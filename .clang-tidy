@@ -1,0 +1,2 @@
+Checks: '-*,modernize-*,-modernize-use-trailing-return-type,-modernize-avoid-c-arrays,-modernize-avoid-c-arrays,-modernize-use-nodiscard,-modernize-use-using'
+HeaderFilterRegex: '^src/.*|^include/.*'
