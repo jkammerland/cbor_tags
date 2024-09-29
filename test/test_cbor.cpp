@@ -59,117 +59,115 @@ std::vector<std::byte> to_bytes(std::string_view hex) {
 auto print_bytes = [](const std::vector<std::byte> &bytes) { fmt::print("{}\n", to_hex(bytes)); };
 
 TEST_CASE("CBOR Encoder") {
-    using namespace cbor;
+    using namespace cbor::tags;
 
     SUBCASE("Encode unsigned integers") {
-        CHECK_EQ(Encoder::serialize(std::uint64_t(0)), std::vector<std::byte>{std::byte(0x00)});
+        CHECK_EQ(encoder::serialize(std::uint64_t(0)), std::vector<std::byte>{std::byte(0x00)});
 
-        CHECK_EQ(Encoder::serialize(std::uint64_t(23)), std::vector<std::byte>{std::byte(0x17)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(24)), std::vector<std::byte>{std::byte(0x18), std::byte(0x18)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(255)), std::vector<std::byte>{std::byte(0x18), std::byte(0xFF)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(256)), std::vector<std::byte>{std::byte(0x19), std::byte(0x01), std::byte(0x00)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(65535)), std::vector<std::byte>{std::byte(0x19), std::byte(0xFF), std::byte(0xFF)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(65536)),
+        CHECK_EQ(encoder::serialize(std::uint64_t(23)), std::vector<std::byte>{std::byte(0x17)});
+        CHECK_EQ(encoder::serialize(std::uint64_t(24)), std::vector<std::byte>{std::byte(0x18), std::byte(0x18)});
+        CHECK_EQ(encoder::serialize(std::uint64_t(255)), std::vector<std::byte>{std::byte(0x18), std::byte(0xFF)});
+        CHECK_EQ(encoder::serialize(std::uint64_t(256)), std::vector<std::byte>{std::byte(0x19), std::byte(0x01), std::byte(0x00)});
+        CHECK_EQ(encoder::serialize(std::uint64_t(65535)), std::vector<std::byte>{std::byte(0x19), std::byte(0xFF), std::byte(0xFF)});
+        CHECK_EQ(encoder::serialize(std::uint64_t(65536)),
                  std::vector<std::byte>{std::byte(0x1A), std::byte(0x00), std::byte(0x01), std::byte(0x00), std::byte(0x00)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(4294967295)),
+        CHECK_EQ(encoder::serialize(std::uint64_t(4294967295)),
                  std::vector<std::byte>{std::byte(0x1A), std::byte(0xFF), std::byte(0xFF), std::byte(0xFF), std::byte(0xFF)});
-        CHECK_EQ(Encoder::serialize(std::uint64_t(4294967296)),
+        CHECK_EQ(encoder::serialize(std::uint64_t(4294967296)),
                  std::vector<std::byte>{std::byte(0x1B), std::byte(0x00), std::byte(0x00), std::byte(0x00), std::byte(0x01),
                                         std::byte(0x00), std::byte(0x00), std::byte(0x00), std::byte(0x00)});
     }
 
     SUBCASE("Encode signed integers") {
-        CHECK_EQ(Encoder::serialize(std::int64_t(0)), std::vector<std::byte>{std::byte(0x00)});
-        CHECK_EQ(Encoder::serialize(std::int64_t(-1)), std::vector<std::byte>{std::byte(0x20)});
-        CHECK_EQ(Encoder::serialize(std::int64_t(-24)), std::vector<std::byte>{std::byte(0x37)});
-        CHECK_EQ(Encoder::serialize(std::int64_t(-25)), std::vector<std::byte>{std::byte(0x38), std::byte(0x18)});
-        CHECK_EQ(Encoder::serialize(std::int64_t(-256)), std::vector<std::byte>{std::byte(0x38), std::byte(0xFF)});
-        CHECK_EQ(Encoder::serialize(std::int64_t(-257)), std::vector<std::byte>{std::byte(0x39), std::byte(0x01), std::byte(0x00)});
+        CHECK_EQ(encoder::serialize(std::int64_t(0)), std::vector<std::byte>{std::byte(0x00)});
+        CHECK_EQ(encoder::serialize(std::int64_t(-1)), std::vector<std::byte>{std::byte(0x20)});
+        CHECK_EQ(encoder::serialize(std::int64_t(-24)), std::vector<std::byte>{std::byte(0x37)});
+        CHECK_EQ(encoder::serialize(std::int64_t(-25)), std::vector<std::byte>{std::byte(0x38), std::byte(0x18)});
+        CHECK_EQ(encoder::serialize(std::int64_t(-256)), std::vector<std::byte>{std::byte(0x38), std::byte(0xFF)});
+        CHECK_EQ(encoder::serialize(std::int64_t(-257)), std::vector<std::byte>{std::byte(0x39), std::byte(0x01), std::byte(0x00)});
         // Check big negative
-        auto data = Encoder::serialize(std::int64_t(-4294967296));
+        auto data = encoder::serialize(std::int64_t(-4294967296));
         fmt::print("Big negative: {}\n", to_hex(data));
         CHECK_EQ(to_hex(data), "3affffffff");
 
-        data = Encoder::serialize(std::int64_t(-42949672960));
+        data = encoder::serialize(std::int64_t(-42949672960));
         fmt::print("Biggest negative: {}\n", to_hex(data));
         CHECK_EQ(to_hex(data), "3b00000009ffffffff");
     }
 
     SUBCASE("Encode strings") {
-        std::vector<std::byte> empty_string = Encoder::serialize(std::string_view(""));
+        std::vector<std::byte> empty_string = encoder::serialize(std::string_view(""));
         fmt::print("Empty string: ");
         print_bytes(empty_string);
         CHECK(empty_string == std::vector<std::byte>{std::byte(0x60)});
 
-        std::vector<std::byte> ietf_string_view = Encoder::serialize(std::string_view("IETF"));
+        std::vector<std::byte> ietf_string_view = encoder::serialize(std::string_view("IETF"));
         fmt::print("IETF string view: ");
         print_bytes(ietf_string_view);
         CHECK(ietf_string_view ==
               std::vector<std::byte>{std::byte(0x64), std::byte(0x49), std::byte(0x45), std::byte(0x54), std::byte(0x46)});
 
-        std::vector<std::byte> ietf_string = Encoder::serialize(std::string("IETF"));
+        std::vector<std::byte> ietf_string = encoder::serialize(std::string("IETF"));
         fmt::print("IETF string: ");
         print_bytes(ietf_string);
         CHECK(ietf_string == std::vector<std::byte>{std::byte(0x64), std::byte(0x49), std::byte(0x45), std::byte(0x54), std::byte(0x46)});
-        std::vector<std::byte> ietf_c_string = Encoder::serialize("IETF");
+        std::vector<std::byte> ietf_c_string = encoder::serialize("IETF");
         fmt::print("IETF C-string: ");
         print_bytes(ietf_c_string);
         CHECK(ietf_c_string == std::vector<std::byte>{std::byte(0x64), std::byte(0x49), std::byte(0x45), std::byte(0x54), std::byte(0x46)});
     }
 
     SUBCASE("Encode arrays") {
-        std::vector<Value> empty_array;
-        CHECK(Encoder::serialize(empty_array) == std::vector<std::byte>{std::byte(0x80)});
+        std::vector<value> empty_array;
+        CHECK(encoder::serialize(empty_array) == std::vector<std::byte>{std::byte(0x80)});
 
-        std::vector<Value> array{1, 2, 3};
-        CHECK(Encoder::serialize(array) == std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
+        std::vector<value> array{1, 2, 3};
+        CHECK(encoder::serialize(array) == std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
 
-        std::array<Value, 3> fixed_array{1, 2, 3};
-        CHECK(Encoder::serialize(fixed_array) ==
+        std::array<value, 3> fixed_array{1, 2, 3};
+        CHECK(encoder::serialize(fixed_array) ==
               std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
 
         // Make big vector
-        std::vector<Value> big_array;
-        big_array.reserve(1000); // Reserve space for efficiency, but don't initialize
+        std::vector<value> big_array;
+        big_array.reserve(1000);
         for (std::uint64_t i = 0; i < 1000; ++i) {
             big_array.emplace_back(i);
         }
-        auto big_array_encoded = Encoder::serialize(big_array);
+        auto big_array_encoded = encoder::serialize(big_array);
 
-        // You might also want to check the encoded size
-        CHECK(big_array_encoded.size() > 1000);         // The encoded size should be larger than 1000 bytes
-        CHECK(big_array_encoded[0] == std::byte{0x99}); // 0x9a is the CBOR header for an array of 1000 elements
+        CHECK(big_array_encoded[0] == std::byte{0x99}); // 0x99 is the CBOR header for an array of 1000 elements
         CHECK(big_array_encoded[1] == std::byte{0x03}); // First byte of 1000 (0x03E8)
         CHECK(big_array_encoded[2] == std::byte{0xE8}); // Second byte of 1000 (0x03E8)
 
-        // 1903e7 is 999, so the last element should be 999
+        // 1903e7 is 999
         CHECK(big_array_encoded[big_array_encoded.size() - 2] == std::byte{0x03});
         CHECK(big_array_encoded.back() == std::byte{0xE7});
 
-        // fmt::print("Big array: ");
-        // print_bytes(big_array_encoded);
+        fmt::print("Big array: ");
+        print_bytes(big_array_encoded);
     }
 
     SUBCASE("Encode maps") {
         {
-            std::map<Value, Value> empty_map;
-            CHECK(Encoder::serialize(empty_map) == std::vector<std::byte>{std::byte(0xA0)});
+            std::map<value, value> empty_map;
+            CHECK(encoder::serialize(empty_map) == std::vector<std::byte>{std::byte(0xA0)});
 
-            std::map<Value, Value> map;
-            map.insert({Value(1), Value(2)});
+            std::map<value, value> map;
+            map.insert({value(1), value(2)});
             // Should be 0xA1 0x01 0x02
             auto expected = std::vector<std::byte>{std::byte(0xA1), std::byte(0x01), std::byte(0x02)};
-            auto encoded  = Encoder::serialize(map);
+            auto encoded  = encoder::serialize(map);
             fmt::print("Map: ");
             print_bytes(encoded);
             CHECK(encoded == expected);
         }
 
         {
-            std::unordered_map<Value, Value> unordered_map{{1, 2}, {3, 4}, {5, 6}};
+            std::unordered_map<value, value> unordered_map{{1, 2}, {3, 4}, {5, 6}};
             // Note: The order of elements in an unordered_map is not guaranteed,
             // so we can't check for an exact byte sequence. Instead, we check the size.
-            auto encoded = Encoder::serialize(unordered_map);
+            auto encoded = encoder::serialize(unordered_map);
             CHECK(encoded.size() == 7);
 
             // Check that is contains the keys
@@ -210,8 +208,8 @@ TEST_CASE("CBOR Encoder") {
 
         // Unordered map of string_view
         {
-            std::unordered_map<Value, Value> string_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
-            auto                             encoded = Encoder::serialize(string_map);
+            std::unordered_map<value, value> string_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
+            auto                             encoded = encoder::serialize(string_map);
             fmt::print("String map: ");
             print_bytes(encoded);
             CHECK(encoded.size() == 13);
@@ -247,39 +245,39 @@ TEST_CASE("CBOR Encoder") {
     }
 
     SUBCASE("Encode map of floats") {
-        std::map<Value, Value> float_map;
-        float_map.insert({Value(1.0f), Value(3.14159f)});
+        std::map<value, value> float_map;
+        float_map.insert({value(1.0f), value(3.14159f)});
         // a1fa3f800000fa40490fd0
         auto expected =
             std::vector<std::byte>{std::byte(0xA1), std::byte(0xFA), std::byte(0x3F), std::byte(0x80), std::byte(0x00), std::byte(0x00),
                                    std::byte(0xFA), std::byte(0x40), std::byte(0x49), std::byte(0x0F), std::byte(0xD0)};
-        auto encoded = Encoder::serialize(float_map);
+        auto encoded = encoder::serialize(float_map);
         fmt::print("Float map: ");
         print_bytes(encoded);
         CHECK(encoded == expected);
     }
 
     SUBCASE("Encode bool and null") {
-        CHECK(Encoder::serialize(true) == std::vector<std::byte>{std::byte(0xF5)});
-        CHECK(Encoder::serialize(false) == std::vector<std::byte>{std::byte(0xF4)});
-        CHECK(Encoder::serialize(nullptr) == std::vector<std::byte>{std::byte(0xF6)});
+        CHECK(encoder::serialize(true) == std::vector<std::byte>{std::byte(0xF5)});
+        CHECK(encoder::serialize(false) == std::vector<std::byte>{std::byte(0xF4)});
+        CHECK(encoder::serialize(nullptr) == std::vector<std::byte>{std::byte(0xF6)});
     }
 
     SUBCASE("Encode nested structures") {
-        std::vector<Value> number_and_stuff{1, 2, "hello", 3, 4.0f};
-        auto               encoded1 = Encoder::serialize(number_and_stuff);
+        std::vector<value> number_and_stuff{1, 2, "hello", 3, 4.0f};
+        auto               encoded1 = encoder::serialize(number_and_stuff);
         fmt::print("encoded1: ");
         print_bytes(encoded1);
         CHECK_EQ(to_hex(encoded1), "8501026568656c6c6f03fa40800000");
 
-        std::vector<Value> other_stuff{false, true, nullptr};
-        auto               encoded2 = Encoder::serialize(other_stuff);
+        std::vector<value> other_stuff{false, true, nullptr};
+        auto               encoded2 = encoder::serialize(other_stuff);
         fmt::print("encoded2: ");
         print_bytes(encoded2);
         CHECK_EQ(to_hex(encoded2), "83f4f5f6");
 
-        std::map<Value, Value> map_of_arrays{{"numbers", std::span(encoded1)}, {"other", std::span(encoded2)}};
-        auto                   encoded3 = Encoder::serialize(map_of_arrays);
+        std::map<value, value> map_of_arrays{{"numbers", std::span(encoded1)}, {"other", std::span(encoded2)}};
+        auto                   encoded3 = encoder::serialize(map_of_arrays);
         fmt::print("Nested map: ");
         print_bytes(encoded3);
         CHECK_EQ(to_hex(encoded3), "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6");
@@ -288,21 +286,21 @@ TEST_CASE("CBOR Encoder") {
 
 TEST_CASE("Sorting strings and binary strings std::map") {
     {
-        std::map<cbor::Value, cbor::Value> string_map;
+        std::map<cbor::tags::value, cbor::tags::value> string_map;
         string_map.insert({"c", 1});
         string_map.insert({"ac", 2});
         string_map.insert({"b", 3});
         string_map.insert({"a", 4});
         string_map.insert({"ab", 5});
 
-        auto encoded = cbor::Encoder::serialize(string_map);
+        auto encoded = cbor::tags::encoder::serialize(string_map);
         fmt::print("String map: {}\n", to_hex(encoded));
         CHECK_EQ(to_hex(encoded), "a56161046261620562616302616203616301");
     }
 
     // Binary strings
     {
-        std::map<cbor::Value, cbor::Value> string_map;
+        std::map<cbor::tags::value, cbor::tags::value> string_map;
         auto vec1 = std::vector<std::byte>({std::byte(0x05), std::byte(0x02), std::byte(0x03), std::byte(0x04), std::byte(0x05)});
         string_map.insert({std::span<std::byte>(vec1), 6});
         auto vec2 = std::vector<std::byte>({std::byte(0x01), std::byte(0x02), std::byte(0x03), std::byte(0x04)});
@@ -310,14 +308,14 @@ TEST_CASE("Sorting strings and binary strings std::map") {
         auto vec3 = std::vector<std::byte>({std::byte(0x05), std::byte(0x02), std::byte(0x01), std::byte(0x04)});
         string_map.insert({std::span<std::byte>(vec3), 8});
 
-        auto encoded = cbor::Encoder::serialize(string_map);
+        auto encoded = cbor::tags::encoder::serialize(string_map);
         fmt::print("Binary string map: {}\n", to_hex(encoded));
         CHECK_EQ(to_hex(encoded), "a344010203040744050201040845050203040506");
     }
 }
 
 TEST_CASE("CBOR Encoder - Float encoding") {
-    cbor::Encoder encoder;
+    cbor::tags::encoder encoder;
 
     SUBCASE("Positive float") {
         float value   = 3.14159f;
@@ -382,7 +380,7 @@ TEST_CASE("CBOR Encoder - Float encoding") {
     }
 
     SUBCASE("Map of float sorted") {
-        std::map<cbor::Value, cbor::Value> float_map;
+        std::map<cbor::tags::value, cbor::tags::value> float_map;
         float_map.insert({3.0f, 3.14159f});
         float_map.insert({1.0f, 3.14159f});
         float_map.insert({2.0f, 3.14159f});
@@ -408,7 +406,7 @@ TEST_CASE("CBOR Encoder - Float encoding") {
         float_map.insert({-2, 3.14159f});
         float_map.insert({-3, 3.14159f});
 
-        auto encoded = cbor::Encoder::serialize(float_map);
+        auto encoded = cbor::tags::encoder::serialize(float_map);
         fmt::print("Float map sorted: ");
         print_bytes(encoded);
 
@@ -439,7 +437,7 @@ TEST_CASE("CBOR Encoder - Float encoding") {
 }
 
 TEST_CASE("CBOR Encoder - Double encoding") {
-    cbor::Encoder encoder;
+    cbor::tags::encoder encoder;
 
     SUBCASE("Positive double") {
         double value   = 3.14159265358979323846;
@@ -514,34 +512,34 @@ TEST_CASE("CBOR Encoder - Double encoding") {
     }
 }
 
-TEST_CASE("cbor decoder") {
-    using namespace cbor;
+TEST_CASE("cbor::tags decoder") {
+    using namespace cbor::tags;
     const char *data  = "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6";
     auto        bytes = to_bytes(data);
 
     SUBCASE("integers") {
-        auto encoded = Encoder::serialize(std::uint64_t(4294967296));
-        auto decoded = Decoder::deserialize(encoded);
+        auto encoded = encoder::serialize(std::uint64_t(4294967296));
+        auto decoded = decoder::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::uint64_t>(decoded));
         CHECK_EQ(std::get<std::uint64_t>(decoded), 4294967296);
 
-        encoded = Encoder::serialize(std::int64_t(-4294967296));
-        decoded = Decoder::deserialize(encoded);
+        encoded = encoder::serialize(std::int64_t(-4294967296));
+        decoded = decoder::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
         CHECK_EQ(std::get<std::int64_t>(decoded), -4294967296);
 
-        encoded = Encoder::serialize(std::int64_t(-42949672960));
-        decoded = Decoder::deserialize(encoded);
+        encoded = encoder::serialize(std::int64_t(-42949672960));
+        decoded = decoder::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
         CHECK_EQ(std::get<std::int64_t>(decoded), -42949672960);
 
         // Check small negative
-        encoded = Encoder::serialize(std::int64_t(-24));
+        encoded = encoder::serialize(std::int64_t(-24));
         fmt::print("Small negative: {}\n", to_hex(encoded));
-        decoded = Decoder::deserialize(encoded);
+        decoded = decoder::deserialize(encoded);
         // fmt::print("Small negative decoded: {}\n", std::get<std::int64_t>(decoded));
 
         // REQUIRE(decoded);
@@ -550,22 +548,22 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Text strings") {
-        auto encoded = Encoder::serialize(std::string_view("IETF"));
-        auto decoded = Decoder::deserialize(encoded);
+        auto encoded = encoder::serialize(std::string_view("IETF"));
+        auto decoded = decoder::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::string_view>(decoded));
         CHECK_EQ(std::get<std::string_view>(decoded), "IETF");
 
-        encoded = Encoder::serialize(std::string("IETF"));
-        decoded = Decoder::deserialize(encoded);
+        encoded = encoder::serialize(std::string("IETF"));
+        decoded = decoder::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::string_view>(decoded));
         CHECK_EQ(std::get<std::string_view>(decoded), "IETF");
     }
 
     SUBCASE("Binary strings") {
-        auto encoded = Encoder::serialize(std::span<std::byte>(bytes));
-        auto decoded = Decoder::deserialize(encoded);
+        auto encoded = encoder::serialize(std::span<std::byte>(bytes));
+        auto decoded = decoder::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::span<const std::byte>>(decoded));
         // Loop and check each byte
@@ -577,11 +575,11 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Arrays") {
-        auto encoded = Encoder::serialize(std::vector<Value>{1, 2, 3});
-        auto decoded = Decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<ArrayView>(decoded));
-        auto array         = std::get<ArrayView>(decoded);
-        auto decoded_array = Decoder::deserialize(array);
+        auto encoded = encoder::serialize(std::vector<value>{1, 2, 3});
+        auto decoded = decoder::deserialize(encoded);
+        REQUIRE(std::holds_alternative<array_view>(decoded));
+        auto array         = std::get<array_view>(decoded);
+        auto decoded_array = decoder::deserialize(array);
         CHECK_EQ(decoded_array.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(decoded_array[0]), 1);
         CHECK_EQ(std::get<std::uint64_t>(decoded_array[1]), 2);
@@ -589,11 +587,11 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Maps") {
-        auto encoded = Encoder::serialize(std::map<Value, Value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
-        auto decoded = Decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<MapView>(decoded));
+        auto encoded = encoder::serialize(std::map<value, value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
+        auto decoded = decoder::deserialize(encoded);
+        REQUIRE(std::holds_alternative<map_view>(decoded));
 
-        auto map = Decoder::deserialize<std::map<Value, Value>>(std::get<MapView>(decoded));
+        auto map = decoder::deserialize<std::map<value, value>>(std::get<map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
         CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
@@ -601,24 +599,24 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Binary string map") {
-        auto decoded = Decoder::deserialize(std::span(bytes));
-        REQUIRE(std::holds_alternative<MapView>(decoded));
+        auto decoded = decoder::deserialize(std::span(bytes));
+        REQUIRE(std::holds_alternative<map_view>(decoded));
 
-        auto map = Decoder::deserialize<std::map<Value, Value>>(std::get<MapView>(decoded));
+        auto map = decoder::deserialize<std::map<value, value>>(std::get<map_view>(decoded));
         CHECK_EQ(map.size(), 2);
         CHECK(map.contains("numbers"));
         CHECK(map.contains("other"));
     }
 
     SUBCASE("Floats unordered map") {
-        auto umap = std::unordered_map<Value, Value>{{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0, 6.0f}};
+        auto umap = std::unordered_map<value, value>{{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0, 6.0f}};
 
-        auto encoded = Encoder::serialize(umap);
+        auto encoded = encoder::serialize(umap);
         fmt::print("Float map: {}\n", to_hex(encoded));
-        auto decoded = Decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<MapView>(decoded));
+        auto decoded = decoder::deserialize(encoded);
+        REQUIRE(std::holds_alternative<map_view>(decoded));
 
-        auto map = Decoder::deserialize<std::unordered_map<Value, Value>>(std::get<MapView>(decoded));
+        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<map_view>(decoded));
 
         CHECK_EQ(std::get<float>(map[1.0f]), 2.0f);
         CHECK_EQ(std::get<float>(map[3.0f]), 4.0f);
@@ -627,11 +625,11 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Doubles map") {
-        auto encoded = Encoder::serialize(std::map<Value, Value>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
-        auto decoded = Decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<MapView>(decoded));
+        auto encoded = encoder::serialize(std::map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
+        auto decoded = decoder::deserialize(encoded);
+        REQUIRE(std::holds_alternative<map_view>(decoded));
 
-        auto map = Decoder::deserialize<std::map<Value, Value>>(std::get<MapView>(decoded));
+        auto map = decoder::deserialize<std::map<value, value>>(std::get<map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
@@ -640,13 +638,13 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Double unordered map") {
-        auto encoded = Encoder::serialize(std::unordered_map<Value, Value>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
-        auto decoded = Decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<MapView>(decoded));
+        auto encoded = encoder::serialize(std::unordered_map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
+        auto decoded = decoder::deserialize(encoded);
+        REQUIRE(std::holds_alternative<map_view>(decoded));
 
         auto s = std::format("{}", "decoded");
 
-        auto map = Decoder::deserialize<std::unordered_map<Value, Value>>(std::get<MapView>(decoded));
+        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
@@ -655,18 +653,18 @@ TEST_CASE("cbor decoder") {
     }
 
     SUBCASE("Decode Simple values") {
-        auto encoded = Encoder::serialize(true);
-        auto decoded = Decoder::deserialize(encoded);
+        auto encoded = encoder::serialize(true);
+        auto decoded = decoder::deserialize(encoded);
         REQUIRE(std::holds_alternative<bool>(decoded));
         CHECK_EQ(std::get<bool>(decoded), true);
 
-        encoded = Encoder::serialize(false);
-        decoded = Decoder::deserialize(encoded);
+        encoded = encoder::serialize(false);
+        decoded = decoder::deserialize(encoded);
         REQUIRE(std::holds_alternative<bool>(decoded));
         CHECK_EQ(std::get<bool>(decoded), false);
 
-        encoded = Encoder::serialize(nullptr);
-        decoded = Decoder::deserialize(encoded);
+        encoded = encoder::serialize(nullptr);
+        decoded = decoder::deserialize(encoded);
         REQUIRE(std::holds_alternative<std::nullptr_t>(decoded));
     }
 }

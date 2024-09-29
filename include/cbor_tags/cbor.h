@@ -9,31 +9,31 @@
 #include <utility>
 #include <variant>
 
-namespace cbor {
+namespace cbor::tags {
 
-struct ArrayView {
+struct array_view {
     std::span<const std::byte> data;
 };
 
-struct MapView {
+struct map_view {
     std::span<const std::byte> data;
 };
 
-struct TagView {
+struct tag_view {
     std::uint64_t              tag;
     std::span<const std::byte> data;
 };
 
 //
 template <typename T>
-concept TaggedType = requires(T) {
+concept tagged_type = requires(T) {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
 };
 
-template <typename T> using Tag = std::pair<std::uint64_t, T>;
-template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return Tag<T>{tag, std::forward<T>(value)}; }
+template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
+template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
 
-using Value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, ArrayView, MapView, TagView, float,
+using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, array_view, map_view, tag_view, float,
                            double, bool, std::nullptr_t>;
 
 // Comparison operators
@@ -49,7 +49,7 @@ template <typename T, typename U> constexpr std::strong_ordering lexicographic_c
     }
 }
 
-constexpr auto operator<=>(const Value &lhs, const Value &rhs) {
+constexpr auto operator<=>(const value &lhs, const value &rhs) {
     if (lhs.index() != rhs.index()) {
         return lhs.index() <=> rhs.index();
     }
@@ -66,7 +66,7 @@ constexpr auto operator<=>(const Value &lhs, const Value &rhs) {
                     return lexicographic_compare(l, r);
                 } else if constexpr (std::is_same_v<L, std::string_view>) {
                     return lexicographic_compare(l, r);
-                } else if constexpr (std::is_same_v<L, ArrayView> || std::is_same_v<L, MapView> || std::is_same_v<L, TagView>) {
+                } else if constexpr (std::is_same_v<L, array_view> || std::is_same_v<L, map_view> || std::is_same_v<L, tag_view>) {
                     return l <=> r;
                 } else if constexpr (std::is_same_v<L, bool>) {
                     return l <=> r;
@@ -92,9 +92,9 @@ constexpr auto operator<=>(const Value &lhs, const Value &rhs) {
         lhs, rhs);
 }
 // Equality operator
-constexpr bool operator==(const Value &lhs, const Value &rhs) { return (lhs <=> rhs) == 0; }
+constexpr bool operator==(const value &lhs, const value &rhs) { return (lhs <=> rhs) == 0; }
 
-enum class Type : std::uint8_t {
+enum class major_type : std::uint8_t {
     UnsignedInteger = 0,
     NegativeInteger = 1,
     ByteString      = 2,
@@ -107,11 +107,11 @@ enum class Type : std::uint8_t {
 
 template <typename T> struct always_false : std::false_type {};
 
-} // namespace cbor
+} // namespace cbor::tags
 
 namespace std {
-template <> struct hash<cbor::Value> {
-    size_t operator()(const cbor::Value &v) const {
+template <> struct hash<cbor::tags::value> {
+    size_t operator()(const cbor::tags::value &v) const {
         return std::visit(
             [](const auto &x) -> size_t {
                 using T = std::decay_t<decltype(x)>;
@@ -122,15 +122,15 @@ template <> struct hash<cbor::Value> {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data()), x.size()));
                 } else if constexpr (std::is_same_v<T, std::string_view>) {
                     return std::hash<std::string_view>{}(x);
-                } else if constexpr (std::is_same_v<T, cbor::ArrayView> || std::is_same_v<T, cbor::MapView>) {
+                } else if constexpr (std::is_same_v<T, cbor::tags::array_view> || std::is_same_v<T, cbor::tags::map_view>) {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
-                } else if constexpr (std::is_same_v<T, cbor::TagView>) {
+                } else if constexpr (std::is_same_v<T, cbor::tags::tag_view>) {
                     return std::hash<std::uint64_t>{}(x.tag) ^
                            std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
                 } else if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::nullptr_t>) {
                     return std::hash<T>{}(x);
                 } else {
-                    static_assert(cbor::always_false<T>::value, "Non-exhaustive visitor!");
+                    static_assert(cbor::tags::always_false<T>::value, "Non-exhaustive visitor!");
                 }
             },
             v);

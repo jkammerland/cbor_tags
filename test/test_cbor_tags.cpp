@@ -106,7 +106,7 @@ TEST_CASE("TAG example COSE") {
     std::string data1 = "This is the content.";
 
     using namespace std::string_view_literals;
-    auto result = out(cbor::TagView{16, std::span<std::byte>(reinterpret_cast<std::byte *>(data1.data()), data1.size())});
+    auto result = out(cbor::tags::tag_view{16, std::span<std::byte>(reinterpret_cast<std::byte *>(data1.data()), data1.size())});
 
     if (failure(result)) {
         // `result` is implicitly convertible to `std::errc`.
@@ -114,7 +114,7 @@ TEST_CASE("TAG example COSE") {
         REQUIRE(false);
     }
 
-    cbor::TagView t;
+    cbor::tags::tag_view t;
     result = in(t);
     if (failure(result)) {
         // `result` is implicitly convertible to `std::errc`.
@@ -137,13 +137,13 @@ TEST_CASE("Tag with big endian encoding") {
 
     Double d{3.14159};
 
-    auto result = out(cbor::make_tag(1, d));
+    auto result = out(cbor::tags::make_tag(1, d));
     CHECK(!failure(result));
 
     // Transfer data
     dataIn = data;
 
-    cbor::Tag<Double> d2;
+    cbor::tags::tag_pair<Double> d2;
     result = in(d2);
     CHECK(!failure(result));
     CHECK(1 == d2.first);
@@ -183,14 +183,14 @@ TEST_CASE("Tag string_view with cbor_tag") {
     std::string_view s{"This is a string view"};
 
     // Encode data
-    auto result = out(cbor::make_tag(1, s));
+    auto result = out(cbor::tags::make_tag(1, s));
     CHECK(!failure(result));
 
     // Emulate data transfer
     dataIn = data;
 
     // Decode data (I would like to use string_view as type here, not std::span<const std::byte>)
-    cbor::Tag<std::string_view> s2;
+    cbor::tags::tag_pair<std::string_view> s2;
     result = in(s2);
     CHECK(!failure(result));
 

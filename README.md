@@ -1,13 +1,15 @@
 # C++20 CBOR Library
 
-1. [Introduction](#c++20-cbor-library)
+## Index
+
+1. [Introduction](#intruction)
 4. [Features](#features)
 5. [Build and Run Tests](#build-and-run-tests)
 6. [Requirements](#requirements)
 7. [Usage](#usage)
-   - [Basic Example](#basic-example)
-   - [JSON-like Sorted Map Example](#json-like-sorted-map-example)
 8. [License](#license)
+
+## Introduction
 
 This library provides a C++ implementation for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format whose design goals include the possibility of smaller encoded size and extensibility without the need for version negotiation. 
 
@@ -70,17 +72,81 @@ ctest
 ## Usage
 basic:
 
+
 ```cpp
-auto encoded = Encoder::serialize(std::uint64_t(4294967296));
-auto decoded = Decoder::deserialize(encoded);
+auto encoded = encoder::serialize(std::uint64_t(4294967296));
+auto decoded = decoder::deserialize(encoded);
 REQUIRE(std::holds_alternative<std::uint64_t>(decoded));
 CHECK_EQ(std::get<std::uint64_t>(decoded), 4294967296);
 ```
-json like sorted map with different key types:
 
+cbor integers in array type of size 1000:
+```cpp
+// Make big vector
+std::vector<value> big_array;
+big_array.reserve(1000);
+for (std::uint64_t i = 0; i < 1000; ++i) {
+    big_array.emplace_back(i);
+}
+auto big_array_encoded = encoder::serialize(big_array);
+
+CHECK(big_array_encoded[0] == std::byte{0x99}); // 0x99 is the CBOR header for an array of 1000 elements
+CHECK(big_array_encoded[1] == std::byte{0x03}); // First byte of 1000 (0x03E8)
+CHECK(big_array_encoded[2] == std::byte{0xE8}); // Second byte of 1000 (0x03E8)
+
+// 1903e7 is 999, the last element
+CHECK(big_array_encoded[big_array_encoded.size() - 2] == std::byte{0x03});
+CHECK(big_array_encoded.back() == std::byte{0xE7});
+
+fmt::print("Big array: ");
+print_bytes(big_array_encoded); // anotated hex/diagnostic notation TODO:
+
+/* anotated hex(2723 bytes):
+99 03e8    # array(1000)
+   00      #   unsigned(0)
+   01      #   unsigned(1)
+   02      #   unsigned(2)
+   03      #   unsigned(3)
+   04      #   unsigned(4)
+   05      #   unsigned(5)
+   06      #   unsigned(6)
+   07      #   unsigned(7)
+   08      #   unsigned(8)
+   09      #   unsigned(9)
+   0a      #   unsigned(10)
+   0b      #   unsigned(11)
+   0c      #   unsigned(12)
+   0d      #   unsigned(13)
+   0e      #   unsigned(14)
+   0f      #   unsigned(15)
+   10      #   unsigned(16)
+   11      #   unsigned(17)
+   12      #   unsigned(18)
+   13      #   unsigned(19)
+   14      #   unsigned(20)
+   15      #   unsigned(21)
+   16      #   unsigned(22)
+   17      #   unsigned(23)
+   18 18   #   unsigned(24)
+   18 19   #   unsigned(25)
+   18 1a   #   unsigned(26)
+   18 1b   #   unsigned(27)
+   18 1c   #   unsigned(28)
+   ...
+   18 fe   #   unsigned(254)
+   18 ff   #   unsigned(255)
+   19 0100 #   unsigned(256)
+   19 0101 #   unsigned(257)
+   19 0102 #   unsigned(258)
+   ...
+*/
+
+```
+
+json like sorted map with different key types:
 ```cpp
 SUBCASE("Map of float sorted") {
-    std::map<cbor::value, cbor::value> float_map;
+    std::map<cbor::tags::value, cbor::tags::value> float_map;
     float_map.insert({3.0f, 3.14159f});
     float_map.insert({1.0f, 3.14159f});
     float_map.insert({2.0f, 3.14159f});
@@ -106,7 +172,7 @@ SUBCASE("Map of float sorted") {
     float_map.insert({-2, 3.14159f});
     float_map.insert({-3, 3.14159f});
 
-    auto encoded = cbor::Encoder::serialize(float_map);
+    auto encoded = cbor::tags::encoder::serialize(float_map);
     fmt::print("Float map sorted: ");
     print_bytes(encoded);
 
