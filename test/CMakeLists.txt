@@ -2,10 +2,18 @@ cmake_minimum_required(VERSION 3.20)
 project(tests VERSION 1.0.0)
 include(cmake/get_cpm.cmake)
 
+set(CPM_SOURCE_CACHE ${CMAKE_CURRENT_BINARY_DIR}/cpm-cache) # keep cache in test build directory
 cpmaddpackage("gh:fmtlib/fmt#11.0.2")
 # cpmaddpackage("gh:catchorg/Catch2@3.7.1")
 cpmaddpackage("gh:Neargye/nameof@0.10.4")
+
+set(CMAKE_WARN_DEPRECATED
+    OFF
+    CACHE BOOL "" FORCE)
 cpmaddpackage("gh:onqtam/doctest@2.4.11")
+set(CMAKE_WARN_DEPRECATED
+    ON
+    CACHE BOOL "" FORCE)
 
 # add executables more if needed
 add_executable(tests)

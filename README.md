@@ -74,6 +74,7 @@ basic:
 
 
 ```cpp
+using namespace cbor::tags;
 auto encoded = encoder::serialize(std::uint64_t(4294967296));
 auto decoded = decoder::deserialize(encoded);
 REQUIRE(std::holds_alternative<std::uint64_t>(decoded));
@@ -82,6 +83,7 @@ CHECK_EQ(std::get<std::uint64_t>(decoded), 4294967296);
 
 cbor integers in array type of size 1000:
 ```cpp
+using namespace cbor::tags;
 // Make big vector
 std::vector<value> big_array;
 big_array.reserve(1000);
