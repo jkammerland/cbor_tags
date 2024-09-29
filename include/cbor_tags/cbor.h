@@ -1,5 +1,9 @@
 #pragma once
 
+// Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
+#include "float16_ieee754.h"
+
+#include <cmath>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -24,7 +28,6 @@ struct tag_view {
     std::span<const std::byte> data;
 };
 
-//
 template <typename T>
 concept tagged_type = requires(T) {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
@@ -33,8 +36,8 @@ concept tagged_type = requires(T) {
 template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
 template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
 
-using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, array_view, map_view, tag_view, float,
-                           double, bool, std::nullptr_t>;
+using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, array_view, map_view, tag_view,
+                           float16_t, float, double, bool, std::nullptr_t>;
 
 // Comparison operators
 template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) {
@@ -110,13 +113,14 @@ template <typename T> struct always_false : std::false_type {};
 } // namespace cbor::tags
 
 namespace std {
+
 template <> struct hash<cbor::tags::value> {
     size_t operator()(const cbor::tags::value &v) const {
         return std::visit(
             [](const auto &x) -> size_t {
                 using T = std::decay_t<decltype(x)>;
-                if constexpr (std::is_same_v<T, std::uint64_t> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, float> ||
-                              std::is_same_v<T, double>) {
+                if constexpr (std::is_same_v<T, std::uint64_t> || std::is_same_v<T, std::int64_t> ||
+                              std::is_same_v<T, cbor::tags::float16_t> || std::is_same_v<T, float> || std::is_same_v<T, double>) {
                     return std::hash<T>{}(x);
                 } else if constexpr (std::is_same_v<T, std::span<const std::byte>>) {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data()), x.size()));

@@ -1,6 +1,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/float16_ieee754.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -146,6 +147,20 @@ TEST_CASE("CBOR Encoder") {
 
         fmt::print("Big array: ");
         print_bytes(big_array_encoded);
+    }
+
+    SUBCASE("Encode floats") {
+        float16_t half;
+        half = 3.140625f;
+
+        // convert back to float
+        float half_float = half;
+        CHECK_EQ(half_float, 3.140625f);
+
+        auto encoded_half = encoder::serialize(half);
+        auto decoded_half = decoder::deserialize(encoded_half);
+
+        CHECK_EQ(half, decoded_half);
     }
 
     SUBCASE("Encode maps") {

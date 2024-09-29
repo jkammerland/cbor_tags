@@ -124,6 +124,7 @@ class decoder {
         case 20: return false;
         case 21: return true;
         case 22: return nullptr;
+        case 25: return read_float16();
         case 26: return read_float();
         case 27: return read_double();
         default: throw std::runtime_error("Unsupported simple value or float");
@@ -176,6 +177,17 @@ class decoder {
                           (static_cast<uint64_t>(data_[position_ + 6]) << 8) | static_cast<uint64_t>(data_[position_ + 7]);
         position_ += 8;
         return result;
+    }
+
+    // CBOR Float16 decoding function
+    float16_t read_float16() {
+        if (position_ + 2 > data_.size()) {
+            throw std::runtime_error("Unexpected end of input");
+        }
+
+        std::uint16_t value = (static_cast<std::uint16_t>(data_[position_]) << 8) | static_cast<std::uint16_t>(data_[position_ + 1]);
+        position_ += 2;
+        return float16_t{value};
     }
 
     float read_float() {

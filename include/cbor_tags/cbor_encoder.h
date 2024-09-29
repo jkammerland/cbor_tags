@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -22,9 +23,6 @@ class encoder {
         encoder.encode_value(value);
         return encoder.data_;
     }
-
-  protected:
-    std::vector<std::byte> data_;
 
     void encode_value(const value &value) {
         std::visit([this](const auto &v) { this->encode(v); }, value);
@@ -95,6 +93,12 @@ class encoder {
         data_.insert(data_.end(), value.data.begin(), value.data.end());
     }
 
+    void encode(float16_t value) {
+        data_.push_back(static_cast<std::byte>(0xf9)); // CBOR Float16 tag
+        data_.push_back(static_cast<std::byte>(value.value >> 8));
+        data_.push_back(static_cast<std::byte>(value.value & 0xff));
+    }
+
     void encode(float value) {
         data_.push_back(static_cast<std::byte>(0xFA));
         auto bits = std::bit_cast<std::uint32_t>(value);
@@ -150,7 +154,9 @@ class encoder {
     void encode_value(const std::map<value, value> &value) { map_encoder(value); }
     void encode_value(const std::unordered_map<value, value> &value) { map_encoder(value); }
 
-  private:
+  protected:
+    std::vector<std::byte> data_;
+
     template <typename Container> void encode_array(const Container &container) {
         encode(static_cast<std::uint64_t>(container.size()) | 0x80);
         for (const auto &item : container) {
