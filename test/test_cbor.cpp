@@ -301,12 +301,7 @@ TEST_CASE("CBOR Encoder") {
 
 TEST_CASE("Sorting strings and binary strings std::map") {
     {
-        std::map<cbor::tags::value, cbor::tags::value> string_map;
-        string_map.insert({"c", 1});
-        string_map.insert({"ac", 2});
-        string_map.insert({"b", 3});
-        string_map.insert({"a", 4});
-        string_map.insert({"ab", 5});
+        std::map<cbor::tags::value, cbor::tags::value> string_map = {{"c", 1}, {"ac", 2}, {"b", 3}, {"a", 4}, {"ab", 5}};
 
         auto encoded = cbor::tags::encoder::serialize(string_map);
         fmt::print("String map: {}\n", to_hex(encoded));
@@ -337,36 +332,23 @@ TEST_CASE("CBOR Encoder - Float encoding") {
         auto  encoded = encoder.serialize(value);
         fmt::print("Positive float: ");
         print_bytes(encoded);
-        CHECK(encoded.size() == 5);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFA));
-        CHECK(encoded[1] == static_cast<std::byte>(0x40));
-        CHECK(encoded[2] == static_cast<std::byte>(0x49));
-        CHECK(encoded[3] == static_cast<std::byte>(0x0F));
-        CHECK(encoded[4] == static_cast<std::byte>(0xD0));
+        CHECK_EQ(to_hex(encoded), "fa40490fd0");
     }
 
     SUBCASE("Negative float") {
         float value   = -3.14159f;
         auto  encoded = encoder.serialize(value);
-        CHECK(encoded.size() == 5);
         fmt::print("Negative float: ");
         print_bytes(encoded);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFA));
-        CHECK(encoded[1] == static_cast<std::byte>(0xC0));
-        CHECK(encoded[2] == static_cast<std::byte>(0x49));
-        CHECK(encoded[3] == static_cast<std::byte>(0x0F));
-        CHECK(encoded[4] == static_cast<std::byte>(0xD0));
+        CHECK_EQ(to_hex(encoded), "fac0490fd0");
     }
 
     SUBCASE("Zero") {
         float value   = 0.0f;
         auto  encoded = encoder.serialize(value);
-        CHECK(encoded.size() == 5);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFA));
-        CHECK(encoded[1] == static_cast<std::byte>(0x00));
-        CHECK(encoded[2] == static_cast<std::byte>(0x00));
-        CHECK(encoded[3] == static_cast<std::byte>(0x00));
-        CHECK(encoded[4] == static_cast<std::byte>(0x00));
+        fmt::print("Zero: ");
+        print_bytes(encoded);
+        CHECK_EQ(to_hex(encoded), "fa00000000");
     }
 
     SUBCASE("Infinity") {
@@ -374,12 +356,7 @@ TEST_CASE("CBOR Encoder - Float encoding") {
         auto  encoded = encoder.serialize(value);
         fmt::print("Infinity: ");
         print_bytes(encoded);
-        CHECK(encoded.size() == 5);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFA));
-        CHECK(encoded[1] == static_cast<std::byte>(0x7F));
-        CHECK(encoded[2] == static_cast<std::byte>(0x80));
-        CHECK(encoded[3] == static_cast<std::byte>(0x00));
-        CHECK(encoded[4] == static_cast<std::byte>(0x00));
+        CHECK_EQ(to_hex(encoded), "fa7f800000");
     }
 
     SUBCASE("NaN") {
@@ -387,39 +364,14 @@ TEST_CASE("CBOR Encoder - Float encoding") {
         auto  encoded = encoder.serialize(value);
         fmt::print("NaN: ");
         print_bytes(encoded);
-        CHECK(encoded.size() == 5);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFA));
-        CHECK((encoded[1] & static_cast<std::byte>(0x7F)) == static_cast<std::byte>(0x7F));
-        CHECK((encoded[2] & static_cast<std::byte>(0x80)) == static_cast<std::byte>(0x80));
-        // The last two bytes can vary, so we don't check them
+        CHECK_EQ(to_hex(encoded), "fa7fc00000");
     }
 
     SUBCASE("Map of float sorted") {
         std::map<cbor::tags::value, cbor::tags::value> float_map;
-        float_map.insert({3.0f, 3.14159f});
-        float_map.insert({1.0f, 3.14159f});
-        float_map.insert({2.0f, 3.14159f});
-        float_map.insert({4.0f, 3.14159f});
-        float_map.insert({-5.0f, 3.14159f});
-        float_map.insert({-1.0f, 3.14159f});
-        float_map.insert({10.0f, 3.14159f});
-        // Mix in a double
-        float_map.insert({3.0, 3.14159f});
-        float_map.insert({-3.0, 3.14159f});
-
-        // Mix in a string
-        float_map.insert({"hello", 3.14159f});
-
-        // Mix in a bool
-        float_map.insert({true, 3.14159f});
-
-        // Mix in a null
-        float_map.insert({nullptr, 3.14159f});
-
-        // Mix in some integers
-        float_map.insert({1, 3.14159f});
-        float_map.insert({-2, 3.14159f});
-        float_map.insert({-3, 3.14159f});
+        float_map = {{3.0f, 3.14159f},  {1.0f, 3.14159f},    {2.0f, 3.14159f}, {4.0f, 3.14159f}, {-5.0f, 3.14159f},
+                     {-1.0f, 3.14159f}, {10.0f, 3.14159f},   {3.0, 3.14159f},  {-3.0, 3.14159f}, {"hello", 3.14159f},
+                     {true, 3.14159f},  {nullptr, 3.14159f}, {1, 3.14159f},    {-2, 3.14159f},   {-3, 3.14159f}};
 
         auto encoded = cbor::tags::encoder::serialize(float_map);
         fmt::print("Float map sorted: ");
@@ -458,15 +410,7 @@ TEST_CASE("CBOR Encoder - Double encoding") {
         double value   = 3.14159265358979323846;
         auto   encoded = encoder.serialize(value);
         CHECK(encoded.size() == 9);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFB));
-        CHECK(encoded[1] == static_cast<std::byte>(0x40));
-        CHECK(encoded[2] == static_cast<std::byte>(0x09));
-        CHECK(encoded[3] == static_cast<std::byte>(0x21));
-        CHECK(encoded[4] == static_cast<std::byte>(0xFB));
-        CHECK(encoded[5] == static_cast<std::byte>(0x54));
-        CHECK(encoded[6] == static_cast<std::byte>(0x44));
-        CHECK(encoded[7] == static_cast<std::byte>(0x2D));
-        CHECK(encoded[8] == static_cast<std::byte>(0x18));
+        CHECK(to_hex(encoded) == "fb400921fb54442d18");
     }
 
     SUBCASE("Negative double") {
@@ -474,46 +418,19 @@ TEST_CASE("CBOR Encoder - Double encoding") {
         auto   encoded = encoder.serialize(value);
         fmt::print("Negative double: ");
         print_bytes(encoded);
-        CHECK(encoded.size() == 9);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFB));
-        CHECK(encoded[1] == static_cast<std::byte>(0xC0));
-        CHECK(encoded[2] == static_cast<std::byte>(0x09));
-        CHECK(encoded[3] == static_cast<std::byte>(0x21));
-        CHECK(encoded[4] == static_cast<std::byte>(0xFB));
-        CHECK(encoded[5] == static_cast<std::byte>(0x54));
-        CHECK(encoded[6] == static_cast<std::byte>(0x44));
-        CHECK(encoded[7] == static_cast<std::byte>(0x2D));
-        CHECK(encoded[8] == static_cast<std::byte>(0x18));
+        CHECK(to_hex(encoded) == "fbc00921fb54442d18");
     }
 
     SUBCASE("Zero") {
         double value   = 0.0;
         auto   encoded = encoder.serialize(value);
-        CHECK(encoded.size() == 9);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFB));
-        CHECK(encoded[1] == static_cast<std::byte>(0x00));
-        CHECK(encoded[2] == static_cast<std::byte>(0x00));
-        CHECK(encoded[3] == static_cast<std::byte>(0x00));
-        CHECK(encoded[4] == static_cast<std::byte>(0x00));
-        CHECK(encoded[5] == static_cast<std::byte>(0x00));
-        CHECK(encoded[6] == static_cast<std::byte>(0x00));
-        CHECK(encoded[7] == static_cast<std::byte>(0x00));
-        CHECK(encoded[8] == static_cast<std::byte>(0x00));
+        CHECK(to_hex(encoded) == "fb0000000000000000");
     }
 
     SUBCASE("Infinity") {
         double value   = std::numeric_limits<double>::infinity();
         auto   encoded = encoder.serialize(value);
-        CHECK(encoded.size() == 9);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFB));
-        CHECK(encoded[1] == static_cast<std::byte>(0x7F));
-        CHECK(encoded[2] == static_cast<std::byte>(0xF0));
-        CHECK(encoded[3] == static_cast<std::byte>(0x00));
-        CHECK(encoded[4] == static_cast<std::byte>(0x00));
-        CHECK(encoded[5] == static_cast<std::byte>(0x00));
-        CHECK(encoded[6] == static_cast<std::byte>(0x00));
-        CHECK(encoded[7] == static_cast<std::byte>(0x00));
-        CHECK(encoded[8] == static_cast<std::byte>(0x00));
+        CHECK(to_hex(encoded) == "fb7ff0000000000000");
     }
 
     SUBCASE("NaN") {
