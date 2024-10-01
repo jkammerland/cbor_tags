@@ -16,19 +16,22 @@
 
 namespace cbor::tags {
 
-class encoder {
+template <typename OutputBuffer = std::vector<std::byte>> class encoder {
   public:
-    template <typename T> static std::vector<std::byte> serialize(const T &value) {
-        encoder encoder;
+    template <typename T> static auto serialize(const T &value) {
+        OutputBuffer          data;
+        encoder<OutputBuffer> encoder(data);
         encoder.encode_value(value);
-        return encoder.data_;
+        return data;
     }
 
-    void encode_value(const value &value) {
+    constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
+
+    constexpr void encode_value(const value &value) {
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 
-    void encode_unsigned(std::uint64_t value, std::byte majorType) {
+    constexpr void encode_unsigned(std::uint64_t value, std::byte majorType) {
         if (value < 24) {
             data_.push_back(static_cast<std::byte>(value) | majorType);
         } else if (value <= 0xFF) {
@@ -57,9 +60,9 @@ class encoder {
         }
     }
 
-    void encode(std::uint64_t value) { encode_unsigned(value, static_cast<std::byte>(0x00)); }
+    constexpr void encode(std::uint64_t value) { encode_unsigned(value, static_cast<std::byte>(0x00)); }
 
-    void encode(std::int64_t value) {
+    constexpr void encode(std::int64_t value) {
         if (value >= 0) {
             encode_unsigned(static_cast<std::uint64_t>(value), static_cast<std::byte>(0x00));
         } else {
@@ -67,39 +70,39 @@ class encoder {
         }
     }
 
-    void encode(std::span<const std::byte> value) {
+    constexpr void encode(std::span<const std::byte> value) {
         encode_unsigned(value.size(), static_cast<std::byte>(0x40));
         data_.insert(data_.end(), value.begin(), value.end());
     }
 
-    void encode(std::string_view value) {
+    constexpr void encode(std::string_view value) {
         encode_unsigned(value.size(), static_cast<std::byte>(0x60));
         data_.insert(data_.end(), reinterpret_cast<const std::byte *>(value.data()),
                      reinterpret_cast<const std::byte *>(value.data() + value.size()));
     }
 
     // Handle std::string
-    void encode(const std::string &value) { encode(std::string_view(value)); }
+    constexpr void encode(const std::string &value) { encode(std::string_view(value)); }
 
     // Handle const char*
-    void encode(const char *value) { encode(std::string_view(value)); }
+    constexpr void encode(const char *value) { encode(std::string_view(value)); }
 
-    void encode(const array_view &value) { data_.insert(data_.end(), value.data.begin(), value.data.end()); }
+    constexpr void encode(const array_view &value) { data_.insert(data_.end(), value.data.begin(), value.data.end()); }
 
-    void encode(const map_view &value) { data_.insert(data_.end(), value.data.begin(), value.data.end()); }
+    constexpr void encode(const map_view &value) { data_.insert(data_.end(), value.data.begin(), value.data.end()); }
 
-    void encode(const tag_view &value) {
+    constexpr void encode(const tag_view &value) {
         encode_unsigned(value.tag, static_cast<std::byte>(0xC0));
         data_.insert(data_.end(), value.data.begin(), value.data.end());
     }
 
-    void encode(float16_t value) {
+    constexpr void encode(float16_t value) {
         data_.push_back(static_cast<std::byte>(0xf9)); // CBOR Float16 tag
         data_.push_back(static_cast<std::byte>(value.value >> 8));
         data_.push_back(static_cast<std::byte>(value.value & 0xff));
     }
 
-    void encode(float value) {
+    constexpr void encode(float value) {
         data_.push_back(static_cast<std::byte>(0xFA));
         auto bits = std::bit_cast<std::uint32_t>(value);
         data_.push_back(static_cast<std::byte>(bits >> 24));
@@ -108,7 +111,7 @@ class encoder {
         data_.push_back(static_cast<std::byte>(bits));
     }
 
-    void encode(double value) {
+    constexpr void encode(double value) {
         data_.push_back(static_cast<std::byte>(0xFB));
         auto bits = std::bit_cast<std::uint64_t>(value);
         data_.push_back(static_cast<std::byte>(bits >> 56));
@@ -121,12 +124,12 @@ class encoder {
         data_.push_back(static_cast<std::byte>(bits));
     }
 
-    void encode(bool value) { data_.push_back(value ? static_cast<std::byte>(0xF5) : static_cast<std::byte>(0xF4)); }
+    constexpr void encode(bool value) { data_.push_back(value ? static_cast<std::byte>(0xF5) : static_cast<std::byte>(0xF4)); }
 
-    void encode(std::nullptr_t) { data_.push_back(static_cast<std::byte>(0xF6)); }
+    constexpr void encode(std::nullptr_t) { data_.push_back(static_cast<std::byte>(0xF6)); }
 
     // Handle std::vector and std::array
-    template <typename T> void arrayEncoder(const T &value) {
+    template <typename T> constexpr void arrayEncoder(const T &value) {
         if (value.empty()) {
             data_.push_back(static_cast<std::byte>(0x80));
         } else {
@@ -136,11 +139,11 @@ class encoder {
             }
         }
     }
-    void                          encode_value(const std::vector<value> &value) { arrayEncoder(value); }
-    template <std::size_t N> void encode_value(const std::array<value, N> &value) { arrayEncoder(value); }
+    constexpr void                          encode_value(const std::vector<value> &value) { arrayEncoder(value); }
+    template <std::size_t N> constexpr void encode_value(const std::array<value, N> &value) { arrayEncoder(value); }
 
     // Handle std::map and std::unordered_map
-    template <typename T> void map_encoder(const T &value) {
+    template <typename T> constexpr void map_encoder(const T &value) {
         if (value.empty()) {
             data_.push_back(static_cast<std::byte>(0xA0));
         } else {
@@ -151,20 +154,20 @@ class encoder {
             }
         }
     }
-    void encode_value(const std::map<value, value> &value) { map_encoder(value); }
-    void encode_value(const std::unordered_map<value, value> &value) { map_encoder(value); }
+    constexpr void encode_value(const std::map<value, value> &value) { map_encoder(value); }
+    constexpr void encode_value(const std::unordered_map<value, value> &value) { map_encoder(value); }
 
   protected:
-    std::vector<std::byte> data_;
+    OutputBuffer &data_;
 
-    template <typename Container> void encode_array(const Container &container) {
+    template <typename Container> constexpr void encode_array(const Container &container) {
         encode(static_cast<std::uint64_t>(container.size()) | 0x80);
         for (const auto &item : container) {
             encode_value(item);
         }
     }
 
-    template <typename Map> void encode_map(const Map &map) {
+    template <typename Map> constexpr void encode_map(const Map &map) {
         encode(static_cast<std::uint64_t>(map.size()) | 0xA0);
         for (const auto &[key, value] : map) {
             encode_value(key);
