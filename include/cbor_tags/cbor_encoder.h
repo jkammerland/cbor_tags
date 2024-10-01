@@ -11,13 +11,19 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
 namespace cbor::tags {
 
-template <typename OutputBuffer = std::vector<std::byte>> class encoder {
+template <typename OutputBuffer = std::vector<std::byte>>
+    requires ValidCborBuffer<OutputBuffer>
+class encoder {
   public:
+    using value_type = typename OutputBuffer::value_type;
+    using size_type  = typename OutputBuffer::size_type;
+
     template <typename T> static auto serialize(const T &value) {
         OutputBuffer          data;
         encoder<OutputBuffer> encoder(data);
@@ -175,5 +181,19 @@ template <typename OutputBuffer = std::vector<std::byte>> class encoder {
         }
     }
 };
+
+template <typename OutputBuffer = std::vector<std::byte>> inline auto make_encoder(OutputBuffer &buffer) {
+    return encoder<OutputBuffer>(buffer);
+}
+
+template <typename OutputBuffer = std::vector<std::byte>> inline auto make_data_and_encoder() {
+    struct data_and_encoder {
+        data_and_encoder() : data(), enc(data) {}
+        OutputBuffer          data;
+        encoder<OutputBuffer> enc;
+    };
+
+    return data_and_encoder{};
+}
 
 } // namespace cbor::tags

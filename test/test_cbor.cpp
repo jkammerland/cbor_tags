@@ -2,32 +2,23 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/float16_ieee754.h"
+#include "test_util.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <exception>
-#include <format>
-#include <span>
-#include <stdexcept>
-#include <string_view>
-#include <variant>
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
+#include <exception>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
+#include <format>
 #include <map>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <variant>
 #include <vector>
-
-template <typename T> std::string to_hex(const T &bytes) {
-    std::string hex;
-    hex.reserve(bytes.size() * 2);
-
-    fmt::format_to(std::back_inserter(hex), "{:02x}", fmt::join(bytes, ""));
-
-    return hex;
-}
 
 std::vector<std::byte> to_bytes(std::string_view hex) {
     if (hex.length() % 2 != 0) {
