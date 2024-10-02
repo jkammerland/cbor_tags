@@ -149,7 +149,7 @@ TEST_CASE("CBOR Encoder") {
         CHECK_EQ(half_float, 3.140625f);
 
         auto encoded_half = encoder<>::serialize(half);
-        auto decoded_half = decoder::deserialize(encoded_half);
+        auto decoded_half = decoder<>::deserialize(encoded_half);
 
         CHECK_EQ(half, decoded_half);
     }
@@ -440,19 +440,19 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("integers") {
         auto encoded = encoder<>::serialize(std::uint64_t(4294967296));
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::uint64_t>(decoded));
         CHECK_EQ(std::get<std::uint64_t>(decoded), 4294967296);
 
         encoded = encoder<>::serialize(std::int64_t(-4294967296));
-        decoded = decoder::deserialize(encoded);
+        decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
         CHECK_EQ(std::get<std::int64_t>(decoded), -4294967296);
 
         encoded = encoder<>::serialize(std::int64_t(-42949672960));
-        decoded = decoder::deserialize(encoded);
+        decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
         CHECK_EQ(std::get<std::int64_t>(decoded), -42949672960);
@@ -460,7 +460,7 @@ TEST_CASE("cbor::tags decoder") {
         // Check small negative
         encoded = encoder<>::serialize(std::int64_t(-24));
         fmt::print("Small negative: {}\n", to_hex(encoded));
-        decoded = decoder::deserialize(encoded);
+        decoded = decoder<>::deserialize(encoded);
         // fmt::print("Small negative decoded: {}\n", std::get<std::int64_t>(decoded));
 
         // REQUIRE(decoded);
@@ -470,13 +470,13 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Text strings") {
         auto encoded = encoder<>::serialize(std::string_view("IETF"));
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::string_view>(decoded));
         CHECK_EQ(std::get<std::string_view>(decoded), "IETF");
 
         encoded = encoder<>::serialize(std::string("IETF"));
-        decoded = decoder::deserialize(encoded);
+        decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::string_view>(decoded));
         CHECK_EQ(std::get<std::string_view>(decoded), "IETF");
@@ -484,7 +484,7 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Binary strings") {
         auto encoded = encoder<>::serialize(std::span<std::byte>(bytes));
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::span<const std::byte>>(decoded));
         // Loop and check each byte
@@ -497,10 +497,10 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Arrays") {
         auto encoded = encoder<>::serialize(std::vector<value>{1, 2, 3});
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_array_view>(decoded));
         auto array         = std::get<binary_array_view>(decoded);
-        auto decoded_array = decoder::deserialize(array);
+        auto decoded_array = decoder<>::deserialize(array);
         CHECK_EQ(decoded_array.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(decoded_array[0]), 1);
         CHECK_EQ(std::get<std::uint64_t>(decoded_array[1]), 2);
@@ -509,10 +509,10 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Maps") {
         auto encoded = encoder<>::serialize(std::map<value, value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
         CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
@@ -520,10 +520,10 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Binary string map") {
-        auto decoded = decoder::deserialize(std::span(bytes));
+        auto decoded = decoder<>::deserialize(std::span(bytes));
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 2);
         CHECK(map.contains("numbers"));
         CHECK(map.contains("other"));
@@ -534,10 +534,10 @@ TEST_CASE("cbor::tags decoder") {
 
         auto encoded = encoder<>::serialize(umap);
         fmt::print("Float map: {}\n", to_hex(encoded));
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
 
         CHECK_EQ(std::get<float>(map[1.0f]), 2.0f);
         CHECK_EQ(std::get<float>(map[3.0f]), 4.0f);
@@ -547,10 +547,10 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Doubles map") {
         auto encoded = encoder<>::serialize(std::map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
@@ -560,12 +560,12 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Double unordered map") {
         auto encoded = encoder<>::serialize(std::unordered_map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
         auto s = std::format("{}", "decoded");
 
-        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
@@ -575,17 +575,17 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Decode Simple values") {
         auto encoded = encoder<>::serialize(true);
-        auto decoded = decoder::deserialize(encoded);
+        auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<bool>(decoded));
         CHECK_EQ(std::get<bool>(decoded), true);
 
         encoded = encoder<>::serialize(false);
-        decoded = decoder::deserialize(encoded);
+        decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<bool>(decoded));
         CHECK_EQ(std::get<bool>(decoded), false);
 
         encoded = encoder<>::serialize(nullptr);
-        decoded = decoder::deserialize(encoded);
+        decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<std::nullptr_t>(decoded));
     }
 }

@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -9,9 +10,16 @@
 
 namespace cbor::tags {
 
+template <typename InputBuffer = std::span<const std::byte>>
+    requires ValidCborBuffer<InputBuffer>
 class decoder {
   public:
-    static value deserialize(std::span<const std::byte> data) {
+    using size_type  = typename InputBuffer::size_type;
+    using value_type = typename InputBuffer::value_type;
+
+    explicit decoder(const InputBuffer &data) : data_(data) {}
+
+    static value deserialize(const InputBuffer &data) {
         decoder decoder(data);
         return decoder.decode_value();
     }
@@ -25,6 +33,13 @@ class decoder {
         return result;
     }
 
+    template <typename Container> static void deserialize_to(binary_array_view array, Container &result) {
+        decoder decoder(array.data);
+        while (decoder.position_ < array.data.size()) {
+            result.push_back(decoder.decode_value());
+        }
+    }
+
     template <typename MapType> static MapType deserialize(binary_map_view map) {
         decoder decoder(map.data);
         MapType result;
@@ -36,20 +51,27 @@ class decoder {
         return result;
     }
 
-  protected:
-    std::span<const std::byte> data_;
-    size_t                     position_ = 0;
+    template <typename MapType> static void deserialize_to(binary_map_view map, MapType &result) {
+        decoder decoder(map.data);
+        while (decoder.position_ < map.data.size()) {
+            auto key    = decoder.decode_value();
+            auto value  = decoder.decode_value();
+            result[key] = value;
+        }
+    }
 
-    explicit decoder(std::span<const std::byte> data) : data_(data) {}
+  protected:
+    const InputBuffer &data_;
+    size_type          position_ = 0;
 
     value decode_value() {
         if (position_ >= data_.size()) {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const std::byte initialByte    = data_[position_++];
-        const auto      majorType      = static_cast<major_type>(static_cast<uint8_t>(initialByte) >> 5);
-        const uint8_t   additionalInfo = static_cast<uint8_t>(initialByte) & 0x1F;
+        const value_type initialByte    = data_[position_++];
+        const auto       majorType      = static_cast<major_type>(static_cast<value_type>(initialByte) >> 5);
+        const auto       additionalInfo = static_cast<value_type>(initialByte) & static_cast<value_type>(0x1F);
 
         switch (majorType) {
         case major_type::UnsignedInteger: return decode_unsigned(additionalInfo);
@@ -60,23 +82,23 @@ class decoder {
         case major_type::Map: return decode_map(additionalInfo);
         case major_type::Tag: return decode_tag(additionalInfo);
         case major_type::SimpleOrFloat: return decodeSimpleOrFloat(additionalInfo);
-        default: throw std::runtime_error("Unknown major type");
+        default: throw std::runtime_error("Unsupported major type");
         }
     }
 
-    uint64_t decode_unsigned(uint8_t additionalInfo) {
-        if (additionalInfo < 24) {
-            return additionalInfo;
+    uint64_t decode_unsigned(value_type additionalInfo) {
+        if (additionalInfo < static_cast<value_type>(24)) {
+            return static_cast<uint64_t>(additionalInfo);
         }
         return read_unsigned(additionalInfo);
     }
 
-    int64_t decode_integer(uint8_t additionalInfo) {
+    int64_t decode_integer(value_type additionalInfo) {
         uint64_t value = decode_unsigned(additionalInfo);
         return -1 - static_cast<int64_t>(value);
     }
 
-    std::span<const std::byte> decode_bstring(uint8_t additionalInfo) {
+    std::span<const std::byte> decode_bstring(value_type additionalInfo) {
         size_t length = decode_unsigned(additionalInfo);
         if (position_ + length > data_.size()) {
             throw std::runtime_error("Unexpected end of input");
@@ -86,23 +108,23 @@ class decoder {
         return result;
     }
 
-    std::string_view decode_text(uint8_t additionalInfo) {
+    std::string_view decode_text(value_type additionalInfo) {
         auto bytes = decode_bstring(additionalInfo);
         return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
     }
 
-    binary_array_view decode_array(uint8_t additionalInfo) {
-        size_t             length   = decode_unsigned(additionalInfo);
-        size_t             startPos = position_;
+    binary_array_view decode_array(value_type additionalInfo) {
+        auto               length   = decode_unsigned(additionalInfo);
+        auto               startPos = position_;
         std::vector<value> items;
         items.reserve(length);
-        for (size_t i = 0; i < length; ++i) {
+        for (size_type i = 0; i < length; ++i) {
             items.push_back(decode_value());
         }
         return binary_array_view{data_.subspan(startPos, position_ - startPos)};
     }
 
-    binary_map_view decode_map(uint8_t additionalInfo) {
+    binary_map_view decode_map(value_type additionalInfo) {
         size_t length   = decode_unsigned(additionalInfo);
         size_t startPos = position_;
         for (size_t i = 0; i < length; ++i) {
@@ -112,15 +134,15 @@ class decoder {
         return binary_map_view{data_.subspan(startPos, position_ - startPos)};
     }
 
-    binary_tag_view decode_tag(uint8_t additionalInfo) {
+    binary_tag_view decode_tag(value_type additionalInfo) {
         uint64_t tagValue = decode_unsigned(additionalInfo);
         size_t   startPos = position_;
         decode_value(); // tagged value
         return binary_tag_view{tagValue, data_.subspan(startPos, position_ - startPos)};
     }
 
-    value decodeSimpleOrFloat(uint8_t additionalInfo) {
-        switch (additionalInfo) {
+    value decodeSimpleOrFloat(value_type additionalInfo) {
+        switch (static_cast<uint8_t>(additionalInfo)) {
         case 20: return false;
         case 21: return true;
         case 22: return nullptr;
@@ -131,8 +153,8 @@ class decoder {
         }
     }
 
-    uint64_t read_unsigned(uint8_t additionalInfo) {
-        switch (additionalInfo) {
+    uint64_t read_unsigned(value_type additionalInfo) {
+        switch (static_cast<uint8_t>(additionalInfo)) {
         case 24: return read_uint8();
         case 25: return read_uint16();
         case 26: return read_uint32();
@@ -200,5 +222,19 @@ class decoder {
         return std::bit_cast<double>(bits);
     }
 };
+
+template <typename InputBuffer = std::vector<std::byte>> inline auto make_decoder(InputBuffer &buffer) {
+    return decoder<InputBuffer>(buffer);
+}
+
+template <typename InputBuffer = std::span<const std::byte>> inline auto make_data_and_decoder() {
+    struct data_and_decoder {
+        data_and_decoder() : data(), dec(data) {}
+        InputBuffer          data;
+        decoder<InputBuffer> dec;
+    };
+
+    return data_and_decoder{};
+}
 
 } // namespace cbor::tags
