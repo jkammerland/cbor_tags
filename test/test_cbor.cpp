@@ -498,8 +498,8 @@ TEST_CASE("cbor::tags decoder") {
     SUBCASE("Arrays") {
         auto encoded = encoder<>::serialize(std::vector<value>{1, 2, 3});
         auto decoded = decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<array_view>(decoded));
-        auto array         = std::get<array_view>(decoded);
+        REQUIRE(std::holds_alternative<binary_array_view>(decoded));
+        auto array         = std::get<binary_array_view>(decoded);
         auto decoded_array = decoder::deserialize(array);
         CHECK_EQ(decoded_array.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(decoded_array[0]), 1);
@@ -510,9 +510,9 @@ TEST_CASE("cbor::tags decoder") {
     SUBCASE("Maps") {
         auto encoded = encoder<>::serialize(std::map<value, value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
         auto decoded = decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<map_view>(decoded));
+        REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::map<value, value>>(std::get<map_view>(decoded));
+        auto map = decoder::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
         CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
@@ -521,9 +521,9 @@ TEST_CASE("cbor::tags decoder") {
 
     SUBCASE("Binary string map") {
         auto decoded = decoder::deserialize(std::span(bytes));
-        REQUIRE(std::holds_alternative<map_view>(decoded));
+        REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::map<value, value>>(std::get<map_view>(decoded));
+        auto map = decoder::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 2);
         CHECK(map.contains("numbers"));
         CHECK(map.contains("other"));
@@ -535,9 +535,9 @@ TEST_CASE("cbor::tags decoder") {
         auto encoded = encoder<>::serialize(umap);
         fmt::print("Float map: {}\n", to_hex(encoded));
         auto decoded = decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<map_view>(decoded));
+        REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<map_view>(decoded));
+        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
 
         CHECK_EQ(std::get<float>(map[1.0f]), 2.0f);
         CHECK_EQ(std::get<float>(map[3.0f]), 4.0f);
@@ -548,9 +548,9 @@ TEST_CASE("cbor::tags decoder") {
     SUBCASE("Doubles map") {
         auto encoded = encoder<>::serialize(std::map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
         auto decoded = decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<map_view>(decoded));
+        REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder::deserialize<std::map<value, value>>(std::get<map_view>(decoded));
+        auto map = decoder::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
@@ -561,11 +561,11 @@ TEST_CASE("cbor::tags decoder") {
     SUBCASE("Double unordered map") {
         auto encoded = encoder<>::serialize(std::unordered_map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
         auto decoded = decoder::deserialize(encoded);
-        REQUIRE(std::holds_alternative<map_view>(decoded));
+        REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
         auto s = std::format("{}", "decoded");
 
-        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<map_view>(decoded));
+        auto map = decoder::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);

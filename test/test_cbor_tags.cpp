@@ -106,7 +106,7 @@ TEST_CASE("TAG example COSE") {
     std::string data1 = "This is the content.";
 
     using namespace std::string_view_literals;
-    auto result = out(cbor::tags::tag_view{16, std::span<std::byte>(reinterpret_cast<std::byte *>(data1.data()), data1.size())});
+    auto result = out(cbor::tags::binary_tag_view{16, std::span<std::byte>(reinterpret_cast<std::byte *>(data1.data()), data1.size())});
 
     if (failure(result)) {
         // `result` is implicitly convertible to `std::errc`.
@@ -114,7 +114,7 @@ TEST_CASE("TAG example COSE") {
         REQUIRE(false);
     }
 
-    cbor::tags::tag_view t;
+    cbor::tags::binary_tag_view t;
     result = in(t);
     if (failure(result)) {
         // `result` is implicitly convertible to `std::errc`.

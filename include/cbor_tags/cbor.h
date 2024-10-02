@@ -20,15 +20,15 @@
 
 namespace cbor::tags {
 
-struct array_view {
+struct binary_array_view {
     std::span<const std::byte> data;
 };
 
-struct map_view {
+struct binary_map_view {
     std::span<const std::byte> data;
 };
 
-struct tag_view {
+struct binary_tag_view {
     std::uint64_t              tag;
     std::span<const std::byte> data;
 };
@@ -41,8 +41,8 @@ concept tagged_type = requires(T) {
 template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
 template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
 
-using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, array_view, map_view, tag_view,
-                           float16_t, float, double, bool, std::nullptr_t>;
+using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view, binary_map_view,
+                           binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
 
 // Comparison operators
 template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) {
@@ -74,7 +74,8 @@ constexpr auto operator<=>(const value &lhs, const value &rhs) {
                     return lexicographic_compare(l, r);
                 } else if constexpr (std::is_same_v<L, std::string_view>) {
                     return lexicographic_compare(l, r);
-                } else if constexpr (std::is_same_v<L, array_view> || std::is_same_v<L, map_view> || std::is_same_v<L, tag_view>) {
+                } else if constexpr (std::is_same_v<L, binary_array_view> || std::is_same_v<L, binary_map_view> ||
+                                     std::is_same_v<L, binary_tag_view>) {
                     return l <=> r;
                 } else if constexpr (std::is_same_v<L, bool>) {
                     return l <=> r;
@@ -151,9 +152,9 @@ template <> struct hash<cbor::tags::value> {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data()), x.size()));
                 } else if constexpr (std::is_same_v<T, std::string_view>) {
                     return std::hash<std::string_view>{}(x);
-                } else if constexpr (std::is_same_v<T, cbor::tags::array_view> || std::is_same_v<T, cbor::tags::map_view>) {
+                } else if constexpr (std::is_same_v<T, cbor::tags::binary_array_view> || std::is_same_v<T, cbor::tags::binary_map_view>) {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
-                } else if constexpr (std::is_same_v<T, cbor::tags::tag_view>) {
+                } else if constexpr (std::is_same_v<T, cbor::tags::binary_tag_view>) {
                     return std::hash<std::uint64_t>{}(x.tag) ^
                            std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
                 } else if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::nullptr_t>) {

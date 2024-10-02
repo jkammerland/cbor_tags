@@ -16,7 +16,7 @@ class decoder {
         return decoder.decode_value();
     }
 
-    static std::vector<value> deserialize(array_view array) {
+    static std::vector<value> deserialize(binary_array_view array) {
         decoder            decoder(array.data);
         std::vector<value> result;
         while (decoder.position_ < array.data.size()) {
@@ -25,7 +25,7 @@ class decoder {
         return result;
     }
 
-    template <typename MapType> static MapType deserialize(map_view map) {
+    template <typename MapType> static MapType deserialize(binary_map_view map) {
         decoder decoder(map.data);
         MapType result;
         while (decoder.position_ < map.data.size()) {
@@ -91,7 +91,7 @@ class decoder {
         return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
     }
 
-    array_view decode_array(uint8_t additionalInfo) {
+    binary_array_view decode_array(uint8_t additionalInfo) {
         size_t             length   = decode_unsigned(additionalInfo);
         size_t             startPos = position_;
         std::vector<value> items;
@@ -99,24 +99,24 @@ class decoder {
         for (size_t i = 0; i < length; ++i) {
             items.push_back(decode_value());
         }
-        return array_view{data_.subspan(startPos, position_ - startPos)};
+        return binary_array_view{data_.subspan(startPos, position_ - startPos)};
     }
 
-    map_view decode_map(uint8_t additionalInfo) {
+    binary_map_view decode_map(uint8_t additionalInfo) {
         size_t length   = decode_unsigned(additionalInfo);
         size_t startPos = position_;
         for (size_t i = 0; i < length; ++i) {
             decode_value(); // key
             decode_value(); // value
         }
-        return map_view{data_.subspan(startPos, position_ - startPos)};
+        return binary_map_view{data_.subspan(startPos, position_ - startPos)};
     }
 
-    tag_view decode_tag(uint8_t additionalInfo) {
+    binary_tag_view decode_tag(uint8_t additionalInfo) {
         uint64_t tagValue = decode_unsigned(additionalInfo);
         size_t   startPos = position_;
         decode_value(); // tagged value
-        return tag_view{tagValue, data_.subspan(startPos, position_ - startPos)};
+        return binary_tag_view{tagValue, data_.subspan(startPos, position_ - startPos)};
     }
 
     value decodeSimpleOrFloat(uint8_t additionalInfo) {

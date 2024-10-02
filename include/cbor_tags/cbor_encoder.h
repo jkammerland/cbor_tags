@@ -95,17 +95,17 @@ class encoder {
     // Handle const char*
     constexpr void encode(const char *value) { encode(std::string_view(value)); }
 
-    constexpr void encode(const array_view &value) {
+    constexpr void encode(const binary_array_view &value) {
         data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data.data()),
                      reinterpret_cast<const value_type *>(value.data.data() + value.data.size()));
     }
 
-    constexpr void encode(const map_view &value) {
+    constexpr void encode(const binary_map_view &value) {
         data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data.data()),
                      reinterpret_cast<const value_type *>(value.data.data() + value.data.size()));
     }
 
-    constexpr void encode(const tag_view &value) {
+    constexpr void encode(const binary_tag_view &value) {
         encode_unsigned(value.tag, static_cast<value_type>(0xC0));
         data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data.data()),
                      reinterpret_cast<const value_type *>(value.data.data() + value.data.size()));
