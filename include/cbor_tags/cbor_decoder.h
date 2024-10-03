@@ -60,10 +60,6 @@ class decoder {
         }
     }
 
-  protected:
-    const InputBuffer &data_;
-    size_type          position_ = 0;
-
     value decode_value() {
         if (position_ >= data_.size()) {
             throw std::runtime_error("Unexpected end of input");
@@ -103,7 +99,7 @@ class decoder {
         if (position_ + length > data_.size()) {
             throw std::runtime_error("Unexpected end of input");
         }
-        std::span<const std::byte> result = data_.subspan(position_, length);
+        auto result = std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[position_]), length);
         position_ += length;
         return result;
     }
@@ -114,14 +110,12 @@ class decoder {
     }
 
     binary_array_view decode_array(value_type additionalInfo) {
-        auto               length   = decode_unsigned(additionalInfo);
-        auto               startPos = position_;
-        std::vector<value> items;
-        items.reserve(length);
-        for (size_type i = 0; i < length; ++i) {
-            items.push_back(decode_value());
+        auto length   = decode_unsigned(additionalInfo);
+        auto startPos = position_;
+        for (size_t i = 0; i < length; ++i) {
+            decode_value();
         }
-        return binary_array_view{data_.subspan(startPos, position_ - startPos)};
+        return binary_array_view{std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
     }
 
     binary_map_view decode_map(value_type additionalInfo) {
@@ -131,14 +125,15 @@ class decoder {
             decode_value(); // key
             decode_value(); // value
         }
-        return binary_map_view{data_.subspan(startPos, position_ - startPos)};
+        return binary_map_view{std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
     }
 
     binary_tag_view decode_tag(value_type additionalInfo) {
         uint64_t tagValue = decode_unsigned(additionalInfo);
         size_t   startPos = position_;
         decode_value(); // tagged value
-        return binary_tag_view{tagValue, data_.subspan(startPos, position_ - startPos)};
+        return binary_tag_view{tagValue,
+                               std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
     }
 
     value decodeSimpleOrFloat(value_type additionalInfo) {
@@ -221,13 +216,15 @@ class decoder {
         uint64_t bits = read_uint64();
         return std::bit_cast<double>(bits);
     }
+
+  protected:
+    const InputBuffer &data_;
+    size_type          position_ = 0;
 };
 
-template <typename InputBuffer = std::vector<std::byte>> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer>(buffer);
-}
+template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer>(buffer); }
 
-template <typename InputBuffer = std::span<const std::byte>> inline auto make_data_and_decoder() {
+template <typename InputBuffer = std::vector<std::byte>> inline auto make_data_and_decoder() {
     struct data_and_decoder {
         data_and_decoder() : data(), dec(data) {}
         InputBuffer          data;

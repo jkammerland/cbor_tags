@@ -191,9 +191,7 @@ class encoder {
     }
 };
 
-template <typename OutputBuffer = std::vector<std::byte>> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer>(buffer);
-}
+template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) { return encoder<OutputBuffer>(buffer); }
 
 template <typename OutputBuffer = std::vector<std::byte>> inline auto make_data_and_encoder() {
     struct data_and_encoder {
