@@ -4,18 +4,59 @@
 
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
 
 namespace cbor::tags {
+
+namespace detail {
+
+template <typename T>
+concept IsArrayConcept = std::is_array_v<T>;
+
+template <typename T, bool IsArray>
+    requires ValidCborBuffer<T>
+struct appender;
+
+template <typename T> struct appender<T, false> {
+    using value_type = T::value_type;
+    constexpr void operator()(T &container, value_type value) { container.push_back(value); }
+    constexpr void operator()(T &container, std::span<const std::byte> values) {
+        container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
+                         reinterpret_cast<const value_type *>(values.data() + values.size()));
+    }
+    constexpr void operator()(T &container, std::string_view value) {
+        container.insert(container.end(), reinterpret_cast<const value_type *>(value.data()),
+                         reinterpret_cast<const value_type *>(value.data() + value.size()));
+    }
+};
+
+template <typename T> struct appender<T, true> {
+    using size_type  = T::size_type;
+    using value_type = T::value_type;
+    size_type      head_{};
+    constexpr void operator()(T &container, value_type value) { container[head_++] = value; }
+    constexpr void operator()(T &container, std::span<const std::byte> values) {
+        std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());
+        head_ += values.size();
+    }
+    constexpr void operator()(T &container, std::string_view value) {
+        std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(value.data()), value.size());
+        head_ += value.size();
+    }
+};
+
+} // namespace detail
 
 template <typename OutputBuffer = std::vector<std::byte>>
     requires ValidCborBuffer<OutputBuffer>
@@ -39,30 +80,30 @@ class encoder {
 
     constexpr void encode_unsigned(std::uint64_t value, value_type majorType) {
         if (value < 24) {
-            data_.push_back(static_cast<value_type>(value) | majorType);
+            appender_(data_, static_cast<value_type>(value) | majorType);
         } else if (value <= 0xFF) {
-            data_.push_back(static_cast<value_type>(24) | majorType);
-            data_.push_back(static_cast<value_type>(value));
+            appender_(data_, static_cast<value_type>(24) | majorType);
+            appender_(data_, static_cast<value_type>(value));
         } else if (value <= 0xFFFF) {
-            data_.push_back(static_cast<value_type>(25) | majorType);
-            data_.push_back(static_cast<value_type>(value >> 8));
-            data_.push_back(static_cast<value_type>(value));
+            appender_(data_, static_cast<value_type>(25) | majorType);
+            appender_(data_, static_cast<value_type>(value >> 8));
+            appender_(data_, static_cast<value_type>(value));
         } else if (value <= 0xFFFFFFFF) {
-            data_.push_back(static_cast<value_type>(26) | majorType);
-            data_.push_back(static_cast<value_type>(value >> 24));
-            data_.push_back(static_cast<value_type>(value >> 16));
-            data_.push_back(static_cast<value_type>(value >> 8));
-            data_.push_back(static_cast<value_type>(value));
+            appender_(data_, static_cast<value_type>(26) | majorType);
+            appender_(data_, static_cast<value_type>(value >> 24));
+            appender_(data_, static_cast<value_type>(value >> 16));
+            appender_(data_, static_cast<value_type>(value >> 8));
+            appender_(data_, static_cast<value_type>(value));
         } else {
-            data_.push_back(static_cast<value_type>(27) | majorType);
-            data_.push_back(static_cast<value_type>(value >> 56));
-            data_.push_back(static_cast<value_type>(value >> 48));
-            data_.push_back(static_cast<value_type>(value >> 40));
-            data_.push_back(static_cast<value_type>(value >> 32));
-            data_.push_back(static_cast<value_type>(value >> 24));
-            data_.push_back(static_cast<value_type>(value >> 16));
-            data_.push_back(static_cast<value_type>(value >> 8));
-            data_.push_back(static_cast<value_type>(value));
+            appender_(data_, static_cast<value_type>(27) | majorType);
+            appender_(data_, static_cast<value_type>(value >> 56));
+            appender_(data_, static_cast<value_type>(value >> 48));
+            appender_(data_, static_cast<value_type>(value >> 40));
+            appender_(data_, static_cast<value_type>(value >> 32));
+            appender_(data_, static_cast<value_type>(value >> 24));
+            appender_(data_, static_cast<value_type>(value >> 16));
+            appender_(data_, static_cast<value_type>(value >> 8));
+            appender_(data_, static_cast<value_type>(value));
         }
     }
 
@@ -78,15 +119,12 @@ class encoder {
 
     constexpr void encode(std::span<const std::byte> value) {
         encode_unsigned(value.size(), static_cast<value_type>(0x40));
-
-        data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data()),
-                     reinterpret_cast<const value_type *>(value.data() + value.size()));
+        appender_(data_, value);
     }
 
     constexpr void encode(std::string_view value) {
         encode_unsigned(value.size(), static_cast<value_type>(0x60));
-        data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data()),
-                     reinterpret_cast<const value_type *>(value.data() + value.size()));
+        appender_(data_, value);
     }
 
     // Handle std::string
@@ -95,58 +133,51 @@ class encoder {
     // Handle const char*
     constexpr void encode(const char *value) { encode(std::string_view(value)); }
 
-    constexpr void encode(const binary_array_view &value) {
-        data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data.data()),
-                     reinterpret_cast<const value_type *>(value.data.data() + value.data.size()));
-    }
+    constexpr void encode(const binary_array_view &value) { appender_(data_, value.data); }
 
-    constexpr void encode(const binary_map_view &value) {
-        data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data.data()),
-                     reinterpret_cast<const value_type *>(value.data.data() + value.data.size()));
-    }
+    constexpr void encode(const binary_map_view &value) { appender_(data_, value.data); }
 
     constexpr void encode(const binary_tag_view &value) {
         encode_unsigned(value.tag, static_cast<value_type>(0xC0));
-        data_.insert(data_.end(), reinterpret_cast<const value_type *>(value.data.data()),
-                     reinterpret_cast<const value_type *>(value.data.data() + value.data.size()));
+        appender_(data_, value.data);
     }
 
     constexpr void encode(float16_t value) {
-        data_.push_back(static_cast<value_type>(0xf9)); // CBOR Float16 tag
-        data_.push_back(static_cast<value_type>(value.value >> 8));
-        data_.push_back(static_cast<value_type>(value.value & 0xff));
+        appender_(data_, static_cast<value_type>(0xf9)); // CBOR Float16 tag
+        appender_(data_, static_cast<value_type>(value.value >> 8));
+        appender_(data_, static_cast<value_type>(value.value & 0xff));
     }
 
     constexpr void encode(float value) {
-        data_.push_back(static_cast<value_type>(0xFA));
+        appender_(data_, static_cast<value_type>(0xFA));
         auto bits = std::bit_cast<std::uint32_t>(value);
-        data_.push_back(static_cast<value_type>(bits >> 24));
-        data_.push_back(static_cast<value_type>(bits >> 16));
-        data_.push_back(static_cast<value_type>(bits >> 8));
-        data_.push_back(static_cast<value_type>(bits));
+        appender_(data_, static_cast<value_type>(bits >> 24));
+        appender_(data_, static_cast<value_type>(bits >> 16));
+        appender_(data_, static_cast<value_type>(bits >> 8));
+        appender_(data_, static_cast<value_type>(bits));
     }
 
     constexpr void encode(double value) {
-        data_.push_back(static_cast<value_type>(0xFB));
+        appender_(data_, static_cast<value_type>(0xFB));
         auto bits = std::bit_cast<std::uint64_t>(value);
-        data_.push_back(static_cast<value_type>(bits >> 56));
-        data_.push_back(static_cast<value_type>(bits >> 48));
-        data_.push_back(static_cast<value_type>(bits >> 40));
-        data_.push_back(static_cast<value_type>(bits >> 32));
-        data_.push_back(static_cast<value_type>(bits >> 24));
-        data_.push_back(static_cast<value_type>(bits >> 16));
-        data_.push_back(static_cast<value_type>(bits >> 8));
-        data_.push_back(static_cast<value_type>(bits));
+        appender_(data_, static_cast<value_type>(bits >> 56));
+        appender_(data_, static_cast<value_type>(bits >> 48));
+        appender_(data_, static_cast<value_type>(bits >> 40));
+        appender_(data_, static_cast<value_type>(bits >> 32));
+        appender_(data_, static_cast<value_type>(bits >> 24));
+        appender_(data_, static_cast<value_type>(bits >> 16));
+        appender_(data_, static_cast<value_type>(bits >> 8));
+        appender_(data_, static_cast<value_type>(bits));
     }
 
-    constexpr void encode(bool value) { data_.push_back(value ? static_cast<value_type>(0xF5) : static_cast<value_type>(0xF4)); }
+    constexpr void encode(bool value) { appender_(data_, value ? static_cast<value_type>(0xF5) : static_cast<value_type>(0xF4)); }
 
-    constexpr void encode(std::nullptr_t) { data_.push_back(static_cast<value_type>(0xF6)); }
+    constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<value_type>(0xF6)); }
 
     // Handle std::vector and std::array
     template <typename T> constexpr void arrayEncoder(const T &value) {
         if (value.empty()) {
-            data_.push_back(static_cast<value_type>(0x80));
+            appender_(data_, static_cast<value_type>(0x80));
         } else {
             encode_unsigned(value.size(), static_cast<value_type>(0x80));
             for (const auto &item : value) {
@@ -160,7 +191,7 @@ class encoder {
     // Handle std::map and std::unordered_map
     template <typename T> constexpr void map_encoder(const T &value) {
         if (value.empty()) {
-            data_.push_back(static_cast<value_type>(0xA0));
+            appender_(data_, static_cast<value_type>(0xA0));
         } else {
             encode_unsigned(value.size(), static_cast<value_type>(0xA0));
             for (const auto &[key, item] : value) {
@@ -173,7 +204,8 @@ class encoder {
     constexpr void encode_value(const std::unordered_map<value, value> &value) { map_encoder(value); }
 
   protected:
-    OutputBuffer &data_;
+    detail::appender<OutputBuffer, detail::IsArrayConcept<OutputBuffer>> appender_;
+    OutputBuffer                                                        &data_;
 
     template <typename Container> constexpr void encode_array(const Container &container) {
         encode(static_cast<std::uint64_t>(container.size()) | 0x80);
