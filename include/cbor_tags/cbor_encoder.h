@@ -22,7 +22,12 @@ namespace cbor::tags {
 namespace detail {
 
 template <typename T>
-concept IsArrayConcept = std::is_array_v<T>;
+concept IsArrayConcept = requires {
+    typename T::value_type;
+    typename T::size_type;
+    typename std::tuple_size<T>::type;
+    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>>;
+};
 
 template <typename T, bool IsArray>
     requires ValidCborBuffer<T>
