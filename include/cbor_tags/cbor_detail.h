@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cbor.h"
+#include "cbor_tags/cbor_concepts.h"
 
 namespace cbor::tags::detail {
 

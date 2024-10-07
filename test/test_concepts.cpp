@@ -1,4 +1,5 @@
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/cbor_concepts.h"
 
 #include <array>
 #include <cstddef>
@@ -58,8 +59,8 @@ TEST_CASE("Test iterator concepts") {
 }
 
 TEST_CASE_TEMPLATE("Cbor stream", T, std::vector<uint8_t>, const std::vector<uint8_t>) {
-    T           buffer;
-    cbor_stream stream(buffer);
+    T          buffer;
+    CborStream stream(buffer);
 
     fmt::print("name: {}\n", nameof::nameof_full_type<decltype(stream.buffer)>());
     if constexpr (std::is_const_v<T>) {
