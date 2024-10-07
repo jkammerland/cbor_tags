@@ -32,6 +32,9 @@ struct binary_tag_view {
     std::span<const std::byte> data;
 };
 
+using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view, binary_map_view,
+                           binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
+
 template <typename T>
 concept tagged_type = requires(T) {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
@@ -39,9 +42,6 @@ concept tagged_type = requires(T) {
 
 template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
 template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
-
-using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view, binary_map_view,
-                           binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
 
 // Comparison operators
 template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) {
