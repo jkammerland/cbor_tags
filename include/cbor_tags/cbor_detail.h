@@ -56,14 +56,16 @@ template <typename T> struct reader<T, true> {
     using size_type  = T::size_type;
     using value_type = T::value_type;
     using iterator   = typename T::iterator;
-    const T  &container_;
     size_type position_{};
 
-    constexpr reader(const T &container) : container_(container) {}
+    constexpr reader(const T &) {}
 
-    constexpr bool       empty() const noexcept { return position_ >= container_.size(); }
-    constexpr value_type read() noexcept { return static_cast<value_type>(container_[position_++]); }
-    constexpr value_type read(size_type offset) noexcept { return static_cast<value_type>(container_[position_ + offset]); }
+    constexpr bool       empty(const T &container) const noexcept { return position_ >= container.size(); }
+    constexpr bool       empty(const T &container, size_type offset) const noexcept { return position_ + offset >= container.size(); }
+    constexpr value_type read(const T &container) noexcept { return static_cast<value_type>(container[position_++]); }
+    constexpr value_type read(const T &container, size_type offset) noexcept {
+        return static_cast<value_type>(container[position_ + offset]);
+    }
 };
 
 template <typename T> struct reader<T, false> {
@@ -74,8 +76,13 @@ template <typename T> struct reader<T, false> {
     constexpr reader(const T &container) : position_(container.begin()) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool       empty(const T &container) const noexcept { return position_ == container.end(); }
-    constexpr value_type read() noexcept { return static_cast<value_type>(*position_++); }
+    constexpr bool empty(const T &container) const noexcept { return position_ == container.end(); }
+    constexpr bool empty(const T &container, size_type offset) const noexcept {
+        // TODO: fix linear complexity
+        return std::distance(position_, container.end()) < static_cast<std::ptrdiff_t>(offset);
+    };
+    constexpr value_type read(const T &) noexcept { return static_cast<value_type>(*position_++); }
+    constexpr value_type read(const T &, size_type) noexcept { return static_cast<value_type>(*position_++); }
 };
 
 } // namespace cbor::tags::detail
