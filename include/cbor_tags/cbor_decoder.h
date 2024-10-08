@@ -36,9 +36,11 @@ class decoder {
     }
 
     template <typename Container> static void deserialize_to(binary_array_view array, Container &result) {
-        decoder decoder(array.data);
+        decoder                     decoder(array.data);
+        detail::appender<Container> appender_;
+
         while (decoder.position_ < array.data.size()) {
-            result.push_back(decoder.decode_value());
+            appender_(result, decoder.decode_value());
         }
     }
 

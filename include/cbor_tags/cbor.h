@@ -33,8 +33,29 @@ struct binary_tag_view {
     std::span<const std::byte> data;
 };
 
+template <std::ranges::input_range R> struct binary_range_view {
+    R range;
+};
+
+template <std::ranges::input_range R> struct binary_array_range_view {
+    R range;
+};
+
+template <std::ranges::input_range R> struct binary_map_range_view {
+    R range;
+};
+
+template <std::ranges::input_range R> struct binary_tag_range_view {
+    std::uint64_t tag;
+    R             range;
+};
+
 using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view, binary_map_view,
                            binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
+
+template <typename R>
+using value_ranged = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_range_view<R>,
+                                  binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename T>
 concept tagged_type = requires(T) {

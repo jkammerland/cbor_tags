@@ -167,8 +167,8 @@ class encoder {
     constexpr void encode_value(const std::unordered_map<value, value> &value) { map_encoder(value); }
 
   protected:
-    detail::appender<OutputBuffer, detail::IsArrayConcept<OutputBuffer>> appender_;
-    OutputBuffer                                                        &data_;
+    detail::appender<OutputBuffer> appender_;
+    OutputBuffer                  &data_;
 
     template <typename Container> constexpr void encode_array(const Container &container) {
         encode(static_cast<std::uint64_t>(container.size()) | 0x80);
