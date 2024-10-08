@@ -15,13 +15,22 @@
 
 namespace cbor::tags {
 
+template <typename T> struct iterator_type {
+    using type = typename T::const_iterator;
+};
+
+template <typename T, std::size_t Extent> struct iterator_type<std::span<T, Extent>> {
+    using type = typename std::span<T, Extent>::iterator;
+};
+
 template <typename InputBuffer = std::span<const std::byte>>
     requires ValidCborBuffer<InputBuffer>
 class decoder {
   public:
     using size_type    = typename InputBuffer::size_type;
     using value_type   = typename InputBuffer::value_type;
-    using cbor_variant = std::conditional_t<IsContiguous<InputBuffer>, value, value_ranged<InputBuffer>>;
+    using iterator_t   = typename iterator_type<InputBuffer>::type;
+    using cbor_variant = std::conditional_t<IsContiguous<InputBuffer>, value, value_ranged<std::ranges::subrange<iterator_t>>>;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data_) {}
 
@@ -102,20 +111,25 @@ class decoder {
         return -1 - static_cast<int64_t>(value);
     }
 
-    std::span<const std::byte> decode_bstring(value_type additionalInfo) {
-        size_t length = decode_unsigned(additionalInfo);
+    auto decode_bstring(value_type additionalInfo) {
+        auto length = decode_unsigned(additionalInfo); // TODO: fix me
         if (reader_.empty(data_, length)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        // auto result = std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[position_]), length);
-        // return result;
-        return {};
+        if constexpr (IsContiguous<InputBuffer>) {
+            return std::span<const std::byte>(reinterpret_cast<const std::byte *>(reader_.position_), length);
+        } else {
+            return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
+        }
     }
 
-    std::string_view decode_text(value_type additionalInfo) {
+    auto decode_text(value_type additionalInfo) {
         auto bytes = decode_bstring(additionalInfo);
-        // return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
-        return {};
+        if constexpr (IsContiguous<InputBuffer>) {
+            return std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        } else {
+            return char_range_view{bytes.range};
+        }
     }
 
     auto decode_array(value_type additionalInfo) {
@@ -129,8 +143,7 @@ class decoder {
             return binary_array_view{
                 std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), reader_.position_ - startPos)};
         } else {
-            // return binary_array_range_view<InputBuffer>{std::ranges::input_range{startPos, reader_.position_}};
-            return binary_array_range_view<InputBuffer>{};
+            return binary_array_range_view{std::ranges::subrange(startPos, reader_.position_)};
         }
     }
 
@@ -146,9 +159,7 @@ class decoder {
             return binary_map_view{
                 std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), reader_.position_ - startPos)};
         } else {
-            // return binary_map_range_view<InputBuffer>{
-            //     std::ranges::subrange<typename InputBuffer::const_iterator>{startPos, reader_.position_}};
-            return binary_map_range_view<InputBuffer>{};
+            return binary_map_range_view{std::ranges::subrange(startPos, reader_.position_)};
         }
     }
 
@@ -159,7 +170,7 @@ class decoder {
         if constexpr (IsContiguous<InputBuffer>) {
             return binary_tag_view{0, std::span<const std::byte>()};
         } else {
-            return binary_tag_range_view<InputBuffer>{};
+            return binary_tag_range_view{0, std::ranges::subrange<typename InputBuffer::const_iterator>{}};
         }
 
         // uint64_t tagValue = decode_unsigned(additionalInfo);
@@ -192,14 +203,14 @@ class decoder {
     }
 
     uint8_t read_uint8() {
-        if (reader_.empty(data_, 1)) {
+        if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
         return static_cast<uint8_t>(reader_.read(data_));
     }
 
     uint16_t read_uint16() {
-        if (reader_.empty(data_, 2)) {
+        if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
         uint16_t result = (static_cast<uint16_t>(reader_.read(data_)) << 8) | static_cast<uint16_t>(reader_.read(data_));
@@ -207,7 +218,7 @@ class decoder {
     }
 
     uint32_t read_uint32() {
-        if (reader_.empty(data_, 4)) {
+        if (reader_.empty(data_, 3)) {
             throw std::runtime_error("Unexpected end of input");
         }
         uint32_t result = (static_cast<uint32_t>(reader_.read(data_)) << 24) | (static_cast<uint32_t>(reader_.read(data_)) << 16) |
@@ -216,7 +227,7 @@ class decoder {
     }
 
     uint64_t read_uint64() {
-        if (reader_.empty(data_, 8)) {
+        if (reader_.empty(data_, 7)) {
             throw std::runtime_error("Unexpected end of input");
         }
         uint64_t result = (static_cast<uint64_t>(reader_.read(data_)) << 56) | (static_cast<uint64_t>(reader_.read(data_)) << 48) |
@@ -228,7 +239,7 @@ class decoder {
 
     // CBOR Float16 decoding function
     float16_t read_float16() {
-        if (reader_.empty(data_, 2)) {
+        if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
 

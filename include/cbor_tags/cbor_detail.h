@@ -56,9 +56,9 @@ template <typename T> struct reader<T, true> {
     using size_type  = T::size_type;
     using value_type = T::value_type;
     using iterator   = typename T::iterator;
-    size_type position_{};
+    size_type position_;
 
-    constexpr reader(const T &) {}
+    constexpr reader(const T &) : position_(0) {}
 
     constexpr bool       empty(const T &container) const noexcept { return position_ >= container.size(); }
     constexpr bool       empty(const T &container, size_type offset) const noexcept { return position_ + offset >= container.size(); }

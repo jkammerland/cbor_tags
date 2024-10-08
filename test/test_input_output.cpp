@@ -36,7 +36,7 @@ TEST_CASE_TEMPLATE("Roundtrip", T, std::vector<std::byte>, std::deque<std::byte>
     }
 }
 
-TEST_CASE_TEMPLATE("Roundtrip binary cbor string" * doctest::skip(), T, std::vector<char>, std::deque<char>) {
+TEST_CASE_TEMPLATE("Roundtrip binary cbor string", T, std::vector<char>) {
     auto [data_in, in]   = make_data_and_decoder<T>();
     auto [data_out, out] = make_data_and_encoder<T>();
 
@@ -52,3 +52,5 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor string" * doctest::skip(), T, std::vec
     CHECK_EQ(std::holds_alternative<std::string_view>(result), true);
     CHECK_EQ(std::get<std::string_view>(result), sv);
 }
+
+// TODO: deque test
