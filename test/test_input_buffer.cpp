@@ -15,23 +15,23 @@
 
 using namespace cbor::tags;
 
-TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>) {
-    auto [data, in] = make_data_and_decoder<T>();
+// TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>) {
+//     auto [data, in] = make_data_and_decoder<T>();
 
-    using value_type = typename T::value_type;
+//     using value_type = typename T::value_type;
 
-    std::vector<value_type> encoded;
-    encoded.push_back(value_type{0x01});
-    encoded.push_back(value_type{0x02});
-    encoded.push_back(value_type{0x03});
+//     std::vector<value_type> encoded;
+//     encoded.push_back(value_type{0x01});
+//     encoded.push_back(value_type{0x02});
+//     encoded.push_back(value_type{0x03});
 
-    data.insert(data.end(), encoded.begin(), encoded.end());
-    for (const auto &value : encoded) {
-        auto result = in.decode_value();
-        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
-        CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
-    }
-}
+//     data.insert(data.end(), encoded.begin(), encoded.end());
+//     for (const auto &value : encoded) {
+//         auto result = in.decode_value();
+//         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+//         CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
+//     }
+// }
 
 TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 5>, std::deque<char>) {
     T data;

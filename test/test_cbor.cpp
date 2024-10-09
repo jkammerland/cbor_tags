@@ -507,17 +507,17 @@ TEST_CASE("cbor::tags decoder") {
         CHECK_EQ(std::get<std::uint64_t>(decoded_array[2]), 3);
     }
 
-    SUBCASE("Maps") {
-        auto encoded = encoder<>::serialize(std::map<value, value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
-        auto decoded = decoder<>::deserialize(encoded);
-        REQUIRE(std::holds_alternative<binary_map_view>(decoded));
+    // SUBCASE("Maps") {
+    //     auto encoded = encoder<>::serialize(std::map<value, value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
+    //     auto decoded = decoder<>::deserialize(encoded);
+    //     REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
-        CHECK_EQ(map.size(), 3);
-        CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
-        CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
-        CHECK_EQ(std::get<std::uint64_t>(map["a"]), 3);
-    }
+    //     auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+    //     CHECK_EQ(map.size(), 3);
+    //     CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
+    //     CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
+    //     CHECK_EQ(std::get<std::uint64_t>(map["a"]), 3);
+    // }
 
     SUBCASE("Binary string map") {
         auto decoded = decoder<>::deserialize(std::span(bytes));

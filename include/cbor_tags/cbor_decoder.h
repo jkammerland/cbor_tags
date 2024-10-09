@@ -113,11 +113,12 @@ class decoder {
 
     auto decode_bstring(value_type additionalInfo) {
         auto length = decode_unsigned(additionalInfo); // TODO: fix me
-        if (reader_.empty(data_, length)) {
+        if (reader_.empty(data_, length - 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
+
         if constexpr (IsContiguous<InputBuffer>) {
-            return std::span<const std::byte>(reinterpret_cast<const std::byte *>(reader_.position_), length);
+            return std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
         } else {
             return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
         }
