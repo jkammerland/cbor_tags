@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor_concepts.h"
 
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 
@@ -72,17 +73,24 @@ template <typename T> struct reader<T, false> {
     using size_type  = T::size_type;
     using value_type = T::value_type;
     using iterator   = typename T::const_iterator;
-    iterator position_;
-    constexpr reader(const T &container) : position_(container.begin()) {}
+    iterator  position_;
+    size_type current_offset_{0};
+    constexpr reader(const T &container) : position_(container.cbegin()) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool empty(const T &container) const noexcept { return position_ == container.end(); }
-    constexpr bool empty(const T &container, size_type offset) const noexcept {
-        // TODO: fix linear complexity
-        return std::distance(position_, container.end()) < static_cast<std::ptrdiff_t>(offset);
-    };
-    constexpr value_type read(const T &) noexcept { return static_cast<value_type>(*position_++); }
-    constexpr value_type read(const T &, size_type) noexcept { return static_cast<value_type>(*position_++); }
+    constexpr bool empty(const T &container) const noexcept { return position_ == container.cend(); }
+    constexpr bool empty(const T &container, size_type offset) const noexcept { return (current_offset_ + offset) >= container.size(); }
+    constexpr value_type read(const T &) noexcept {
+        auto result = static_cast<value_type>(*position_);
+        ++position_;
+        ++current_offset_;
+        return result;
+    }
+    constexpr value_type read(const T &, size_type offset) noexcept {
+        throw std::runtime_error("Not implemented");
+        auto it = std::next(position_, offset);
+        return static_cast<value_type>(*it);
+    }
 };
 
 } // namespace cbor::tags::detail

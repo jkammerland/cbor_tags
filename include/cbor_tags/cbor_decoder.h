@@ -32,7 +32,7 @@ class decoder {
     using iterator_t   = typename iterator_type<InputBuffer>::type;
     using cbor_variant = std::conditional_t<IsContiguous<InputBuffer>, value, value_ranged<std::ranges::subrange<iterator_t>>>;
 
-    explicit decoder(const InputBuffer &data) : data_(data), reader_(data_) {}
+    explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     static cbor_variant deserialize(const InputBuffer &data) {
         decoder decoder(data);
@@ -118,7 +118,9 @@ class decoder {
         }
 
         if constexpr (IsContiguous<InputBuffer>) {
-            return std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+            auto result = std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+            reader_.position_ += length;
+            return result;
         } else {
             return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
         }
