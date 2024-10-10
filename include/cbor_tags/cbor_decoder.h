@@ -32,7 +32,7 @@ class decoder {
     using iterator_t   = typename iterator_type<InputBuffer>::type;
     using cbor_variant = std::conditional_t<IsContiguous<InputBuffer>, value, value_ranged<std::ranges::subrange<iterator_t>>>;
 
-    explicit decoder(const InputBuffer &data) : data_(data), reader_(data_) {}
+    explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     static cbor_variant deserialize(const InputBuffer &data) {
         decoder decoder(data);
@@ -118,7 +118,9 @@ class decoder {
         }
 
         if constexpr (IsContiguous<InputBuffer>) {
-            return std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+            auto result = std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+            reader_.position_ += length;
+            return result;
         } else {
             return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
         }
@@ -165,20 +167,13 @@ class decoder {
     }
 
     auto decode_tag(value_type additionalInfo) {
-        (void)additionalInfo;
-        throw std::runtime_error("Tagged values not supported yet");
-
+        auto tag  = decode_unsigned(additionalInfo);
+        auto data = decode_value();
         if constexpr (IsContiguous<InputBuffer>) {
-            return binary_tag_view{0, std::span<const std::byte>()};
+            return binary_tag_view{tag, std::get<std::span<const std::byte>>(data)};
         } else {
-            return binary_tag_range_view{0, std::ranges::subrange<typename InputBuffer::const_iterator>{}};
+            return binary_tag_range_view{tag, std::get<binary_range_view<std::ranges::subrange<iterator_t>>>(data).range};
         }
-
-        // uint64_t tagValue = decode_unsigned(additionalInfo);
-        // size_t   startPos = reader_.position_;
-        // decode_value(); // tagged value
-        // return binary_tag_view{tagValue,
-        //                        std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
     }
 
     cbor_variant decodeSimpleOrFloat(value_type additionalInfo) {
