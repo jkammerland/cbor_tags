@@ -6,30 +6,43 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <ranges>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace cbor::tags {
+
+template <typename T> struct iterator_type {
+    using type = typename T::const_iterator;
+};
+
+template <typename T, std::size_t Extent> struct iterator_type<std::span<T, Extent>> {
+    using type = typename std::span<T, Extent>::iterator;
+};
 
 template <typename InputBuffer = std::span<const std::byte>>
     requires ValidCborBuffer<InputBuffer>
 class decoder {
   public:
-    using size_type  = typename InputBuffer::size_type;
-    using value_type = typename InputBuffer::value_type;
+    using size_type    = typename InputBuffer::size_type;
+    using value_type   = typename InputBuffer::value_type;
+    using iterator_t   = typename iterator_type<InputBuffer>::type;
+    using cbor_variant = std::conditional_t<IsContiguous<InputBuffer>, value, value_ranged<std::ranges::subrange<iterator_t>>>;
 
-    explicit decoder(const InputBuffer &data) : data_(data) {}
+    explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    static value deserialize(const InputBuffer &data) {
+    static cbor_variant deserialize(const InputBuffer &data) {
         decoder decoder(data);
         return decoder.decode_value();
     }
 
-    static std::vector<value> deserialize(binary_array_view array) {
-        decoder            decoder(array.data);
-        std::vector<value> result;
-        while (decoder.position_ < array.data.size()) {
+    static std::vector<cbor_variant> deserialize(binary_array_view array) {
+        decoder                   decoder(array.data);
+        std::vector<cbor_variant> result;
+        while (!decoder.reader_.empty(decoder.data_)) {
             result.push_back(decoder.decode_value());
         }
         return result;
@@ -39,7 +52,7 @@ class decoder {
         decoder                     decoder(array.data);
         detail::appender<Container> appender_;
 
-        while (decoder.position_ < array.data.size()) {
+        while (!decoder.reader_.empty(decoder.data_)) {
             appender_(result, decoder.decode_value());
         }
     }
@@ -47,7 +60,7 @@ class decoder {
     template <typename MapType> static MapType deserialize(binary_map_view map) {
         decoder decoder(map.data);
         MapType result;
-        while (decoder.position_ < map.data.size()) {
+        while (!decoder.reader_.empty(decoder.data_)) {
             auto key    = decoder.decode_value();
             auto value  = decoder.decode_value();
             result[key] = value;
@@ -64,12 +77,12 @@ class decoder {
         }
     }
 
-    value decode_value() {
-        if (position_ >= data_.size()) {
+    cbor_variant decode_value() {
+        if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const value_type initialByte    = data_[position_++];
+        const value_type initialByte    = reader_.read(data_);
         const auto       majorType      = static_cast<major_type>(static_cast<value_type>(initialByte) >> 5);
         const auto       additionalInfo = static_cast<value_type>(initialByte) & static_cast<value_type>(0x1F);
 
@@ -98,49 +111,72 @@ class decoder {
         return -1 - static_cast<int64_t>(value);
     }
 
-    std::span<const std::byte> decode_bstring(value_type additionalInfo) {
-        size_t length = decode_unsigned(additionalInfo);
-        if (position_ + length > data_.size()) {
+    auto decode_bstring(value_type additionalInfo) {
+        auto length = decode_unsigned(additionalInfo); // TODO: fix me
+        if (reader_.empty(data_, length - 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        auto result = std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[position_]), length);
-        position_ += length;
-        return result;
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            auto result = std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+            reader_.position_ += length;
+            return result;
+        } else {
+            return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
+        }
     }
 
-    std::string_view decode_text(value_type additionalInfo) {
+    auto decode_text(value_type additionalInfo) {
         auto bytes = decode_bstring(additionalInfo);
-        return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
+        if constexpr (IsContiguous<InputBuffer>) {
+            return std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        } else {
+            return char_range_view{bytes.range};
+        }
     }
 
-    binary_array_view decode_array(value_type additionalInfo) {
+    auto decode_array(value_type additionalInfo) {
         auto length   = decode_unsigned(additionalInfo);
-        auto startPos = position_;
+        auto startPos = reader_.position_;
         for (size_t i = 0; i < length; ++i) {
             decode_value();
         }
-        return binary_array_view{std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            return binary_array_view{
+                std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), reader_.position_ - startPos)};
+        } else {
+            return binary_array_range_view{std::ranges::subrange(startPos, reader_.position_)};
+        }
     }
 
-    binary_map_view decode_map(value_type additionalInfo) {
+    auto decode_map(value_type additionalInfo) {
         size_t length   = decode_unsigned(additionalInfo);
-        size_t startPos = position_;
+        auto   startPos = reader_.position_;
         for (size_t i = 0; i < length; ++i) {
             decode_value(); // key
             decode_value(); // value
         }
-        return binary_map_view{std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            return binary_map_view{
+                std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), reader_.position_ - startPos)};
+        } else {
+            return binary_map_range_view{std::ranges::subrange(startPos, reader_.position_)};
+        }
     }
 
-    binary_tag_view decode_tag(value_type additionalInfo) {
-        uint64_t tagValue = decode_unsigned(additionalInfo);
-        size_t   startPos = position_;
-        decode_value(); // tagged value
-        return binary_tag_view{tagValue,
-                               std::span<const std::byte>(reinterpret_cast<const std::byte *>(&data_[startPos]), position_ - startPos)};
+    auto decode_tag(value_type additionalInfo) {
+        auto tag  = decode_unsigned(additionalInfo);
+        auto data = decode_value();
+        if constexpr (IsContiguous<InputBuffer>) {
+            return binary_tag_view{tag, std::get<std::span<const std::byte>>(data)};
+        } else {
+            return binary_tag_range_view{tag, std::get<binary_range_view<std::ranges::subrange<iterator_t>>>(data).range};
+        }
     }
 
-    value decodeSimpleOrFloat(value_type additionalInfo) {
+    cbor_variant decodeSimpleOrFloat(value_type additionalInfo) {
         switch (static_cast<uint8_t>(additionalInfo)) {
         case 20: return false;
         case 21: return true;
@@ -163,51 +199,47 @@ class decoder {
     }
 
     uint8_t read_uint8() {
-        if (position_ + 1 > data_.size()) {
+        if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        return static_cast<uint8_t>(data_[position_++]);
+        return static_cast<uint8_t>(reader_.read(data_));
     }
 
     uint16_t read_uint16() {
-        if (position_ + 2 > data_.size()) {
+        if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        uint16_t result = (static_cast<uint16_t>(data_[position_]) << 8) | static_cast<uint16_t>(data_[position_ + 1]);
-        position_ += 2;
+        uint16_t result = (static_cast<uint16_t>(reader_.read(data_)) << 8) | static_cast<uint16_t>(reader_.read(data_));
         return result;
     }
 
     uint32_t read_uint32() {
-        if (position_ + 4 > data_.size()) {
+        if (reader_.empty(data_, 3)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        uint32_t result = (static_cast<uint32_t>(data_[position_]) << 24) | (static_cast<uint32_t>(data_[position_ + 1]) << 16) |
-                          (static_cast<uint32_t>(data_[position_ + 2]) << 8) | static_cast<uint32_t>(data_[position_ + 3]);
-        position_ += 4;
+        uint32_t result = (static_cast<uint32_t>(reader_.read(data_)) << 24) | (static_cast<uint32_t>(reader_.read(data_)) << 16) |
+                          (static_cast<uint32_t>(reader_.read(data_)) << 8) | static_cast<uint32_t>(reader_.read(data_));
         return result;
     }
 
     uint64_t read_uint64() {
-        if (position_ + 8 > data_.size()) {
+        if (reader_.empty(data_, 7)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        uint64_t result = (static_cast<uint64_t>(data_[position_]) << 56) | (static_cast<uint64_t>(data_[position_ + 1]) << 48) |
-                          (static_cast<uint64_t>(data_[position_ + 2]) << 40) | (static_cast<uint64_t>(data_[position_ + 3]) << 32) |
-                          (static_cast<uint64_t>(data_[position_ + 4]) << 24) | (static_cast<uint64_t>(data_[position_ + 5]) << 16) |
-                          (static_cast<uint64_t>(data_[position_ + 6]) << 8) | static_cast<uint64_t>(data_[position_ + 7]);
-        position_ += 8;
+        uint64_t result = (static_cast<uint64_t>(reader_.read(data_)) << 56) | (static_cast<uint64_t>(reader_.read(data_)) << 48) |
+                          (static_cast<uint64_t>(reader_.read(data_)) << 40) | (static_cast<uint64_t>(reader_.read(data_)) << 32) |
+                          (static_cast<uint64_t>(reader_.read(data_)) << 24) | (static_cast<uint64_t>(reader_.read(data_)) << 16) |
+                          (static_cast<uint64_t>(reader_.read(data_)) << 8) | static_cast<uint64_t>(reader_.read(data_));
         return result;
     }
 
     // CBOR Float16 decoding function
     float16_t read_float16() {
-        if (position_ + 2 > data_.size()) {
+        if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        std::uint16_t value = (static_cast<std::uint16_t>(data_[position_]) << 8) | static_cast<std::uint16_t>(data_[position_ + 1]);
-        position_ += 2;
+        std::uint16_t value = (static_cast<std::uint16_t>(reader_.read(data_)) << 8) | static_cast<std::uint16_t>(reader_.read(data_));
         return float16_t{value};
     }
 
@@ -222,8 +254,8 @@ class decoder {
     }
 
   protected:
-    const InputBuffer &data_;
-    size_type          position_ = 0;
+    const InputBuffer          &data_;
+    detail::reader<InputBuffer> reader_;
 };
 
 template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer>(buffer); }

@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iterator> //# TODO: use iterator concepts
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -37,6 +36,10 @@ template <std::ranges::input_range R> struct binary_range_view {
     R range;
 };
 
+template <std::ranges::input_range R> struct char_range_view {
+    R range;
+};
+
 template <std::ranges::input_range R> struct binary_array_range_view {
     R range;
 };
@@ -54,13 +57,15 @@ using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byt
                            binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename R>
-using value_ranged = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_range_view<R>,
+using value_ranged = std::variant<std::uint64_t, std::int64_t, binary_range_view<R>, char_range_view<R>, binary_array_range_view<R>,
                                   binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
 
+template <typename T> using range = std::ranges::subrange<typename T::const_iterator>;
+
+template <typename T> using value_variant = std::conditional_t<IsContiguous<T>, value, value_ranged<range<T>>>;
+
 template <typename T>
-concept tagged_type = requires(T) {
-    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
-};
+concept tagged_type = std::is_same_v<T, std::uint64_t>;
 
 template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
 template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
@@ -101,10 +106,12 @@ constexpr auto operator<=>(const value &lhs, const value &rhs) {
                 } else if constexpr (std::is_same_v<L, bool>) {
                     return l <=> r;
                 } else if constexpr (std::is_same_v<L, float> || std::is_same_v<L, double>) {
-                    if (l < r)
+                    if (l < r) {
                         return std::strong_ordering::less;
-                    if (l > r)
+                    }
+                    if (l > r) {
                         return std::strong_ordering::greater;
+                    }
                     return std::strong_ordering::equal;
                 } else if constexpr (std::is_arithmetic_v<L>) {
                     return l <=> r;

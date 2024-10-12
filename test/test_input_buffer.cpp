@@ -16,7 +16,6 @@
 using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>) {
-    auto [data, in] = make_data_and_decoder<T>();
 
     using value_type = typename T::value_type;
 
@@ -25,7 +24,9 @@ TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>) 
     encoded.push_back(value_type{0x02});
     encoded.push_back(value_type{0x03});
 
-    data.insert(data.end(), encoded.begin(), encoded.end());
+    T    data(encoded.begin(), encoded.end());
+    auto in = make_decoder<T>(data);
+
     for (const auto &value : encoded) {
         auto result = in.decode_value();
         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
