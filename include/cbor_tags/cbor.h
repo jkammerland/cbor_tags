@@ -1,43 +1,74 @@
 #pragma once
 
 // Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
-#include "float16_ieee754.h"
+#include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/float16_ieee754.h"
 
 #include <cmath>
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <ranges>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
 namespace cbor::tags {
 
-struct array_view {
+struct binary_array_view {
     std::span<const std::byte> data;
 };
 
-struct map_view {
+struct binary_map_view {
     std::span<const std::byte> data;
 };
 
-struct tag_view {
+struct binary_tag_view {
     std::uint64_t              tag;
     std::span<const std::byte> data;
 };
 
-template <typename T>
-concept tagged_type = requires(T) {
-    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
+template <std::ranges::input_range R> struct binary_range_view {
+    R range;
 };
+
+template <std::ranges::input_range R> struct char_range_view {
+    R range;
+};
+
+template <std::ranges::input_range R> struct binary_array_range_view {
+    R range;
+};
+
+template <std::ranges::input_range R> struct binary_map_range_view {
+    R range;
+};
+
+template <std::ranges::input_range R> struct binary_tag_range_view {
+    std::uint64_t tag;
+    R             range;
+};
+
+using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view, binary_map_view,
+                           binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
+
+template <typename R>
+using value_ranged = std::variant<std::uint64_t, std::int64_t, binary_range_view<R>, char_range_view<R>, binary_array_range_view<R>,
+                                  binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
+
+template <typename T> using range = std::ranges::subrange<typename T::const_iterator>;
+
+template <typename T> using value_variant = std::conditional_t<IsContiguous<T>, value, value_ranged<range<T>>>;
+
+template <typename T>
+concept tagged_type = std::is_same_v<T, std::uint64_t>;
 
 template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
 template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
-
-using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, array_view, map_view, tag_view,
-                           float16_t, float, double, bool, std::nullptr_t>;
 
 // Comparison operators
 template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) {
@@ -69,15 +100,18 @@ constexpr auto operator<=>(const value &lhs, const value &rhs) {
                     return lexicographic_compare(l, r);
                 } else if constexpr (std::is_same_v<L, std::string_view>) {
                     return lexicographic_compare(l, r);
-                } else if constexpr (std::is_same_v<L, array_view> || std::is_same_v<L, map_view> || std::is_same_v<L, tag_view>) {
+                } else if constexpr (std::is_same_v<L, binary_array_view> || std::is_same_v<L, binary_map_view> ||
+                                     std::is_same_v<L, binary_tag_view>) {
                     return l <=> r;
                 } else if constexpr (std::is_same_v<L, bool>) {
                     return l <=> r;
                 } else if constexpr (std::is_same_v<L, float> || std::is_same_v<L, double>) {
-                    if (l < r)
+                    if (l < r) {
                         return std::strong_ordering::less;
-                    if (l > r)
+                    }
+                    if (l > r) {
                         return std::strong_ordering::greater;
+                    }
                     return std::strong_ordering::equal;
                 } else if constexpr (std::is_arithmetic_v<L>) {
                     return l <=> r;
@@ -126,9 +160,9 @@ template <> struct hash<cbor::tags::value> {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data()), x.size()));
                 } else if constexpr (std::is_same_v<T, std::string_view>) {
                     return std::hash<std::string_view>{}(x);
-                } else if constexpr (std::is_same_v<T, cbor::tags::array_view> || std::is_same_v<T, cbor::tags::map_view>) {
+                } else if constexpr (std::is_same_v<T, cbor::tags::binary_array_view> || std::is_same_v<T, cbor::tags::binary_map_view>) {
                     return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
-                } else if constexpr (std::is_same_v<T, cbor::tags::tag_view>) {
+                } else if constexpr (std::is_same_v<T, cbor::tags::binary_tag_view>) {
                     return std::hash<std::uint64_t>{}(x.tag) ^
                            std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
                 } else if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::nullptr_t>) {

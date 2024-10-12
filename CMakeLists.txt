@@ -11,6 +11,9 @@ include(cmake/create_tidy_target.cmake)
 add_library(cbor_tags INTERFACE)
 target_include_directories(cbor_tags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# add tools
+add_subdirectory(tools)
+
 # add tests
 enable_testing()
 add_subdirectory(test)
