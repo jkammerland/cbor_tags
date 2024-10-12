@@ -22,7 +22,7 @@ add_executable(tests)
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 target_sources(tests PRIVATE ${TEST_SOURCES})
 
-# add include directories (zpp_bits)
+# add test include directories
 target_include_directories(tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # add link libraries
