@@ -68,26 +68,12 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor string", T, std::vector<char>, std::de
     }
 }
 
-TEST_CASE_TEMPLATE("Roundtrip binary cbor array", T, std::vector<char>, std::deque<std::byte>, std::list<uint8_t>) {
-    // auto [data_out, out] = make_data_and_encoder<T>();
+TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, std::deque<std::byte>, std::list<uint8_t>) {
+    auto [data_out, out] = make_data_and_encoder<T>();
 
-    // std::vector<value> values(1e5);
+    std::vector<value> values(1e1);
+    std::iota(values.begin(), values.end(), 0);
 
-    // // Emulate data transfer
-    // auto data_in = data_out;
-    // auto in      = make_decoder(data_in);
-
-    // auto result = in.decode_value();
-    // if constexpr (IsContiguous<T>) {
-    //     CHECK_EQ(std::holds_alternative<binary_array_view>(result), true);
-    //     auto range = std::get<binary_array_view>(result).data;
-    //     CHECK_EQ(range.size(), values.size() * sizeof(uint64_t));
-    //     CHECK_EQ(std::equal(values.begin(), values.end(), reinterpret_cast<const uint64_t *>(range.data())), true);
-    // } else {
-    //     using iterator_t   = typename iterator_type<T>::type;
-    //     using binary_range = binary_array_range_view<std::ranges::subrange<iterator_t>>;
-    //     REQUIRE_EQ(std::holds_alternative<binary_range>(result), true);
-    //     auto range = std::get<binary_range>(result).range;
-    //     CHECK_EQ(std::equal(values.begin(), values.end(), reinterpret_cast<const uint64_t *>(range.data())), true);
-    // }
+    [[maybe_unused]] auto tag = make_tag(1, values);
+    // out.encode_value(tag);
 }

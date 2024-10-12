@@ -1,5 +1,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_reflection.h"
 
 #include <array>
 #include <cstddef>
@@ -70,4 +72,55 @@ TEST_CASE_TEMPLATE("Cbor stream", T, std::vector<uint8_t>, const std::vector<uin
         CHECK(std::is_reference_v<decltype(stream.buffer)>);
         CHECK(!std::is_const_v<std::remove_reference_t<decltype(stream.buffer)>>);
     }
+}
+
+TEST_CASE("Count struct members") {
+    struct A {
+        int    a;
+        double b;
+        char   c;
+    };
+
+    auto t = std::tuple<int, double, char, A>{};
+
+    CHECK_EQ(detail::aggregate_binding_count<A>, 3);
+    CHECK_EQ(detail::aggregate_binding_count<decltype(t)>, 4);
+
+    struct B {};
+    CHECK_EQ(detail::aggregate_binding_count<B>, 0);
+
+    struct Eleven {
+        int a;
+        int b;
+        int c;
+        int d;
+        int e;
+        int f;
+        struct C {
+            int g;
+            int h;
+        };
+        C   c1;
+        int h;
+        int i;
+        int j;
+        int k;
+    };
+    CHECK_EQ(detail::aggregate_binding_count<Eleven>, 11);
+}
+
+TEST_CASE("Reflection into tuple") {
+    struct A {
+        int    a;
+        double b;
+        char   c;
+    };
+
+    A a{1, 3.14, 'a'};
+
+    auto &&t = to_tuple(a);
+
+    CHECK_EQ(std::get<0>(t), 1);
+    CHECK_EQ(std::get<1>(t), 3.14);
+    CHECK_EQ(std::get<2>(t), 'a');
 }

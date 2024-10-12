@@ -93,4 +93,14 @@ template <typename T> struct reader<T, false> {
     }
 };
 
+template <IsAggregateOrTuple T, typename... TArgs> constexpr std::size_t num_bindings_impl() {
+    if constexpr (requires { T{std::declval<TArgs>()...}; }) {
+        return num_bindings_impl<T, any, TArgs...>();
+    } else {
+        return sizeof...(TArgs) - 1;
+    }
+}
+
+template <IsAggregateOrTuple T> constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
+
 } // namespace cbor::tags::detail

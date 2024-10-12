@@ -5,3 +5,4 @@ bin/*
 build/*
 .cache/*
 cmake-build-*/
+include/cbor_tags/cbor_reflection_impl.h
