@@ -18,10 +18,14 @@ void generate_header(fmt::memory_buffer &out, int N) {
 
 namespace cbor::tags {{
 
+namespace detail {{
+constexpr size_t MAX_REFLECTION_MEMBERS = {0};
+}} // namespace detail
+
 template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     using type = std::decay_t<T>;
     static_assert(!IsNonAggregate<type>, "Type must be an aggregate");
-    static_assert(detail::aggregate_binding_count<type> <= {0}, "Type must have {0} or less members");
+    static_assert(detail::aggregate_binding_count<type> <= detail::MAX_REFLECTION_MEMBERS, "Type must have at most {0} members. Rerun the generator with a higher value if you need more.");
 
     if constexpr (IsTuple<type>) {{
         return object;

@@ -10,7 +10,7 @@ add_executable(reflection_module_generator reflection_module_generator.cpp)
 target_link_libraries(reflection_module_generator PRIVATE fmt::fmt)
 
 set(REFLECTION_MAX_MEMBERS
-    5
+    100
     CACHE STRING "Maximum number of members for reflection")
 
 message(STATUS "REFLECTION_MAX_MEMBERS: ${REFLECTION_MAX_MEMBERS}")

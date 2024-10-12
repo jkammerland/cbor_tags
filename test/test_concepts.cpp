@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/cbor_reflection_impl.h"
 
 #include <array>
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <nameof.hpp>
 #include <type_traits>
@@ -123,4 +125,41 @@ TEST_CASE("Reflection into tuple") {
     CHECK_EQ(std::get<0>(t), 1);
     CHECK_EQ(std::get<1>(t), 3.14);
     CHECK_EQ(std::get<2>(t), 'a');
+
+    CHECK_LT(detail::MAX_REFLECTION_MEMBERS, std::numeric_limits<size_t>::max());
+
+    struct Eleven {
+        int           a;
+        int           b;
+        char          c;
+        std::uint16_t d;
+        int           e;
+        int           f;
+        struct C {
+            int g;
+            int h;
+        };
+        C            c1;
+        int          h;
+        std::uint8_t i;
+        int          j;
+        std::string  k;
+    };
+
+    Eleven e{1, 2, 3, 4, 5, 6, {7, 8}, 9, 10, 11, "12"};
+
+    auto &&t2 = to_tuple(e);
+    CHECK_EQ(std::get<0>(t2), 1);
+    CHECK_EQ(std::get<1>(t2), 2);
+    CHECK_EQ(std::get<2>(t2), 3);
+    CHECK_EQ(std::get<3>(t2), 4);
+    CHECK_EQ(std::get<4>(t2), 5);
+    CHECK_EQ(std::get<5>(t2), 6);
+    auto &&[c, d] = std::get<6>(t2);
+    CHECK_EQ(c, 7);
+    CHECK_EQ(d, 8);
+    CHECK_EQ(std::get<7>(t2), 9);
+    CHECK_EQ(std::get<8>(t2), 10);
+    CHECK_EQ(std::get<9>(t2), 11);
+    CHECK_EQ(std::get<10>(t2), "12");
 }
