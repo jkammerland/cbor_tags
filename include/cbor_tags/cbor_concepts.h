@@ -45,6 +45,9 @@ concept TaggedCborType = HasCborTag<T> || IsTaggedPair<T>;
 template <typename T, typename... Args>
 concept IsBracesContructible = requires { T{std::declval<Args>()...}; };
 
+// template <typename T, typename... Args>
+// concept IsBracesContructible = requires(Args... args) { T{args...}; };
+
 template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<T>::type;
@@ -58,7 +61,17 @@ template <typename T>
 concept IsNonAggregate = !IsAggregateOrTuple<T>;
 
 struct any {
-    template <class T> constexpr operator T(); // non explicit
-};
+    template <class T> constexpr operator T() const {
+        if constexpr (is_optional_v<T>) {
+            return T{typename T::value_type{}};
+        } else {
+            return T{};
+        }
+    }
 
+  private:
+    template <class T> static constexpr bool is_optional_v = false;
+
+    template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
+};
 } // namespace cbor::tags
