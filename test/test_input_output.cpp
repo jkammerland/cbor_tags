@@ -74,6 +74,6 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
     std::vector<value> values(1e1);
     std::iota(values.begin(), values.end(), 0);
 
-    [[maybe_unused]] auto tag = make_tag(1, values);
+    [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);
     // out.encode_value(tag);
 }

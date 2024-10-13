@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_reflection.h"
 
 #include <array>
 #include <bit>
@@ -21,10 +22,12 @@
 
 namespace cbor::tags {
 
-template <typename OutputBuffer = std::vector<std::byte>>
+template <typename OutputBuffer = std::vector<std::byte>, typename... Encoders>
     requires ValidCborBuffer<OutputBuffer>
-class encoder {
+class encoder : public Encoders... {
   public:
+    using Encoders::encode...;
+
     using value_type = typename OutputBuffer::value_type;
     using size_type  = typename OutputBuffer::size_type;
 
@@ -33,6 +36,11 @@ class encoder {
         encoder<OutputBuffer> encoder(data);
         encoder.encode_value(value);
         return data;
+    }
+
+    template <typename T> constexpr void operator()(const T &value) {
+        const auto &&tuple = to_tuple(value);
+        std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
     }
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}

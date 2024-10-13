@@ -107,11 +107,19 @@ TEST_CASE("Advanced reflection") {
 }
 
 TEST_CASE("Basic tag") {
-    auto tag_A = make_tag(140, A{-42, "Hello world!"});
-
+    using namespace literals;
+    auto   tag_A = make_tag_pair(140_tag, A{-42, "Hello world!"});
     auto &&tuple = to_tuple(tag_A);
-
     std::apply([](auto &&...args) { (print_type_and_value(args), ...); }, tuple);
+
+    auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
+    struct B {
+        std::int64_t a;
+        std::string  s;
+    };
+    out(B{-42, "Hello world!"});
+
+    fmt::print("data: {}\n", to_hex(data));
 
     // auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
 

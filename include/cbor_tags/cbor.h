@@ -64,11 +64,11 @@ template <typename T> using range = std::ranges::subrange<typename T::const_iter
 
 template <typename T> using value_variant_t = std::conditional_t<IsContiguous<T>, value, value_ranged<range<T>>>;
 
-template <typename T>
-concept tagged_type = std::is_same_v<T, std::uint64_t>;
+template <typename Tag, typename T> using tag_pair = std::pair<Tag, T>;
+template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&value) { return tag_pair<Tag, T>{t, std::forward<T>(value)}; }
 
-template <typename T> using tag_pair = std::pair<std::uint64_t, T>;
-template <typename T> auto make_tag(std::uint64_t tag, T &&value) { return tag_pair<T>{tag, std::forward<T>(value)}; }
+// static_assert(IsTaggedPair<tag_pair<int>>);
+// static_assert(TaggedCborType<decltype(make_tag({1}, int{}))>);
 
 // Comparison operators
 template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) {
