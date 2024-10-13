@@ -138,7 +138,7 @@ class encoder {
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<value_type>(0xF6)); }
 
     // Handle std::vector and std::array
-    template <typename T> constexpr void arrayEncoder(const T &value) {
+    template <typename T> constexpr void array_encoder(const T &value) {
         if (value.empty()) {
             appender_(data_, static_cast<value_type>(0x80));
         } else {
@@ -148,8 +148,8 @@ class encoder {
             }
         }
     }
-    constexpr void                          encode_value(const std::vector<value> &value) { arrayEncoder(value); }
-    template <std::size_t N> constexpr void encode_value(const std::array<value, N> &value) { arrayEncoder(value); }
+    constexpr void                          encode_value(const std::vector<value> &value) { array_encoder(value); }
+    template <std::size_t N> constexpr void encode_value(const std::array<value, N> &value) { array_encoder(value); }
 
     // Handle std::map and std::unordered_map
     template <typename T> constexpr void map_encoder(const T &value) {

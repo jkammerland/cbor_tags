@@ -62,7 +62,7 @@ using value_ranged = std::variant<std::uint64_t, std::int64_t, binary_range_view
 
 template <typename T> using range = std::ranges::subrange<typename T::const_iterator>;
 
-template <typename T> using value_variant = std::conditional_t<IsContiguous<T>, value, value_ranged<range<T>>>;
+template <typename T> using value_variant_t = std::conditional_t<IsContiguous<T>, value, value_ranged<range<T>>>;
 
 template <typename T>
 concept tagged_type = std::is_same_v<T, std::uint64_t>;
