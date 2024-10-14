@@ -62,7 +62,8 @@ struct any {
 
 template <std::uint64_t N> struct tag {
     static constexpr std::uint64_t cbor_tag = N;
-    operator std::uint64_t() { return tag::cbor_tag; }
+
+    constexpr operator std::uint64_t() const { return cbor_tag; }
 };
 
 template <typename T>
@@ -72,9 +73,9 @@ concept HasCborTag = requires {
 
 template <typename T>
 concept IsTaggedPair = requires(T t) {
-    requires std::is_constructible_v<T, tag<5>, typename T::second_type>;
-    { std::get<0>(t) } -> std::convertible_to<std::uint64_t>;
+    typename T::first_type;
     typename T::second_type;
+    requires HasCborTag<typename T::first_type>;
 };
 
 template <typename T>

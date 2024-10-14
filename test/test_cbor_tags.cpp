@@ -106,38 +106,32 @@ TEST_CASE("Advanced reflection") {
     CHECK_EQ(detail::aggregate_binding_count<Z>, 12);
 }
 
+struct B {
+    std::int64_t a;
+    std::string  s;
+};
+struct C {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::int64_t                   a;
+    std::string                    s;
+};
+
 TEST_CASE("Basic tag") {
     using namespace literals;
-    auto   tag_A = make_tag_pair(140_tag, A{-42, "Hello world!"});
-    auto &&tuple = to_tuple(tag_A);
-    std::apply([](auto &&...args) { (print_type_and_value(args), ...); }, tuple);
+    std::string s1, s2;
+    {
 
-    auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
-    struct B {
-        std::int64_t a;
-        std::string  s;
-    };
-    out(B{-42, "Hello world!"});
+        auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
 
-    fmt::print("data: {}\n", to_hex(data));
+        auto tag_B = make_tag_pair(140_tag, B{-42, "Hello world!"});
+        out(tag_B);
+        s1 = to_hex(data);
+    }
+    {
+        auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
+        out(C{-42, "Hello world!"});
+        s2 = to_hex(data);
+    }
 
-    // auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
-
-    // out.encode(binary_tag_view{160, std::span<const std::byte>(reinterpret_cast<const std::byte *>(some_data.data()),
-    // some_data.size())});
-
-    // auto dataIn = data;
-    // auto in     = make_decoder(dataIn);
-
-    // binary_tag_view t;
-    // auto            result = in.decode_value();
-    // CHECK(std::holds_alternative<binary_tag_view>(result));
-    // t = std::get<binary_tag_view>(result);
-
-    // CHECK_EQ(t.tag, 160);
-    // fmt::print("data encoded: {}\n", to_hex(data));
-    // fmt::print("data decoded: {}\n", to_hex(t.data));
-    // REQUIRE_EQ(t.data.size(), some_data.size());
-
-    // CHECK(std::equal(some_data.begin(), some_data.end(), reinterpret_cast<const char *>(t.data.data())));
+    CHECK_EQ(s1, s2);
 }

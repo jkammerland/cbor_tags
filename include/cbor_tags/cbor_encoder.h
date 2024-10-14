@@ -4,12 +4,16 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "fmt/format.h"
+#include "nameof.hpp"
 
 #include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <fmt/base.h>
 #include <map>
 #include <span>
 #include <string>
@@ -38,9 +42,26 @@ class encoder : public Encoders... {
         return data;
     }
 
-    template <typename T> constexpr void operator()(const T &value) {
-        const auto &&tuple = to_tuple(value);
-        std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
+    template <typename T> constexpr void operator()(const T &value) { encode(value); }
+
+    template <typename T> constexpr void encode(const T &value) {
+        fmt::print("T: {}\n", nameof::nameof_type<T>());
+        fmt::print("IsTaggedPair: {}\n", IsTaggedPair<T>);
+        if constexpr (IsTaggedPair<T>) {
+            fmt::print("Tagged pair second {}\n", nameof::nameof_type<decltype(T::second)>());
+            static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type shall not have a tag of its own");
+            fmt::print("Tagged pair first {}\n", nameof::nameof_type<decltype(T::first)>());
+            fmt::print("Tagged pair first tag {}\n", nameof::nameof_type<decltype(static_cast<std::uint64_t>(value.first))>());
+            encode(decltype(T::first)::cbor_tag);
+            encode(value.second);
+        } else {
+            if constexpr (HasCborTag<T>) {
+                fmt::print("Tagged: {}\n", T::cbor_tag);
+                encode(static_cast<std::uint64_t>(T::cbor_tag));
+            }
+            const auto &&tuple = to_tuple(value);
+            std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
+        }
     }
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
