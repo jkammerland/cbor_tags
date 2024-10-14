@@ -34,7 +34,7 @@ class encoder : public Encoders... {
 
     using byte_type = typename OutputBuffer::value_type;
     using size_type = typename OutputBuffer::size_type;
-    using variant   = value_variant_t<OutputBuffer>;
+    using variant   = variant_t<OutputBuffer>;
 
     template <typename T> static auto serialize(const T &value) {
         OutputBuffer          data;

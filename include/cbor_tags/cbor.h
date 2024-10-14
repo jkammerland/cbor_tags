@@ -62,7 +62,7 @@ using variant_ranges = std::variant<std::uint64_t, std::int64_t, binary_range_vi
 
 template <typename T> using range = std::ranges::subrange<typename T::const_iterator>;
 
-template <typename T> using value_variant_t = std::conditional_t<IsContiguous<T>, variant_contiguous, variant_ranges<range<T>>>;
+template <typename T> using variant_t = std::conditional_t<IsContiguous<T>, variant_contiguous, variant_ranges<range<T>>>;
 
 template <typename Tag, typename T> using tag_pair = std::pair<Tag, T>;
 template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&value) { return tag_pair<Tag, T>{t, std::forward<T>(value)}; }
@@ -71,7 +71,7 @@ template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&valu
 // static_assert(TaggedCborType<decltype(make_tag({1}, int{}))>);
 
 // Comparison operators
-template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) {
+template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) noexcept {
     if constexpr (std::is_same_v<T, std::string_view> && std::is_same_v<U, std::string_view>) {
         return lhs.compare(rhs) <=> 0;
     } else if constexpr (std::is_same_v<T, std::span<const std::byte>> && std::is_same_v<U, std::span<const std::byte>>) {
@@ -83,7 +83,7 @@ template <typename T, typename U> constexpr std::strong_ordering lexicographic_c
     }
 }
 
-constexpr auto operator<=>(const variant_contiguous &lhs, const variant_contiguous &rhs) {
+constexpr auto operator<=>(const variant_contiguous &lhs, const variant_contiguous &rhs) noexcept {
     if (lhs.index() != rhs.index()) {
         return lhs.index() <=> rhs.index();
     }
@@ -129,7 +129,7 @@ constexpr auto operator<=>(const variant_contiguous &lhs, const variant_contiguo
         lhs, rhs);
 }
 // Equality operator
-constexpr bool operator==(const variant_contiguous &lhs, const variant_contiguous &rhs) { return (lhs <=> rhs) == 0; }
+constexpr bool operator==(const variant_contiguous &lhs, const variant_contiguous &rhs) noexcept { return (lhs <=> rhs) == 0; }
 
 enum class major_type : std::uint8_t {
     UnsignedInteger = 0,
@@ -149,7 +149,7 @@ template <typename T> struct always_false : std::false_type {};
 namespace std {
 
 template <> struct hash<cbor::tags::variant_contiguous> {
-    size_t operator()(const cbor::tags::variant_contiguous &v) const {
+    size_t operator()(const cbor::tags::variant_contiguous &v) const noexcept {
         return std::visit(
             [](const auto &x) -> size_t {
                 using T = std::decay_t<decltype(x)>;
