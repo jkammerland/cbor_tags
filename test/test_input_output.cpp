@@ -71,7 +71,7 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor string", T, std::vector<char>, std::de
 TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, std::deque<std::byte>, std::list<uint8_t>) {
     auto [data_out, out] = make_data_and_encoder<T>();
 
-    std::vector<value> values(1e1);
+    std::vector<variant_contiguous> values(1e1);
     std::iota(values.begin(), values.end(), 0);
 
     [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);

@@ -53,16 +53,16 @@ template <std::ranges::input_range R> struct binary_tag_range_view {
     R             range;
 };
 
-using value = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view, binary_map_view,
-                           binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
+using variant_contiguous = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view,
+                                        binary_map_view, binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename R>
-using value_ranged = std::variant<std::uint64_t, std::int64_t, binary_range_view<R>, char_range_view<R>, binary_array_range_view<R>,
-                                  binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
+using variant_ranges = std::variant<std::uint64_t, std::int64_t, binary_range_view<R>, char_range_view<R>, binary_array_range_view<R>,
+                                    binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename T> using range = std::ranges::subrange<typename T::const_iterator>;
 
-template <typename T> using value_variant_t = std::conditional_t<IsContiguous<T>, value, value_ranged<range<T>>>;
+template <typename T> using value_variant_t = std::conditional_t<IsContiguous<T>, variant_contiguous, variant_ranges<range<T>>>;
 
 template <typename Tag, typename T> using tag_pair = std::pair<Tag, T>;
 template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&value) { return tag_pair<Tag, T>{t, std::forward<T>(value)}; }
@@ -83,7 +83,7 @@ template <typename T, typename U> constexpr std::strong_ordering lexicographic_c
     }
 }
 
-constexpr auto operator<=>(const value &lhs, const value &rhs) {
+constexpr auto operator<=>(const variant_contiguous &lhs, const variant_contiguous &rhs) {
     if (lhs.index() != rhs.index()) {
         return lhs.index() <=> rhs.index();
     }
@@ -129,7 +129,7 @@ constexpr auto operator<=>(const value &lhs, const value &rhs) {
         lhs, rhs);
 }
 // Equality operator
-constexpr bool operator==(const value &lhs, const value &rhs) { return (lhs <=> rhs) == 0; }
+constexpr bool operator==(const variant_contiguous &lhs, const variant_contiguous &rhs) { return (lhs <=> rhs) == 0; }
 
 enum class major_type : std::uint8_t {
     UnsignedInteger = 0,
@@ -148,8 +148,8 @@ template <typename T> struct always_false : std::false_type {};
 
 namespace std {
 
-template <> struct hash<cbor::tags::value> {
-    size_t operator()(const cbor::tags::value &v) const {
+template <> struct hash<cbor::tags::variant_contiguous> {
+    size_t operator()(const cbor::tags::variant_contiguous &v) const {
         return std::visit(
             [](const auto &x) -> size_t {
                 using T = std::decay_t<decltype(x)>;
