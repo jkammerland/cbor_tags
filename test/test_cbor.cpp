@@ -457,7 +457,7 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Binary strings") {
-        auto encoded = encoder<>::serialize(std::span<std::byte>(bytes));
+        auto encoded = encoder<>::serialize(std::span<const std::byte>(bytes));
         auto decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::span<const std::byte>>(decoded));

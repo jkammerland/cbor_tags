@@ -18,6 +18,20 @@ concept ValidCborBuffer = requires(T) {
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
 
+template <typename T>
+concept IsRange = std::ranges::range<T> && std::is_class_v<T>;
+
+template <typename T>
+concept IsMap = IsRange<T> && requires(T t) {
+    typename T::key_type;
+    typename T::mapped_type;
+    typename T::value_type;
+    requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
+    { t.find(std::declval<typename T::key_type>()) } -> std::same_as<typename T::iterator>;
+    { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
+    { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
+};
+
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
 struct CborStream {

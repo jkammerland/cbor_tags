@@ -29,7 +29,7 @@ TEST_CASE_TEMPLATE("Roundtrip", T, std::vector<std::byte>, std::deque<std::byte>
     std::vector<uint64_t> values(1e5);
     std::iota(values.begin(), values.end(), 0);
     for (const auto &value : values) {
-        out.encode_value(value);
+        out.encode(value);
     }
 
     // Emulate data transfer
@@ -49,7 +49,7 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor string", T, std::vector<char>, std::de
     using namespace std::string_view_literals;
     auto sv =
         "Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!"sv;
-    out.encode_value(sv);
+    out.encode(sv);
 
     // Emulate data transfer
     auto data_in = data_out;
@@ -75,5 +75,5 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
     std::iota(values.begin(), values.end(), 0);
 
     [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);
-    // out.encode_value(tag);
+    // out.encode(tag);
 }

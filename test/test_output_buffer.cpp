@@ -17,10 +17,9 @@ using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::byte>, std::array<std::byte, 1024>) {
     auto [data, out] = make_data_and_encoder<T>();
-
-    out.encode_value(1ull);
-    out.encode_value(2ull);
-    out.encode_value(3ull);
+    out.encode(static_cast<std::uint64_t>(1));
+    out.encode(static_cast<std::uint64_t>(2));
+    out.encode(static_cast<std::uint64_t>(3));
 
     if constexpr (!detail::IsArrayConcept<T>) {
         CHECK_EQ(to_hex(data), "010203");
@@ -34,7 +33,7 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;
-    out.encode_value(sv);
+    out.encode(sv);
 
     if constexpr (!detail::IsArrayConcept<T>) {
         // +1 for the tag
@@ -52,15 +51,15 @@ TEST_CASE("CBOR Encoder on deque") {
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;
-    out.encode_value(1ull);
-    out.encode_value(sv);
+    out.encode(static_cast<std::uint64_t>(1));
+    out.encode(sv);
 
     CHECK_EQ(to_hex(buffer), "016c48656c6c6f20776f726c6421");
 
     { // Big string
         auto        size1 = buffer.size();
         std::string big_string(10, 'a');
-        out.encode_value(big_string);
+        out.encode(big_string);
         auto size2 = buffer.size();
 
         CHECK_EQ(size2 - size1, 1 + big_string.size());
@@ -77,10 +76,9 @@ TEST_CASE_TEMPLATE("CBOR with std::pmr", T, std::pmr::vector<std::byte>, std::pm
     T                                   resource_vector(&resource);
 
     auto out = make_encoder<T>(resource_vector);
-
-    out.encode_value(1ull);
-    out.encode_value(2ull);
-    out.encode_value(3ull);
+    out.encode(static_cast<std::uint64_t>(1));
+    out.encode(static_cast<std::uint64_t>(2));
+    out.encode(static_cast<std::uint64_t>(3));
 
     CHECK_EQ(to_hex(resource_vector), "010203");
 }

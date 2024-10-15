@@ -39,15 +39,17 @@ class encoder : public Encoders... {
     template <typename T> static auto serialize(const T &value) {
         OutputBuffer          data;
         encoder<OutputBuffer> encoder(data);
-        encoder.encode_value(value);
+        encoder.encode(value);
         return data;
     }
 
     template <typename T> constexpr void operator()(const T &value) { encode(value); }
 
-    template <typename T> constexpr void encode(const T &value) {
+    template <typename T>
+        requires std::is_compound_v<T> && (!IsRange<T>)
+    constexpr void encode(const T &value) {
         if constexpr (IsTaggedPair<T>) {
-            static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type shall not have a tag of its own");
+            static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
             encode(decltype(T::first)::cbor_tag);
             encode(value.second);
         } else {
@@ -61,7 +63,7 @@ class encoder : public Encoders... {
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
-    constexpr void encode_value(const variant_contiguous &value) {
+    constexpr void encode(const variant_contiguous &value) {
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 
@@ -105,6 +107,11 @@ class encoder : public Encoders... {
     }
 
     constexpr void encode(std::span<const std::byte> value) {
+        encode_unsigned(value.size(), static_cast<byte_type>(0x40));
+        appender_(data_, value);
+    }
+
+    constexpr void encode(std::span<std::byte> value) {
         encode_unsigned(value.size(), static_cast<byte_type>(0x40));
         appender_(data_, value);
     }
@@ -161,53 +168,28 @@ class encoder : public Encoders... {
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
-    // Handle std::vector and std::array
-    template <typename T> constexpr void array_encoder(const T &value) {
-        if (value.empty()) {
-            appender_(data_, static_cast<byte_type>(0x80));
-        } else {
-            encode_unsigned(value.size(), static_cast<byte_type>(0x80));
-            for (const auto &item : value) {
-                encode_value(item);
-            }
+    template <typename Container>
+        requires IsRange<Container> && (!IsMap<Container>)
+    constexpr void encode(const Container &container) {
+        encode_unsigned(container.size(), static_cast<byte_type>(0x80));
+        for (const auto &item : container) {
+            encode(item);
         }
     }
-    constexpr void                          encode_value(const std::vector<variant_contiguous> &value) { array_encoder(value); }
-    template <std::size_t N> constexpr void encode_value(const std::array<variant_contiguous, N> &value) { array_encoder(value); }
 
-    // Handle std::map and std::unordered_map
-    template <typename T> constexpr void map_encoder(const T &value) {
-        if (value.empty()) {
-            appender_(data_, static_cast<byte_type>(0xA0));
-        } else {
-            encode_unsigned(value.size(), static_cast<byte_type>(0xA0));
-            for (const auto &[key, item] : value) {
-                encode_value(key);
-                encode_value(item);
-            }
+    template <typename Map>
+        requires IsMap<Map>
+    constexpr void encode(const Map &map) {
+        encode_unsigned(map.size(), static_cast<byte_type>(0xA0));
+        for (const auto &[key, value] : map) {
+            encode(key);
+            encode(value);
         }
     }
-    constexpr void encode_value(const std::map<variant_contiguous, variant_contiguous> &value) { map_encoder(value); }
-    constexpr void encode_value(const std::unordered_map<variant_contiguous, variant_contiguous> &value) { map_encoder(value); }
 
   protected:
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
-
-    template <typename Container> constexpr void encode_array(const Container &container) {
-        encode(static_cast<std::uint64_t>(container.size()) | 0x80);
-        for (const auto &item : container) {
-            encode_value(item);
-        }
-    }
-
-    template <typename Map> constexpr void encode_map(const Map &map) {
-        encode(static_cast<std::uint64_t>(map.size()) | 0xA0);
-        for (const auto &[key, value] : map) {
-            encode_value(key);
-            encode_value(value);
-        }
-    }
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) { return encoder<OutputBuffer>(buffer); }
