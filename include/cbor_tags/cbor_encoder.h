@@ -36,6 +36,8 @@ class encoder : public Encoders... {
     using size_type = typename OutputBuffer::size_type;
     using variant   = variant_t<OutputBuffer>;
 
+    constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
+
     template <typename T> static auto serialize(const T &value) {
         OutputBuffer          data;
         encoder<OutputBuffer> encoder(data);
@@ -46,28 +48,41 @@ class encoder : public Encoders... {
     template <typename T> constexpr void operator()(const T &value) { encode(value); }
 
     template <typename T>
-        requires std::is_compound_v<T> && (!IsRange<T>)
+        requires std::is_compound_v<T>
     constexpr void encode(const T &value) {
-        if constexpr (IsTaggedPair<T>) {
+        // check if value is a range of some sort, i.e vector list etc
+        if constexpr (IsRange<T>) {
+            // If map, use 0xA0, otherwise array 0x80
+            constexpr auto major_type = IsMap<T> ? static_cast<byte_type>(0xA0) : static_cast<byte_type>(0x80);
+            encode_major_and_size(value.size(), major_type);
+            for (const auto &item : value) {
+                encode(item);
+            }
+        }
+        // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
+        else if constexpr (IsTaggedPair<T>) {
             static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
             encode(decltype(T::first)::cbor_tag);
             encode(value.second);
-        } else {
+        }
+        // is_compound, not range, not tagged pair... must be a struct or tuple
+        else {
+            // Check if T is has a tag (only structs can have tags)
             if constexpr (HasCborTag<T>) {
                 encode(static_cast<std::uint64_t>(T::cbor_tag));
             }
+            // Convert to tuple, if not tuple already
             const auto &&tuple = to_tuple(value);
+            // Apply encode to each element in tuple
             std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
         }
     }
-
-    constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
     constexpr void encode(const variant_contiguous &value) {
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 
-    constexpr void encode_unsigned(std::uint64_t value, byte_type majorType) {
+    constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
         if (value < 24) {
             appender_(data_, static_cast<byte_type>(value) | majorType);
         } else if (value <= 0xFF) {
@@ -96,35 +111,33 @@ class encoder : public Encoders... {
         }
     }
 
-    constexpr void encode(std::uint64_t value) { encode_unsigned(value, static_cast<byte_type>(0x00)); }
+    constexpr void encode(std::uint64_t value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
 
     constexpr void encode(std::int64_t value) {
         if (value >= 0) {
-            encode_unsigned(static_cast<std::uint64_t>(value), static_cast<byte_type>(0x00));
+            encode_major_and_size(static_cast<std::uint64_t>(value), static_cast<byte_type>(0x00));
         } else {
-            encode_unsigned(static_cast<std::uint64_t>(-1 - value), static_cast<byte_type>(0x20));
+            encode_major_and_size(static_cast<std::uint64_t>(-1 - value), static_cast<byte_type>(0x20));
         }
     }
 
     constexpr void encode(std::span<const std::byte> value) {
-        encode_unsigned(value.size(), static_cast<byte_type>(0x40));
+        encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
         appender_(data_, value);
     }
 
     constexpr void encode(std::span<std::byte> value) {
-        encode_unsigned(value.size(), static_cast<byte_type>(0x40));
+        encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
         appender_(data_, value);
     }
 
     constexpr void encode(std::string_view value) {
-        encode_unsigned(value.size(), static_cast<byte_type>(0x60));
+        encode_major_and_size(value.size(), static_cast<byte_type>(0x60));
         appender_(data_, value);
     }
 
-    // Handle std::string
     constexpr void encode(const std::string &value) { encode(std::string_view(value)); }
 
-    // Handle const char*
     constexpr void encode(const char *value) { encode(std::string_view(value)); }
 
     constexpr void encode(const binary_array_view &value) { appender_(data_, value.data); }
@@ -132,7 +145,7 @@ class encoder : public Encoders... {
     constexpr void encode(const binary_map_view &value) { appender_(data_, value.data); }
 
     constexpr void encode(const binary_tag_view &value) {
-        encode_unsigned(value.tag, static_cast<byte_type>(0xC0));
+        encode_major_and_size(value.tag, static_cast<byte_type>(0xC0));
         appender_(data_, value.data);
     }
 
@@ -167,25 +180,6 @@ class encoder : public Encoders... {
     constexpr void encode(bool value) { appender_(data_, value ? static_cast<byte_type>(0xF5) : static_cast<byte_type>(0xF4)); }
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
-
-    template <typename Container>
-        requires IsRange<Container> && (!IsMap<Container>)
-    constexpr void encode(const Container &container) {
-        encode_unsigned(container.size(), static_cast<byte_type>(0x80));
-        for (const auto &item : container) {
-            encode(item);
-        }
-    }
-
-    template <typename Map>
-        requires IsMap<Map>
-    constexpr void encode(const Map &map) {
-        encode_unsigned(map.size(), static_cast<byte_type>(0xA0));
-        for (const auto &[key, value] : map) {
-            encode(key);
-            encode(value);
-        }
-    }
 
   protected:
     detail::appender<OutputBuffer> appender_;
