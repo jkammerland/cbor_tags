@@ -93,6 +93,14 @@ template <typename T> struct reader<T, false> {
     }
 };
 
+template <typename T> struct iterator_type {
+    using type = typename T::const_iterator;
+};
+
+template <typename T, std::size_t Extent> struct iterator_type<std::span<T, Extent>> {
+    using type = typename std::span<T, Extent>::iterator;
+};
+
 template <IsAggregateOrTuple T, typename... TArgs> constexpr std::size_t num_bindings_impl() {
     if constexpr (requires { T{std::declval<TArgs>()...}; }) {
         return num_bindings_impl<T, any, TArgs...>();

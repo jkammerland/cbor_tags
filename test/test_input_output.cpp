@@ -60,7 +60,7 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor string", T, std::vector<char>, std::de
         CHECK_EQ(std::holds_alternative<std::string_view>(result), true);
         CHECK_EQ(std::get<std::string_view>(result), sv);
     } else {
-        using iterator_t = typename iterator_type<T>::type;
+        using iterator_t = decltype(in)::iterator_t;
         using char_range = char_range_view<std::ranges::subrange<iterator_t>>;
         REQUIRE_EQ(std::holds_alternative<char_range>(result), true);
         auto range = std::get<char_range>(result).range;

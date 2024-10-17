@@ -15,21 +15,13 @@
 
 namespace cbor::tags {
 
-template <typename T> struct iterator_type {
-    using type = typename T::const_iterator;
-};
-
-template <typename T, std::size_t Extent> struct iterator_type<std::span<T, Extent>> {
-    using type = typename std::span<T, Extent>::iterator;
-};
-
 template <typename InputBuffer = std::span<const std::byte>>
     requires ValidCborBuffer<InputBuffer>
 class decoder {
   public:
     using size_type  = typename InputBuffer::size_type;
     using value_type = typename InputBuffer::value_type;
-    using iterator_t = typename iterator_type<InputBuffer>::type;
+    using iterator_t = typename detail::iterator_type<InputBuffer>::type;
     using cbor_variant =
         std::conditional_t<IsContiguous<InputBuffer>, variant_contiguous, variant_ranges<std::ranges::subrange<iterator_t>>>;
 

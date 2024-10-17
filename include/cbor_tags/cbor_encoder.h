@@ -32,9 +32,11 @@ class encoder : public Encoders... {
   public:
     using Encoders::encode...;
 
-    using byte_type = typename OutputBuffer::value_type;
-    using size_type = typename OutputBuffer::size_type;
-    using variant   = variant_t<OutputBuffer>;
+    using byte_type  = typename OutputBuffer::value_type;
+    using size_type  = typename OutputBuffer::size_type;
+    using iterator_t = typename detail::iterator_type<OutputBuffer>::type;
+    using subrange   = std::ranges::subrange<iterator_t>;
+    using variant    = variant_t<OutputBuffer>;
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
@@ -46,41 +48,6 @@ class encoder : public Encoders... {
     }
 
     template <typename T> constexpr void operator()(const T &value) { encode(value); }
-
-    template <typename T>
-        requires std::is_compound_v<T>
-    constexpr void encode(const T &value) {
-        // check if value is a range of some sort, i.e vector list etc
-        if constexpr (IsRange<T>) {
-            // If map, use 0xA0, otherwise array 0x80
-            constexpr auto major_type = IsMap<T> ? static_cast<byte_type>(0xA0) : static_cast<byte_type>(0x80);
-            encode_major_and_size(value.size(), major_type);
-            for (const auto &item : value) {
-                encode(item);
-            }
-        }
-        // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
-        else if constexpr (IsTaggedPair<T>) {
-            static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
-            encode(decltype(T::first)::cbor_tag);
-            encode(value.second);
-        }
-        // is_compound, not range, not tagged pair... must be a struct or tuple
-        else {
-            // Check if T is has a tag (only structs can have tags)
-            if constexpr (HasCborTag<T>) {
-                encode(static_cast<std::uint64_t>(T::cbor_tag));
-            }
-            // Convert to tuple, if not tuple already
-            const auto &&tuple = to_tuple(value);
-            // Apply encode to each element in tuple
-            std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
-        }
-    }
-
-    constexpr void encode(const variant_contiguous &value) {
-        std::visit([this](const auto &v) { this->encode(v); }, value);
-    }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
         if (value < 24) {
@@ -149,6 +116,12 @@ class encoder : public Encoders... {
         appender_(data_, value.data);
     }
 
+    constexpr void encode(const char_range_view<subrange> &value) { appender_(data_, value.range); }
+    constexpr void encode(const binary_range_view<subrange> &value) { appender_(data_, value.range); }
+    constexpr void encode(const binary_array_range_view<subrange> &value) { appender_(data_, value.range); }
+    constexpr void encode(const binary_map_range_view<subrange> &value) { appender_(data_, value.range); }
+    constexpr void encode(const binary_tag_range_view<subrange> &value) { appender_(data_, value.range); }
+
     constexpr void encode(float16_t value) {
         appender_(data_, static_cast<byte_type>(0xf9)); // CBOR Float16 tag
         appender_(data_, static_cast<byte_type>(value.value >> 8));
@@ -180,6 +153,41 @@ class encoder : public Encoders... {
     constexpr void encode(bool value) { appender_(data_, value ? static_cast<byte_type>(0xF5) : static_cast<byte_type>(0xF4)); }
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
+
+    template <typename T>
+        requires std::is_compound_v<T>
+    constexpr void encode(const T &value) {
+        // check if value is a range of some sort, i.e vector list etc
+        if constexpr (IsRange<T>) {
+            // If map, use 0xA0, otherwise array 0x80
+            constexpr auto major_type = IsMap<T> ? static_cast<byte_type>(0xA0) : static_cast<byte_type>(0x80);
+            encode_major_and_size(value.size(), major_type);
+            for (const auto &item : value) {
+                encode(item);
+            }
+        }
+        // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
+        else if constexpr (IsTaggedPair<T>) {
+            static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
+            encode(decltype(T::first)::cbor_tag);
+            encode(value.second);
+        }
+        // Is compound, not range, not tagged pair... must be a struct or tuple
+        else {
+            // Check if T is has a tag, implies T is struct
+            if constexpr (HasCborTag<T>) {
+                encode(static_cast<std::uint64_t>(T::cbor_tag));
+            }
+            // Convert to tuple, if not tuple already
+            const auto &&tuple = to_tuple(value);
+            // Apply encode to each element in tuple
+            std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
+        }
+    }
+
+    constexpr void encode(const variant &value) {
+        std::visit([this](const auto &v) { this->encode(v); }, value);
+    }
 
   protected:
     detail::appender<OutputBuffer> appender_;
