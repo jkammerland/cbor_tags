@@ -23,19 +23,19 @@ class decoder {
     using size_type  = typename InputBuffer::size_type;
     using value_type = typename InputBuffer::value_type;
     using iterator_t = typename detail::iterator_type<InputBuffer>::type;
-    using cbor_variant =
-        std::conditional_t<IsContiguous<InputBuffer>, variant_contiguous, variant_ranges<std::ranges::subrange<iterator_t>>>;
+    using subrange   = std::ranges::subrange<iterator_t>;
+    using variant    = std::conditional_t<IsContiguous<InputBuffer>, variant_contiguous, variant_ranges<subrange>>;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    static cbor_variant deserialize(const InputBuffer &data) {
+    static variant deserialize(const InputBuffer &data) {
         decoder decoder(data);
         return decoder.decode_value();
     }
 
-    static std::vector<cbor_variant> deserialize(binary_array_view array) {
-        decoder                   decoder(array.data);
-        std::vector<cbor_variant> result;
+    static std::vector<variant> deserialize(binary_array_view array) {
+        decoder              decoder(array.data);
+        std::vector<variant> result;
         while (!decoder.reader_.empty(decoder.data_)) {
             result.push_back(decoder.decode_value());
         }
@@ -71,7 +71,7 @@ class decoder {
         }
     }
 
-    cbor_variant decode_value() {
+    variant decode_value() {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
@@ -116,7 +116,7 @@ class decoder {
             reader_.position_ += length;
             return result;
         } else {
-            return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
+            return binary_array_range_view{subrange(reader_.position_, std::next(reader_.position_, length))};
         }
     }
 
@@ -166,11 +166,11 @@ class decoder {
         if constexpr (IsContiguous<InputBuffer>) {
             return binary_tag_view{tag, std::get<std::span<const std::byte>>(data)};
         } else {
-            return binary_tag_range_view{tag, std::get<binary_range_view<std::ranges::subrange<iterator_t>>>(data).range};
+            return binary_tag_range_view{tag, std::get<binary_range_view<subrange>>(data).range};
         }
     }
 
-    cbor_variant decodeSimpleOrFloat(value_type additionalInfo) {
+    variant decodeSimpleOrFloat(value_type additionalInfo) {
         switch (static_cast<uint8_t>(additionalInfo)) {
         case 20: return false;
         case 21: return true;
