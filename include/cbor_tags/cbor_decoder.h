@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_operators.h"
 
 #include <cstddef>
 #include <cstdint>
