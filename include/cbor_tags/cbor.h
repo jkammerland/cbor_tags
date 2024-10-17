@@ -53,8 +53,7 @@ template <typename R>
 using variant_ranges = std::variant<std::uint64_t, std::int64_t, binary_range_view<R>, char_range_view<R>, binary_array_range_view<R>,
                                     binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
 
-template <typename T> using range = std::ranges::subrange<typename T::const_iterator>;
-
+template <typename T> using range     = std::ranges::subrange<typename T::const_iterator>;
 template <typename T> using variant_t = std::conditional_t<IsContiguous<T>, variant_contiguous, variant_ranges<range<T>>>;
 
 template <typename Tag, typename T> using tag_pair = std::pair<Tag, T>;

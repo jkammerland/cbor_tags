@@ -4,6 +4,7 @@
 #include "test_util.h"
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <doctest/parts/doctest_fwd.h>
@@ -12,6 +13,7 @@
 #include <list>
 #include <memory_resource>
 #include <nameof.hpp>
+#include <numeric>
 
 using namespace cbor::tags;
 
@@ -81,4 +83,40 @@ TEST_CASE_TEMPLATE("CBOR with std::pmr", T, std::pmr::vector<std::byte>, std::pm
     out.encode(static_cast<std::uint64_t>(3));
 
     CHECK_EQ(to_hex(resource_vector), "010203");
+}
+
+TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::byte>, std::deque<std::byte>) {
+    std::array<uint64_t, 100> buffer_array;
+    std::list<uint64_t>       buffer_list(100);
+
+    {
+        T    data;
+        auto out = make_encoder(data);
+
+        std::iota(buffer_array.begin(), buffer_array.end(), 0);
+        auto span = std::span(buffer_array);
+
+        out.encode(span);
+        // fmt::print("span: {}\n", to_hex(data));
+        CHECK_EQ(
+            to_hex(data),
+            "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f18201821182218231824182518261827182818291"
+            "82a182b182c182d182e182f1830183118321833183418351836183718381839183a183b183c183d183e183f18401841184218431844184518461847184818"
+            "49184a184b184c184d184e184f1850185118521853185418551856185718581859185a185b185c185d185e185f1860186118621863");
+    }
+    {
+        T    data;
+        auto out = make_encoder(data);
+
+        std::iota(buffer_list.begin(), buffer_list.end(), 0);
+
+        out.encode(buffer_list);
+        // fmt::print("list: {}\n", to_hex(data));
+        CHECK_EQ(to_hex(data),
+                 "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f1820182118221823182418251826182718281"
+                 "829182a182b182c182d182e182f1830183118321833183418351836183718381839183a183b183c183d183e183f184018411842184318441845184618"
+                 "4718481849184a184b184c184d184e184f1850185118521853185418551856185718581859185a185b185c185d185e185f1860186118621863");
+    }
+
+    CHECK_EQ(std::equal(buffer_array.begin(), buffer_array.end(), buffer_list.begin()), true);
 }
