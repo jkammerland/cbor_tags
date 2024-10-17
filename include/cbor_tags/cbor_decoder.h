@@ -20,11 +20,11 @@ template <typename InputBuffer = std::span<const std::byte>>
     requires ValidCborBuffer<InputBuffer>
 class decoder {
   public:
-    using size_type  = typename InputBuffer::size_type;
-    using value_type = typename InputBuffer::value_type;
-    using iterator_t = typename detail::iterator_type<InputBuffer>::type;
-    using cbor_variant =
-        std::conditional_t<IsContiguous<InputBuffer>, variant_contiguous, variant_ranges<std::ranges::subrange<iterator_t>>>;
+    using size_type    = typename InputBuffer::size_type;
+    using value_type   = typename InputBuffer::value_type;
+    using iterator_t   = typename detail::iterator_type<InputBuffer>::type;
+    using subrange     = std::ranges::subrange<iterator_t>;
+    using cbor_variant = std::conditional_t<IsContiguous<InputBuffer>, variant_contiguous, variant_ranges<subrange>>;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
@@ -116,7 +116,7 @@ class decoder {
             reader_.position_ += length;
             return result;
         } else {
-            return binary_array_range_view{std::ranges::subrange<iterator_t>(reader_.position_, std::next(reader_.position_, length))};
+            return binary_array_range_view{subrange(reader_.position_, std::next(reader_.position_, length))};
         }
     }
 
@@ -166,7 +166,7 @@ class decoder {
         if constexpr (IsContiguous<InputBuffer>) {
             return binary_tag_view{tag, std::get<std::span<const std::byte>>(data)};
         } else {
-            return binary_tag_range_view{tag, std::get<binary_range_view<std::ranges::subrange<iterator_t>>>(data).range};
+            return binary_tag_range_view{tag, std::get<binary_range_view<subrange>>(data).range};
         }
     }
 
