@@ -6,20 +6,16 @@
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 
-#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fmt/base.h>
-#include <map>
 #include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <unordered_map>
-#include <utility>
 #include <variant>
 #include <vector>
 
