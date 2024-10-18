@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor_concepts.h"
 
+#include <concepts>
 #include <cstdio>
 #include <cstring>
 #include <type_traits>
@@ -91,14 +92,6 @@ template <typename T> struct reader<T, false> {
         auto it = std::next(position_, offset);
         return static_cast<value_type>(*it);
     }
-};
-
-template <typename T> struct iterator_type {
-    using type = typename T::const_iterator;
-};
-
-template <typename T, std::size_t Extent> struct iterator_type<std::span<T, Extent>> {
-    using type = typename std::span<T, Extent>::iterator;
 };
 
 template <IsAggregateOrTuple T, typename... TArgs> constexpr std::size_t num_bindings_impl() {

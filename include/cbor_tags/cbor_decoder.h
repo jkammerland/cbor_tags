@@ -24,7 +24,7 @@ class decoder {
     using value_type = typename InputBuffer::value_type;
     using iterator_t = typename detail::iterator_type<InputBuffer>::type;
     using subrange   = std::ranges::subrange<iterator_t>;
-    using variant    = std::conditional_t<IsContiguous<InputBuffer>, variant_contiguous, variant_ranges<subrange>>;
+    using variant    = variant_t<InputBuffer>;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 

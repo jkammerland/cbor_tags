@@ -97,6 +97,15 @@ concept TaggedCborType = HasCborTag<T> || IsTaggedPair<T>;
 
 namespace detail {
 
+// requires(!std::same_as<T, std::span<typename T::value_type>>)
+template <typename T> struct iterator_type {
+    using type = typename T::const_iterator;
+};
+
+template <typename T> struct iterator_type<std::span<T>> {
+    using type = typename std::span<T>::iterator;
+};
+
 // Helper for decimal parsing
 template <char... Chars> constexpr std::uint64_t parse_decimal() {
     std::uint64_t result = 0;
