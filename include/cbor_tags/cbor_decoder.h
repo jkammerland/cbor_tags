@@ -87,9 +87,9 @@ class decoder {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const byte_type initialByte    = reader_.read(data_);
-        const auto      majorType      = static_cast<major_type>(static_cast<byte_type>(initialByte) >> 5);
-        const auto      additionalInfo = static_cast<byte_type>(initialByte) & static_cast<byte_type>(0x1F);
+        const auto initialByte    = reader_.read(data_);
+        const auto majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
+        const auto additionalInfo = initialByte & static_cast<byte_type>(0x1F);
 
         switch (majorType) {
         case major_type::UnsignedInteger: return decode_unsigned(additionalInfo);
@@ -109,8 +109,8 @@ class decoder {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const byte_type initialByte    = reader_.read(data_);
-        const auto      additionalInfo = static_cast<byte_type>(initialByte) & static_cast<byte_type>(0x1F);
+        const auto initialByte    = reader_.read(data_);
+        const auto additionalInfo = initialByte & static_cast<byte_type>(0x1F);
 
         decode(value, additionalInfo);
     }
@@ -205,11 +205,11 @@ class decoder {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const byte_type initialByte    = reader_.read(data_);
-        const auto      majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
-        const auto      additionalInfo = static_cast<byte_type>(initialByte) & static_cast<byte_type>(0x1F);
+        const auto initialByte    = reader_.read(data_);
+        const auto majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
+        const auto additionalInfo = initialByte & static_cast<byte_type>(0x1F);
 
-        if constexpr (IsRange<T>) {
+        if constexpr (IsRange<T> && !IsString<T>) {
             const auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
             if (majorType != expected_major_type) {
                 throw std::runtime_error("Invalid major type for array or map");

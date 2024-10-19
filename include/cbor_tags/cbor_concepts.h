@@ -32,6 +32,23 @@ concept IsMap = IsRange<T> && requires(T t) {
     { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
 };
 
+template <typename T>
+concept IsTextString = requires(T t) {
+    requires std::is_signed_v<typename T::value_type>;
+    requires std::is_integral_v<typename T::value_type>;
+    requires sizeof(typename T::value_type) == 1;
+};
+
+template <typename T>
+concept IsBinaryString = requires(T t) {
+    requires std::is_unsigned_v<typename T::value_type>;
+    requires std::is_integral_v<typename T::value_type>;
+    requires sizeof(typename T::value_type) == 1;
+};
+
+template <typename T>
+concept IsString = IsTextString<T> || IsBinaryString<T>;
+
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
 struct CborStream {
