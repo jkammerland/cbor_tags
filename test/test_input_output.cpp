@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <doctest/parts/doctest_fwd.h>
@@ -15,6 +16,7 @@
 #include <memory_resource>
 #include <nameof.hpp>
 #include <numeric>
+#include <ranges>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -76,4 +78,41 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
 
     [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);
     // out.encode(tag);
+}
+
+TEST_CASE_TEMPLATE("Decode array of ints", T, std::vector<unsigned char>) {
+    T data;
+    data.reserve(1000);
+    auto out = make_encoder(data);
+
+    std::vector<uint64_t> values(10);
+    std::iota(values.begin(), values.end(), 0);
+    out(values);
+
+    auto                  in = make_decoder(data);
+    std::vector<uint64_t> result;
+    in(result);
+
+    REQUIRE_EQ(values.size(), result.size());
+    CHECK_EQ(values, result);
+}
+
+TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>) {
+    T data;
+    data.reserve(1000);
+    auto out = make_encoder(data);
+
+    std::vector<std::string> values(10);
+    std::generate(values.begin(), values.end(), [i = 0]() mutable { return fmt::format("Hello world {}", i++); });
+    out(values);
+
+    fmt::print("Encoded data: {}\n", fmt::join(data, ""));
+    fmt::print("Hex encoded data: {}\n", to_hex(data));
+
+    auto                     in = make_decoder(data);
+    std::vector<std::string> result;
+    in(result);
+
+    REQUIRE_EQ(values.size(), result.size());
+    CHECK_EQ(std::equal(values.begin(), values.end(), result.begin()), true);
 }

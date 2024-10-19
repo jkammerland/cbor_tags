@@ -7,7 +7,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fmt/format.h>
 #include <iterator>
+#include <map>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -27,6 +29,15 @@ class decoder {
     using variant    = variant_t<InputBuffer>;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
+
+    template <typename... T> constexpr void operator()(T &...args) { (decode(args), ...); }
+    template <typename T> constexpr         operator T() { return decode<T>(); }
+
+    template <typename T> constexpr T decode() {
+        T result;
+        decode(result);
+        return result;
+    }
 
     static variant deserialize(const InputBuffer &data) {
         decoder decoder(data);
@@ -189,47 +200,44 @@ class decoder {
         }
     }
 
-    template <typename T>
-        requires std::is_compound_v<T>
-    constexpr void decode(T &value) {
+    template <typename T> constexpr void decode(T &value) {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
 
         const byte_type initialByte    = reader_.read(data_);
-        const auto      majorType      = static_cast<major_type>(static_cast<byte_type>(initialByte) >> 5);
+        const auto      majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
         const auto      additionalInfo = static_cast<byte_type>(initialByte) & static_cast<byte_type>(0x1F);
 
         if constexpr (IsRange<T>) {
-            const auto expected_major_type = IsMap<T> ? static_cast<byte_type>(0xA0) : static_cast<byte_type>(0x80);
+            const auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
             if (majorType != expected_major_type) {
                 throw std::runtime_error("Invalid major type for array or map");
             }
 
-            const auto          length = decode_unsigned(additionalInfo);
+            const auto length = decode_unsigned(additionalInfo);
+            if constexpr (HasReserve<T>) {
+                value.reserve(length);
+            }
             detail::appender<T> appender_;
             for (auto i = length; i > 0; --i) {
-                appender_(value);
+                auto result = decode<typename T::value_type>();
+                appender_(value, result);
+                fmt::print("decoding: {}\n", result);
             }
         }
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
         else if constexpr (IsTaggedPair<T>) {
             static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
             decode(value.second);
-        }
-        // Is compound, not range, not tagged pair... must be a struct or tuple
-        else if constexpr (HasCborTag<T>) {
+        } else if constexpr (HasCborTag<T>) {
             // Convert to tuple, if not tuple already
             const auto &&tuple = to_tuple(value);
             // Apply encode to each element in tuple
-            std::apply([this](auto &...args) { (this->decode(args), ...); }, tuple);
+            std::apply([this, additionalInfo](auto &...args) { (this->decode(args, additionalInfo), ...); }, tuple);
+        } else {
+            decode(value, additionalInfo);
         }
-    }
-
-    template <typename T> constexpr auto decode() {
-        T value;
-        decode(value);
-        return value;
     }
 
     constexpr uint64_t decode_unsigned(byte_type additionalInfo) {
@@ -392,15 +400,5 @@ class decoder {
 };
 
 template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer>(buffer); }
-
-template <typename InputBuffer = std::vector<std::byte>> inline auto make_data_and_decoder() {
-    struct data_and_decoder {
-        data_and_decoder() : data(), dec(data) {}
-        InputBuffer          data;
-        decoder<InputBuffer> dec;
-    };
-
-    return data_and_decoder{};
-}
 
 } // namespace cbor::tags

@@ -95,6 +95,11 @@ concept IsTaggedPair = requires(T t) {
 template <typename T>
 concept TaggedCborType = HasCborTag<T> || IsTaggedPair<T>;
 
+template <typename T>
+concept HasReserve = requires(T t) {
+    { t.reserve(std::declval<typename T::size_type>()) };
+};
+
 namespace detail {
 
 // requires(!std::same_as<T, std::span<typename T::value_type>>)
