@@ -12,6 +12,7 @@
 #include <doctest/doctest.h>
 #include <doctest/parts/doctest_fwd.h>
 #include <fmt/core.h>
+#include <forward_list>
 #include <list>
 #include <memory_resource>
 #include <nameof.hpp>
@@ -97,17 +98,16 @@ TEST_CASE_TEMPLATE("Decode array of ints", T, std::vector<unsigned char>) {
     CHECK_EQ(values, result);
 }
 
-TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>) {
+TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>, std::deque<char>, std::list<char>) {
     T data;
-    data.reserve(1000);
+    if constexpr (HasReserve<T>) {
+        data.reserve(1000);
+    }
     auto out = make_encoder(data);
 
     std::vector<std::string> values(10);
     std::generate(values.begin(), values.end(), [i = 0]() mutable { return fmt::format("Hello world {}", i++); });
     out(values);
-
-    fmt::print("Encoded data: {}\n", fmt::join(data, ""));
-    fmt::print("Hex encoded data: {}\n", to_hex(data));
 
     auto                     in = make_decoder(data);
     std::vector<std::string> result;

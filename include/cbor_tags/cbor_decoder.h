@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <iterator>
 #include <map>
+#include <nameof.hpp>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -210,7 +211,7 @@ class decoder {
         const auto additionalInfo = initialByte & static_cast<byte_type>(0x1F);
 
         if constexpr (IsRange<T> && !IsString<T>) {
-            const auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
+            constexpr auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
             if (majorType != expected_major_type) {
                 throw std::runtime_error("Invalid major type for array or map");
             }
@@ -223,7 +224,7 @@ class decoder {
             for (auto i = length; i > 0; --i) {
                 auto result = decode<typename T::value_type>();
                 appender_(value, result);
-                fmt::print("decoding: {}\n", result);
+                fmt::print("decoding: {}\n", nameof::nameof_full_type<typename T::value_type>());
             }
         }
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
@@ -263,7 +264,10 @@ class decoder {
             reader_.position_ += length;
             return result;
         } else {
-            return binary_array_range_view{subrange(reader_.position_, std::next(reader_.position_, length))};
+            auto it           = std::next(reader_.position_, length);
+            auto result       = subrange(reader_.position_, it);
+            reader_.position_ = it;
+            return binary_array_range_view{result};
         }
     }
 

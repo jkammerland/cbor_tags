@@ -4,11 +4,13 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <ranges>
 #include <span>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace cbor::tags {
 
@@ -27,10 +29,12 @@ struct binary_tag_view {
 
 template <std::ranges::input_range R> struct binary_range_view {
     R range;
+    operator std::vector<std::byte>() const { return {range.begin(), range.end()}; }
 };
 
 template <std::ranges::input_range R> struct char_range_view {
-    R range;
+    R         range;
+    constexpr operator std::string() const { return {range.begin(), range.end()}; }
 };
 
 template <std::ranges::input_range R> struct binary_array_range_view {
