@@ -28,7 +28,7 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     static_assert(detail::aggregate_binding_count<type> <= detail::MAX_REFLECTION_MEMBERS, "Type must have at most {0} members. Rerun the generator with a higher value if you need more.");
 
     if constexpr (IsTuple<type>) {{
-        return object;
+        return std::tie(object);
     }})",
                    N);
 
@@ -43,8 +43,8 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {{
         }
 
         fmt::format_to(std::back_inserter(out), R"( else if constexpr (IsBracesContructible<type, {0}>) {{
-        auto &&[{1}] = object;
-        return std::make_tuple({1});
+        auto &[{1}] = object;
+        return std::tie({1});
     }})",
                        fmt::join(anys, ", "), fmt::join(params, ", "));
     }

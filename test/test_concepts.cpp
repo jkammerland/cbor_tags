@@ -14,6 +14,7 @@
 #include <limits>
 #include <list>
 #include <nameof.hpp>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -111,6 +112,8 @@ TEST_CASE("Count struct members") {
     CHECK_EQ(detail::aggregate_binding_count<Eleven>, 11);
 }
 
+void test_ref(int &a) { a = 42; }
+
 TEST_CASE("Reflection into tuple") {
     struct A {
         int    a;
@@ -162,4 +165,51 @@ TEST_CASE("Reflection into tuple") {
     CHECK_EQ(std::get<8>(t2), 10);
     CHECK_EQ(std::get<9>(t2), 11);
     CHECK_EQ(std::get<10>(t2), "12");
+
+    c = 44;
+    CHECK_EQ(std::get<6>(t2).g, 44);
+    d = 55;
+    CHECK_EQ(std::get<6>(t2).h, 55);
+
+    auto &ref = std::get<9>(t2);
+    test_ref(ref);
+    CHECK_EQ(std::get<9>(t2), 42);
+}
+
+TEST_CASE("to_tupple address") {
+
+    {
+        struct A {
+            int    a;
+            double b;
+            char   c;
+        };
+
+        A a{1, 3.14, 'a'};
+
+        auto t = to_tuple(a);
+
+        CHECK_EQ(&std::get<0>(t), &a.a);
+        CHECK_EQ(&std::get<1>(t), &a.b);
+        CHECK_EQ(&std::get<2>(t), &a.c);
+    }
+
+    {
+        auto t           = std::make_tuple(1, 3.14, 'a');
+        auto &&[a, b, c] = t;
+
+        CHECK_EQ(&a, &std::get<0>(t));
+        CHECK_EQ(&b, &std::get<1>(t));
+        CHECK_EQ(&c, &std::get<2>(t));
+    }
+
+    {
+        auto t          = std::make_tuple(1, 3.14, 'a');
+        auto [unpack]   = to_tuple(t);
+        auto &[a, b, c] = unpack;
+
+        CHECK_EQ(&a, &std::get<0>(t));
+        CHECK_EQ(&b, &std::get<1>(t));
+        CHECK_EQ(&c, &std::get<2>(t));
+    }
 }

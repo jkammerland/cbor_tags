@@ -116,3 +116,30 @@ TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>, std::deque<c
     REQUIRE_EQ(values.size(), result.size());
     CHECK_EQ(std::equal(values.begin(), values.end(), result.begin()), true);
 }
+
+TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<std::byte>, std::list<std::byte>) {
+    T data;
+    if constexpr (HasReserve<T>) {
+        data.reserve(1000);
+    }
+    auto out = make_encoder(data);
+
+    struct A {
+        int    a;
+        double b;
+        // std::optional<std::string> c;
+        // std::vector<int>           d;
+    };
+
+    using namespace cbor::tags::literals;
+    out(make_tag_pair(123_tag, A{1, 3.14}));
+
+    fmt::print("to_Hex: {}\n", to_hex(data));
+
+    auto in = make_decoder(data);
+
+    auto result = make_tag_pair(123_tag, A{});
+    in(result);
+
+    CHECK_EQ(result.second.a, 1);
+}

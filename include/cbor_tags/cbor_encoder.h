@@ -83,6 +83,18 @@ class encoder : public Encoders... {
         }
     }
 
+    template <typename T>
+        requires std::is_unsigned_v<T> && std::is_integral_v<T>
+    constexpr void encode(T value) {
+        encode(static_cast<std::uint64_t>(value));
+    }
+
+    template <typename T>
+        requires std::is_signed_v<T> && std::is_integral_v<T>
+    constexpr void encode(T value) {
+        encode(static_cast<std::int64_t>(value));
+    }
+
     constexpr void encode(std::span<const std::byte> value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
         appender_(data_, value);
@@ -155,6 +167,7 @@ class encoder : public Encoders... {
         // check if value is a range of some sort, i.e vector list etc
         if constexpr (IsRange<T>) {
             // If map, use 0xA0, otherwise array 0x80
+            static_assert(!std::is_same_v<T, std::string>, "No strings allowed");
             constexpr auto major_type = IsMap<T> ? static_cast<byte_type>(0xA0) : static_cast<byte_type>(0x80);
             encode_major_and_size(value.size(), major_type);
             for (const auto &item : value) {
@@ -164,19 +177,20 @@ class encoder : public Encoders... {
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
         else if constexpr (IsTaggedPair<T>) {
             static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
-            encode(decltype(T::first)::cbor_tag);
+            encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
             encode(value.second);
         }
-        // Is compound, not range, not tagged pair... must be a struct or tuple
-        else {
-            // Check if T is has a tag, implies T is struct
+        // Is compound, not range, not tagged pair... check if struct
+        else if constexpr (!IsTuple<T>) {
+            // Check if T is has a tag
             if constexpr (HasCborTag<T>) {
-                encode(static_cast<std::uint64_t>(T::cbor_tag));
+                encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
             }
-            // Convert to tuple, if not tuple already
-            const auto &&tuple = to_tuple(value);
+            const auto &tuple = to_tuple(value);
             // Apply encode to each element in tuple
             std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
+        } else {
+            std::apply([this](const auto &...args) { (this->encode(args), ...); }, value);
         }
     }
 

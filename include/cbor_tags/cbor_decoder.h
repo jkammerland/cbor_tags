@@ -4,9 +4,11 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_operators.h"
+#include "cbor_tags/cbor_reflection.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <fmt/base.h>
 #include <fmt/format.h>
 #include <iterator>
 #include <map>
@@ -15,6 +17,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace cbor::tags {
@@ -119,10 +122,16 @@ class decoder {
     template <typename T>
         requires std::is_integral_v<T>
     constexpr void decode(T &value, byte_type additionalInfo) {
+        const auto decoded = decode_unsigned(additionalInfo);
+
         if constexpr (std::is_signed_v<T>) {
-            value = static_cast<T>(decode_integer(additionalInfo));
+            if (decoded > std::numeric_limits<T>::max() / 2) {
+                value = -1 - static_cast<T>(decoded);
+            } else {
+                value = static_cast<T>(decoded);
+            }
         } else {
-            value = static_cast<T>(decode_unsigned(additionalInfo));
+            value = static_cast<T>(decoded);
         }
     }
 
@@ -210,7 +219,14 @@ class decoder {
         const auto majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
         const auto additionalInfo = initialByte & static_cast<byte_type>(0x1F);
 
-        if constexpr (IsRange<T> && !IsString<T>) {
+        if constexpr (IsString<T>) {
+            constexpr auto expected_major_type = IsTextString<T> ? major_type::TextString : major_type::ByteString;
+            if (majorType != expected_major_type) {
+                throw std::runtime_error("Invalid major type for array or map");
+            }
+
+            decode(value, additionalInfo);
+        } else if constexpr (IsRange<T>) {
             constexpr auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
             if (majorType != expected_major_type) {
                 throw std::runtime_error("Invalid major type for array or map");
@@ -230,14 +246,31 @@ class decoder {
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
         else if constexpr (IsTaggedPair<T>) {
             static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
-            decode(value.second);
-        } else if constexpr (HasCborTag<T>) {
-            // Convert to tuple, if not tuple already
-            const auto &&tuple = to_tuple(value);
-            // Apply encode to each element in tuple
-            std::apply([this, additionalInfo](auto &...args) { (this->decode(args, additionalInfo), ...); }, tuple);
+            const auto tag = decode_unsigned(additionalInfo);
+            if (tag != value.first) {
+                throw std::runtime_error("Invalid tag");
+            }
+
+            if constexpr (std::is_compound_v<std::decay_t<decltype(T::second)>>) {
+                fmt::print("Nameof: {}\n", nameof::nameof_full_type<decltype(value.second)>());
+                auto &&tuple = to_tuple(value.second);
+                std::apply([this](auto &&...args) { (this->decode(std::forward<decltype(args)>(args)), ...); }, tuple);
+            } else {
+                decode(value.second);
+            }
         } else {
-            decode(value, additionalInfo);
+            // Convert to tuple, if not tuple already
+            if constexpr (std::is_compound_v<T>) {
+                auto &tuple = to_tuple(value);
+                // std::apply(
+                //     [i = 0](auto &...args) mutable {
+                //         (fmt::print("Tuple element {}: {}\n", i++, nameof::nameof_full_type<decltype(args)>()), ...);
+                //     },
+                //     tuple);
+                std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+            } else {
+                decode(value, additionalInfo);
+            }
         }
     }
 

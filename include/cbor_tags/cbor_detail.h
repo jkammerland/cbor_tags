@@ -9,16 +9,7 @@
 
 namespace cbor::tags::detail {
 
-template <typename T>
-concept IsArrayConcept = requires {
-    typename T::value_type;
-    typename T::size_type;
-    typename std::tuple_size<T>::type;
-    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
-                 std::is_same_v<T, std::span<typename T::value_type>>;
-};
-
-template <typename T, bool IsArray = IsArrayConcept<T>>
+template <typename T, bool IsArray = IsArray<T>>
     requires ValidCborBuffer<T>
 struct appender;
 

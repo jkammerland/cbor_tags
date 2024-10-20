@@ -33,6 +33,15 @@ concept IsMap = IsRange<T> && requires(T t) {
 };
 
 template <typename T>
+concept IsArray = requires {
+    typename T::value_type;
+    typename T::size_type;
+    typename std::tuple_size<T>::type;
+    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
+                 std::is_same_v<T, std::span<typename T::value_type>>;
+};
+
+template <typename T>
 concept IsTextString = requires(T t) {
     requires std::is_signed_v<typename T::value_type>;
     requires std::is_integral_v<typename T::value_type>;
@@ -95,6 +104,17 @@ template <std::uint64_t N> struct tag {
     static constexpr std::uint64_t cbor_tag = N;
 
     constexpr operator std::uint64_t() const { return cbor_tag; }
+
+    // Spacechip operator
+    template <std::uint64_t M> constexpr auto operator<=>(const tag<M> &) const {
+        if constexpr (N < M) {
+            return std::strong_ordering::less;
+        } else if constexpr (N > M) {
+            return std::strong_ordering::greater;
+        } else {
+            return std::strong_ordering::equal;
+        }
+    }
 };
 
 template <typename T>
