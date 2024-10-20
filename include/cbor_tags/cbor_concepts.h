@@ -92,10 +92,10 @@ concept IsOptional = requires(T t) {
 };
 
 template <typename T>
-concept IsAggregateOrTuple = std::is_aggregate_v<T> || IsTuple<T>;
+concept IsAggregate = std::is_aggregate_v<T>;
 
 template <typename T>
-concept IsNonAggregate = !IsAggregateOrTuple<T>;
+concept IsNonAggregate = !IsAggregate<T>;
 
 struct any {
     template <class T> constexpr operator T() const {

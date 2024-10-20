@@ -24,11 +24,11 @@ constexpr size_t MAX_REFLECTION_MEMBERS = {0};
 
 template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     using type = std::decay_t<T>;
-    static_assert(!IsNonAggregate<type>, "Type must be an aggregate");
+    static_assert(IsAggregate<type>, "Type must be an aggregate");
     static_assert(detail::aggregate_binding_count<type> <= detail::MAX_REFLECTION_MEMBERS, "Type must have at most {0} members. Rerun the generator with a higher value if you need more.");
 
     if constexpr (IsTuple<type>) {{
-        return std::tie(object);
+        return; // unreachable due to IsAggregate
     }})",
                    N);
 

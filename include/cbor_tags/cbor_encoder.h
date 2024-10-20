@@ -181,7 +181,7 @@ class encoder : public Encoders... {
             encode(value.second);
         }
         // Is compound, not range, not tagged pair... check if struct
-        else if constexpr (!IsTuple<T>) {
+        else if constexpr (IsAggregate<T>) {
             // Check if T is has a tag
             if constexpr (HasCborTag<T>) {
                 encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
@@ -191,6 +191,14 @@ class encoder : public Encoders... {
             std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
         } else {
             std::apply([this](const auto &...args) { (this->encode(args), ...); }, value);
+        }
+    }
+
+    template <typename T> constexpr void encode(const std::optional<T> &value) {
+        if (value.has_value()) {
+            encode(*value);
+        } else {
+            appender_(data_, static_cast<byte_type>(0xF6));
         }
     }
 

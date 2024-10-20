@@ -209,8 +209,7 @@ TEST_CASE("to_tupple address") {
 
     {
         auto t          = std::make_tuple(1, 3.14, 'a');
-        auto [unpack]   = to_tuple(t);
-        auto &[a, b, c] = unpack;
+        auto &[a, b, c] = t;
 
         CHECK_EQ(&a, &std::get<0>(t));
         CHECK_EQ(&b, &std::get<1>(t));
@@ -322,5 +321,15 @@ TEST_CASE("Test more concepts for IsX") {
         using container = std::array<int, 5>;
         static_assert(IsRange<container>);
         static_assert(IsContiguous<container>);
+    }
+}
+
+TEST_CASE("Test aggregates") {
+    {
+        using opt = std::optional<int>;
+        static_assert(!IsAggregate<opt>);
+        static_assert(!IsAggregate<std::vector<int>>);
+        static_assert(!IsAggregate<std::map<int, int>>);
+        static_assert(!IsAggregate<std::tuple<int, int>>);
     }
 }
