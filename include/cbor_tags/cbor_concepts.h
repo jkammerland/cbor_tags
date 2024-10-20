@@ -7,6 +7,7 @@
 #include <ranges>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace cbor::tags {
 template <typename T>
@@ -89,6 +90,12 @@ concept IsOptional = requires(T t) {
     { T{typename T::value_type{}} } -> std::same_as<T>;
     { T{std::nullopt} } -> std::same_as<T>;
     { t.value() } -> std::same_as<typename T::value_type &>;
+};
+
+template <typename T>
+concept IsVariant = requires(T t) {
+    { std::variant_size_v<T> } -> std::convertible_to<size_t>;
+    { t.index() } -> std::convertible_to<size_t>;
 };
 
 template <typename T>

@@ -324,12 +324,27 @@ TEST_CASE("Test more concepts for IsX") {
     }
 }
 
-TEST_CASE("Test aggregates") {
+TEST_CASE("Test non aggregates") {
     {
-        using opt = std::optional<int>;
+        using var = std::variant<int, double>;
+        using opt = std::optional<var>;
+        static_assert(IsOptional<opt>);
         static_assert(!IsAggregate<opt>);
+        static_assert(!IsVariant<opt>);
+    }
+    {
         static_assert(!IsAggregate<std::vector<int>>);
         static_assert(!IsAggregate<std::map<int, int>>);
         static_assert(!IsAggregate<std::tuple<int, int>>);
+    }
+
+    {
+        using opt = std::optional<std::string>;
+        using var = std::variant<int, opt>;
+        static_assert(IsVariant<var>);
+        static_assert(!IsOptional<var>);
+        static_assert(!IsAggregate<var>);
+        static_assert(!IsAggregate<std::vector<var>>);
+        static_assert(!IsTuple<var>);
     }
 }
