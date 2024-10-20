@@ -8,11 +8,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <fmt/base.h>
-#include <fmt/format.h>
 #include <iterator>
 #include <map>
-#include <nameof.hpp>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -211,12 +208,14 @@ class decoder {
         }
     }
 
-    template <IsOptional T> constexpr void decode(T &value, byte_type additionalInfo) {
-        using value_type = typename T::value_type;
+    template <typename T> constexpr void decode(std::optional<T> &value, byte_type additionalInfo) {
         if (additionalInfo == static_cast<byte_type>(22)) {
             value.reset();
         } else {
-            value = decode<value_type>();
+            using value_type = std::decay_t<T>;
+            value_type t;
+            decode(t, additionalInfo);
+            value = std::move(t);
         }
     }
 
@@ -250,7 +249,6 @@ class decoder {
             for (auto i = length; i > 0; --i) {
                 auto result = decode<typename T::value_type>();
                 appender_(value, result);
-                fmt::print("decoding: {}\n", nameof::nameof_full_type<typename T::value_type>());
             }
         }
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
@@ -261,26 +259,19 @@ class decoder {
                 throw std::runtime_error("Invalid tag");
             }
 
-            if constexpr (std::is_compound_v<std::decay_t<decltype(T::second)>>) {
-                fmt::print("Nameof: {}\n", nameof::nameof_full_type<decltype(value.second)>());
+            if constexpr (IsAggregate<typename T::second_type>) {
                 auto &&tuple = to_tuple(value.second);
                 std::apply([this](auto &&...args) { (this->decode(std::forward<decltype(args)>(args)), ...); }, tuple);
             } else {
                 decode(value.second);
             }
+        } else if constexpr (IsAggregate<T>) {
+            auto &tuple = to_tuple(value);
+            std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+        } else if constexpr (IsTuple<T>) {
+            std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
         } else {
-            // Convert to tuple, if not tuple already
-            if constexpr (std::is_compound_v<T>) {
-                auto &tuple = to_tuple(value);
-                // std::apply(
-                //     [i = 0](auto &...args) mutable {
-                //         (fmt::print("Tuple element {}: {}\n", i++, nameof::nameof_full_type<decltype(args)>()), ...);
-                //     },
-                //     tuple);
-                std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
-            } else {
-                decode(value, additionalInfo);
-            }
+            decode(value, additionalInfo);
         }
     }
 

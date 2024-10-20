@@ -134,14 +134,16 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     using namespace cbor::tags::literals;
     out(make_tag_pair(123_tag, A{1, 3.14, "Hello", {1, 2, 3}}));
 
-    fmt::print("to_Hex: {}\n", to_hex(data));
+    auto hex = to_hex(data);
+    fmt::print("to_hex: {}\n", hex);
+    REQUIRE_EQ(hex, "d87b01fb40091eb851eb851f6548656c6c6f83010203");
 
-    // auto in = make_decoder(data);
+    auto in     = make_decoder(data);
+    auto result = make_tag_pair(123_tag, A{});
+    in(result);
 
-    // auto result = make_tag_pair(123_tag, A{});
-    // in(result);
-
-    // CHECK_EQ(result.second.a, 1);
-    // CHECK_EQ(result.second.b, 3.14);
-    // CHECK_EQ(result.second.d, std::vector<int>({1, 2, 3}));
+    CHECK_EQ(result.second.a, 1);
+    CHECK_EQ(result.second.b, 3.14);
+    CHECK_EQ(result.second.c, "Hello");
+    CHECK_EQ(result.second.d, std::vector<int>({1, 2, 3}));
 }

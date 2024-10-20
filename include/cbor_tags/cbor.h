@@ -29,12 +29,39 @@ struct binary_tag_view {
 
 template <std::ranges::input_range R> struct binary_range_view {
     R range;
+
+    constexpr auto view() const {
+        return range | std::views::transform([](const auto &c) { return static_cast<const std::byte>(c); });
+    }
+    constexpr auto begin() const {
+        auto v = view();
+        return std::ranges::begin(v);
+    }
+    constexpr auto end() const {
+        auto v = view();
+        return std::ranges::end(v);
+    }
+
     operator std::vector<std::byte>() const { return {range.begin(), range.end()}; }
 };
 
 template <std::ranges::input_range R> struct char_range_view {
-    R         range;
-    constexpr operator std::string() const { return {range.begin(), range.end()}; }
+    R range;
+
+    constexpr auto view() const {
+        return range | std::views::transform([](const auto &c) { return static_cast<const char>(c); });
+    }
+
+    constexpr auto begin() const {
+        auto v = view();
+        return std::ranges::begin(v);
+    }
+    constexpr auto end() const {
+        auto v = view();
+        return std::ranges::end(v);
+    }
+
+    constexpr operator std::string() const { return {begin(), end()}; }
 };
 
 template <std::ranges::input_range R> struct binary_array_range_view {
