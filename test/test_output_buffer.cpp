@@ -38,10 +38,11 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
     out.encode(sv);
 
     if constexpr (!IsArray<T>) {
-        // +1 for the tag
         CHECK_EQ(to_hex(data), "6c48656c6c6f20776f726c6421");
+        // +1 for the tag
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);
     } else {
+        // +1 for the tag
         CHECK_EQ(to_hex(std::span(data.data(), sv.size() + 1)), "6c48656c6c6f20776f726c6421");
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);
     }

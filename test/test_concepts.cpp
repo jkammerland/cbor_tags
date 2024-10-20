@@ -13,9 +13,13 @@
 #include <iterator>
 #include <limits>
 #include <list>
+#include <map>
 #include <nameof.hpp>
+#include <optional>
+#include <string>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 using namespace cbor::tags;
@@ -211,5 +215,112 @@ TEST_CASE("to_tupple address") {
         CHECK_EQ(&a, &std::get<0>(t));
         CHECK_EQ(&b, &std::get<1>(t));
         CHECK_EQ(&c, &std::get<2>(t));
+    }
+}
+
+TEST_CASE("Test more concepts for IsX") {
+    {
+        using map_1 = std::map<int, int>;
+        static_assert(IsMap<map_1>);
+        static_assert(!IsArray<map_1>);
+        static_assert(!IsTuple<map_1>);
+    }
+
+    {
+        using map_2 = std::unordered_map<int, int>;
+        static_assert(IsMap<map_2>);
+        static_assert(!IsArray<map_2>);
+        static_assert(!IsTuple<map_2>);
+    }
+
+    {
+        using opt_1 = std::optional<int>;
+        static_assert(IsOptional<opt_1>);
+        static_assert(!IsArray<opt_1>);
+        static_assert(!IsMap<opt_1>);
+        static_assert(!IsTuple<opt_1>);
+        static_assert(!IsTextString<opt_1>);
+        static_assert(!IsBinaryString<opt_1>);
+    }
+
+    {
+        using array_1 = std::array<int, 5>;
+        static_assert(IsArray<array_1>);
+        static_assert(IsRange<array_1>);
+        static_assert(!IsMap<array_1>);
+        static_assert(!IsTuple<array_1>);
+        static_assert(!IsOptional<array_1>);
+    }
+
+    {
+        using tuple_1 = std::tuple<int, std::optional<int>>;
+        static_assert(IsTuple<tuple_1>);
+        static_assert(!IsRange<tuple_1>);
+        static_assert(!IsArray<tuple_1>);
+        static_assert(!IsMap<tuple_1>);
+        static_assert(!IsOptional<tuple_1>);
+    }
+
+    {
+        using string_1 = std::string;
+        static_assert(IsTextString<string_1>);
+        static_assert(IsRange<string_1>);
+        static_assert(!IsBinaryString<string_1>);
+        static_assert(!IsArray<string_1>);
+        static_assert(!IsMap<string_1>);
+        static_assert(!IsOptional<string_1>);
+        static_assert(!IsTuple<string_1>);
+    }
+
+    {
+        using string_1 = std::string_view;
+        static_assert(IsTextString<string_1>);
+
+        using string_2 = std::basic_string_view<char>;
+        static_assert(IsTextString<string_2>);
+
+        using string_3 = std::basic_string_view<std::byte>;
+        static_assert(!IsTextString<string_3>);
+
+        using string_4 = std::vector<char>;
+        static_assert(!IsTextString<string_4>);
+    }
+
+    {
+        using bstring_1 = std::basic_string<std::byte>;
+        using bstring_2 = std::vector<std::byte>;
+        using bstring_3 = std::basic_string_view<std::byte>;
+        static_assert(IsBinaryString<bstring_1>);
+        static_assert(!IsBinaryString<bstring_2>);
+        static_assert(IsBinaryString<bstring_3>);
+        static_assert(IsRange<bstring_1>);
+        static_assert(!IsTextString<bstring_1>);
+        static_assert(!IsTextString<bstring_2>);
+        static_assert(!IsTextString<bstring_3>);
+        static_assert(!IsArray<bstring_1>);
+    }
+
+    {
+        using container = std::vector<int>;
+        static_assert(IsRange<container>);
+        static_assert(IsContiguous<container>);
+    }
+
+    {
+        using container = std::list<int>;
+        static_assert(IsRange<container>);
+        static_assert(!IsContiguous<container>);
+    }
+
+    {
+        using container = std::deque<int>;
+        static_assert(IsRange<container>);
+        static_assert(!IsContiguous<container>);
+    }
+
+    {
+        using container = std::array<int, 5>;
+        static_assert(IsRange<container>);
+        static_assert(IsContiguous<container>);
     }
 }

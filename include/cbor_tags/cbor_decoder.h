@@ -13,6 +13,7 @@
 #include <iterator>
 #include <map>
 #include <nameof.hpp>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -207,6 +208,15 @@ class decoder {
             }
         } else {
             value = decode_value();
+        }
+    }
+
+    template <IsOptional T> constexpr void decode(T &value, byte_type additionalInfo) {
+        using value_type = typename T::value_type;
+        if (additionalInfo == static_cast<byte_type>(22)) {
+            value.reset();
+        } else {
+            value = decode<value_type>();
         }
     }
 

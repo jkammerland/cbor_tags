@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <ranges>
 #include <type_traits>
@@ -46,13 +47,14 @@ concept IsTextString = requires(T t) {
     requires std::is_signed_v<typename T::value_type>;
     requires std::is_integral_v<typename T::value_type>;
     requires sizeof(typename T::value_type) == 1;
+    { t.substr(0, 1) };
 };
 
 template <typename T>
 concept IsBinaryString = requires(T t) {
-    requires std::is_unsigned_v<typename T::value_type>;
-    requires std::is_integral_v<typename T::value_type>;
-    requires sizeof(typename T::value_type) == 1;
+    requires std::is_same_v<std::decay_t<typename T::value_type>, std::byte> ||
+                 std::is_same_v<std::decay_t<typename T::value_type>, std::uint8_t>;
+    { t.substr(0, 1) };
 };
 
 template <typename T>
@@ -78,6 +80,15 @@ template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<T>::type;
     typename std::tuple_element<0, T>::type;
+    requires(!IsArray<T>);
+};
+
+template <typename T>
+concept IsOptional = requires(T t) {
+    typename T::value_type;
+    { T{typename T::value_type{}} } -> std::same_as<T>;
+    { T{std::nullopt} } -> std::same_as<T>;
+    { t.value() } -> std::same_as<typename T::value_type &>;
 };
 
 template <typename T>
