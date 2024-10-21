@@ -202,6 +202,12 @@ class encoder : public Encoders... {
         }
     }
 
+    template <typename... T>
+        requires IsVariant<std::variant<T...>> && (!std::is_same_v<variant, std::variant<T...>>)
+    constexpr void encode(const std::variant<T...> &value) {
+        std::visit([this](const auto &v) { this->encode(v); }, value);
+    }
+
     constexpr void encode(const variant &value) {
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }

@@ -14,6 +14,7 @@
 #include <memory_resource>
 #include <nameof.hpp>
 #include <numeric>
+#include <optional>
 
 using namespace cbor::tags;
 
@@ -120,4 +121,62 @@ TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::by
     }
 
     CHECK_EQ(std::equal(buffer_array.begin(), buffer_array.end(), buffer_list.begin()), true);
+}
+
+TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>) {
+    using namespace std::string_view_literals;
+    using variant_t = std::variant<int, double, std::string, std::optional<uint8_t>>;
+
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = 42;
+        out.encode(var);
+
+        auto expected_sv = "182a"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = 3.14;
+        out.encode(var);
+
+        auto expected_sv = "fb40091eb851eb851f"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = "Hello world!";
+        out.encode(var);
+
+        auto expected = "6c48656c6c6f20776f726c6421"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected.size()), expected);
+    }
+
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = std::optional<uint8_t>(42);
+        out.encode(var);
+
+        auto expected_sv = "182a"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = std::nullopt;
+        out.encode(var);
+
+        auto expected_sv = "f6"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
 }

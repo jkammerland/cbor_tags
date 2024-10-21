@@ -46,6 +46,5 @@ struct TEST_SUITE {
 TEST_CASE("test suite") {
     auto tests = TEST_SUITE{};
     auto t     = cbor::tags::to_tuple(tests);
-
     std::apply([](auto &...args) { (args.run(), ...); }, t);
 }

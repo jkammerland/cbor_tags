@@ -107,26 +107,7 @@ print_bytes(big_array_encoded); // anotated hex/diagnostic notation TODO:
 99 03e8    # array(1000)
    00      #   unsigned(0)
    01      #   unsigned(1)
-   02      #   unsigned(2)
-   03      #   unsigned(3)
-   04      #   unsigned(4)
-   05      #   unsigned(5)
-   06      #   unsigned(6)
-   07      #   unsigned(7)
-   08      #   unsigned(8)
-   09      #   unsigned(9)
-   0a      #   unsigned(10)
-   0b      #   unsigned(11)
-   0c      #   unsigned(12)
-   0d      #   unsigned(13)
-   0e      #   unsigned(14)
-   0f      #   unsigned(15)
-   10      #   unsigned(16)
-   11      #   unsigned(17)
-   12      #   unsigned(18)
-   13      #   unsigned(19)
-   14      #   unsigned(20)
-   15      #   unsigned(21)
+   ...
    16      #   unsigned(22)
    17      #   unsigned(23)
    18 18   #   unsigned(24)
@@ -238,6 +219,16 @@ SUBCASE("Map of float sorted") {
                 "0fd0fb4008000000000000fa40490fd0f5fa40490fd0f6fa40490fd0");
 }
 ```
+
+## Important notes about interpretation of RFC8949
+
+This is a low level parser, that only verify that the data is well-formed, not the data's validity. The validity of well-formed cbor can/should be handled by the application layer, i.e the consumer of this library. This also makes it more flexible. See [RFC8949#validity-of-items](https://datatracker.ietf.org/doc/html/rfc8949#name-validity-of-items)
+
+ 5.3. Validity of Items
+
+A well-formed but invalid CBOR data item (Section 1.2) presents a problem with interpreting the data encoded in it in the CBOR data model. A CBOR-based protocol could be specified in several layers, in which the lower layers don't process the semantics of some of the CBOR data they forward. These layers can't notice any validity errors in data they don't process and MUST forward that data as-is. The first layer that does process the semantics of an invalid CBOR item MUST pick one of two choices:
+Replace the problematic item with an error marker and continue with the next item, or
+Issue an error and stop processing altogether.A CBOR-based protocol MUST specify which of these options its decoders take for each kind of invalid item they might encounter.Such problems might occur at the basic validity level of CBOR or in the context of tags (tag validity).
 
 ## License
 [MIT]
