@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace cbor::tags {
@@ -218,6 +219,8 @@ class decoder {
             value = std::move(t);
         }
     }
+
+    template <typename... T> constexpr void decode(std::variant<T...> &value) { auto [major, additionalInfo] = read_initial_byte(); }
 
     template <typename T> constexpr void decode(T &value) {
         if (reader_.empty(data_)) {
@@ -433,6 +436,18 @@ class decoder {
     }
 
   protected:
+    inline constexpr auto read_initial_byte() {
+        if (reader_.empty(data_)) {
+            throw std::runtime_error("Unexpected end of input");
+        }
+
+        const auto   initialByte    = reader_.read(data_);
+        const auto &&majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
+        const auto &&additionalInfo = initialByte & static_cast<byte_type>(0x1F);
+
+        return std::make_pair(majorType, additionalInfo);
+    }
+
     const InputBuffer          &data_;
     detail::reader<InputBuffer> reader_;
 };
