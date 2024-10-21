@@ -18,6 +18,7 @@
 #include <nameof.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
@@ -53,6 +54,8 @@ TEST_CASE("Test concepts for IsX") {
         static_assert(IsBinaryString<std::vector<std::byte>>);
         static_assert(IsBinaryString<std::span<const std::byte>>);
         static_assert(!IsBinaryString<std::vector<uint8_t>>);
+        static_assert(!IsBinaryString<std::span<const uint8_t>>);
+        static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
         static_assert(!IsBinaryString<std::string>);
         static_assert(!IsBinaryString<std::string_view>);
     }
@@ -181,7 +184,7 @@ TEST_CASE_TEMPLATE("Test simple concepts negative", T, std::string, std::vector<
     static_assert(!IsSimple<T>);
 }
 
-TEST_CASE("Test non aggregates") {
+TEST_CASE("Test non aggregates, to_tuple(Type) will not work for Type that does not meet IsAggregate<Type>") {
     {
         using var = std::variant<int, double>;
         using opt = std::optional<var>;
