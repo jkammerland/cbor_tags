@@ -20,6 +20,19 @@ template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
 
 template <typename T>
+concept IsUnsigned = std::is_unsigned_v<T>;
+
+template <typename T>
+concept IsSigned = std::is_signed_v<T>;
+
+// Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
+struct float16_t;
+
+template <typename T>
+concept IsSimple =
+    std::is_floating_point_v<T> || std::is_same_v<T, float16_t> || std::is_same_v<T, std::nullptr_t> || std::is_same_v<T, bool>;
+
+template <typename T>
 concept IsRange = std::ranges::range<T> && std::is_class_v<T>;
 
 template <typename T>
@@ -86,6 +99,22 @@ concept IsAggregate = std::is_aggregate_v<T>;
 
 template <typename T>
 concept IsNonAggregate = !IsAggregate<T>;
+
+// Helper struct to assign numbers to concepts
+template <typename T>
+struct ConceptType : std::integral_constant<int,
+                                            IsContiguous<T>     ? 1
+                                            : IsMap<T>          ? 2
+                                            : IsArray<T>        ? 3
+                                            : IsTextString<T>   ? 4
+                                            : IsBinaryString<T> ? 5
+                                            : IsTuple<T>        ? 6
+                                            : IsOptional<T>     ? 7
+                                            : IsVariant<T>      ? 8
+                                            : IsRange<T>        ? 9
+                                                                : // IsRange should be last as it's the most general
+                                                0                 // Default case if no concept is satisfied
+                                            > {};
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
