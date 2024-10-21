@@ -64,11 +64,7 @@ concept IsTextString = requires(T t) {
 };
 
 template <typename T>
-concept IsBinaryString = requires(T t) {
-    requires std::is_same_v<std::decay_t<typename T::value_type>, std::byte> ||
-                 std::is_same_v<std::decay_t<typename T::value_type>, std::uint8_t>;
-    { t.substr(0, 1) };
-};
+concept IsBinaryString = IsRange<T> && std::is_same_v<std::decay_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
 concept IsString = IsTextString<T> || IsBinaryString<T>;

@@ -25,7 +25,38 @@
 
 using namespace cbor::tags;
 
-TEST_CASE("Test more concepts for IsX") {
+TEST_CASE("Test concepts for IsX") {
+    {
+        static_assert(IsUnsigned<std::uint8_t>);
+        static_assert(IsUnsigned<std::uint16_t>);
+        static_assert(!IsUnsigned<int>);
+
+        static_assert(IsSigned<int>);
+        static_assert(IsSigned<std::int8_t>);
+        static_assert(IsSigned<std::int16_t>);
+        static_assert(!IsSigned<std::uint8_t>);
+    }
+
+    {
+        static_assert(IsTextString<std::string>);
+        static_assert(IsTextString<std::string_view>);
+        static_assert(IsTextString<std::basic_string_view<char>>);
+        static_assert(!IsTextString<std::basic_string_view<std::byte>>);
+        static_assert(!IsTextString<std::vector<char>>);
+        static_assert(!IsTextString<std::span<char>>);
+        static_assert(!IsTextString<std::span<const std::byte>>);
+    }
+
+    {
+        static_assert(IsBinaryString<std::basic_string<std::byte>>);
+        static_assert(IsBinaryString<std::basic_string_view<std::byte>>);
+        static_assert(IsBinaryString<std::vector<std::byte>>);
+        static_assert(IsBinaryString<std::span<const std::byte>>);
+        static_assert(!IsBinaryString<std::vector<uint8_t>>);
+        static_assert(!IsBinaryString<std::string>);
+        static_assert(!IsBinaryString<std::string_view>);
+    }
+
     {
         using map_1 = std::map<int, int>;
         static_assert(IsMap<map_1>);
@@ -99,7 +130,7 @@ TEST_CASE("Test more concepts for IsX") {
         using bstring_2 = std::vector<std::byte>;
         using bstring_3 = std::basic_string_view<std::byte>;
         static_assert(IsBinaryString<bstring_1>);
-        static_assert(!IsBinaryString<bstring_2>);
+        static_assert(IsBinaryString<bstring_2>);
         static_assert(IsBinaryString<bstring_3>);
         static_assert(IsRange<bstring_1>);
         static_assert(!IsTextString<bstring_1>);
