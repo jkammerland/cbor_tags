@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -61,22 +60,6 @@ concept IsBinaryString = requires(T t) {
 template <typename T>
 concept IsString = IsTextString<T> || IsBinaryString<T>;
 
-template <typename Buffer>
-    requires ValidCborBuffer<Buffer>
-struct CborStream {
-    Buffer           &buffer;
-    Buffer::size_type head{};
-
-    constexpr explicit CborStream(Buffer &buffer) : buffer(buffer) {}
-    template <typename... Args> void operator()(const Args &...) { /* (de)serialize cbor onto buffer */ }
-};
-
-template <typename T, typename... Args>
-concept IsBracesContructible = requires { T{std::declval<Args>()...}; };
-
-// template <typename T, typename... Args>
-// concept IsBracesContructible = requires(Args... args) { T{args...}; };
-
 template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<T>::type;
@@ -103,6 +86,19 @@ concept IsAggregate = std::is_aggregate_v<T>;
 
 template <typename T>
 concept IsNonAggregate = !IsAggregate<T>;
+
+template <typename Buffer>
+    requires ValidCborBuffer<Buffer>
+struct CborStream {
+    Buffer           &buffer;
+    Buffer::size_type head{};
+
+    constexpr explicit CborStream(Buffer &buffer) : buffer(buffer) {}
+    template <typename... Args> void operator()(const Args &...) { /* (de)serialize cbor onto buffer */ }
+};
+
+template <typename T, typename... Args>
+concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
 struct any {
     template <class T> constexpr operator T() const {
