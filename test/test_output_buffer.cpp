@@ -123,7 +123,7 @@ TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::by
     CHECK_EQ(std::equal(buffer_array.begin(), buffer_array.end(), buffer_list.begin()), true);
 }
 
-TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>) {
+TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vector<uint8_t>) {
     using namespace std::string_view_literals;
     using variant_t = std::variant<int, double, std::string, std::optional<uint8_t>>;
 

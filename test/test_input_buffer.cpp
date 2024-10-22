@@ -12,6 +12,7 @@
 #include <list>
 #include <memory_resource>
 #include <nameof.hpp>
+#include <optional>
 #include <utility>
 #include <variant>
 
@@ -53,33 +54,51 @@ TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 5>, st
     }
 }
 
-template <typename T> void set1(T &a) {
-    auto &[b] = a;
-    b         = 6.28;
-}
-
-TEST_CASE_TEMPLATE("Test input tag 123", T, std::vector<uint8_t>) {
+TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
     using namespace std::string_view_literals;
-    auto bytes = to_bytes("d87bfb40091eb851eb851f"sv);
+    auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
 
     auto in = make_decoder(bytes);
     struct A {
-        double b;
+        std::string b;
     };
-    auto a             = make_tag_pair(tag<123>{}, A{});
-    auto &[tag, value] = a;
-    value.b            = 3.14;
-    CHECK_EQ(tag, 123);
-    CHECK_EQ(value.b, 3.14);
 
-    set1(std::get<1>(a));
-    CHECK_EQ(value.b, 6.28);
-
-    A    c{3.4};
-    auto tuple         = to_tuple(c);
-    std::get<0>(tuple) = 3.0;
-    CHECK_EQ(c.b, 3.0);
+    auto a               = make_tag_pair(tag<1>{}, A{});
+    auto &[tag, value_a] = a;
 
     in(a);
-    CHECK_EQ(value.b, 3.14);
+    CHECK_EQ(value_a.b, "Hello world!");
+}
+
+TEST_CASE_TEMPLATE("Test input tag 1 optional", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+    {
+        using namespace std::string_view_literals;
+        auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
+
+        auto in = make_decoder(bytes);
+        struct A {
+            std::optional<std::string> b;
+        };
+
+        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto &[tag, value_a] = a;
+
+        in(a);
+        CHECK_EQ(value_a.b, "Hello world!");
+    }
+    {
+        using namespace std::string_view_literals;
+        auto bytes = to_bytes("01f6"sv);
+
+        auto in = make_decoder(bytes);
+
+        struct A {
+            std::optional<std::string> b;
+        };
+
+        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto &[tag, value_a] = a;
+        in(a);
+        CHECK_EQ(value_a.b, std::nullopt);
+    }
 }
