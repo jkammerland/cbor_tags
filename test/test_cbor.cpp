@@ -17,38 +17,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
-
-std::vector<std::byte> to_bytes(std::string_view hex) {
-    if (hex.length() % 2 != 0) {
-        return {};
-    }
-
-    std::vector<std::byte> bytes;
-    bytes.reserve(hex.length() / 2);
-
-    auto byte_to_int = [](char c) -> int {
-        if (c >= '0' && c <= '9')
-            return c - '0';
-        if (c >= 'a' && c <= 'f')
-            return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F')
-            return c - 'A' + 10;
-        throw std::invalid_argument("Invalid hex character");
-    };
-
-    for (size_t i = 0; i < hex.length(); i += 2) {
-        int high = byte_to_int(hex[i]);
-        int low  = byte_to_int(hex[i + 1]);
-        bytes.push_back(static_cast<std::byte>((high << 4) | low));
-    }
-
-    return bytes;
-}
-
-// Print using fmt
-auto print_bytes = [](const std::vector<std::byte> &bytes) { fmt::print("{}\n", to_hex(bytes)); };
 
 TEST_CASE("CBOR Encoder") {
     using namespace cbor::tags;
@@ -110,18 +81,18 @@ TEST_CASE("CBOR Encoder") {
     }
 
     SUBCASE("Encode arrays") {
-        std::vector<value> empty_array;
+        std::vector<variant_contiguous> empty_array;
         CHECK(encoder<>::serialize(empty_array) == std::vector<std::byte>{std::byte(0x80)});
 
-        std::vector<value> array{1, 2, 3};
+        std::vector<variant_contiguous> array{1, 2, 3};
         CHECK(encoder<>::serialize(array) == std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
 
-        std::array<value, 3> fixed_array{1, 2, 3};
+        std::array<variant_contiguous, 3> fixed_array{1, 2, 3};
         CHECK(encoder<>::serialize(fixed_array) ==
               std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
 
         // Make big vector
-        std::vector<value> big_array;
+        std::vector<variant_contiguous> big_array;
         big_array.reserve(1000);
         for (std::uint64_t i = 0; i < 1000; ++i) {
             big_array.emplace_back(i);
@@ -156,11 +127,11 @@ TEST_CASE("CBOR Encoder") {
 
     SUBCASE("Encode maps") {
         {
-            std::map<value, value> empty_map;
+            std::map<variant_contiguous, variant_contiguous> empty_map;
             CHECK(encoder<>::serialize(empty_map) == std::vector<std::byte>{std::byte(0xA0)});
 
-            std::map<value, value> map;
-            map.insert({value(1), value(2)});
+            std::map<variant_contiguous, variant_contiguous> map;
+            map.insert({variant_contiguous(1), variant_contiguous(2)});
             // Should be 0xA1 0x01 0x02
             auto expected = std::vector<std::byte>{std::byte(0xA1), std::byte(0x01), std::byte(0x02)};
             auto encoded  = encoder<>::serialize(map);
@@ -170,7 +141,7 @@ TEST_CASE("CBOR Encoder") {
         }
 
         {
-            std::unordered_map<value, value> unordered_map{{1, 2}, {3, 4}, {5, 6}};
+            std::unordered_map<variant_contiguous, variant_contiguous> unordered_map{{1, 2}, {3, 4}, {5, 6}};
             // Note: The order of elements in an unordered_map is not guaranteed,
             // so we can't check for an exact byte sequence. Instead, we check the size.
             auto encoded = encoder<>::serialize(unordered_map);
@@ -214,8 +185,8 @@ TEST_CASE("CBOR Encoder") {
 
         // Unordered map of string_view
         {
-            std::unordered_map<value, value> string_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
-            auto                             encoded = encoder<>::serialize(string_map);
+            std::unordered_map<variant_contiguous, variant_contiguous> string_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
+            auto                                                       encoded = encoder<>::serialize(string_map);
             fmt::print("String map: ");
             print_bytes(encoded);
             CHECK(encoded.size() == 13);
@@ -251,8 +222,8 @@ TEST_CASE("CBOR Encoder") {
     }
 
     SUBCASE("Encode map of floats") {
-        std::map<value, value> float_map;
-        float_map.insert({value(1.0f), value(3.14159f)});
+        std::map<variant_contiguous, variant_contiguous> float_map;
+        float_map.insert({variant_contiguous(1.0f), variant_contiguous(3.14159f)});
         // a1fa3f800000fa40490fd0
         auto expected =
             std::vector<std::byte>{std::byte(0xA1), std::byte(0xFA), std::byte(0x3F), std::byte(0x80), std::byte(0x00), std::byte(0x00),
@@ -270,20 +241,20 @@ TEST_CASE("CBOR Encoder") {
     }
 
     SUBCASE("Encode nested structures") {
-        std::vector<value> number_and_stuff{1, 2, "hello", 3, 4.0f};
-        auto               encoded1 = encoder<>::serialize(number_and_stuff);
+        std::vector<variant_contiguous> number_and_stuff{1, 2, "hello", 3, 4.0f};
+        auto                            encoded1 = encoder<>::serialize(number_and_stuff);
         fmt::print("encoded1: ");
         print_bytes(encoded1);
         CHECK_EQ(to_hex(encoded1), "8501026568656c6c6f03fa40800000");
 
-        std::vector<value> other_stuff{false, true, nullptr};
-        auto               encoded2 = encoder<>::serialize(other_stuff);
+        std::vector<variant_contiguous> other_stuff{false, true, nullptr};
+        auto                            encoded2 = encoder<>::serialize(other_stuff);
         fmt::print("encoded2: ");
         print_bytes(encoded2);
         CHECK_EQ(to_hex(encoded2), "83f4f5f6");
 
-        std::map<value, value> map_of_arrays{{"numbers", std::span(encoded1)}, {"other", std::span(encoded2)}};
-        auto                   encoded3 = encoder<>::serialize(map_of_arrays);
+        std::map<variant_contiguous, variant_contiguous> map_of_arrays{{"numbers", std::span(encoded1)}, {"other", std::span(encoded2)}};
+        auto                                             encoded3 = encoder<>::serialize(map_of_arrays);
         fmt::print("Nested map: ");
         print_bytes(encoded3);
         CHECK_EQ(to_hex(encoded3), "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6");
@@ -292,7 +263,11 @@ TEST_CASE("CBOR Encoder") {
 
 TEST_CASE("Sorting strings and binary strings std::map") {
     {
-        std::map<cbor::tags::value, cbor::tags::value> string_map = {{"c", 1}, {"ac", 2}, {"b", 3}, {"a", 4}, {"ab", 5}};
+        std::map<cbor::tags::variant_contiguous, cbor::tags::variant_contiguous> string_map = {{"c", 1},
+                                                                                               {"ac", 2},
+                                                                                               {"b", 3},
+                                                                                               {"a", 4},
+                                                                                               {"ab", 5}};
 
         auto encoded = cbor::tags::encoder<>::serialize(string_map);
         fmt::print("String map: {}\n", to_hex(encoded));
@@ -301,7 +276,7 @@ TEST_CASE("Sorting strings and binary strings std::map") {
 
     // Binary strings
     {
-        std::map<cbor::tags::value, cbor::tags::value> string_map;
+        std::map<cbor::tags::variant_contiguous, cbor::tags::variant_contiguous> string_map;
         auto vec1 = std::vector<std::byte>({std::byte(0x05), std::byte(0x02), std::byte(0x03), std::byte(0x04), std::byte(0x05)});
         string_map.insert({std::span<std::byte>(vec1), 6});
         auto vec2 = std::vector<std::byte>({std::byte(0x01), std::byte(0x02), std::byte(0x03), std::byte(0x04)});
@@ -358,7 +333,7 @@ TEST_CASE("CBOR Encoder - Float encoding") {
     }
 
     SUBCASE("Map of float sorted") {
-        std::map<cbor::tags::value, cbor::tags::value> float_map;
+        std::map<cbor::tags::variant_contiguous, cbor::tags::variant_contiguous> float_map;
         float_map = {{3.0f, 3.14159f},  {1.0f, 3.14159f},    {2.0f, 3.14159f}, {4.0f, 3.14159f}, {-5.0f, 3.14159f},
                      {-1.0f, 3.14159f}, {10.0f, 3.14159f},   {3.0, 3.14159f},  {-3.0, 3.14159f}, {"hello", 3.14159f},
                      {true, 3.14159f},  {nullptr, 3.14159f}, {1, 3.14159f},    {-2, 3.14159f},   {-3, 3.14159f}};
@@ -483,7 +458,7 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Binary strings") {
-        auto encoded = encoder<>::serialize(std::span<std::byte>(bytes));
+        auto encoded = encoder<>::serialize(std::span<const std::byte>(bytes));
         auto decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);
         REQUIRE(std::holds_alternative<std::span<const std::byte>>(decoded));
@@ -496,7 +471,7 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Arrays") {
-        auto encoded = encoder<>::serialize(std::vector<value>{1, 2, 3});
+        auto encoded = encoder<>::serialize(std::vector<variant_contiguous>{1, 2, 3});
         auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_array_view>(decoded));
         auto array         = std::get<binary_array_view>(decoded);
@@ -508,11 +483,11 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Maps") {
-        auto encoded = encoder<>::serialize(std::map<value, value>{{"ca", 1}, {"ba", 2}, {"a", 3}});
+        auto encoded = encoder<>::serialize(std::map<variant_contiguous, variant_contiguous>{{"ca", 1}, {"ba", 2}, {"a", 3}});
         auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
         CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
@@ -523,21 +498,21 @@ TEST_CASE("cbor::tags decoder") {
         auto decoded = decoder<>::deserialize(std::span(bytes));
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 2);
         CHECK(map.contains("numbers"));
         CHECK(map.contains("other"));
     }
 
     SUBCASE("Floats unordered map") {
-        auto umap = std::unordered_map<value, value>{{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0, 6.0f}};
+        auto umap = std::unordered_map<variant_contiguous, variant_contiguous>{{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0, 6.0f}};
 
         auto encoded = encoder<>::serialize(umap);
         fmt::print("Float map: {}\n", to_hex(encoded));
         auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder<>::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::unordered_map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
 
         CHECK_EQ(std::get<float>(map[1.0f]), 2.0f);
         CHECK_EQ(std::get<float>(map[3.0f]), 4.0f);
@@ -546,11 +521,11 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Doubles map") {
-        auto encoded = encoder<>::serialize(std::map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
+        auto encoded = encoder<>::serialize(std::map<variant_contiguous, variant_contiguous>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
         auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
-        auto map = decoder<>::deserialize<std::map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
@@ -559,13 +534,14 @@ TEST_CASE("cbor::tags decoder") {
     }
 
     SUBCASE("Double unordered map") {
-        auto encoded = encoder<>::serialize(std::unordered_map<value, value>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
+        auto encoded =
+            encoder<>::serialize(std::unordered_map<variant_contiguous, variant_contiguous>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
         auto decoded = decoder<>::deserialize(encoded);
         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
 
         auto s = std::format("{}", "decoded");
 
-        auto map = decoder<>::deserialize<std::unordered_map<value, value>>(std::get<binary_map_view>(decoded));
+        auto map = decoder<>::deserialize<std::unordered_map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
         CHECK_EQ(map.size(), 3);
         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
         CHECK_EQ(std::get<double>(map[3.0]), 4.0);

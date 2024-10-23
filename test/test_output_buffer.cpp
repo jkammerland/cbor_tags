@@ -4,6 +4,7 @@
 #include "test_util.h"
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <doctest/parts/doctest_fwd.h>
@@ -12,17 +13,18 @@
 #include <list>
 #include <memory_resource>
 #include <nameof.hpp>
+#include <numeric>
+#include <optional>
 
 using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::byte>, std::array<std::byte, 1024>) {
     auto [data, out] = make_data_and_encoder<T>();
+    out.encode(static_cast<std::uint64_t>(1));
+    out.encode(static_cast<std::uint64_t>(2));
+    out.encode(static_cast<std::uint64_t>(3));
 
-    out.encode_value(1ull);
-    out.encode_value(2ull);
-    out.encode_value(3ull);
-
-    if constexpr (!detail::IsArrayConcept<T>) {
+    if constexpr (!IsArray<T>) {
         CHECK_EQ(to_hex(data), "010203");
     } else {
         CHECK_EQ(to_hex(std::span(data.data(), 3)), "010203");
@@ -34,13 +36,14 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;
-    out.encode_value(sv);
+    out.encode(sv);
 
-    if constexpr (!detail::IsArrayConcept<T>) {
-        // +1 for the tag
+    if constexpr (!IsArray<T>) {
         CHECK_EQ(to_hex(data), "6c48656c6c6f20776f726c6421");
+        // +1 for the tag
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);
     } else {
+        // +1 for the tag
         CHECK_EQ(to_hex(std::span(data.data(), sv.size() + 1)), "6c48656c6c6f20776f726c6421");
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);
     }
@@ -52,15 +55,15 @@ TEST_CASE("CBOR Encoder on deque") {
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;
-    out.encode_value(1ull);
-    out.encode_value(sv);
+    out.encode(static_cast<std::uint64_t>(1));
+    out.encode(sv);
 
     CHECK_EQ(to_hex(buffer), "016c48656c6c6f20776f726c6421");
 
     { // Big string
         auto        size1 = buffer.size();
         std::string big_string(10, 'a');
-        out.encode_value(big_string);
+        out.encode(big_string);
         auto size2 = buffer.size();
 
         CHECK_EQ(size2 - size1, 1 + big_string.size());
@@ -77,10 +80,103 @@ TEST_CASE_TEMPLATE("CBOR with std::pmr", T, std::pmr::vector<std::byte>, std::pm
     T                                   resource_vector(&resource);
 
     auto out = make_encoder<T>(resource_vector);
-
-    out.encode_value(1ull);
-    out.encode_value(2ull);
-    out.encode_value(3ull);
+    out.encode(static_cast<std::uint64_t>(1));
+    out.encode(static_cast<std::uint64_t>(2));
+    out.encode(static_cast<std::uint64_t>(3));
 
     CHECK_EQ(to_hex(resource_vector), "010203");
+}
+
+TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::byte>, std::deque<std::byte>) {
+    std::array<uint64_t, 100> buffer_array;
+    std::list<uint64_t>       buffer_list(100);
+
+    {
+        T    data;
+        auto out = make_encoder(data);
+
+        std::iota(buffer_array.begin(), buffer_array.end(), 0);
+        auto span = std::span(buffer_array);
+
+        out.encode(span);
+        // fmt::print("span: {}\n", to_hex(data));
+        CHECK_EQ(
+            to_hex(data),
+            "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f18201821182218231824182518261827182818291"
+            "82a182b182c182d182e182f1830183118321833183418351836183718381839183a183b183c183d183e183f18401841184218431844184518461847184818"
+            "49184a184b184c184d184e184f1850185118521853185418551856185718581859185a185b185c185d185e185f1860186118621863");
+    }
+    {
+        T    data;
+        auto out = make_encoder(data);
+
+        std::iota(buffer_list.begin(), buffer_list.end(), 0);
+
+        out.encode(buffer_list);
+        // fmt::print("list: {}\n", to_hex(data));
+        CHECK_EQ(to_hex(data),
+                 "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f1820182118221823182418251826182718281"
+                 "829182a182b182c182d182e182f1830183118321833183418351836183718381839183a183b183c183d183e183f184018411842184318441845184618"
+                 "4718481849184a184b184c184d184e184f1850185118521853185418551856185718581859185a185b185c185d185e185f1860186118621863");
+    }
+
+    CHECK_EQ(std::equal(buffer_array.begin(), buffer_array.end(), buffer_list.begin()), true);
+}
+
+TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vector<uint8_t>) {
+    using namespace std::string_view_literals;
+    using variant_t = std::variant<int, double, std::string, std::optional<uint8_t>>;
+
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = 42;
+        out.encode(var);
+
+        auto expected_sv = "182a"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = 3.14;
+        out.encode(var);
+
+        auto expected_sv = "fb40091eb851eb851f"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = "Hello world!";
+        out.encode(var);
+
+        auto expected = "6c48656c6c6f20776f726c6421"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected.size()), expected);
+    }
+
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = std::optional<uint8_t>(42);
+        out.encode(var);
+
+        auto expected_sv = "182a"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+
+    {
+        T    buffer;
+        auto out = make_encoder(buffer);
+
+        variant_t var = std::nullopt;
+        out.encode(var);
+
+        auto expected_sv = "f6"sv;
+        CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
 }

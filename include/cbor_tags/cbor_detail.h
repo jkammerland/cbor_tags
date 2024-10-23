@@ -2,22 +2,14 @@
 
 #include "cbor_tags/cbor_concepts.h"
 
+#include <concepts>
 #include <cstdio>
 #include <cstring>
 #include <type_traits>
 
 namespace cbor::tags::detail {
 
-template <typename T>
-concept IsArrayConcept = requires {
-    typename T::value_type;
-    typename T::size_type;
-    typename std::tuple_size<T>::type;
-    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
-                 std::is_same_v<T, std::span<typename T::value_type>>;
-};
-
-template <typename T, bool IsArray = IsArrayConcept<T>>
+template <typename T, bool IsArray = IsArray<T>>
     requires ValidCborBuffer<T>
 struct appender;
 
@@ -93,7 +85,9 @@ template <typename T> struct reader<T, false> {
     }
 };
 
-template <IsAggregateOrTuple T, typename... TArgs> constexpr std::size_t num_bindings_impl() {
+template <typename T, typename... TArgs>
+    requires IsAggregate<T> || IsTuple<T>
+constexpr std::size_t num_bindings_impl() {
     if constexpr (requires { T{std::declval<TArgs>()...}; }) {
         return num_bindings_impl<T, any, TArgs...>();
     } else {
@@ -101,6 +95,10 @@ template <IsAggregateOrTuple T, typename... TArgs> constexpr std::size_t num_bin
     }
 }
 
-template <IsAggregateOrTuple T> constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
+template <IsTuple T> constexpr std::size_t num_bindings_impl() { return std::tuple_size_v<T>; }
+
+template <typename T>
+    requires IsAggregate<T> || IsTuple<T>
+constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
 
 } // namespace cbor::tags::detail

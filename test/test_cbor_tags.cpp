@@ -1,332 +1,137 @@
-
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/float16_ieee754.h"
+#include "test_util.h"
 
-#include <bit>
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <doctest/doctest.h>
+#include <exception>
+#include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <fmt/std.h>
+#include <format>
+#include <list>
+#include <map>
 #include <nameof.hpp>
+#include <optional>
+#include <set>
+#include <span>
+#include <stdexcept>
+#include <string>
 #include <string_view>
-#include <sys/stat.h>
-#include <system_error>
+#include <type_traits>
 #include <variant>
-#include <zpp_bits.h>
+#include <vector>
 
-struct person {
-    std::string                                                 name;
-    int                                                         age;
-    std::variant<std::monostate, std::string, std::vector<int>> data;
+using namespace cbor::tags;
+
+std::string some_data = "Hello world!";
+struct A {
+    std::int64_t a;
+    std::string  s;
 };
 
-TEST_SUITE("zpp bits example") {
-    TEST_CASE("serialize") {
-        auto [data, in, out] = zpp::bits::data_in_out();
-        fmt::print("data type: {}\n", nameof::nameof_type<decltype(data)>());
-        fmt::print("in type: {}\n", nameof::nameof_type<decltype(in)>());
-        fmt::print("out type: {}\n", nameof::nameof_type<decltype(out)>());
-
-        auto result = out(person{"Person1", 25, {}}, person{"Person2", 35, std::vector<int>{1, 2, 3}});
-        if (failure(result)) {
-            // `result` is implicitly convertible to `std::errc`.
-            // handle the error or return/throw exception.
-            REQUIRE(false);
-        }
-
-        result = out(person{"Person4", 25, {}}, person{"Person5", 35, std::vector<int>{1, 2, 3}});
-        if (failure(result)) {
-            // `result` is implicitly convertible to `std::errc`.
-            // handle the error or return/throw exception.
-            REQUIRE(false);
-        }
-
-        person p1, p2;
-
-        result = in(p1, p2);
-        if (failure(result)) {
-            // `result` is implicitly convertible to `std::errc`.
-            // handle the error or return/throw exception.
-        } else {
-            CHECK(p1.name == "Person1");
-            CHECK(p1.age == 25);
-            CHECK(p2.name == "Person2");
-            CHECK(p2.age == 35);
-            CHECK(std::holds_alternative<std::monostate>(p1.data));
-            CHECK(std::get<std::vector<int>>(p2.data) == std::vector<int>{1, 2, 3});
-        }
-
-        result = in(p1, p2);
-        if (failure(result)) {
-            // `result` is implicitly convertible to `std::errc`.
-            // handle the error or return/throw exception.
-        } else {
-            CHECK(p1.name == "Person4");
-            CHECK(p1.age == 25);
-            CHECK(p2.name == "Person5");
-            CHECK(p2.age == 35);
-            CHECK(std::holds_alternative<std::monostate>(p1.data));
-            CHECK(std::get<std::vector<int>>(p2.data) == std::vector<int>{1, 2, 3});
-        }
-    }
-}
-
-TEST_CASE("Serialize std::span") {
-    auto [data, in, out] = zpp::bits::data_in_out(zpp::bits::endian::network{});
-
-    std::vector<int> v{1, 2, 3, 4, 5};
-
-    auto result = out(std::span(v));
-    if (failure(result)) {
-        // `result` is implicitly convertible to `std::errc`.
-        // handle the error or return/throw exception.
-        REQUIRE(false);
-    }
-
-    std::span<const std::byte> s;
-    result = in(s);
-    if (failure(result)) {
-        // `result` is implicitly convertible to `std::errc`.
-        // handle the error or return/throw exception.
-
-        // Print error message
-        fmt::print("Error: {}\n", int(result.code));
-        REQUIRE(false);
+// Helper function to print type and value
+template <typename T> constexpr void print_type_and_value(const T &value) {
+    if constexpr (std::is_same_v<T, A>) {
+        fmt::print("Got type <A>: with values a={}, s={}\n", value.a, value.s);
+    } else if constexpr (fmt::is_formattable<T>()) {
+        fmt::print("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
     } else {
-        CHECK(s.size() == 5);
-        // CHECK(std::equal(v.begin(), v.end(), reinterpret_cast<const int *>(s.data())));
-        fmt::print("s: {}\n", fmt::join(s, ", "));
+        fmt::print("Got type <{}>\n", nameof::nameof_short_type<T>());
     }
 }
 
-TEST_CASE("TAG example COSE") {
-    auto [data, in, out] = zpp::bits::data_in_out();
-
-    std::string data1 = "This is the content.";
-
-    using namespace std::string_view_literals;
-    auto result = out(cbor::tags::binary_tag_view{16, std::span<std::byte>(reinterpret_cast<std::byte *>(data1.data()), data1.size())});
-
-    if (failure(result)) {
-        // `result` is implicitly convertible to `std::errc`.
-        // handle the error or return/throw exception.
-        REQUIRE(false);
-    }
-
-    cbor::tags::binary_tag_view t;
-    result = in(t);
-    if (failure(result)) {
-        // `result` is implicitly convertible to `std::errc`.
-        // handle the error or return/throw exception.
-        REQUIRE(false);
-    } else {
-        CHECK(t.tag == 16);
-        CHECK(t.data.size() == data1.size());
-        CHECK(std::equal(data1.begin(), data1.end(), reinterpret_cast<const char *>(t.data.data())));
-    }
-}
-
-TEST_CASE("Tag with big endian encoding") {
-    struct Double {
-        double value;
+TEST_CASE("Basic reflection") {
+    struct M {
+        int                a;
+        std::optional<int> b;
     };
 
-    auto [data, out]  = zpp::bits::data_out(zpp::bits::endian::big{});
-    auto [dataIn, in] = zpp::bits::data_in(zpp::bits::endian::big{});
+    auto count = detail::aggregate_binding_count<M>;
+    fmt::print("M has {} members\n", count);
+    CHECK_EQ(count, 2);
 
-    Double d{3.14159};
+    auto is_constructible = IsBracesContructible<M, any, any>;
+    fmt::print("M is braces construct with 2 members: {}\n", is_constructible);
+    CHECK(is_constructible);
 
-    auto result = out(cbor::tags::make_tag(1, d));
-    CHECK(!failure(result));
+    // Check if we can construct M with any and any
+    [[maybe_unused]] auto tmp1 = M{any{}, std::optional<int>{any{}}}; // This should compile
 
-    // Transfer data
-    dataIn = data;
-
-    cbor::tags::tag_pair<Double> d2;
-    result = in(d2);
-    CHECK(!failure(result));
-    CHECK(1 == d2.first);
-    CHECK(d.value == d2.second.value);
+    [[maybe_unused]] auto tmp2 = M{any{}, any{}}; // Question is if if we can compile this
 }
 
-struct DoubleStruct {
-    double                         value;
-    static constexpr std::uint64_t cbor_tag{1};
-};
-
-TEST_CASE("Tag struct with cbor_tag") {
-    auto [data, out]  = zpp::bits::data_out();
-    auto [dataIn, in] = zpp::bits::data_in();
-
-    DoubleStruct d{3.14159};
-
-    auto result = out(d);
-    CHECK(!failure(result));
-
-    // Transfer data
-    CHECK(data.size() == 8);
-
-    dataIn = data;
-
-    DoubleStruct d2;
-    result = in(d2);
-    CHECK(!failure(result));
-    CHECK(d.value == d2.value);
-}
-
-TEST_CASE("Tag string_view with cbor_tag") {
-    auto [data, out]  = zpp::bits::data_out();
-    auto [dataIn, in] = zpp::bits::data_in();
-
-    // Data to transfer
-    std::string_view s{"This is a string view"};
-
-    // Encode data
-    auto result = out(cbor::tags::make_tag(1, s));
-    CHECK(!failure(result));
-
-    // Emulate data transfer
-    dataIn = data;
-
-    // Decode data (I would like to use string_view as type here, not std::span<const std::byte>)
-    cbor::tags::tag_pair<std::string_view> s2;
-    result = in(s2);
-    CHECK(!failure(result));
-
-    // Check data
-    CHECK(1 == s2.first);
-    CHECK(s == std::string_view(reinterpret_cast<const char *>(s2.second.data()), s2.second.size()));
-
-    // Check data location is different (it was truly transferred)
-    CHECK(s.data() != reinterpret_cast<const char *>(s2.second.data()));
-}
-
-TEST_CASE("just string_views") {
-    auto [data, out]  = zpp::bits::data_out();
-    auto [dataIn, in] = zpp::bits::data_in();
-
-    // Data to transfer
-    std::string_view s{"This is a string view"};
-
-    // Encode data
-    auto result = out(s);
-    CHECK(!failure(result));
-
-    // Emulate data transfer
-    dataIn = data;
-
-    // Decode data (I would like to use string_view as type here, not std::span<const std::byte>)
-    std::string_view s2;
-    result = in(s2);
-    CHECK(!failure(result));
-
-    // Check data
-    CHECK(s == s2);
-
-    // Check data location is different (it was truly transferred)
-    CHECK(s.data() != s2.data());
-
-    CHECK(s2.data() >= reinterpret_cast<const char *>(dataIn.data()));
-    CHECK(s2.data() < reinterpret_cast<const char *>(dataIn.data() + dataIn.size()));
-}
-
-TEST_CASE("Multiple string_views") {
-    struct Data {
-        std::string_view s1;
-        std::string_view s2;
-    };
-
-    auto [data, out]  = zpp::bits::data_out();
-    auto [dataIn, in] = zpp::bits::data_in();
-
-    // Data to transfer
-    Data d{"This is a string view", "This is another string view"};
-
-    // Encode data
-    auto result = out(d);
-    CHECK(!failure(result));
-
-    // Emulate data transfer
-    dataIn = data;
-
-    // Decode data (I would like to use string_view as type here, not std::span<const std::byte>)
-    Data d2;
-    result = in(d2);
-    CHECK(!failure(result));
-
-    // Check data
-    CHECK(d.s1 == d2.s1);
-    CHECK(d.s2 == d2.s2);
-
-    // Check data location is different (it was truly transferred)
-    CHECK(d.s1.data() != d2.s1.data());
-    CHECK(d.s2.data() != d2.s2.data());
-
-    CHECK(d2.s1.data() >= reinterpret_cast<const char *>(dataIn.data()));
-    CHECK(d2.s1.data() < reinterpret_cast<const char *>(dataIn.data() + dataIn.size()));
-
-    CHECK(d2.s2.data() >= reinterpret_cast<const char *>(dataIn.data()));
-    CHECK(d2.s2.data() < reinterpret_cast<const char *>(dataIn.data() + dataIn.size()));
-}
-
-TEST_CASE("Mix string_view and std::span<const std::byte>") {
-    struct Data {
-        std::string_view           s1;
-        std::span<const std::byte> s2;
+TEST_CASE("Advanced reflection") {
+    struct Z {
         int                        a;
-        double                     b;
+        float                      b;
+        std::string                c;
+        std::vector<int>           d;
+        std::map<std::string, int> e;
+        std::deque<double>         f;
 
-        std::variant<float, double> v;
+        A g;
+
+        std::optional<int>            h;
+        std::optional<std::list<int>> i;
+        std::vector<std::vector<int>> j;
+        std::multimap<int, int>       k;
+        std::set<std::pair<int, int>> l;
     };
 
-    auto [data, out]  = zpp::bits::data_out();
-    auto [dataIn, in] = zpp::bits::data_in();
+    auto z = Z{42,
+               3.14f,
+               "Hello world!",
+               {1, 2, 3},
+               {{"one", 1}, {"two", 2}, {"three", 3}},
+               {1.0, 2.0, 3.0},
+               A{42, "Hello world!"},
+               std::nullopt,
+               std::list<int>{1, 2, 3},           // std::optional<std::list<int>>
+               {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, // std::vector<std::vector<int>>
+               {{1, 2}, {1, 2}, {1, 2}},          // std::multimap<int, int>
+               {{1, 2}, {3, 4}, {5, 6}}};         // std::set<std::pair<int, int>>
 
-    std::vector<std::byte> v{
-        std::initializer_list<std::byte>{std::byte{0x1}, std::byte{0x2}, std::byte{0x3}, std::byte{0x4}, std::byte{0x5}}};
+    auto &&tuple = to_tuple(z);
 
-    // Data to transfer
-    Data d{"This is a string view", std::span(v), 42, 3.14159, 3.14159f};
-
-    // Encode data
-    auto result = out(d);
-    CHECK(!failure(result));
-
-    // Emulate data transfer
-    dataIn = data;
-
-    // Decode data (I would like to use string_view as type here, not std::span<const std::byte>)
-    Data d2;
-    result = in(d2);
-    CHECK(!failure(result));
-
-    // Check data
-    CHECK(d.s1 == d2.s1);
-    CHECK(d.s2.size() == d2.s2.size());
-    CHECK(std::equal(d.s2.begin(), d.s2.end(), d2.s2.begin()));
-
-    // Check data location is different (it was truly transferred)
-    CHECK(d.s1.data() != d2.s1.data());
-
-    // pointer value is within the transferred data
-    CHECK(d2.s1.data() >= reinterpret_cast<const char *>(dataIn.data()));
-    CHECK(d2.s1.data() < reinterpret_cast<const char *>(dataIn.data() + dataIn.size()));
-
-    CHECK(d2.s2.data() >= reinterpret_cast<const std::byte *>(dataIn.data()));
-    CHECK(d2.s2.data() < reinterpret_cast<const std::byte *>(dataIn.data() + dataIn.size()));
-
-    CHECK(d.a == d2.a);
-    CHECK(d.b == d2.b);
-    CHECK(std::get<float>(d.v) == std::get<float>(d2.v));
+    std::apply([](auto &&...args) { (print_type_and_value(args), ...); }, tuple);
+    CHECK_EQ(detail::aggregate_binding_count<Z>, 12);
 }
 
-TEST_CASE("TEST endian") {
-    using native = zpp::bits::endian::native;
-    using big    = zpp::bits::endian::big;
-    using little = zpp::bits::endian::little;
+struct B {
+    std::int64_t a;
+    std::string  s;
+};
+struct C {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::int64_t                   a;
+    std::string                    s;
+};
 
-    static_assert(native::value == std::endian::native);
-    static_assert(big::value == std::endian::big);
-    static_assert(little::value == std::endian::little);
+TEST_CASE("Basic tag") {
+    using namespace literals;
+    std::string s1, s2;
+    {
+
+        auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
+
+        auto tag_B = make_tag_pair(140_tag, B{-42, "Hello world!"});
+        out(tag_B);
+        s1 = to_hex(data);
+    }
+    {
+        auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
+        out(C{-42, "Hello world!"});
+        s2 = to_hex(data);
+    }
+
+    CHECK_EQ(s1, s2);
 }

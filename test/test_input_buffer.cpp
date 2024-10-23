@@ -1,4 +1,5 @@
 
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "test_util.h"
 
@@ -11,6 +12,8 @@
 #include <list>
 #include <memory_resource>
 #include <nameof.hpp>
+#include <optional>
+#include <utility>
 #include <variant>
 
 using namespace cbor::tags;
@@ -49,4 +52,94 @@ TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 5>, st
         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
         CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
     }
+}
+
+TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+    using namespace std::string_view_literals;
+    auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
+
+    auto in = make_decoder(bytes);
+    struct A {
+        std::string b;
+    };
+
+    auto a               = make_tag_pair(tag<1>{}, A{});
+    auto &[tag, value_a] = a;
+
+    in(a);
+    CHECK_EQ(value_a.b, "Hello world!");
+}
+
+TEST_CASE_TEMPLATE("Test input tag 1 optional", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+    {
+        using namespace std::string_view_literals;
+        auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
+
+        auto in = make_decoder(bytes);
+        struct A {
+            std::optional<std::string> b;
+        };
+
+        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto &[tag, value_a] = a;
+
+        in(a);
+        CHECK_EQ(value_a.b, "Hello world!");
+    }
+    {
+        using namespace std::string_view_literals;
+        auto bytes = to_bytes("01f6"sv);
+
+        auto in = make_decoder(bytes);
+
+        struct A {
+            std::optional<std::string> b;
+        };
+
+        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto &[tag, value_a] = a;
+        in(a);
+        CHECK_EQ(value_a.b, std::nullopt);
+    }
+}
+
+template <typename MajorType, typename... T> bool contains_major(MajorType major, std::variant<T...>) {
+    return (... || (major == ConceptType<MajorType, T>::value));
+}
+
+TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<uint8_t>, std::list<std::byte>) {
+    {
+        using namespace std::string_view_literals;
+        auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
+
+        auto in = make_decoder(bytes);
+        struct A {
+            std::variant<std::string, int> b;
+        };
+
+        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto &[tag, value_a] = a;
+        value_a.b            = 4;
+
+        REQUIRE(contains_major(static_cast<T::value_type>(3), value_a.b));
+
+        in(a);
+        REQUIRE(std::holds_alternative<std::string>(value_a.b));
+        CHECK_EQ(std::get<std::string>(value_a.b), "Hello world!");
+    }
+    // {
+    //     using namespace std::string_view_literals;
+    //     auto bytes = to_bytes("01f6"sv);
+
+    //     auto in = make_decoder(bytes);
+
+    //     struct A {
+    //         std::optional<std::string> b;
+    //     };
+
+    //     auto a               = make_tag_pair(tag<1>{}, A{});
+    //     auto &[tag, value_a] = a;
+    //     in(a);
+    //     CHECK_EQ(value_a.b, std::nullopt);
+    // }
 }
