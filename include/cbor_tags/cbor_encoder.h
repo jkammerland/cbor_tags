@@ -175,7 +175,7 @@ class encoder : public Encoders... {
             }
         }
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
-        else if constexpr (IsTaggedPair<T>) {
+        else if constexpr (IsTaggedTuple<T>) {
             static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
             encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
             encode(value.second);

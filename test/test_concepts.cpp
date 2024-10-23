@@ -11,17 +11,21 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <iterator>
 #include <limits>
 #include <list>
 #include <map>
 #include <nameof.hpp>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -207,6 +211,48 @@ TEST_CASE("Test non aggregates, to_tuple(Type) will not work for Type that does 
         static_assert(!IsAggregate<std::vector<var>>);
         static_assert(!IsTuple<var>);
     }
+}
+
+struct TAGMAJORTYPE {
+    static constexpr std::uint64_t cbor_tag = 123;
+    int                            a;
+};
+
+struct NONMAJORTYPE {
+    int a;
+};
+
+template <typename Byte, typename... Types> auto collect_concept_types() { return std::set<Byte>{ConceptType<Byte, Types>::value...}; }
+
+TEST_CASE_TEMPLATE("Test which concept type major type", T, std::byte, char, uint8_t) {
+    auto set = collect_concept_types<T, std::uint8_t, std::int8_t, std::map<int, std::string>, std::array<uint8_t, 5>, std::string,
+                                     std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
+
+    // Set contain:
+    fmt::print("Set contains: [{}], size of set is <{}>\n", fmt::join(set, ", "), set.size());
+    CHECK_EQ(set.size(), 8);
+}
+
+template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
+    fmt::print("major: {}\n", major);
+    (fmt::print("Types: {}\n", nameof::nameof_type<T>()), ...);
+
+    (fmt::print("ConceptType<ByteType, T>::value: {}\n", (ConceptType<ByteType, T>::value) == major), ...);
+    fmt::print("TRUE: {}\n", ((ConceptType<ByteType, T>::value == major) || ...));
+    fmt::print("TRUE: {}\n", (... || (ConceptType<ByteType, T>::value == major)));
+    return (... || (major == ConceptType<ByteType, T>::value));
+}
+
+template <typename MajorType, typename... T> bool contains_major(MajorType major, std::variant<T...>) {
+    return (... || (major == ConceptType<MajorType, T>::value));
+}
+
+TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, char, uint8_t) {
+    using var1 = std::variant<double, int, std::vector<std::byte>>;
+    using var2 = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, std::optional<uint8_t>>;
+    CHECK(is_valid_major<T, double, int, std::vector<std::byte>>(static_cast<T>(1)));
+    CHECK(contains_major(static_cast<T>(1), var1{}));
+    CHECK(contains_major(static_cast<T>(2), var2{}));
 }
 
 TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, unsigned char) {

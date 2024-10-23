@@ -8,9 +8,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fmt/base.h>
+#include <iostream>
 #include <iterator>
 #include <map>
+#include <nameof.hpp>
 #include <optional>
+#include <ostream>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -220,7 +224,27 @@ class decoder {
         }
     }
 
-    template <typename... T> constexpr void decode(std::variant<T...> &value) { auto [major, additionalInfo] = read_initial_byte(); }
+    template <typename... T> constexpr void decode(std::variant<T...> &value) {
+        const auto [major, additionalInfo] = read_initial_byte();
+        if (!is_valid_major<decltype(major), T...>(major)) {
+            throw std::runtime_error("Invalid major type for variant");
+        }
+
+        // Only compare against the types in the variant
+        bool found_type_in_variant = ([this, major, additionalInfo, &value]<typename U>() -> bool {
+            if (ConceptType<byte_type, U>::value == static_cast<byte_type>(major)) {
+                U t;
+                this->decode(t, additionalInfo);
+                value = std::move(t);
+                return true;
+            }
+            return false;
+        }.template operator()<T>() || ...);
+
+        if (!found_type_in_variant) {
+            throw std::runtime_error("Invalid major type for variant");
+        }
+    }
 
     template <typename T> constexpr void decode(T &value) {
         if (reader_.empty(data_)) {
@@ -255,7 +279,7 @@ class decoder {
             }
         }
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
-        else if constexpr (IsTaggedPair<T>) {
+        else if constexpr (IsTaggedTuple<T>) {
             static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
             const auto tag = decode_unsigned(additionalInfo);
             if (tag != value.first) {
@@ -446,6 +470,23 @@ class decoder {
         const auto &&additionalInfo = initialByte & static_cast<byte_type>(0x1F);
 
         return std::make_pair(majorType, additionalInfo);
+    }
+
+    template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
+        std::cout << "major: " << static_cast<int>(major) << std::endl;
+
+        std::cout << "sizeof...(T): " << (sizeof...(T)) << std::endl;
+        auto result = (... || (major == ConceptType<ByteType, T>::value));
+        std::cout << "result: " << result << std::endl;
+
+        (fmt::print("Types: {}\n", nameof::nameof_type<T>()), ...);
+
+        // Print all ConceptType<ByteType, T>::value
+        (fmt::print("ConceptType<ByteType, T>::value: {}\n", static_cast<int>(ConceptType<ByteType, T>::value)), ...);
+
+        (fmt::print("ConceptType<ByteType, T>::value: {}\n", (ConceptType<ByteType, T>::value) == major), ...);
+
+        return (... || (major == ConceptType<ByteType, T>::value));
     }
 
     const InputBuffer          &data_;

@@ -77,6 +77,20 @@ concept IsTuple = requires {
 };
 
 template <typename T>
+concept HasCborTag = requires {
+    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
+};
+
+template <typename T>
+concept IsTaggedTuple = requires(T t) {
+    requires IsTuple<T>;
+    requires HasCborTag<typename T::first_type>;
+};
+
+template <typename T>
+concept IsTagged = HasCborTag<T> || IsTaggedTuple<T>;
+
+template <typename T>
 concept IsOptional = requires(T t) {
     typename T::value_type;
     { T{typename T::value_type{}} } -> std::same_as<T>;
@@ -96,21 +110,28 @@ concept IsAggregate = std::is_aggregate_v<T>;
 template <typename T>
 concept IsNonAggregate = !IsAggregate<T>;
 
+// Major Type  | Meaning           | Content
+// ------------|-------------------|-------------------------
+// 0           | unsigned integer  | N
+// 1           | negative integer  | -1-N
+// 2           | byte string       | N bytes
+// 3           | text string       | N bytes (UTF-8 text)
+// 4           | array             | N data items (elements)
+// 5           | map               | 2N data items (key/value pairs)
+// 6           | tag of number N   | 1 data item
+// 7           | simple/float      | -
+
 // Helper struct to assign numbers to concepts
-template <typename T>
-struct ConceptType : std::integral_constant<int,
-                                            IsContiguous<T>     ? 1
-                                            : IsMap<T>          ? 2
-                                            : IsArray<T>        ? 3
-                                            : IsTextString<T>   ? 4
-                                            : IsBinaryString<T> ? 5
-                                            : IsTuple<T>        ? 6
-                                            : IsOptional<T>     ? 7
-                                            : IsVariant<T>      ? 8
-                                            : IsRange<T>        ? 9
-                                                                : // IsRange should be last as it's the most general
-                                                0                 // Default case if no concept is satisfied
-                                            > {};
+template <typename ByteType, typename T>
+struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUnsigned<T>       ? 0
+                                                                            : IsSigned<T>       ? 1
+                                                                            : IsBinaryString<T> ? 2
+                                                                            : IsTextString<T>   ? 3
+                                                                            : IsMap<T>          ? 4
+                                                                            : IsArray<T>        ? 5
+                                                                            : IsTagged<T>       ? 6
+                                                                            : IsRange<T>        ? 5
+                                                                                                : 255)> {};
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
@@ -155,21 +176,6 @@ template <std::uint64_t N> struct tag {
         }
     }
 };
-
-template <typename T>
-concept HasCborTag = requires {
-    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
-};
-
-template <typename T>
-concept IsTaggedPair = requires(T t) {
-    typename T::first_type;
-    typename T::second_type;
-    requires HasCborTag<typename T::first_type>;
-};
-
-template <typename T>
-concept TaggedCborType = HasCborTag<T> || IsTaggedPair<T>;
 
 template <typename T>
 concept HasReserve = requires(T t) {
