@@ -19,18 +19,18 @@ concept ValidCborBuffer = requires(T) {
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
 
-template <typename T>
-concept IsUnsigned = std::is_unsigned_v<T>;
-
-template <typename T>
-concept IsSigned = std::is_signed_v<T>;
-
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
 
 template <typename T>
 concept IsSimple =
     std::is_floating_point_v<T> || std::is_same_v<T, float16_t> || std::is_same_v<T, std::nullptr_t> || std::is_same_v<T, bool>;
+
+template <typename T>
+concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+
+template <typename T>
+concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
 
 template <typename T>
 concept IsRange = std::ranges::range<T> && std::is_class_v<T>;
@@ -130,6 +130,7 @@ struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUn
                                                                             : IsMap<T>          ? 4
                                                                             : IsArray<T>        ? 5
                                                                             : IsTagged<T>       ? 6
+                                                                            : IsSimple<T>       ? 7
                                                                             : IsRange<T>        ? 5
                                                                                                 : 255)> {};
 

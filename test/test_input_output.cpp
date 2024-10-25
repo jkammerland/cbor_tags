@@ -17,6 +17,7 @@
 #include <memory_resource>
 #include <nameof.hpp>
 #include <numeric>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <type_traits>
@@ -146,4 +147,53 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     CHECK_EQ(result.second.b, 3.14);
     CHECK_EQ(result.second.c, "Hello");
     CHECK_EQ(result.second.d, std::vector<int>({1, 2, 3}));
+}
+
+struct A {
+    static constexpr uint64_t cbor_tag = 1234;
+    // Empty struct
+};
+
+TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::variant<int, double>) {
+    using namespace std::string_view_literals;
+    using opt = std::optional<T>;
+    {
+        // Positive optional
+        std::vector<std::byte> buffer1;
+        auto                   out = make_encoder(buffer1);
+        opt                    optional;
+        if constexpr (IsVariant<T>) {
+            if (std::rand() % 2 == 0) {
+                optional = static_cast<int>(std::rand() % 100000);
+            } else {
+                optional = static_cast<double>(std::rand() % 100000);
+            }
+        } else {
+            optional = T{};
+        }
+
+        out(optional);
+        auto buffer2 = buffer1;
+
+        auto in = make_decoder(buffer2);
+        opt  result;
+        in(result);
+
+        CHECK_EQ(result.has_value(), true);
+    }
+    {
+        // nullopt
+        std::vector<std::byte> buffer1;
+        auto                   out      = make_encoder(buffer1);
+        opt                    optional = std::nullopt;
+        out(optional);
+
+        auto buffer2 = buffer1;
+
+        auto in = make_decoder(buffer2);
+        opt  result;
+        in(result);
+
+        CHECK_EQ(result.has_value(), false);
+    }
 }

@@ -213,19 +213,22 @@ class decoder {
         }
     }
 
-    template <typename T> constexpr void decode(std::optional<T> &value, byte_type additionalInfo) {
+    template <typename T> constexpr void decode(std::optional<T> &value, major_type major, byte_type additionalInfo) {
         if (additionalInfo == static_cast<byte_type>(22)) {
-            value.reset();
+            value = std::nullopt;
         } else {
             using value_type = std::decay_t<T>;
             value_type t;
-            decode(t, additionalInfo);
+            if constexpr (IsVariant<T> || IsOptional<T>) {
+                decode(t, major, additionalInfo);
+            } else {
+                decode(t, additionalInfo);
+            }
             value = std::move(t);
         }
     }
 
-    template <typename... T> constexpr void decode(std::variant<T...> &value) {
-        const auto [major, additionalInfo] = read_initial_byte();
+    template <typename... T> constexpr void decode(std::variant<T...> &value, major_type major, byte_type additionalInfo) {
         if (!is_valid_major<decltype(major), T...>(major)) {
             throw std::runtime_error("Invalid major type for variant");
         }
@@ -234,7 +237,11 @@ class decoder {
         bool found_type_in_variant = ([this, major, additionalInfo, &value]<typename U>() -> bool {
             if (ConceptType<byte_type, U>::value == static_cast<byte_type>(major)) {
                 U t;
-                this->decode(t, additionalInfo);
+                if constexpr (IsVariant<U> || IsOptional<U>) {
+                    this->decode(t, major, additionalInfo);
+                } else {
+                    this->decode(t, additionalInfo);
+                }
                 value = std::move(t);
                 return true;
             }
@@ -251,9 +258,7 @@ class decoder {
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const auto initialByte    = reader_.read(data_);
-        const auto majorType      = static_cast<major_type>(static_cast<std::byte>(initialByte) >> 5);
-        const auto additionalInfo = initialByte & static_cast<byte_type>(0x1F);
+        const auto [majorType, additionalInfo] = read_initial_byte();
 
         if constexpr (IsString<T>) {
             constexpr auto expected_major_type = IsTextString<T> ? major_type::TextString : major_type::ByteString;
@@ -297,6 +302,8 @@ class decoder {
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
         } else if constexpr (IsTuple<T>) {
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
+        } else if constexpr (IsVariant<T> || IsOptional<T>) {
+            decode(value, majorType, additionalInfo);
         } else {
             decode(value, additionalInfo);
         }
@@ -473,19 +480,6 @@ class decoder {
     }
 
     template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
-        std::cout << "major: " << static_cast<int>(major) << std::endl;
-
-        std::cout << "sizeof...(T): " << (sizeof...(T)) << std::endl;
-        auto result = (... || (major == ConceptType<ByteType, T>::value));
-        std::cout << "result: " << result << std::endl;
-
-        (fmt::print("Types: {}\n", nameof::nameof_type<T>()), ...);
-
-        // Print all ConceptType<ByteType, T>::value
-        (fmt::print("ConceptType<ByteType, T>::value: {}\n", static_cast<int>(ConceptType<ByteType, T>::value)), ...);
-
-        (fmt::print("ConceptType<ByteType, T>::value: {}\n", (ConceptType<ByteType, T>::value) == major), ...);
-
         return (... || (major == ConceptType<ByteType, T>::value));
     }
 

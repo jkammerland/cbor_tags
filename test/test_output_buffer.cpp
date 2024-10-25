@@ -15,6 +15,7 @@
 #include <nameof.hpp>
 #include <numeric>
 #include <optional>
+#include <vector>
 
 using namespace cbor::tags;
 

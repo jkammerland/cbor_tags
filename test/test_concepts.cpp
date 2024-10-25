@@ -222,15 +222,18 @@ struct NONMAJORTYPE {
     int a;
 };
 
-template <typename Byte, typename... Types> auto collect_concept_types() { return std::set<Byte>{ConceptType<Byte, Types>::value...}; }
+template <typename Byte, typename... Types> auto collect_concept_types() {
+    (fmt::print("Types: {}, value: <{}>\n", nameof::nameof_type<Types>(), static_cast<int>(ConceptType<Byte, Types>::value)), ...);
+    return std::set<Byte>{ConceptType<Byte, Types>::value...};
+}
 
 TEST_CASE_TEMPLATE("Test which concept type major type", T, std::byte, char, uint8_t) {
-    auto set = collect_concept_types<T, std::uint8_t, std::int8_t, std::map<int, std::string>, std::array<uint8_t, 5>, std::string,
-                                     std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
+    auto set = collect_concept_types<T, std::uint8_t, double, float, std::int8_t, std::map<int, std::string>, std::array<uint8_t, 5>,
+                                     std::string, std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
 
     // Set contain:
     fmt::print("Set contains: [{}], size of set is <{}>\n", fmt::join(set, ", "), set.size());
-    CHECK_EQ(set.size(), 8);
+    CHECK_EQ(set.size(), 9);
 }
 
 template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
@@ -238,8 +241,8 @@ template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteTy
     (fmt::print("Types: {}\n", nameof::nameof_type<T>()), ...);
 
     (fmt::print("ConceptType<ByteType, T>::value: {}\n", (ConceptType<ByteType, T>::value) == major), ...);
-    fmt::print("TRUE: {}\n", ((ConceptType<ByteType, T>::value == major) || ...));
-    fmt::print("TRUE: {}\n", (... || (ConceptType<ByteType, T>::value == major)));
+    fmt::print("Is major == any concepts: {}\n", ((ConceptType<ByteType, T>::value == major) || ...));
+    fmt::print("reverse of above variadic, should be same: {}\n", (... || (ConceptType<ByteType, T>::value == major)));
     return (... || (major == ConceptType<ByteType, T>::value));
 }
 
