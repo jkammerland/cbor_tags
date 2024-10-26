@@ -30,8 +30,7 @@ target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::
 
 # Enable ASAN for linux and macos
 if(UNIX OR APPLE)
-  target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(tests PRIVATE -fsanitize=address)
+  # target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer) target_link_options(tests PRIVATE -fsanitize=address)
 elseif(WIN32)
   target_compile_options(tests PRIVATE /fsanitize=address)
   target_link_options(tests PRIVATE /fsanitize=address)

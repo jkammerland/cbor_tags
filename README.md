@@ -226,9 +226,11 @@ This is a low level parser, that only verify that the data is well-formed, not t
 
  5.3. Validity of Items
 
+```
 A well-formed but invalid CBOR data item (Section 1.2) presents a problem with interpreting the data encoded in it in the CBOR data model. A CBOR-based protocol could be specified in several layers, in which the lower layers don't process the semantics of some of the CBOR data they forward. These layers can't notice any validity errors in data they don't process and MUST forward that data as-is. The first layer that does process the semantics of an invalid CBOR item MUST pick one of two choices:
 Replace the problematic item with an error marker and continue with the next item, or
-Issue an error and stop processing altogether.A CBOR-based protocol MUST specify which of these options its decoders take for each kind of invalid item they might encounter.Such problems might occur at the basic validity level of CBOR or in the context of tags (tag validity).
+Issue an error and stop processing altogether. A CBOR-based protocol MUST specify which of these options its decoders take for each kind of invalid item they might encounter.Such problems might occur at the basic validity level of CBOR or in the context of tags (tag validity).
+```
 
 ## License
 [MIT]

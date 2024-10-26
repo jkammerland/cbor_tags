@@ -11,12 +11,14 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <doctest/parts/doctest_fwd.h>
+#include <fmt/base.h>
 #include <fmt/core.h>
 #include <forward_list>
 #include <list>
 #include <memory_resource>
 #include <nameof.hpp>
 #include <numeric>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <type_traits>
@@ -146,4 +148,121 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     CHECK_EQ(result.second.b, 3.14);
     CHECK_EQ(result.second.c, "Hello");
     CHECK_EQ(result.second.d, std::vector<int>({1, 2, 3}));
+}
+
+struct A {
+    static constexpr uint64_t cbor_tag = 1234;
+    // Empty struct
+};
+
+TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::variant<int, double>) {
+    using namespace std::string_view_literals;
+    using opt = std::optional<T>;
+    {
+        // Positive optional
+        std::vector<std::byte> buffer1;
+        auto                   out = make_encoder(buffer1);
+        opt                    optional;
+        if constexpr (IsVariant<T>) {
+            if (std::rand() % 2 == 0) {
+                optional = static_cast<int>(std::rand() % 100000);
+            } else {
+                optional = static_cast<double>(std::rand() % 100000);
+            }
+        } else {
+            optional = T{};
+        }
+
+        out(optional);
+        auto buffer2 = buffer1;
+
+        auto in = make_decoder(buffer2);
+        opt  result;
+        in(result);
+
+        CHECK_EQ(result.has_value(), true);
+    }
+    {
+        // nullopt
+        std::vector<std::byte> buffer1;
+        auto                   out      = make_encoder(buffer1);
+        opt                    optional = std::nullopt;
+        out(optional);
+
+        auto buffer2 = buffer1;
+
+        auto in = make_decoder(buffer2);
+        opt  result;
+        in(result);
+
+        CHECK_EQ(result.has_value(), false);
+    }
+}
+
+TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::deque<char>) {
+    T data;
+    if constexpr (HasReserve<T>) {
+        data.reserve(1e3);
+    }
+    auto out = make_encoder(data);
+
+    std::vector<int64_t> values(1e3);
+    std::iota(values.begin(), values.end(), 0);
+    // make negative
+    std::transform(values.begin(), values.end(), values.begin(), [](auto v) { return -v; });
+    out(values);
+    fmt::print("Data: {}\n", to_hex(data));
+
+    auto                 in = make_decoder(data);
+    std::vector<int64_t> result;
+    in(result);
+
+    REQUIRE_EQ(values.size(), result.size());
+    CHECK_EQ(values, result);
+}
+
+TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::variant<int, double>) {
+    using variant = std::variant<uint64_t, T>;
+    {
+        std::vector<std::byte> buffer1;
+        auto                   out = make_encoder(buffer1);
+        variant                v;
+        v = static_cast<uint64_t>(std::rand() % 100000);
+        out(v);
+
+        auto buffer2 = buffer1;
+
+        auto    in = make_decoder(buffer2);
+        variant result;
+        in(result);
+        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+        CHECK_EQ(v, result);
+    }
+
+    {
+        std::vector<std::byte> buffer1;
+        auto                   out = make_encoder(buffer1);
+        variant                v;
+        if constexpr (IsVariant<T>) {
+            if (std::rand() % 2 == 0) {
+                v = static_cast<int>(-std::rand() % 100000);
+            } else {
+                v = static_cast<double>(std::rand() % 100000);
+            }
+        } else if constexpr (std::is_same_v<T, int>) {
+            v = static_cast<int>(-100);
+        } else {
+            v = T{};
+        }
+        out(v);
+        fmt::print("Variant: {}\n", to_hex(buffer1));
+        fmt::print("int64_t casted from int {}\n", static_cast<int64_t>(-100));
+
+        auto buffer2 = buffer1;
+
+        auto    in = make_decoder(buffer2);
+        variant result;
+        in(result);
+        CHECK_EQ(v, result);
+    }
 }

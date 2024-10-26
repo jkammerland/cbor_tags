@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <doctest/parts/doctest_fwd.h>
@@ -127,19 +128,19 @@ TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<
         REQUIRE(std::holds_alternative<std::string>(value_a.b));
         CHECK_EQ(std::get<std::string>(value_a.b), "Hello world!");
     }
-    // {
-    //     using namespace std::string_view_literals;
-    //     auto bytes = to_bytes("01f6"sv);
+    {
+        using namespace std::string_view_literals;
+        auto bytes = to_bytes("01f6"sv);
 
-    //     auto in = make_decoder(bytes);
+        auto in = make_decoder(bytes);
 
-    //     struct A {
-    //         std::optional<std::string> b;
-    //     };
+        struct A {
+            std::optional<std::string> b;
+        };
 
-    //     auto a               = make_tag_pair(tag<1>{}, A{});
-    //     auto &[tag, value_a] = a;
-    //     in(a);
-    //     CHECK_EQ(value_a.b, std::nullopt);
-    // }
+        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto &[tag, value_a] = a;
+        in(a);
+        CHECK_EQ(value_a.b, std::nullopt);
+    }
 }

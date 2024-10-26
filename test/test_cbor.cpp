@@ -420,6 +420,11 @@ TEST_CASE("cbor::tags decoder") {
         REQUIRE(std::holds_alternative<std::uint64_t>(decoded));
         CHECK_EQ(std::get<std::uint64_t>(decoded), 4294967296);
 
+        encoded = encoder<>::serialize(std::int64_t(-100));
+        decoded = decoder<>::deserialize(encoded);
+        REQUIRE(std::holds_alternative<std::int64_t>(decoded));
+        CHECK_EQ(std::get<std::int64_t>(decoded), -100);
+
         encoded = encoder<>::serialize(std::int64_t(-4294967296));
         decoded = decoder<>::deserialize(encoded);
         // REQUIRE(decoded);

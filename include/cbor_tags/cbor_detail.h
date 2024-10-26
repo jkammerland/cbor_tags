@@ -47,7 +47,7 @@ struct reader;
 
 template <typename T> struct reader<T, true> {
     using size_type  = T::size_type;
-    using value_type = T::value_type;
+    using value_type = std::byte;
     using iterator   = typename T::iterator;
     size_type position_;
 
@@ -63,7 +63,7 @@ template <typename T> struct reader<T, true> {
 
 template <typename T> struct reader<T, false> {
     using size_type  = T::size_type;
-    using value_type = T::value_type;
+    using value_type = std::byte;
     using iterator   = typename T::const_iterator;
     iterator  position_;
     size_type current_offset_{0};

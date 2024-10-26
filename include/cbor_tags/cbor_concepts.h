@@ -19,18 +19,18 @@ concept ValidCborBuffer = requires(T) {
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
 
-template <typename T>
-concept IsUnsigned = std::is_unsigned_v<T>;
-
-template <typename T>
-concept IsSigned = std::is_signed_v<T>;
-
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
 
 template <typename T>
 concept IsSimple =
     std::is_floating_point_v<T> || std::is_same_v<T, float16_t> || std::is_same_v<T, std::nullptr_t> || std::is_same_v<T, bool>;
+
+template <typename T>
+concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+
+template <typename T>
+concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
 
 template <typename T>
 concept IsRange = std::ranges::range<T> && std::is_class_v<T>;
@@ -109,29 +109,6 @@ concept IsAggregate = std::is_aggregate_v<T>;
 
 template <typename T>
 concept IsNonAggregate = !IsAggregate<T>;
-
-// Major Type  | Meaning           | Content
-// ------------|-------------------|-------------------------
-// 0           | unsigned integer  | N
-// 1           | negative integer  | -1-N
-// 2           | byte string       | N bytes
-// 3           | text string       | N bytes (UTF-8 text)
-// 4           | array             | N data items (elements)
-// 5           | map               | 2N data items (key/value pairs)
-// 6           | tag of number N   | 1 data item
-// 7           | simple/float      | -
-
-// Helper struct to assign numbers to concepts
-template <typename ByteType, typename T>
-struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUnsigned<T>       ? 0
-                                                                            : IsSigned<T>       ? 1
-                                                                            : IsBinaryString<T> ? 2
-                                                                            : IsTextString<T>   ? 3
-                                                                            : IsMap<T>          ? 4
-                                                                            : IsArray<T>        ? 5
-                                                                            : IsTagged<T>       ? 6
-                                                                            : IsRange<T>        ? 5
-                                                                                                : 255)> {};
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
