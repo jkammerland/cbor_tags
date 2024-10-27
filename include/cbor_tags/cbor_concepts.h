@@ -33,10 +33,13 @@ template <typename T>
 concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
 
 template <typename T>
-concept IsRange = std::ranges::range<T> && std::is_class_v<T>;
+concept IsBinaryString = std::is_same_v<std::decay_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
-concept IsMap = IsRange<T> && requires(T t) {
+concept IsRangeOfCborValues = std::ranges::range<T> && std::is_class_v<T> && !IsBinaryString<T>;
+
+template <typename T>
+concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     typename T::key_type;
     typename T::mapped_type;
     typename T::value_type;
@@ -62,9 +65,6 @@ concept IsTextString = requires(T t) {
     requires sizeof(typename T::value_type) == 1;
     { t.substr(0, 1) };
 };
-
-template <typename T>
-concept IsBinaryString = IsRange<T> && std::is_same_v<std::decay_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
 concept IsString = IsTextString<T> || IsBinaryString<T>;
@@ -106,9 +106,6 @@ concept IsVariant = requires(T t) {
 
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T>;
-
-template <typename T>
-concept IsNonAggregate = !IsAggregate<T>;
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>

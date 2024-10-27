@@ -20,6 +20,7 @@
 #include <numeric>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -264,5 +265,42 @@ TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::varia
         variant result;
         in(result);
         CHECK_EQ(v, result);
+    }
+}
+
+TEST_CASE("Test strings and binary strings in std::variant") {
+    using variant = std::variant<std::string, std::span<std::byte>>;
+    {
+        std::vector<std::byte> buffer;
+        auto                   out = make_encoder(buffer);
+        variant                v;
+        v = std::string("Hello world!");
+        out(v);
+
+        auto buffer2 = buffer;
+
+        auto    in = make_decoder(buffer2);
+        variant result;
+        in(result);
+        CHECK_EQ(std::get<std::string>(v), std::get<std::string>(result));
+        fmt::print("String: {}\n", std::get<std::string>(result));
+    }
+    {
+        std::vector<std::byte> buffer;
+        auto                   out = make_encoder(buffer);
+        variant                v;
+        auto                   vec = std::vector<std::byte>({std::byte(0x01), std::byte(0x02), std::byte(0x03)});
+        v                          = std::span<std::byte>(vec);
+        out(v);
+
+        auto buffer2 = buffer;
+
+        auto    in = make_decoder(buffer2);
+        variant result;
+        in(result);
+        for (size_t i = 0; i < vec.size(); ++i) {
+            CHECK_EQ(std::get<std::span<std::byte>>(v)[i], std::get<std::span<std::byte>>(result)[i]);
+        }
+        fmt::print("Binary string: {}\n", to_hex(std::get<std::span<std::byte>>(result)));
     }
 }

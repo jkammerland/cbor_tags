@@ -174,6 +174,18 @@ class decoder {
         value = read_double();
     }
 
+    template <IsRangeOfCborValues T> constexpr void decode(T &, major_type, byte) {}
+
+    constexpr void decode(std::span<std::byte> &value, major_type, byte additionalInfo) {
+        auto bstring = decode_bstring(additionalInfo);
+        value        = std::span<std::byte>(const_cast<std::byte *>(bstring.data()), bstring.size());
+    }
+
+    constexpr void decode(std::vector<std::byte> &value, major_type, byte additionalInfo) {
+        auto bstring = decode_bstring(additionalInfo);
+        value.assign(bstring.begin(), bstring.end());
+    }
+
     constexpr void decode(std::string &value, major_type, byte additionalInfo) { value = std::string(decode_text(additionalInfo)); }
 
     constexpr void decode(std::string_view &value, major_type, byte additionalInfo) { value = decode_text(additionalInfo); }
@@ -266,7 +278,7 @@ class decoder {
             }
 
             decode(value, majorType, additionalInfo);
-        } else if constexpr (IsRange<T>) {
+        } else if constexpr (IsRangeOfCborValues<T>) {
             constexpr auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
             if (majorType != expected_major_type) {
                 throw std::runtime_error("Invalid major type for array or map");

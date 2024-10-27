@@ -57,18 +57,21 @@ TEST_CASE("Test concepts for IsX") {
         static_assert(IsBinaryString<std::basic_string<std::byte>>);
         static_assert(IsBinaryString<std::basic_string_view<std::byte>>);
         static_assert(IsBinaryString<std::vector<std::byte>>);
+        static_assert(IsBinaryString<std::array<std::byte, 5>>);
         static_assert(IsBinaryString<std::span<const std::byte>>);
         static_assert(!IsBinaryString<std::vector<uint8_t>>);
         static_assert(!IsBinaryString<std::span<const uint8_t>>);
         static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
         static_assert(!IsBinaryString<std::string>);
         static_assert(!IsBinaryString<std::string_view>);
+        static_assert(!IsRangeOfCborValues<std::array<std::byte, 5>>);
+        static_assert(!IsRangeOfCborValues<std::vector<std::byte>>);
     }
 
     {
         using map_1 = std::map<int, int>;
         static_assert(IsMap<map_1>);
-        static_assert(IsRange<map_1>);
+        static_assert(IsRangeOfCborValues<map_1>);
         static_assert(!IsArray<map_1>);
         static_assert(!IsTuple<map_1>);
     }
@@ -93,7 +96,7 @@ TEST_CASE("Test concepts for IsX") {
     {
         using array_1 = std::array<int, 5>;
         static_assert(IsArray<array_1>);
-        static_assert(IsRange<array_1>);
+        static_assert(IsRangeOfCborValues<array_1>);
         static_assert(!IsMap<array_1>);
         static_assert(!IsTuple<array_1>);
         static_assert(!IsOptional<array_1>);
@@ -102,7 +105,7 @@ TEST_CASE("Test concepts for IsX") {
     {
         using tuple_1 = std::tuple<int, std::optional<int>>;
         static_assert(IsTuple<tuple_1>);
-        static_assert(!IsRange<tuple_1>);
+        static_assert(!IsRangeOfCborValues<tuple_1>);
         static_assert(!IsArray<tuple_1>);
         static_assert(!IsMap<tuple_1>);
         static_assert(!IsOptional<tuple_1>);
@@ -111,7 +114,7 @@ TEST_CASE("Test concepts for IsX") {
     {
         using string_1 = std::string;
         static_assert(IsTextString<string_1>);
-        static_assert(IsRange<string_1>);
+        static_assert(IsRangeOfCborValues<string_1>);
         static_assert(!IsBinaryString<string_1>);
         static_assert(!IsArray<string_1>);
         static_assert(!IsMap<string_1>);
@@ -140,7 +143,7 @@ TEST_CASE("Test concepts for IsX") {
         static_assert(IsBinaryString<bstring_1>);
         static_assert(IsBinaryString<bstring_2>);
         static_assert(IsBinaryString<bstring_3>);
-        static_assert(IsRange<bstring_1>);
+        static_assert(!IsRangeOfCborValues<bstring_1>);
         static_assert(!IsTextString<bstring_1>);
         static_assert(!IsTextString<bstring_2>);
         static_assert(!IsTextString<bstring_3>);
@@ -149,25 +152,25 @@ TEST_CASE("Test concepts for IsX") {
 
     {
         using container = std::vector<int>;
-        static_assert(IsRange<container>);
+        static_assert(IsRangeOfCborValues<container>);
         static_assert(IsContiguous<container>);
     }
 
     {
         using container = std::list<int>;
-        static_assert(IsRange<container>);
+        static_assert(IsRangeOfCborValues<container>);
         static_assert(!IsContiguous<container>);
     }
 
     {
         using container = std::deque<int>;
-        static_assert(IsRange<container>);
+        static_assert(IsRangeOfCborValues<container>);
         static_assert(!IsContiguous<container>);
     }
 
     {
         using container = std::array<int, 5>;
-        static_assert(IsRange<container>);
+        static_assert(IsRangeOfCborValues<container>);
         static_assert(IsContiguous<container>);
     }
 }

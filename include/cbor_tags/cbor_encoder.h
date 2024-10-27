@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fmt/base.h>
+#include <nameof.hpp>
 #include <span>
 #include <string>
 #include <string_view>
@@ -165,7 +166,7 @@ class encoder : public Encoders... {
         requires std::is_compound_v<T>
     constexpr void encode(const T &value) {
         // check if value is a range of some sort, i.e vector list etc
-        if constexpr (IsRange<T>) {
+        if constexpr (IsRangeOfCborValues<T>) {
             // If map, use 0xA0, otherwise array 0x80
             static_assert(!std::is_same_v<T, std::string>, "No strings allowed");
             constexpr auto major_type = IsMap<T> ? static_cast<byte_type>(0xA0) : static_cast<byte_type>(0x80);
