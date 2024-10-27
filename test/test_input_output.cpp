@@ -81,7 +81,11 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
     std::iota(values.begin(), values.end(), 0);
 
     [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);
-    // enc.encode(tag);
+    enc(t);
+
+    [[maybe_unused]] auto dec    = make_decoder(data_out);
+    auto                  result = make_tag_pair(tag<123>{}, std::vector<variant_contiguous>{});
+    // dec(result);
 }
 
 TEST_CASE_TEMPLATE("Decode array of ints", T, std::vector<unsigned char>) {
@@ -269,7 +273,7 @@ TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::varia
 }
 
 TEST_CASE("Test strings and binary strings in std::variant") {
-    using variant = std::variant<std::string, std::span<std::byte>>;
+    using variant = std::variant<std::string, std::span<const std::byte>>;
     {
         std::vector<std::byte> buffer;
         auto                   enc = make_encoder(buffer);
@@ -299,8 +303,8 @@ TEST_CASE("Test strings and binary strings in std::variant") {
         variant result;
         dec(result);
         for (size_t i = 0; i < vec.size(); ++i) {
-            CHECK_EQ(std::get<std::span<std::byte>>(v)[i], std::get<std::span<std::byte>>(result)[i]);
+            CHECK_EQ(std::get<std::span<const std::byte>>(v)[i], std::get<std::span<const std::byte>>(result)[i]);
         }
-        fmt::print("Binary string: {}\n", to_hex(std::get<std::span<std::byte>>(result)));
+        fmt::print("Binary string: {}\n", to_hex(std::get<std::span<const std::byte>>(result)));
     }
 }

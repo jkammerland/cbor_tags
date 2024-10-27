@@ -174,16 +174,36 @@ class decoder {
         value = read_double();
     }
 
-    template <IsRangeOfCborValues T> constexpr void decode(T &, major_type, byte) {}
-
-    constexpr void decode(std::span<std::byte> &value, major_type, byte additionalInfo) {
-        auto bstring = decode_bstring(additionalInfo);
-        value        = std::span<std::byte>(const_cast<std::byte *>(bstring.data()), bstring.size());
+    template <IsBinaryString T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::ByteString) {
+            t = decode_bstring(additionalInfo);
+        } else {
+            throw std::runtime_error("Invalid major type for binary string");
+        }
     }
 
-    constexpr void decode(std::vector<std::byte> &value, major_type, byte additionalInfo) {
-        auto bstring = decode_bstring(additionalInfo);
-        value.assign(bstring.begin(), bstring.end());
+    template <IsTextString T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::TextString) {
+            t = decode_text(additionalInfo);
+        } else {
+            throw std::runtime_error("Invalid major type for text string");
+        }
+    }
+
+    template <IsRangeOfCborValues T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::Array || major == major_type::Map) {
+            const auto length = decode_unsigned(additionalInfo);
+            if constexpr (HasReserve<T>) {
+                t.reserve(length);
+            }
+            detail::appender<T> appender_;
+            for (auto i = length; i > 0; --i) {
+                auto result = decode_value();
+                appender_(t, result);
+            }
+        } else {
+            throw std::runtime_error("Invalid major type for array or map");
+        }
     }
 
     constexpr void decode(std::string &value, major_type, byte additionalInfo) { value = std::string(decode_text(additionalInfo)); }

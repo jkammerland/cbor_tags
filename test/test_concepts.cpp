@@ -28,151 +28,188 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
-
 using namespace cbor::tags;
 
-TEST_CASE("Test concepts for IsX") {
-    {
-        static_assert(IsUnsigned<std::uint8_t>);
-        static_assert(IsUnsigned<std::uint16_t>);
-        static_assert(!IsUnsigned<int>);
+TEST_CASE("Test IsUnsigned concept") {
+    static_assert(IsUnsigned<std::uint8_t>);
+    static_assert(IsUnsigned<std::uint16_t>);
+    static_assert(!IsUnsigned<int>);
+}
 
-        static_assert(IsSigned<int>);
-        static_assert(IsSigned<std::int8_t>);
-        static_assert(IsSigned<std::int16_t>);
-        static_assert(!IsSigned<std::uint8_t>);
-    }
+TEST_CASE("Test IsSigned concept") {
+    static_assert(IsSigned<int>);
+    static_assert(IsSigned<std::int8_t>);
+    static_assert(IsSigned<std::int16_t>);
+    static_assert(!IsSigned<std::uint8_t>);
+}
 
-    {
-        static_assert(IsTextString<std::string>);
-        static_assert(IsTextString<std::string_view>);
-        static_assert(IsTextString<std::basic_string_view<char>>);
-        static_assert(!IsTextString<std::basic_string_view<std::byte>>);
-        static_assert(!IsTextString<std::vector<char>>);
-        static_assert(!IsTextString<std::span<char>>);
-        static_assert(!IsTextString<std::span<const std::byte>>);
-    }
+TEST_CASE("Test IsTextString concept") {
+    static_assert(IsTextString<std::string>);
+    static_assert(IsTextString<std::string_view>);
+    static_assert(IsTextString<std::basic_string_view<char>>);
+    static_assert(!IsTextString<std::basic_string_view<std::byte>>);
+    static_assert(!IsTextString<std::vector<char>>);
+    static_assert(!IsTextString<std::span<char>>);
+    static_assert(!IsTextString<std::span<const std::byte>>);
+}
 
-    {
-        static_assert(IsBinaryString<std::basic_string<std::byte>>);
-        static_assert(IsBinaryString<std::basic_string_view<std::byte>>);
-        static_assert(IsBinaryString<std::vector<std::byte>>);
-        static_assert(IsBinaryString<std::array<std::byte, 5>>);
-        static_assert(IsBinaryString<std::span<const std::byte>>);
-        static_assert(!IsBinaryString<std::vector<uint8_t>>);
-        static_assert(!IsBinaryString<std::span<const uint8_t>>);
-        static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
-        static_assert(!IsBinaryString<std::string>);
-        static_assert(!IsBinaryString<std::string_view>);
-        static_assert(!IsRangeOfCborValues<std::array<std::byte, 5>>);
-        static_assert(!IsRangeOfCborValues<std::vector<std::byte>>);
-    }
+TEST_CASE("Test IsBinaryString concept") {
+    static_assert(IsBinaryString<std::basic_string<std::byte>>);
+    static_assert(IsBinaryString<std::basic_string_view<std::byte>>);
+    static_assert(IsBinaryString<std::vector<std::byte>>);
+    static_assert(IsBinaryString<std::array<std::byte, 5>>);
+    static_assert(IsBinaryString<std::span<const std::byte>>);
+    static_assert(!IsBinaryString<std::vector<uint8_t>>);
+    static_assert(!IsBinaryString<std::span<const uint8_t>>);
+    static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
+    static_assert(!IsBinaryString<std::string>);
+    static_assert(!IsBinaryString<std::string_view>);
+    static_assert(!IsRangeOfCborValues<std::array<std::byte, 5>>);
+    static_assert(!IsRangeOfCborValues<std::vector<std::byte>>);
+}
 
-    {
-        using map_1 = std::map<int, int>;
-        static_assert(IsMap<map_1>);
-        static_assert(IsRangeOfCborValues<map_1>);
-        static_assert(!IsArray<map_1>);
-        static_assert(!IsTuple<map_1>);
-    }
+TEST_CASE("Test IsMap concept with std::map") {
+    using map_1 = std::map<int, int>;
+    static_assert(IsMap<map_1>);
+    static_assert(IsRangeOfCborValues<map_1>);
+    static_assert(!IsArray<map_1>);
+    static_assert(!IsTuple<map_1>);
+}
 
-    {
-        using map_2 = std::unordered_map<int, int>;
-        static_assert(IsMap<map_2>);
-        static_assert(!IsArray<map_2>);
-        static_assert(!IsTuple<map_2>);
-    }
+TEST_CASE("Test IsMap concept with std::unordered_map") {
+    using map_2 = std::unordered_map<int, int>;
+    static_assert(IsMap<map_2>);
+    static_assert(!IsArray<map_2>);
+    static_assert(!IsTuple<map_2>);
+}
 
-    {
-        using opt_1 = std::optional<int>;
-        static_assert(IsOptional<opt_1>);
-        static_assert(!IsArray<opt_1>);
-        static_assert(!IsMap<opt_1>);
-        static_assert(!IsTuple<opt_1>);
-        static_assert(!IsTextString<opt_1>);
-        static_assert(!IsBinaryString<opt_1>);
-    }
+TEST_CASE("Test IsOptional concept") {
+    using opt_1 = std::optional<int>;
+    static_assert(IsOptional<opt_1>);
+    static_assert(!IsArray<opt_1>);
+    static_assert(!IsMap<opt_1>);
+    static_assert(!IsTuple<opt_1>);
+    static_assert(!IsTextString<opt_1>);
+    static_assert(!IsBinaryString<opt_1>);
+}
 
-    {
-        using array_1 = std::array<int, 5>;
-        static_assert(IsArray<array_1>);
-        static_assert(IsRangeOfCborValues<array_1>);
-        static_assert(!IsMap<array_1>);
-        static_assert(!IsTuple<array_1>);
-        static_assert(!IsOptional<array_1>);
-    }
+TEST_CASE("Test IsArray concept") {
+    using array_1 = std::array<int, 5>;
+    static_assert(IsArray<array_1>);
+    static_assert(IsRangeOfCborValues<array_1>);
+    static_assert(!IsMap<array_1>);
+    static_assert(!IsTuple<array_1>);
+    static_assert(!IsOptional<array_1>);
+}
 
-    {
-        using tuple_1 = std::tuple<int, std::optional<int>>;
-        static_assert(IsTuple<tuple_1>);
-        static_assert(!IsRangeOfCborValues<tuple_1>);
-        static_assert(!IsArray<tuple_1>);
-        static_assert(!IsMap<tuple_1>);
-        static_assert(!IsOptional<tuple_1>);
-    }
+TEST_CASE("Test HasCborTag and IsTagged concepts") {
+    struct CBOR1 {
+        std::uint64_t cbor_tag = 1;
+    };
 
-    {
-        using string_1 = std::string;
-        static_assert(IsTextString<string_1>);
-        static_assert(IsRangeOfCborValues<string_1>);
-        static_assert(!IsBinaryString<string_1>);
-        static_assert(!IsArray<string_1>);
-        static_assert(!IsMap<string_1>);
-        static_assert(!IsOptional<string_1>);
-        static_assert(!IsTuple<string_1>);
-    }
+    static_assert(HasCborTag<CBOR1>);
+    static_assert(IsTagged<CBOR1>);
+    static_assert(!IsTaggedTuple<CBOR1>);
 
-    {
-        using string_1 = std::string_view;
-        static_assert(IsTextString<string_1>);
+    struct CBOR2 {
+        std::uint64_t cbor_ = 2;
+    };
 
-        using string_2 = std::basic_string_view<char>;
-        static_assert(IsTextString<string_2>);
+    static_assert(!HasCborTag<CBOR2>);
+    static_assert(!IsTagged<CBOR2>);
+}
 
-        using string_3 = std::basic_string_view<std::byte>;
-        static_assert(!IsTextString<string_3>);
+TEST_CASE("Test IsTuple concept") {
+    using tuple_1 = std::tuple<int, std::optional<int>>;
+    static_assert(IsTuple<tuple_1>);
+    static_assert(!IsRangeOfCborValues<tuple_1>);
+    static_assert(!IsArray<tuple_1>);
+    static_assert(!IsMap<tuple_1>);
+    static_assert(!IsOptional<tuple_1>);
+}
 
-        using string_4 = std::vector<char>;
-        static_assert(!IsTextString<string_4>);
-    }
+TEST_CASE("Test IsTagged concept with tagged tuples") {
+    auto tagged = std::make_tuple(tag<1>{}, 1);
+    static_assert(IsTagged<decltype(tagged)>);
 
-    {
-        using bstring_1 = std::basic_string<std::byte>;
-        using bstring_2 = std::vector<std::byte>;
-        using bstring_3 = std::basic_string_view<std::byte>;
-        static_assert(IsBinaryString<bstring_1>);
-        static_assert(IsBinaryString<bstring_2>);
-        static_assert(IsBinaryString<bstring_3>);
-        static_assert(!IsRangeOfCborValues<bstring_1>);
-        static_assert(!IsTextString<bstring_1>);
-        static_assert(!IsTextString<bstring_2>);
-        static_assert(!IsTextString<bstring_3>);
-        static_assert(!IsArray<bstring_1>);
-    }
+    auto tagged_tuple = std::make_tuple(tag<1>{}, std::make_tuple(1, 2));
+    static_assert(IsTagged<decltype(tagged_tuple)>);
 
-    {
-        using container = std::vector<int>;
-        static_assert(IsRangeOfCborValues<container>);
-        static_assert(IsContiguous<container>);
-    }
+    auto tagged_tuple_2 = std::make_pair(tag<1>{}, std::make_tuple(1, 2));
+    static_assert(IsTagged<decltype(tagged_tuple_2)>);
+    static_assert(!IsVariant<decltype(tagged_tuple_2)>);
+    static_assert(!IsOptional<decltype(tagged_tuple_2)>);
+    static_assert(!IsArray<decltype(tagged_tuple_2)>);
+    static_assert(!IsMap<decltype(tagged_tuple_2)>);
 
-    {
-        using container = std::list<int>;
-        static_assert(IsRangeOfCborValues<container>);
-        static_assert(!IsContiguous<container>);
-    }
+    auto tagged_tuple_3 = std::tuple(tag<1>{}, std::make_tuple(1, 2), std::make_tuple(3, 4));
+    static_assert(IsTagged<decltype(tagged_tuple_3)>);
 
-    {
-        using container = std::deque<int>;
-        static_assert(IsRangeOfCborValues<container>);
-        static_assert(!IsContiguous<container>);
-    }
+    auto tagged_tuple_4 = std::tuple(1, tag<1>{});
+    static_assert(!IsTagged<decltype(tagged_tuple_4)>);
+}
 
-    {
-        using container = std::array<int, 5>;
-        static_assert(IsRangeOfCborValues<container>);
-        static_assert(IsContiguous<container>);
-    }
+TEST_CASE("Test IsTextString concept with various string types") {
+    using string_1 = std::string;
+    static_assert(IsTextString<string_1>);
+    static_assert(IsRangeOfCborValues<string_1>);
+    static_assert(!IsBinaryString<string_1>);
+    static_assert(!IsArray<string_1>);
+    static_assert(!IsMap<string_1>);
+    static_assert(!IsOptional<string_1>);
+    static_assert(!IsTuple<string_1>);
+}
+
+TEST_CASE("Test IsTextString concept with string views") {
+    using string_1 = std::string_view;
+    static_assert(IsTextString<string_1>);
+
+    using string_2 = std::basic_string_view<char>;
+    static_assert(IsTextString<string_2>);
+
+    using string_3 = std::basic_string_view<std::byte>;
+    static_assert(!IsTextString<string_3>);
+
+    using string_4 = std::vector<char>;
+    static_assert(!IsTextString<string_4>);
+}
+
+TEST_CASE("Test IsBinaryString concept with various binary string types") {
+    using bstring_1 = std::basic_string<std::byte>;
+    using bstring_2 = std::vector<std::byte>;
+    using bstring_3 = std::basic_string_view<std::byte>;
+    static_assert(IsBinaryString<bstring_1>);
+    static_assert(IsBinaryString<bstring_2>);
+    static_assert(IsBinaryString<bstring_3>);
+    static_assert(!IsRangeOfCborValues<bstring_1>);
+    static_assert(!IsTextString<bstring_1>);
+    static_assert(!IsTextString<bstring_2>);
+    static_assert(!IsTextString<bstring_3>);
+    static_assert(!IsArray<bstring_1>);
+}
+
+TEST_CASE("Test IsRangeOfCborValues and IsContiguous concepts with containers") {
+    using container = std::vector<int>;
+    static_assert(IsRangeOfCborValues<container>);
+    static_assert(IsContiguous<container>);
+}
+
+TEST_CASE("Test IsRangeOfCborValues and IsContiguous concepts with non-contiguous containers") {
+    using container = std::list<int>;
+    static_assert(IsRangeOfCborValues<container>);
+    static_assert(!IsContiguous<container>);
+}
+
+TEST_CASE("Test IsRangeOfCborValues and IsContiguous concepts with deque") {
+    using container = std::deque<int>;
+    static_assert(IsRangeOfCborValues<container>);
+    static_assert(!IsContiguous<container>);
+}
+
+TEST_CASE("Test IsRangeOfCborValues and IsContiguous concepts with array") {
+    using container = std::array<int, 5>;
+    static_assert(IsRangeOfCborValues<container>);
+    static_assert(IsContiguous<container>);
 }
 
 TEST_CASE_TEMPLATE("Test simple concepts positive", T, bool, std::nullptr_t, float, double, float16_t) {
@@ -235,20 +272,9 @@ TEST_CASE_TEMPLATE("Test which concept type major type", T, std::byte, char, uin
     auto set = collect_concept_types<T, std::uint8_t, double, float, std::int8_t, std::map<int, std::string>, std::array<uint8_t, 5>,
                                      std::string, std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
 
-    // Set contain:
     fmt::print("Set contains: [{}], size of set is <{}>\n", fmt::join(set, ", "), set.size());
     CHECK_EQ(set.size(), 9);
 }
-
-// template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
-//     fmt::print("major: {}\n", major);
-//     (fmt::print("Types: {}\n", nameof::nameof_type<T>()), ...);
-
-//     (fmt::print("ConceptType<ByteType, T>::value: {}\n", (ConceptType<ByteType, T>::value) == major), ...);
-//     fmt::print("Is major == any concepts: {}\n", ((ConceptType<ByteType, T>::value == major) || ...));
-//     fmt::print("reverse of above variadic, should be same: {}\n", (... || (ConceptType<ByteType, T>::value == major)));
-//     return (... || (major == ConceptType<ByteType, T>::value));
-// }
 
 template <typename MajorType, typename... T> bool contains_major(MajorType major, std::variant<T...>) {
     return (... || (major == ConceptType<MajorType, T>::value));

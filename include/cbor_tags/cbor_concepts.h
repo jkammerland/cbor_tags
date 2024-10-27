@@ -84,7 +84,7 @@ concept HasCborTag = requires {
 template <typename T>
 concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
-    requires HasCborTag<typename T::first_type>;
+    requires HasCborTag<std::remove_cvref_t<decltype(std::get<0>(t))>>;
 };
 
 template <typename T>
