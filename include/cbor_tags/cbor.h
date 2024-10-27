@@ -90,4 +90,20 @@ template <typename T> using variant_t = std::conditional_t<IsContiguous<T>, vari
 template <typename Tag, typename T> using tag_pair = std::pair<Tag, T>;
 template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&value) { return tag_pair<Tag, T>{t, std::forward<T>(value)}; }
 
+struct as_array {
+    std::uint64_t size_;
+    constexpr as_array(std::uint64_t size) : size_(size) {}
+};
+
+struct as_indefinite_array {};
+struct end_array {};
+
+struct as_map {
+    std::uint64_t size_;
+    constexpr as_map(std::uint64_t size) : size_(size) {}
+};
+
+struct as_indefinite_map {};
+struct end_map {};
+
 } // namespace cbor::tags

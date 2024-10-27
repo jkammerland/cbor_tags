@@ -178,9 +178,12 @@ TEST_CASE("Test IsBinaryString concept with various binary string types") {
     using bstring_1 = std::basic_string<std::byte>;
     using bstring_2 = std::vector<std::byte>;
     using bstring_3 = std::basic_string_view<std::byte>;
+    using bstring_4 = std::array<std::byte, 5>;
     static_assert(IsBinaryString<bstring_1>);
     static_assert(IsBinaryString<bstring_2>);
     static_assert(IsBinaryString<bstring_3>);
+    static_assert(IsBinaryString<bstring_4>);
+    static_assert(!IsAggregate<bstring_4>);
     static_assert(!IsRangeOfCborValues<bstring_1>);
     static_assert(!IsTextString<bstring_1>);
     static_assert(!IsTextString<bstring_2>);
@@ -252,6 +255,48 @@ TEST_CASE("Test non aggregates, to_tuple(Type) will not work for Type that does 
         static_assert(!IsAggregate<std::vector<var>>);
         static_assert(!IsTuple<var>);
     }
+}
+
+TEST_CASE_TEMPLATE("Not IsAggregate<T>", T, std::vector<int>, std::map<int, int>, std::tuple<int, int>, std::pair<tag<1>, int>,
+                   std::optional<int>, float, double, std::string, std::string_view, std::byte, std::uint8_t, std::int8_t, std::uint64_t,
+                   std::int64_t, std::nullptr_t) {
+    static_assert(!IsAggregate<T>);
+}
+
+TEST_CASE("IsAggregate<T>") {
+    struct A {};
+    struct B {
+        A a;
+    };
+    struct C {
+        A a;
+        B b;
+    };
+    struct D {
+        A a;
+        B b;
+        C c;
+    };
+    struct E {
+        A                            a;
+        B                            b;
+        C                            c;
+        D                            d;
+        std::variant<int, double, A> v;
+    };
+
+    static_assert(IsAggregate<A>);
+    static_assert(IsAggregate<B>);
+    static_assert(IsAggregate<C>);
+    static_assert(IsAggregate<D>);
+    static_assert(IsAggregate<E>);
+
+    // Check to_tuple, TODO: add rhs ref overload for to_tuple
+    [[maybe_unused]] auto a = to_tuple(A{});
+    [[maybe_unused]] auto b = to_tuple(B{});
+    [[maybe_unused]] auto c = to_tuple(C{});
+    [[maybe_unused]] auto d = to_tuple(D{});
+    [[maybe_unused]] auto e = to_tuple(E{});
 }
 
 struct TAGMAJORTYPE {

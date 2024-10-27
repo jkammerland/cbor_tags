@@ -1,9 +1,11 @@
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -25,59 +27,85 @@ TEST_CASE("CBOR Encoder") {
     using namespace cbor::tags;
 
     SUBCASE("Encode unsigned integers") {
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(0)), std::vector<std::byte>{std::byte(0x00)});
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(23)), std::vector<std::byte>{std::byte(0x17)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(24)), std::vector<std::byte>{std::byte(0x18), std::byte(0x18)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(255)), std::vector<std::byte>{std::byte(0x18), std::byte(0xFF)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(256)), std::vector<std::byte>{std::byte(0x19), std::byte(0x01), std::byte(0x00)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(65535)), std::vector<std::byte>{std::byte(0x19), std::byte(0xFF), std::byte(0xFF)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(65536)),
-                 std::vector<std::byte>{std::byte(0x1A), std::byte(0x00), std::byte(0x01), std::byte(0x00), std::byte(0x00)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(4294967295)),
-                 std::vector<std::byte>{std::byte(0x1A), std::byte(0xFF), std::byte(0xFF), std::byte(0xFF), std::byte(0xFF)});
-        CHECK_EQ(encoder<>::serialize(std::uint64_t(4294967296)),
-                 std::vector<std::byte>{std::byte(0x1B), std::byte(0x00), std::byte(0x00), std::byte(0x00), std::byte(0x01),
-                                        std::byte(0x00), std::byte(0x00), std::byte(0x00), std::byte(0x00)});
+        enc(as_array{10}, 0, 1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296);
+
+        std::array<std::uint64_t, 10> values;
+        static_assert(IsUnsigned<decltype(values)::value_type>);
+        dec(values);
+        CHECK_EQ(values[0], 0);
+        CHECK_EQ(values[1], 1);
+        CHECK_EQ(values[2], 23);
+        CHECK_EQ(values[3], 24);
+        CHECK_EQ(values[4], 255);
+        CHECK_EQ(values[5], 256);
+        CHECK_EQ(values[6], 65535);
+        CHECK_EQ(values[7], 65536);
+        CHECK_EQ(values[8], 4294967295);
+        CHECK_EQ(values[9], 4294967296);
+
+        int  first, second, third;
+        auto dec2 = make_decoder(data);
+        dec2(as_array{10}, first, second, third);
+        CHECK_EQ(first, 0);
+        CHECK_EQ(second, 1);
+        CHECK_EQ(third, 23);
+
+        CHECK_EQ(to_hex(data), "8a000117181818ff19010019ffff1a000100001affffffff1b0000000100000000");
     }
 
     SUBCASE("Encode signed integers") {
-        CHECK_EQ(encoder<>::serialize(std::int64_t(0)), std::vector<std::byte>{std::byte(0x00)});
-        CHECK_EQ(encoder<>::serialize(std::int64_t(-1)), std::vector<std::byte>{std::byte(0x20)});
-        CHECK_EQ(encoder<>::serialize(std::int64_t(-24)), std::vector<std::byte>{std::byte(0x37)});
-        CHECK_EQ(encoder<>::serialize(std::int64_t(-25)), std::vector<std::byte>{std::byte(0x38), std::byte(0x18)});
-        CHECK_EQ(encoder<>::serialize(std::int64_t(-256)), std::vector<std::byte>{std::byte(0x38), std::byte(0xFF)});
-        CHECK_EQ(encoder<>::serialize(std::int64_t(-257)), std::vector<std::byte>{std::byte(0x39), std::byte(0x01), std::byte(0x00)});
-        // Check big negative
-        auto data = encoder<>::serialize(std::int64_t(-4294967296));
-        fmt::print("Big negative: {}\n", to_hex(data));
-        CHECK_EQ(to_hex(data), "3affffffff");
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
-        data = encoder<>::serialize(std::int64_t(-42949672960));
-        fmt::print("Biggest negative: {}\n", to_hex(data));
-        CHECK_EQ(to_hex(data), "3b00000009ffffffff");
+        enc(as_array{8}, 0, -1, -24, -25, -256, -257, -4294967296, -42949672960);
+
+        std::array<std::int64_t, 8> values;
+        static_assert(IsSigned<decltype(values)::value_type>);
+        dec(values);
+        CHECK_EQ(values[0], 0); // Will be unsigned
+        CHECK_EQ(values[1], -1);
+        CHECK_EQ(values[2], -24);
+        CHECK_EQ(values[3], -25);
+        CHECK_EQ(values[4], -256);
+        CHECK_EQ(values[5], -257);
+        CHECK_EQ(values[6], -4294967296);
+        CHECK_EQ(values[7], -42949672960);
+
+        CHECK_EQ(to_hex(data), "88002037381838ff3901003affffffff3b00000009ffffffff");
     }
 
     SUBCASE("Encode strings") {
-        std::vector<std::byte> empty_string = encoder<>::serialize(std::string_view(""));
-        fmt::print("Empty string: ");
-        print_bytes(empty_string);
-        CHECK(empty_string == std::vector<std::byte>{std::byte(0x60)});
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
-        std::vector<std::byte> ietf_string_view = encoder<>::serialize(std::string_view("IETF"));
-        fmt::print("IETF string view: ");
-        print_bytes(ietf_string_view);
-        CHECK(ietf_string_view ==
-              std::vector<std::byte>{std::byte(0x64), std::byte(0x49), std::byte(0x45), std::byte(0x54), std::byte(0x46)});
+        enc(as_array{3}, "IETF", "", "Hello world!");
 
-        std::vector<std::byte> ietf_string = encoder<>::serialize(std::string("IETF"));
-        fmt::print("IETF string: ");
-        print_bytes(ietf_string);
-        CHECK(ietf_string == std::vector<std::byte>{std::byte(0x64), std::byte(0x49), std::byte(0x45), std::byte(0x54), std::byte(0x46)});
-        std::vector<std::byte> ietf_c_string = encoder<>::serialize("IETF");
-        fmt::print("IETF C-string: ");
-        print_bytes(ietf_c_string);
-        CHECK(ietf_c_string == std::vector<std::byte>{std::byte(0x64), std::byte(0x49), std::byte(0x45), std::byte(0x54), std::byte(0x46)});
+        std::array<std::string, 3> values;
+        CHECK(IsTextString<decltype(values)::value_type>);
+        dec(values);
+
+        CHECK_EQ(values[0], "IETF");
+        CHECK_EQ(values[1], "");
+        CHECK_EQ(values[2], "Hello world!");
+
+        CHECK_EQ(to_hex(data), "836449455446606c48656c6c6f20776f726c6421");
+    }
+
+    SUBCASE("Encode binary strings") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
+
+        std::array<std::byte, 3> binary1{std::byte(0x01), std::byte(0x02), std::byte(0x03)};
+        std::array<std::byte, 1> binary2{std::byte(0x00)};
+
+        enc(as_array{2}, binary1, binary2);
     }
 
     SUBCASE("Encode arrays") {

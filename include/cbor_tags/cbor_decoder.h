@@ -10,12 +10,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <fmt/base.h>
-#include <iostream>
 #include <iterator>
 #include <map>
 #include <nameof.hpp>
 #include <optional>
-#include <ostream>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -26,10 +24,14 @@
 
 namespace cbor::tags {
 
-template <typename InputBuffer = std::span<const std::byte>>
+template <typename T> struct cbor_header_decoder;
+
+template <typename InputBuffer = std::span<const std::byte>, template <typename> typename... Decoders>
     requires ValidCborBuffer<InputBuffer>
-class decoder {
-  public:
+struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
+    using self_t = decoder<InputBuffer, Decoders...>;
+    using Decoders<self_t>::decode...;
+
     using size_type     = typename InputBuffer::size_type;
     using buffer_byte_t = typename InputBuffer::value_type;
     using byte          = std::byte;
@@ -40,6 +42,7 @@ class decoder {
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     template <typename... T> constexpr void operator()(T &...args) { (decode(args), ...); }
+    template <typename... T> constexpr void operator()(T &&...args) { (decode(args), ...); }
     template <typename T> constexpr         operator T() { return decode<T>(); }
 
     template <typename T> constexpr T decode() {
@@ -284,13 +287,6 @@ class decoder {
 
         const auto [majorType, additionalInfo] = read_initial_byte();
 
-        // if constexpr (!IsVariant<T> && !IsOptional<T> && !IsAggregate<T> && !IsTuple<T>) {
-        //     if (!is_valid_major<decltype(majorType), T>(majorType)) {
-        //         throw std::runtime_error("Invalid major type for T:" + std::string(nameof::nameof_type<T>()) +
-        //                                  " majorType:" + std::to_string(static_cast<int>(majorType)));
-        //     }
-        // }
-
         if constexpr (IsString<T>) {
             constexpr auto expected_major_type = IsTextString<T> ? major_type::TextString : major_type::ByteString;
             if (majorType != expected_major_type) {
@@ -333,8 +329,6 @@ class decoder {
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
         } else if constexpr (IsTuple<T>) {
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
-        } else if constexpr (IsVariant<T> || IsOptional<T>) {
-            decode(value, majorType, additionalInfo);
         } else {
             decode(value, majorType, additionalInfo);
         }
@@ -495,7 +489,6 @@ class decoder {
         return std::bit_cast<double>(bits);
     }
 
-  protected:
     inline constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
@@ -512,10 +505,33 @@ class decoder {
         return (... || (major == ConceptType<ByteType, T>::value));
     }
 
+    // Variadic friends only in c++26, must be public
     const InputBuffer          &data_;
     detail::reader<InputBuffer> reader_;
 };
 
-template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer>(buffer); }
+template <typename T> struct cbor_header_decoder : crtp_base<T> {
+
+    constexpr auto get_and_validate_header(major_type expectedMajorType) {
+        auto [initialByte, additionalInfo] = this->underlying().read_initial_byte();
+        if (initialByte != expectedMajorType) {
+            throw std::runtime_error("Invalid major type");
+        }
+        return additionalInfo;
+    }
+
+    constexpr auto validate_size(major_type expectedMajor, std::uint64_t expectedSize) {
+        auto additionalInfo = get_and_validate_header(expectedMajor);
+        auto size           = this->underlying().decode_unsigned(additionalInfo);
+        if (size != expectedSize) {
+            throw std::runtime_error("Invalid container size");
+        }
+    }
+
+    constexpr void decode(as_array value) { validate_size(major_type::Array, value.size_); }
+    constexpr void decode(as_map value) { validate_size(major_type::Map, value.size_); }
+};
+
+template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer, cbor_header_decoder>(buffer); }
 
 } // namespace cbor::tags

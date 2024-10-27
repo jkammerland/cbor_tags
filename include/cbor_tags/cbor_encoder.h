@@ -22,11 +22,13 @@
 
 namespace cbor::tags {
 
-template <typename OutputBuffer = std::vector<std::byte>, typename... Encoders>
+template <typename T> struct cbor_header_encoder;
+
+template <typename OutputBuffer = std::vector<std::byte>, template <typename> typename... Encoders>
     requires ValidCborBuffer<OutputBuffer>
-class encoder : public Encoders... {
-  public:
-    using Encoders::encode...;
+struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
+    using self_t = encoder<OutputBuffer, Encoders...>;
+    using Encoders<self_t>::encode...;
 
     using byte_type  = typename OutputBuffer::value_type;
     using size_type  = typename OutputBuffer::size_type;
@@ -43,7 +45,7 @@ class encoder : public Encoders... {
         return data;
     }
 
-    template <typename T> constexpr void operator()(const T &value) { encode(value); }
+    template <typename... T> constexpr void operator()(const T &...args) { (encode(args), ...); }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
         if (value < 24) {
@@ -106,6 +108,11 @@ class encoder : public Encoders... {
         appender_(data_, value);
     }
 
+    template <IsBinaryString T> constexpr void encode(const T &value) {
+        encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
+        appender_(data_, value);
+    }
+
     constexpr void encode(std::string_view value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(0x60));
         appender_(data_, value);
@@ -163,7 +170,7 @@ class encoder : public Encoders... {
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
     template <typename T>
-        requires std::is_compound_v<T>
+        requires std::is_compound_v<T> && (!IsBinaryString<T>)
     constexpr void encode(const T &value) {
         // check if value is a range of some sort, i.e vector list etc
         if constexpr (IsRangeOfCborValues<T>) {
@@ -213,18 +220,27 @@ class encoder : public Encoders... {
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 
-  protected:
+    // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
 };
 
-template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) { return encoder<OutputBuffer>(buffer); }
+template <typename T> struct cbor_header_encoder : crtp_base<T> {
+    constexpr void encode(as_array value) {
+        this->underlying().encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
+    }
+    constexpr void encode(as_map value) { this->underlying().encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0xA0)); }
+};
+
+template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
+    return encoder<OutputBuffer, cbor_header_encoder>(buffer);
+}
 
 template <typename OutputBuffer = std::vector<std::byte>> inline auto make_data_and_encoder() {
     struct data_and_encoder {
         data_and_encoder() : data(), enc(data) {}
-        OutputBuffer          data;
-        encoder<OutputBuffer> enc;
+        OutputBuffer                               data;
+        encoder<OutputBuffer, cbor_header_encoder> enc;
     };
 
     return data_and_encoder{};

@@ -105,7 +105,7 @@ concept IsVariant = requires(T t) {
 };
 
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsArray<T>;
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
@@ -154,6 +154,24 @@ template <std::uint64_t N> struct tag {
 template <typename T>
 concept HasReserve = requires(T t) {
     { t.reserve(std::declval<typename T::size_type>()) };
+};
+
+template <typename T>
+concept IsEncoder = requires(T t) {
+    { t.appender_ };
+    { t.data_ };
+    { t.encode_major_and_size(std::declval<std::uint64_t>(), std::declval<std::byte>()) };
+};
+
+template <typename T>
+concept IsDecoder = requires(T t) {
+    { t.reader_ };
+    { t.data_ };
+};
+
+template <typename T> struct crtp_base {
+    constexpr T       &underlying() { return static_cast<T &>(*this); }
+    constexpr const T &underlying() const { return static_cast<const T &>(*this); }
 };
 
 namespace detail {
