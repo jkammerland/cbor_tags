@@ -121,15 +121,15 @@ TEST_CASE("Basic tag") {
     std::string s1, s2;
     {
 
-        auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
+        auto [data, enc] = make_data_and_encoder<std::vector<std::byte>>();
 
         auto tag_B = make_tag_pair(140_tag, B{-42, "Hello world!"});
-        out(tag_B);
+        enc(tag_B);
         s1 = to_hex(data);
     }
     {
-        auto [data, out] = make_data_and_encoder<std::vector<std::byte>>();
-        out(C{-42, "Hello world!"});
+        auto [data, enc] = make_data_and_encoder<std::vector<std::byte>>();
+        enc(C{-42, "Hello world!"});
         s2 = to_hex(data);
     }
 
