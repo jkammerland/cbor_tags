@@ -25,14 +25,14 @@ template <typename T> using unwrap_type_t = typename unwrap_type<T>::type;
 
 // Major Type  | Meaning           | Content
 // ------------|-------------------|-------------------------
-// 0           | unsigned integer  | N
-// 1           | negative integer  | -1-N
+// 0           | unsigned integer  | N (integer in [0, uint64_max])
+// 1           | negative integer  | -1-N (integer in [-uint64_max, -1])
 // 2           | byte string       | N bytes
 // 3           | text string       | N bytes (UTF-8 text)
 // 4           | array             | N data items (elements)
-// 5           | map               | 2N data items (key/value pairs)
+// 5           | map               | 2N data items (N {key, value} pairs)
 // 6           | tag of number N   | 1 data item
-// 7           | simple/float      | -
+// 7           | simple/float      | specific encoding of a simple type
 
 // Modified ConceptType
 template <typename ByteType, typename T>

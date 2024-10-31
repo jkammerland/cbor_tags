@@ -280,24 +280,25 @@ TEST_CASE("CBOR Encoder") {
     }
 
     SUBCASE("Encode nested structures") {
-        // struct A {
-        //     float16_t a;
-        //     double    b;
-        // };
-        // using tagged_A = std::pair<tag<5>, A>;
+        struct A {
+            float16_t a;
+            double    b;
+        };
+        using tagged_A = std::pair<tag<511>, A>;
 
-        // using variant = std::variant<int, std::string, float, tagged_A>;
+        using variant = std::variant<int, std::string, float, tagged_A>;
 
-        // std::vector<std::byte> data;
-        // auto                   enc = make_encoder(data);
-        // auto                   dec = make_decoder(data);
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
-        // std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(tag<5>{}, A{3.14f, 3.14})};
-        // enc(number_and_stuff);
-        // REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000f94247fb40091eb851eb851f");
+        std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(tag<511>{}, A{3.14f, 3.14})};
+        enc(number_and_stuff);
+        fmt::print("Number and stuff: {}\n", to_hex(data));
+        REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901fff94247fb40091eb851eb851f");
 
-        // std::vector<variant> number_and_stuff_result;
-        // dec(number_and_stuff_result);
+        std::vector<variant> number_and_stuff_result;
+        dec(number_and_stuff_result);
 
         // std::vector<variant_contiguous> other_stuff{false, true, nullptr};
         // auto                            encoded2 = encoder<>::serialize(other_stuff);

@@ -212,6 +212,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
+    template <IsTagged T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::Tag) {
+            auto tag = decode_unsigned(additionalInfo);
+
+            if constexpr (HasCborTag<T>) {
+                if (tag != T::cbor_tag) {
+                    throw std::runtime_error("Invalid tag for tagged object");
+                }
+            } else {
+                if (tag != std::get<0>(t)) {
+                    throw std::runtime_error("Invalid tag for tagged object");
+                }
+            }
+        }
+    }
+
     constexpr void decode(std::string &value, major_type, byte additionalInfo) { value = std::string(decode_text(additionalInfo)); }
 
     constexpr void decode(std::string_view &value, major_type, byte additionalInfo) { value = decode_text(additionalInfo); }
@@ -262,9 +278,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <typename... T>
-    // requires(IsCborMajor<T> && ...)
-    constexpr void decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <IsCborMajor... T> constexpr void decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
         if (!is_valid_major<decltype(major), T...>(major)) {
             throw std::runtime_error("Invalid major type for variant");
         }
@@ -273,7 +287,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         fmt::print("Types: {}\n", fmt::join({nameof::nameof_type<T>()...}, ", "));
 
         auto try_decode = [this, major, additionalInfo, &value]<typename U>() -> bool {
-            if (ConceptType<byte, U>::value != static_cast<byte>(major)) {
+            fmt::print("Nameof U type: {}\n", nameof::nameof_type<U>());
+            bool condition =
+                (ConceptType<byte, U>::value != static_cast<byte>(major)) && !(IsSigned<U> && (major == major_type::UnsignedInteger));
+            bool condition2 = !(IsSigned<U> && (major == major_type::UnsignedInteger));
+            bool condition3 = major == major_type::UnsignedInteger;
+            fmt::print("TEST: {}, {}, {}\n", condition, condition2, condition3);
+
+            if (ConceptType<byte, U>::value != static_cast<byte>(major) && !(IsSigned<U> && (major == major_type::UnsignedInteger))) {
                 return false;
             }
 
@@ -317,8 +338,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
                 }
 
                 return true;
-            } else if constexpr (IsTagged<U>) {
-                throw std::runtime_error("Tagged types are not supported in variant");
             }
 
             U decoded_value;
@@ -566,7 +585,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     }
 
     template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
-        return (... || (major == ConceptType<ByteType, T>::value));
+        fmt::print("Major: {} - [ ", static_cast<int>(major));
+        (fmt::print("{} ", static_cast<int>(ConceptType<ByteType, T>::value)), ...);
+        fmt::print("]\n");
+        // Check any Signed?
+        (fmt::print("IsSigned: {}\n", IsSigned<unwrap_type_t<T>>), ...);
+        bool test = (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
+                             (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));
+        fmt::print("Test: {}\n", test);
+
+        return (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
+                        (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));
     }
 
     // Variadic friends only in c++26, must be public
