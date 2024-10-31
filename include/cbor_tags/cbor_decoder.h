@@ -43,7 +43,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    template <typename... T> constexpr void operator()(T &...args) { (decode(args), ...); }
     template <typename... T> constexpr void operator()(T &&...args) { (decode(args), ...); }
     template <typename T> constexpr         operator T() { return decode<T>(); }
 
@@ -212,20 +211,31 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <IsTagged T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
-        if (major == major_type::Tag) {
-            auto tag = decode_unsigned(additionalInfo);
+    template <std::uint64_t N> constexpr void decode(tag<N>, major_type, byte) {}
 
-            if constexpr (HasCborTag<T>) {
-                if (tag != T::cbor_tag) {
-                    throw std::runtime_error("Invalid tag for tagged object");
-                }
-            } else {
-                if (tag != std::get<0>(t)) {
-                    throw std::runtime_error("Invalid tag for tagged object");
-                }
+    template <IsTagged T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (!(major == major_type::Tag)) {
+            throw std::runtime_error("Invalid major type for tagged object");
+        }
+
+        auto tag = decode_unsigned(additionalInfo);
+
+        if constexpr (HasCborTag<T>) {
+            if (tag != T::cbor_tag) {
+                throw std::runtime_error("Invalid tag for tagged object");
+            }
+        } else if constexpr (IsTaggedTuple<T>) {
+            if (tag != std::get<0>(t)) {
+                throw std::runtime_error("Invalid tag for tagged object");
             }
         }
+
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, t);
+    }
+
+    template <IsAggregate T> constexpr void decode(T &value) {
+        const auto &tuple = to_tuple(value);
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
     }
 
     constexpr void decode(std::string &value, major_type, byte additionalInfo) { value = std::string(decode_text(additionalInfo)); }

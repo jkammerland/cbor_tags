@@ -283,6 +283,7 @@ TEST_CASE("CBOR Encoder") {
         struct A {
             float16_t a;
             double    b;
+            bool      operator==(const A &rhs) const { return a.value == rhs.a.value && b == rhs.b; }
         };
         using tagged_A = std::pair<tag<511>, A>;
 
@@ -300,17 +301,21 @@ TEST_CASE("CBOR Encoder") {
         std::vector<variant> number_and_stuff_result;
         dec(number_and_stuff_result);
 
-        // std::vector<variant_contiguous> other_stuff{false, true, nullptr};
-        // auto                            encoded2 = encoder<>::serialize(other_stuff);
-        // fmt::print("encoded2: ");
-        // print_bytes(encoded2);
-        // CHECK_EQ(to_hex(encoded2), "83f4f5f6");
+        REQUIRE_EQ(number_and_stuff_result.size(), number_and_stuff.size());
+        for (std::size_t i = 0; i < number_and_stuff.size(); ++i) {
+            auto index_same = number_and_stuff[i].index() == number_and_stuff_result[i].index();
+            CHECK(index_same);
 
-        // std::map<variant_contiguous, variant_contiguous> map_of_arrays{{"numbers", std::span(encoded1)}, {"other",
-        // std::span(encoded2)}}; auto                                             encoded3 = encoder<>::serialize(map_of_arrays);
-        // fmt::print("Nested map: ");
-        // print_bytes(encoded3);
-        // CHECK_EQ(to_hex(encoded3), "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6");
+            if (std::holds_alternative<int>(number_and_stuff[i])) {
+                CHECK_EQ(std::get<int>(number_and_stuff[i]), std::get<int>(number_and_stuff_result[i]));
+            } else if (std::holds_alternative<std::string>(number_and_stuff[i])) {
+                CHECK_EQ(std::get<std::string>(number_and_stuff[i]), std::get<std::string>(number_and_stuff_result[i]));
+            } else if (std::holds_alternative<float>(number_and_stuff[i])) {
+                CHECK_EQ(std::get<float>(number_and_stuff[i]), std::get<float>(number_and_stuff_result[i]));
+            } else if (std::holds_alternative<tagged_A>(number_and_stuff[i])) {
+                CHECK_EQ(std::get<tagged_A>(number_and_stuff[i]).second, std::get<tagged_A>(number_and_stuff_result[i]).second);
+            }
+        }
     }
 }
 
