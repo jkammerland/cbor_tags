@@ -9,7 +9,7 @@
 
 namespace cbor::tags::detail {
 
-template <typename T, bool IsArray = IsArray<T>>
+template <typename T, bool IsArray = IsFixedArray<T>>
     requires ValidCborBuffer<T>
 struct appender;
 

@@ -23,8 +23,22 @@ concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; 
 struct float16_t;
 
 template <typename T>
-concept IsSimple =
-    std::is_floating_point_v<T> || std::is_same_v<T, float16_t> || std::is_same_v<T, std::nullptr_t> || std::is_same_v<T, bool>;
+concept IsFloat16 = std::is_same_v<T, float16_t>; // Do not require sizeof(T) == 2, let the memory layout be implementation defined
+
+template <typename T>
+concept IsFloat32 = std::is_same_v<T, float> && requires(T t) { sizeof(t) == 4; };
+
+template <typename T>
+concept IsFloat64 = std::is_same_v<T, double> && requires(T t) { sizeof(t) == 8; };
+
+template <typename T>
+concept IsBool = std::is_same_v<T, bool>;
+
+template <typename T>
+concept IsNull = std::is_same_v<T, std::nullptr_t>;
+
+template <typename T>
+concept IsSimple = IsFloat16<T> || IsFloat32<T> || IsFloat64<T> || IsBool<T> || IsNull<T>;
 
 template <typename T>
 concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
@@ -33,10 +47,30 @@ template <typename T>
 concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
 
 template <typename T>
+concept IsTextString = requires(T t) {
+    requires std::is_signed_v<typename T::value_type>;
+    requires std::is_integral_v<typename T::value_type>;
+    requires sizeof(typename T::value_type) == 1;
+    { t.substr(0, 1) };
+};
+
+template <typename T>
 concept IsBinaryString = std::is_same_v<std::decay_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
 concept IsRangeOfCborValues = std::ranges::range<T> && std::is_class_v<T> && !IsBinaryString<T>;
+
+template <typename T>
+concept IsFixedArray = requires {
+    typename T::value_type;
+    typename T::size_type;
+    typename std::tuple_size<T>::type;
+    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
+                 std::is_same_v<T, std::span<typename T::value_type>>;
+};
+
+template <typename T>
+concept IsArray = IsRangeOfCborValues<T> && !IsFixedArray<T>;
 
 template <typename T>
 concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
@@ -50,30 +84,13 @@ concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
 };
 
 template <typename T>
-concept IsArray = requires {
-    typename T::value_type;
-    typename T::size_type;
-    typename std::tuple_size<T>::type;
-    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
-                 std::is_same_v<T, std::span<typename T::value_type>>;
-};
-
-template <typename T>
-concept IsTextString = requires(T t) {
-    requires std::is_signed_v<typename T::value_type>;
-    requires std::is_integral_v<typename T::value_type>;
-    requires sizeof(typename T::value_type) == 1;
-    { t.substr(0, 1) };
-};
-
-template <typename T>
 concept IsString = IsTextString<T> || IsBinaryString<T>;
 
 template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<T>::type;
     typename std::tuple_element<0, T>::type;
-    requires(!IsArray<T>);
+    requires(!IsFixedArray<T>);
 };
 
 template <typename T>
@@ -104,8 +121,30 @@ concept IsVariant = requires(T t) {
     { t.index() } -> std::convertible_to<size_t>;
 };
 
+// Helper to check if all types in a variant satisfy IsCborMajor
+template <typename T> struct AllTypesAreCborMajor;
+template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
+
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsArray<T>;
+concept IsCborMajor = IsUnsigned<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> || (IsArray<T> && ContainsCborMajor<T>::value) ||
+                      (IsMap<T> && ContainsCborMajor<T>::value) || IsTagged<T> || IsSimple<T> ||
+                      (IsVariant<T> && AllTypesAreCborMajor<T>::value) || (IsOptional<T> && ContainsCborMajor<T>::value);
+
+template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
+    static constexpr bool value = (IsCborMajor<Ts> && ...);
+};
+
+// Helper for container like types, e.g optional
+template <typename T> struct ContainsCborMajor<T, false> {
+    static constexpr bool value = IsCborMajor<typename T::value_type>;
+};
+
+template <typename T> struct ContainsCborMajor<T, true> {
+    static constexpr bool value = IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>;
+};
+
+template <typename T>
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T>;
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>

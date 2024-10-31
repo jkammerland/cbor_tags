@@ -87,12 +87,20 @@ using variant_ranges = std::variant<std::uint64_t, std::int64_t, binary_range_vi
 template <typename T> using subrange  = std::ranges::subrange<typename detail::iterator_type<T>::type>;
 template <typename T> using variant_t = std::conditional_t<IsContiguous<T>, variant_contiguous, variant_ranges<subrange<T>>>;
 
-template <typename Tag, typename T> using tag_pair = std::pair<Tag, T>;
-template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&value) { return tag_pair<Tag, T>{t, std::forward<T>(value)}; }
+template <typename Tag, typename T> using tagged_object = std::pair<Tag, T>;
+template <typename Tag, typename T> constexpr auto make_tag_pair(Tag t, T &&value) {
+    return tagged_object<Tag, T>{t, std::forward<T>(value)};
+}
 
 struct as_array {
     std::uint64_t size_;
     constexpr as_array(std::uint64_t size) : size_(size) {}
+};
+
+template <typename... T> struct wrap_as_array {
+    std::tuple<T...> &&values_;
+    std::uint64_t      size_{sizeof...(T)};
+    constexpr wrap_as_array(T &&...values) : values_(values...) {}
 };
 
 struct as_indefinite_array {};

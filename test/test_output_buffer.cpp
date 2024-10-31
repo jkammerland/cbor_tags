@@ -25,7 +25,7 @@ TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::by
     enc.encode(static_cast<std::uint64_t>(2));
     enc.encode(static_cast<std::uint64_t>(3));
 
-    if constexpr (!IsArray<T>) {
+    if constexpr (!IsFixedArray<T>) {
         CHECK_EQ(to_hex(data), "010203");
     } else {
         CHECK_EQ(to_hex(std::span(data.data(), 3)), "010203");
@@ -39,7 +39,7 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
     auto sv = "Hello world!"sv;
     enc.encode(sv);
 
-    if constexpr (!IsArray<T>) {
+    if constexpr (!IsFixedArray<T>) {
         CHECK_EQ(to_hex(data), "6c48656c6c6f20776f726c6421");
         // +1 for the tag
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);

@@ -8,18 +8,24 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <doctest/doctest.h>
 #include <exception>
+#include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 #include <format>
+#include <list>
 #include <map>
+#include <numeric>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -32,6 +38,8 @@ TEST_CASE("CBOR Encoder") {
         auto                   dec = make_decoder(data);
 
         enc(as_array{10}, 0, 1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296);
+
+        REQUIRE_EQ(to_hex(data), "8a000117181818ff19010019ffff1a000100001affffffff1b0000000100000000");
 
         std::array<std::uint64_t, 10> values;
         static_assert(IsUnsigned<decltype(values)::value_type>);
@@ -53,8 +61,6 @@ TEST_CASE("CBOR Encoder") {
         CHECK_EQ(first, 0);
         CHECK_EQ(second, 1);
         CHECK_EQ(third, 23);
-
-        CHECK_EQ(to_hex(data), "8a000117181818ff19010019ffff1a000100001affffffff1b0000000100000000");
     }
 
     SUBCASE("Encode signed integers") {
@@ -63,6 +69,8 @@ TEST_CASE("CBOR Encoder") {
         auto                   dec = make_decoder(data);
 
         enc(as_array{8}, 0, -1, -24, -25, -256, -257, -4294967296, -42949672960);
+
+        REQUIRE_EQ(to_hex(data), "88002037381838ff3901003affffffff3b00000009ffffffff");
 
         std::array<std::int64_t, 8> values;
         static_assert(IsSigned<decltype(values)::value_type>);
@@ -75,16 +83,16 @@ TEST_CASE("CBOR Encoder") {
         CHECK_EQ(values[5], -257);
         CHECK_EQ(values[6], -4294967296);
         CHECK_EQ(values[7], -42949672960);
-
-        CHECK_EQ(to_hex(data), "88002037381838ff3901003affffffff3b00000009ffffffff");
     }
 
-    SUBCASE("Encode strings") {
+    SUBCASE("Encode Text Strings") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
         enc(as_array{3}, "IETF", "", "Hello world!");
+
+        REQUIRE_EQ(to_hex(data), "836449455446606c48656c6c6f20776f726c6421");
 
         std::array<std::string, 3> values;
         CHECK(IsTextString<decltype(values)::value_type>);
@@ -93,11 +101,9 @@ TEST_CASE("CBOR Encoder") {
         CHECK_EQ(values[0], "IETF");
         CHECK_EQ(values[1], "");
         CHECK_EQ(values[2], "Hello world!");
-
-        CHECK_EQ(to_hex(data), "836449455446606c48656c6c6f20776f726c6421");
     }
 
-    SUBCASE("Encode binary strings") {
+    SUBCASE("Encode Binary Strings") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
@@ -106,186 +112,204 @@ TEST_CASE("CBOR Encoder") {
         std::array<std::byte, 1> binary2{std::byte(0x00)};
 
         enc(as_array{2}, binary1, binary2);
+
+        REQUIRE_EQ(to_hex(data), "82430102034100");
+
+        std::array<std::vector<std::byte>, 2> values;
+        CHECK(IsBinaryString<decltype(values)::value_type>);
+        dec(values);
+
+        CHECK(std::equal(values[0].begin(), values[0].end(), binary1.begin()));
+        CHECK(std::equal(values[1].begin(), values[1].end(), binary2.begin()));
     }
 
     SUBCASE("Encode arrays") {
-        std::vector<variant_contiguous> empty_array;
-        CHECK(encoder<>::serialize(empty_array) == std::vector<std::byte>{std::byte(0x80)});
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
-        std::vector<variant_contiguous> array{1, 2, 3};
-        CHECK(encoder<>::serialize(array) == std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
+        enc(as_array{4}, std::vector<int>{1, 2, 3}, std::array<int, 3>{4, 5, 6}, std::deque<int>{7, 8, 9}, std::list<int>{10, 11, 12});
 
-        std::array<variant_contiguous, 3> fixed_array{1, 2, 3};
-        CHECK(encoder<>::serialize(fixed_array) ==
-              std::vector<std::byte>{std::byte(0x83), std::byte(0x01), std::byte(0x02), std::byte(0x03)});
+        REQUIRE_EQ(to_hex(data), "84830102038304050683070809830a0b0c");
+
+        std::array<std::vector<int>, 4> values;
+        static_assert(IsRangeOfCborValues<decltype(values)::value_type>);
+        dec(values);
+
+        CHECK_EQ(values[0], std::vector<int>{1, 2, 3});
+        CHECK_EQ(values[1], std::vector<int>{4, 5, 6});
+        CHECK_EQ(values[2], std::vector<int>{7, 8, 9});
+        CHECK_EQ(values[3], std::vector<int>{10, 11, 12});
 
         // Make big vector
-        std::vector<variant_contiguous> big_array;
-        big_array.reserve(1000);
-        for (std::uint64_t i = 0; i < 1000; ++i) {
-            big_array.emplace_back(i);
+        {
+            std::vector<int> big_vector(1e5);
+            std::iota(big_vector.begin(), big_vector.end(), -1e4);
+            enc(big_vector);
+
+            std::deque<int> big_vector_result;
+            dec(big_vector_result);
+            CHECK(std::equal(big_vector.begin(), big_vector.end(), big_vector_result.begin()));
         }
-        auto big_array_encoded = encoder<>::serialize(big_array);
-
-        CHECK(big_array_encoded[0] == std::byte{0x99}); // 0x99 is the CBOR header for an array of 1000 elements
-        CHECK(big_array_encoded[1] == std::byte{0x03}); // First byte of 1000 (0x03E8)
-        CHECK(big_array_encoded[2] == std::byte{0xE8}); // Second byte of 1000 (0x03E8)
-
-        // 1903e7 is 999
-        CHECK(big_array_encoded[big_array_encoded.size() - 2] == std::byte{0x03});
-        CHECK(big_array_encoded.back() == std::byte{0xE7});
-
-        fmt::print("Big array: ");
-        print_bytes(big_array_encoded);
     }
 
     SUBCASE("Encode floats") {
-        float16_t half;
-        half = 3.140625f;
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
-        // convert back to float
-        float half_float = half;
-        CHECK_EQ(half_float, 3.140625f);
+        enc(as_array{3}, float16_t(3.14f), float(3.14f), double(3.14));
 
-        auto encoded_half = encoder<>::serialize(half);
-        auto decoded_half = decoder<>::deserialize(encoded_half);
+        REQUIRE_EQ(to_hex(data), "83f94247fa4048f5c3fb40091eb851eb851f");
 
-        CHECK_EQ(half, decoded_half);
+        std::array<std::variant<float16_t, float, double>, 3> values;
+        static_assert(IsSimple<float16_t>);
+        static_assert(!IsFloat16<float>);
+        static_assert(IsFloat32<float>);
+
+        static_assert(IsSimple<float>);
+        static_assert(IsSimple<double>);
+
+        dec(values);
+        auto f16          = static_cast<float>(std::get<float16_t>(values[0]));
+        auto expected_f16 = static_cast<float>(float16_t(3.14f));
+        CHECK_EQ(f16, expected_f16);
+        CHECK_EQ(std::get<float>(values[1]), 3.14f);
+        CHECK_EQ(std::get<double>(values[2]), 3.14);
+    }
+
+    SUBCASE("Encode bools") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
+
+        enc(as_array{2}, true, false);
+
+        REQUIRE_EQ(to_hex(data), "82f5f4");
+
+        std::array<bool, 2> values;
+        dec(values);
+        CHECK_EQ(values[0], true);
+        CHECK_EQ(values[1], false);
+    }
+
+    SUBCASE("Encode null") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
+
+        enc(as_array{2}, std::optional<int>(std::nullopt), 42);
+
+        REQUIRE_EQ(to_hex(data), "82f6182a");
+
+        std::array<std::optional<int>, 2> values;
+        dec(values);
+        CHECK_EQ(values[0], std::nullopt);
+        CHECK_EQ(values[1].value(), 42);
     }
 
     SUBCASE("Encode maps") {
         {
-            std::map<variant_contiguous, variant_contiguous> empty_map;
-            CHECK(encoder<>::serialize(empty_map) == std::vector<std::byte>{std::byte(0xA0)});
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            auto                   dec = make_decoder(data);
 
-            std::map<variant_contiguous, variant_contiguous> map;
-            map.insert({variant_contiguous(1), variant_contiguous(2)});
-            // Should be 0xA1 0x01 0x02
-            auto expected = std::vector<std::byte>{std::byte(0xA1), std::byte(0x01), std::byte(0x02)};
-            auto encoded  = encoder<>::serialize(map);
-            fmt::print("Map: ");
-            print_bytes(encoded);
-            CHECK(encoded == expected);
+            std::map<int, int> map{{1, 2}, {3, 4}, {5, 6}};
+            enc(map);
+
+            REQUIRE_EQ(to_hex(data), "a3010203040506");
+
+            std::map<int, int> map_result;
+            dec(map_result);
+
+            CHECK_EQ(map_result, map);
         }
 
         {
-            std::unordered_map<variant_contiguous, variant_contiguous> unordered_map{{1, 2}, {3, 4}, {5, 6}};
-            // Note: The order of elements in an unordered_map is not guaranteed,
-            // so we can't check for an exact byte sequence. Instead, we check the size.
-            auto encoded = encoder<>::serialize(unordered_map);
-            CHECK(encoded.size() == 7);
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            auto                   dec = make_decoder(data);
 
-            // Check that is contains the keys
-            CHECK(unordered_map.find(1) != unordered_map.end());
-            CHECK(unordered_map.find(3) != unordered_map.end());
-            CHECK(unordered_map.find(5) != unordered_map.end());
+            std::unordered_map<int, int> unordered_map{{1, 2}, {3, 4}, {5, 6}};
+            enc(unordered_map);
 
-            // Negative
-            CHECK(unordered_map.find(2) == unordered_map.end());
-            CHECK(unordered_map.find(4) == unordered_map.end());
-            CHECK(unordered_map.find(6) == unordered_map.end());
+            std::unordered_map<int, int> map_result;
+            dec(map_result);
 
-            // Check that the values are correct
-            CHECK(unordered_map[1] == 2);
-            CHECK(unordered_map[3] == 4);
-            CHECK(unordered_map[5] == 6);
-
-            // Check encoded
-            fmt::print("Unordered map: ");
-            print_bytes(encoded);
-
-            // Find the bytes for the keys
-            auto key1 = std::find(encoded.begin(), encoded.end(), std::byte(0x01));
-            CHECK(key1 != encoded.end());
-            auto key3 = std::find(encoded.begin(), encoded.end(), std::byte(0x03));
-            CHECK(key3 != encoded.end());
-            auto key5 = std::find(encoded.begin(), encoded.end(), std::byte(0x05));
-            CHECK(key5 != encoded.end());
-
-            // Find the bytes for the values
-            auto value2 = std::find(encoded.begin(), encoded.end(), std::byte(0x02));
-            CHECK(value2 != encoded.end());
-            auto value4 = std::find(encoded.begin(), encoded.end(), std::byte(0x04));
-            CHECK(value4 != encoded.end());
-            auto value6 = std::find(encoded.begin(), encoded.end(), std::byte(0x06));
-            CHECK(value6 != encoded.end());
+            CHECK_EQ(map_result, unordered_map);
         }
 
         // Unordered map of string_view
         {
-            std::unordered_map<variant_contiguous, variant_contiguous> string_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
-            auto                                                       encoded = encoder<>::serialize(string_map);
-            fmt::print("String map: ");
-            print_bytes(encoded);
-            CHECK(encoded.size() == 13);
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            auto                   dec = make_decoder(data);
 
-            // Check that is contains the keys
-            CHECK(string_map.find("a") != string_map.end());
-            CHECK(string_map.find("c") != string_map.end());
-            CHECK(string_map.find("e") != string_map.end());
-            // Negative
-            CHECK(string_map.find("b") == string_map.end());
-            CHECK(string_map.find("d") == string_map.end());
-            // Check that the values are correct
-            CHECK(string_map["a"] == "b");
-            CHECK(string_map["c"] == "d");
-            CHECK(string_map["e"] == "f");
+            std::unordered_map<std::string_view, std::string_view> unordered_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
+            enc(unordered_map);
 
-            // Find the bytes for the keys
-            auto key1 = std::find(encoded.begin(), encoded.end(), std::byte(0x61));
-            CHECK(key1 != encoded.end());
-            auto key3 = std::find(encoded.begin(), encoded.end(), std::byte(0x63));
-            CHECK(key3 != encoded.end());
-            auto key5 = std::find(encoded.begin(), encoded.end(), std::byte(0x65));
-            CHECK(key5 != encoded.end());
+            // Could look like "a3616561666163616461616162"
 
-            // Find the bytes for the values
-            auto value2 = std::find(encoded.begin(), encoded.end(), std::byte(0x62));
-            CHECK(value2 != encoded.end());
-            auto value4 = std::find(encoded.begin(), encoded.end(), std::byte(0x64));
-            CHECK(value4 != encoded.end());
-            auto value6 = std::find(encoded.begin(), encoded.end(), std::byte(0x66));
-            CHECK(value6 != encoded.end());
+            std::unordered_map<std::string_view, std::string_view> map_result;
+            dec(map_result);
+
+            CHECK_EQ(map_result, unordered_map);
         }
     }
 
     SUBCASE("Encode map of floats") {
-        std::map<variant_contiguous, variant_contiguous> float_map;
-        float_map.insert({variant_contiguous(1.0f), variant_contiguous(3.14159f)});
+        std::map<float, float> float_map;
+        float_map.insert({1.0f, 3.14159f});
         // a1fa3f800000fa40490fd0
         auto expected =
             std::vector<std::byte>{std::byte(0xA1), std::byte(0xFA), std::byte(0x3F), std::byte(0x80), std::byte(0x00), std::byte(0x00),
                                    std::byte(0xFA), std::byte(0x40), std::byte(0x49), std::byte(0x0F), std::byte(0xD0)};
-        auto encoded = encoder<>::serialize(float_map);
-        fmt::print("Float map: ");
-        print_bytes(encoded);
-        CHECK(encoded == expected);
-    }
 
-    SUBCASE("Encode bool and null") {
-        CHECK(encoder<>::serialize(true) == std::vector<std::byte>{std::byte(0xF5)});
-        CHECK(encoder<>::serialize(false) == std::vector<std::byte>{std::byte(0xF4)});
-        CHECK(encoder<>::serialize(nullptr) == std::vector<std::byte>{std::byte(0xF6)});
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
+        enc(float_map);
+
+        fmt::print("Float map: ");
+        print_bytes(data);
+        CHECK(data == expected);
+
+        std::map<float, float> map_result;
+        dec(map_result);
+        CHECK_EQ(map_result, float_map);
     }
 
     SUBCASE("Encode nested structures") {
-        std::vector<variant_contiguous> number_and_stuff{1, 2, "hello", 3, 4.0f};
-        auto                            encoded1 = encoder<>::serialize(number_and_stuff);
-        fmt::print("encoded1: ");
-        print_bytes(encoded1);
-        CHECK_EQ(to_hex(encoded1), "8501026568656c6c6f03fa40800000");
+        // struct A {
+        //     float16_t a;
+        //     double    b;
+        // };
+        // using tagged_A = std::pair<tag<5>, A>;
 
-        std::vector<variant_contiguous> other_stuff{false, true, nullptr};
-        auto                            encoded2 = encoder<>::serialize(other_stuff);
-        fmt::print("encoded2: ");
-        print_bytes(encoded2);
-        CHECK_EQ(to_hex(encoded2), "83f4f5f6");
+        // using variant = std::variant<int, std::string, float, tagged_A>;
 
-        std::map<variant_contiguous, variant_contiguous> map_of_arrays{{"numbers", std::span(encoded1)}, {"other", std::span(encoded2)}};
-        auto                                             encoded3 = encoder<>::serialize(map_of_arrays);
-        fmt::print("Nested map: ");
-        print_bytes(encoded3);
-        CHECK_EQ(to_hex(encoded3), "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6");
+        // std::vector<std::byte> data;
+        // auto                   enc = make_encoder(data);
+        // auto                   dec = make_decoder(data);
+
+        // std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(tag<5>{}, A{3.14f, 3.14})};
+        // enc(number_and_stuff);
+        // REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000f94247fb40091eb851eb851f");
+
+        // std::vector<variant> number_and_stuff_result;
+        // dec(number_and_stuff_result);
+
+        // std::vector<variant_contiguous> other_stuff{false, true, nullptr};
+        // auto                            encoded2 = encoder<>::serialize(other_stuff);
+        // fmt::print("encoded2: ");
+        // print_bytes(encoded2);
+        // CHECK_EQ(to_hex(encoded2), "83f4f5f6");
+
+        // std::map<variant_contiguous, variant_contiguous> map_of_arrays{{"numbers", std::span(encoded1)}, {"other",
+        // std::span(encoded2)}}; auto                                             encoded3 = encoder<>::serialize(map_of_arrays);
+        // fmt::print("Nested map: ");
+        // print_bytes(encoded3);
+        // CHECK_EQ(to_hex(encoded3), "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6");
     }
 }
 
