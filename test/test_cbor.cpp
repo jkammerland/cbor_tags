@@ -29,8 +29,9 @@
 #include <variant>
 #include <vector>
 
+using namespace cbor::tags;
+
 TEST_CASE("CBOR Encoder") {
-    using namespace cbor::tags;
 
     SUBCASE("Encode unsigned integers") {
         std::vector<std::byte> data;
@@ -319,17 +320,23 @@ TEST_CASE("CBOR Encoder") {
     }
 }
 
+using variant = std::variant<int, std::string, float, double, bool, std::nullptr_t>;
+// Make spaceship operator for variant
+o
+
 TEST_CASE("Sorting strings and binary strings std::map") {
     {
-        std::map<cbor::tags::variant_contiguous, cbor::tags::variant_contiguous> string_map = {{"c", 1},
-                                                                                               {"ac", 2},
-                                                                                               {"b", 3},
-                                                                                               {"a", 4},
-                                                                                               {"ab", 5}};
+        std::map<variant, variant> string_map = {{"c", true}, {"ac", false}, {"b", 3.0}, {"a", nullptr}, {"ab", 5.0f}};
 
-        auto encoded = cbor::tags::encoder<>::serialize(string_map);
-        fmt::print("String map: {}\n", to_hex(encoded));
-        CHECK_EQ(to_hex(encoded), "a56161046261620562616302616203616301");
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
+
+        enc(string_map);
+
+        fmt::print("String map: {}\n", to_hex(data));
+
+        CHECK_EQ(to_hex(data), "a56161046261620562616302616203616301");
     }
 
     // Binary strings
