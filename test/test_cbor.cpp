@@ -3,7 +3,6 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_operators.h"
-#include "cbor_tags/cbor_variant_hash.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 
@@ -352,21 +351,78 @@ template <typename Compare = std::less<>> struct VariantCompare {
 };
 
 TEST_CASE("Sorting strings and binary strings std::map") {
+    std::map<variant, variant, variant_comparator<>> string_map = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+                                                                   {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+    auto                   dec = make_decoder(data);
+
+    enc(string_map);
+
+    fmt::print("String map: {}\n", to_hex(data));
+
+    CHECK_EQ(to_hex(data), "a720fb400800000000000001fb40080000000000006161f66162fb40080000000000006163f5626162fa40a00000626163f4");
+
+    std::map<variant, variant, variant_comparator<>> map_result;
+    dec(map_result);
+
+    CHECK_EQ(map_result.size(), string_map.size());
+    CHECK_EQ(map_result, string_map);
+}
+
+TEST_CASE("Test std::greater in std::map<variant,...>") {
+    std::map<variant, variant, variant_comparator<>> string_map1 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+                                                                    {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+
+    std::map<variant, variant, variant_comparator<std::greater<>>> string_map2 = {
+        {"c", true}, {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}}, {"ab", 5.0f}, {1, 3.0}, {-1, 3.0}};
+
+    std::vector<std::byte> data;
+    std::string            hex1;
+    std::string            hex2;
+
     {
-        using namespace std::string_view_literals;
-        std::map<variant, variant, variant_comparator<>> string_map = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+        auto enc = make_encoder(data);
+        enc(string_map1);
+        hex1 = to_hex(data);
+    }
+    data.clear();
+    {
+        auto enc = make_encoder(data);
+        enc(string_map2);
+        hex2 = to_hex(data);
+    }
+    CHECK_EQ(string_map1.size(), string_map2.size());
+    CHECK_NE(hex1, hex2);
+    CHECK_EQ(hex1.size(), hex2.size());
+}
+
+TEST_CASE("Unordered maps") {
+    std::unordered_map<variant, variant, variant_hasher> string_map = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
                                                                        {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
 
-        std::vector<std::byte> data;
-        auto                   enc = make_encoder(data);
-        // auto                   dec = make_decoder(data);
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+    auto                   dec = make_decoder(data);
 
-        enc(string_map);
+    enc(string_map);
 
-        fmt::print("String map: {}\n", to_hex(data));
+    fmt::print("Unordered map: {}\n", to_hex(data));
 
-        CHECK_EQ(to_hex(data), "a56161f66162fb40080000000000006163f5626162fa40a00000626163f4");
-    }
+    std::unordered_map<variant, variant, variant_hasher> map_result;
+    dec(map_result);
+
+    CHECK_EQ(map_result.size(), string_map.size());
+    CHECK_EQ(map_result, string_map);
+}
+
+TEST_CASE("Sanity check equal size map unordered_map") {
+    std::unordered_map<variant, variant, variant_hasher> string_map1 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+                                                                        {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+    std::map<variant, variant, variant_comparator<>>     string_map2 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+                                                                        {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+    CHECK_EQ(string_map1.size(), string_map2.size());
 }
 
 TEST_CASE("CBOR Encoder - Float encoding") {

@@ -67,53 +67,51 @@ template <typename Compare = std::less<>> struct variant_comparator {
     }
 };
 
-enum class major_type : std::uint8_t {
-    UnsignedInteger = 0,
-    NegativeInteger = 1,
-    ByteString      = 2,
-    TextString      = 3,
-    Array           = 4,
-    Map             = 5,
-    Tag             = 6,
-    SimpleOrFloat   = 7
+struct variant_hasher {
+    template <IsVariant Variant> size_t operator()(const Variant &v) const noexcept {
+        // Start with the index hash
+        size_t seed = std::hash<size_t>{}(v.index());
+
+        // Combine with value hash
+        return std::visit(
+            [seed](const auto &arg) mutable -> size_t {
+                using T = std::decay_t<decltype(arg)>;
+
+                size_t value_hash;
+                if constexpr (IsUnsigned<T> || IsSigned<T>) {
+                    value_hash = std::hash<T>{}(arg);
+                } else if constexpr (IsBinaryString<T> || IsTextString<T>) {
+                    // Hash the contents of the string/binary data
+                    value_hash =
+                        std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(std::data(arg)), std::size(arg)));
+                } else if constexpr (IsArray<T> || IsMap<T>) {
+                    // Hash each element in the container
+                    value_hash = 0;
+                    for (const auto &elem : arg) {
+                        // Combine hashes using FNV-1a-like algorithm
+                        value_hash ^= std::hash<std::decay_t<decltype(elem)>>{}(elem);
+                        value_hash *= 16777619;
+                    }
+                } else if constexpr (IsTag<T>) {
+                    value_hash = std::hash<T>{}(arg);
+                } else if constexpr (IsSimple<T>) {
+                    if constexpr (std::is_same_v<T, std::nullptr_t>) {
+                        value_hash = 0;
+                    } else {
+                        value_hash = std::hash<T>{}(arg);
+                    }
+                } else {
+                    static_assert(always_false<T>::value, "Non-exhaustive visitor!");
+                }
+
+                // Combine the seed (index hash) with the value hash
+                // Using FNV-1a-like combining
+                seed ^= value_hash;
+                seed *= 16777619;
+                return seed;
+            },
+            v);
+    }
 };
-
-// [](const auto &l, const auto &r) -> std::strong_ordering {
-//             using L = std::decay_t<decltype(l)>;
-//             using R = std::decay_t<decltype(r)>;
-
-//             if constexpr (std::is_same_v<L, R>) {
-//                 if constexpr (std::is_same_v<L, std::nullptr_t>) {
-//                     return std::strong_ordering::equal;
-//                 } else if constexpr (std::is_same_v<L, std::span<const std::byte>>) {
-//                     return lexicographic_compare(l, r);
-//                 } else if constexpr (std::is_same_v<L, std::string_view>) {
-//                     return lexicographic_compare(l, r);
-//                 } else if constexpr (std::is_same_v<L, binary_array_view> || std::is_same_v<L, binary_map_view> ||
-//                                      std::is_same_v<L, binary_tag_view>) {
-//                     return l <=> r;
-//                 } else if constexpr (std::is_same_v<L, bool>) {
-//                     return l <=> r;
-//                 } else if constexpr (std::is_same_v<L, float> || std::is_same_v<L, double>) {
-//                     if (l < r) {
-//                         return std::strong_ordering::less;
-//                     }
-//                     if (l > r) {
-//                         return std::strong_ordering::greater;
-//                     }
-//                     return std::strong_ordering::equal;
-//                 } else if constexpr (std::is_arithmetic_v<L>) {
-//                     return l <=> r;
-//                 } else {
-//                     // This should never happen
-//                     // std::unreachable(); // C++23
-//                     return std::strong_ordering::equal;
-//                 }
-//             } else {
-//                 // This should never happen due to the index check
-//                 // std::unreachable(); // C++23
-//                 return std::strong_ordering::equal;
-//             }
-//         }
 
 } // namespace cbor::tags

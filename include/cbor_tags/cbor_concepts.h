@@ -9,6 +9,18 @@
 #include <variant>
 
 namespace cbor::tags {
+
+enum class major_type : std::uint8_t {
+    UnsignedInteger = 0,
+    NegativeInteger = 1,
+    ByteString      = 2,
+    TextString      = 3,
+    Array           = 4,
+    Map             = 5,
+    Tag             = 6,
+    SimpleOrFloat   = 7
+};
+
 template <typename T>
 concept ValidCborBuffer = requires(T) {
     std::is_convertible_v<typename T::value_type, std::byte>;
