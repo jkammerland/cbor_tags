@@ -213,7 +213,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
     template <std::uint64_t N> constexpr void decode(tag<N>, major_type, byte) {}
 
-    template <IsTagged T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTag T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
         if (!(major == major_type::Tag)) {
             throw std::runtime_error("Invalid major type for tagged object");
         }

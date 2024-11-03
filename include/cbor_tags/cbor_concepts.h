@@ -105,7 +105,7 @@ concept IsTaggedTuple = requires(T t) {
 };
 
 template <typename T>
-concept IsTagged = HasCborTag<T> || IsTaggedTuple<T>;
+concept IsTag = HasCborTag<T> || IsTaggedTuple<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -127,7 +127,7 @@ template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
 
 template <typename T>
 concept IsCborMajor = IsUnsigned<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> || (IsArray<T> && ContainsCborMajor<T>::value) ||
-                      (IsMap<T> && ContainsCborMajor<T>::value) || IsTagged<T> || IsSimple<T> ||
+                      (IsMap<T> && ContainsCborMajor<T>::value) || IsTag<T> || IsSimple<T> ||
                       (IsVariant<T> && AllTypesAreCborMajor<T>::value) || (IsOptional<T> && ContainsCborMajor<T>::value);
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
@@ -212,6 +212,8 @@ template <typename T> struct crtp_base {
     constexpr T       &underlying() { return static_cast<T &>(*this); }
     constexpr const T &underlying() const { return static_cast<const T &>(*this); }
 };
+
+template <typename T> struct always_false : std::false_type {};
 
 namespace detail {
 

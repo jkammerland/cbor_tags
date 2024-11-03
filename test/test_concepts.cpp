@@ -119,7 +119,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
     };
 
     static_assert(HasCborTag<CBOR1>);
-    static_assert(IsTagged<CBOR1>);
+    static_assert(IsTag<CBOR1>);
     static_assert(!IsTaggedTuple<CBOR1>);
 
     struct CBOR2 {
@@ -127,7 +127,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
     };
 
     static_assert(!HasCborTag<CBOR2>);
-    static_assert(!IsTagged<CBOR2>);
+    static_assert(!IsTag<CBOR2>);
 }
 
 TEST_CASE("Test IsTuple concept") {
@@ -141,23 +141,23 @@ TEST_CASE("Test IsTuple concept") {
 
 TEST_CASE("Test IsTagged concept with tagged tuples") {
     auto tagged = std::make_tuple(tag<1>{}, 1);
-    static_assert(IsTagged<decltype(tagged)>);
+    static_assert(IsTag<decltype(tagged)>);
 
     auto tagged_tuple = std::make_tuple(tag<1>{}, std::make_tuple(1, 2));
-    static_assert(IsTagged<decltype(tagged_tuple)>);
+    static_assert(IsTag<decltype(tagged_tuple)>);
 
     auto tagged_tuple_2 = std::make_pair(tag<1>{}, std::make_tuple(1, 2));
-    static_assert(IsTagged<decltype(tagged_tuple_2)>);
+    static_assert(IsTag<decltype(tagged_tuple_2)>);
     static_assert(!IsVariant<decltype(tagged_tuple_2)>);
     static_assert(!IsOptional<decltype(tagged_tuple_2)>);
     static_assert(!IsFixedArray<decltype(tagged_tuple_2)>);
     static_assert(!IsMap<decltype(tagged_tuple_2)>);
 
     auto tagged_tuple_3 = std::tuple(tag<1>{}, std::make_tuple(1, 2), std::make_tuple(3, 4));
-    static_assert(IsTagged<decltype(tagged_tuple_3)>);
+    static_assert(IsTag<decltype(tagged_tuple_3)>);
 
     auto tagged_tuple_4 = std::tuple(1, tag<1>{});
-    static_assert(!IsTagged<decltype(tagged_tuple_4)>);
+    static_assert(!IsTag<decltype(tagged_tuple_4)>);
 }
 
 struct DefCbor {

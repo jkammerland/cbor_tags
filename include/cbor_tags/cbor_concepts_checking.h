@@ -42,7 +42,7 @@ struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUn
                                                                             : IsTextString<unwrap_type_t<T>>        ? 3
                                                                             : IsMap<unwrap_type_t<T>>               ? 4
                                                                             : IsFixedArray<unwrap_type_t<T>>        ? 5
-                                                                            : IsTagged<unwrap_type_t<T>>            ? 6
+                                                                            : IsTag<unwrap_type_t<T>>               ? 6
                                                                             : IsSimple<unwrap_type_t<T>>            ? 7
                                                                             : IsRangeOfCborValues<unwrap_type_t<T>> ? 5
                                                                                                                     : 255)> {};
