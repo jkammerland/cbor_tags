@@ -34,6 +34,8 @@ concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; 
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
 
+struct negative;
+
 template <typename T>
 concept IsFloat16 = std::is_same_v<T, float16_t>; // Do not require sizeof(T) == 2, let the memory layout be implementation defined
 
@@ -57,6 +59,9 @@ concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple
 
 template <typename T>
 concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+
+template <typename T>
+concept IsNegative = std::is_same_v<T, negative>;
 
 template <typename T>
 concept IsTextString = requires(T t) {

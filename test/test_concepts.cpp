@@ -37,6 +37,7 @@ TEST_CASE("Test IsUnsigned concept") {
 }
 
 TEST_CASE("Test IsSigned concept") {
+    static_assert(IsSigned<char>);
     static_assert(IsSigned<int>);
     static_assert(IsSigned<std::int8_t>);
     static_assert(IsSigned<std::int16_t>);
@@ -352,16 +353,21 @@ TEST_CASE_TEMPLATE("Test which concept type major type", T, std::byte, char, uin
     CHECK_EQ(set.size(), 9);
 }
 
-template <typename MajorType, typename... T> bool contains_major(MajorType major, std::variant<T...>) {
-    return (... || (major == ConceptType<MajorType, T>::value));
-}
+template <typename Byte, typename... T> bool wrapper(Byte b, const std::variant<T...> &) { return is_valid_major<Byte, T...>(b); }
 
 TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, char, uint8_t) {
     using var1 = std::variant<double, int, std::vector<std::byte>>;
     using var2 = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, std::optional<uint8_t>>;
-    CHECK(is_valid_major<T, double, int, std::vector<std::byte>>(static_cast<T>(1)));
-    CHECK(contains_major(static_cast<T>(1), var1{}));
-    CHECK(contains_major(static_cast<T>(2), var2{}));
+    CHECK(!wrapper(static_cast<T>(0), var1{})); // 0 is Unsigned, thus int will not match
+    CHECK(wrapper(static_cast<T>(0), var2{}));
+
+    CHECK(wrapper(static_cast<T>(1), var1{}));
+    CHECK(wrapper(static_cast<T>(1), var2{}));
+
+    CHECK(wrapper(static_cast<T>(2), var1{}));
+    CHECK(wrapper(static_cast<T>(2), var2{}));
+
+    // CHECK(!wrapper(static_cast<T>(3), var1{}));
 }
 
 TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, unsigned char) {
