@@ -1,34 +1,37 @@
 #pragma once
 
-#include "cbor_tags/cbor_concepts.h"
-
+#include <compare>
 #include <cstdint>
 #include <limits>
 
 namespace cbor::tags {
 
-using positve = std::uint64_t;
+using positive = std::uint64_t;
+struct integer;
 
 struct negative {
-    std::uint64_t value;
+    positive value;
 
-    constexpr negative(std::uint64_t N) : value(N) {}
+    constexpr negative() : value(0) {}
+    constexpr negative(positive N) : value(N) {}
 
     constexpr auto operator<=>(const negative &rhs) const {
         return rhs.value <=> value; // Reverse comparison because negative numbers
     }
 
+    constexpr auto operator==(const negative &rhs) const { return value == rhs.value; }
+
     // Unary operators
-    constexpr negative operator-() const { return {value}; }
-    constexpr negative operator+() const { return *this; }
+    constexpr std::uint64_t operator-() const { return value; }
+    constexpr negative      operator+() const { return *this; }
 };
 
 struct integer {
-    std::uint64_t value;
-    bool          is_negative;
+    positive value;
+    bool     is_negative;
 
-    constexpr integer(std::uint64_t N) : value(N), is_negative(false) {}
-    constexpr integer(std::uint64_t N, bool is_negative) : value(N), is_negative(is_negative) {}
+    constexpr integer(positive N) : value(N), is_negative(false) {}
+    constexpr integer(positive N, bool is_negative) : value(N), is_negative(is_negative) {}
     constexpr integer(negative N) : value(N.value), is_negative(true) {}
 
     constexpr auto operator<=>(const integer &rhs) const {
@@ -138,28 +141,28 @@ struct integer {
     }
 };
 
-constexpr auto operator+(std::uint64_t a, integer b) {
+constexpr auto operator+(positive a, integer b) {
     const auto result = a + (b.is_negative ? -b.value : b.value);
     if (b.is_negative && b.value > a) {
-        return integer(std::numeric_limits<std::uint64_t>::max() - result);
+        return integer(std::numeric_limits<positive>::max() - result);
     } else {
         return integer(result);
     }
 }
 
-constexpr auto operator+(integer a, std::uint64_t b) { return b + a; }
+constexpr auto operator+(integer a, positive b) { return b + a; }
 
-constexpr auto operator+(std::uint64_t a, negative b) {
+constexpr auto operator+(positive a, negative b) {
     auto result      = a - b.value;
     bool is_negative = b.value > a;
-    result           = is_negative ? (std::numeric_limits<std::uint64_t>::max() - result + 1) : result;
+    result           = is_negative ? (std::numeric_limits<positive>::max() - result + 1) : result;
     return integer(result, is_negative);
 }
 
 constexpr auto operator+(integer a, negative b) {
     const auto result = a.value + (a.is_negative ? b.value : -b.value);
     if (b.value > a.value && !a.is_negative) {
-        return integer(std::numeric_limits<std::uint64_t>::max() - result + 1, true);
+        return integer(std::numeric_limits<positive>::max() - result + 1, true);
     } else {
         return integer(result, a.is_negative);
     }
@@ -169,7 +172,7 @@ constexpr auto operator+(negative a, integer b) { return b + a; }
 constexpr auto operator-(integer a, negative b) {
     const auto result = a.value + (a.is_negative ? -b.value : b.value);
     if (a.is_negative && b.value > a.value) {
-        return integer(std::numeric_limits<std::uint64_t>::max() - result - 1, false);
+        return integer(std::numeric_limits<positive>::max() - result - 1, false);
     } else {
         return integer(result, a.value < b.value);
     }
@@ -179,16 +182,16 @@ constexpr auto operator-(negative a, integer b) {
 
     const auto result = a.value + (b.is_negative ? b.value : -b.value);
     if (!b.is_negative && b.value > a.value) {
-        return integer(std::numeric_limits<std::uint64_t>::max() - result - 1, false);
+        return integer(std::numeric_limits<positive>::max() - result - 1, false);
     } else {
         return integer(result, true);
     }
 }
 
-constexpr auto operator+(negative a, std::uint64_t b) { return b + a; }
+constexpr auto operator+(negative a, positive b) { return b + a; }
 constexpr auto operator+(negative a, negative b) { return negative(a.value + b.value); }
-constexpr auto operator-(std::uint64_t a, negative b) { return a + integer(b.value); }
-constexpr auto operator-(negative a, std::uint64_t b) { return negative(a.value + b); }
+constexpr auto operator-(positive a, negative b) { return a + integer(b.value); }
+constexpr auto operator-(negative a, positive b) { return negative(a.value + b); }
 constexpr auto operator-(negative a, negative b) {
     auto result = a.value - b.value;
     if (b.value > a.value) {
@@ -198,16 +201,16 @@ constexpr auto operator-(negative a, negative b) {
     }
 }
 
-constexpr auto operator-(std::uint64_t a, integer b) {
+constexpr auto operator-(positive a, integer b) {
     const auto result = a - (b.is_negative ? -b.value : b.value);
     if (b.is_negative && b.value > a) {
-        return integer(std::numeric_limits<std::uint64_t>::max() - result);
+        return integer(std::numeric_limits<positive>::max() - result);
     } else {
         return integer(result);
     }
 }
 
-constexpr auto operator-(integer a, std::uint64_t b) { return b - a; }
+constexpr auto operator-(integer a, positive b) { return b - a; }
 
 constexpr auto operator""_neg(unsigned long long N) { return negative(N); }
 

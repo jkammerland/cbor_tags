@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 
@@ -96,6 +97,19 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         requires std::is_signed_v<T> && std::is_integral_v<T>
     constexpr void encode(T value) {
         encode(static_cast<std::int64_t>(value));
+    }
+
+    constexpr void encode(negative value) {
+        // Encode negative value directly using CBOR negative integer format
+        encode_major_and_size(static_cast<std::uint64_t>(-1 - value.value), static_cast<byte_type>(0x20));
+    }
+
+    constexpr void encode(integer value) {
+        if (value.is_negative) {
+            encode(negative{value.value});
+        } else {
+            encode(value.value);
+        }
     }
 
     constexpr void encode(std::span<const std::byte> value) {

@@ -36,6 +36,8 @@ struct float16_t;
 
 struct negative;
 
+struct integer;
+
 template <typename T>
 concept IsFloat16 = std::is_same_v<T, float16_t>; // Do not require sizeof(T) == 2, let the memory layout be implementation defined
 
@@ -58,7 +60,7 @@ template <typename T>
 concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
 
 template <typename T>
-concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+concept IsSigned = (std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>;
 
 template <typename T>
 concept IsNegative = std::is_same_v<T, negative>;
@@ -132,19 +134,68 @@ concept IsOptional = requires(T t) {
     { t.value() } -> std::same_as<typename T::value_type &>;
 };
 
+// Type trait to unwrap nested types
+template <typename T> struct unwrap_type {
+    using type = T;
+};
+
+// Specialization for std::optional
+template <typename T> struct unwrap_type<std::optional<T>> {
+    using type = typename unwrap_type<T>::type;
+};
+
+// Specialization for std::variant
+template <typename... Ts> struct unwrap_type<std::variant<Ts...>> {
+    // Get the first type's unwrapped version
+    using type = typename unwrap_type<std::tuple_element_t<0, std::tuple<Ts...>>>::type;
+};
+
+// Helper alias
+template <typename T> using unwrap_type_t = typename unwrap_type<T>::type;
+
+template <typename... T> constexpr bool contains_signed_integer = (... || IsSigned<unwrap_type_t<T>>);
+template <typename... T> constexpr bool contains_unsigned       = (... || IsUnsigned<unwrap_type_t<T>>);
+template <typename... T> constexpr bool contains_negative       = (... || IsNegative<unwrap_type_t<T>>);
+
 template <typename T>
 concept IsVariant = requires(T t) {
     { std::variant_size_v<T> } -> std::convertible_to<size_t>;
     { t.index() } -> std::convertible_to<size_t>;
 };
 
+template <typename T> struct variant_contains_integer : std::false_type {};
+template <template <typename...> typename V, typename... T>
+struct variant_contains_integer<V<T...>> : std::bool_constant<contains_signed_integer<T...>> {};
+
+template <typename T> struct variant_contains_unsigned_or_negative : std::false_type {};
+template <template <typename...> typename V, typename... T>
+struct variant_contains_unsigned_or_negative<V<T...>> : std::bool_constant<contains_unsigned<T...> || contains_negative<T...>> {};
+
+template <typename T>
+concept IsVariantWithSignedInteger = IsVariant<T> && variant_contains_integer<T>::value;
+
+template <typename T>
+concept IsVariantWithUnsignedInteger = IsVariant<T> && variant_contains_unsigned_or_negative<T>::value;
+
+template <typename T>
+concept IsVariantWithOnlySignedInteger = IsVariantWithSignedInteger<T> && !IsVariantWithUnsignedInteger<T>;
+
+template <typename T>
+concept IsVariantWithOnlyUnsignedInteger = IsVariantWithUnsignedInteger<T> && !IsVariantWithSignedInteger<T>;
+
+template <typename T>
+concept IsVariantWithoutIntegers = !IsVariantWithSignedInteger<T> && !IsVariantWithUnsignedInteger<T>;
+
+template <typename T>
+concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
+
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
 template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
 
 template <typename T>
-concept IsCborMajor = IsUnsigned<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> || (IsArray<T> && ContainsCborMajor<T>::value) ||
-                      (IsMap<T> && ContainsCborMajor<T>::value) || IsTag<T> || IsSimple<T> ||
+concept IsCborMajor = IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+                      (IsArray<T> && ContainsCborMajor<T>::value) || (IsMap<T> && ContainsCborMajor<T>::value) || IsTag<T> || IsSimple<T> ||
                       (IsVariant<T> && AllTypesAreCborMajor<T>::value) || (IsOptional<T> && ContainsCborMajor<T>::value);
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {

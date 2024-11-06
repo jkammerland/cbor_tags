@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_reflection_impl.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -289,6 +290,26 @@ TEST_CASE("Test non aggregates, to_tuple(Type) will not work for Type that does 
     }
 }
 
+TEST_CASE_TEMPLATE("Test IsVariant", T, std::variant<int, double>, std::variant<int, std::optional<int>>) {
+    static_assert(IsVariant<T>);
+    static_assert(!IsOptional<T>);
+}
+
+TEST_CASE_TEMPLATE("Test IsVariant negative", T, std::tuple<int, double>, std::map<int, double>, std::optional<int>) {
+    static_assert(!IsVariant<T>);
+}
+
+TEST_CASE_TEMPLATE("Test IsStrictVariant", T, std::variant<int, double>, std::variant<int, bool>, std::variant<std::int64_t, bool>,
+                   std::variant<positive, negative>, std::variant<std::string, negative, positive>, std::variant<std::string, bool>,
+                   std::variant<int64_t, bool>, std::variant<negative, bool>, std::variant<positive, bool>, std::variant<double, float>) {
+    static_assert(IsStrictVariant<T>);
+}
+
+TEST_CASE_TEMPLATE("Test IsStrictVariant negative", T, std::variant<int, negative>, std::variant<int, positive>,
+                   std::variant<std::string, int, negative>, std::variant<std::string, int, positive>) {
+    static_assert(!IsStrictVariant<T>);
+}
+
 TEST_CASE_TEMPLATE("Not IsAggregate<T>", T, std::vector<int>, std::map<int, int>, std::tuple<int, int>, std::pair<tag<1>, int>,
                    std::optional<int>, float, double, std::string, std::string_view, std::byte, std::uint8_t, std::int8_t, std::uint64_t,
                    std::int64_t, std::nullptr_t) {
@@ -346,8 +367,8 @@ template <typename Byte, typename... Types> auto collect_concept_types() {
 }
 
 TEST_CASE_TEMPLATE("Test which concept type major type", T, std::byte, char, uint8_t) {
-    auto set = collect_concept_types<T, std::uint8_t, double, float, std::int8_t, std::map<int, std::string>, std::array<uint8_t, 5>,
-                                     std::string, std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
+    auto set = collect_concept_types<T, std::uint8_t, double, float, negative, std::int8_t, std::map<int, std::string>,
+                                     std::array<uint8_t, 5>, std::string, std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
 
     fmt::print("Set contains: [{}], size of set is <{}>\n", fmt::join(set, ", "), set.size());
     CHECK_EQ(set.size(), 9);
@@ -357,8 +378,8 @@ template <typename Byte, typename... T> bool wrapper(Byte b, const std::variant<
 
 TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, char, uint8_t) {
     using var1 = std::variant<double, int, std::vector<std::byte>>;
-    using var2 = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, std::optional<uint8_t>>;
-    CHECK(!wrapper(static_cast<T>(0), var1{})); // 0 is Unsigned, thus int will not match
+    using var2 = std::variant<std::uint64_t, negative, std::span<const std::byte>, std::string_view, std::optional<uint8_t>>;
+    CHECK(wrapper(static_cast<T>(0), var1{})); // 0 is Unsigned, thus int will not match
     CHECK(wrapper(static_cast<T>(0), var2{}));
 
     CHECK(wrapper(static_cast<T>(1), var1{}));
@@ -568,4 +589,19 @@ TEST_CASE("to_tupple address") {
         CHECK_EQ(&b, &std::get<1>(t));
         CHECK_EQ(&c, &std::get<2>(t));
     }
+}
+
+// Example function that uses tags
+template <std::uint64_t N> constexpr void process_tag(tag<N>) { fmt::print("Processing tag value: 0x{:x} ({})\n", N, N); }
+
+TEST_CASE("Literals") {
+    using namespace cbor::tags::literals;
+
+    // Using hex tags
+    process_tag(0xFF_hex_tag);   // Will print: Processing tag value: 0xff (255)
+    process_tag(0xDEAD_hex_tag); // Will print: Processing tag value: 0xdead (57005)
+
+    static_assert(decltype(255_tag)::cbor_tag == 255);
+    static_assert(decltype(0xFF_hex_tag)::cbor_tag == 255);
+    static_assert(decltype(0xABC_hex_tag)::cbor_tag == 2748);
 }

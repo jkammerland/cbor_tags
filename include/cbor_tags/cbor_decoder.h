@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -138,6 +139,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         } else {
             throw std::runtime_error("Invalid major type for integer");
         }
+    }
+
+    constexpr void decode(integer &, major_type, byte) { throw std::runtime_error("Not implemented"); }
+    constexpr void decode(negative &value, major_type major, byte additionalInfo) {
+        if (major != major_type::NegativeInteger) {
+            throw std::runtime_error("Invalid major type for negative integer");
+        }
+        value = negative(decode_integer(additionalInfo));
     }
 
     constexpr void decode(bool &value, major_type, byte additionalInfo) {
@@ -304,8 +313,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
             bool condition3 = major == major_type::UnsignedInteger;
             fmt::print("TEST: {}, {}, {}\n", condition, condition2, condition3);
 
-            if (ConceptType<byte, U>::value != static_cast<byte>(major) && !(IsSigned<U> && (major == major_type::UnsignedInteger))) {
-                return false;
+            if constexpr (IsSigned<U>) {
+                if (major > major_type::NegativeInteger) {
+                    return false;
+                }
+            } else {
+                if (ConceptType<byte, U>::value != static_cast<byte>(major)) {
+                    return false;
+                }
             }
 
             if constexpr (IsSimple<U>) {

@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_integer.h"
 #include "test_util.h"
 
 #include <array>
@@ -226,8 +227,8 @@ TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::
     CHECK_EQ(values, result);
 }
 
-TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::variant<int, double>) {
-    using variant = std::variant<uint64_t, T>;
+TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string /*, std::variant<int, double> */) {
+    using variant = std::variant<positive, T>;
     {
         std::vector<std::byte> buffer1;
         auto                   enc = make_encoder(buffer1);
@@ -240,7 +241,7 @@ TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::varia
         auto    dec = make_decoder(buffer2);
         variant result;
         dec(result);
-        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+        CHECK_EQ(std::holds_alternative<positive>(result), true);
         CHECK_EQ(v, result);
     }
 

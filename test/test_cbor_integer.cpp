@@ -1,5 +1,5 @@
 #include <cbor_tags/cbor_concepts.h>
-#include <cbor_tags/cbor_negative.h>
+#include <cbor_tags/cbor_integer.h>
 #include <doctest/doctest.h>
 #include <limits>
 
@@ -105,8 +105,8 @@ TEST_CASE("Subtraction") {
 }
 
 TEST_CASE("test max positive + min negative") {
-    positve a = std::numeric_limits<std::uint64_t>::max();
-    auto    b = negative(std::numeric_limits<std::uint64_t>::max());
+    positive a = std::numeric_limits<std::uint64_t>::max();
+    auto     b = negative(std::numeric_limits<std::uint64_t>::max());
 
     auto result = a + b;
     CHECK_EQ(result.value, 0);
