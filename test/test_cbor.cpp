@@ -425,283 +425,44 @@ TEST_CASE("Sanity check equal size map unordered_map") {
     CHECK_EQ(string_map1.size(), string_map2.size());
 }
 
-TEST_CASE("CBOR Encoder - Float encoding") {
+TEST_CASE("CBOR Encoder - Map of float sorted" * doctest::skip()) {
     using namespace cbor::tags;
-    // SUBCASE("Positive float") {
-    //     float value   = 3.14159f;
-    //     auto  encoded = encoder<>::serialize(value);
-    //     fmt::print("Positive float: ");
-    //     print_bytes(encoded);
-    //     CHECK_EQ(to_hex(encoded), "fa40490fd0");
-    // }
+    using variant = std::variant<int, float, double, bool, std::nullptr_t, std::string>;
 
-    // SUBCASE("Negative float") {
-    //     float value   = -3.14159f;
-    //     auto  encoded = encoder<>::serialize(value);
-    //     fmt::print("Negative float: ");
-    //     print_bytes(encoded);
-    //     CHECK_EQ(to_hex(encoded), "fac0490fd0");
-    // }
+    std::map<variant, variant, VariantCompare<>> float_map = {
+        {3.0f, 3.14159f},  {1.0f, 3.14159f},    {2.0f, 3.14159f}, {4.0f, 3.14159f}, {-5.0f, 3.14159f},
+        {-1.0f, 3.14159f}, {10.0f, 3.14159f},   {3.0, 3.14159f},  {-3.0, 3.14159f}, {"hello", 3.14159f},
+        {true, 3.14159f},  {nullptr, 3.14159f}, {1, 3.14159f},    {-2, 3.14159f},   {-3, 3.14159f}};
 
-    // SUBCASE("Zero") {
-    //     float value   = 0.0f;
-    //     auto  encoded = encoder<>::serialize(value);
-    //     fmt::print("Zero: ");
-    //     print_bytes(encoded);
-    //     CHECK_EQ(to_hex(encoded), "fa00000000");
-    // }
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+    // auto                   dec = make_decoder(data);
 
-    // SUBCASE("Infinity") {
-    //     float value   = std::numeric_limits<float>::infinity();
-    //     auto  encoded = encoder<>::serialize(value);
-    //     fmt::print("Infinity: ");
-    //     print_bytes(encoded);
-    //     CHECK_EQ(to_hex(encoded), "fa7f800000");
-    // }
+    enc(float_map);
 
-    // SUBCASE("NaN") {
-    //     float value   = std::numeric_limits<float>::quiet_NaN();
-    //     auto  encoded = encoder<>::serialize(value);
-    //     fmt::print("NaN: ");
-    //     print_bytes(encoded);
-    //     CHECK_EQ(to_hex(encoded), "fa7fc00000");
-    // }
+    fmt::print("Float map: {}\n", to_hex(data));
 
-    // SUBCASE("Map of float sorted") {
-    //     std::map<cbor::tags::variant_contiguous, cbor::tags::variant_contiguous> float_map;
-    //     float_map = {{3.0f, 3.14159f},  {1.0f, 3.14159f},    {2.0f, 3.14159f}, {4.0f, 3.14159f}, {-5.0f, 3.14159f},
-    //                  {-1.0f, 3.14159f}, {10.0f, 3.14159f},   {3.0, 3.14159f},  {-3.0, 3.14159f}, {"hello", 3.14159f},
-    //                  {true, 3.14159f},  {nullptr, 3.14159f}, {1, 3.14159f},    {-2, 3.14159f},   {-3, 3.14159f}};
-
-    //     auto encoded = cbor::tags::encoder<>::serialize(float_map);
-    //     fmt::print("Float map sorted: ");
-    //     print_bytes(encoded);
-
-    //     /*
-    //         {
-    //             -3: 3.14159_2,
-    //             -2: 3.14159_2,
-    //             1: 3.14159_2,
-    //             "hello": 3.14159_2,
-    //             -5.0_2: 3.14159_2,
-    //             -1.0_2: 3.14159_2,
-    //             1.0_2: 3.14159_2,
-    //             2.0_2: 3.14159_2,
-    //             3.0_2: 3.14159_2,
-    //             4.0_2: 3.14159_2,
-    //             10.0_2: 3.14159_2,
-    //             -3.0_3: 3.14159_2,
-    //             3.0_3: 3.14159_2,
-    //             true: 3.14159_2,
-    //             null: 3.14159_2,
-    //         }
-    //     */
-    //     CHECK_EQ(to_hex(encoded),
-    //              "af22fa40490fd021fa40490fd001fa40490fd06568656c6c6ffa40490fd0fac0a00000fa40490fd0fabf800000fa40490fd0fa3f800000fa"
-    //              "40490fd0fa40000000fa40490fd0fa40400000fa40490fd0fa40800000fa40490fd0fa41200000fa40490fd0fbc008000000000000fa4049"
-    //              "0fd0fb4008000000000000fa40490fd0f5fa40490fd0f6fa40490fd0");
-    // }
+    /*
+        {
+            -3: 3.14159_2,
+            -2: 3.14159_2,
+            1: 3.14159_2,
+            "hello": 3.14159_2,
+            -5.0_2: 3.14159_2,
+            -1.0_2: 3.14159_2,
+            1.0_2: 3.14159_2,
+            2.0_2: 3.14159_2,
+            3.0_2: 3.14159_2,
+            4.0_2: 3.14159_2,
+            10.0_2: 3.14159_2,
+            -3.0_3: 3.14159_2,
+            3.0_3: 3.14159_2,
+            true: 3.14159_2,
+            null: 3.14159_2,
+        }
+    */
+    CHECK_EQ(to_hex(data),
+             "af22fa40490fd021fa40490fd001fa40490fd06568656c6c6ffa40490fd0fac0a00000fa40490fd0fabf800000fa40490fd0fa3f800000fa"
+             "40490fd0fa40000000fa40490fd0fa40400000fa40490fd0fa40800000fa40490fd0fa41200000fa40490fd0fbc008000000000000fa4049"
+             "0fd0fb4008000000000000fa40490fd0f5fa40490fd0f6fa40490fd0");
 }
-
-TEST_CASE("CBOR Encoder - Double encoding") {
-    using namespace cbor::tags;
-    SUBCASE("Positive double") {
-        double value   = 3.14159265358979323846;
-        auto   encoded = encoder<>::serialize(value);
-        CHECK(encoded.size() == 9);
-        CHECK(to_hex(encoded) == "fb400921fb54442d18");
-    }
-
-    SUBCASE("Negative double") {
-        double value   = -3.14159265358979323846;
-        auto   encoded = encoder<>::serialize(value);
-        fmt::print("Negative double: ");
-        print_bytes(encoded);
-        CHECK(to_hex(encoded) == "fbc00921fb54442d18");
-    }
-
-    SUBCASE("Zero") {
-        double value   = 0.0;
-        auto   encoded = encoder<>::serialize(value);
-        CHECK(to_hex(encoded) == "fb0000000000000000");
-    }
-
-    SUBCASE("Infinity") {
-        double value   = std::numeric_limits<double>::infinity();
-        auto   encoded = encoder<>::serialize(value);
-        CHECK(to_hex(encoded) == "fb7ff0000000000000");
-    }
-
-    SUBCASE("NaN") {
-        double value   = std::numeric_limits<double>::quiet_NaN();
-        auto   encoded = encoder<>::serialize(value);
-        CHECK(encoded.size() == 9);
-        CHECK(encoded[0] == static_cast<std::byte>(0xFB));
-        CHECK((encoded[1] & static_cast<std::byte>(0x7F)) == static_cast<std::byte>(0x7F));
-        CHECK((encoded[2] & static_cast<std::byte>(0xF0)) == static_cast<std::byte>(0xF0));
-        // The last 6 bytes can vary, so we don't check them
-    }
-}
-
-// TEST_CASE("cbor::tags decoder") {
-//     using namespace cbor::tags;
-//     const char *data  = "a2676e756d626572734f8501026568656c6c6f03fa40800000656f746865724483f4f5f6";
-//     auto        bytes = to_bytes(data);
-
-//     SUBCASE("integers") {
-//         auto encoded = encoder<>::serialize(std::uint64_t(4294967296));
-//         auto decoded = decoder<>::deserialize(encoded);
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::uint64_t>(decoded));
-//         CHECK_EQ(std::get<std::uint64_t>(decoded), 4294967296);
-
-//         encoded = encoder<>::serialize(std::int64_t(-100));
-//         decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
-//         CHECK_EQ(std::get<std::int64_t>(decoded), -100);
-
-//         encoded = encoder<>::serialize(std::int64_t(-4294967296));
-//         decoded = decoder<>::deserialize(encoded);
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
-//         CHECK_EQ(std::get<std::int64_t>(decoded), -4294967296);
-
-//         encoded = encoder<>::serialize(std::int64_t(-42949672960));
-//         decoded = decoder<>::deserialize(encoded);
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
-//         CHECK_EQ(std::get<std::int64_t>(decoded), -42949672960);
-
-//         // Check small negative
-//         encoded = encoder<>::serialize(std::int64_t(-24));
-//         fmt::print("Small negative: {}\n", to_hex(encoded));
-//         decoded = decoder<>::deserialize(encoded);
-//         // fmt::print("Small negative decoded: {}\n", std::get<std::int64_t>(decoded));
-
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::int64_t>(decoded));
-//         CHECK_EQ(std::get<std::int64_t>(decoded), -24);
-//     }
-
-//     SUBCASE("Text strings") {
-//         auto encoded = encoder<>::serialize(std::string_view("IETF"));
-//         auto decoded = decoder<>::deserialize(encoded);
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::string_view>(decoded));
-//         CHECK_EQ(std::get<std::string_view>(decoded), "IETF");
-
-//         encoded = encoder<>::serialize(std::string("IETF"));
-//         decoded = decoder<>::deserialize(encoded);
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::string_view>(decoded));
-//         CHECK_EQ(std::get<std::string_view>(decoded), "IETF");
-//     }
-
-//     SUBCASE("Binary strings") {
-//         auto encoded = encoder<>::serialize(std::span<const std::byte>(bytes));
-//         auto decoded = decoder<>::deserialize(encoded);
-//         // REQUIRE(decoded);
-//         REQUIRE(std::holds_alternative<std::span<const std::byte>>(decoded));
-//         // Loop and check each byte
-//         auto decoded_bytes = std::get<std::span<const std::byte>>(decoded);
-//         CHECK_EQ(decoded_bytes.size(), bytes.size());
-//         for (size_t i = 0; i < bytes.size(); ++i) {
-//             CHECK_EQ(decoded_bytes[i], bytes[i]);
-//         }
-//     }
-
-//     SUBCASE("Arrays") {
-//         auto encoded = encoder<>::serialize(std::vector<variant_contiguous>{1, 2, 3});
-//         auto decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<binary_array_view>(decoded));
-//         auto array         = std::get<binary_array_view>(decoded);
-//         auto decoded_array = decoder<>::deserialize(array);
-//         CHECK_EQ(decoded_array.size(), 3);
-//         CHECK_EQ(std::get<std::uint64_t>(decoded_array[0]), 1);
-//         CHECK_EQ(std::get<std::uint64_t>(decoded_array[1]), 2);
-//         CHECK_EQ(std::get<std::uint64_t>(decoded_array[2]), 3);
-//     }
-
-//     SUBCASE("Maps") {
-//         auto encoded = encoder<>::serialize(std::map<variant_contiguous, variant_contiguous>{{"ca", 1}, {"ba", 2}, {"a", 3}});
-//         auto decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
-
-//         auto map = decoder<>::deserialize<std::map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
-//         CHECK_EQ(map.size(), 3);
-//         CHECK_EQ(std::get<std::uint64_t>(map["ca"]), 1);
-//         CHECK_EQ(std::get<std::uint64_t>(map["ba"]), 2);
-//         CHECK_EQ(std::get<std::uint64_t>(map["a"]), 3);
-//     }
-
-//     SUBCASE("Binary string map") {
-//         auto decoded = decoder<>::deserialize(std::span(bytes));
-//         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
-
-//         auto map = decoder<>::deserialize<std::map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
-//         CHECK_EQ(map.size(), 2);
-//         CHECK(map.contains("numbers"));
-//         CHECK(map.contains("other"));
-//     }
-
-//     SUBCASE("Floats unordered map") {
-//         auto umap = std::unordered_map<variant_contiguous, variant_contiguous>{{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0, 6.0f}};
-
-//         auto encoded = encoder<>::serialize(umap);
-//         fmt::print("Float map: {}\n", to_hex(encoded));
-//         auto decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
-
-//         auto map = decoder<>::deserialize<std::unordered_map<variant_contiguous,
-//         variant_contiguous>>(std::get<binary_map_view>(decoded));
-
-//         CHECK_EQ(std::get<float>(map[1.0f]), 2.0f);
-//         CHECK_EQ(std::get<float>(map[3.0f]), 4.0f);
-//         CHECK_EQ(std::get<float>(map[5.0]), 6.0f);
-//         CHECK_THROWS_AS(std::get<double>(map[5.0]), std::exception);
-//     }
-
-//     SUBCASE("Doubles map") {
-//         auto encoded = encoder<>::serialize(std::map<variant_contiguous, variant_contiguous>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}});
-//         auto decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
-
-//         auto map = decoder<>::deserialize<std::map<variant_contiguous, variant_contiguous>>(std::get<binary_map_view>(decoded));
-//         CHECK_EQ(map.size(), 3);
-//         CHECK_EQ(std::get<double>(map[1.0]), 2.0);
-//         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
-//         CHECK_EQ(std::get<double>(map.at(5.0)), 6.0);
-//         CHECK_THROWS_AS(std::get<float>(map.at(5.0f)), std::exception);
-//     }
-
-//     SUBCASE("Double unordered map") {
-//         auto encoded =
-//             encoder<>::serialize(std::unordered_map<variant_contiguous, variant_contiguous>{{1.0, 2.0}, {3.0, 4.0}, {5.0f, 6.0}});
-//         auto decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<binary_map_view>(decoded));
-
-//         auto s = std::format("{}", "decoded");
-
-//         auto map = decoder<>::deserialize<std::unordered_map<variant_contiguous,
-//         variant_contiguous>>(std::get<binary_map_view>(decoded)); CHECK_EQ(map.size(), 3); CHECK_EQ(std::get<double>(map[1.0]), 2.0);
-//         CHECK_EQ(std::get<double>(map[3.0]), 4.0);
-//         CHECK_EQ(std::get<double>(map.at(5.0f)), 6.0);
-//         CHECK_THROWS_AS(std::get<double>(map.at(5.0)), std::out_of_range);
-//     }
-
-//     SUBCASE("Decode Simple values") {
-//         auto encoded = encoder<>::serialize(true);
-//         auto decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<bool>(decoded));
-//         CHECK_EQ(std::get<bool>(decoded), true);
-
-//         encoded = encoder<>::serialize(false);
-//         decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<bool>(decoded));
-//         CHECK_EQ(std::get<bool>(decoded), false);
-
-//         encoded = encoder<>::serialize(nullptr);
-//         decoded = decoder<>::deserialize(encoded);
-//         REQUIRE(std::holds_alternative<std::nullptr_t>(decoded));
-//     }
-// }

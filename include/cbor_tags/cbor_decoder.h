@@ -53,71 +53,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return result;
     }
 
-    static variant deserialize(const InputBuffer &data) {
-        decoder decoder(data);
-        return decoder.decode_value();
-    }
-
-    static std::vector<variant> deserialize(binary_array_view array) {
-        decoder              decoder(array.data);
-        std::vector<variant> result;
-        while (!decoder.reader_.empty(decoder.data_)) {
-            result.push_back(decoder.decode_value());
-        }
-        return result;
-    }
-
-    template <typename Container> static void deserialize_to(binary_array_view array, Container &result) {
-        decoder                     decoder(array.data);
-        detail::appender<Container> appender_;
-
-        while (!decoder.reader_.empty(decoder.data_)) {
-            appender_(result, decoder.decode_value());
-        }
-    }
-
-    template <typename MapType> static MapType deserialize(binary_map_view map) {
-        decoder decoder(map.data);
-        MapType result;
-        while (!decoder.reader_.empty(decoder.data_)) {
-            auto key    = decoder.decode_value();
-            auto value  = decoder.decode_value();
-            result[key] = value;
-        }
-        return result;
-    }
-
-    template <typename MapType> static void deserialize_to(binary_map_view map, MapType &result) {
-        decoder decoder(map.data);
-        while (decoder.position_ < map.data.size()) {
-            auto key    = decoder.decode_value();
-            auto value  = decoder.decode_value();
-            result[key] = value;
-        }
-    }
-
-    variant decode_value() {
-        if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
-        }
-
-        const auto initialByte    = reader_.read(data_);
-        const auto majorType      = static_cast<major_type>(static_cast<byte>(initialByte) >> 5);
-        const auto additionalInfo = initialByte & static_cast<byte>(0x1F);
-
-        switch (majorType) {
-        case major_type::UnsignedInteger: return decode_unsigned(additionalInfo);
-        case major_type::NegativeInteger: return decode_integer(additionalInfo);
-        case major_type::ByteString: return decode_bstring(additionalInfo);
-        case major_type::TextString: return decode_text(additionalInfo);
-        case major_type::Array: return decode_array(additionalInfo);
-        case major_type::Map: return decode_map(additionalInfo);
-        case major_type::Tag: return decode_tag(additionalInfo);
-        case major_type::SimpleOrFloat: return decodeSimpleOrFloat(additionalInfo);
-        default: throw std::runtime_error("Unsupported major type");
-        }
-    }
-
     template <typename T> constexpr auto decode_value(T &value) {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
@@ -303,15 +238,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
 
         // Print all types
-        fmt::print("Types: {}\n", fmt::join({nameof::nameof_type<T>()...}, ", "));
+        // fmt::print("Types: {}\n", fmt::join({nameof::nameof_type<T>()...}, ", "));
 
         auto try_decode = [this, major, additionalInfo, &value]<typename U>() -> bool {
-            fmt::print("Nameof U type: {}\n", nameof::nameof_type<U>());
-            bool condition =
-                (ConceptType<byte, U>::value != static_cast<byte>(major)) && !(IsSigned<U> && (major == major_type::UnsignedInteger));
-            bool condition2 = !(IsSigned<U> && (major == major_type::UnsignedInteger));
-            bool condition3 = major == major_type::UnsignedInteger;
-            fmt::print("TEST: {}, {}, {}\n", condition, condition2, condition3);
+            // // fmt::print("Nameof U type: {}\n", nameof::nameof_type<U>());
+            // bool condition =
+            //     (ConceptType<byte, U>::value != static_cast<byte>(major)) && !(IsSigned<U> && (major == major_type::UnsignedInteger));
+            // bool condition2 = !(IsSigned<U> && (major == major_type::UnsignedInteger));
+            // bool condition3 = major == major_type::UnsignedInteger;
+            // fmt::print("TEST: {}, {}, {}\n", condition, condition2, condition3);
 
             if constexpr (IsSigned<U>) {
                 if (major > major_type::NegativeInteger) {
@@ -324,7 +259,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
             }
 
             if constexpr (IsSimple<U>) {
-                fmt::print("Simple type: {}\n", nameof::nameof_type<U>());
+                // fmt::print("Simple type: {}\n", nameof::nameof_type<U>());
                 if constexpr (IsFloat16<U>) {
                     if (additionalInfo != static_cast<byte>(25)) {
                         return false;
@@ -610,14 +545,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     }
 
     template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
-        fmt::print("Major: {} - [ ", static_cast<int>(major));
-        (fmt::print("{} ", static_cast<int>(ConceptType<ByteType, T>::value)), ...);
-        fmt::print("]\n");
-        // Check any Signed?
-        (fmt::print("IsSigned: {}\n", IsSigned<unwrap_type_t<T>>), ...);
-        bool test = (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
-                             (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));
-        fmt::print("Test: {}\n", test);
+        // fmt::print("Major: {} - [ ", static_cast<int>(major));
+        // (fmt::print("{} ", static_cast<int>(ConceptType<ByteType, T>::value)), ...);
+        // fmt::print("]\n");
+        // // Check any Signed?
+        // (fmt::print("IsSigned: {}\n", IsSigned<unwrap_type_t<T>>), ...);
+        // bool test = (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
+        //  (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));
+        // fmt::print("Test: {}\n", test);
 
         return (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
                         (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));

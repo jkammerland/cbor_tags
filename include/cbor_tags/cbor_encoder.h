@@ -39,13 +39,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
-    template <typename T> static auto serialize(const T &value) {
-        OutputBuffer          data;
-        encoder<OutputBuffer> encoder(data);
-        encoder.encode(value);
-        return data;
-    }
-
     template <typename... T> constexpr void operator()(const T &...args) { (encode(args), ...); }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
