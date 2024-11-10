@@ -98,21 +98,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         appender_(data_, value);
     }
 
-    constexpr void encode(const binary_array_view &value) { appender_(data_, value.data); }
-
-    constexpr void encode(const binary_map_view &value) { appender_(data_, value.data); }
-
-    constexpr void encode(const binary_tag_view &value) {
-        encode_major_and_size(value.tag, static_cast<byte_type>(0xC0));
-        appender_(data_, value.data);
-    }
-
-    constexpr void encode(const char_range_view<subrange> &value) { appender_(data_, value.range); }
-    constexpr void encode(const binary_range_view<subrange> &value) { appender_(data_, value.range); }
-    constexpr void encode(const binary_array_range_view<subrange> &value) { appender_(data_, value.range); }
-    constexpr void encode(const binary_map_range_view<subrange> &value) { appender_(data_, value.range); }
-    constexpr void encode(const binary_tag_range_view<subrange> &value) { appender_(data_, value.range); }
-
     constexpr void encode(float16_t value) {
         appender_(data_, static_cast<byte_type>(0xf9)); // CBOR Float16 tag
         appender_(data_, static_cast<byte_type>(value.value >> 8));
