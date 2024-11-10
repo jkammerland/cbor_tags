@@ -93,8 +93,9 @@ TEST_CASE("CBOR Encoder") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
+        using namespace std::string_view_literals;
 
-        enc(as_array{3}, "IETF", "", "Hello world!");
+        enc(as_array{3}, "IETF"sv, ""sv, "Hello world!"sv);
 
         REQUIRE_EQ(to_hex(data), "836449455446606c48656c6c6f20776f726c6421");
 

@@ -127,8 +127,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(const std::string &value) { encode(std::string_view(value)); }
 
-    constexpr void encode(const char *value) { encode(std::string_view(value)); }
-
     constexpr void encode(const binary_array_view &value) { appender_(data_, value.data); }
 
     constexpr void encode(const binary_map_view &value) { appender_(data_, value.data); }

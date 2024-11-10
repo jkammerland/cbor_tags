@@ -114,4 +114,28 @@ struct as_map {
 struct as_indefinite_map {};
 struct end_map {};
 
+// Compile-time function to get CBOR major type
+template <IsCborMajor T> constexpr std::byte get_major_type() {
+    if constexpr (IsUnsigned<T>) {
+        return static_cast<std::byte>(0x00);
+    } else if constexpr (IsNegative<T>) {
+        return static_cast<std::byte>(0x20);
+    } else if constexpr (IsBinaryString<T>) {
+        return static_cast<std::byte>(0x40);
+    } else if constexpr (IsTextString<T>) {
+        return static_cast<std::byte>(0x60);
+    } else if constexpr (IsArray<T>) {
+        return static_cast<std::byte>(0x80);
+    } else if constexpr (IsMap<T>) {
+        return static_cast<std::byte>(0xA0);
+    } else if constexpr (IsTag<T>) {
+        return static_cast<std::byte>(0xC0);
+    } else if constexpr (IsSimple<T>) {
+        return static_cast<std::byte>(0xE0);
+    } else {
+        // std::unreachable(); // Due to IsCborMajor concept, this should never happen
+        return static_cast<std::byte>(0xFF);
+    }
+}
+
 } // namespace cbor::tags
