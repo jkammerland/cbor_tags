@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_reflection.h"
 
 #include <bit>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -80,8 +81,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
-    // constexpr void encode(positive value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
-
     constexpr void encode(negative value) {
         encode_major_and_size(static_cast<std::uint64_t>(-1 - value.value), static_cast<byte_type>(0x20));
     }
@@ -94,34 +93,10 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
-    // template <typename T>
-    //     requires IsCborMajor<T>
-    // constexpr void encode(const T &value) {
-    //     const auto major = get_major_3_bit_tag<T>();
-    //     encode_major_and_size(value, major);
-    // }
-
-    constexpr void encode(std::span<const std::byte> value) {
-        encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
+    template <IsString T> constexpr void encode(const T &value) {
+        encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));
         appender_(data_, value);
     }
-
-    constexpr void encode(std::span<std::byte> value) {
-        encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
-        appender_(data_, value);
-    }
-
-    template <IsBinaryString T> constexpr void encode(const T &value) {
-        encode_major_and_size(value.size(), static_cast<byte_type>(0x40));
-        appender_(data_, value);
-    }
-
-    constexpr void encode(std::string_view value) {
-        encode_major_and_size(value.size(), static_cast<byte_type>(0x60));
-        appender_(data_, value);
-    }
-
-    constexpr void encode(const std::string &value) { encode(std::string_view(value)); }
 
     constexpr void encode(const binary_array_view &value) { appender_(data_, value.data); }
 
@@ -171,7 +146,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
     template <typename T>
-        requires std::is_compound_v<T> && (!IsBinaryString<T>)
+        requires std::is_compound_v<T> && (!IsString<T>)
     constexpr void encode(const T &value) {
         // check if value is a range of some sort, i.e vector list etc
         if constexpr (IsRangeOfCborValues<T>) {

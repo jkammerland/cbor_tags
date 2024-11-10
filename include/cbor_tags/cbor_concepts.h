@@ -80,7 +80,10 @@ template <typename T>
 concept IsBinaryString = std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
-concept IsRangeOfCborValues = std::ranges::range<T> && std::is_class_v<T> && !IsBinaryString<T>;
+concept IsString = IsTextString<T> || IsBinaryString<T>;
+
+template <typename T>
+concept IsRangeOfCborValues = std::ranges::range<T> && std::is_class_v<T> && (!IsString<T>);
 
 template <typename T>
 concept IsFixedArray = requires {
@@ -104,9 +107,6 @@ concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
     { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
 };
-
-template <typename T>
-concept IsString = IsTextString<T> || IsBinaryString<T>;
 
 template <typename T>
 concept IsTuple = requires {
