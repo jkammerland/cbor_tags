@@ -70,9 +70,9 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
-    constexpr void encode(std::uint64_t value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
+    template <IsUnsigned T> constexpr void encode(T value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
 
-    constexpr void encode(std::int64_t value) {
+    template <IsSigned T> constexpr void encode(T value) {
         if (value >= 0) {
             encode_major_and_size(static_cast<std::uint64_t>(value), static_cast<byte_type>(0x00));
         } else {
@@ -80,20 +80,9 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
-    template <typename T>
-        requires std::is_unsigned_v<T> && std::is_integral_v<T>
-    constexpr void encode(T value) {
-        encode(static_cast<std::uint64_t>(value));
-    }
-
-    template <typename T>
-        requires std::is_signed_v<T> && std::is_integral_v<T>
-    constexpr void encode(T value) {
-        encode(static_cast<std::int64_t>(value));
-    }
+    // constexpr void encode(positive value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
 
     constexpr void encode(negative value) {
-        // Encode negative value directly using CBOR negative integer format
         encode_major_and_size(static_cast<std::uint64_t>(-1 - value.value), static_cast<byte_type>(0x20));
     }
 
@@ -104,6 +93,13 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
             encode(value.value);
         }
     }
+
+    // template <typename T>
+    //     requires IsCborMajor<T>
+    // constexpr void encode(const T &value) {
+    //     const auto major = get_major_3_bit_tag<T>();
+    //     encode_major_and_size(value, major);
+    // }
 
     constexpr void encode(std::span<const std::byte> value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(0x40));

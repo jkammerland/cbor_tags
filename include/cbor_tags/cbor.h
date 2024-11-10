@@ -115,7 +115,7 @@ struct as_indefinite_map {};
 struct end_map {};
 
 // Compile-time function to get CBOR major type
-template <IsCborMajor T> constexpr std::byte get_major_type() {
+template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {
     if constexpr (IsUnsigned<T>) {
         return static_cast<std::byte>(0x00);
     } else if constexpr (IsNegative<T>) {

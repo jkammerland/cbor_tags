@@ -66,6 +66,9 @@ template <typename T>
 concept IsNegative = std::is_same_v<T, negative>;
 
 template <typename T>
+concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
+
+template <typename T>
 concept IsTextString = requires(T t) {
     requires std::is_signed_v<typename T::value_type>;
     requires std::is_integral_v<typename T::value_type>;
@@ -74,7 +77,7 @@ concept IsTextString = requires(T t) {
 };
 
 template <typename T>
-concept IsBinaryString = std::is_same_v<std::decay_t<std::ranges::range_value_t<T>>, std::byte>;
+concept IsBinaryString = std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
 concept IsRangeOfCborValues = std::ranges::range<T> && std::is_class_v<T> && !IsBinaryString<T>;
