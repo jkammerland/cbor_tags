@@ -56,7 +56,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
 # Shared flags for all compilers
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG -fconcepts-diagnostics-depth=2")
+  set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG -fconcepts-diagnostics-depth=3") # -fconcepts-diagnostics-depth=2 will not work with tidy
   set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 
   # Check if mold is available on system

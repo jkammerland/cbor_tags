@@ -4,18 +4,20 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/float16_ieee754.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <fmt/base.h>
-#include <iostream>
+#include <fmt/ranges.h>
 #include <iterator>
 #include <map>
 #include <nameof.hpp>
 #include <optional>
-#include <ostream>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -26,10 +28,14 @@
 
 namespace cbor::tags {
 
-template <typename InputBuffer = std::span<const std::byte>>
+template <typename T> struct cbor_header_decoder;
+
+template <typename InputBuffer = std::span<const std::byte>, template <typename> typename... Decoders>
     requires ValidCborBuffer<InputBuffer>
-class decoder {
-  public:
+struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
+    using self_t = decoder<InputBuffer, Decoders...>;
+    using Decoders<self_t>::decode...;
+
     using size_type     = typename InputBuffer::size_type;
     using buffer_byte_t = typename InputBuffer::value_type;
     using byte          = std::byte;
@@ -39,78 +45,13 @@ class decoder {
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    template <typename... T> constexpr void operator()(T &...args) { (decode(args), ...); }
+    template <typename... T> constexpr void operator()(T &&...args) { (decode(args), ...); }
     template <typename T> constexpr         operator T() { return decode<T>(); }
 
     template <typename T> constexpr T decode() {
         T result;
         decode(result);
         return result;
-    }
-
-    static variant deserialize(const InputBuffer &data) {
-        decoder decoder(data);
-        return decoder.decode_value();
-    }
-
-    static std::vector<variant> deserialize(binary_array_view array) {
-        decoder              decoder(array.data);
-        std::vector<variant> result;
-        while (!decoder.reader_.empty(decoder.data_)) {
-            result.push_back(decoder.decode_value());
-        }
-        return result;
-    }
-
-    template <typename Container> static void deserialize_to(binary_array_view array, Container &result) {
-        decoder                     decoder(array.data);
-        detail::appender<Container> appender_;
-
-        while (!decoder.reader_.empty(decoder.data_)) {
-            appender_(result, decoder.decode_value());
-        }
-    }
-
-    template <typename MapType> static MapType deserialize(binary_map_view map) {
-        decoder decoder(map.data);
-        MapType result;
-        while (!decoder.reader_.empty(decoder.data_)) {
-            auto key    = decoder.decode_value();
-            auto value  = decoder.decode_value();
-            result[key] = value;
-        }
-        return result;
-    }
-
-    template <typename MapType> static void deserialize_to(binary_map_view map, MapType &result) {
-        decoder decoder(map.data);
-        while (decoder.position_ < map.data.size()) {
-            auto key    = decoder.decode_value();
-            auto value  = decoder.decode_value();
-            result[key] = value;
-        }
-    }
-
-    variant decode_value() {
-        if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
-        }
-
-        const auto initialByte    = reader_.read(data_);
-        const auto majorType      = static_cast<major_type>(static_cast<byte>(initialByte) >> 5);
-        const auto additionalInfo = initialByte & static_cast<byte>(0x1F);
-
-        switch (majorType) {
-        case major_type::UnsignedInteger: return decode_unsigned(additionalInfo);
-        case major_type::NegativeInteger: return decode_integer(additionalInfo);
-        case major_type::ByteString: return decode_bstring(additionalInfo);
-        case major_type::TextString: return decode_text(additionalInfo);
-        case major_type::Array: return decode_array(additionalInfo);
-        case major_type::Map: return decode_map(additionalInfo);
-        case major_type::Tag: return decode_tag(additionalInfo);
-        case major_type::SimpleOrFloat: return decodeSimpleOrFloat(additionalInfo);
-        default: throw std::runtime_error("Unsupported major type");
-        }
     }
 
     template <typename T> constexpr auto decode_value(T &value) {
@@ -134,6 +75,14 @@ class decoder {
         } else {
             throw std::runtime_error("Invalid major type for integer");
         }
+    }
+
+    constexpr void decode(integer &, major_type, byte) { throw std::runtime_error("Not implemented"); }
+    constexpr void decode(negative &value, major_type major, byte additionalInfo) {
+        if (major != major_type::NegativeInteger) {
+            throw std::runtime_error("Invalid major type for negative integer");
+        }
+        value = negative(decode_integer(additionalInfo));
     }
 
     constexpr void decode(bool &value, major_type, byte additionalInfo) {
@@ -172,6 +121,66 @@ class decoder {
             throw std::runtime_error("Invalid additional info for double");
         }
         value = read_double();
+    }
+
+    template <IsBinaryString T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::ByteString) {
+            auto bstring = decode_bstring(additionalInfo);
+            t            = T(bstring.begin(), bstring.end());
+        } else {
+            throw std::runtime_error("Invalid major type for binary string");
+        }
+    }
+
+    template <IsTextString T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::TextString) {
+            t = decode_text(additionalInfo);
+        } else {
+            throw std::runtime_error("Invalid major type for text string");
+        }
+    }
+
+    template <IsRangeOfCborValues T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (major == major_type::Array || major == major_type::Map) {
+            const auto length = decode_unsigned(additionalInfo);
+            if constexpr (HasReserve<T>) {
+                t.reserve(length);
+            }
+            detail::appender<T> appender_;
+            for (auto i = length; i > 0; --i) {
+                auto result = decode_value();
+                appender_(t, result);
+            }
+        } else {
+            throw std::runtime_error("Invalid major type for array or map");
+        }
+    }
+
+    template <std::uint64_t N> constexpr void decode(tag<N>, major_type, byte) {}
+
+    template <IsTag T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+        if (!(major == major_type::Tag)) {
+            throw std::runtime_error("Invalid major type for tagged object");
+        }
+
+        auto tag = decode_unsigned(additionalInfo);
+
+        if constexpr (HasCborTag<T>) {
+            if (tag != T::cbor_tag) {
+                throw std::runtime_error("Invalid tag for tagged object");
+            }
+        } else if constexpr (IsTaggedTuple<T>) {
+            if (tag != std::get<0>(t)) {
+                throw std::runtime_error("Invalid tag for tagged object");
+            }
+        }
+
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, t);
+    }
+
+    template <IsAggregate T> constexpr void decode(T &value) {
+        const auto &tuple = to_tuple(value);
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
     }
 
     constexpr void decode(std::string &value, major_type, byte additionalInfo) { value = std::string(decode_text(additionalInfo)); }
@@ -224,40 +233,91 @@ class decoder {
         }
     }
 
-    template <typename... T> constexpr void decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <IsCborMajor... T> constexpr void decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
         if (!is_valid_major<decltype(major), T...>(major)) {
             throw std::runtime_error("Invalid major type for variant");
         }
 
-        // Only compare against the types in the variant
-        bool found_type_in_variant = ([this, major, additionalInfo, &value]<typename U>() -> bool {
-            if (ConceptType<byte, U>::value == static_cast<byte>(major)) {
-                U t;
-                this->decode(t, major, additionalInfo);
-                value = std::move(t);
+        // Print all types
+        // fmt::print("Types: {}\n", fmt::join({nameof::nameof_type<T>()...}, ", "));
+
+        auto try_decode = [this, major, additionalInfo, &value]<typename U>() -> bool {
+            // // fmt::print("Nameof U type: {}\n", nameof::nameof_type<U>());
+            // bool condition =
+            //     (ConceptType<byte, U>::value != static_cast<byte>(major)) && !(IsSigned<U> && (major == major_type::UnsignedInteger));
+            // bool condition2 = !(IsSigned<U> && (major == major_type::UnsignedInteger));
+            // bool condition3 = major == major_type::UnsignedInteger;
+            // fmt::print("TEST: {}, {}, {}\n", condition, condition2, condition3);
+
+            if constexpr (IsSigned<U>) {
+                if (major > major_type::NegativeInteger) {
+                    return false;
+                }
+            } else {
+                if (ConceptType<byte, U>::value != static_cast<byte>(major)) {
+                    return false;
+                }
+            }
+
+            if constexpr (IsSimple<U>) {
+                // fmt::print("Simple type: {}\n", nameof::nameof_type<U>());
+                if constexpr (IsFloat16<U>) {
+                    if (additionalInfo != static_cast<byte>(25)) {
+                        return false;
+                    }
+                    float16_t v;
+                    decode(v, major, additionalInfo);
+                    value = v;
+                } else if constexpr (IsFloat32<U>) {
+                    if (additionalInfo != static_cast<byte>(26)) {
+                        return false;
+                    }
+                    float v;
+                    decode(v, major, additionalInfo);
+                    value = v;
+                } else if constexpr (IsFloat64<U>) {
+                    if (additionalInfo != static_cast<byte>(27)) {
+                        return false;
+                    }
+                    double v;
+                    decode(v, major, additionalInfo);
+                    value = v;
+                } else if constexpr (IsBool<U>) {
+                    if (additionalInfo != static_cast<byte>(20) && additionalInfo != static_cast<byte>(21)) {
+                        return false;
+                    }
+                    bool v;
+                    decode(v, major, additionalInfo);
+                    value = v;
+                } else if constexpr (IsNull<U>) {
+                    if (additionalInfo != static_cast<byte>(22)) {
+                        return false;
+                    }
+                    value = nullptr;
+                } else {
+                    return false;
+                }
+
                 return true;
             }
-            return false;
-        }.template operator()<T>() || ...);
 
-        if (!found_type_in_variant) {
+            U decoded_value;
+            this->decode(decoded_value, major, additionalInfo);
+            value = std::move(decoded_value);
+            return true;
+        };
+
+        bool found = (try_decode.template operator()<T>() || ...);
+        if (!found) {
             throw std::runtime_error("Invalid major type for variant");
         }
     }
-
     template <typename T> constexpr void decode(T &value) {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
 
         const auto [majorType, additionalInfo] = read_initial_byte();
-
-        // if constexpr (!IsVariant<T> && !IsOptional<T> && !IsAggregate<T> && !IsTuple<T>) {
-        //     if (!is_valid_major<decltype(majorType), T>(majorType)) {
-        //         throw std::runtime_error("Invalid major type for T:" + std::string(nameof::nameof_type<T>()) +
-        //                                  " majorType:" + std::to_string(static_cast<int>(majorType)));
-        //     }
-        // }
 
         if constexpr (IsString<T>) {
             constexpr auto expected_major_type = IsTextString<T> ? major_type::TextString : major_type::ByteString;
@@ -266,10 +326,22 @@ class decoder {
             }
 
             decode(value, majorType, additionalInfo);
-        } else if constexpr (IsRange<T>) {
-            constexpr auto expected_major_type = IsMap<T> ? major_type::Map : major_type::Array;
+        } else if constexpr (IsMap<T>) {
+            constexpr auto expected_major_type = major_type::Map;
             if (majorType != expected_major_type) {
-                throw std::runtime_error("Invalid major type for array or map");
+                throw std::runtime_error("Invalid major type for map");
+            }
+
+            const auto length = decode_unsigned(additionalInfo);
+            for (auto i = length; i > 0; --i) {
+                auto key = decode<typename T::key_type>();
+                auto val = decode<typename T::mapped_type>();
+                value.insert_or_assign(key, val);
+            }
+        } else if constexpr (IsRangeOfCborValues<T>) {
+            constexpr auto expected_major_type = major_type::Array;
+            if (majorType != expected_major_type) {
+                throw std::runtime_error("Invalid major type for array");
             }
 
             const auto length = decode_unsigned(additionalInfo);
@@ -301,8 +373,6 @@ class decoder {
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
         } else if constexpr (IsTuple<T>) {
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
-        } else if constexpr (IsVariant<T> || IsOptional<T>) {
-            decode(value, majorType, additionalInfo);
         } else {
             decode(value, majorType, additionalInfo);
         }
@@ -463,7 +533,6 @@ class decoder {
         return std::bit_cast<double>(bits);
     }
 
-  protected:
     inline constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
@@ -477,13 +546,46 @@ class decoder {
     }
 
     template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
-        return (... || (major == ConceptType<ByteType, T>::value));
+        // fmt::print("Major: {} - [ ", static_cast<int>(major));
+        // (fmt::print("{} ", static_cast<int>(ConceptType<ByteType, T>::value)), ...);
+        // fmt::print("]\n");
+        // // Check any Signed?
+        // (fmt::print("IsSigned: {}\n", IsSigned<unwrap_type_t<T>>), ...);
+        // bool test = (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
+        //  (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));
+        // fmt::print("Test: {}\n", test);
+
+        return (... || ((major == ConceptType<ByteType, unwrap_type_t<T>>::value) ||
+                        (IsSigned<unwrap_type_t<T>> && (major == static_cast<ByteType>(0) || major == static_cast<ByteType>(1)))));
     }
 
+    // Variadic friends only in c++26, must be public
     const InputBuffer          &data_;
     detail::reader<InputBuffer> reader_;
 };
 
-template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer>(buffer); }
+template <typename T> struct cbor_header_decoder : crtp_base<T> {
+
+    constexpr auto get_and_validate_header(major_type expectedMajorType) {
+        auto [initialByte, additionalInfo] = this->underlying().read_initial_byte();
+        if (initialByte != expectedMajorType) {
+            throw std::runtime_error("Invalid major type");
+        }
+        return additionalInfo;
+    }
+
+    constexpr auto validate_size(major_type expectedMajor, std::uint64_t expectedSize) {
+        auto additionalInfo = get_and_validate_header(expectedMajor);
+        auto size           = this->underlying().decode_unsigned(additionalInfo);
+        if (size != expectedSize) {
+            throw std::runtime_error("Invalid container size");
+        }
+    }
+
+    constexpr void decode(as_array value) { validate_size(major_type::Array, value.size_); }
+    constexpr void decode(as_map value) { validate_size(major_type::Map, value.size_); }
+};
+
+template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer, cbor_header_decoder>(buffer); }
 
 } // namespace cbor::tags

@@ -20,12 +20,12 @@
 using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::byte>, std::array<std::byte, 1024>) {
-    auto [data, out] = make_data_and_encoder<T>();
-    out.encode(static_cast<std::uint64_t>(1));
-    out.encode(static_cast<std::uint64_t>(2));
-    out.encode(static_cast<std::uint64_t>(3));
+    auto [data, enc] = make_data_and_encoder<T>();
+    enc.encode(static_cast<std::uint64_t>(1));
+    enc.encode(static_cast<std::uint64_t>(2));
+    enc.encode(static_cast<std::uint64_t>(3));
 
-    if constexpr (!IsArray<T>) {
+    if constexpr (!IsFixedArray<T>) {
         CHECK_EQ(to_hex(data), "010203");
     } else {
         CHECK_EQ(to_hex(std::span(data.data(), 3)), "010203");
@@ -33,13 +33,13 @@ TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::by
 }
 
 TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>, std::array<std::byte, 1024>) {
-    auto [data, out] = make_data_and_encoder<T>();
+    auto [data, enc] = make_data_and_encoder<T>();
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;
-    out.encode(sv);
+    enc.encode(sv);
 
-    if constexpr (!IsArray<T>) {
+    if constexpr (!IsFixedArray<T>) {
         CHECK_EQ(to_hex(data), "6c48656c6c6f20776f726c6421");
         // +1 for the tag
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);
@@ -52,19 +52,19 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
 
 TEST_CASE("CBOR Encoder on deque") {
     std::deque<std::byte> buffer;
-    auto                  out = make_encoder(buffer);
+    auto                  enc = make_encoder(buffer);
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;
-    out.encode(static_cast<std::uint64_t>(1));
-    out.encode(sv);
+    enc.encode(static_cast<std::uint64_t>(1));
+    enc.encode(sv);
 
     CHECK_EQ(to_hex(buffer), "016c48656c6c6f20776f726c6421");
 
     { // Big string
         auto        size1 = buffer.size();
         std::string big_string(10, 'a');
-        out.encode(big_string);
+        enc.encode(big_string);
         auto size2 = buffer.size();
 
         CHECK_EQ(size2 - size1, 1 + big_string.size());
@@ -80,10 +80,10 @@ TEST_CASE_TEMPLATE("CBOR with std::pmr", T, std::pmr::vector<std::byte>, std::pm
     std::pmr::monotonic_buffer_resource resource(buffer.data(), buffer.size());
     T                                   resource_vector(&resource);
 
-    auto out = make_encoder<T>(resource_vector);
-    out.encode(static_cast<std::uint64_t>(1));
-    out.encode(static_cast<std::uint64_t>(2));
-    out.encode(static_cast<std::uint64_t>(3));
+    auto enc = make_encoder<T>(resource_vector);
+    enc.encode(static_cast<std::uint64_t>(1));
+    enc.encode(static_cast<std::uint64_t>(2));
+    enc.encode(static_cast<std::uint64_t>(3));
 
     CHECK_EQ(to_hex(resource_vector), "010203");
 }
@@ -94,12 +94,12 @@ TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::by
 
     {
         T    data;
-        auto out = make_encoder(data);
+        auto enc = make_encoder(data);
 
         std::iota(buffer_array.begin(), buffer_array.end(), 0);
         auto span = std::span(buffer_array);
 
-        out.encode(span);
+        enc.encode(span);
         // fmt::print("span: {}\n", to_hex(data));
         CHECK_EQ(
             to_hex(data),
@@ -109,11 +109,11 @@ TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::by
     }
     {
         T    data;
-        auto out = make_encoder(data);
+        auto enc = make_encoder(data);
 
         std::iota(buffer_list.begin(), buffer_list.end(), 0);
 
-        out.encode(buffer_list);
+        enc.encode(buffer_list);
         // fmt::print("list: {}\n", to_hex(data));
         CHECK_EQ(to_hex(data),
                  "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f1820182118221823182418251826182718281"
@@ -130,30 +130,30 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
 
     {
         T    buffer;
-        auto out = make_encoder(buffer);
+        auto enc = make_encoder(buffer);
 
         variant_t var = 42;
-        out.encode(var);
+        enc.encode(var);
 
         auto expected_sv = "182a"sv;
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
     }
     {
         T    buffer;
-        auto out = make_encoder(buffer);
+        auto enc = make_encoder(buffer);
 
         variant_t var = 3.14;
-        out.encode(var);
+        enc.encode(var);
 
         auto expected_sv = "fb40091eb851eb851f"sv;
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
     }
     {
         T    buffer;
-        auto out = make_encoder(buffer);
+        auto enc = make_encoder(buffer);
 
         variant_t var = "Hello world!";
-        out.encode(var);
+        enc.encode(var);
 
         auto expected = "6c48656c6c6f20776f726c6421"sv;
         CHECK_EQ(to_hex(buffer).substr(0, expected.size()), expected);
@@ -161,10 +161,10 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
 
     {
         T    buffer;
-        auto out = make_encoder(buffer);
+        auto enc = make_encoder(buffer);
 
         variant_t var = std::optional<uint8_t>(42);
-        out.encode(var);
+        enc.encode(var);
 
         auto expected_sv = "182a"sv;
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
@@ -172,10 +172,10 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
 
     {
         T    buffer;
-        auto out = make_encoder(buffer);
+        auto enc = make_encoder(buffer);
 
         variant_t var = std::nullopt;
-        out.encode(var);
+        enc.encode(var);
 
         auto expected_sv = "f6"sv;
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);

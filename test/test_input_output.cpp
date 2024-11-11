@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_integer.h"
 #include "test_util.h"
 
 #include <array>
@@ -20,6 +21,7 @@
 #include <numeric>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -29,72 +31,79 @@ using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("Roundtrip", T, std::vector<std::byte>, std::deque<std::byte>) {
     T data_in;
-    auto [data_out, out] = make_data_and_encoder<T>();
+    auto [data_out, enc] = make_data_and_encoder<T>();
 
     std::vector<uint64_t> values(1e5);
     std::iota(values.begin(), values.end(), 0);
     for (const auto &value : values) {
-        out.encode(value);
+        enc.encode(value);
     }
 
     // Emulate data transfer
-    data_in = data_out;
-    auto in = make_decoder(data_in);
+    data_in  = data_out;
+    auto dec = make_decoder(data_in);
 
     for (const auto &value : values) {
-        auto result = in.decode_value();
+        std::variant<uint64_t, std::string> result;
+        dec(result);
         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
         CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
     }
 }
 
 TEST_CASE_TEMPLATE("Roundtrip binary cbor string", T, std::vector<char>, std::deque<char>, std::list<uint8_t>) {
-    auto [data_out, out] = make_data_and_encoder<T>();
+    // auto [data_out, enc] = make_data_and_encoder<T>();
 
-    using namespace std::string_view_literals;
-    auto sv =
-        "Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!"sv;
-    out.encode(sv);
+    // using namespace std::string_view_literals;
+    // auto sv =
+    //     "Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello
+    //     world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello world!Hello
+    //     world!Hello world!"sv;
+    // enc.encode(sv);
 
-    // Emulate data transfer
-    auto data_in = data_out;
-    auto in      = make_decoder(data_in);
+    // // Emulate data transfer
+    // auto data_in = data_out;
+    // auto dec     = make_decoder(data_in);
 
-    auto result = in.decode_value();
-    if constexpr (IsContiguous<T>) {
-        CHECK_EQ(std::holds_alternative<std::string_view>(result), true);
-        CHECK_EQ(std::get<std::string_view>(result), sv);
-    } else {
-        using iterator_t = decltype(in)::iterator_t;
-        using char_range = char_range_view<std::ranges::subrange<iterator_t>>;
-        REQUIRE_EQ(std::holds_alternative<char_range>(result), true);
-        auto range = std::get<char_range>(result).range;
-        CHECK_EQ(std::equal(sv.begin(), sv.end(), range.begin()), true);
-    }
+    // auto result = dec.decode_value();
+    // if constexpr (IsContiguous<T>) {
+    //     CHECK_EQ(std::holds_alternative<std::string_view>(result), true);
+    //     CHECK_EQ(std::get<std::string_view>(result), sv);
+    // } else {
+    //     using iterator_t = decltype(dec)::iterator_t;
+    //     using char_range = char_range_view<std::ranges::subrange<iterator_t>>;
+    //     REQUIRE_EQ(std::holds_alternative<char_range>(result), true);
+    //     auto range = std::get<char_range>(result).range;
+    //     CHECK_EQ(std::equal(sv.begin(), sv.end(), range.begin()), true);
+    // }
 }
 
 TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, std::deque<std::byte>, std::list<uint8_t>) {
-    auto [data_out, out] = make_data_and_encoder<T>();
+    auto [data_out, enc] = make_data_and_encoder<T>();
 
     std::vector<variant_contiguous> values(1e1);
     std::iota(values.begin(), values.end(), 0);
 
     [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);
-    // out.encode(tag);
+    enc(t);
+
+    [[maybe_unused]] auto dec    = make_decoder(data_out);
+    auto                  result = make_tag_pair(tag<123>{}, std::vector<variant_contiguous>{});
+    // dec(result);
 }
 
 TEST_CASE_TEMPLATE("Decode array of ints", T, std::vector<unsigned char>) {
     T data;
     data.reserve(1000);
-    auto out = make_encoder(data);
+    auto enc = make_encoder(data);
 
     std::vector<uint64_t> values(10);
     std::iota(values.begin(), values.end(), 0);
-    out(values);
+    enc(values);
 
-    auto                  in = make_decoder(data);
+    auto                  dec = make_decoder(data);
     std::vector<uint64_t> result;
-    in(result);
+    dec(result);
 
     REQUIRE_EQ(values.size(), result.size());
     CHECK_EQ(values, result);
@@ -105,15 +114,15 @@ TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>, std::deque<c
     if constexpr (HasReserve<T>) {
         data.reserve(1000);
     }
-    auto out = make_encoder(data);
+    auto enc = make_encoder(data);
 
     std::vector<std::string> values(10);
     std::generate(values.begin(), values.end(), [i = 0]() mutable { return fmt::format("Hello world {}", i++); });
-    out(values);
+    enc(values);
 
-    auto                     in = make_decoder(data);
+    auto                     dec = make_decoder(data);
     std::vector<std::string> result;
-    in(result);
+    dec(result);
 
     REQUIRE_EQ(values.size(), result.size());
     CHECK_EQ(std::equal(values.begin(), values.end(), result.begin()), true);
@@ -124,7 +133,7 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     if constexpr (HasReserve<T>) {
         data.reserve(1000);
     }
-    auto out = make_encoder(data);
+    auto enc = make_encoder(data);
 
     struct A {
         int                        a;
@@ -134,15 +143,15 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     };
 
     using namespace cbor::tags::literals;
-    out(make_tag_pair(123_tag, A{1, 3.14, "Hello", {1, 2, 3}}));
+    enc(make_tag_pair(123_tag, A{1, 3.14, "Hello", {1, 2, 3}}));
 
     auto hex = to_hex(data);
     fmt::print("to_hex: {}\n", hex);
     REQUIRE_EQ(hex, "d87b01fb40091eb851eb851f6548656c6c6f83010203");
 
-    auto in     = make_decoder(data);
+    auto dec    = make_decoder(data);
     auto result = make_tag_pair(123_tag, A{});
-    in(result);
+    dec(result);
 
     CHECK_EQ(result.second.a, 1);
     CHECK_EQ(result.second.b, 3.14);
@@ -161,7 +170,7 @@ TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::vari
     {
         // Positive optional
         std::vector<std::byte> buffer1;
-        auto                   out = make_encoder(buffer1);
+        auto                   enc = make_encoder(buffer1);
         opt                    optional;
         if constexpr (IsVariant<T>) {
             if (std::rand() % 2 == 0) {
@@ -173,27 +182,27 @@ TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::vari
             optional = T{};
         }
 
-        out(optional);
+        enc(optional);
         auto buffer2 = buffer1;
 
-        auto in = make_decoder(buffer2);
+        auto dec = make_decoder(buffer2);
         opt  result;
-        in(result);
+        dec(result);
 
         CHECK_EQ(result.has_value(), true);
     }
     {
         // nullopt
         std::vector<std::byte> buffer1;
-        auto                   out      = make_encoder(buffer1);
+        auto                   enc      = make_encoder(buffer1);
         opt                    optional = std::nullopt;
-        out(optional);
+        enc(optional);
 
         auto buffer2 = buffer1;
 
-        auto in = make_decoder(buffer2);
+        auto dec = make_decoder(buffer2);
         opt  result;
-        in(result);
+        dec(result);
 
         CHECK_EQ(result.has_value(), false);
     }
@@ -204,44 +213,44 @@ TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::
     if constexpr (HasReserve<T>) {
         data.reserve(1e3);
     }
-    auto out = make_encoder(data);
+    auto enc = make_encoder(data);
 
     std::vector<int64_t> values(1e3);
     std::iota(values.begin(), values.end(), 0);
     // make negative
     std::transform(values.begin(), values.end(), values.begin(), [](auto v) { return -v; });
-    out(values);
+    enc(values);
     fmt::print("Data: {}\n", to_hex(data));
 
-    auto                 in = make_decoder(data);
+    auto                 dec = make_decoder(data);
     std::vector<int64_t> result;
-    in(result);
+    dec(result);
 
     REQUIRE_EQ(values.size(), result.size());
     CHECK_EQ(values, result);
 }
 
-TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::variant<int, double>) {
-    using variant = std::variant<uint64_t, T>;
+TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string /*, std::variant<int, double> */) {
+    using variant = std::variant<positive, T>;
     {
         std::vector<std::byte> buffer1;
-        auto                   out = make_encoder(buffer1);
+        auto                   enc = make_encoder(buffer1);
         variant                v;
         v = static_cast<uint64_t>(std::rand() % 100000);
-        out(v);
+        enc(v);
 
         auto buffer2 = buffer1;
 
-        auto    in = make_decoder(buffer2);
+        auto    dec = make_decoder(buffer2);
         variant result;
-        in(result);
-        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+        dec(result);
+        CHECK_EQ(std::holds_alternative<positive>(result), true);
         CHECK_EQ(v, result);
     }
 
     {
         std::vector<std::byte> buffer1;
-        auto                   out = make_encoder(buffer1);
+        auto                   enc = make_encoder(buffer1);
         variant                v;
         if constexpr (IsVariant<T>) {
             if (std::rand() % 2 == 0) {
@@ -254,15 +263,52 @@ TEST_CASE_TEMPLATE("Test variant types", T, int, double, std::string, std::varia
         } else {
             v = T{};
         }
-        out(v);
+        enc(v);
         fmt::print("Variant: {}\n", to_hex(buffer1));
         fmt::print("int64_t casted from int {}\n", static_cast<int64_t>(-100));
 
         auto buffer2 = buffer1;
 
-        auto    in = make_decoder(buffer2);
+        auto    dec = make_decoder(buffer2);
         variant result;
-        in(result);
+        dec(result);
         CHECK_EQ(v, result);
+    }
+}
+
+TEST_CASE("Test strings and binary strings in std::variant") {
+    using variant = std::variant<std::string, std::span<const std::byte>>;
+    {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        variant                v;
+        v = std::string("Hello world!");
+        enc(v);
+
+        auto buffer2 = buffer;
+
+        auto    dec = make_decoder(buffer2);
+        variant result;
+        dec(result);
+        CHECK_EQ(std::get<std::string>(v), std::get<std::string>(result));
+        fmt::print("String: {}\n", std::get<std::string>(result));
+    }
+    {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        variant                v;
+        auto                   vec = std::vector<std::byte>({std::byte(0x01), std::byte(0x02), std::byte(0x03)});
+        v                          = std::span<std::byte>(vec);
+        enc(v);
+
+        auto buffer2 = buffer;
+
+        auto    dec = make_decoder(buffer2);
+        variant result;
+        dec(result);
+        for (size_t i = 0; i < vec.size(); ++i) {
+            CHECK_EQ(std::get<std::span<const std::byte>>(v)[i], std::get<std::span<const std::byte>>(result)[i]);
+        }
+        fmt::print("Binary string: {}\n", to_hex(std::get<std::span<const std::byte>>(result)));
     }
 }

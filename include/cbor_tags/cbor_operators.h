@@ -1,7 +1,8 @@
 #pragma once
 
-// Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
-#include "cbor.h"
+#include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_integer.h"
+#include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <cmath>
@@ -19,108 +20,100 @@
 
 namespace cbor::tags {
 
-// Comparison operators
-template <typename T, typename U> constexpr std::strong_ordering lexicographic_compare(const T &lhs, const U &rhs) noexcept {
-    if constexpr (std::is_same_v<T, std::string_view> && std::is_same_v<U, std::string_view>) {
-        return lhs.compare(rhs) <=> 0;
-    } else if constexpr (std::is_same_v<T, std::span<const std::byte>> && std::is_same_v<U, std::span<const std::byte>>) {
-        return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
-    } else {
-        const auto *lhs_bytes = reinterpret_cast<const std::byte *>(&lhs);
-        const auto *rhs_bytes = reinterpret_cast<const std::byte *>(&rhs);
-        return std::lexicographical_compare_three_way(lhs_bytes, lhs_bytes + sizeof(T), rhs_bytes, rhs_bytes + sizeof(U));
-    }
-}
+template <typename Compare> struct cbor_variant_visitor {
+    template <typename T, typename U> constexpr bool operator()(const T &lhs, const U &rhs) const noexcept {
+        using namespace cbor::tags;
 
-constexpr auto operator<=>(const variant_contiguous &lhs, const variant_contiguous &rhs) noexcept {
-    if (lhs.index() != rhs.index()) {
-        return lhs.index() <=> rhs.index();
-    }
-
-    return std::visit(
-        [](const auto &l, const auto &r) -> std::strong_ordering {
-            using L = std::decay_t<decltype(l)>;
-            using R = std::decay_t<decltype(r)>;
-
-            if constexpr (std::is_same_v<L, R>) {
-                if constexpr (std::is_same_v<L, std::nullptr_t>) {
-                    return std::strong_ordering::equal;
-                } else if constexpr (std::is_same_v<L, std::span<const std::byte>>) {
-                    return lexicographic_compare(l, r);
-                } else if constexpr (std::is_same_v<L, std::string_view>) {
-                    return lexicographic_compare(l, r);
-                } else if constexpr (std::is_same_v<L, binary_array_view> || std::is_same_v<L, binary_map_view> ||
-                                     std::is_same_v<L, binary_tag_view>) {
-                    return l <=> r;
-                } else if constexpr (std::is_same_v<L, bool>) {
-                    return l <=> r;
-                } else if constexpr (std::is_same_v<L, float> || std::is_same_v<L, double>) {
-                    if (l < r) {
-                        return std::strong_ordering::less;
-                    }
-                    if (l > r) {
-                        return std::strong_ordering::greater;
-                    }
-                    return std::strong_ordering::equal;
-                } else if constexpr (std::is_arithmetic_v<L>) {
-                    return l <=> r;
+        if constexpr (std::is_same_v<T, U>) {
+            if constexpr (IsUnsigned<T> || IsSigned<T>) {
+                return Compare{}(lhs, rhs);
+            } else if constexpr (IsBinaryString<T> || IsTextString<T> || IsArray<T> || IsMap<T>) {
+                if (lhs.size() != rhs.size()) {
+                    return Compare{}(lhs.size(), rhs.size());
+                }
+                auto cmp = std::lexicographical_compare_three_way(std::ranges::begin(lhs), std::ranges::end(lhs), std::ranges::begin(rhs),
+                                                                  std::ranges::end(rhs));
+                if constexpr (std::is_same_v<Compare, std::less<>>) {
+                    return cmp < 0;
                 } else {
-                    // This should never happen
-                    // std::unreachable(); // C++23
-                    return std::strong_ordering::equal;
+                    return cmp > 0;
+                }
+
+            } else if constexpr (IsTag<T>) {
+                // Assuming Tag types have their own comparison operators
+                return Compare{}(lhs, rhs);
+            } else if constexpr (IsSimple<T>) {
+                // Handle simple types (null, undefined, bool, etc.)
+                if constexpr (std::is_same_v<T, std::nullptr_t>) {
+                    return false; // nullptr == nullptr
+                } else {
+                    return Compare{}(lhs, rhs);
                 }
             } else {
-                // This should never happen due to the index check
-                // std::unreachable(); // C++23
-                return std::strong_ordering::equal;
+                static_assert(always_false<T>::value, "Non-exhaustive visitor!");
             }
-        },
-        lhs, rhs);
-}
-// Equality operator
-constexpr bool operator==(const variant_contiguous &lhs, const variant_contiguous &rhs) noexcept { return (lhs <=> rhs) == 0; }
-
-enum class major_type : std::uint8_t {
-    UnsignedInteger = 0,
-    NegativeInteger = 1,
-    ByteString      = 2,
-    TextString      = 3,
-    Array           = 4,
-    Map             = 5,
-    Tag             = 6,
-    SimpleOrFloat   = 7
+        } else {
+            // Different types
+            return false;
+        }
+    }
 };
 
-template <typename T> struct always_false : std::false_type {};
+template <typename Compare = std::less<>> struct variant_comparator {
+    template <typename Variant> bool operator()(const Variant &lhs, const Variant &rhs) const {
+        if (lhs.index() != rhs.index()) {
+            return Compare{}(lhs.index(), rhs.index());
+        }
 
-} // namespace cbor::tags
+        return std::visit(cbor_variant_visitor<Compare>{}, lhs, rhs);
+    }
+};
 
-namespace std {
+struct variant_hasher {
+    template <IsVariant Variant> size_t operator()(const Variant &v) const noexcept {
+        // Start with the index hash
+        size_t seed = std::hash<size_t>{}(v.index());
 
-template <> struct hash<cbor::tags::variant_contiguous> {
-    size_t operator()(const cbor::tags::variant_contiguous &v) const noexcept {
+        // Combine with value hash
         return std::visit(
-            [](const auto &x) -> size_t {
-                using T = std::decay_t<decltype(x)>;
-                if constexpr (std::is_same_v<T, std::uint64_t> || std::is_same_v<T, std::int64_t> ||
-                              std::is_same_v<T, cbor::tags::float16_t> || std::is_same_v<T, float> || std::is_same_v<T, double>) {
-                    return std::hash<T>{}(x);
-                } else if constexpr (std::is_same_v<T, std::span<const std::byte>>) {
-                    return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data()), x.size()));
-                } else if constexpr (std::is_same_v<T, std::string_view>) {
-                    return std::hash<std::string_view>{}(x);
-                } else if constexpr (std::is_same_v<T, cbor::tags::binary_array_view> || std::is_same_v<T, cbor::tags::binary_map_view>) {
-                    return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
-                } else if constexpr (std::is_same_v<T, cbor::tags::binary_tag_view>) {
-                    return std::hash<std::uint64_t>{}(x.tag) ^
-                           std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(x.data.data()), x.data.size()));
-                } else if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::nullptr_t>) {
-                    return std::hash<T>{}(x);
+            [seed](const auto &arg) mutable -> size_t {
+                using T = std::decay_t<decltype(arg)>;
+
+                size_t value_hash;
+                if constexpr (IsUnsigned<T> || IsSigned<T>) {
+                    value_hash = std::hash<T>{}(arg);
+                } else if constexpr (IsBinaryString<T> || IsTextString<T>) {
+                    // Hash the contents of the string/binary data
+                    value_hash =
+                        std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(std::data(arg)), std::size(arg)));
+                } else if constexpr (IsArray<T> || IsMap<T>) {
+                    // Hash each element in the container
+                    value_hash = 0;
+                    for (const auto &elem : arg) {
+                        // Combine hashes using FNV-1a-like algorithm
+                        value_hash ^= std::hash<std::decay_t<decltype(elem)>>{}(elem);
+                        value_hash *= 16777619;
+                    }
+                } else if constexpr (IsTag<T>) {
+                    value_hash = std::hash<T>{}(arg);
+                } else if constexpr (IsSimple<T>) {
+                    if constexpr (std::is_same_v<T, std::nullptr_t>) {
+                        value_hash = 0;
+                    } else {
+                        value_hash = std::hash<T>{}(arg);
+                    }
                 } else {
-                    static_assert(cbor::tags::always_false<T>::value, "Non-exhaustive visitor!");
+                    static_assert(always_false<T>::value, "Non-exhaustive visitor!");
                 }
+
+                // Combine the seed (index hash) with the value hash
+                // Using FNV-1a-like combining
+                seed ^= value_hash;
+                seed *= 16777619;
+                return seed;
             },
             v);
     }
 };
-} // namespace std
+
+} // namespace cbor::tags

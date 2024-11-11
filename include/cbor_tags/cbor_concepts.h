@@ -9,6 +9,18 @@
 #include <variant>
 
 namespace cbor::tags {
+
+enum class major_type : std::uint8_t {
+    UnsignedInteger = 0,
+    NegativeInteger = 1,
+    ByteString      = 2,
+    TextString      = 3,
+    Array           = 4,
+    Map             = 5,
+    Tag             = 6,
+    SimpleOrFloat   = 7
+};
+
 template <typename T>
 concept ValidCborBuffer = requires(T) {
     std::is_convertible_v<typename T::value_type, std::byte>;
@@ -22,38 +34,41 @@ concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; 
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
 
+struct negative;
+
+struct integer;
+
+struct simple;
+
 template <typename T>
-concept IsSimple =
-    std::is_floating_point_v<T> || std::is_same_v<T, float16_t> || std::is_same_v<T, std::nullptr_t> || std::is_same_v<T, bool>;
+concept IsFloat16 = std::is_same_v<T, float16_t>; // Do not require sizeof(T) == 2, let the memory layout be implementation defined
+
+template <typename T>
+concept IsFloat32 = std::is_same_v<T, float> && requires(T t) { sizeof(t) == 4; };
+
+template <typename T>
+concept IsFloat64 = std::is_same_v<T, double> && requires(T t) { sizeof(t) == 8; };
+
+template <typename T>
+concept IsBool = std::is_same_v<T, bool>;
+
+template <typename T>
+concept IsNull = std::is_same_v<T, std::nullptr_t>;
+
+template <typename T>
+concept IsSimple = IsFloat16<T> || IsFloat32<T> || IsFloat64<T> || IsBool<T> || IsNull<T> || std::is_same_v<T, simple>;
 
 template <typename T>
 concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
 
 template <typename T>
-concept IsSigned = std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+concept IsSigned = (std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>;
 
 template <typename T>
-concept IsRange = std::ranges::range<T> && std::is_class_v<T>;
+concept IsNegative = std::is_same_v<T, negative>;
 
 template <typename T>
-concept IsMap = IsRange<T> && requires(T t) {
-    typename T::key_type;
-    typename T::mapped_type;
-    typename T::value_type;
-    requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
-    { t.find(std::declval<typename T::key_type>()) } -> std::same_as<typename T::iterator>;
-    { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
-    { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
-};
-
-template <typename T>
-concept IsArray = requires {
-    typename T::value_type;
-    typename T::size_type;
-    typename std::tuple_size<T>::type;
-    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
-                 std::is_same_v<T, std::span<typename T::value_type>>;
-};
+concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
 
 template <typename T>
 concept IsTextString = requires(T t) {
@@ -64,16 +79,42 @@ concept IsTextString = requires(T t) {
 };
 
 template <typename T>
-concept IsBinaryString = IsRange<T> && std::is_same_v<std::decay_t<std::ranges::range_value_t<T>>, std::byte>;
+concept IsBinaryString = std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte>;
 
 template <typename T>
 concept IsString = IsTextString<T> || IsBinaryString<T>;
 
 template <typename T>
+concept IsRangeOfCborValues = std::ranges::range<T> && std::is_class_v<T> && (!IsString<T>);
+
+template <typename T>
+concept IsFixedArray = requires {
+    typename T::value_type;
+    typename T::size_type;
+    typename std::tuple_size<T>::type;
+    requires std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>> ||
+                 std::is_same_v<T, std::span<typename T::value_type>>;
+};
+
+template <typename T>
+concept IsArray = IsRangeOfCborValues<T> && !IsFixedArray<T>;
+
+template <typename T>
+concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
+    typename T::key_type;
+    typename T::mapped_type;
+    typename T::value_type;
+    requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
+    { t.find(std::declval<typename T::key_type>()) } -> std::same_as<typename T::iterator>;
+    { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
+    { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
+};
+
+template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<T>::type;
     typename std::tuple_element<0, T>::type;
-    requires(!IsArray<T>);
+    requires(!IsFixedArray<T>);
 };
 
 template <typename T>
@@ -84,11 +125,14 @@ concept HasCborTag = requires {
 template <typename T>
 concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
-    requires HasCborTag<typename T::first_type>;
+    requires HasCborTag<std::remove_cvref_t<decltype(std::get<0>(t))>>;
 };
 
 template <typename T>
-concept IsTagged = HasCborTag<T> || IsTaggedTuple<T>;
+concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T>;
+
+template <typename T>
+concept IsTag = HasCborTag<T> || IsTaggedTuple<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -98,17 +142,85 @@ concept IsOptional = requires(T t) {
     { t.value() } -> std::same_as<typename T::value_type &>;
 };
 
+// Type trait to unwrap nested types
+template <typename T> struct unwrap_type {
+    using type = T;
+};
+
+// Specialization for std::optional
+template <typename T> struct unwrap_type<std::optional<T>> {
+    using type = typename unwrap_type<T>::type;
+};
+
+// Specialization for std::variant
+template <typename... Ts> struct unwrap_type<std::variant<Ts...>> {
+    // Get the first type's unwrapped version
+    using type = typename unwrap_type<std::tuple_element_t<0, std::tuple<Ts...>>>::type;
+};
+
+// Helper alias
+template <typename T> using unwrap_type_t = typename unwrap_type<T>::type;
+
+template <typename... T> constexpr bool contains_signed_integer = (... || IsSigned<unwrap_type_t<T>>);
+template <typename... T> constexpr bool contains_unsigned       = (... || IsUnsigned<unwrap_type_t<T>>);
+template <typename... T> constexpr bool contains_negative       = (... || IsNegative<unwrap_type_t<T>>);
+
 template <typename T>
 concept IsVariant = requires(T t) {
     { std::variant_size_v<T> } -> std::convertible_to<size_t>;
     { t.index() } -> std::convertible_to<size_t>;
 };
 
-template <typename T>
-concept IsAggregate = std::is_aggregate_v<T>;
+template <typename T> struct variant_contains_integer : std::false_type {};
+template <template <typename...> typename V, typename... T>
+struct variant_contains_integer<V<T...>> : std::bool_constant<contains_signed_integer<T...>> {};
+
+template <typename T> struct variant_contains_unsigned_or_negative : std::false_type {};
+template <template <typename...> typename V, typename... T>
+struct variant_contains_unsigned_or_negative<V<T...>> : std::bool_constant<contains_unsigned<T...> || contains_negative<T...>> {};
 
 template <typename T>
-concept IsNonAggregate = !IsAggregate<T>;
+concept IsVariantWithSignedInteger = IsVariant<T> && variant_contains_integer<T>::value;
+
+template <typename T>
+concept IsVariantWithUnsignedInteger = IsVariant<T> && variant_contains_unsigned_or_negative<T>::value;
+
+template <typename T>
+concept IsVariantWithOnlySignedInteger = IsVariantWithSignedInteger<T> && !IsVariantWithUnsignedInteger<T>;
+
+template <typename T>
+concept IsVariantWithOnlyUnsignedInteger = IsVariantWithUnsignedInteger<T> && !IsVariantWithSignedInteger<T>;
+
+template <typename T>
+concept IsVariantWithoutIntegers = !IsVariantWithSignedInteger<T> && !IsVariantWithUnsignedInteger<T>;
+
+template <typename T>
+concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
+
+// Helper to check if all types in a variant satisfy IsCborMajor
+template <typename T> struct AllTypesAreCborMajor;
+template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
+
+template <typename T>
+concept IsCborMajor = IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+                      (IsArray<T> && ContainsCborMajor<T>::value) || (IsMap<T> && ContainsCborMajor<T>::value) || IsTag<T> || IsSimple<T> ||
+                      (IsVariant<T> && AllTypesAreCborMajor<T>::value) || (IsOptional<T> && ContainsCborMajor<T>::value);
+
+template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
+    static constexpr bool value = (IsCborMajor<Ts> && ...);
+};
+
+// Helper for container like types, e.g optional
+template <typename T> struct ContainsCborMajor<T, false> {
+    static constexpr bool value = IsCborMajor<typename T::value_type>;
+};
+
+template <typename T> struct ContainsCborMajor<T, true> {
+    static constexpr bool value = IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>;
+};
+
+template <typename T>
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T>;
 
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
@@ -158,6 +270,26 @@ template <typename T>
 concept HasReserve = requires(T t) {
     { t.reserve(std::declval<typename T::size_type>()) };
 };
+
+template <typename T>
+concept IsEncoder = requires(T t) {
+    { t.appender_ };
+    { t.data_ };
+    { t.encode_major_and_size(std::declval<std::uint64_t>(), std::declval<std::byte>()) };
+};
+
+template <typename T>
+concept IsDecoder = requires(T t) {
+    { t.reader_ };
+    { t.data_ };
+};
+
+template <typename T> struct crtp_base {
+    constexpr T       &underlying() { return static_cast<T &>(*this); }
+    constexpr const T &underlying() const { return static_cast<const T &>(*this); }
+};
+
+template <typename T> struct always_false : std::false_type {};
 
 namespace detail {
 

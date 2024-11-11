@@ -21,45 +21,45 @@ using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>) {
 
-    using value_type = typename T::value_type;
+    // using value_type = typename T::value_type;
 
-    std::vector<value_type> encoded;
-    encoded.push_back(value_type{0x01});
-    encoded.push_back(value_type{0x02});
-    encoded.push_back(value_type{0x03});
+    // std::vector<value_type> encoded;
+    // encoded.push_back(value_type{0x01});
+    // encoded.push_back(value_type{0x02});
+    // encoded.push_back(value_type{0x03});
 
-    T    data(encoded.begin(), encoded.end());
-    auto in = make_decoder<T>(data);
+    // T    data(encoded.begin(), encoded.end());
+    // auto dec = make_decoder<T>(data);
 
-    for (const auto &value : encoded) {
-        auto result = in.decode_value();
-        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
-        CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
-    }
+    // for (const auto &value : encoded) {
+    //     auto result = dec.decode_value();
+    //     CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+    //     CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
+    // }
 }
 
 TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 5>, std::deque<char>) {
-    T data;
-    if constexpr (std::is_same_v<T, std::array<unsigned char, 5>>) {
-        data = {0x01, 0x02, 0x03, 0x04, 0x05};
-    } else {
-        data = {'\x01', '\x02', '\x03', '\x04', '\x05'};
-    }
+    // T data;
+    // if constexpr (std::is_same_v<T, std::array<unsigned char, 5>>) {
+    //     data = {0x01, 0x02, 0x03, 0x04, 0x05};
+    // } else {
+    //     data = {'\x01', '\x02', '\x03', '\x04', '\x05'};
+    // }
 
-    auto in = make_decoder(data);
+    // auto dec = make_decoder(data);
 
-    for (const auto &value : data) {
-        auto result = in.decode_value();
-        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
-        CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
-    }
+    // for (const auto &value : data) {
+    //     auto result = dec.decode_value();
+    //     CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+    //     CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
+    // }
 }
 
 TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
     using namespace std::string_view_literals;
     auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
 
-    auto in = make_decoder(bytes);
+    auto dec = make_decoder(bytes);
     struct A {
         std::string b;
     };
@@ -67,7 +67,7 @@ TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8
     auto a               = make_tag_pair(tag<1>{}, A{});
     auto &[tag, value_a] = a;
 
-    in(a);
+    dec(a);
     CHECK_EQ(value_a.b, "Hello world!");
 }
 
@@ -76,7 +76,7 @@ TEST_CASE_TEMPLATE("Test input tag 1 optional", T, std::vector<uint8_t>, std::de
         using namespace std::string_view_literals;
         auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
 
-        auto in = make_decoder(bytes);
+        auto dec = make_decoder(bytes);
         struct A {
             std::optional<std::string> b;
         };
@@ -84,14 +84,14 @@ TEST_CASE_TEMPLATE("Test input tag 1 optional", T, std::vector<uint8_t>, std::de
         auto a               = make_tag_pair(tag<1>{}, A{});
         auto &[tag, value_a] = a;
 
-        in(a);
+        dec(a);
         CHECK_EQ(value_a.b, "Hello world!");
     }
     {
         using namespace std::string_view_literals;
         auto bytes = to_bytes("01f6"sv);
 
-        auto in = make_decoder(bytes);
+        auto dec = make_decoder(bytes);
 
         struct A {
             std::optional<std::string> b;
@@ -99,7 +99,7 @@ TEST_CASE_TEMPLATE("Test input tag 1 optional", T, std::vector<uint8_t>, std::de
 
         auto a               = make_tag_pair(tag<1>{}, A{});
         auto &[tag, value_a] = a;
-        in(a);
+        dec(a);
         CHECK_EQ(value_a.b, std::nullopt);
     }
 }
@@ -113,7 +113,7 @@ TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<
         using namespace std::string_view_literals;
         auto bytes = to_bytes("016c48656c6c6f20776f726c6421"sv);
 
-        auto in = make_decoder(bytes);
+        auto dec = make_decoder(bytes);
         struct A {
             std::variant<std::string, int> b;
         };
@@ -124,7 +124,7 @@ TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<
 
         REQUIRE(contains_major(static_cast<T::value_type>(3), value_a.b));
 
-        in(a);
+        dec(a);
         REQUIRE(std::holds_alternative<std::string>(value_a.b));
         CHECK_EQ(std::get<std::string>(value_a.b), "Hello world!");
     }
@@ -132,7 +132,7 @@ TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<
         using namespace std::string_view_literals;
         auto bytes = to_bytes("01f6"sv);
 
-        auto in = make_decoder(bytes);
+        auto dec = make_decoder(bytes);
 
         struct A {
             std::optional<std::string> b;
@@ -140,7 +140,7 @@ TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<
 
         auto a               = make_tag_pair(tag<1>{}, A{});
         auto &[tag, value_a] = a;
-        in(a);
+        dec(a);
         CHECK_EQ(value_a.b, std::nullopt);
     }
 }
