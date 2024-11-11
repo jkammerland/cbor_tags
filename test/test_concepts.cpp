@@ -5,6 +5,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_reflection_impl.h"
+#include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <array>
@@ -248,7 +249,7 @@ TEST_CASE("Test IsRangeOfCborValues and IsContiguous concepts with array") {
     static_assert(IsContiguous<container>);
 }
 
-TEST_CASE_TEMPLATE("Test simple concepts positive", T, bool, std::nullptr_t, float, double, float16_t) {
+TEST_CASE_TEMPLATE("Test simple concepts positive", T, bool, std::nullptr_t, float, double, float16_t, simple) {
     static_assert(IsSimple<T>);
     static_assert(!IsAggregate<T>);
     static_assert(!IsOptional<T>);
@@ -261,7 +262,7 @@ TEST_CASE_TEMPLATE("Test simple concepts positive", T, bool, std::nullptr_t, flo
 }
 
 TEST_CASE_TEMPLATE("Test simple concepts negative", T, std::string, std::vector<int>, std::map<int, int>, std::tuple<int, int>, int,
-                   uint8_t, std::uint64_t, char, std::nullopt_t) {
+                   uint8_t, std::uint64_t, char, std::nullopt_t, integer, negative) {
     static_assert(!IsSimple<T>);
 }
 
@@ -277,6 +278,9 @@ TEST_CASE("Test non aggregates, to_tuple(Type) will not work for Type that does 
         static_assert(!IsAggregate<std::vector<int>>);
         static_assert(!IsAggregate<std::map<int, int>>);
         static_assert(!IsAggregate<std::tuple<int, int>>);
+        static_assert(!IsAggregate<negative>);
+        static_assert(!IsAggregate<integer>);
+        static_assert(!IsAggregate<simple>);
     }
 
     {

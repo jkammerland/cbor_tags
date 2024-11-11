@@ -6,6 +6,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/cbor_simple.h"
 
 #include <bit>
 #include <bitset>
@@ -118,6 +119,10 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
     }
 
+    template <IsUntaggedTuple T> constexpr void encode(const T &value) {
+        std::apply([this](const auto &...args) { (this->encode(args), ...); }, value);
+    }
+
     constexpr void encode(float16_t value) {
         appender_(data_, static_cast<byte_type>(0xf9)); // CBOR Float16 tag
         appender_(data_, static_cast<byte_type>(value.value >> 8));
@@ -150,29 +155,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
-    template <typename T>
-        requires std::is_compound_v<T> && (!IsString<T>) && (!IsRangeOfCborValues<T>) && (!IsTag<T>) && (!IsAggregate<T>)
-    constexpr void encode(const T &value) {
-
-        // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
-        if constexpr (IsTaggedTuple<T>) {
-            static_assert(!HasCborTag<std::decay_t<decltype(T::second)>>, "The tagged type must not directly have a tag of its own");
-            encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
-            encode(value.second);
-        }
-        // Is compound, not range, not tagged pair... check if struct
-        else if constexpr (IsAggregate<T>) {
-            // Check if T is has a tag
-            if constexpr (HasCborTag<T>) {
-                encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
-            }
-            const auto &tuple = to_tuple(value);
-            // Apply encode to each element in tuple
-            std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
-        } else {
-            std::apply([this](const auto &...args) { (this->encode(args), ...); }, value);
-        }
-    }
+    constexpr void encode(simple value) { appender_(data_, static_cast<byte_type>(value.value)); }
 
     template <typename T> constexpr void encode(const std::optional<T> &value) {
         if (value.has_value()) {
@@ -182,13 +165,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
-    template <typename... T>
-        requires IsVariant<std::variant<T...>> && (!std::is_same_v<variant, std::variant<T...>>)
-    constexpr void encode(const std::variant<T...> &value) {
-        std::visit([this](const auto &v) { this->encode(v); }, value);
-    }
-
-    constexpr void encode(const variant &value) {
+    template <typename... T> constexpr void encode(const std::variant<T...> &value) {
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 

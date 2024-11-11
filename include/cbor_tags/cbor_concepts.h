@@ -38,6 +38,8 @@ struct negative;
 
 struct integer;
 
+struct simple;
+
 template <typename T>
 concept IsFloat16 = std::is_same_v<T, float16_t>; // Do not require sizeof(T) == 2, let the memory layout be implementation defined
 
@@ -54,7 +56,7 @@ template <typename T>
 concept IsNull = std::is_same_v<T, std::nullptr_t>;
 
 template <typename T>
-concept IsSimple = IsFloat16<T> || IsFloat32<T> || IsFloat64<T> || IsBool<T> || IsNull<T>;
+concept IsSimple = IsFloat16<T> || IsFloat32<T> || IsFloat64<T> || IsBool<T> || IsNull<T> || std::is_same_v<T, simple>;
 
 template <typename T>
 concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
@@ -125,6 +127,9 @@ concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
     requires HasCborTag<std::remove_cvref_t<decltype(std::get<0>(t))>>;
 };
+
+template <typename T>
+concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T>;
 
 template <typename T>
 concept IsTag = HasCborTag<T> || IsTaggedTuple<T>;

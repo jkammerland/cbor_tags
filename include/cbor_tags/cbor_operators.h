@@ -1,6 +1,8 @@
 #pragma once
 
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_integer.h"
+#include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <cmath>
