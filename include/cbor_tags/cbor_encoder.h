@@ -155,7 +155,13 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
-    constexpr void encode(simple value) { appender_(data_, static_cast<byte_type>(value.value)); }
+    constexpr void encode(simple value) {
+        if (value.value < 24 || value.value > 31) {
+            encode_major_and_size(value.value, static_cast<byte_type>(0xE0));
+        } else {
+            throw std::runtime_error("Invalid simple value, use float16_t, float etc");
+        }
+    }
 
     template <typename T> constexpr void encode(const std::optional<T> &value) {
         if (value.has_value()) {

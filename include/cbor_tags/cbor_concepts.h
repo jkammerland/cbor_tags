@@ -18,7 +18,7 @@ enum class major_type : std::uint8_t {
     Array           = 4,
     Map             = 5,
     Tag             = 6,
-    SimpleOrFloat   = 7
+    Simple          = 7
 };
 
 template <typename T>

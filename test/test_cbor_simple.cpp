@@ -115,3 +115,17 @@ TEST_CASE("CBOR Encoder - NaN double") {
     CHECK((data[1] & static_cast<std::byte>(0x7F)) == static_cast<std::byte>(0x7F));
     CHECK((data[2] & static_cast<std::byte>(0xF0)) == static_cast<std::byte>(0xF0));
 }
+
+TEST_CASE("CBOR Encoder - simple") {
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+    simple                 number{19};
+    enc(number);
+    fmt::print("Simple: ");
+    print_bytes(data);
+    CHECK_EQ(to_hex(data), "f3");
+
+    // auto   dec = make_decoder(data);
+    // simple decoded;
+    // dec(decoded);
+}
