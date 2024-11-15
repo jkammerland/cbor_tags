@@ -88,10 +88,28 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
+    template <IsRangeOfCborValues T> constexpr void decode(T &value, major_type major, byte additionalInfo) {
+        if (major != major_type::Array || major != major_type::Map) {
+            throw std::runtime_error("Invalid major type for array");
+        }
+
+        const auto length = decode_unsigned(additionalInfo);
+        if constexpr (HasReserve<T>) {
+            value.reserve(length);
+        }
+        detail::appender<T> appender_;
+        for (auto i = length; i > 0; --i) {
+            using value_type = typename T::value_type;
+            value_type result;
+            decode(result);
+            appender_(value, result);
+        }
+    }
+
     template <std::uint64_t N> constexpr void decode(tag<N>, major_type, byte) {}
 
     template <IsTag T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
-        if (!(major == major_type::Tag)) {
+        if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
         }
 
@@ -198,6 +216,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
             throw std::runtime_error("Invalid major type for variant");
         }
     }
+
     template <typename T> constexpr void decode(T &value) {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");

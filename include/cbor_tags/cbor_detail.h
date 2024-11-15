@@ -15,7 +15,15 @@ struct appender;
 
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
-    constexpr void operator()(T &container, value_type value) { container.push_back(value); }
+
+    constexpr void operator()(T &container, value_type value) {
+        if constexpr (IsMap<T>) {
+            container.insert_or_assign(value);
+        } else {
+            container.push_back(value);
+        }
+    }
+
     constexpr void operator()(T &container, std::span<const std::byte> values) {
         container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
                          reinterpret_cast<const value_type *>(values.data() + values.size()));
