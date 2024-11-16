@@ -18,7 +18,8 @@ template <typename T> struct appender<T, false> {
 
     constexpr void operator()(T &container, value_type value) {
         if constexpr (IsMap<T>) {
-            container.insert_or_assign(value);
+            const auto &[key, mapped_value] = value;
+            container.insert_or_assign(key, mapped_value);
         } else {
             container.push_back(value);
         }

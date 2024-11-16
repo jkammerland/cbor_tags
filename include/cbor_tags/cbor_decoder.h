@@ -68,7 +68,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         if (major != major_type::NegativeInteger) {
             throw std::runtime_error("Invalid major type for negative integer");
         }
-        value = negative(decode_integer(additionalInfo));
+        value = negative(decode_unsigned(additionalInfo) + 1);
     }
 
     template <IsBinaryString T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
@@ -89,8 +89,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     }
 
     template <IsRangeOfCborValues T> constexpr void decode(T &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Array || major != major_type::Map) {
-            throw std::runtime_error("Invalid major type for array");
+        if (major != major_type::Array && major != major_type::Map) {
+            throw std::runtime_error("Invalid major type for range of cbor values");
         }
 
         const auto length = decode_unsigned(additionalInfo);
@@ -99,10 +99,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
         detail::appender<T> appender_;
         for (auto i = length; i > 0; --i) {
-            using value_type = typename T::value_type;
-            value_type result;
-            decode(result);
-            appender_(value, result);
+            if constexpr (IsMap<T>) {
+                using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
+                value_type result;
+                decode(result);
+                appender_(value, result);
+            } else {
+                using value_type = typename T::value_type;
+                value_type result;
+                decode(result);
+                appender_(value, result);
+            }
         }
     }
 
@@ -224,46 +231,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
         const auto [majorType, additionalInfo] = read_initial_byte();
 
-        if constexpr (IsString<T>) {
-            constexpr auto expected_major_type = IsTextString<T> ? major_type::TextString : major_type::ByteString;
-            if (majorType != expected_major_type) {
-                throw std::runtime_error("Invalid major type for array or map");
-            }
-
+        if constexpr (IsString<T> || IsMap<T> || IsRangeOfCborValues<T>) {
             decode(value, majorType, additionalInfo);
-        } else if constexpr (IsMap<T>) {
-            constexpr auto expected_major_type = major_type::Map;
-            if (majorType != expected_major_type) {
-                throw std::runtime_error("Invalid major type for map");
-            }
-
-            const auto length = decode_unsigned(additionalInfo);
-            for (auto i = length; i > 0; --i) {
-                using key_type    = typename T::key_type;
-                using mapped_type = typename T::mapped_type;
-                key_type    key;
-                mapped_type val;
-                decode(key);
-                decode(val);
-                value.insert_or_assign(key, val);
-            }
-        } else if constexpr (IsRangeOfCborValues<T>) {
-            constexpr auto expected_major_type = major_type::Array;
-            if (majorType != expected_major_type) {
-                throw std::runtime_error("Invalid major type for array");
-            }
-
-            const auto length = decode_unsigned(additionalInfo);
-            if constexpr (HasReserve<T>) {
-                value.reserve(length);
-            }
-            detail::appender<T> appender_;
-            for (auto i = length; i > 0; --i) {
-                using value_type = typename T::value_type;
-                value_type result;
-                decode(result);
-                appender_(value, result);
-            }
         }
         // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
         else if constexpr (IsTaggedTuple<T>) {
