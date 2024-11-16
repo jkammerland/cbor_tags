@@ -112,7 +112,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <IsAggregate T> constexpr void encode(const T &value) {
-        if constexpr (HasCborTag<T>) {
+        if constexpr (HasStaticTag<T>) {
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
         }
         const auto &tuple = to_tuple(value);

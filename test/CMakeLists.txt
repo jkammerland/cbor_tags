@@ -6,6 +6,8 @@ set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 cpmaddpackage("gh:fmtlib/fmt#11.0.2")
 # cpmaddpackage("gh:catchorg/Catch2@3.7.1")
 cpmaddpackage("gh:Neargye/nameof@0.10.4")
+# Magic enum
+cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
 
 set(CMAKE_WARN_DEPRECATED
     OFF
@@ -26,7 +28,7 @@ target_sources(tests PRIVATE ${TEST_SOURCES})
 target_include_directories(tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # add link libraries
-target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof)
+target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
 
 # Enable ASAN for linux and macos
 if(UNIX OR APPLE)

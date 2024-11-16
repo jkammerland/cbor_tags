@@ -121,7 +121,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
         std::uint64_t cbor_tag = 1;
     };
 
-    static_assert(HasCborTag<CBOR1>);
+    static_assert(HasStaticTag<CBOR1>);
     static_assert(IsTag<CBOR1>);
     static_assert(!IsTaggedTuple<CBOR1>);
 
@@ -129,7 +129,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
         std::uint64_t cbor_ = 2;
     };
 
-    static_assert(!HasCborTag<CBOR2>);
+    static_assert(!HasStaticTag<CBOR2>);
     static_assert(!IsTag<CBOR2>);
 }
 

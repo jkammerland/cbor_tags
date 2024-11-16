@@ -118,21 +118,31 @@ concept IsTuple = requires {
 };
 
 template <typename T>
-concept HasCborTag = requires {
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T>;
+
+template <IsUnsigned T> struct dynamic_tag;
+
+template <typename T>
+concept HasDynamicTag = std::is_same_v<T, dynamic_tag<typename T::value_type>> || requires(T t) {
+    { t.cbor_tag } -> std::convertible_to<std::uint64_t>;
+};
+
+template <typename T>
+concept HasStaticTag = requires {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T>
 concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
-    requires HasCborTag<std::remove_cvref_t<decltype(std::get<0>(t))>>;
+    requires HasStaticTag<std::remove_cvref_t<decltype(std::get<0>(t))>>;
 };
 
 template <typename T>
 concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T>;
 
 template <typename T>
-concept IsTag = HasCborTag<T> || IsTaggedTuple<T>;
+concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || IsTaggedTuple<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -219,9 +229,6 @@ template <typename T> struct ContainsCborMajor<T, true> {
     static constexpr bool value = IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>;
 };
 
-template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T>;
-
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
 struct CborStream {
@@ -264,6 +271,12 @@ template <std::uint64_t N> struct tag {
             return std::strong_ordering::equal;
         }
     }
+};
+
+template <IsUnsigned T> struct dynamic_tag {
+    using value_type = T;
+    value_type value;
+    constexpr  operator value_type() const { return value; }
 };
 
 template <typename T>
@@ -336,5 +349,4 @@ template <char... Chars> constexpr auto operator"" _tag() { return tag<detail::p
 template <char... Chars> constexpr auto operator"" _hex_tag() { return tag<detail::parse_hex<Chars...>()>{}; }
 
 } // namespace literals
-
 } // namespace cbor::tags
