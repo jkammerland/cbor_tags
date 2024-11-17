@@ -56,7 +56,7 @@ TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 5>, st
     // }
 }
 
-TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+TEST_CASE_TEMPLATE("Test decode dynamic tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
     using namespace std::string_view_literals;
     auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
 
@@ -69,7 +69,6 @@ TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8
     static_assert(HasDynamicTag<A>);
     static_assert(IsTag<A>);
 
-    // auto a               = make_tag_pair(tag<1>{}, A{});
     A a;
     auto &[tag, value_a] = a;
 
@@ -78,7 +77,28 @@ TEST_CASE_TEMPLATE("Test input tag 1", T, std::vector<uint8_t>, std::deque<uint8
     CHECK_EQ(value_a, "Hello world!");
 }
 
-TEST_CASE_TEMPLATE("Test input tag 1 optional", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+TEST_CASE_TEMPLATE("Test decode static tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+    using namespace std::string_view_literals;
+    auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
+
+    auto dec = make_decoder(bytes);
+    struct A {
+        tag<1>      cbor_tag;
+        std::string b;
+    };
+
+    static_assert(HasStaticTag<A>);
+    static_assert(IsTag<A>);
+
+    A a;
+    auto &[tag, value_a] = a;
+
+    dec(a);
+    CHECK_EQ(tag, 1);
+    CHECK_EQ(value_a, "Hello world!");
+}
+
+TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
     {
         using namespace std::string_view_literals;
         auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
@@ -115,7 +135,7 @@ template <typename MajorType, typename... T> bool contains_major(MajorType major
     return (... || (major == ConceptType<MajorType, T>::value));
 }
 
-TEST_CASE_TEMPLATE("Test input tag 1 variant", T, std::vector<char>, std::deque<uint8_t>, std::list<std::byte>) {
+TEST_CASE_TEMPLATE("Test decode tag 1 variant", T, std::vector<char>, std::deque<uint8_t>, std::list<std::byte>) {
     {
         using namespace std::string_view_literals;
         auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);

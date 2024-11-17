@@ -125,6 +125,7 @@ template <IsUnsigned T> struct dynamic_tag;
 template <typename T>
 concept HasDynamicTag = std::is_same_v<T, dynamic_tag<typename T::value_type>> || requires(T t) {
     { t.cbor_tag } -> std::convertible_to<std::uint64_t>;
+    requires std::is_same_v<decltype(t.cbor_tag), dynamic_tag<typename decltype(t.cbor_tag)::value_type>>;
 };
 
 template <typename T>

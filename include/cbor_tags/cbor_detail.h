@@ -94,6 +94,11 @@ template <typename T> struct reader<T, false> {
     }
 };
 
+template <typename Tuple> constexpr auto tuple_tail(Tuple &&tuple) {
+    return std::apply([](auto &&, auto &&...tail) { return std::forward_as_tuple(std::forward<decltype(tail)>(tail)...); },
+                      std::forward<Tuple>(tuple));
+}
+
 template <typename T, typename... TArgs>
     requires IsAggregate<T> || IsTuple<T>
 constexpr std::size_t num_bindings_impl() {

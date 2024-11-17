@@ -114,9 +114,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <std::uint64_t N> constexpr void decode(tag<N>, major_type, byte) {}
-    template <IsUnsigned T> constexpr void    decode(dynamic_tag<T> &value) {
+    template <std::uint64_t N> constexpr void decode(tag<N>, major_type major, byte additionalInfo) {
+        fmt::print("decoding tag {}\n", N);
+        if (major != major_type::Tag) {
+            throw std::runtime_error("Invalid major type for tag");
+        }
+        if (decode_unsigned(additionalInfo) != N) {
+            throw std::runtime_error("Invalid tag value");
+        }
+    }
+
+    template <std::uint64_t N> constexpr void decode(tag<N> value) {
+        fmt::print("decoding tag {}\n", N);
         auto [major, additionalInfo] = read_initial_byte();
+        decode(value, major, additionalInfo);
+    }
+
+    template <IsUnsigned T> constexpr void decode(dynamic_tag<T> &value, major_type major, byte additionalInfo) {
+        // auto [major, additionalInfo] = read_initial_byte();
 
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for dynamic tag");
@@ -124,24 +139,36 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
     }
 
-    template <IsTag T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+    template <IsUnsigned T> constexpr void decode(dynamic_tag<T> &value) {
+        auto [major, additionalInfo] = read_initial_byte();
+        decode(value, major, additionalInfo);
+    }
+
+    template <IsTaggedTuple T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
         }
 
         auto tag = decode_unsigned(additionalInfo);
 
-        if constexpr (HasStaticTag<T>) {
-            if (tag != T::cbor_tag) {
-                throw std::runtime_error("Invalid tag for tagged object");
-            }
-        } else if constexpr (IsTaggedTuple<T>) {
-            if (tag != std::get<0>(t)) {
-                throw std::runtime_error("Invalid tag for tagged object");
-            }
+        if (tag != std::get<0>(t)) {
+            throw std::runtime_error("Invalid tag for tagged object");
         }
 
-        std::apply([this](auto &&...args) { (this->decode(args), ...); }, t);
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, detail::tuple_tail(t));
+    }
+
+    template <IsAggregate T> constexpr void decode(T &value) {
+        const auto &tuple = to_tuple(value);
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+    }
+
+    // template <IsTuple T> constexpr void decode(T &value) {
+    //     std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
+    // }
+
+    template <IsUntaggedTuple T> constexpr void decode(T &value) {
+        std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
     }
 
     constexpr void decode(bool &value, major_type major, byte additionalInfo) {
@@ -183,15 +210,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
             throw std::runtime_error("Invalid additional info for double");
         }
         value = read_double();
-    }
-
-    template <IsAggregate T> constexpr void decode(T &value) {
-        const auto &tuple = to_tuple(value);
-        std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
-    }
-
-    template <IsUntaggedTuple T> constexpr void decode(T &value) {
-        std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
     }
 
     constexpr void decode(std::string &value, major_type, byte additionalInfo) { value = std::string(decode_text(additionalInfo)); }
@@ -243,18 +261,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_short_type<T>(), magic_enum::enum_name(majorType),
                    additionalInfo);
 
-        if constexpr (IsString<T> || IsMap<T> || IsRangeOfCborValues<T> || IsTaggedTuple<T>) {
-            decode(value, majorType, additionalInfo);
-        }
-        // Not range? Maybe T is a pair, e.g std::pair<cbor::tags::tag<i>, T::second_type>
-        else if constexpr (IsAggregate<T>) {
-            auto &tuple = to_tuple(value);
-            std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
-        } else if constexpr (IsTuple<T>) {
-            std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
-        } else {
-            decode(value, majorType, additionalInfo);
-        }
+        decode(value, majorType, additionalInfo);
     }
 
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
