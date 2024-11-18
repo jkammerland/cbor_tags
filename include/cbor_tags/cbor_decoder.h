@@ -114,7 +114,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <std::uint64_t N> constexpr void decode(tag<N>, major_type major, byte additionalInfo) {
+    template <std::uint64_t N> constexpr void decode(static_tag<N>, major_type major, byte additionalInfo) {
         fmt::print("decoding tag {}\n", N);
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tag");
@@ -124,7 +124,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <std::uint64_t N> constexpr void decode(tag<N> value) {
+    template <std::uint64_t N> constexpr void decode(static_tag<N> value) {
         fmt::print("decoding tag {}\n", N);
         auto [major, additionalInfo] = read_initial_byte();
         decode(value, major, additionalInfo);
@@ -160,12 +160,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
     template <IsAggregate T> constexpr void decode(T &value) {
         const auto &tuple = to_tuple(value);
+
+        if constexpr (HasInlineTag<T>) {
+            decode(static_tag<static_cast<uint64_t>(value.cbor_tag)>{});
+        }
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
     }
-
-    // template <IsTuple T> constexpr void decode(T &value) {
-    //     std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
-    // }
 
     template <IsUntaggedTuple T> constexpr void decode(T &value) {
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
@@ -258,8 +258,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
         const auto [majorType, additionalInfo] = read_initial_byte();
 
-        fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_short_type<T>(), magic_enum::enum_name(majorType),
-                   additionalInfo);
+        // fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_short_type<T>(), magic_enum::enum_name(majorType),
+        //            additionalInfo);
 
         decode(value, majorType, additionalInfo);
     }

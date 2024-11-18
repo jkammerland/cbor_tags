@@ -220,14 +220,6 @@ TEST_CASE("Assign string_view to string?") {
     }
 }
 
-template <typename T> constexpr auto t1(T &t) { t = 1; }
-
-TEST_CASE("Test assignment???") {
-    int res;
-    t1(res);
-    CHECK_EQ(res, 1);
-}
-
 // Helper to store type-function pairs
 template <typename T, auto F> struct TypeFunction {
     using Type                     = T;

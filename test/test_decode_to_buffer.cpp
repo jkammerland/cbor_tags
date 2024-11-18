@@ -83,8 +83,8 @@ TEST_CASE_TEMPLATE("Test decode static tag 1", T, std::vector<uint8_t>, std::deq
 
     auto dec = make_decoder(bytes);
     struct A {
-        tag<1>      cbor_tag;
-        std::string b;
+        static_tag<1> cbor_tag;
+        std::string   b;
     };
 
     static_assert(HasStaticTag<A>);
@@ -98,6 +98,27 @@ TEST_CASE_TEMPLATE("Test decode static tag 1", T, std::vector<uint8_t>, std::deq
     CHECK_EQ(value_a, "Hello world!");
 }
 
+struct STATICTAGINLINE {
+    static constexpr uint64_t cbor_tag = 1;
+    std::string               b;
+};
+
+TEST_CASE_TEMPLATE("Test decode static tag 1 reverse", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+    using namespace std::string_view_literals;
+    auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
+
+    auto dec = make_decoder(bytes);
+
+    static_assert(HasInlineTag<STATICTAGINLINE>);
+    static_assert(IsTag<STATICTAGINLINE>);
+
+    STATICTAGINLINE a;
+    auto &[s] = a;
+
+    dec(a);
+    CHECK_EQ(s, "Hello world!");
+}
+
 TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
     {
         using namespace std::string_view_literals;
@@ -108,7 +129,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<uint8_t>, std::d
             std::optional<std::string> b;
         };
 
-        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
 
         dec(a);
@@ -124,7 +145,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<uint8_t>, std::d
             std::optional<std::string> b;
         };
 
-        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
         dec(a);
         CHECK_EQ(value_a.b, std::nullopt);
@@ -145,7 +166,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 variant", T, std::vector<char>, std::deque
             std::variant<std::string, int> b;
         };
 
-        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
         value_a.b            = 4;
 
@@ -165,7 +186,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 variant", T, std::vector<char>, std::deque
             std::optional<std::string> b;
         };
 
-        auto a               = make_tag_pair(tag<1>{}, A{});
+        auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
         dec(a);
         CHECK_EQ(value_a.b, std::nullopt);

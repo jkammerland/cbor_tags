@@ -120,6 +120,7 @@ concept IsTuple = requires {
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T>;
 
+template <std::uint64_t T> struct static_tag;
 template <IsUnsigned T> struct dynamic_tag;
 
 template <typename T>
@@ -128,22 +129,35 @@ concept HasDynamicTag = std::is_same_v<T, dynamic_tag<typename T::value_type>> |
     requires std::is_same_v<decltype(t.cbor_tag), dynamic_tag<typename decltype(t.cbor_tag)::value_type>>;
 };
 
+template <typename T> struct is_static_tag_t : std::false_type {};
+template <std::uint64_t T> struct is_static_tag_t<static_tag<T>> : std::true_type {};
+
 template <typename T>
 concept HasStaticTag = requires {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
+    requires is_static_tag_t<decltype(T::cbor_tag)>::value;
+    requires(!HasDynamicTag<T>);
+}; // namespace cbor::tags
+
+template <typename T>
+concept HasInlineTag = requires {
+    requires IsUnsigned<decltype(T::cbor_tag)>;
+    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
+    requires(!HasDynamicTag<T>);
+    requires(!HasStaticTag<T>);
 };
 
 template <typename T>
 concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
-    requires HasStaticTag<std::remove_cvref_t<decltype(std::get<0>(t))>>;
+    requires is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value;
 };
 
 template <typename T>
 concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T>;
 
 template <typename T>
-concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || IsTaggedTuple<T>;
+concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -257,13 +271,13 @@ struct any {
     template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
 };
 
-template <std::uint64_t N> struct tag {
+template <std::uint64_t N> struct static_tag {
     static constexpr std::uint64_t cbor_tag = N;
 
     constexpr operator std::uint64_t() const { return cbor_tag; }
 
     // Spacechip operator
-    template <std::uint64_t M> constexpr auto operator<=>(const tag<M> &) const {
+    template <std::uint64_t M> constexpr auto operator<=>(const static_tag<M> &) const {
         if constexpr (N < M) {
             return std::strong_ordering::less;
         } else if constexpr (N > M) {
@@ -344,10 +358,10 @@ template <char... Chars> constexpr std::uint64_t parse_hex() {
 namespace literals {
 
 // Decimal tag literal
-template <char... Chars> constexpr auto operator"" _tag() { return tag<detail::parse_decimal<Chars...>()>{}; }
+template <char... Chars> constexpr auto operator"" _tag() { return static_tag<detail::parse_decimal<Chars...>()>{}; }
 
 // Hexadecimal tag literal
-template <char... Chars> constexpr auto operator"" _hex_tag() { return tag<detail::parse_hex<Chars...>()>{}; }
+template <char... Chars> constexpr auto operator"" _hex_tag() { return static_tag<detail::parse_hex<Chars...>()>{}; }
 
 } // namespace literals
 } // namespace cbor::tags

@@ -94,6 +94,8 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
+    template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_major_and_size(N, static_cast<byte_type>(0xC0)); }
+
     template <IsString T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));
         appender_(data_, value);
@@ -112,7 +114,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <IsAggregate T> constexpr void encode(const T &value) {
-        if constexpr (HasStaticTag<T>) {
+        if constexpr (HasInlineTag<T>) {
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
         }
         const auto &tuple = to_tuple(value);
