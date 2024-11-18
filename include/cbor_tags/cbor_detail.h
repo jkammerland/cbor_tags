@@ -15,7 +15,16 @@ struct appender;
 
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
-    constexpr void operator()(T &container, value_type value) { container.push_back(value); }
+
+    constexpr void operator()(T &container, value_type value) {
+        if constexpr (IsMap<T>) {
+            const auto &[key, mapped_value] = value;
+            container.insert_or_assign(key, mapped_value);
+        } else {
+            container.push_back(value);
+        }
+    }
+
     constexpr void operator()(T &container, std::span<const std::byte> values) {
         container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
                          reinterpret_cast<const value_type *>(values.data() + values.size()));
@@ -84,6 +93,11 @@ template <typename T> struct reader<T, false> {
         return static_cast<value_type>(*it);
     }
 };
+
+template <typename Tuple> constexpr auto tuple_tail(Tuple &&tuple) {
+    return std::apply([](auto &&, auto &&...tail) { return std::forward_as_tuple(std::forward<decltype(tail)>(tail)...); },
+                      std::forward<Tuple>(tuple));
+}
 
 template <typename T, typename... TArgs>
     requires IsAggregate<T> || IsTuple<T>

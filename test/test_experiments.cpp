@@ -14,13 +14,104 @@
  */
 
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "doctest/doctest.h"
+#include "test_util.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <deque>
+#include <fmt/core.h>
 #include <functional>
 #include <iostream>
+#include <list>
+#include <map>
+#include <memory>
+#include <memory_resource>
+#include <nameof.hpp>
+#include <ranges>
+#include <set>
+#include <sstream>
+#include <type_traits>
+#include <variant>
 #include <vector>
+
+using namespace cbor::tags;
+
+std::string some_data = "Hello world!";
+struct A {
+    std::int64_t a;
+    std::string  s;
+};
+
+// Helper function to print type and value
+template <typename T> constexpr void print_type_and_value(const T &value) {
+    if constexpr (std::is_same_v<T, A>) {
+        fmt::print("Got type <A>: with values a={}, s={}\n", value.a, value.s);
+    } else if constexpr (fmt::is_formattable<T>()) {
+        fmt::print("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
+    } else {
+        fmt::print("Got type <{}>\n", nameof::nameof_short_type<T>());
+    }
+}
+
+TEST_CASE("Basic reflection") {
+    struct M {
+        int                a;
+        std::optional<int> b;
+    };
+
+    auto count = detail::aggregate_binding_count<M>;
+    fmt::print("M has {} members\n", count);
+    CHECK_EQ(count, 2);
+
+    auto is_constructible = IsBracesContructible<M, any, any>;
+    fmt::print("M is braces construct with 2 members: {}\n", is_constructible);
+    CHECK(is_constructible);
+
+    // Check if we can construct M with any and any
+    [[maybe_unused]] auto tmp1 = M{any{}, std::optional<int>{any{}}}; // This should compile
+
+    [[maybe_unused]] auto tmp2 = M{any{}, any{}}; // Question is if if we can compile this
+}
+
+TEST_CASE("Advanced reflection") {
+    struct Z {
+        int                        a;
+        float                      b;
+        std::string                c;
+        std::vector<int>           d;
+        std::map<std::string, int> e;
+        std::deque<double>         f;
+
+        A g;
+
+        std::optional<int>            h;
+        std::optional<std::list<int>> i;
+        std::vector<std::vector<int>> j;
+        std::multimap<int, int>       k;
+        std::set<std::pair<int, int>> l;
+    };
+
+    auto z = Z{42,
+               3.14f,
+               "Hello world!",
+               {1, 2, 3},
+               {{"one", 1}, {"two", 2}, {"three", 3}},
+               {1.0, 2.0, 3.0},
+               A{42, "Hello world!"},
+               std::nullopt,
+               std::list<int>{1, 2, 3},           // std::optional<std::list<int>>
+               {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, // std::vector<std::vector<int>>
+               {{1, 2}, {1, 2}, {1, 2}},          // std::multimap<int, int>
+               {{1, 2}, {3, 4}, {5, 6}}};         // std::set<std::pair<int, int>>
+
+    auto &&tuple = to_tuple(z);
+
+    std::apply([](auto &&...args) { (print_type_and_value(args), ...); }, tuple);
+    CHECK_EQ(detail::aggregate_binding_count<Z>, 12);
+}
 
 struct featureA {
     constexpr int decode(double) { return 1; }
@@ -98,9 +189,6 @@ TEST_CASE("CRTP feature test") {
     CHECK_EQ(my_d.decode("Hello world!"), 0);
 }
 
-#include <type_traits>
-#include <variant>
-
 // All possible types
 struct Type1 {};
 struct Type2 {};
@@ -176,4 +264,115 @@ TEST_CASE("parseByID") {
     CHECK_THROWS_AS(parseByID(val1, 3, buf), std::runtime_error);
     CHECK_THROWS_AS(parseByID(val1, 4, buf), std::runtime_error);
     CHECK_THROWS_AS(parseByID(val1, 5, buf), std::runtime_error);
+}
+
+TEST_CASE("Assign string_view to string?") {
+    {
+        std::string_view sv = "Hello world!";
+        std::string      s(sv);
+        CHECK_EQ(s, "Hello world!");
+    }
+    {
+        std::array<std::byte, 5>            arr;
+        std::pmr::monotonic_buffer_resource r(arr.data(), arr.size(), std::pmr::get_default_resource());
+        std::pmr::string                    s("Hello world!", &r);
+
+        std::string s2(s);
+        CHECK_EQ(s, "Hello world!");
+    }
+    {
+        std::array<std::byte, 5>            arr;
+        std::pmr::monotonic_buffer_resource r(arr.data(), arr.size(), std::pmr::get_default_resource());
+        std::pmr::string                    s("Hello world!", &r);
+
+        std::string_view sv(s);
+        CHECK_EQ(sv, "Hello world!");
+    }
+    {
+        // Use a std::range::view of a deque of chars, really long string
+        std::deque<char> d;
+        std::generate_n(std::back_inserter(d), 1000, [i = 0]() mutable { return 'a' + i++; });
+
+        // Create a range view of the deque, as it is non-contiguous
+        namespace views = std::ranges::views;
+        auto view       = views::all(d);
+
+        std::string s(view.begin(), view.end());
+        CHECK(std::equal(s.begin(), s.end(), view.begin(), view.end()));
+    }
+}
+
+// Helper to store type-function pairs
+template <typename T, auto F> struct TypeFunction {
+    using Type                     = T;
+    static constexpr auto Function = F;
+};
+
+// Base handler class
+template <typename... Handlers> class TypeHandler {
+  public:
+    template <typename T> static void handle(std::shared_ptr<T> ptr) {
+        (try_handle<typename Handlers::Type>(ptr, Handlers::Function) || ...);
+    }
+
+  private:
+    template <typename Target, typename T> static bool try_handle(std::shared_ptr<T> ptr, auto func) {
+        if (auto derived = std::dynamic_pointer_cast<Target>(ptr)) {
+            func(derived);
+            return true;
+        }
+        return false;
+    }
+};
+
+// Example usage:
+class Base {
+  public:
+    virtual ~Base() = default;
+};
+
+class Derived1 : public Base {
+  public:
+    void method1() { std::cout << "Derived1::method1\n"; }
+};
+
+class Derived2 : public Base {
+  public:
+    void method2() { std::cout << "Derived2::method2\n"; }
+};
+
+// Define handlers
+using MyHandler =
+    TypeHandler<TypeFunction<Derived1, [](auto ptr) { ptr->method1(); }>, TypeFunction<Derived2, [](auto ptr) { ptr->method2(); }>>;
+
+// Use the handler
+template <typename T> void method(std::shared_ptr<T> ptr) { MyHandler::handle(ptr); }
+
+TEST_CASE("TypeHandler test") {
+    auto                  d1 = std::make_shared<Derived1>();
+    auto                  d2 = std::make_shared<Derived2>();
+    std::shared_ptr<Base> b1 = d1;
+    std::shared_ptr<Base> b2 = d2;
+
+    // Redirect std::cout to a stringstream to capture the output
+    std::stringstream buffer;
+    std::streambuf   *old = std::cout.rdbuf(buffer.rdbuf());
+
+    method(d1); // Calls method1
+    CHECK_EQ(buffer.str(), "Derived1::method1\n");
+    buffer.str(""); // Clear the buffer
+
+    method(d2); // Calls method2
+    CHECK_EQ(buffer.str(), "Derived2::method2\n");
+    buffer.str(""); // Clear the buffer
+
+    method(b1); // Calls method1
+    CHECK_EQ(buffer.str(), "Derived1::method1\n");
+    buffer.str(""); // Clear the buffer
+
+    method(b2); // Calls method2
+    CHECK_EQ(buffer.str(), "Derived2::method2\n");
+
+    // Restore the original std::cout buffer
+    std::cout.rdbuf(old);
 }

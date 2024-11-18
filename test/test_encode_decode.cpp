@@ -84,11 +84,11 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
     std::vector<variant_contiguous> values(1e1);
     std::iota(values.begin(), values.end(), 0);
 
-    [[maybe_unused]] auto t = make_tag_pair(tag<123>{}, values);
+    [[maybe_unused]] auto t = make_tag_pair(static_tag<123>{}, values);
     enc(t);
 
     [[maybe_unused]] auto dec    = make_decoder(data_out);
-    auto                  result = make_tag_pair(tag<123>{}, std::vector<variant_contiguous>{});
+    auto                  result = make_tag_pair(static_tag<123>{}, std::vector<variant_contiguous>{});
     // dec(result);
 }
 
@@ -158,11 +158,6 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     CHECK_EQ(result.second.c, "Hello");
     CHECK_EQ(result.second.d, std::vector<int>({1, 2, 3}));
 }
-
-struct A {
-    static constexpr uint64_t cbor_tag = 1234;
-    // Empty struct
-};
 
 TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::variant<int, double>) {
     using namespace std::string_view_literals;

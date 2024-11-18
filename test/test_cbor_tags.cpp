@@ -27,93 +27,19 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
 
-std::string some_data = "Hello world!";
-struct A {
-    std::int64_t a;
-    std::string  s;
-};
-
-// Helper function to print type and value
-template <typename T> constexpr void print_type_and_value(const T &value) {
-    if constexpr (std::is_same_v<T, A>) {
-        fmt::print("Got type <A>: with values a={}, s={}\n", value.a, value.s);
-    } else if constexpr (fmt::is_formattable<T>()) {
-        fmt::print("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
-    } else {
-        fmt::print("Got type <{}>\n", nameof::nameof_short_type<T>());
-    }
-}
-
-TEST_CASE("Basic reflection") {
-    struct M {
-        int                a;
-        std::optional<int> b;
-    };
-
-    auto count = detail::aggregate_binding_count<M>;
-    fmt::print("M has {} members\n", count);
-    CHECK_EQ(count, 2);
-
-    auto is_constructible = IsBracesContructible<M, any, any>;
-    fmt::print("M is braces construct with 2 members: {}\n", is_constructible);
-    CHECK(is_constructible);
-
-    // Check if we can construct M with any and any
-    [[maybe_unused]] auto tmp1 = M{any{}, std::optional<int>{any{}}}; // This should compile
-
-    [[maybe_unused]] auto tmp2 = M{any{}, any{}}; // Question is if if we can compile this
-}
-
-TEST_CASE("Advanced reflection") {
-    struct Z {
-        int                        a;
-        float                      b;
-        std::string                c;
-        std::vector<int>           d;
-        std::map<std::string, int> e;
-        std::deque<double>         f;
-
-        A g;
-
-        std::optional<int>            h;
-        std::optional<std::list<int>> i;
-        std::vector<std::vector<int>> j;
-        std::multimap<int, int>       k;
-        std::set<std::pair<int, int>> l;
-    };
-
-    auto z = Z{42,
-               3.14f,
-               "Hello world!",
-               {1, 2, 3},
-               {{"one", 1}, {"two", 2}, {"three", 3}},
-               {1.0, 2.0, 3.0},
-               A{42, "Hello world!"},
-               std::nullopt,
-               std::list<int>{1, 2, 3},           // std::optional<std::list<int>>
-               {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, // std::vector<std::vector<int>>
-               {{1, 2}, {1, 2}, {1, 2}},          // std::multimap<int, int>
-               {{1, 2}, {3, 4}, {5, 6}}};         // std::set<std::pair<int, int>>
-
-    auto &&tuple = to_tuple(z);
-
-    std::apply([](auto &&...args) { (print_type_and_value(args), ...); }, tuple);
-    CHECK_EQ(detail::aggregate_binding_count<Z>, 12);
-}
-
 struct B {
     std::int64_t a;
     std::string  s;
 };
-struct C {
+struct inline_tag_example {
     static constexpr std::uint64_t cbor_tag = 140;
-    std::int64_t                   a;
-    std::string                    s;
+    B                              b;
 };
 
 TEST_CASE("Basic tag") {
@@ -129,9 +55,126 @@ TEST_CASE("Basic tag") {
     }
     {
         auto [data, enc] = make_data_and_encoder<std::vector<std::byte>>();
-        enc(C{-42, "Hello world!"});
+        enc(inline_tag_example{-42, "Hello world!"});
         s2 = to_hex(data);
     }
 
     CHECK_EQ(s1, s2);
+}
+
+struct STATIC_EX1 {
+    static_tag<140u>           cbor_tag;
+    std::optional<std::string> s;
+};
+
+struct DYNAMIC_EX1 {
+    dynamic_tag<uint64_t>      cbor_tag;
+    std::optional<std::string> s;
+};
+
+struct INLINE_EX1 {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::optional<std::string>     s;
+};
+
+TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
+    using namespace std::string_view_literals;
+
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    T t;
+    if constexpr (std::is_same_v<T, DYNAMIC_EX1>) {
+        t.cbor_tag.value = 140;
+    }
+    t.s = "Hello world!";
+
+    enc(t);
+
+    auto dec = make_decoder(data);
+    T    result;
+    dec(result);
+}
+
+TEST_CASE("Test tuple static tag") {
+    using namespace literals;
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    auto tag = make_tag_pair(140_tag, std::tuple<int, std::string>{42, "Hello world!"});
+    enc(tag);
+
+    auto                         dec = make_decoder(data);
+    std::tuple<int, std::string> result;
+    auto                         tag_result = make_tag_pair(140_tag, result);
+    dec(tag_result);
+
+    CHECK_EQ(std::get<0>(result), 42);
+    CHECK_EQ(std::get<1>(result), "Hello world!");
+}
+
+TEST_CASE("Test tuple dynamic tag") {
+    using namespace literals;
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    auto tag = make_tag_pair(140_tag, std::tuple<int, std::string>{42, "Hello world!"});
+    enc(tag);
+
+    auto dec = make_decoder(data);
+
+    std::tuple<dynamic_tag<std::uint64_t>, int, std::string> result;
+    dec(result);
+
+    CHECK_EQ(std::get<0>(result), 140);
+    CHECK_EQ(std::get<1>(result), 42);
+    CHECK_EQ(std::get<2>(result), "Hello world!");
+}
+
+TEST_CASE("Nested structs") {
+    struct A {
+        static_tag<140> cbor_tag;
+        int             a;
+        struct B {
+            dynamic_tag<uint64_t> cbor_tag;
+            int                   b;
+            struct C {
+                static_tag<141> cbor_tag;
+                int             c;
+            } c;
+        } b;
+    } a{{}, 1, {{5}, 2, {{}, 3}}};
+
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+    enc(a);
+
+    auto dec = make_decoder(data);
+    A    result;
+    dec(result);
+
+    CHECK_EQ(a.a, result.a);
+    CHECK_EQ(a.b.cbor_tag.value, result.b.cbor_tag.value);
+    CHECK_EQ(a.b.b, result.b.b);
+    CHECK_EQ(a.b.c.c, result.b.c.c);
+}
+
+struct D {
+    static_tag<140>                                       cbor_tag;
+    std::variant<int, std::string, std::map<int, double>> v;
+};
+
+TEST_CASE("Variant") {
+    using namespace literals;
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    D d{{}, "Hello world!"};
+    enc(d);
+
+    auto dec = make_decoder(data);
+    D    result;
+    dec(result);
+
+    CHECK_EQ(std::get<std::string>(d.v), std::get<std::string>(result.v));
 }

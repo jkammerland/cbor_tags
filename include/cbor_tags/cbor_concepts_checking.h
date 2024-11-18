@@ -28,7 +28,7 @@ struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUn
                                                                             : IsTag<unwrap_type_t<T>>               ? 6
                                                                             : IsSimple<unwrap_type_t<T>>            ? 7
                                                                             : IsRangeOfCborValues<unwrap_type_t<T>> ? 5
-                                                                                                                    : 255)> {};
+                                                                                                                    : 8)> {};
 
 // Modified get_major
 template <typename ByteType, typename T> constexpr auto get_major(const T &&) {
@@ -37,12 +37,18 @@ template <typename ByteType, typename T> constexpr auto get_major(const T &&) {
 
 // Modified is_valid_major for variants
 template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteType major) {
-    if constexpr (contains_signed_integer<T...>) {
-        const bool is_major_integer = major <= static_cast<ByteType>(1);
-        return is_major_integer ? true : (... || (major == ConceptType<ByteType, unwrap_type_t<T>>::value));
-    } else {
-        return (... || (major == ConceptType<ByteType, unwrap_type_t<T>>::value));
-    }
+    // Helper to check if a type matches the major type
+    constexpr auto matches_major = []<typename U>(ByteType m) {
+        using Type = unwrap_type_t<U>;
+        // Special case for signed types which can be either positive or negative
+        if constexpr (IsSigned<Type>) {
+            return m <= static_cast<ByteType>(major_type::NegativeInteger);
+        } else {
+            return m == ConceptType<ByteType, Type>::value;
+        }
+    };
+
+    return (matches_major.template operator()<T>(major) || ...);
 }
 
 } // namespace cbor::tags

@@ -14,8 +14,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <fmt/base.h>
-#include <nameof.hpp>
+// #include <fmt/base.h>
+// #include <nameof.hpp>
 #include <span>
 #include <string>
 #include <string_view>
@@ -94,6 +94,11 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
         }
     }
 
+    template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_major_and_size(N, static_cast<byte_type>(0xC0)); }
+    template <IsUnsigned T> constexpr void    encode(dynamic_tag<T> value) {
+        encode_major_and_size(value.value, static_cast<byte_type>(0xC0));
+    }
+
     template <IsString T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));
         appender_(data_, value);
@@ -112,7 +117,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <IsAggregate T> constexpr void encode(const T &value) {
-        if constexpr (HasCborTag<T>) {
+        if constexpr (HasInlineTag<T>) {
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
         }
         const auto &tuple = to_tuple(value);
@@ -155,7 +160,13 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
-    constexpr void encode(simple value) { appender_(data_, static_cast<byte_type>(value.value)); }
+    constexpr void encode(simple value) {
+        if (value.value < 24 || value.value > 31) {
+            encode_major_and_size(value.value, static_cast<byte_type>(0xE0));
+        } else {
+            throw std::runtime_error("Invalid simple value, use float16_t, float etc");
+        }
+    }
 
     template <typename T> constexpr void encode(const std::optional<T> &value) {
         if (value.has_value()) {

@@ -121,7 +121,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
         std::uint64_t cbor_tag = 1;
     };
 
-    static_assert(HasCborTag<CBOR1>);
+    static_assert(HasInlineTag<CBOR1>);
     static_assert(IsTag<CBOR1>);
     static_assert(!IsTaggedTuple<CBOR1>);
 
@@ -129,7 +129,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
         std::uint64_t cbor_ = 2;
     };
 
-    static_assert(!HasCborTag<CBOR2>);
+    static_assert(!HasStaticTag<CBOR2>);
     static_assert(!IsTag<CBOR2>);
 }
 
@@ -143,23 +143,23 @@ TEST_CASE("Test IsTuple concept") {
 }
 
 TEST_CASE("Test IsTagged concept with tagged tuples") {
-    auto tagged = std::make_tuple(tag<1>{}, 1);
+    auto tagged = std::make_tuple(static_tag<1>{}, 1);
     static_assert(IsTag<decltype(tagged)>);
 
-    auto tagged_tuple = std::make_tuple(tag<1>{}, std::make_tuple(1, 2));
+    auto tagged_tuple = std::make_tuple(static_tag<1>{}, std::make_tuple(1, 2));
     static_assert(IsTag<decltype(tagged_tuple)>);
 
-    auto tagged_tuple_2 = std::make_pair(tag<1>{}, std::make_tuple(1, 2));
+    auto tagged_tuple_2 = std::make_pair(static_tag<1>{}, std::make_tuple(1, 2));
     static_assert(IsTag<decltype(tagged_tuple_2)>);
     static_assert(!IsVariant<decltype(tagged_tuple_2)>);
     static_assert(!IsOptional<decltype(tagged_tuple_2)>);
     static_assert(!IsFixedArray<decltype(tagged_tuple_2)>);
     static_assert(!IsMap<decltype(tagged_tuple_2)>);
 
-    auto tagged_tuple_3 = std::tuple(tag<1>{}, std::make_tuple(1, 2), std::make_tuple(3, 4));
+    auto tagged_tuple_3 = std::tuple(static_tag<1>{}, std::make_tuple(1, 2), std::make_tuple(3, 4));
     static_assert(IsTag<decltype(tagged_tuple_3)>);
 
-    auto tagged_tuple_4 = std::tuple(1, tag<1>{});
+    auto tagged_tuple_4 = std::tuple(1, static_tag<1>{});
     static_assert(!IsTag<decltype(tagged_tuple_4)>);
 }
 
@@ -170,8 +170,8 @@ struct DefCbor {
 struct NotCbor {};
 
 TEST_CASE_TEMPLATE("IsCborMajor Positive", T, std::uint8_t, int, double, std::string, std::vector<int>, std::map<int, int>,
-                   tagged_object<tag<5>, int>, std::variant<int, double, DefCbor, tagged_object<tag<2>, NotCbor>>, std::optional<int>,
-                   std::optional<std::string>,
+                   tagged_object<static_tag<5>, int>, std::variant<int, double, DefCbor, tagged_object<static_tag<2>, NotCbor>>,
+                   std::optional<int>, std::optional<std::string>,
                    std::optional<std::variant<int, double, DefCbor, std::variant<std::string, std::vector<std::byte>>>>,
                    std::map<int, DefCbor>, std::unordered_map<DefCbor, int>) {
     static_assert(IsCborMajor<T>);
@@ -314,7 +314,7 @@ TEST_CASE_TEMPLATE("Test IsStrictVariant negative", T, std::variant<int, negativ
     static_assert(!IsStrictVariant<T>);
 }
 
-TEST_CASE_TEMPLATE("Not IsAggregate<T>", T, std::vector<int>, std::map<int, int>, std::tuple<int, int>, std::pair<tag<1>, int>,
+TEST_CASE_TEMPLATE("Not IsAggregate<T>", T, std::vector<int>, std::map<int, int>, std::tuple<int, int>, std::pair<static_tag<1>, int>,
                    std::optional<int>, float, double, std::string, std::string_view, std::byte, std::uint8_t, std::int8_t, std::uint64_t,
                    std::int64_t, std::nullptr_t) {
     static_assert(!IsAggregate<T>);
@@ -596,7 +596,7 @@ TEST_CASE("to_tupple address") {
 }
 
 // Example function that uses tags
-template <std::uint64_t N> constexpr void process_tag(tag<N>) { fmt::print("Processing tag value: 0x{:x} ({})\n", N, N); }
+template <std::uint64_t N> constexpr void process_tag(static_tag<N>) { fmt::print("Processing tag value: 0x{:x} ({})\n", N, N); }
 
 TEST_CASE("Literals") {
     using namespace cbor::tags::literals;
