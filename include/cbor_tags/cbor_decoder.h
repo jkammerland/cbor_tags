@@ -12,12 +12,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <fmt/base.h>
-#include <fmt/ranges.h>
+// #include <fmt/base.h>
+// #include <fmt/ranges.h>
 #include <iterator>
-#include <magic_enum/magic_enum.hpp>
+// #include <magic_enum/magic_enum.hpp>
 #include <map>
-#include <nameof.hpp>
+// #include <nameof.hpp>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -115,7 +115,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     }
 
     template <std::uint64_t N> constexpr void decode(static_tag<N>, major_type major, byte additionalInfo) {
-        fmt::print("decoding tag {}\n", N);
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tag");
         }
@@ -125,14 +124,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     }
 
     template <std::uint64_t N> constexpr void decode(static_tag<N> value) {
-        fmt::print("decoding tag {}\n", N);
         auto [major, additionalInfo] = read_initial_byte();
         decode(value, major, additionalInfo);
     }
 
     template <IsUnsigned T> constexpr void decode(dynamic_tag<T> &value, major_type major, byte additionalInfo) {
-        // auto [major, additionalInfo] = read_initial_byte();
-
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for dynamic tag");
         }
