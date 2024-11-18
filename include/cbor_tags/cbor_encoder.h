@@ -95,6 +95,9 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_major_and_size(N, static_cast<byte_type>(0xC0)); }
+    template <IsUnsigned T> constexpr void    encode(dynamic_tag<T> value) {
+        encode_major_and_size(value.value, static_cast<byte_type>(0xC0));
+    }
 
     template <IsString T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));

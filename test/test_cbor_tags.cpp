@@ -110,10 +110,9 @@ struct B {
     std::int64_t a;
     std::string  s;
 };
-struct C {
+struct inline_tag_example {
     static constexpr std::uint64_t cbor_tag = 140;
-    std::int64_t                   a;
-    std::string                    s;
+    B                              b;
 };
 
 TEST_CASE("Basic tag") {
@@ -129,9 +128,43 @@ TEST_CASE("Basic tag") {
     }
     {
         auto [data, enc] = make_data_and_encoder<std::vector<std::byte>>();
-        enc(C{-42, "Hello world!"});
+        enc(inline_tag_example{-42, "Hello world!"});
         s2 = to_hex(data);
     }
 
     CHECK_EQ(s1, s2);
+}
+
+struct STATIC_EX1 {
+    static_tag<140u>           cbor_tag;
+    std::optional<std::string> s;
+};
+
+struct DYNAMIC_EX1 {
+    dynamic_tag<uint64_t>      cbor_tag;
+    std::optional<std::string> s;
+};
+
+struct INLINE_EX1 {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::optional<std::string>     s;
+};
+
+TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
+    using namespace std::string_view_literals;
+
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    T t;
+    if constexpr (std::is_same_v<T, DYNAMIC_EX1>) {
+        t.cbor_tag.value = 140;
+    }
+    t.s = "Hello world!";
+
+    enc(t);
+
+    auto dec = make_decoder(data);
+    T    result;
+    dec(result);
 }
