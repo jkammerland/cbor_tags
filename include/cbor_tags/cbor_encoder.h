@@ -195,15 +195,4 @@ template <typename T> struct cbor_header_encoder : crtp_base<T> {
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
     return encoder<OutputBuffer, cbor_header_encoder>(buffer);
 }
-
-template <typename OutputBuffer = std::vector<std::byte>> inline auto make_data_and_encoder() {
-    struct data_and_encoder {
-        data_and_encoder() : data(), enc(data) {}
-        OutputBuffer                               data;
-        encoder<OutputBuffer, cbor_header_encoder> enc;
-    };
-
-    return data_and_encoder{};
-}
-
 } // namespace cbor::tags

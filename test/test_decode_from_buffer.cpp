@@ -19,41 +19,42 @@
 #include <variant>
 
 using namespace cbor::tags;
+using namespace std::string_view_literals;
 
-TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>) {
+using variant_type = std::variant<uint64_t, double, std::string>;
 
-    // using value_type = typename T::value_type;
+TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>, std::list<uint8_t>) {
 
-    // std::vector<value_type> encoded;
-    // encoded.push_back(value_type{0x01});
-    // encoded.push_back(value_type{0x02});
-    // encoded.push_back(value_type{0x03});
+    using value_type = typename T::value_type;
+    auto &&bytes     = to_bytes<value_type>("010203"sv);
+    T      data(bytes.begin(), bytes.end());
 
-    // T    data(encoded.begin(), encoded.end());
-    // auto dec = make_decoder<T>(data);
+    auto dec = make_decoder(data);
 
-    // for (const auto &value : encoded) {
-    //     auto result = dec.decode_value();
-    //     CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
-    //     CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
-    // }
+    for (const auto &value : bytes) {
+        variant_type result;
+        dec(result);
+        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+        CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
+    }
 }
 
 TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 5>, std::deque<char>) {
-    // T data;
-    // if constexpr (std::is_same_v<T, std::array<unsigned char, 5>>) {
-    //     data = {0x01, 0x02, 0x03, 0x04, 0x05};
-    // } else {
-    //     data = {'\x01', '\x02', '\x03', '\x04', '\x05'};
-    // }
+    T data;
+    if constexpr (std::is_same_v<T, std::array<unsigned char, 5>>) {
+        data = {0x01, 0x02, 0x03, 0x04, 0x05};
+    } else {
+        data = {'\x01', '\x02', '\x03', '\x04', '\x05'};
+    }
 
-    // auto dec = make_decoder(data);
+    auto dec = make_decoder(data);
 
-    // for (const auto &value : data) {
-    //     auto result = dec.decode_value();
-    //     CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
-    //     CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
-    // }
+    for (const auto &value : data) {
+        variant_type result;
+        dec(result);
+        CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
+        CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
+    }
 }
 
 TEST_CASE_TEMPLATE("Test decode dynamic tag 1", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
@@ -103,9 +104,9 @@ struct STATICTAGINLINE {
     std::string               b;
 };
 
-TEST_CASE_TEMPLATE("Test decode static tag 1 reverse", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+TEST_CASE_TEMPLATE("Test decode static tag 1 reverse", T, std::vector<uint8_t>, std::deque<char>, std::list<char>) {
     using namespace std::string_view_literals;
-    auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
+    auto bytes = to_bytes<typename T::value_type>("c16c48656c6c6f20776f726c6421"sv);
 
     auto dec = make_decoder(bytes);
 
@@ -119,10 +120,10 @@ TEST_CASE_TEMPLATE("Test decode static tag 1 reverse", T, std::vector<uint8_t>, 
     CHECK_EQ(s, "Hello world!");
 }
 
-TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<uint8_t>, std::deque<uint8_t>, std::list<uint8_t>) {
+TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<char>, std::deque<uint8_t>, std::list<std::byte>) {
     {
         using namespace std::string_view_literals;
-        auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
+        auto bytes = to_bytes<typename T::value_type>("c16c48656c6c6f20776f726c6421"sv);
 
         auto dec = make_decoder(bytes);
         struct A {

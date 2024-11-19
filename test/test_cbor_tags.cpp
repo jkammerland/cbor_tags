@@ -46,15 +46,17 @@ TEST_CASE("Basic tag") {
     using namespace literals;
     std::string s1, s2;
     {
-
-        auto [data, enc] = make_data_and_encoder<std::vector<std::byte>>();
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
 
         auto tag_B = make_tag_pair(140_tag, B{-42, "Hello world!"});
         enc(tag_B);
         s1 = to_hex(data);
     }
     {
-        auto [data, enc] = make_data_and_encoder<std::vector<std::byte>>();
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
         enc(inline_tag_example{-42, "Hello world!"});
         s2 = to_hex(data);
     }
