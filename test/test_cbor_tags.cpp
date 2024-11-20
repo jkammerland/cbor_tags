@@ -180,3 +180,52 @@ TEST_CASE("Variant") {
 
     CHECK_EQ(std::get<std::string>(d.v), std::get<std::string>(result.v));
 }
+
+TEST_CASE("Multi tag handling") {
+    {
+        using namespace literals;
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        enc(141_tag, D{{}, "Hello world!"});
+
+        fmt::print("data: {}\n", to_hex(data));
+
+        auto dec = make_decoder(data);
+        D    result;
+        dec(141_tag, result);
+
+        CHECK_EQ(std::get<std::string>(result.v), "Hello world!");
+    }
+
+    struct MultiObj {
+        static_tag<140> cbor_tag;
+
+        struct A {
+            static_tag<142> cbor_tag;
+            int             a;
+        } a;
+
+        struct B {
+            static_tag<141> cbor_tag;
+            int             b;
+        } b;
+    };
+
+    {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        enc(MultiObj{{}, {{}, 1}, {{}, 2}});
+
+        fmt::print("data: {}\n", to_hex(data));
+        REQUIRE_EQ(to_hex(data), "d88cd88e01d88d02");
+
+        auto     dec = make_decoder(data);
+        MultiObj result;
+        dec(result);
+
+        CHECK_EQ(result.a.a, 1);
+        CHECK_EQ(result.b.b, 2);
+    }
+}

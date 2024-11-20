@@ -1,4 +1,6 @@
 ```cpp
+// Note c++23
+
 #include <ranges>
 #include <span>
 #include <array>
