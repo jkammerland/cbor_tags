@@ -62,6 +62,13 @@ make -j
 ctest
 ```
 
+## Installation
+
+### Using CMake directly
+```cmake
+find_package(cbor_tags REQUIRED)
+target_link_libraries(your_target PRIVATE cbor_tags::cbor_tags)
+```
 
 ## Requirements
 

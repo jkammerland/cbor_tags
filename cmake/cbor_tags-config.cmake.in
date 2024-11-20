@@ -1,0 +1,4 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/cbor_tags-targets.cmake")
+check_required_components(cbor_tags)

@@ -1,0 +1,8 @@
+{
+    "name": "cbor-tags",
+    "version": "0.1.0",
+    "description": "RFC 8949 implementation with generic reflection",
+    "homepage": "https://github.com/jkammerland/cbor_tags",
+    "license": "MIT",
+    "dependencies": []
+}
