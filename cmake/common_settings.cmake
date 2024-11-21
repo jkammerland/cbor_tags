@@ -2,23 +2,6 @@ message(STATUS "Current cmake version: ${CMAKE_VERSION}")
 cmake_minimum_required(VERSION 3.29)
 # 3.29 required for CMAKE_LINKER_TYPE
 
-function(set_output_directories target)
-  set_target_properties(
-    ${target}
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/bin_debug"
-               LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/lib_debug"
-               ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/lib_debug"
-               RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/bin"
-               LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/lib"
-               ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/lib")
-endfunction()
-
-# Uninstall target setup in CMakeLists.txt remains the same, ensuring it references the unified cmake_uninstall.cmake script.
-if(NOT TARGET uninstall)
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake" "# Generated uninstall script\n")
-  add_custom_target(uninstall COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
-endif()
-
 if(CMAKE_GENERATOR)
   message(STATUS "Using generator [cmake ... -G ${CMAKE_GENERATOR} ...]")
 else() # Print active generator
@@ -92,4 +75,4 @@ else()
   message(STATUS "No linker set?")
 endif()
 
-include(cmake/print_compiler_and_flags.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)

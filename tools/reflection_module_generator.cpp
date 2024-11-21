@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     generate_header(buffer, N);
 
     out_file << std::string_view(buffer.data(), buffer.size());
-    fmt::print("Header file '{}' has been generated at {}.\n", filename, std::filesystem::current_path().string());
+    fmt::print("Generated reflection header containing to_tuple(...) at {}/{}.\n", std::filesystem::current_path().string(), filename);
 
     return 0;
 }

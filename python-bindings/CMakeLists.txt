@@ -5,7 +5,7 @@ project(python-bindings VERSION 0.1.0)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message(STATUS "CMAKE_POSITION_INDEPENDENT_CODE: ${CMAKE_POSITION_INDEPENDENT_CODE}")
 
-include(${CMAKE_SOURCE_DIR}/cmake/get_cpm.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/python_cache/cpm_cache)
 
 cpmaddpackage("gh:fmtlib/fmt#11.0.2")
