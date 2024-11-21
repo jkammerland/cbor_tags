@@ -12,23 +12,27 @@ target_include_directories(cbor_tags INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT
 include(cmake/installation_target.cmake)
 
 # add python bindings TODO: FIX FPIC FOR ONLY THIS SUBDIR
-option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
+option(BUILD_PYTHON_BINDINGS "Build Python bindings" OFF)
 if(BUILD_PYTHON_BINDINGS)
   add_subdirectory(python-bindings)
 endif()
 
 # add tools
-option(BUILD_TOOLS "Build tools" ON)
+option(BUILD_TOOLS "Build tools" OFF)
 if(BUILD_TOOLS)
   add_subdirectory(tools)
 endif()
 
 # add tests
-option(BUILD_TESTS "Build tests" ON)
+option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
   enable_testing()
   add_subdirectory(test)
 endif()
 
-include(cmake/create_tidy_target.cmake)
-create_tidy_target(${CMAKE_CURRENT_SOURCE_DIR}/test)
+option(TIDY_TARGET "Enable clang-tidy target" OFF)
+
+if(TIDY_TARGET)
+  include(cmake/create_tidy_target.cmake)
+  create_tidy_target(${CMAKE_CURRENT_SOURCE_DIR}/test)
+endif()
