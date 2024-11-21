@@ -171,13 +171,13 @@ struct NotCbor {};
 
 TEST_CASE_TEMPLATE("IsCborMajor Positive", T, std::uint8_t, int, double, std::string, std::vector<int>, std::map<int, int>,
                    tagged_object<static_tag<5>, int>, std::variant<int, double, DefCbor, tagged_object<static_tag<2>, NotCbor>>,
-                   std::optional<int>, std::optional<std::string>,
+                   std::optional<int>, std::optional<std::string>, std::optional<std::byte>,
                    std::optional<std::variant<int, double, DefCbor, std::variant<std::string, std::vector<std::byte>>>>,
                    std::map<int, DefCbor>, std::unordered_map<DefCbor, int>) {
     static_assert(IsCborMajor<T>);
 }
 
-TEST_CASE_TEMPLATE("IsCborMajor negative", T, std::byte, NotCbor, std::variant<int, NotCbor>, std::optional<NotCbor>,
+TEST_CASE_TEMPLATE("IsCborMajor negative", T, NotCbor, std::variant<int, NotCbor>, std::optional<NotCbor>,
                    std::optional<std::variant<int, NotCbor>>, std::tuple<int, NotCbor>, std::pair<int, NotCbor>, std::vector<NotCbor>,
                    std::map<NotCbor, int>, std::unordered_map<int, NotCbor>, std::tuple<std::uint64_t, int>) {
     static_assert(!IsCborMajor<T>);
