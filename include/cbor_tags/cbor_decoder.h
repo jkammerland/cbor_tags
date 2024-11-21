@@ -158,7 +158,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         const auto &tuple = to_tuple(value);
 
         if constexpr (HasInlineTag<T>) {
-            decode(static_tag<static_cast<uint64_t>(value.cbor_tag)>{});
+            decode(static_tag<T::cbor_tag>{});
         }
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
     }

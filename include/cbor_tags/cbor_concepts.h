@@ -71,6 +71,9 @@ template <typename T>
 concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
 
 template <typename T>
+concept IsEnum = std::is_enum_v<T>;
+
+template <typename T>
 concept IsTextString = requires(T t) {
     requires std::is_signed_v<typename T::value_type>;
     requires std::is_integral_v<typename T::value_type>;
@@ -257,6 +260,11 @@ struct CborStream {
 template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
+namespace {
+template <class T> static constexpr bool is_optional_v                   = false;
+template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
+} // namespace
+
 struct any {
     template <class T> constexpr operator T() const {
         if constexpr (is_optional_v<T>) {
@@ -265,10 +273,6 @@ struct any {
             return T{};
         }
     }
-
-  private:
-    template <class T> static constexpr bool is_optional_v                   = false;
-    template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
 };
 
 template <std::uint64_t N> struct static_tag {
