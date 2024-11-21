@@ -29,8 +29,6 @@
 
 namespace cbor::tags {
 
-template <typename T> struct cbor_header_decoder;
-
 template <typename InputBuffer = std::span<const std::byte>, template <typename> typename... Decoders>
     requires ValidCborBuffer<InputBuffer>
 struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
@@ -158,7 +156,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         const auto &tuple = to_tuple(value);
 
         if constexpr (HasInlineTag<T>) {
-            decode(static_tag<static_cast<uint64_t>(value.cbor_tag)>{});
+            decode(static_tag<T::cbor_tag>{});
         }
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
     }
@@ -393,10 +391,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     detail::reader<InputBuffer> reader_;
 };
 
-template <typename T> struct cbor_header_decoder : crtp_base<T> {
-
+template <typename T> struct cbor_header_decoder {
     constexpr auto get_and_validate_header(major_type expectedMajorType) {
-        auto [initialByte, additionalInfo] = this->underlying().read_initial_byte();
+        auto [initialByte, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
         if (initialByte != expectedMajorType) {
             throw std::runtime_error("Invalid major type");
         }
@@ -405,7 +402,7 @@ template <typename T> struct cbor_header_decoder : crtp_base<T> {
 
     constexpr auto validate_size(major_type expectedMajor, std::uint64_t expectedSize) {
         auto additionalInfo = get_and_validate_header(expectedMajor);
-        auto size           = this->underlying().decode_unsigned(additionalInfo);
+        auto size           = detail::underlying<T>(this).decode_unsigned(additionalInfo);
         if (size != expectedSize) {
             throw std::runtime_error("Invalid container size");
         }
@@ -415,6 +412,35 @@ template <typename T> struct cbor_header_decoder : crtp_base<T> {
     constexpr void decode(as_map value) { validate_size(major_type::Map, value.size_); }
 };
 
-template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) { return decoder<InputBuffer, cbor_header_decoder>(buffer); }
+template <typename T> struct enum_decoder {
+
+    template <IsEnum U> constexpr void decode(U &value, major_type major, std::byte additionalInfo) {
+        using underlying_type = std::underlying_type_t<U>;
+        if constexpr (IsSigned<underlying_type>) {
+            if (major > major_type::NegativeInteger) {
+                throw std::runtime_error("Invalid major type for enum");
+            }
+        } else if constexpr (IsUnsigned<underlying_type>) {
+            if (major != major_type::UnsignedInteger) {
+                throw std::runtime_error("Invalid major type for enum");
+            }
+        } else {
+            throw std::runtime_error("Invalid enum type");
+        }
+
+        underlying_type result;
+        detail::underlying<T>(this).decode(result, major, additionalInfo);
+        value = static_cast<U>(result);
+    }
+
+    template <IsEnum U> constexpr void decode(U &value) {
+        auto [major, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
+        decode(value, major, additionalInfo);
+    }
+};
+
+template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
+    return decoder<InputBuffer, cbor_header_decoder, enum_decoder>(buffer);
+}
 
 } // namespace cbor::tags

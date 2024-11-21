@@ -185,25 +185,22 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     OutputBuffer                  &data_;
 };
 
-template <typename T> struct cbor_header_encoder : crtp_base<T> {
-    constexpr void encode(as_array value) {
-        this->underlying().encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
+template <typename T> struct enum_encoder {
+    template <IsEnum U> constexpr void encode(U value) {
+        detail::underlying<T>(this).encode(static_cast<std::underlying_type_t<U>>(value));
     }
-    constexpr void encode(as_map value) { this->underlying().encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0xA0)); }
+};
+
+template <typename T> struct cbor_header_encoder {
+    constexpr void encode(as_array value) {
+        detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
+    }
+    constexpr void encode(as_map value) {
+        detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0xA0));
+    }
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, cbor_header_encoder>(buffer);
+    return encoder<OutputBuffer, cbor_header_encoder, enum_encoder>(buffer);
 }
-
-template <typename OutputBuffer = std::vector<std::byte>> inline auto make_data_and_encoder() {
-    struct data_and_encoder {
-        data_and_encoder() : data(), enc(data) {}
-        OutputBuffer                               data;
-        encoder<OutputBuffer, cbor_header_encoder> enc;
-    };
-
-    return data_and_encoder{};
-}
-
 } // namespace cbor::tags

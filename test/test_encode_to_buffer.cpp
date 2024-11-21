@@ -20,7 +20,9 @@
 using namespace cbor::tags;
 
 TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::byte>, std::array<std::byte, 1024>) {
-    auto [data, enc] = make_data_and_encoder<T>();
+    auto data = T{};
+    auto enc  = make_encoder(data);
+
     enc.encode(static_cast<std::uint64_t>(1));
     enc.encode(static_cast<std::uint64_t>(2));
     enc.encode(static_cast<std::uint64_t>(3));
@@ -33,7 +35,8 @@ TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::by
 }
 
 TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>, std::array<std::byte, 1024>) {
-    auto [data, enc] = make_data_and_encoder<T>();
+    auto data = T{};
+    auto enc  = make_encoder(data);
 
     using namespace std::string_view_literals;
     auto sv = "Hello world!"sv;

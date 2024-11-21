@@ -71,6 +71,9 @@ template <typename T>
 concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
 
 template <typename T>
+concept IsEnum = std::is_enum_v<T>;
+
+template <typename T>
 concept IsTextString = requires(T t) {
     requires std::is_signed_v<typename T::value_type>;
     requires std::is_integral_v<typename T::value_type>;
@@ -229,7 +232,7 @@ template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
 template <typename T>
 concept IsCborMajor = IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
                       (IsArray<T> && ContainsCborMajor<T>::value) || (IsMap<T> && ContainsCborMajor<T>::value) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajor<T>::value) || (IsOptional<T> && ContainsCborMajor<T>::value);
+                      (IsVariant<T> && AllTypesAreCborMajor<T>::value) || (IsOptional<T> && ContainsCborMajor<T>::value) || IsEnum<T>;
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);
@@ -257,6 +260,11 @@ struct CborStream {
 template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
+namespace {
+template <class T> static constexpr bool is_optional_v                   = false;
+template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
+} // namespace
+
 struct any {
     template <class T> constexpr operator T() const {
         if constexpr (is_optional_v<T>) {
@@ -265,10 +273,6 @@ struct any {
             return T{};
         }
     }
-
-  private:
-    template <class T> static constexpr bool is_optional_v                   = false;
-    template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
 };
 
 template <std::uint64_t N> struct static_tag {
@@ -364,4 +368,5 @@ template <char... Chars> constexpr auto operator"" _tag() { return static_tag<de
 template <char... Chars> constexpr auto operator"" _hex_tag() { return static_tag<detail::parse_hex<Chars...>()>{}; }
 
 } // namespace literals
+
 } // namespace cbor::tags

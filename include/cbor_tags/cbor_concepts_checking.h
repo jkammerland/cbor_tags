@@ -2,6 +2,11 @@
 
 #include "cbor_tags/cbor_concepts.h"
 
+// #include <fmt/core.h>
+// #include <magic_enum/magic_enum.hpp>
+// #include <nameof.hpp>
+#include <type_traits>
+
 namespace cbor::tags {
 
 // Major Type  | Meaning           | Content
@@ -40,8 +45,15 @@ template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteTy
     // Helper to check if a type matches the major type
     constexpr auto matches_major = []<typename U>(ByteType m) {
         using Type = unwrap_type_t<U>;
+
+        // fmt::print("Type: {}, major: {}\n", nameof::nameof_short_type<Type>(), static_cast<int>(m));
+
         // Special case for signed types which can be either positive or negative
-        if constexpr (IsSigned<Type>) {
+        if constexpr (IsEnum<U>) {
+            using enum_type = std::underlying_type_t<Type>;
+            return is_valid_major<ByteType, enum_type>(m);
+
+        } else if constexpr (IsSigned<Type>) {
             return m <= static_cast<ByteType>(major_type::NegativeInteger);
         } else {
             return m == ConceptType<ByteType, Type>::value;
