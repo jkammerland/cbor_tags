@@ -10,6 +10,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 // #include <fmt/base.h>
