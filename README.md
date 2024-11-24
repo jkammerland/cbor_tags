@@ -1,105 +1,147 @@
-# C++20 CBOR Library (WIP)
+# 🚀 Modern C++20 CBOR Library with Static Reflection
 
-## Index
+This library is designed with modern C++20 features, providing a type-safe, compile-time validated CBOR implementation with special focus on tagged types and static reflection capabilities.
 
-1. [Introduction](#intruction)
-4. [Features](#features)
-5. [Build and Run Tests](#build-and-run-tests)
-6. [Requirements](#requirements)
-7. [Usage](#usage)
-8. [License](#license)
+## 🎯 Key Features
 
-## Introduction
+> [!TIP]
+> - Static visitor pattern for composable encoders/decoders
+> - CRTP-based design for zero-overhead abstractions
+> - Static reflection via `to_tuple(...)` helper
+> - Flexible tag handling for struct and tuples (static, dynamic, and inline)
+> - STL container support (including optional and variants)
+> - Header-only library
 
-This library provides a C++ implementation for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format whose design goals include the possibility of smaller encoded size and extensibility without the need for version negotiation. 
+## 🔧 Quick Start
 
-There are many types of cbor objects defined, but the major types are:
+```cpp
+// Define a simple tagged structure
+struct UserProfile {
+    static constexpr std::uint64_t cbor_tag = 140; // Inline tag
+    std::string name;
+    int64_t age;
+};
 
-| Major Type | Meaning                 | Content               |
-|------------|-------------------------|-----------------------|
-| 0          | unsigned integer N      | -                     |
-| 1          | negative integer -1-N   | -                     |
-| 2          | byte string N bytes     | -                     |
-| 3          | text string N bytes     | UTF-8 text            |
-| 4          | array N data items      | elements              |
-| 5          | map 2N data items       | key/value pairs       |
-| 6          | tag of number N         | 1 data item           |
-| 7          | simple/float            | -                     |
+// Encoding
+auto data = std::vector<std::byte>{};
+auto enc = make_encoder(data);
+enc(UserProfile{"John Doe", 30});
 
+// Decoding
+auto dec = make_decoder(data);
+UserProfile result;
+dec(result);
+```
 
-The name cbor_tags refer to the focus on handling tagged types(6) in a user friendly way. 
+## 🎨 Advanced Usage: Tag Handling
 
-"A tagged data item ("tag") whose tag number, an integer in the range 0..264-1 inclusive, is the argument and whose enclosed data item (tag content) is the single encoded data item that follows the head. See [RFC8949#tags](https://www.rfc-editor.org/rfc/rfc8949.html#tags)"
+> [!NOTE]
+> The library supports three different ways to handle CBOR tags:
 
-**This means that if you want to make an object for public use, you can define the exact serialization of that object and tag it.**
+### 1. Static Tags
+```cpp
+struct StaticTagged {
+    static_tag<140> cbor_tag;
+    std::optional<std::string> data;
+};
+```
 
-Please see the public online database of [tags](https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml), where the tags are grouped as follows:
+### 2. Dynamic Tags
+```cpp
+struct DynamicTagged {
+    dynamic_tag<uint64_t> cbor_tag;
+    std::optional<std::string> data;
+};
+```
 
-| Tag Range                   | How to Register         |
-|-----------------------------|-------------------------|
-| 0-23                        | Standards Action        |
-| 24-32767                    | Specification Required  |
-| 32768-18446744073709551615  | First Come First Served |
+### 3. Inline Tags
+```cpp
+struct InlineTagged {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::optional<std::string> data;
+};
+```
 
-## Features
+> [!IMPORTANT]
+> As per the extended model, when tagging a struct, you implicitly define a object with it's own CDDL (RFC...).
+> This likely has to be handled manually by decoders that doesn't have the header definition and this library at hand.
+> Instead one can wrap the struct in an array(wrap_as_array{}), so the tag can be handled in a generic way by all decoders.
 
-- Supports encoding and decoding of various CBOR data types according to [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (WIP)
-- Handles tagged types, lets the user choose how to decode any type without making any copies first
-- Supports serialization and deserialization of general CBOR data (WIP)
-- Provides partial parsing API, for improved flexibility
-- Implements optional full encoding/decoding into standard containers like vector, map, unordered_map and variants (WIP)
+## 🔄 Static Reflection
 
-## Build and run tests
+> [!NOTE]
+> Until C++26 introduces native reflection, this library provides a powerful alternative using `to_tuple(...)`:
 
-This will build and run the tests. Currently the tests use doctest, nameof, fmt and zpp_bits. The dependencies are downloaded with cpm cmake and 
+```cpp
+struct ComplexType {
+    static_tag<140> cbor_tag;
+    int a;
+    std::string b;
+    std::vector<double> c;
+};
+
+// Automatic serialization/deserialization
+auto data = std::vector<std::byte>{};
+auto enc = make_encoder(data);
+enc(ComplexType{{}, 42, "Hello", {1.0, 2.0}});
+```
+
+## 🛠️ Requirements
+
+- C++20 compatible compiler (gcc 12+)
+- CMake 3.20+
+
+## 📦 Installation
+
+Standard cmake:
+
+```cmake
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+
+FetchContent_Declare(
+  cbor_tags
+  GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
+  GIT_TAG v0.1.0 # or specify a particular commit/tag
+)
+
+FetchContent_MakeAvailable(cbor_tags)
+
+add_executable(my_target main.cpp)
+target_link_libraries(my_target PRIVATE cbor_tags)
+```
+
+System-wide install:
 
 ```bash
-git clone ...
+git clone https://github.com/yourusername/cbor_tags
 cd cbor_tags
 mkdir build && cd build
 cmake ..
-make -j
-ctest
+make install
 ```
 
-## Installation
+## 💡 CMake Integration
 
-### Using CMake directly
 ```cmake
 find_package(cbor_tags REQUIRED)
 target_link_libraries(your_target PRIVATE cbor_tags::cbor_tags)
 ```
 
-## Requirements
+> [!WARNING]
+> This library requires C++20 features. Ensure your compiler supports them before use.
 
-- C++20 compatible compiler
-- Standard C++ library
-- exceptions (for now)
+## 📚 Documentation
 
-## Usage
-basic:
+For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
 
+## 📄 License
 
-```cpp
-// TODO
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-cbor integers in array type of size 1000:
-```cpp
-// TODO
-```
+---
 
-## Important notes about interpretation of RFC8949
-
-This is a low level parser, that only verify that the data is well-formed, not the data's validity. The validity of well-formed cbor can/should be handled by the application layer, i.e the consumer of this library. This also makes it more flexible. See [RFC8949#validity-of-items](https://datatracker.ietf.org/doc/html/rfc8949#name-validity-of-items)
-
- 5.3. Validity of Items
-
-```
-A well-formed but invalid CBOR data item (Section 1.2) presents a problem with interpreting the data encoded in it in the CBOR data model. A CBOR-based protocol could be specified in several layers, in which the lower layers don't process the semantics of some of the CBOR data they forward. These layers can't notice any validity errors in data they don't process and MUST forward that data as-is. The first layer that does process the semantics of an invalid CBOR item MUST pick one of two choices:
-Replace the problematic item with an error marker and continue with the next item, or
-Issue an error and stop processing altogether. A CBOR-based protocol MUST specify which of these options its decoders take for each kind of invalid item they might encounter.Such problems might occur at the basic validity level of CBOR or in the context of tags (tag validity).
-```
-
-## License
-[MIT]
+> [!TIP]
+> For best performance, compile with optimization flags enabled (`-O3` for GCC/Clang).

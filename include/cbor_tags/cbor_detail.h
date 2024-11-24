@@ -109,7 +109,7 @@ constexpr std::size_t num_bindings_impl() {
     }
 }
 
-template <IsTuple T> constexpr std::size_t num_bindings_impl() { return std::tuple_size_v<T>; }
+// template <IsTuple T> constexpr std::size_t num_bindings_impl() { return std::tuple_size_v<T>; }
 
 template <typename T>
     requires IsAggregate<T> || IsTuple<T>

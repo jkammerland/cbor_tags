@@ -5,7 +5,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common_settings.cmake)
+option(USE_DEV_SETTINGS "Use dev settings" OFF)
+if(USE_DEV_SETTINGS)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ccache.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_mold_linker.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common_settings.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
+endif()
 
 # add tools - reflection module generator primarily
 option(BUILD_TOOLS "Build tools" ON)
@@ -21,6 +27,11 @@ endif()
 # THE LIBRARY
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+# Define public dependencies (if any)
+set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
+# If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
+
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 
 # Make ${PROJECT_NAME} depend on the generated header
@@ -33,7 +44,7 @@ if(BUILD_PYTHON_BINDINGS)
 endif()
 
 # add tests
-option(BUILD_TESTS "Build tests" ON)
+option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
   enable_testing()
   add_subdirectory(test)

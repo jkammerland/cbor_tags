@@ -1,6 +1,5 @@
 message(STATUS "Current cmake version: ${CMAKE_VERSION}")
-cmake_minimum_required(VERSION 3.29)
-# 3.29 required for CMAKE_LINKER_TYPE
+cmake_minimum_required(VERSION 3.22)
 
 if(CMAKE_GENERATOR)
   message(STATUS "Using generator [cmake ... -G ${CMAKE_GENERATOR} ...]")
@@ -8,49 +7,17 @@ else() # Print active generator
   message(STATUS "No generator set?")
 endif()
 
-option(USE_MODULES "Enable C++20 modules" OFF)
-if(USE_MODULES MATCHES ON AND CMAKE_GENERATOR MATCHES "Ninja")
-  message(STATUS "Enabling C++20 modules")
-  set(CMAKE_CXX_SCAN_FOR_MODULES ON)
-  set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD ON)
-  if(CMAKE_CXX_COMPILER_IMPORT_STD)
-    message(STATUS "List CMAKE_CXX_COMPILER_IMPORT_STD contains modules:")
-    foreach(item ${CMAKE_CXX_COMPILER_IMPORT_STD})
-      message(STATUS "-->${item}")
-    endforeach()
-  else()
-    message(STATUS "No modules found in CMAKE_CXX_COMPILER_IMPORT_STD")
-  endif()
-else()
-  message(STATUS "Disabling C++20 modules, set USE_MODULES=ON and use Ninja generator with Clang or GCC")
-  set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
-endif()
-
-find_program(CCACHE_FOUND ccache)
-if(CCACHE_FOUND)
-  message(STATUS "ccache found, using it")
-  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache) # Less useful to do it for linking, see edit2
-else()
-  message(STATUS "ccache not found - no compiler cache used")
-endif(CCACHE_FOUND)
-
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
 # Shared flags for all compilers
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG -fconcepts-diagnostics-depth=3") # -fconcepts-diagnostics-depth=2 will not work with tidy
-  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG -fconcepts-diagnostics-depth=2") # -fconcepts-diagnostics-depth=2 will not work with tidy
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG")
+  endif()
 
-  # Check if mold is available on system
-  find_program(MOLD_FOUND mold)
-  if(MOLD_FOUND)
-    message(STATUS "mold found, using it")
-    # set(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=mold") set(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=mold") set(CMAKE_MODULE_LINKER_FLAGS "-fuse-ld=mold")
-    set(CMAKE_LINKER_TYPE "MOLD") # Replacement for the above, used for each add_executable and add_library
-  else()
-    message(STATUS "mold not found - using default linker")
-  endif(MOLD_FOUND)
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 elseif(MSVC)
   message(STATUS "MSVC detected, adding compile flags")
@@ -67,12 +34,3 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics")
   message(STATUS "Clang detected")
 endif()
-
-# Check active linker
-if(CMAKE_LINKER_TYPE)
-  message(STATUS "Using linker [${CMAKE_LINKER_TYPE}]")
-else()
-  message(STATUS "No linker set?")
-endif()
-
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
