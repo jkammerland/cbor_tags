@@ -11,11 +11,15 @@ add_executable(reflection_module_generator reflection_module_generator.cpp)
 target_link_libraries(reflection_module_generator PRIVATE fmt::fmt)
 
 # Set specific compile options for reflection_module_generator
-target_compile_options(reflection_module_generator PRIVATE -O2 -g0)
+if(MSVC)
+  target_compile_options(reflection_module_generator PRIVATE /O2)
+else()
+  target_compile_options(reflection_module_generator PRIVATE -O2 -g0)
+endif()
 
 # Define ranges as a space-separated string
 set(REFLECTION_RANGES
-    "1:100 256:256" # Default ranges, space-separated
+    "1:100" # Default ranges, space-separated
     CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2)")
 
 # Print ranges for debugging
