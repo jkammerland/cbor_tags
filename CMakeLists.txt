@@ -5,7 +5,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common_settings.cmake)
+option(USE_DEV_SETTINGS "Use dev settings" OFF)
+if(USE_DEV_SETTINGS)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ccache.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_mold_linker.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common_settings.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
+endif()
 
 # add tools - reflection module generator primarily
 option(BUILD_TOOLS "Build tools" ON)
@@ -44,5 +50,3 @@ if(TIDY_TARGET)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/create_tidy_target.cmake)
   create_tidy_target(${CMAKE_CURRENT_SOURCE_DIR}/test)
 endif()
-
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
