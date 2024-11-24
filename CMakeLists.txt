@@ -27,6 +27,11 @@ endif()
 # THE LIBRARY
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+# Define public dependencies (if any)
+set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
+# If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
+
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 
 # Make ${PROJECT_NAME} depend on the generated header
