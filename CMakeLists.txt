@@ -48,6 +48,7 @@ option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
   enable_testing()
   add_subdirectory(test)
+  # add_subdirectory(doc/test_readme)
 endif()
 
 option(TIDY_TARGET "Enable clang-tidy target" OFF)

@@ -22,9 +22,6 @@ set(REFLECTION_RANGES
     "1:100" # Default ranges, space-separated
     CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2)")
 
-# Print ranges for debugging
-message(STATUS "Reflection ranges: ${REFLECTION_RANGES}")
-
 set(RANGES_CACHE_FILE "${CMAKE_BINARY_DIR}/reflection_ranges.txt")
 set(OUTPUT_HEADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../include/cbor_tags/cbor_reflection_impl.h")
 
@@ -37,11 +34,13 @@ if(EXISTS "${RANGES_CACHE_FILE}")
   if(NOT "${CACHED_RANGES}" STREQUAL "${REFLECTION_RANGES}")
     file(REMOVE ${OUTPUT_HEADER_FILE})
     file(WRITE "${RANGES_CACHE_FILE}" "${REFLECTION_RANGES}")
+    message(STATUS "Reflection ranges changed [${CACHED_RANGES}] -> [${REFLECTION_RANGES}]")
   else()
-    message(STATUS "Reflection ranges unchanged")
+    message(STATUS "Reflection ranges unchanged [${REFLECTION_RANGES}]")
   endif()
 else()
   file(WRITE "${RANGES_CACHE_FILE}" "${REFLECTION_RANGES}")
+  message(STATUS "Reflection ranges set [${REFLECTION_RANGES}]")
 endif()
 
 # Generate the header
