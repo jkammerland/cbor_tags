@@ -2,7 +2,7 @@
 
 ## Index
 
-1. [Introduction](#intruction)
+1. [CBOR Introduction](#intruction)
 4. [Features](#features)
 5. [Build and Run Tests](#build-and-run-tests)
 6. [Requirements](#requirements)

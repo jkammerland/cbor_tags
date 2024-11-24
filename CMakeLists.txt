@@ -33,7 +33,7 @@ if(BUILD_PYTHON_BINDINGS)
 endif()
 
 # add tests
-option(BUILD_TESTS "Build tests" ON)
+option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
   enable_testing()
   add_subdirectory(test)
@@ -44,3 +44,5 @@ if(TIDY_TARGET)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/create_tidy_target.cmake)
   create_tidy_target(${CMAKE_CURRENT_SOURCE_DIR}/test)
 endif()
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
