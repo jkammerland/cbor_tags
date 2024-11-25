@@ -5,6 +5,8 @@
 #include <fmt/ranges.h>
 #include <pybind11/pybind11.h>
 
+namespace py = pybind11;
+
 template <typename T> inline std::string to_hex(const T &bytes) {
     std::string hex;
     hex.reserve(bytes.size() * 2);
@@ -27,7 +29,8 @@ void processA(const A &input) {
 // Function that takes struct B as input
 void processB(const B &input) { fmt::print("processB: b={}\n", input.b); }
 
-namespace py = pybind11;
+void register_A(py::module &m) {}
+
 PYBIND11_MODULE(pybinding1, m) {
     // Expose struct A
     py::class_<A>(m, "A")

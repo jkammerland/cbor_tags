@@ -1,4 +1,4 @@
-# Modern C++20 CBOR Library with Automatic Reflection
+# A C++20 CBOR Library with Automatic Reflection
 
 This library is designed with modern C++20 features, providing a simple but flexible API, with full control over memory and protocol customization. 
 
@@ -8,14 +8,12 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 
 ## 🎯 Key Features
 
-- Modern C++20 design using concepts and static visitor pattern for Encoder/Decoder
-- Extensible architecture with CRTP-based customization
 - Support for both contiguous and non-contiguous buffers
-- Zero-copy encoding by joining multiple buffers
-- Zero-copy decoding using views and spans
-- Flexible tag handling for structs and tuples
+- Support Zero-copy encoding by joining multiple buffers
+- Support Zero-copy decoding using views and spans
+- Flexible tag handling for structs and tuples, non-invasive
 - Support for arbitrary containers (concept-based)
-- Header-only library for easy integration
+- Header-only library, modules TODO:
 
 ## 🔧 Quick Start
 
@@ -72,10 +70,10 @@ struct InlineTagged {
 > This likely has to be handled manually by decoders that don't have the header definition and this library at hand.
 > Instead one can wrap the struct in an array using `wrap_as_array{}`, so the tag can be handled in a generic way by all decoders.
 
-## 🔄 Static Reflection
+## 🔄 Automatic Reflection
 
 > [!NOTE]
-> Until C++26 introduces native reflection, this library provides a powerful alternative using `to_tuple(...)`:
+> Until C++26 introduces native reflection, this library provides an alternative compiler trick using `to_tuple(...)`:
 
 ```cpp
 // to_tuple example here
