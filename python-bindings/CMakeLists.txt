@@ -51,16 +51,23 @@ llvm_map_components_to_libnames(llvm_libs SUPPORT frontenddriver core irreader a
 # Add executable
 add_executable(binding_generator binding_generator.cpp)
 
-target_include_directories(binding_generator PRIVATE ${LLVM_INCLUDE_DIRS})
+# Glob all libs in /usr/local/lib *.a and *.so
+file(GLOB LIBS /usr/local/lib/*.a /usr/local/lib/*.so)
 
-target_link_directories(binding_generator PRIVATE "$ENV{VCPKG_ROOT}/installed/x64-linux/lib")
-
-message(STATUS "LLVM LIBS: ${llvm_libs}")
-
-file(GLOB CLANG_LIBS "$ENV{VCPKG_ROOT}/installed/x64-linux/lib/lib*.a" "$ENV{VCPKG_ROOT}/installed/x64-linux/lib/lib*.so")
+set(CLANG_LIBS
+    clangTooling
+    clangFrontend
+    clangASTMatchers
+    clang-cpp
+    clangBasic
+    clangAST
+    clangSerialization)
 
 # Link LLVM and Clang libraries
-target_link_libraries(binding_generator PRIVATE fmt::fmt nameof::nameof magic_enum::magic_enum ${CLANG_LIBS})
+target_link_libraries(binding_generator PRIVATE fmt::fmt tinfo ${LIBS})
+
+# Copy struct_example.h to binary directory
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/struct_example.h ${CMAKE_CURRENT_BINARY_DIR}/struct_example.h COPYONLY)
 
 # Other shared lib
 
