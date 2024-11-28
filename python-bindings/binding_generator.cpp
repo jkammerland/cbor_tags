@@ -33,19 +33,19 @@ class StructVisitor : public clang::RecursiveASTVisitor<StructVisitor> {
         // Check if it is a user-defined struct in the 'test' namespace
         if (declaration->isStruct() && !declaration->isImplicit()) {
             const clang::DeclContext *declContext = declaration->getDeclContext();
-            if (const auto *namespaceDecl = llvm::dyn_cast<clang::NamespaceDecl>(declContext)) {
-                if (namespaceDecl->getName() == "test") { // Only process structs in the 'test' namespace
-                    llvm::outs() << "Struct: " << declaration->getName() << "\n";
-                    StructInfo info;
-                    info.name = declaration->getNameAsString();
-                    for (const auto *field : declaration->fields()) {
-                        std::string type = field->getType().getAsString();
-                        std::string name = field->getNameAsString();
-                        info.members.emplace_back(type, name);
-                    }
-                    structs_.push_back(info);
-                }
+            // if (const auto *namespaceDecl = llvm::dyn_cast<clang::NamespaceDecl>(declContext)) {
+            // if (namespaceDecl->getName() == "test") { // Only process structs in the 'test' namespace
+            llvm::outs() << "Struct: " << declaration->getName() << "\n";
+            StructInfo info;
+            info.name = declaration->getNameAsString();
+            for (const auto *field : declaration->fields()) {
+                std::string type = field->getType().getAsString();
+                std::string name = field->getNameAsString();
+                info.members.emplace_back(type, name);
             }
+            structs_.push_back(info);
+            // }
+            // }
         }
         return true;
     }
@@ -203,6 +203,14 @@ int main(int argc, const char **argv) {
     for (const auto &structInfo : structs) {
         llvm::outs() << "Struct: " << structInfo.name << "\n";
         for (const auto &[type, name] : structInfo.members) {
+            llvm::outs() << "    " << type << " " << name << "\n";
+        }
+    }
+
+    for (const auto &funcInfo : functions) {
+        llvm::outs() << "Function: " << funcInfo.name << "\n";
+        llvm::outs() << "    Return type: " << funcInfo.returnType << "\n";
+        for (const auto &[type, name] : funcInfo.parameters) {
             llvm::outs() << "    " << type << " " << name << "\n";
         }
     }
