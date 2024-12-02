@@ -51,6 +51,8 @@ llvm_map_components_to_libnames(llvm_libs SUPPORT frontenddriver core irreader a
 # Add executable
 add_executable(binding_generator binding_generator.cpp)
 
+target_include_directories(binding_generator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # Glob all libs in /usr/local/lib *.a and *.so
 file(GLOB LIBS /usr/local/lib/*.a /usr/local/lib/*.so)
 
