@@ -1,3 +1,90 @@
+# Working example python output
+
+Hello from Python!
+alpha0.0000000.0000003Hello from C++!
+zeta.A = 1
+a.z = zeta.B
+a.z as int = 2
+
+zeta values:
+A = 1
+B = 2
+C = 3
+
+beta.A = -1
+beta.B = 0
+beta.C = 1
+
+```py
+import pybinding2
+
+def main():
+    print("Hello from Python!")
+    a = pybinding2.alpha()
+    a.b = "Hello from C++!"
+    output = a.print(2)
+    print(output)
+    
+    # Using the nested enum zeta
+    z = pybinding2.zeta.A
+    print(f"zeta.A = {int(z)}")
+    
+    a.z = pybinding2.zeta.B
+    print(f"a.z = {a.z}")
+    print(f"a.z as int = {int(a.z)}")
+    
+    # Print individual enum values
+    print("\nzeta values:")
+    print(f"A = {int(pybinding2.zeta.A)}")
+    print(f"B = {int(pybinding2.zeta.B)}")
+    print(f"C = {int(pybinding2.zeta.C)}")
+    
+    # Regular enum beta
+    b = pybinding2.beta.A
+    print(f"\nbeta.A = {int(b)}")
+    
+    b = pybinding2.beta.B
+    print(f"beta.B = {int(b)}")
+    
+    b = pybinding2.beta.C
+    print(f"beta.C = {int(b)}")
+
+if __name__ == "__main__":
+    main()
+```
+
+```cpp
+#include <complex>
+#include <cstdint>
+#include <string>
+
+namespace n1 {
+
+namespace n2::n3 {
+
+struct alpha {
+    std::complex<double> a;
+    std::string          b;
+
+    std::string print(int imag) const {
+        auto f = [](int x) { return x + 1; };
+        return "alpha" + std::to_string(a.real()) + std::to_string(a.imag()) + std::to_string(f(imag)) + b;
+    }
+
+    enum class zeta : std::uint16_t { A = 1, B, C };
+
+    zeta z;
+};
+
+} // namespace n2::n3
+
+enum class beta : int { A = -1, B, C };
+
+}; // namespace n1
+
+```
+
+
 # Input example
 ```cpp
 #include <complex>

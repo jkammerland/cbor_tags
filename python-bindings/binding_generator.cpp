@@ -1,4 +1,6 @@
 #include "ast_actions.hpp"
+#include "include_tracker.hpp"
+#include "visitor.hpp"
 
 #include <fmt/format.h>
 #include <format>
@@ -12,40 +14,81 @@
 
 using namespace std::string_literals;
 
-void generateBindings(const std::vector<StructInfo> &structs, const std::vector<FunctionInfo> &functions, const std::string &moduleName) {
-    // THIS CODE IS OLD
-    /*
+void generateBindings(const Structs &structs, const Functions &functions, const Headers &headers, const std::string &moduleName) {
     std::ofstream out(moduleName + "_bindings.cpp");
 
     // Write headers
     out << "#include <pybind11/pybind11.h>\n"
-        << "#include <pybind11/stl.h>\n"
-        << "namespace py = pybind11;\n\n";
+        << "#include <pybind11/stl.h>\n\n";
 
-    // Include headers for structs and functions
-    for (const auto &structInfo : structs) {
-        out << fmt::format("#include \"{}.h\"\n", structInfo.name);
+    // Include all headers
+    for (const auto &header : headers) {
+        if (!header.isSystem) {
+            out << fmt::format("#include \"{}\"\n", header.name);
+        }
+    }
+    for (const auto &header : headers) {
+        if (header.isSystem) {
+            out << fmt::format("#include <{}>\n", header.name);
+        }
     }
 
-    out << "\nPYBIND11_MODULE(" << moduleName << ", m) {\n";
+    out << "\nnamespace py = pybind11;\n\n";
+    out << "PYBIND11_MODULE(" << moduleName << ", m) {\n";
 
-    // Generate struct bindings
+    // Helper function to get fully qualified name
+    auto getFullName = [](const StructInfo &s) { return s.name.qualified.empty() ? s.name.plain : s.name.qualified; };
+
+    // First, declare all enums and classes
     for (const auto &structInfo : structs) {
-        out << fmt::format("    py::class_<{0}>(m, \"{0}\")\n", structInfo.name) << "        .def(py::init<>())\n";
-
-        for (const auto &[type, name] : structInfo.members) {
-            out << fmt::format("        .def_readwrite(\"{0}\", &{1}::{0})\n", name, structInfo.name);
+        if (structInfo.isEnum) {
+            out << fmt::format("    py::enum_<{0}>(m, \"{1}\", py::arithmetic())\n", getFullName(structInfo), structInfo.name.plain);
+            for (const auto &member : structInfo.members) {
+                out << fmt::format("        .value(\"{0}\", {1}::{0})\n", member.name.plain, getFullName(structInfo));
+            }
+            out << "        .export_values();\n\n";
+        } else {
+            out << fmt::format("    py::class_<{0}> {1}(m, \"{2}\");\n", getFullName(structInfo), structInfo.name.plain + "_class",
+                               structInfo.name.plain);
         }
+    }
+
+    // Then, define the actual bindings for non-enum classes
+    for (const auto &structInfo : structs) {
+        if (structInfo.isEnum)
+            continue;
+
+        std::string className = structInfo.name.plain + "_class";
+        std::string fullName  = getFullName(structInfo);
+
+        // Main class definition
+        out << fmt::format("    {0}\n", className) << "        .def(py::init<>())\n";
+
+        // Add members
+        for (const auto &member : structInfo.members) {
+            out << fmt::format("        .def_readwrite(\"{0}\", &{1}::{0})\n", member.name.plain, fullName);
+        }
+
+        // Add member functions
+        for (const auto &funcInfo : functions) {
+            if (funcInfo.parent.has_value() && funcInfo.parent->qualified == fullName) {
+                out << fmt::format("        .def(\"{0}\", &{1}::{0})\n", funcInfo.name.plain, fullName);
+            }
+        }
+
         out << "        ;\n\n";
     }
 
-    // Generate function bindings
+    // Generate free function bindings
     for (const auto &funcInfo : functions) {
-        out << fmt::format("    m.def(\"{0}\", &{0});\n", funcInfo.name);
+        if (funcInfo.name.plain == "main" || funcInfo.isMemberFunction)
+            continue;
+
+        out << fmt::format("    m.def(\"{0}\", &{1});\n", funcInfo.name.plain,
+                           funcInfo.name.qualified.empty() ? funcInfo.name.plain : funcInfo.name.qualified);
     }
 
     out << "}\n";
-    */
 }
 
 int main(int argc, const char **argv) {
@@ -73,11 +116,11 @@ int main(int argc, const char **argv) {
 
     clang::tooling::ClangTool tool(expectedParser->getCompilations(), expectedParser->getSourcePathList());
 
-    std::vector<StructInfo>   structs;
-    std::vector<FunctionInfo> functions;
-    Headers                   headers;
+    Structs   structs;
+    Functions functions;
+    Headers   headers;
 
-    auto cb = [&structs, &functions](std::vector<StructInfo> &&structs_, std::vector<FunctionInfo> &&functions_) {
+    auto cb = [&structs, &functions](Structs &&structs_, Functions &&functions_) {
         structs.insert(structs.end(), std::make_move_iterator(structs_.begin()), std::make_move_iterator(structs_.end()));
         functions.insert(functions.end(), std::make_move_iterator(functions_.begin()), std::make_move_iterator(functions_.end()));
     };
@@ -118,7 +161,7 @@ int main(int argc, const char **argv) {
         }
     }
 
-    generateBindings(structs, functions, moduleName);
+    generateBindings(structs, functions, headers, moduleName);
 
     return 0;
 }

@@ -71,7 +71,7 @@ target_link_libraries(binding_generator PRIVATE fmt::fmt tinfo ${LIBS})
 # Copy struct_example.h to binary directory
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/struct_example.h ${CMAKE_CURRENT_BINARY_DIR}/struct_example.h COPYONLY)
 
-# Other shared lib
+add_subdirectory(tests)
 
 # add_library(python_bindings_example SHARED python_bindings_example.cpp)
 

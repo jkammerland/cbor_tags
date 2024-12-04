@@ -40,6 +40,7 @@ struct StructInfo {
 struct FunctionInfo {
     DeclarationName                   name;
     DeclarationName                   returnType;
+    std::optional<std::string>        namespace_;
     bool                              isMemberFunction{false};
     bool                              isPureVirtual{false};
     bool                              isStatic{false};
@@ -68,7 +69,7 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
      *
      * @tparam DeclarationType The type of the declaration.
      * @param declaration Pointer to the declaration to be filtered.
-     * @return std::fieldInfo<bool, std::string_view> A fieldInfo where the first element is a boolean
+     * @return A fieldInfo where the first element is a boolean
      *         indicating if the declaration is non-user code, and the second element is a
      *         string view of the qualified name.
      * @note The qualified name is stored in the stringBuffer_ member variable, and must be consumed before next visit.
@@ -100,14 +101,14 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
 
         const clang::DeclContext *declContext = declaration->getDeclContext();
         if (const auto *namespaceDecl = llvm::dyn_cast<clang::NamespaceDecl>(declContext)) { /* Namespace */
-            llvm::outs() << "[ NAMESPACE: " << namespaceDecl->getName() << " ]";
+            // llvm::outs() << "[ NAMESPACE: " << namespaceDecl->getName() << " ]";
             info.name.namespace_ = namespaceDecl->getName();
         } else {
-            llvm::outs() << "[ GLOBAL ]";
+            // llvm::outs() << "[ GLOBAL ]";
             info.name.namespace_ = std::nullopt;
         }
 
-        llvm::outs() << declaration->getName() << "\n";
+        // llvm::outs() << declaration->getName() << "\n";
         info.name.plain     = declaration->getName();
         info.name.qualified = declaration->getQualifiedNameAsString();
 
@@ -154,9 +155,9 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
         if (isNonUserCode) {
             return true;
         }
-        llvm::outs() << "Struct: " << declaration->getParent()->getQualifiedNameAsString() << " methods: ";
-        llvm::outs() << " " << declaration->getQualifiedNameAsString() << " ";
-        llvm::outs() << "isPureVirtual: " << (declaration->isPureVirtual() ? "<yes>" : "<no>") << "\n";
+        // llvm::outs() << "Struct: " << declaration->getParent()->getQualifiedNameAsString() << " methods: ";
+        // llvm::outs() << " " << declaration->getQualifiedNameAsString() << " ";
+        // llvm::outs() << "isPureVirtual: " << (declaration->isPureVirtual() ? "<yes>" : "<no>") << "\n";
         return true;
     }
 
@@ -167,6 +168,13 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
         }
 
         FunctionInfo info;
+
+        const clang::DeclContext *declContext = declaration->getDeclContext();
+        if (const auto *namespaceDecl = llvm::dyn_cast<clang::NamespaceDecl>(declContext)) { /* Namespace */
+            info.namespace_ = namespaceDecl->getName();
+        } else {
+            info.namespace_ = std::nullopt;
+        }
 
         if (auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(declaration)) {
             info.parent            = DeclarationName{};
