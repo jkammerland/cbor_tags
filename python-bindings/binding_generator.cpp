@@ -1,6 +1,7 @@
 #include "ast_actions.hpp"
 
 #include <fmt/format.h>
+#include <format>
 #include <fstream>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
@@ -12,7 +13,8 @@
 using namespace std::string_literals;
 
 void generateBindings(const std::vector<StructInfo> &structs, const std::vector<FunctionInfo> &functions, const std::string &moduleName) {
-
+    // THIS CODE IS OLD
+    /*
     std::ofstream out(moduleName + "_bindings.cpp");
 
     // Write headers
@@ -43,6 +45,7 @@ void generateBindings(const std::vector<StructInfo> &structs, const std::vector<
     }
 
     out << "}\n";
+    */
 }
 
 int main(int argc, const char **argv) {
@@ -75,11 +78,13 @@ int main(int argc, const char **argv) {
     Headers                   headers;
 
     auto cb = [&structs, &functions](std::vector<StructInfo> &&structs_, std::vector<FunctionInfo> &&functions_) {
-        structs   = std::move(structs_);
-        functions = std::move(functions_);
+        structs.insert(structs.end(), std::make_move_iterator(structs_.begin()), std::make_move_iterator(structs_.end()));
+        functions.insert(functions.end(), std::make_move_iterator(functions_.begin()), std::make_move_iterator(functions_.end()));
     };
 
-    auto hcb = [&headers](Headers &&headers_) { headers = std::move(headers_); };
+    auto hcb = [&headers](Headers &&headers_) {
+        headers.insert(headers.end(), std::make_move_iterator(headers_.begin()), std::make_move_iterator(headers_.end()));
+    };
 
     auto factoryPtr = std::make_unique<DeclarationExtractionActionFactory>(cb, hcb);
 
@@ -93,25 +98,27 @@ int main(int argc, const char **argv) {
     }
 
     for (const auto &structInfo : structs) {
-        llvm::outs() << "Struct: " << structInfo.name << "\n";
-        for (const auto &[type, name] : structInfo.members) {
-            llvm::outs() << "    " << type << " " << name << "\n";
+        llvm::outs() << "Struct: " << std::format("{0} ({1})", structInfo.name.plain, structInfo.name.qualified) << "\n";
+        for (const auto &info : structInfo.members) {
+            llvm::outs() << "    " << std::format("{0} {1}", info.type.plain, info.name.plain) << "\n";
         }
     }
 
     for (const auto &funcInfo : functions) {
-        llvm::outs() << "Function: " << funcInfo.name << "\n";
-        llvm::outs() << "    Return type: " << funcInfo.returnType << "\n";
+        llvm::outs() << "Function: " << std::format("{0} ({1})", funcInfo.name.plain, funcInfo.name.qualified) << "\n";
+        llvm::outs() << "    Return type: " << std::format("{0} ({1})", funcInfo.returnType.plain, funcInfo.returnType.qualified) << "\n";
 
         if (!funcInfo.parameters.empty()) {
             llvm::outs() << "    Parameters:\n";
         }
-        for (const auto &[type, name] : funcInfo.parameters) {
-            llvm::outs() << "    " << "    " << type << " " << name << "\n";
+        for (const auto &info : funcInfo.parameters) {
+            llvm::outs() << "    " << "    "
+                         << std::format("{0} ({1}) {2} ({3})", info.type.plain, info.type.qualified, info.name.plain, info.name.qualified)
+                         << "\n";
         }
     }
 
-    // generateBindings(structs, functions, moduleName);
+    generateBindings(structs, functions, moduleName);
 
     return 0;
 }

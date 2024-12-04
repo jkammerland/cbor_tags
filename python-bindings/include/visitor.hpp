@@ -3,26 +3,50 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <fmt/format.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 
 struct DeclarationName {
-    std::string plain;
-    std::string qualified;
+    std::string                plain;
+    std::string                qualified;
+    std::optional<std::string> namespace_;
+
+    [[nodiscard]] bool hasNamespace() const noexcept { return namespace_.has_value(); }
+};
+
+struct FieldDeclarationInfo {
+    DeclarationName type;
+    DeclarationName name;
+    bool            isConst{false};
+    bool            isPointer{false};
+    bool            isReference{false};
+    bool            isStatic{false};
+    bool            isConstexpr{false};
+
+    [[nodiscard]] constexpr bool isSpecial() const noexcept { return isConst || isPointer || isReference || isStatic || isConstexpr; }
 };
 
 struct StructInfo {
-    std::string                                      name;
-    std::string                                      qualifiedName;
-    std::vector<std::pair<std::string, std::string>> members;
+    DeclarationName                   name;
+    bool                              isEnum{false};
+    std::vector<FieldDeclarationInfo> members;
+
+    [[nodiscard]] bool   empty() const noexcept { return members.empty(); }
+    [[nodiscard]] size_t memberCount() const noexcept { return members.size(); }
 };
 
 struct FunctionInfo {
-    std::string                                      name;
-    std::string                                      qualifiedName;
-    std::string                                      returnType;
-    std::vector<std::pair<std::string, std::string>> parameters;
+    DeclarationName                   name;
+    DeclarationName                   returnType;
+    bool                              isMemberFunction{false};
+    bool                              isPureVirtual{false};
+    bool                              isStatic{false};
+    std::optional<DeclarationName>    parent;
+    std::vector<FieldDeclarationInfo> parameters;
+
+    [[nodiscard]] bool hasParameters() const noexcept { return !parameters.empty(); }
 };
 
 using Structs   = std::vector<StructInfo>;
@@ -34,17 +58,28 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
   public:
     explicit Visitor(clang::ASTContext *context, VisitCompleteCallback cb) : context_(context), cb_(std::move(cb)) {}
 
-    // 1. Starts with std or dual underscore
-    // 2. Is in system header
-    // 3. Has no name (anonymous)
-    // 4. Is implicit
+    /**
+     * @brief Filters the qualified name of a given declaration.
+     *
+     * This function takes a declaration and filters its qualified name to determine
+     * if it belongs to non-user code (e.g., standard library, compiler-generated, etc.).
+     * It returns a fieldInfo consisting of a boolean indicating whether the declaration is
+     * non-user code and a string view of the qualified name.
+     *
+     * @tparam DeclarationType The type of the declaration.
+     * @param declaration Pointer to the declaration to be filtered.
+     * @return std::fieldInfo<bool, std::string_view> A fieldInfo where the first element is a boolean
+     *         indicating if the declaration is non-user code, and the second element is a
+     *         string view of the qualified name.
+     * @note The qualified name is stored in the stringBuffer_ member variable, and must be consumed before next visit.
+     */
     template <typename DeclarationType> auto FilterQualifiedName(const DeclarationType *declaration) {
         auto stringStream_ = getNewStream();
         declaration->printQualifiedName(stringStream_);
         auto &qName = stringBuffer_;
 
         auto isNonUserCode = qName.starts_with("std") || qName.starts_with("__") || declaration->isImplicit() ||
-                             declaration->getLocation().isInvalid() || qName.empty() ||
+                             !declaration->isFirstDecl() || declaration->getLocation().isInvalid() || qName.empty() ||
                              context_->getSourceManager().isInSystemHeader(declaration->getLocation());
         return std::make_pair(isNonUserCode, std::string_view{qName});
     }
@@ -55,28 +90,60 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     }
 
     bool VisitCXXRecordDecl(clang::CXXRecordDecl *declaration) {
-        // declaration->dump();
 
         auto [isNonUserCode, qName] = FilterQualifiedName(declaration);
         if (isNonUserCode) {
             return true;
         }
 
+        StructInfo info;
+
         const clang::DeclContext *declContext = declaration->getDeclContext();
         if (const auto *namespaceDecl = llvm::dyn_cast<clang::NamespaceDecl>(declContext)) { /* Namespace */
             llvm::outs() << "[ NAMESPACE: " << namespaceDecl->getName() << " ]";
+            info.name.namespace_ = namespaceDecl->getName();
+        } else {
+            llvm::outs() << "[ GLOBAL ]";
+            info.name.namespace_ = std::nullopt;
+        }
+
+        llvm::outs() << declaration->getName() << "\n";
+        info.name.plain     = declaration->getName();
+        info.name.qualified = declaration->getQualifiedNameAsString();
+
+        for (const auto *field : declaration->fields()) {
+            FieldDeclarationInfo fieldInfo;
+            fieldInfo.type.plain     = field->getType().getAsString();
+            fieldInfo.type.qualified = field->getType().getCanonicalType().getAsString();
+            fieldInfo.name.plain     = field->getName();
+            fieldInfo.name.qualified = field->getQualifiedNameAsString();
+            info.members.emplace_back(fieldInfo);
+        }
+        structs_.push_back(info);
+
+        return true;
+    }
+
+    bool VisitEnumDecl(clang::EnumDecl *declaration) {
+        auto [isNonUserCode, qName] = FilterQualifiedName(declaration);
+        if (isNonUserCode) {
+            return true;
         }
 
         StructInfo info;
+        info.isEnum         = true;
+        info.name.plain     = declaration->getName();
+        info.name.qualified = declaration->getQualifiedNameAsString();
 
-        llvm::outs() << declaration->getName() << "\n";
-        info.name = declaration->getQualifiedNameAsString();
-        for (const auto *field : declaration->fields()) {
-            std::string type          = field->getType().getAsString();
-            std::string qualifiedName = field->getQualifiedNameAsString();
-            std::string name          = field->getNameAsString();
-            info.members.emplace_back(type, qualifiedName);
+        for (const auto *enumerator : declaration->enumerators()) {
+            FieldDeclarationInfo fieldInfo;
+            fieldInfo.type.plain     = declaration->getIntegerType().getAsString();
+            fieldInfo.type.qualified = declaration->getIntegerType().getCanonicalType().getAsString();
+            fieldInfo.name.plain     = enumerator->getName();
+            fieldInfo.name.qualified = enumerator->getQualifiedNameAsString();
+            info.members.emplace_back(fieldInfo);
         }
+
         structs_.push_back(info);
 
         return true;
@@ -87,8 +154,9 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
         if (isNonUserCode) {
             return true;
         }
-
-        llvm::outs() << "VisitCXXMethodDecl: " << declaration->getQualifiedNameAsString() << "\n";
+        llvm::outs() << "Struct: " << declaration->getParent()->getQualifiedNameAsString() << " methods: ";
+        llvm::outs() << " " << declaration->getQualifiedNameAsString() << " ";
+        llvm::outs() << "isPureVirtual: " << (declaration->isPureVirtual() ? "<yes>" : "<no>") << "\n";
         return true;
     }
 
@@ -99,23 +167,45 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
         }
 
         FunctionInfo info;
-        info.name       = declaration->getNameAsString();
-        info.returnType = declaration->getReturnType().getAsString();
+
+        if (auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(declaration)) {
+            info.parent            = DeclarationName{};
+            info.isMemberFunction  = true;
+            info.parent->plain     = method->getParent()->getName();
+            info.parent->qualified = method->getParent()->getQualifiedNameAsString();
+            auto *declContext      = method->getParent()->getDeclContext();
+            if (const auto *namespaceDecl = llvm::dyn_cast<clang::NamespaceDecl>(declContext)) {
+                info.parent->namespace_ = namespaceDecl->getName();
+            } else {
+                info.parent->namespace_ = std::nullopt;
+            }
+        } else {
+            info.parent           = std::nullopt;
+            info.isMemberFunction = false;
+        }
+
+        info.name.plain     = declaration->getName();
+        info.name.qualified = declaration->getQualifiedNameAsString();
+        info.isPureVirtual  = declaration->isPureVirtual();
+        info.isStatic       = declaration->isStatic();
+
+        info.returnType.plain     = declaration->getReturnType().getAsString();
+        info.returnType.qualified = declaration->getReturnType().getAsString();
 
         for (const auto *param : declaration->parameters()) {
-            std::string type = param->getType().getAsString();
-            std::string name = param->getNameAsString();
-            info.parameters.emplace_back(type, name);
+            FieldDeclarationInfo fieldInfo;
+            fieldInfo.type.plain     = param->getType().getAsString();
+            fieldInfo.type.qualified = param->getType().getCanonicalType().getAsString();
+            fieldInfo.name.plain     = param->getName();
+            fieldInfo.name.qualified = param->getQualifiedNameAsString();
+            info.parameters.emplace_back(fieldInfo);
         }
         functions_.push_back(info);
 
         return true;
     }
 
-    ~Visitor() {
-        cb_(std::move(structs_), std::move(functions_));
-        // llvm::outs() << "Destroying StructVisitor\n";
-    }
+    ~Visitor() { cb_(std::move(structs_), std::move(functions_)); }
 
   private:
     clang::ASTContext    *context_;

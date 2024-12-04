@@ -28,13 +28,11 @@ class DeclarationExtractorAction : public clang::ASTFrontendAction {
 
     bool BeginSourceFileAction(clang::CompilerInstance &CI) override {
         // Create and register the IncludeTracker with the SourceManager
-        llvm::outs() << "BeginSourceFileAction\n";
         CI.getPreprocessor().addPPCallbacks(std::make_unique<IncludeTracker>(CI.getSourceManager(), hcb_));
         return true;
     }
 
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &compiler, llvm::StringRef file) override {
-        llvm::outs() << "CreateASTConsumer\n";
         consumer_ = new ASTConsumer(&compiler.getASTContext(), cb_);
         return std::unique_ptr<clang::ASTConsumer>(consumer_);
     }
