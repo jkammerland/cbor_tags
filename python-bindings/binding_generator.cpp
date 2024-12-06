@@ -23,14 +23,14 @@ void generateBindings(const Structs &structs, const Functions &functions, const 
         << "#include <pybind11/functional.h>\n";
 
     // Include all headers
-    out << "\n// User headers";
+    out << "\n// User headers\n";
     for (const auto &header : headers) {
         if (!header.isSystem) {
             out << fmt::format("#include \"{}\"\n", header.fullPath);
         }
     }
 
-    out << "\n// System headers";
+    out << "\n// System headers\n";
     for (const auto &header : headers) {
         if (header.isSystem) {
             out << fmt::format("#include <{}>\n", header.name);
