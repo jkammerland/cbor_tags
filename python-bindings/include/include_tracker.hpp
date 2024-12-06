@@ -8,6 +8,7 @@ struct Header {
     std::string name;
     std::string fullPath;
     bool        isSystem;
+    bool        isInputFile;
 };
 
 using Headers = std::vector<Header>;
@@ -38,7 +39,7 @@ class IncludeTracker : public clang::PPCallbacks {
 
         // Only process direct includes from the main file
         if (isDirectInclude) {
-            headers_.push_back({FileName.str(), fullPath, FileType != clang::SrcMgr::C_User});
+            headers_.push_back({FileName.str(), fullPath, FileType != clang::SrcMgr::C_User, false});
 
             // llvm::outs() << "Kind: " << static_cast<int>(FileType) << " " << FileName << " (from main file)\n";
             // llvm::outs() << "Direct include: " << FileName << " (from main file)\n";

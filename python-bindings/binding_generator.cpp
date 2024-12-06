@@ -3,7 +3,6 @@
 #include "visitor.hpp"
 
 #include <fmt/format.h>
-#include <format>
 #include <fstream>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
@@ -15,18 +14,23 @@
 using namespace std::string_literals;
 
 void generateBindings(const Structs &structs, const Functions &functions, const Headers &headers, const std::string &moduleName) {
-    std::ofstream out(moduleName + "_bindings.cpp");
+    std::ofstream out(moduleName + ".cpp");
 
-    // Write headers
+    // Write headers - TODO: be smart here, only include what is needed
     out << "#include <pybind11/pybind11.h>\n"
-        << "#include <pybind11/stl.h>\n\n";
+        << "#include <pybind11/stl.h>\n"
+        << "#include <pybind11/complex.h>\n"
+        << "#include <pybind11/functional.h>\n";
 
     // Include all headers
+    out << "\n// User headers";
     for (const auto &header : headers) {
         if (!header.isSystem) {
-            out << fmt::format("#include \"{}\"\n", header.name);
+            out << fmt::format("#include \"{}\"\n", header.fullPath);
         }
     }
+
+    out << "\n// System headers";
     for (const auto &header : headers) {
         if (header.isSystem) {
             out << fmt::format("#include <{}>\n", header.name);
@@ -75,13 +79,14 @@ void generateBindings(const Structs &structs, const Functions &functions, const 
                 out << fmt::format("        .def(\"{0}\", &{1}::{0})\n", funcInfo.name.plain, fullName);
             }
         }
-
-        out << "        ;\n\n";
+        // Remove last newline and add semicolon
+        out.seekp(-1, std::ios_base::end);
+        out << ";\n\n";
     }
 
     // Generate free function bindings
     for (const auto &funcInfo : functions) {
-        if (funcInfo.name.plain == "main" || funcInfo.isMemberFunction)
+        if (funcInfo.isMemberFunction)
             continue;
 
         out << fmt::format("    m.def(\"{0}\", &{1});\n", funcInfo.name.plain,
@@ -93,7 +98,7 @@ void generateBindings(const Structs &structs, const Functions &functions, const 
 
 int main(int argc, const char **argv) {
     if (argc < 2) {
-        llvm::errs() << "Usage: " << argv[0] << "<source-file>... [compiler-args...]\n";
+        llvm::errs() << "Usage: " << argv[0] << "<module-name> <source-files>... [compiler-args...]\n";
         return 1;
     }
 
@@ -102,9 +107,22 @@ int main(int argc, const char **argv) {
         llvm::outs() << "argv[" << i << "] = " << argv[i] << "\n";
     }
 
-    std::string moduleName = "my_module";
+    // Copy argv except for argv[1] (module name), but include argv[0] (program name)
+    int          newArgc = argc - 1;
+    const char **newArgv = new const char *[newArgc];
+    newArgv[0]           = argv[0];
+    for (int i = 2; i < argc; ++i) {
+        newArgv[i - 1] = argv[i];
+    }
 
-    auto expectedParser = clang::tooling::CommonOptionsParser::create(argc, argv, llvm::cl::getGeneralCategory());
+    // print new args
+    for (int i = 0; i < newArgc; ++i) {
+        llvm::outs() << "newArgv[" << i << "] = " << newArgv[i] << "\n";
+    }
+
+    std::string moduleName = argv[1];
+
+    auto expectedParser = clang::tooling::CommonOptionsParser::create(newArgc, newArgv, llvm::cl::getGeneralCategory());
     if (!expectedParser) {
         llvm::errs() << "Error parsing command line arguments: " << expectedParser.takeError() << "\n";
         return 1;
@@ -141,22 +159,22 @@ int main(int argc, const char **argv) {
     }
 
     for (const auto &structInfo : structs) {
-        llvm::outs() << "Struct: " << std::format("{0} ({1})", structInfo.name.plain, structInfo.name.qualified) << "\n";
+        llvm::outs() << "Struct: " << fmt::format("{0} ({1})", structInfo.name.plain, structInfo.name.qualified) << "\n";
         for (const auto &info : structInfo.members) {
-            llvm::outs() << "    " << std::format("{0} {1}", info.type.plain, info.name.plain) << "\n";
+            llvm::outs() << "    " << fmt::format("{0} {1}", info.type.plain, info.name.plain) << "\n";
         }
     }
 
     for (const auto &funcInfo : functions) {
-        llvm::outs() << "Function: " << std::format("{0} ({1})", funcInfo.name.plain, funcInfo.name.qualified) << "\n";
-        llvm::outs() << "    Return type: " << std::format("{0} ({1})", funcInfo.returnType.plain, funcInfo.returnType.qualified) << "\n";
+        llvm::outs() << "Function: " << fmt::format("{0} ({1})", funcInfo.name.plain, funcInfo.name.qualified) << "\n";
+        llvm::outs() << "    Return type: " << fmt::format("{0} ({1})", funcInfo.returnType.plain, funcInfo.returnType.qualified) << "\n";
 
         if (!funcInfo.parameters.empty()) {
             llvm::outs() << "    Parameters:\n";
         }
         for (const auto &info : funcInfo.parameters) {
             llvm::outs() << "    " << "    "
-                         << std::format("{0} ({1}) {2} ({3})", info.type.plain, info.type.qualified, info.name.plain, info.name.qualified)
+                         << fmt::format("{0} ({1}) {2} ({3})", info.type.plain, info.type.qualified, info.name.plain, info.name.qualified)
                          << "\n";
         }
     }

@@ -22,8 +22,9 @@ struct FieldDeclarationInfo {
     bool            isConst{false};
     bool            isPointer{false};
     bool            isReference{false};
-    bool            isStatic{false};
-    bool            isConstexpr{false};
+    bool            isStatic{false};    // Not working
+    bool            isConstexpr{false}; // Not working
+    bool            isPublic{false};
 
     [[nodiscard]] constexpr bool isSpecial() const noexcept { return isConst || isPointer || isReference || isStatic || isConstexpr; }
 };
@@ -118,6 +119,11 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
             fieldInfo.type.qualified = field->getType().getCanonicalType().getAsString();
             fieldInfo.name.plain     = field->getName();
             fieldInfo.name.qualified = field->getQualifiedNameAsString();
+            fieldInfo.isConst        = field->getType().isConstQualified();
+            fieldInfo.isPointer      = field->getType()->isPointerType();
+            fieldInfo.isReference    = field->getType()->isReferenceType();
+            // fieldInfo.? = field->getTypeSourceInfo()->getType()->isAggregateType();
+            fieldInfo.isPublic = field->getAccess() == clang::AccessSpecifier::AS_public;
             info.members.emplace_back(fieldInfo);
         }
         structs_.push_back(info);

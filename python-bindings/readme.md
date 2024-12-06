@@ -1,53 +1,69 @@
 # Working example python output
 
-Hello from Python!
-alpha0.0000000.0000003Hello from C++!
-zeta.A = 1
-a.z = zeta.B
-a.z as int = 2
-
-zeta values:
-A = 1
-B = 2
-C = 3
-
-beta.A = -1
-beta.B = 0
-beta.C = 1
+python main2.py 
+Alpha print result: alpha1.0000002.0000006test
+Nested print result: 10
+Nested cw.c: (5+6j)
+Beta A value: -1
+zeta.A: 1
+zeta.B: 2
+zeta.C: 3
+jonkam@7950x:tests$ python main2.py 
+Alpha print result: alpha1.0000002.0000006test
+Nested print result: 10
+Nested cw.c: (5+6j)
+Beta A value: -1
+Beta B value: 0
+Beta C value: 1
+zeta.A: 1
+zeta.B: 2
+zeta.C: 3
 
 ```py
-import pybinding2
+from pybinding2 import ComplexWrapper, alpha, zeta, Nested, empty, beta
 
 def main():
-    print("Hello from Python!")
-    a = pybinding2.alpha()
-    a.b = "Hello from C++!"
-    output = a.print(2)
-    print(output)
+    # Create an instance of alpha
+    a = alpha()
     
-    # Using the nested enum zeta
-    z = pybinding2.zeta.A
-    print(f"zeta.A = {int(z)}")
+    # Set complex number
+    a.a = complex(1.0, 2.0)
     
-    a.z = pybinding2.zeta.B
-    print(f"a.z = {a.z}")
-    print(f"a.z as int = {int(a.z)}")
+    # Set string
+    a.b = "test"
     
-    # Print individual enum values
-    print("\nzeta values:")
-    print(f"A = {int(pybinding2.zeta.A)}")
-    print(f"B = {int(pybinding2.zeta.B)}")
-    print(f"C = {int(pybinding2.zeta.C)}")
+    # Set enum value
+    a.z = zeta.B
     
-    # Regular enum beta
-    b = pybinding2.beta.A
-    print(f"\nbeta.A = {int(b)}")
+    # Call print method
+    print("Alpha print result:", a.print(5))  # Should print real part, imaginary part, f(imag), and string b
     
-    b = pybinding2.beta.B
-    print(f"beta.B = {int(b)}")
+    # Create and use Nested class
+    nested = Nested()
+    print("Nested print result:", nested.print(10))
     
-    b = pybinding2.beta.C
-    print(f"beta.C = {int(b)}")
+    # Work with ComplexWrapper
+    wrapper = ComplexWrapper()
+    wrapper.c = complex(3.0, 4.0)
+    
+    # Assign ComplexWrapper to nested.cw
+    nested.cw = wrapper
+    nested.cw.c = complex(5.0, 6.0)
+    print("Nested cw.c:", nested.cw.c)  # Should print 5.0 + 6.0j
+    
+    # Create empty class instance
+    e = empty()
+    
+    # Work with beta enum
+    b = beta.A
+    print("Beta A value:", int(b))  # Should print -1
+    print("Beta B value:", int(beta.B))  # Should print 0
+    print("Beta C value:", int(beta.C))  # Should print 1
+    
+    # Print enum values
+    print("zeta.A:", int(zeta.A))  # Should print 1
+    print("zeta.B:", int(zeta.B))  # Should print 2
+    print("zeta.C:", int(zeta.C))  # Should print 3
 
 if __name__ == "__main__":
     main()
@@ -88,56 +104,92 @@ enum class beta : int { A = -1, B, C };
 # Input example
 ```cpp
 #include <complex>
+#include <cstdint>
 #include <string>
+
+namespace n1 {
+
+namespace n2::n3 {
 
 struct alpha {
     std::complex<double> a;
     std::string          b;
 
-    std::string print(int) const { return "alpha" + std::to_string(a.real()) + std::to_string(a.imag()) + b; }
+    std::string print(int imag) const {
+        auto f = [](int x) { return x + 1; };
+        return "alpha" + std::to_string(a.real()) + std::to_string(a.imag()) + std::to_string(f(imag)) + b;
+    }
+
+    enum class zeta : std::uint16_t { A = 1, B, C };
+
+    struct Nested 
+    {
+        std::string print(int real)
+        {
+            return std::to_string(real);
+        }
+    };
+
+    Nested n;
+
+    zeta z;
 };
+
+} // namespace n2::n3
+
+enum class beta : int { A = -1, B, C };
+
+}; // namespace n1
+
 ```
 
 
 
-# Output example
-argv[1] = struct_example_impl.cpp
-argv[2] = another_ex.h
-argv[3] = --
-argv[4] = -xc++
-argv[5] = -std=c++14
-argv[6] = -I/usr/lib/gcc/x86_64-redhat-linux/14/include
-argv[7] = -I/usr/include/c++/14
-argv[8] = -I/usr/include/c++/14/x86_64-redhat-linux
-argv[9] = -I/usr/include/c++/14/backward
-argv[10] = -I/usr/local/include
-argv[11] = -I/usr/include
-Source path: struct_example_impl.cpp
+# Generator Output example
+```
+newArgv[1] = another_ex.h
+newArgv[2] = --
+newArgv[3] = -xc++
+newArgv[4] = -std=c++17
+newArgv[5] = -I/usr/lib/gcc/x86_64-redhat-linux/14/include
+newArgv[6] = -I/usr/include/c++/14
+newArgv[7] = -I/usr/include/c++/14/x86_64-redhat-linux
+newArgv[8] = -I/usr/include/c++/14/backward
+newArgv[9] = -I/usr/local/include
+newArgv[10] = -I/usr/include
 Source path: another_ex.h
-[1/2] Processing file /path/struct_example_impl.cpp.
-BeginSourceFileAction
-CreateASTConsumer
-[ NAMESPACE: test2 ]A
-[ NAMESPACE: test2 ]B
-[ NAMESPACE: test ]EmptyOuter
-[ NAMESPACE: test ]A
-B
-C
-[ NAMESPACE: test ]B
-[2/2] Processing file path/another_ex.h.
-BeginSourceFileAction
-CreateASTConsumer
-alpha
-VisitCXXMethodDecl: alpha::print
+Processing file: ..../python-bindings/another_ex.h
+Header: another_ex.h system: <no> (..../python-bindings/another_ex.h)
 Header: complex system: <yes> (/usr/include/c++/14/complex)
+Header: cstdint system: <yes> (/usr/include/c++/14/cstdint)
 Header: string system: <yes> (/usr/include/c++/14/string)
-Struct: alpha
-    std::complex<double> alpha::a
-    std::string alpha::b
-Function: print
-    Return type: std::string
+Struct: ComplexWrapper (n1::ComplexWrapper)
+    Complex c
+Struct: alpha (n1::n2::n3::alpha)
+    std::complex<double> a
+    std::string b
+    Nested n
+    zeta z
+Struct: zeta (n1::n2::n3::alpha::zeta)
+    std::uint16_t A
+    std::uint16_t B
+    std::uint16_t C
+Struct: Nested (n1::n2::n3::alpha::Nested)
+    ComplexWrapper cw
+Struct: empty (n1::n2::n3::alpha::empty)
+Struct: beta (n1::beta)
+    int A
+    int B
+    int C
+Function: print (n1::n2::n3::alpha::print)
+    Return type: std::string (std::string)
     Parameters:
-        int
+        int (int) imag (imag)
+Function: print (n1::n2::n3::alpha::Nested::print)
+    Return type: std::string (std::string)
+    Parameters:
+        int (int) real (real)
+```
 
 
 

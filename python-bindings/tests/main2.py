@@ -1,35 +1,45 @@
-import pybinding2
+from pybinding2 import ComplexWrapper, alpha, zeta, Nested, empty, beta
 
 def main():
-    print("Hello from Python!")
-    a = pybinding2.alpha()
-    a.b = "Hello from C++!"
-    output = a.print(2)
-    print(output)
+    # Create an instance of alpha
+    a = alpha()
     
-    # Using the nested enum zeta
-    z = pybinding2.zeta.A
-    print(f"zeta.A = {int(z)}")
+    # Set complex number
+    a.a = complex(1.0, 2.0)
     
-    a.z = pybinding2.zeta.B
-    print(f"a.z = {a.z}")
-    print(f"a.z as int = {int(a.z)}")
+    # Set string
+    a.b = "test"
     
-    # Print individual enum values
-    print("\nzeta values:")
-    print(f"A = {int(pybinding2.zeta.A)}")
-    print(f"B = {int(pybinding2.zeta.B)}")
-    print(f"C = {int(pybinding2.zeta.C)}")
+    # Set enum value
+    a.z = zeta.B
     
-    # Regular enum beta
-    b = pybinding2.beta.A
-    print(f"\nbeta.A = {int(b)}")
+    # Call print method
+    print("Alpha print result:", a.print(5))  # Should print real part, imaginary part, f(imag), and string b
     
-    b = pybinding2.beta.B
-    print(f"beta.B = {int(b)}")
+    # Create and use Nested class
+    nested = Nested()
+    print("Nested print result:", nested.print(10))
     
-    b = pybinding2.beta.C
-    print(f"beta.C = {int(b)}")
+    # Work with ComplexWrapper
+    wrapper = ComplexWrapper()
+    wrapper.c = complex(3.0, 4.0)
+    
+    # Assign ComplexWrapper to nested.cw
+    nested.cw = wrapper
+    nested.cw.c = complex(5.0, 6.0)
+    print("Nested cw.c:", nested.cw.c)  # Should print 5.0 + 6.0j
+    
+    # Create empty class instance
+    e = empty()
+    
+    # Work with beta enum
+    b = beta.A
+    print("Beta A value:", int(b))  # Should print -1
+    
+    # Print enum values
+    print("zeta.A:", int(zeta.A))  # Should print 1
+    print("zeta.B:", int(zeta.B))  # Should print 2
+    print("zeta.C:", int(zeta.C))  # Should print 3
 
 if __name__ == "__main__":
     main()

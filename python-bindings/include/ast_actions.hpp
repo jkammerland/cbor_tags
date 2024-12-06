@@ -11,12 +11,15 @@
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
+#include <utility>
 
 class ASTConsumer : public clang::ASTConsumer {
   public:
     explicit ASTConsumer(clang::ASTContext *context, VisitCompleteCallback cb) : visitor_(context, cb) {}
 
     void HandleTranslationUnit(clang::ASTContext &context) override { visitor_.TraverseDecl(context.getTranslationUnitDecl()); }
+
+    ~ASTConsumer() override = default;
 
   private:
     Visitor visitor_;
@@ -33,6 +36,9 @@ class DeclarationExtractorAction : public clang::ASTFrontendAction {
     }
 
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &compiler, llvm::StringRef file) override {
+        llvm::outs() << "Processing file: " << file << "\n";
+        auto fileName = file.find_last_of('/') != std::string::npos ? file.substr(file.find_last_of('/') + 1) : file;
+        hcb_({{fileName.str(), file.str(), false, true}});
         consumer_ = new ASTConsumer(&compiler.getASTContext(), cb_);
         return std::unique_ptr<clang::ASTConsumer>(consumer_);
     }
@@ -48,14 +54,14 @@ class DeclarationExtractorAction : public clang::ASTFrontendAction {
 // Create an action factory
 class DeclarationExtractionActionFactory : public clang::tooling::FrontendActionFactory {
   public:
-    explicit DeclarationExtractionActionFactory(VisitCompleteCallback cb, HeaderCallback hcb) : cb_(std::move(cb)), hcb_(hcb) {}
+    explicit DeclarationExtractionActionFactory(VisitCompleteCallback cb, HeaderCallback hcb) : cb_(std::move(cb)), hcb_(std::move(hcb)) {}
 
     std::unique_ptr<clang::FrontendAction> create() override {
         action_ = new DeclarationExtractorAction(cb_, hcb_);
         return std::unique_ptr<clang::FrontendAction>(action_);
     }
 
-    DeclarationExtractorAction *getAction() const { return action_; }
+    ~DeclarationExtractionActionFactory() override = default;
 
   private:
     VisitCompleteCallback       cb_;
