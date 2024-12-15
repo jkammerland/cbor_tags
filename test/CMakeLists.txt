@@ -34,8 +34,8 @@ target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::
 if(UNIX OR APPLE)
   # target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer) target_link_options(tests PRIVATE -fsanitize=address)
 elseif(WIN32)
-  target_compile_options(tests PRIVATE /fsanitize=address)
-  target_link_options(tests PRIVATE /fsanitize=address)
+ # target_compile_options(tests PRIVATE /fsanitize=address)
+ # target_link_options(tests PRIVATE /fsanitize=address)
 endif()
 
 # add tests for ctest

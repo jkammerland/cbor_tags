@@ -5,6 +5,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable Address Sanitizer if supported
+if(MSVC)
+    # For Visual Studio 2019 and later
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        # add_compile_options(/fsanitize=address)
+        # Disable incremental linking which is incompatible with asan
+        # string(REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG}")
+    endif()
+endif()
+
 option(USE_DEV_SETTINGS "Use dev settings" OFF)
 if(USE_DEV_SETTINGS)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ccache.cmake)
@@ -44,7 +54,8 @@ if(BUILD_PYTHON_BINDINGS)
 endif()
 
 # add tests
-option(BUILD_TESTS "Build tests" OFF)
+option(BUILD_TESTS "Build tests" ON)
+set(BUILD_TESTS ON)
 if(BUILD_TESTS)
   enable_testing()
   add_subdirectory(test)

@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <optional>
 
 namespace cbor::tags {
 
@@ -193,11 +194,12 @@ template <typename... T> constexpr bool contains_signed_integer = (... || IsSign
 template <typename... T> constexpr bool contains_unsigned       = (... || IsUnsigned<unwrap_type_t<T>>);
 template <typename... T> constexpr bool contains_negative       = (... || IsNegative<unwrap_type_t<T>>);
 
+template <typename T> struct is_variant : std::false_type {};
+
+template <typename... Args> struct is_variant<std::variant<Args...>> : std::true_type {};
+
 template <typename T>
-concept IsVariant = requires(T t) {
-    { std::variant_size_v<T> } -> std::convertible_to<size_t>;
-    { t.index() } -> std::convertible_to<size_t>;
-};
+concept IsVariant = is_variant<std::remove_cvref_t<T>>::value;
 
 template <typename T> struct variant_contains_integer : std::false_type {};
 template <template <typename...> typename V, typename... T>

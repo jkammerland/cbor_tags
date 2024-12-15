@@ -12,7 +12,7 @@ target_link_libraries(reflection_module_generator PRIVATE fmt::fmt)
 
 # Set specific compile options for reflection_module_generator
 if(MSVC)
-  target_compile_options(reflection_module_generator PRIVATE /O2)
+  #target_compile_options(reflection_module_generator PRIVATE /O2)
 else()
   target_compile_options(reflection_module_generator PRIVATE -O2 -g0)
 endif()
