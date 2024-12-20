@@ -5,16 +5,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Enable Address Sanitizer if supported
-if(MSVC)
-    # For Visual Studio 2019 and later
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        # add_compile_options(/fsanitize=address)
-        # Disable incremental linking which is incompatible with asan
-        # string(REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG}")
-    endif()
-endif()
-
 option(USE_DEV_SETTINGS "Use dev settings" OFF)
 if(USE_DEV_SETTINGS)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ccache.cmake)
@@ -46,12 +36,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 
 # Make ${PROJECT_NAME} depend on the generated header
 add_dependencies(${PROJECT_NAME} generate_reflection_module)
-
-# add python bindings: WIP
-option(BUILD_PYTHON_BINDINGS "Build Python bindings" OFF)
-if(BUILD_PYTHON_BINDINGS)
-  add_subdirectory(python-bindings)
-endif()
 
 # add tests
 option(BUILD_TESTS "Build tests" ON)

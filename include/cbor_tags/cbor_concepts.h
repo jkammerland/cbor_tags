@@ -3,11 +3,11 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <optional>
 
 namespace cbor::tags {
 
@@ -165,10 +165,10 @@ concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTagg
 
 template <typename T>
 concept IsOptional = requires(T t) {
-    typename T::value_type;
-    { T{typename T::value_type{}} } -> std::same_as<T>;
-    { T{std::nullopt} } -> std::same_as<T>;
-    { t.value() } -> std::same_as<typename T::value_type &>;
+    typename T::value_type; // Must have a value_type
+    t.has_value();          // Must have has_value() method
+    t.value();              // Must have value() method
+    T{};                    // Must be default constructible (nullopt)
 };
 
 // Type trait to unwrap nested types

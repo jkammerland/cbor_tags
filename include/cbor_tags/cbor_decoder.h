@@ -131,8 +131,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for dynamic tag");
         }
+
+        // TODO: FIX NARROWING PROBLEM!!!
         value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
     }
+
+    // template <HasInlineTag T> constexpr void decode(T &value) {
+    //     decode(static_tag<T::cbor_tag>{});
+    //     std::apply([this](auto &&...args) { (this->decode(args), ...); }, to_tuple(value));
+    // }
 
     template <IsUnsigned T> constexpr void decode(dynamic_tag<T> &value) {
         auto [major, additionalInfo] = read_initial_byte();
@@ -160,6 +167,31 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
             decode(static_tag<T::cbor_tag>{});
         }
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+    }
+
+    template <IsAggregate T> constexpr void decode(T &value, major_type major, byte additionalInfo) {
+        if (major != major_type::Tag) {
+            throw std::runtime_error("Invalid major type for tagged object");
+        }
+
+        const auto &tuple = to_tuple(value);
+        auto        tag   = decode_unsigned(additionalInfo);
+        if constexpr (HasInlineTag<T>) {
+            if (tag != T::cbor_tag) {
+                throw std::runtime_error("Invalid tag for tagged object");
+            }
+            std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+        } else {
+            if constexpr (HasStaticTag<T>) {
+                if (tag != std::get<0>(tuple)) {
+                    throw std::runtime_error("Invalid tag for tagged object");
+                }
+            } else {
+                std::get<0>(tuple) = tag;
+            }
+
+            std::apply([this](auto &&...args) { (this->decode(args), ...); }, detail::tuple_tail(tuple));
+        }
     }
 
     template <IsUntaggedTuple T> constexpr void decode(T &value) {
@@ -215,7 +247,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         if (additionalInfo == static_cast<byte>(22)) {
             value = std::nullopt;
         } else {
-            using value_type = std::decay_t<T>;
+            using value_type = std::remove_cvref_t<T>;
             value_type t;
             decode(t, major, additionalInfo);
             value = std::move(t);
