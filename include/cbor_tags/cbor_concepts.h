@@ -3,6 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <type_traits>
 #include <utility>
@@ -164,10 +165,10 @@ concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTagg
 
 template <typename T>
 concept IsOptional = requires(T t) {
-    typename T::value_type;
-    { T{typename T::value_type{}} } -> std::same_as<T>;
-    { T{std::nullopt} } -> std::same_as<T>;
-    { t.value() } -> std::same_as<typename T::value_type &>;
+    typename T::value_type; // Must have a value_type
+    t.has_value();          // Must have has_value() method
+    t.value();              // Must have value() method
+    T{};                    // Must be default constructible (nullopt)
 };
 
 // Type trait to unwrap nested types
@@ -193,11 +194,12 @@ template <typename... T> constexpr bool contains_signed_integer = (... || IsSign
 template <typename... T> constexpr bool contains_unsigned       = (... || IsUnsigned<unwrap_type_t<T>>);
 template <typename... T> constexpr bool contains_negative       = (... || IsNegative<unwrap_type_t<T>>);
 
+template <typename T> struct is_variant : std::false_type {};
+
+template <typename... Args> struct is_variant<std::variant<Args...>> : std::true_type {};
+
 template <typename T>
-concept IsVariant = requires(T t) {
-    { std::variant_size_v<T> } -> std::convertible_to<size_t>;
-    { t.index() } -> std::convertible_to<size_t>;
-};
+concept IsVariant = is_variant<std::remove_cvref_t<T>>::value;
 
 template <typename T> struct variant_contains_integer : std::false_type {};
 template <template <typename...> typename V, typename... T>

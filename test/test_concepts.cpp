@@ -96,6 +96,19 @@ TEST_CASE("Test IsOptional concept") {
     static_assert(!IsBinaryString<opt_1>);
 }
 
+enum class E { A, B, C, D };
+
+struct TEST0 {
+    static constexpr std::size_t cbor_tag = 0x01;
+    E                            e;
+    double                       d;
+};
+
+TEST_CASE_TEMPLATE("Test IsOptional concept with std::optional", T, std::optional<int>, std::optional<std::string>,
+                   std::optional<std::byte>, std::optional<E>, std::optional<std::variant<E, std::string>>, std::optional<TEST0>) {
+    static_assert(IsOptional<T>);
+}
+
 TEST_CASE("Test IsRangeOfCborValues concept") {
     using array_1 = std::array<int, 5>;
     static_assert(IsFixedArray<array_1>);
@@ -173,7 +186,7 @@ TEST_CASE_TEMPLATE("IsCborMajor Positive", T, std::uint8_t, int, double, std::st
                    tagged_object<static_tag<5>, int>, std::variant<int, double, DefCbor, tagged_object<static_tag<2>, NotCbor>>,
                    std::optional<int>, std::optional<std::string>, std::optional<std::byte>,
                    std::optional<std::variant<int, double, DefCbor, std::variant<std::string, std::vector<std::byte>>>>,
-                   std::map<int, DefCbor>, std::unordered_map<DefCbor, int>) {
+                   std::map<int, DefCbor>, std::unordered_map<DefCbor, int>, std::optional<TEST0>) {
     static_assert(IsCborMajor<T>);
 }
 

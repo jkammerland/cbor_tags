@@ -37,12 +37,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 # Make ${PROJECT_NAME} depend on the generated header
 add_dependencies(${PROJECT_NAME} generate_reflection_module)
 
-# add python bindings: WIP
-option(BUILD_PYTHON_BINDINGS "Build Python bindings" OFF)
-if(BUILD_PYTHON_BINDINGS)
-  add_subdirectory(python-bindings)
-endif()
-
 # add tests
 option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)

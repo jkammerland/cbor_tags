@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <type_traits>
 
 namespace cbor::tags::detail {
