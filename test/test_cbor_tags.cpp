@@ -229,3 +229,26 @@ TEST_CASE("Multi tag handling") {
         CHECK_EQ(result.b.b, 2);
     }
 }
+
+template <size_t N> struct A0 {
+    static_tag<N> cbor_tag;
+};
+
+using A1 = A0<1>;
+using A2 = A0<2>;
+using A3 = A0<3>;
+
+TEST_CASE_TEMPLATE("Variant tags", AX, A1, A2, A3) {
+    using variant = std::variant<A1, A2, A3>;
+    variant v0    = AX{};
+
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+    enc(v0);
+
+    auto    dec = make_decoder(data);
+    variant v;
+    dec(v);
+
+    CHECK(std::holds_alternative<AX>(v));
+}

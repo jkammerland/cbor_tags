@@ -15,6 +15,7 @@
 #include <cstdint>
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
+#include <exception>
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
 #include <map>
@@ -264,6 +265,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
                 if (!compare_simple_value<U>(additionalInfo)) {
                     return false;
                 }
+            } else if constexpr (IsTag<U>) {
+                throw std::runtime_error("Not implemented tag support!");
             }
 
             U decoded_value;
@@ -272,10 +275,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
             return true;
         };
 
-        bool found = (try_decode.template operator()<T>() || ...);
-        if (!found) {
-            throw std::runtime_error("Invalid major type for variant");
-        }
+        try {
+            bool found = (try_decode.template operator()<T>() || ...);
+            if (!found) {
+                throw std::runtime_error("Invalid major type for variant");
+            }
+        } catch (...) { std::rethrow_exception(std::current_exception()); }
     }
 
     template <typename T> constexpr void decode(T &value) {
