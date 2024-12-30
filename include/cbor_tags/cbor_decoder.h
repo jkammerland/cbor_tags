@@ -15,6 +15,7 @@
 #include <cstdint>
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
+#include <exception>
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
 #include <map>
@@ -113,27 +114,33 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <std::uint64_t N> constexpr void decode(static_tag<N>, major_type major, byte additionalInfo) {
+    template <std::uint64_t N> [[maybe_unused]] constexpr bool decode(static_tag<N>, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tag");
+            return false;
         }
         if (decode_unsigned(additionalInfo) != N) {
             throw std::runtime_error("Invalid tag value");
+            return false;
         }
+        return true;
     }
 
-    template <std::uint64_t N> constexpr void decode(static_tag<N> value) {
+    template <std::uint64_t N> [[maybe_unused]] constexpr bool decode(static_tag<N> value) {
         auto [major, additionalInfo] = read_initial_byte();
         decode(value, major, additionalInfo);
+        return true;
     }
 
-    template <IsUnsigned T> constexpr void decode(dynamic_tag<T> &value, major_type major, byte additionalInfo) {
+    template <IsUnsigned T> constexpr bool decode(dynamic_tag<T> &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for dynamic tag");
+            return false;
         }
 
         // TODO: FIX NARROWING PROBLEM!!!
         value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
+        return true;
     }
 
     // template <HasInlineTag T> constexpr void decode(T &value) {
@@ -146,30 +153,34 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         decode(value, major, additionalInfo);
     }
 
-    template <IsTaggedTuple T> constexpr void decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTaggedTuple T> [[maybe_unused]] constexpr bool decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
+            return false;
         }
 
         auto tag = decode_unsigned(additionalInfo);
 
         if (tag != std::get<0>(t)) {
             throw std::runtime_error("Invalid tag for tagged object");
+            return false;
         }
 
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, detail::tuple_tail(t));
+        return true;
     }
 
-    template <IsAggregate T> constexpr void decode(T &value) {
+    template <IsAggregate T> [[maybe_unused]] constexpr bool decode(T &value) {
         const auto &tuple = to_tuple(value);
 
         if constexpr (HasInlineTag<T>) {
             decode(static_tag<T::cbor_tag>{});
         }
         std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+        return true;
     }
 
-    template <IsAggregate T> constexpr void decode(T &value, major_type major, byte additionalInfo) {
+    template <IsAggregate T> [[maybe_unused]] constexpr bool decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
         }
@@ -178,13 +189,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         auto        tag   = decode_unsigned(additionalInfo);
         if constexpr (HasInlineTag<T>) {
             if (tag != T::cbor_tag) {
-                throw std::runtime_error("Invalid tag for tagged object");
+                // throw std::runtime_error("Invalid tag for tagged object");
+                return false;
             }
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
         } else {
             if constexpr (HasStaticTag<T>) {
                 if (tag != std::get<0>(tuple)) {
-                    throw std::runtime_error("Invalid tag for tagged object");
+                    // throw std::runtime_error("Invalid tag for tagged object");
+                    return false;
                 }
             } else {
                 std::get<0>(tuple) = tag;
@@ -192,6 +205,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
             std::apply([this](auto &&...args) { (this->decode(args), ...); }, detail::tuple_tail(tuple));
         }
+
+        return true;
     }
 
     template <IsUntaggedTuple T> constexpr void decode(T &value) {
@@ -260,22 +275,51 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
                 return false;
             }
 
+            // fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_full_type<U>(), magic_enum::enum_name(major),
+            //            additionalInfo);
+
+            U decoded_value;
             if constexpr (IsSimple<U>) {
                 if (!compare_simple_value<U>(additionalInfo)) {
                     return false;
                 }
+                this->decode(decoded_value, major, additionalInfo);
+            } else if constexpr (IsTag<U>) {
+                if (!decode(decoded_value, major, additionalInfo)) {
+                    // TODO: THIS WILL LEAVE IN A BAD STATE FOR INCOMPLETE PARSING OF STRUCTS!!!
+
+                    // Attempt reverse reader position depending on additionalInfo
+                    switch (additionalInfo) {
+                    case static_cast<byte>(27):
+                        reader_.position_--;
+                        reader_.position_--;
+                        reader_.position_--;
+                        reader_.position_--;
+                        [[fallthrough]];
+                    case static_cast<byte>(26):
+                        reader_.position_--;
+                        reader_.position_--;
+                        [[fallthrough]];
+                    case static_cast<byte>(25): reader_.position_--; [[fallthrough]];
+                    case static_cast<byte>(24): reader_.position_--; [[fallthrough]];
+                    default: break;
+                    }
+                    return false;
+                }
+            } else {
+                this->decode(decoded_value, major, additionalInfo);
             }
 
-            U decoded_value;
-            this->decode(decoded_value, major, additionalInfo);
             value = std::move(decoded_value);
             return true;
         };
 
-        bool found = (try_decode.template operator()<T>() || ...);
-        if (!found) {
-            throw std::runtime_error("Invalid major type for variant");
-        }
+        try {
+            bool found = (try_decode.template operator()<T>() || ...);
+            if (!found) {
+                throw std::runtime_error("Invalid major type for variant");
+            }
+        } catch (...) { std::rethrow_exception(std::current_exception()); }
     }
 
     template <typename T> constexpr void decode(T &value) {

@@ -17,6 +17,7 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 #include <format>
+#include <limits>
 #include <list>
 #include <map>
 #include <nameof.hpp>
@@ -227,5 +228,111 @@ TEST_CASE("Multi tag handling") {
 
         CHECK_EQ(result.a.a, 1);
         CHECK_EQ(result.b.b, 2);
+    }
+}
+
+template <size_t N> struct A0 {
+    static_tag<N> cbor_tag;
+};
+
+using A1 = A0<1>;
+using A2 = A0<2>;
+using A3 = A0<3>;
+
+TEST_CASE_TEMPLATE("Variant tags", AX, A1, A2, A3) {
+    using variant = std::variant<A1, A2, A3>;
+    variant v0    = AX{};
+
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+    enc(v0);
+
+    auto    dec = make_decoder(data);
+    variant v;
+    dec(v);
+
+    CHECK(std::holds_alternative<AX>(v));
+}
+
+template <size_t N> struct DerivedA0 : A0<N> {
+    int a;
+};
+using DerivedA1 = DerivedA0<1>;
+
+TEST_CASE_TEMPLATE("Derived tags", AX, A1, DerivedA1) {
+    // This cannot work as far as I know, need manual encoding/decoding
+    // auto &&[p1] = DerivedA1{};
+}
+
+namespace v1 {
+struct Version {
+    static_tag<std::numeric_limits<std::uint64_t>::max()> cbor_tag;
+    std::variant<A1, A2, A3>                              v;
+    double                                                damage;
+};
+} // namespace v1
+
+TEST_CASE_TEMPLATE("Variant tags in struct", AX, A1, A2, A3) {
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    v1::Version v{{}, AX{}, 3.14};
+    enc(v);
+
+    auto        dec = make_decoder(data);
+    v1::Version result;
+    dec(result);
+
+    CHECK(std::holds_alternative<AX>(result.v));
+    CHECK_EQ(result.damage, 3.14);
+}
+
+namespace v2 {
+struct Version {
+    static_tag<141>          cbor_tag;
+    std::variant<A1, A2, A3> v;
+    double                   damage;
+    std::string              name;
+};
+} // namespace v2
+
+TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
+    {
+        using VersionVariant = std::variant<v1::Version, v2::Version>;
+
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        VersionVariant v{v1::Version{{}, AX{}, 3.14}};
+        enc(v);
+
+        fmt::print("data: {}\n", to_hex(data));
+
+        auto           dec = make_decoder(data);
+        VersionVariant result;
+        dec(result);
+
+        REQUIRE(std::holds_alternative<v1::Version>(result));
+        CHECK_EQ(std::get<v1::Version>(result).damage, 3.14);
+    }
+
+    {
+        using VersionVariant = std::variant<v1::Version, v2::Version>;
+
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        VersionVariant v{v2::Version{{}, AX{}, 3.14, "Hello world!"}};
+        enc(v);
+
+        fmt::print("data: {}\n", to_hex(data));
+
+        auto           dec = make_decoder(data);
+        VersionVariant result;
+        dec(result);
+
+        REQUIRE(std::holds_alternative<v2::Version>(result));
+        CHECK_EQ(std::get<v2::Version>(result).damage, 3.14);
+        CHECK_EQ(std::get<v2::Version>(result).name, "Hello world!");
     }
 }
