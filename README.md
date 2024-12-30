@@ -79,6 +79,25 @@ struct InlineTagged {
 // to_tuple example here
 // showing how to use fold expression with visitor
 // show how to make a fully custom non cbor serializer
+
+// Note: This will NOT work
+template <size_t N> struct A0 {
+    static_tag<N> cbor_tag;
+};
+
+using A1 = A0<1>;
+
+template <size_t N> struct DerivedA0 : A0<N> {
+    using A0<N>::cbor_tag;
+    int a;
+};
+
+using DerivedA1 = DerivedA0<1>;
+
+void does_not_compile() {
+    auto [tag, a] = to_tuple(DerivedA1{});
+}
+
 ```
 
 ## 🛠️ Requirements

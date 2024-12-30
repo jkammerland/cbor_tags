@@ -201,3 +201,45 @@ TEST_CASE("CBOR - struct with enum + optional") {
     CHECK_EQ(os->extra.s, os2->extra.s);
     CHECK_EQ(static_cast<int8_t>(os->extra2.h), -1);
 }
+
+TEST_CASE("CBOR - struct with enum + variant") {
+    {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+
+        S                            s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+        std::variant<S, std::string> v = s;
+        enc(v);
+
+        auto                         dec = make_decoder(data);
+        std::variant<S, std::string> v2;
+        dec(v2);
+
+        CHECK_EQ(v.index(), v2.index());
+        const auto &s1 = std::get<S>(v);
+        const auto &s2 = std::get<S>(v2);
+        CHECK_EQ(s1.e, s2.e);
+        CHECK_EQ(s1.f, s2.f);
+        CHECK_EQ(s1.g, s2.g);
+        CHECK_EQ(s1.h, s2.h);
+        CHECK_EQ(static_cast<uint8_t>(s1.h), 255);
+        CHECK_EQ(s1.extra.s, s2.extra.s);
+        CHECK_EQ(static_cast<int8_t>(s1.extra2.h), -1);
+    }
+
+    {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+
+        S                            s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+        std::variant<S, std::string> v = "Hello world!";
+        enc(v);
+
+        auto                         dec = make_decoder(data);
+        std::variant<S, std::string> v2;
+        dec(v2);
+
+        CHECK_EQ(v.index(), v2.index());
+        CHECK_EQ(std::get<std::string>(v), std::get<std::string>(v2));
+    }
+}

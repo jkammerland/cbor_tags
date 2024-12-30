@@ -184,7 +184,7 @@ TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::
     CHECK_EQ(values, result);
 }
 
-TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string /*, std::variant<int, double> */) {
+TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::variant<int, double>) {
     using variant = std::variant<positive, T>;
     {
         std::vector<std::byte> buffer1;
