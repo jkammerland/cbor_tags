@@ -16,9 +16,6 @@
 #include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
-#include <span>
-#include <string>
-#include <string_view>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -136,7 +133,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(float value) {
         appender_(data_, static_cast<byte_type>(0xFA));
-        auto bits = std::bit_cast<std::uint32_t>(value);
+        const auto bits = std::bit_cast<std::uint32_t>(value);
         appender_(data_, static_cast<byte_type>(bits >> 24));
         appender_(data_, static_cast<byte_type>(bits >> 16));
         appender_(data_, static_cast<byte_type>(bits >> 8));
@@ -145,7 +142,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(double value) {
         appender_(data_, static_cast<byte_type>(0xFB));
-        auto bits = std::bit_cast<std::uint64_t>(value);
+        const auto bits = std::bit_cast<std::uint64_t>(value);
         appender_(data_, static_cast<byte_type>(bits >> 56));
         appender_(data_, static_cast<byte_type>(bits >> 48));
         appender_(data_, static_cast<byte_type>(bits >> 40));

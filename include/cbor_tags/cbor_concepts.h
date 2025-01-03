@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -31,6 +32,26 @@ concept ValidCborBuffer = requires(T) {
 
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
+
+// Status/Error handling
+enum class status : uint8_t {
+    success = 0,
+    incomplete,
+    invalid_major_type,
+    invalid_container_size,
+    invalid_tag,
+    invalid_tag_value,
+    invalid_major_type_for_variant,
+    invalid_major_type_for_enum,
+    invalid_major_type_for_binary_string,
+    invalid_major_type_for_text_string,
+    invalid_major_type_for_range_of_cbor_values,
+    out_of_memory
+};
+
+inline bool                  success(status &&value) { return value == status::success; }
+inline std::optional<status> failure(status &&value) { return value == status::success ? std::nullopt : std::optional<status>{value}; }
+// ---------
 
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
