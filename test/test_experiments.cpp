@@ -178,7 +178,12 @@ template <typename Derived> struct featureA_mixin {
     }
 };
 
-template <typename Derived> struct featureB_mixin : cbor::tags::crtp_base<Derived> {
+template <typename T> struct crtp_base {
+    constexpr T       &underlying() { return static_cast<T &>(*this); }
+    constexpr const T &underlying() const { return static_cast<const T &>(*this); }
+};
+
+template <typename Derived> struct featureB_mixin : ::crtp_base<Derived> {
     constexpr int decode(float) { return 2 + this->underlying().methodInA(); }
 };
 

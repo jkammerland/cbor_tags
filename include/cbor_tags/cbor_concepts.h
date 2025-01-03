@@ -46,7 +46,8 @@ enum class status : uint8_t {
     invalid_major_type_for_binary_string,
     invalid_major_type_for_text_string,
     invalid_major_type_for_range_of_cbor_values,
-    out_of_memory
+    out_of_memory,
+    internal_error
 };
 
 inline bool                  success(status &&value) { return value == status::success; }
@@ -324,24 +325,6 @@ template <IsUnsigned T> struct dynamic_tag {
 template <typename T>
 concept HasReserve = requires(T t) {
     { t.reserve(std::declval<typename T::size_type>()) };
-};
-
-template <typename T>
-concept IsEncoder = requires(T t) {
-    { t.appender_ };
-    { t.data_ };
-    { t.encode_major_and_size(std::declval<std::uint64_t>(), std::declval<std::byte>()) };
-};
-
-template <typename T>
-concept IsDecoder = requires(T t) {
-    { t.reader_ };
-    { t.data_ };
-};
-
-template <typename T> struct crtp_base {
-    constexpr T       &underlying() { return static_cast<T &>(*this); }
-    constexpr const T &underlying() const { return static_cast<const T &>(*this); }
 };
 
 template <typename T> struct always_false : std::false_type {};
