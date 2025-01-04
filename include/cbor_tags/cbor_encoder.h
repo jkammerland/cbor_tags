@@ -16,6 +16,7 @@
 #include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
+#include <new>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -38,11 +39,13 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
-    template <typename... T> [[maybe_unused]] status operator()(const T &...args) noexcept {
+    template <typename... T> status operator()(const T &...args) noexcept {
         try {
             (encode(args), ...);
             return status::success;
-        } catch (const std::exception &e) { return status::internal_error; }
+        } catch (const std::bad_alloc &) { return status::out_of_memory; } catch (const std::exception &e) {
+            return status::internal_error;
+        }
     }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {

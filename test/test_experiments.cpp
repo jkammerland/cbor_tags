@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <fmt/core.h>
 #include <functional>
@@ -380,4 +381,56 @@ TEST_CASE("TypeHandler test") {
 
     // Restore the original std::cout buffer
     std::cout.rdbuf(old);
+}
+
+template <auto Concept, typename... Ts> constexpr size_t count_satisfying() {
+    return (requires { Concept.operator()(std::declval<Ts>()); } + ... + 0);
+}
+
+template <auto Concept, typename... Ts> constexpr bool satisfies_atmost_one() { return count_satisfying<Concept, Ts...>() <= 1; }
+
+template <typename Variant, auto... Concepts> struct ValidConceptMapping;
+
+template <typename... Ts, auto... Concepts> struct ValidConceptMapping<std::variant<Ts...>, Concepts...> {
+    static constexpr bool types_map_uniquely = (satisfies_atmost_one<Concepts, Ts...>() && ...);
+
+    static constexpr bool all_types_mapped = ((count_satisfying<Concepts, Ts...>() + ...) >= sizeof...(Ts));
+
+    static constexpr bool value = types_map_uniquely && all_types_mapped;
+};
+
+// Helper variable template
+template <typename Variant, auto... Concepts>
+inline constexpr bool valid_concept_mapping_v = ValidConceptMapping<Variant, Concepts...>::value;
+
+// Example usage:
+template <typename T>
+concept Integral = std::integral<T>;
+
+template <typename T>
+concept Floating = std::floating_point<T>;
+
+template <typename T>
+concept String = std::same_as<T, std::string>;
+
+TEST_CASE_TEMPLATE("ValidConceptMapping test positive", T, std::variant<int, double>, std::variant<double, std::string>,
+                   std::variant<int, float, std::string>) {
+    using GoodVariant = T;
+
+    // Use lambdas to wrap concepts
+    constexpr auto integral_check = [](Integral auto) {};
+    constexpr auto floating_check = [](Floating auto) {};
+    constexpr auto string_check   = [](String auto) {};
+
+    static_assert(valid_concept_mapping_v<GoodVariant, integral_check, floating_check, string_check>);
+}
+
+TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, float, std::string, double>) {
+    using BadVariant = std::variant<int, float, std::string, double>;
+
+    constexpr auto integral_check = [](Integral auto) {};
+    constexpr auto floating_check = [](Floating auto) {};
+    constexpr auto string_check   = [](String auto) {};
+
+    static_assert(!valid_concept_mapping_v<BadVariant, integral_check, floating_check, string_check>);
 }

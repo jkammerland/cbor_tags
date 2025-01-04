@@ -146,7 +146,12 @@ TEST_CASE("CBOR - struct with enum") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    S s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+    S s{.e      = E::A,
+        .f      = F::B,
+        .g      = G::C,
+        .h      = H{static_cast<H>(255)},
+        .extra  = {.cbor_tag = {}, .s = "Hello"},
+        .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
     enc(s);
 
     auto dec = make_decoder(data);
@@ -185,7 +190,12 @@ TEST_CASE("CBOR - struct with enum + optional") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    S                s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+    S                s{.e      = E::A,
+                       .f      = F::B,
+                       .g      = G::C,
+                       .h      = H{static_cast<H>(255)},
+                       .extra  = {.cbor_tag = {}, .s = "Hello"},
+                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
     std::optional<S> os = s;
     enc(os);
 
@@ -207,7 +217,12 @@ TEST_CASE("CBOR - struct with enum + variant") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
 
-        S                            s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+        S                            s{.e      = E::A,
+                                       .f      = F::B,
+                                       .g      = G::C,
+                                       .h      = H{static_cast<H>(255)},
+                                       .extra  = {.cbor_tag = {}, .s = "Hello"},
+                                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = s;
         enc(v);
 
@@ -231,7 +246,12 @@ TEST_CASE("CBOR - struct with enum + variant") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
 
-        S                            s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+        S                            s{.e      = E::A,
+                                       .f      = F::B,
+                                       .g      = G::C,
+                                       .h      = H{static_cast<H>(255)},
+                                       .extra  = {.cbor_tag = {}, .s = "Hello"},
+                                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = "Hello world!";
         enc(v);
 

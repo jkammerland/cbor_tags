@@ -114,7 +114,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <std::uint64_t N> [[maybe_unused]] constexpr bool decode(static_tag<N>, major_type major, byte additionalInfo) {
+    template <std::uint64_t N> constexpr bool decode(static_tag<N>, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tag");
             return false;
@@ -126,7 +126,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return true;
     }
 
-    template <std::uint64_t N> [[maybe_unused]] constexpr bool decode(static_tag<N> value) {
+    template <std::uint64_t N> constexpr bool decode(static_tag<N> value) {
         auto [major, additionalInfo] = read_initial_byte();
         decode(value, major, additionalInfo);
         return true;
@@ -153,7 +153,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         decode(value, major, additionalInfo);
     }
 
-    template <IsTaggedTuple T> [[maybe_unused]] constexpr bool decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTaggedTuple T> constexpr bool decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
             return false;
@@ -170,7 +170,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return true;
     }
 
-    template <IsAggregate T> [[maybe_unused]] constexpr bool decode(T &value) {
+    template <IsAggregate T> constexpr bool decode(T &value) {
         const auto &tuple = to_tuple(value);
 
         if constexpr (HasInlineTag<T>) {
@@ -180,7 +180,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return true;
     }
 
-    template <IsAggregate T> [[maybe_unused]] constexpr bool decode(T &value, major_type major, byte additionalInfo) {
+    template <IsAggregate T> constexpr bool decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
         }
