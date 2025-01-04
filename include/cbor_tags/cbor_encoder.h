@@ -183,7 +183,20 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <typename... T> constexpr void encode(const std::variant<T...> &value) {
-        // static_assert();
+
+        [[maybe_unused]] auto Unsigned = [](IsUnsignedWithEnum auto) {};
+        [[maybe_unused]] auto Signed   = [](IsSignedWithEnum auto) {};
+        [[maybe_unused]] auto Negative = [](IsNegative auto) {};
+        [[maybe_unused]] auto Text     = [](IsString auto) {};
+        [[maybe_unused]] auto Binary   = [](IsBinaryString auto) {};
+        [[maybe_unused]] auto Array    = [](IsArray auto) {};
+        [[maybe_unused]] auto Map      = [](IsMap auto) {};
+        // [[maybe_unused]] auto Tag      = [](IsTag auto) {};
+        // [[maybe_unused]] auto Simple   = [](IsSimple auto) {};
+
+        // static_assert(valid_concept_mapping_v<std::remove_cvref_t<decltype(value)>, Unsigned, Signed, Text, Binary, Array, Map>,
+        //               "Ambiguous types in variant, you must not have multiple types with the same major type!");
+
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 

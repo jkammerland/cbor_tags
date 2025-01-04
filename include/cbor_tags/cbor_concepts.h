@@ -82,19 +82,31 @@ template <typename T>
 concept IsSimple = IsFloat16<T> || IsFloat32<T> || IsFloat64<T> || IsBool<T> || IsNull<T> || std::is_same_v<T, simple>;
 
 template <typename T>
-concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+concept IsEnum = std::is_enum_v<T>;
 
 template <typename T>
-concept IsSigned = (std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>;
+concept IsEnumUnsigned = IsEnum<T> && std::is_unsigned_v<std::underlying_type_t<T>>;
+
+template <typename T>
+concept IsEnumSigned = IsEnum<T> && std::is_signed_v<std::underlying_type_t<T>>;
+
+template <typename T>
+concept IsUnsigned = (std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>);
+
+template <typename T>
+concept IsUnsignedWithEnum = IsUnsigned<T> && IsEnumUnsigned<T>;
+
+template <typename T>
+concept IsSigned = ((std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>);
+
+template <typename T>
+concept IsSignedWithEnum = IsSigned<T> && IsEnumSigned<T>;
 
 template <typename T>
 concept IsNegative = std::is_same_v<T, negative>;
 
 template <typename T>
 concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
-
-template <typename T>
-concept IsEnum = std::is_enum_v<T>;
 
 template <typename T>
 concept IsTextString = requires(T t) {
