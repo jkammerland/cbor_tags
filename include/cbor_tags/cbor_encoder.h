@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/variant_handling.h"
 
 #include <bit>
 #include <bitset>
@@ -182,6 +183,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <typename... T> constexpr void encode(const std::variant<T...> &value) {
+        // static_assert();
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 
