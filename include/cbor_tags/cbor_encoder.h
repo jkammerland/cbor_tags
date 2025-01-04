@@ -89,7 +89,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     constexpr void encode(negative value) {
-        encode_major_and_size(static_cast<std::uint64_t>(-1 - value.value), static_cast<byte_type>(0x20));
+        encode_major_and_size(static_cast<std::uint64_t>(value.value - 1), static_cast<byte_type>(0x20));
     }
 
     constexpr void encode(integer value) {

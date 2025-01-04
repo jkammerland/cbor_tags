@@ -1,6 +1,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/variant_handling.h"
+#include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
@@ -111,13 +112,15 @@ TEST_CASE("CBOR variant enum") {
     }
 }
 
-TEST_CASE("CBOR variant enum + negative" * doctest::may_fail()) {
+TEST_CASE("CBOR variant enum + negative") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
     std::variant<G, negative> v = negative{42};
 
     enc(v);
+
+    fmt::print("buffer: {}\n", to_hex(data));
 
     auto                      dec = make_decoder(data);
     std::variant<G, negative> v2;
