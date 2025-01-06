@@ -180,14 +180,23 @@ constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &
     if constexpr (IsTag<T>) {
         unmatched = false;
 
-        if constexpr (HasInlineTag<T> || HasStaticTag<T>) {
+        if constexpr (HasInlineTag<T>) {
             auto it = std::find(tags.begin(), tags.end(), T::cbor_tag);
             if (it == tags.end()) {
                 tags.push_back(T::cbor_tag);
             } else {
                 result[6]++; // If duplicate tag is found
             }
-        } else {
+        } else if constexpr (HasStaticTag<T>) {
+            auto it = std::find(tags.begin(), tags.end(), decltype(T::cbor_tag){});
+            if (it == tags.end()) {
+                tags.push_back(decltype(T::cbor_tag){});
+            } else {
+                result[6]++; // If duplicate tag is found
+            }
+        }
+
+        else {
             result[6]++;
         }
     }
