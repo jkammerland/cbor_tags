@@ -77,6 +77,8 @@ TEST_CASE("Test IsMap concept with std::map") {
     static_assert(IsRangeOfCborValues<map_1>);
     static_assert(!IsFixedArray<map_1>);
     static_assert(!IsTuple<map_1>);
+    static_assert(!IsArray<map_1>);
+    static_assert(!IsOptional<map_1>);
 }
 
 TEST_CASE("Test IsMap concept with std::unordered_map") {
@@ -121,10 +123,9 @@ TEST_CASE("Test IsRangeOfCborValues concept") {
     static_assert(!IsRangeOfCborValues<array_2>);
 }
 
-TEST_CASE_TEMPLATE("Test IsArray", T, std::vector<int>, std::deque<int>, std::list<int>) {
+TEST_CASE_TEMPLATE("Test IsArray", T, std::vector<int>, std::deque<int>, std::list<int>, std::array<int, 5>) {
     static_assert(IsArray<T>);
     static_assert(IsRangeOfCborValues<T>);
-    static_assert(!IsFixedArray<T>);
     static_assert(!IsMap<T>);
     static_assert(!IsAggregate<T>);
 }
@@ -621,4 +622,20 @@ TEST_CASE("Literals") {
     static_assert(decltype(255_tag)::cbor_tag == 255);
     static_assert(decltype(0xFF_hex_tag)::cbor_tag == 255);
     static_assert(decltype(0xABC_hex_tag)::cbor_tag == 2748);
+}
+
+TEST_CASE_TEMPLATE("ValidConceptMapping test positive", T, std::variant<int, double>,
+                   std::variant<double, std::string, std::vector<std::byte>>,
+                   std::variant<int, float, std::string, std::vector<std::byte>, std::map<int, std::string>>,
+                   std::variant<uint64_t, negative>) {
+    using GoodVariant = T;
+
+    // Use lambdas to wrap concepts
+
+    auto result = valid_concept_mapping_v<GoodVariant>;
+    auto array  = valid_concept_mapping_array_v<GoodVariant>;
+    fmt::print("Result: {}\n", result);
+    fmt::print("Array: {}\n", array);
+
+    CHECK(result);
 }

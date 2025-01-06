@@ -94,13 +94,13 @@ template <typename T>
 concept IsUnsigned = (std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>);
 
 template <typename T>
-concept IsUnsignedWithEnum = IsUnsigned<T> && IsEnumUnsigned<T>;
+concept IsUnsignedOrEnum = IsUnsigned<T> || IsEnumUnsigned<T>;
 
 template <typename T>
 concept IsSigned = ((std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>);
 
 template <typename T>
-concept IsSignedWithEnum = IsSigned<T> && IsEnumSigned<T>;
+concept IsSignedOrEnum = IsSigned<T> || IsEnumSigned<T>;
 
 template <typename T>
 concept IsNegative = std::is_same_v<T, negative>;
@@ -135,9 +135,6 @@ concept IsFixedArray = requires {
 };
 
 template <typename T>
-concept IsArray = IsRangeOfCborValues<T> && !IsFixedArray<T>;
-
-template <typename T>
 concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     typename T::key_type;
     typename T::mapped_type;
@@ -147,6 +144,9 @@ concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
     { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
 };
+
+template <typename T>
+concept IsArray = IsRangeOfCborValues<T> && !IsMap<T>;
 
 template <typename T>
 concept IsTuple = requires {

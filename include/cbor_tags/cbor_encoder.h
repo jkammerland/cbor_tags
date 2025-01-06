@@ -184,18 +184,24 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     template <typename... T> constexpr void encode(const std::variant<T...> &value) {
 
-        [[maybe_unused]] auto Unsigned = [](IsUnsignedWithEnum auto) {};
-        [[maybe_unused]] auto Signed   = [](IsSignedWithEnum auto) {};
+        [[maybe_unused]] auto Unsigned = [](IsUnsignedOrEnum auto) {};
+        [[maybe_unused]] auto Signed   = [](IsSignedOrEnum auto) {};
         [[maybe_unused]] auto Negative = [](IsNegative auto) {};
         [[maybe_unused]] auto Text     = [](IsString auto) {};
         [[maybe_unused]] auto Binary   = [](IsBinaryString auto) {};
         [[maybe_unused]] auto Array    = [](IsArray auto) {};
         [[maybe_unused]] auto Map      = [](IsMap auto) {};
-        // [[maybe_unused]] auto Tag      = [](IsTag auto) {};
-        // [[maybe_unused]] auto Simple   = [](IsSimple auto) {};
+        [[maybe_unused]] auto Tag      = [](IsTag auto) {};
+        [[maybe_unused]] auto Simple   = [](IsSimple auto) {};
 
-        // static_assert(valid_concept_mapping_v<std::remove_cvref_t<decltype(value)>, Unsigned, Signed, Text, Binary, Array, Map>,
-        //               "Ambiguous types in variant, you must not have multiple types with the same major type!");
+        // constexpr bool valid_1 =
+        //     valid_concept_mapping_v<std::remove_cvref_t<decltype(value)>, Unsigned, Negative, Text, Binary, Array, Map, Tag, Simple>;
+        // constexpr bool valid_2 =
+        //     valid_concept_mapping_v<std::remove_cvref_t<decltype(value)>, Signed, Text, Binary, Array, Map, Tag, Simple>;
+        // static_assert(valid_1 || valid_2,
+        //               "Missing or ambiguous types in variant, you must not have multiple types with the same major type! e.g std::map or
+        //               " "std::unordered_map, tag types with the same cbor_tag, or multiple (untagged) enums. Also the types must map to a
+        //               " "cbor major type concept, you'll have to check why.");
 
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }

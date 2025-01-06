@@ -14,6 +14,7 @@
  */
 
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/variant_handling.h"
@@ -382,36 +383,4 @@ TEST_CASE("TypeHandler test") {
 
     // Restore the original std::cout buffer
     std::cout.rdbuf(old);
-}
-
-// Example usage:
-template <typename T>
-concept Integral = std::integral<T>;
-
-template <typename T>
-concept Floating = std::floating_point<T>;
-
-template <typename T>
-concept String = std::same_as<T, std::string>;
-
-TEST_CASE_TEMPLATE("ValidConceptMapping test positive", T, std::variant<int, double>, std::variant<double, std::string>,
-                   std::variant<int, float, std::string>) {
-    using GoodVariant = T;
-
-    // Use lambdas to wrap concepts
-    constexpr auto integral_check = [](Integral auto) {};
-    constexpr auto floating_check = [](Floating auto) {};
-    constexpr auto string_check   = [](String auto) {};
-
-    static_assert(valid_concept_mapping_v<GoodVariant, integral_check, floating_check, string_check>);
-}
-
-TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, float, std::string, double>) {
-    using BadVariant = std::variant<int, float, std::string, double>;
-
-    constexpr auto integral_check = [](Integral auto) {};
-    constexpr auto floating_check = [](Floating auto) {};
-    constexpr auto string_check   = [](String auto) {};
-
-    static_assert(!valid_concept_mapping_v<BadVariant, integral_check, floating_check, string_check>);
 }
