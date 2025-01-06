@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/variant_handling.h"
 
 #include <bit>
 #include <bitset>
@@ -16,9 +17,7 @@
 #include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
-#include <span>
-#include <string>
-#include <string_view>
+#include <new>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -41,7 +40,15 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
-    template <typename... T> constexpr void operator()(const T &...args) { (encode(args), ...); }
+    template <typename... T> status operator()(const T &...args) noexcept {
+        try {
+            (encode(args), ...);
+            return status::success;
+        } catch (const std::bad_alloc &) { return status::out_of_memory; } catch (const std::exception &e) {
+            // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
+            return status::placeholder_error; // placeholder
+        }
+    }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
         if (value < 24) {
@@ -83,7 +90,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     constexpr void encode(negative value) {
-        encode_major_and_size(static_cast<std::uint64_t>(-1 - value.value), static_cast<byte_type>(0x20));
+        encode_major_and_size(static_cast<std::uint64_t>(value.value - 1), static_cast<byte_type>(0x20));
     }
 
     constexpr void encode(integer value) {
@@ -136,7 +143,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(float value) {
         appender_(data_, static_cast<byte_type>(0xFA));
-        auto bits = std::bit_cast<std::uint32_t>(value);
+        const auto bits = std::bit_cast<std::uint32_t>(value);
         appender_(data_, static_cast<byte_type>(bits >> 24));
         appender_(data_, static_cast<byte_type>(bits >> 16));
         appender_(data_, static_cast<byte_type>(bits >> 8));
@@ -145,7 +152,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
 
     constexpr void encode(double value) {
         appender_(data_, static_cast<byte_type>(0xFB));
-        auto bits = std::bit_cast<std::uint64_t>(value);
+        const auto bits = std::bit_cast<std::uint64_t>(value);
         appender_(data_, static_cast<byte_type>(bits >> 56));
         appender_(data_, static_cast<byte_type>(bits >> 48));
         appender_(data_, static_cast<byte_type>(bits >> 40));
@@ -177,6 +184,7 @@ struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
     }
 
     template <typename... T> constexpr void encode(const std::variant<T...> &value) {
+        // encoding a variant is less strict than decoding
         std::visit([this](const auto &v) { this->encode(v); }, value);
     }
 

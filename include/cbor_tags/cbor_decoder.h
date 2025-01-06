@@ -46,7 +46,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    template <typename... T> constexpr void operator()(T &&...args) { (decode(args), ...); }
+    template <typename... T> status operator()(T &&...args) noexcept {
+        try {
+            (decode(args), ...);
+            return status::success;
+        } catch (const std::bad_alloc &) { return status::out_of_memory; } catch (const std::exception &) {
+            // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
+            return status::placeholder_error; // placeholder
+        }
+    }
 
     template <IsSigned T> constexpr void decode(T &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
@@ -114,7 +122,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         }
     }
 
-    template <std::uint64_t N> [[maybe_unused]] constexpr bool decode(static_tag<N>, major_type major, byte additionalInfo) {
+    template <std::uint64_t N> constexpr bool decode(static_tag<N>, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tag");
             return false;
@@ -126,7 +134,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return true;
     }
 
-    template <std::uint64_t N> [[maybe_unused]] constexpr bool decode(static_tag<N> value) {
+    template <std::uint64_t N> constexpr bool decode(static_tag<N> value) {
         auto [major, additionalInfo] = read_initial_byte();
         decode(value, major, additionalInfo);
         return true;
@@ -153,7 +161,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         decode(value, major, additionalInfo);
     }
 
-    template <IsTaggedTuple T> [[maybe_unused]] constexpr bool decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTaggedTuple T> constexpr bool decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
             return false;
@@ -170,7 +178,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return true;
     }
 
-    template <IsAggregate T> [[maybe_unused]] constexpr bool decode(T &value) {
+    template <IsAggregate T> constexpr bool decode(T &value) {
         const auto &tuple = to_tuple(value);
 
         if constexpr (HasInlineTag<T>) {
@@ -180,7 +188,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         return true;
     }
 
-    template <IsAggregate T> [[maybe_unused]] constexpr bool decode(T &value, major_type major, byte additionalInfo) {
+    template <IsAggregate T> constexpr bool decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             throw std::runtime_error("Invalid major type for tagged object");
         }
@@ -270,6 +278,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
     }
 
     template <IsCborMajor... T> constexpr void decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+        using Variant                                                      = std::variant<T...>;
+        constexpr auto                  no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
+        [[maybe_unused]] constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
+        static_assert(matching_major_types[0] <= 1, "Multiple types match against major type 0 (unsigned integer)");
+        static_assert(matching_major_types[1] <= 1, "Multiple types match against major type 1 (negative integer)");
+        static_assert(matching_major_types[2] <= 1, "Multiple types match against major type 2 (byte string)");
+        static_assert(matching_major_types[3] <= 1, "Multiple types match against major type 3 (text string)");
+        static_assert(matching_major_types[4] <= 1, "Multiple types match against major type 4 (array)");
+        static_assert(matching_major_types[5] <= 1, "Multiple types match against major type 5 (map)");
+        static_assert(matching_major_types[6] <= 1, "Multiple types match against major type 6 (tag)");
+        static_assert(matching_major_types[7] <= 1, "Multiple types match against major type 7 (simple)");
+        // static_assert(matching_major_types[8] == 0, "Unmatched major types in variant");
+
+        static_assert(no_ambigous_major_types_in_variant, "Variant has ambigous major types, if this would compile, only the first type \
+                                                          (among the ambigous) would match against a decode. Uncomment the lines above for better diagnostics.");
+
         auto try_decode = [this, major, additionalInfo, &value]<typename U>() -> bool {
             if (!is_valid_major<decltype(major), U>(major)) {
                 return false;

@@ -426,6 +426,7 @@ TEST_CASE("Sanity check equal size map unordered_map") {
     CHECK_EQ(string_map1.size(), string_map2.size());
 }
 
+// TODO:
 TEST_CASE("CBOR Encoder - Map of float sorted" * doctest::skip()) {
     using namespace cbor::tags;
     using variant = std::variant<int, float, double, bool, std::nullptr_t, std::string>;
@@ -437,9 +438,9 @@ TEST_CASE("CBOR Encoder - Map of float sorted" * doctest::skip()) {
 
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
-    // auto                   dec = make_decoder(data);
 
-    enc(float_map);
+    auto result = enc(float_map);
+    REQUIRE_EQ(result, status::success);
 
     fmt::print("Float map: {}\n", to_hex(data));
 

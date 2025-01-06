@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -31,6 +32,27 @@ concept ValidCborBuffer = requires(T) {
 
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
+
+// Status/Error handling
+enum class status : uint8_t {
+    success = 0,
+    incomplete,
+    invalid_major_type,
+    invalid_container_size,
+    invalid_tag,
+    invalid_tag_value,
+    invalid_major_type_for_variant,
+    invalid_major_type_for_enum,
+    invalid_major_type_for_binary_string,
+    invalid_major_type_for_text_string,
+    invalid_major_type_for_range_of_cbor_values,
+    out_of_memory,
+    placeholder_error
+};
+
+inline bool                  success(status &&value) { return value == status::success; }
+inline std::optional<status> failure(status &&value) { return value == status::success ? std::nullopt : std::optional<status>{value}; }
+// ---------
 
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
@@ -60,19 +82,31 @@ template <typename T>
 concept IsSimple = IsFloat16<T> || IsFloat32<T> || IsFloat64<T> || IsBool<T> || IsNull<T> || std::is_same_v<T, simple>;
 
 template <typename T>
-concept IsUnsigned = std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>;
+concept IsEnum = std::is_enum_v<T>;
 
 template <typename T>
-concept IsSigned = (std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>;
+concept IsEnumUnsigned = IsEnum<T> && std::is_unsigned_v<std::underlying_type_t<T>>;
+
+template <typename T>
+concept IsEnumSigned = IsEnum<T> && std::is_signed_v<std::underlying_type_t<T>>;
+
+template <typename T>
+concept IsUnsigned = (std::is_unsigned_v<T> && std::is_integral_v<T> && !IsSimple<T>);
+
+template <typename T>
+concept IsUnsignedOrEnum = IsUnsigned<T> || IsEnumUnsigned<T>;
+
+template <typename T>
+concept IsSigned = ((std::is_signed_v<T> && std::is_integral_v<T> && !IsSimple<T>) || std::is_same_v<T, integer>);
+
+template <typename T>
+concept IsSignedOrEnum = IsSigned<T> || IsEnumSigned<T>;
 
 template <typename T>
 concept IsNegative = std::is_same_v<T, negative>;
 
 template <typename T>
 concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
-
-template <typename T>
-concept IsEnum = std::is_enum_v<T>;
 
 template <typename T>
 concept IsTextString = requires(T t) {
@@ -101,9 +135,6 @@ concept IsFixedArray = requires {
 };
 
 template <typename T>
-concept IsArray = IsRangeOfCborValues<T> && !IsFixedArray<T>;
-
-template <typename T>
 concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     typename T::key_type;
     typename T::mapped_type;
@@ -113,6 +144,9 @@ concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
     { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
 };
+
+template <typename T>
+concept IsArray = IsRangeOfCborValues<T> && !IsMap<T>;
 
 template <typename T>
 concept IsTuple = requires {
@@ -303,24 +337,6 @@ template <IsUnsigned T> struct dynamic_tag {
 template <typename T>
 concept HasReserve = requires(T t) {
     { t.reserve(std::declval<typename T::size_type>()) };
-};
-
-template <typename T>
-concept IsEncoder = requires(T t) {
-    { t.appender_ };
-    { t.data_ };
-    { t.encode_major_and_size(std::declval<std::uint64_t>(), std::declval<std::byte>()) };
-};
-
-template <typename T>
-concept IsDecoder = requires(T t) {
-    { t.reader_ };
-    { t.data_ };
-};
-
-template <typename T> struct crtp_base {
-    constexpr T       &underlying() { return static_cast<T &>(*this); }
-    constexpr const T &underlying() const { return static_cast<const T &>(*this); }
 };
 
 template <typename T> struct always_false : std::false_type {};

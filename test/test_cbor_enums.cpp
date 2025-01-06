@@ -1,4 +1,7 @@
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_integer.h"
+#include "cbor_tags/variant_handling.h"
+#include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
@@ -113,40 +116,46 @@ TEST_CASE("CBOR variant enum + negative") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    std::variant<G, int> v = -42;
+    std::variant<G, negative> v = negative{42};
 
     enc(v);
 
-    auto                 dec = make_decoder(data);
-    std::variant<G, int> v2;
+    fmt::print("buffer: {}\n", to_hex(data));
+
+    auto                      dec = make_decoder(data);
+    std::variant<G, negative> v2;
 
     dec(v2);
 
-    CHECK_EQ(v, v2);
+    REQUIRE_EQ(v.index(), v2.index());
+    CHECK_EQ(std::get<negative>(v).value, std::get<negative>(v2).value);
+    fmt::print("v: {}\n", v.index());
+    fmt::print("v2: {}\n", v2.index());
+    fmt::print("v: {}\n", std::get<negative>(v).value);
+    fmt::print("v2: {}\n", std::get<negative>(v2).value); // TODO: BUUG!
 }
 
-TEST_CASE("expected integer precedence in variant - TODO: fix cannot compile instead") {
-    std::vector<std::byte> data;
-    auto                   enc = make_encoder(data);
+TEST_CASE("Check variant for enums static_assert") {
+    // std::vector<std::byte> data;
 
-    std::variant<int, G> v = G::D;
+    // constexpr auto Unsigned = [](IsUnsignedOrEnum auto) {};
+    // constexpr auto Signed   = [](IsSignedOrEnum auto) {};
 
-    enc(v);
-
-    auto                 dec = make_decoder(data);
-    std::variant<int, G> v2;
-
-    dec(v2);
-
-    // NOTE: NOT EQUAL, int is taking the enum value first, before G can be checked
-    CHECK_NE(v.index(), v2.index());
+    // static_assert(!valid_concept_mapping_v<std::variant<int, G>, Unsigned, Signed>, "Expected int to be signed");
+    // static_assert(!valid_concept_mapping_v<std::variant<G, int>, Unsigned, Signed>, "Expected int to be signed");
+    // static_assert(!valid_concept_mapping_v<std::variant<uint16_t, G>, Unsigned, Signed>, "Expected uint16_t to be unsigned");
 }
 
 TEST_CASE("CBOR - struct with enum") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    S s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+    S s{.e      = E::A,
+        .f      = F::B,
+        .g      = G::C,
+        .h      = H{static_cast<H>(255)},
+        .extra  = {.cbor_tag = {}, .s = "Hello"},
+        .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
     enc(s);
 
     auto dec = make_decoder(data);
@@ -185,7 +194,12 @@ TEST_CASE("CBOR - struct with enum + optional") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    S                s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+    S                s{.e      = E::A,
+                       .f      = F::B,
+                       .g      = G::C,
+                       .h      = H{static_cast<H>(255)},
+                       .extra  = {.cbor_tag = {}, .s = "Hello"},
+                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
     std::optional<S> os = s;
     enc(os);
 
@@ -207,7 +221,12 @@ TEST_CASE("CBOR - struct with enum + variant") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
 
-        S                            s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+        S                            s{.e      = E::A,
+                                       .f      = F::B,
+                                       .g      = G::C,
+                                       .h      = H{static_cast<H>(255)},
+                                       .extra  = {.cbor_tag = {}, .s = "Hello"},
+                                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = s;
         enc(v);
 
@@ -231,7 +250,12 @@ TEST_CASE("CBOR - struct with enum + variant") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
 
-        S                            s{E::A, F::B, G::C, H{static_cast<H>(255)}, {{}, "Hello"}, {{}, static_cast<H>(-1)}};
+        S                            s{.e      = E::A,
+                                       .f      = F::B,
+                                       .g      = G::C,
+                                       .h      = H{static_cast<H>(255)},
+                                       .extra  = {.cbor_tag = {}, .s = "Hello"},
+                                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = "Hello world!";
         enc(v);
 

@@ -1,2 +1,2 @@
-Checks: '-*,modernize-*,-modernize-use-trailing-return-type,-modernize-avoid-c-arrays,-modernize-use-nodiscard,-modernize-use-using'
+Checks: '-*,modernize-*,-modernize-use-trailing-return-type,-modernize-avoid-c-arrays,-modernize-use-nodiscard,-modernize-use-using,-modernize-use-std-numbers'
 HeaderFilterRegex: '^src/.*|^include/.*'

@@ -184,7 +184,7 @@ TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::
     CHECK_EQ(values, result);
 }
 
-TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::variant<int, double>) {
+TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::variant<negative, double>) {
     using variant = std::variant<positive, T>;
     {
         std::vector<std::byte> buffer1;
@@ -208,7 +208,7 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
         variant                v;
         if constexpr (IsVariant<T>) {
             if (std::rand() % 2 == 0) {
-                v = static_cast<int>(-std::rand() % 100000);
+                v = negative(std::rand() % 100000);
             } else {
                 v = static_cast<double>(std::rand() % 100000);
             }

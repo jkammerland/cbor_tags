@@ -77,6 +77,8 @@ TEST_CASE("Test IsMap concept with std::map") {
     static_assert(IsRangeOfCborValues<map_1>);
     static_assert(!IsFixedArray<map_1>);
     static_assert(!IsTuple<map_1>);
+    static_assert(!IsArray<map_1>);
+    static_assert(!IsOptional<map_1>);
 }
 
 TEST_CASE("Test IsMap concept with std::unordered_map") {
@@ -121,10 +123,9 @@ TEST_CASE("Test IsRangeOfCborValues concept") {
     static_assert(!IsRangeOfCborValues<array_2>);
 }
 
-TEST_CASE_TEMPLATE("Test IsArray", T, std::vector<int>, std::deque<int>, std::list<int>) {
+TEST_CASE_TEMPLATE("Test IsArray", T, std::vector<int>, std::deque<int>, std::list<int>, std::array<int, 5>) {
     static_assert(IsArray<T>);
     static_assert(IsRangeOfCborValues<T>);
-    static_assert(!IsFixedArray<T>);
     static_assert(!IsMap<T>);
     static_assert(!IsAggregate<T>);
 }
@@ -621,4 +622,97 @@ TEST_CASE("Literals") {
     static_assert(decltype(255_tag)::cbor_tag == 255);
     static_assert(decltype(0xFF_hex_tag)::cbor_tag == 255);
     static_assert(decltype(0xABC_hex_tag)::cbor_tag == 2748);
+}
+
+enum class E1 { A, B, C, D };
+
+struct A2 {
+    static constexpr std::uint64_t cbor_tag = 1;
+    E1                             e;
+    double                         d;
+};
+
+struct B2 {
+    static constexpr std::uint64_t cbor_tag = 2;
+    E1                             e;
+    double                         d;
+};
+
+TEST_CASE_TEMPLATE(
+    "ValidConceptMapping test positive", T, std::variant<int, double>, std::variant<double, std::string, std::vector<std::byte>>,
+    std::variant<int, float, std::string, std::vector<std::byte>, std::vector<uint16_t>, static_tag<2>, std::map<int, std::string>>,
+    std::variant<uint64_t, negative>, std::variant<static_tag<1>, static_tag<2>, static_tag<3>>, std::variant<static_tag<1>, E1>,
+    std::variant<static_tag<1>, E1, B2>,
+    std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2, A2,
+                 std::array<int, 5>, std::map<int, std::string>>) {
+
+    // Use lambdas to wrap concepts
+
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
+    fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
+
+    CHECK(result);
+    CHECK_EQ(unmatched, 0);
+}
+
+TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, negative>, std::variant<int, positive>, std::variant<E1, int>,
+                   std::variant<E1, negative>, std::variant<E1, positive>, std::variant<std::string, std::string_view>,
+                   std::variant<std::vector<std::byte>, std::span<const std::byte>>, std::variant<std::byte, std::uint8_t>,
+                   std::variant<static_tag<1>, dynamic_tag<uint64_t>>,
+                   std::variant<std::map<int, std::string>, std::unordered_map<int, double>>,
+                   std::variant<static_tag<1>, static_tag<2>, static_tag<1>>, std::variant<static_tag<2>, E1, B2>,
+                   std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2,
+                                A2, std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>) {
+
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
+    fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
+
+    CHECK(!result);
+    CHECK_EQ(unmatched, 0);
+}
+
+struct VA1 {
+    static constexpr std::uint64_t cbor_tag = 1;
+    E1                             e1;
+};
+
+struct VA2 {
+    static constexpr std::uint64_t cbor_tag = 2;
+    E1                             e1;
+};
+
+struct VA3 {
+    static constexpr std::uint64_t cbor_tag = 3;
+    E1                             e1;
+};
+
+struct VA4 {
+    static constexpr std::uint64_t cbor_tag = 4;
+    E1                             e1;
+};
+
+TEST_CASE_TEMPLATE("Nested variants positive", T, std::variant<std::variant<VA1, VA2>, std::variant<VA3, VA4>>,
+                   std::variant<std::variant<double, std::nullptr_t>, std::variant<bool, float>>) {
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
+    fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
+
+    CHECK(result);
+    CHECK_EQ(unmatched, 0);
+}
+
+TEST_CASE_TEMPLATE("Nested variants negative", T, std::variant<std::variant<VA1, VA2>, std::variant<VA3, static_tag<1>>>,
+                   std::variant<std::variant<double, float>, std::variant<bool, float>>) {
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
+    fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
+
+    CHECK(!result);
+    CHECK_EQ(unmatched, 0);
 }
