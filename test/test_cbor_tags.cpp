@@ -20,6 +20,7 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <memory_resource>
 #include <nameof.hpp>
 #include <optional>
 #include <set>
@@ -217,7 +218,7 @@ TEST_CASE("Multi tag handling") {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        enc(MultiObj{{}, {{}, 1}, {{}, 2}});
+        enc(MultiObj{.cbor_tag = {}, .a = {.cbor_tag = {}, .a = 1}, .b = {.cbor_tag = {}, .b = 2}});
 
         fmt::print("data: {}\n", to_hex(data));
         REQUIRE_EQ(to_hex(data), "d88cd88e01d88d02");
@@ -281,7 +282,7 @@ TEST_CASE_TEMPLATE("Variant tags in struct", AX, A1, A2, A3) {
 
     auto        dec = make_decoder(data);
     v1::Version result;
-    dec(result);
+    REQUIRE_EQ(dec(result), status::success);
 
     CHECK(std::holds_alternative<AX>(result.v));
     CHECK_EQ(result.damage, 3.14);
@@ -310,7 +311,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
 
         auto           dec = make_decoder(data);
         VersionVariant result;
-        dec(result);
+        REQUIRE_EQ(dec(result), status::success);
 
         REQUIRE(std::holds_alternative<v1::Version>(result));
         CHECK_EQ(std::get<v1::Version>(result).damage, 3.14);
@@ -329,10 +330,67 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
 
         auto           dec = make_decoder(data);
         VersionVariant result;
-        dec(result);
+        REQUIRE_EQ(dec(result), status::success);
 
         REQUIRE(std::holds_alternative<v2::Version>(result));
         CHECK_EQ(std::get<v2::Version>(result).damage, 3.14);
         CHECK_EQ(std::get<v2::Version>(result).name, "Hello world!");
     }
+}
+
+TEST_CASE("Status handling - memory") {
+    std::array<std::byte, 1024>         R;
+    std::pmr::monotonic_buffer_resource resource(R.data(), R.size(), std::pmr::null_memory_resource());
+    std::pmr::vector<std::byte>         buffer(&resource);
+
+    auto enc = make_encoder(buffer);
+
+    struct A {
+        static_tag<140> cbor_tag;
+        int             a;
+    };
+
+    std::vector<A> v(1e3, A{.cbor_tag = {}, .a = 42});
+    auto           result = enc(v);
+    CHECK_EQ(result, status::out_of_memory);
+}
+
+TEST_CASE("Status handling - decode wrong tag") {
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    using namespace literals;
+    auto result = enc(make_tag_pair(140_tag, A1{}));
+    CHECK_EQ(result, status::success);
+
+    auto dec = make_decoder(data);
+    A1   a1;
+    auto result2 = dec(make_tag_pair(141_tag, a1));
+    CHECK_EQ(result2, status::placeholder_error); // internal error for now
+}
+
+TEST_CASE("Advanced tag problem positive") {
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    std::variant<A1, A2, A3> v = A3{};
+    REQUIRE_EQ(enc(v), status::success);
+
+    auto                     dec = make_decoder(data);
+    std::variant<A1, A2, A3> result;
+    REQUIRE_EQ(dec(result), status::success);
+
+    CHECK(std::holds_alternative<A3>(result));
+}
+
+TEST_CASE("Advanced tag problem negative") {
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    std::variant<A1, A2, A3> v = A3{};
+    REQUIRE_EQ(enc(v), status::success);
+
+    auto                 dec = make_decoder(data);
+    std::variant<A1, A2> result;
+    REQUIRE_EQ(dec(result), status::placeholder_error);
 }

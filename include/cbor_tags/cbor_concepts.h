@@ -47,7 +47,7 @@ enum class status : uint8_t {
     invalid_major_type_for_text_string,
     invalid_major_type_for_range_of_cbor_values,
     out_of_memory,
-    internal_error
+    placeholder_error
 };
 
 inline bool                  success(status &&value) { return value == status::success; }
