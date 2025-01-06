@@ -1,13 +1,16 @@
 #pragma once
 
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 
 // #include <fmt/core.h>
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <numeric>
 #include <type_traits>
+#include <vector>
 
 namespace cbor::tags {
 
@@ -78,32 +81,66 @@ constexpr auto CheckSimple   = [](IsSimple auto) { return 7; };
 constexpr auto CheckSigned   = [](IsSignedWithEnum auto) { return 8; };
 */
 
-template <typename T> constexpr void getMatchCount(std::array<int, 9> &result) {
-    if constexpr (IsUnsignedOrEnum<T>) {
+template <typename T>
+constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
+    bool unmatched = true;
+
+    if constexpr (IsUnsignedOrEnum<T> || IsSignedOrEnum<T>) {
+        unmatched = false;
         result[0]++;
     }
-    if constexpr (IsNegative<T>) {
+    if constexpr (IsNegative<T> || IsSignedOrEnum<T>) {
+        unmatched = false;
         result[1]++;
     }
     if constexpr (IsBinaryString<T>) {
+        unmatched = false;
         result[2]++;
     }
     if constexpr (IsTextString<T>) {
+        unmatched = false;
         result[3]++;
     }
     if constexpr (IsArray<T>) {
+        unmatched = false;
         result[4]++;
     }
     if constexpr (IsMap<T>) {
+        unmatched = false;
         result[5]++;
     }
     if constexpr (IsTag<T>) {
-        result[6]++;
+        unmatched = false;
+
+        if constexpr (HasInlineTag<T> || HasStaticTag<T>) {
+            auto it = std::find(tags.begin(), tags.end(), T::cbor_tag);
+            if (it == tags.end()) {
+                tags.push_back(T::cbor_tag);
+            } else {
+                result[6]++; // If duplicate tag is found
+            }
+        } else {
+            result[6]++;
+        }
     }
     if constexpr (IsSimple<T>) {
-        result[7]++;
+        unmatched = false;
+
+        auto current_tag = get_simple_tag_of_primitive_type<T>();
+        if (current_tag == SimpleType::Undefined) {
+            result[8]++;
+            return;
+        }
+
+        auto it = std::find(simples.begin(), simples.end(), current_tag);
+        if (it == simples.end()) {
+            simples.push_back(current_tag);
+        } else {
+            result[7]++; // If duplicate simple type is found
+        }
     }
-    if constexpr (IsSignedOrEnum<T>) {
+
+    if (unmatched) {
         result[8]++;
     }
 }
@@ -118,17 +155,25 @@ template <typename Variant, auto... Concepts> struct ValidConceptMapping;
 
 template <template <typename...> typename Variant, typename... Ts, auto... Concepts>
 struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
-    static constexpr auto counts = []() {
-        std::array<int, 9> result{};
-        (getMatchCount<Ts>(result), ...);
+    static constexpr auto counts = []() mutable {
+        std::array<int, 9>      result{};
+        std::vector<uint64_t>   tags;
+        std::vector<SimpleType> simples;
+        (getMatchCount<Ts>(result, tags, simples), ...);
+        if (tags.size() > 0) {
+            result[6]++; // If any tag has been duplicated, this will be > 1, i.e invalid
+        }
+        if (simples.size() > 0) {
+            result[7]++; // If any simple type has been duplicated, this will be > 1, i.e invalid
+        }
         return result;
     }();
 
     static constexpr bool types_map_uniquely = std::all_of(counts.begin(), counts.end(), [](int count) { return count <= 1; });
-    static constexpr bool all_types_mapped   = std::accumulate(counts.begin(), counts.end(), 0) >= sizeof...(Ts);
 
-    static constexpr bool value = types_map_uniquely && all_types_mapped;
-    static constexpr auto array = counts;
+    static constexpr auto number_of_unmatched = counts[counts.size() - 1];
+    static constexpr bool value               = types_map_uniquely;
+    static constexpr auto array               = counts;
 };
 
 template <typename Variant, auto... Concepts>
@@ -136,5 +181,8 @@ inline constexpr bool valid_concept_mapping_v = ValidConceptMapping<Variant, Con
 
 template <typename Variant, auto... Concepts>
 inline constexpr auto valid_concept_mapping_array_v = ValidConceptMapping<Variant, Concepts...>::array;
+
+template <typename Variant, auto... Concepts>
+inline constexpr auto valid_concept_mapping_n_unmatched_v = ValidConceptMapping<Variant, Concepts...>::number_of_unmatched;
 
 } // namespace cbor::tags

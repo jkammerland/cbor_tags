@@ -167,24 +167,55 @@ template <IsSimple T> constexpr std::byte get_simple_5_bit_value() {
         return static_cast<std::byte>(0x00);
     }
 }
-// Compare function for simple types taking byte with additional info
+enum class SimpleType : std::uint8_t {
+    Undefined  = 0x00,
+    Bool_False = 0x14,
+    Bool_True  = 0x15,
+    Null       = 0x16,
+    Simple     = 0x18,
+    Float16    = 0x19,
+    Float32    = 0x1A,
+    Float64    = 0x1B,
+    End_Marker = 0xFF // Used for end_string, end_array, and end_map
+};
+
 template <IsSimple T> constexpr bool compare_simple_value(std::byte value) {
     if constexpr (IsBool<T>) {
-        return value == static_cast<std::byte>(0x14) || value == static_cast<std::byte>(0x15);
+        return value == static_cast<std::byte>(SimpleType::Bool_False) || value == static_cast<std::byte>(SimpleType::Bool_True);
     } else if constexpr (IsNull<T>) {
-        return value == static_cast<std::byte>(0x16);
+        return value == static_cast<std::byte>(SimpleType::Null);
     } else if constexpr (std::is_same_v<T, simple>) {
-        return value == static_cast<std::byte>(0x18);
+        return value == static_cast<std::byte>(SimpleType::Simple);
     } else if constexpr (IsFloat16<T>) {
-        return value == static_cast<std::byte>(0x19);
+        return value == static_cast<std::byte>(SimpleType::Float16);
     } else if constexpr (IsFloat32<T>) {
-        return value == static_cast<std::byte>(0x1A);
+        return value == static_cast<std::byte>(SimpleType::Float32);
     } else if constexpr (IsFloat64<T>) {
-        return value == static_cast<std::byte>(0x1B);
+        return value == static_cast<std::byte>(SimpleType::Float64);
     } else if constexpr (std::is_same_v<T, end_string> || std::is_same_v<T, end_array> || std::is_same_v<T, end_map>) {
-        return value == static_cast<std::byte>(0xFF);
+        return value == static_cast<std::byte>(SimpleType::End_Marker);
     }
     return false;
+}
+
+template <IsSimple T> constexpr SimpleType get_simple_tag_of_primitive_type() {
+    if constexpr (IsBool<T>) {
+        return SimpleType::Bool_False;
+    } else if constexpr (IsNull<T>) {
+        return SimpleType::Null;
+    } else if constexpr (std::is_same_v<T, simple>) {
+        return SimpleType::Simple;
+    } else if constexpr (IsFloat16<T>) {
+        return SimpleType::Float16;
+    } else if constexpr (IsFloat32<T>) {
+        return SimpleType::Float32;
+    } else if constexpr (IsFloat64<T>) {
+        return SimpleType::Float64;
+    } else if constexpr (std::is_same_v<T, end_string> || std::is_same_v<T, end_array> || std::is_same_v<T, end_map>) {
+        return SimpleType::End_Marker;
+    } else {
+        return SimpleType::Undefined;
+    }
 }
 
 // Compile-time function to get CBOR start value for indefinite

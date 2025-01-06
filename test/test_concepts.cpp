@@ -624,18 +624,53 @@ TEST_CASE("Literals") {
     static_assert(decltype(0xABC_hex_tag)::cbor_tag == 2748);
 }
 
-TEST_CASE_TEMPLATE("ValidConceptMapping test positive", T, std::variant<int, double>,
-                   std::variant<double, std::string, std::vector<std::byte>>,
-                   std::variant<int, float, std::string, std::vector<std::byte>, std::map<int, std::string>>,
-                   std::variant<uint64_t, negative>) {
+enum class E1 { A, B, C, D };
+
+struct A2 {
+    static constexpr std::uint64_t cbor_tag = 1;
+    E1                             e;
+    double                         d;
+};
+
+struct B2 {
+    static constexpr std::uint64_t cbor_tag = 2;
+    E1                             e;
+    double                         d;
+};
+
+TEST_CASE_TEMPLATE(
+    "ValidConceptMapping test positive", T, std::variant<int, double>, std::variant<double, std::string, std::vector<std::byte>>,
+    std::variant<int, float, std::string, std::vector<std::byte>, std::vector<uint16_t>, static_tag<2>, std::map<int, std::string>>,
+    std::variant<uint64_t, negative>, std::variant<static_tag<1>, static_tag<2>, static_tag<3>>, std::variant<static_tag<1>, E1>,
+    std::variant<static_tag<1>, E1, B2>,
+    std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2, A2,
+                 std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>) {
     using GoodVariant = T;
 
     // Use lambdas to wrap concepts
 
-    auto result = valid_concept_mapping_v<GoodVariant>;
-    auto array  = valid_concept_mapping_array_v<GoodVariant>;
-    fmt::print("Result: {}\n", result);
-    fmt::print("Array: {}\n", array);
+    auto result    = valid_concept_mapping_v<GoodVariant>;
+    auto array     = valid_concept_mapping_array_v<GoodVariant>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<GoodVariant>;
+    fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
 
     CHECK(result);
+    CHECK_EQ(unmatched, 0);
+}
+
+TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, negative>, std::variant<int, positive>, std::variant<E1, int>,
+                   std::variant<E1, negative>, std::variant<E1, positive>, std::variant<std::string, std::string_view>,
+                   std::variant<std::vector<std::byte>, std::span<const std::byte>>, std::variant<std::byte, std::uint8_t>,
+                   std::variant<static_tag<1>, dynamic_tag<uint64_t>>,
+                   std::variant<std::map<int, std::string>, std::unordered_map<int, double>>,
+                   std::variant<static_tag<1>, static_tag<2>, static_tag<1>>, std::variant<static_tag<2>, E1, B2>) {
+    using BadVariant = T;
+
+    auto result    = valid_concept_mapping_v<BadVariant>;
+    auto array     = valid_concept_mapping_array_v<BadVariant>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<BadVariant>;
+    fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
+
+    CHECK(!result);
+    CHECK_EQ(unmatched, 0);
 }
