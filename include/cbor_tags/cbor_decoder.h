@@ -46,7 +46,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    template <typename... T> constexpr void operator()(T &&...args) { (decode(args), ...); }
+    template <typename... T> status operator()(T &&...args) noexcept {
+        try {
+            (decode(args), ...);
+            return status::success;
+        } catch (const std::bad_alloc &) { return status::out_of_memory; } catch (const std::exception &) {
+            // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
+            return status::internal_error; // placeholder
+        }
+    }
 
     template <IsSigned T> constexpr void decode(T &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
