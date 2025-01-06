@@ -7,6 +7,7 @@
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <type_traits>
@@ -82,8 +83,75 @@ constexpr auto CheckSigned   = [](IsSignedWithEnum auto) { return 8; };
 */
 
 template <typename T>
+constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples);
+
+template <typename Variant, auto... Concepts> struct ValidConceptMapping;
+
+template <template <typename...> typename Variant, typename... Ts, auto... Concepts>
+struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
+    static constexpr auto counts_fn_inner = [](std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
+        (getMatchCount<Ts>(result, tags, simples), ...);
+    };
+
+    static constexpr auto counts_fn_outer = []() mutable {
+        std::array<int, 9>      result{};
+        std::vector<uint64_t>   tags;
+        std::vector<SimpleType> simples;
+        counts_fn_inner(result, tags, simples);
+
+        /* FINILIZE THE TAG AND SIMPLE BINS */
+        if (tags.size() > 0) {
+            result[6]++; // If any tag has been duplicated, this will be > 1, i.e invalid
+        }
+        if (simples.size() > 0) {
+            result[7]++; // If any simple type has been duplicated, this will be > 1, i.e invalid
+        }
+        return result;
+    };
+
+    static constexpr auto counts = counts_fn_outer();
+
+    static constexpr bool types_map_uniquely = std::all_of(counts.begin(), counts.end(), [](int count) { return count <= 1; });
+
+    static constexpr auto number_of_unmatched = counts[counts.size() - 1];
+    static constexpr bool value               = types_map_uniquely;
+    static constexpr auto array               = counts;
+};
+
+template <typename Variant, auto... Concepts>
+inline constexpr bool valid_concept_mapping_v = ValidConceptMapping<Variant, Concepts...>::value;
+
+template <typename Variant, auto... Concepts>
+inline constexpr auto valid_concept_mapping_array_v = ValidConceptMapping<Variant, Concepts...>::array;
+
+template <typename Variant, auto... Concepts>
+inline constexpr auto valid_concept_mapping_n_unmatched_v = ValidConceptMapping<Variant, Concepts...>::number_of_unmatched;
+
+template <typename T>
 constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
     bool unmatched = true;
+
+    /* SPECIAL CASES */
+    if constexpr (IsOptional<T>) {
+        unmatched        = false;
+        auto current_tag = get_simple_tag_of_primitive_type<std::nullptr_t>();
+        auto it          = std::ranges::find(simples, current_tag);
+        if (it == simples.end()) {
+            simples.push_back(current_tag);
+        } else {
+            result[7]++; // If duplicate simple type is found
+        }
+
+        getMatchCount<typename T::value_type>(result, tags, simples);
+        return;
+    }
+    if constexpr (IsVariant<T>) {
+        unmatched = false;
+        ValidConceptMapping<T>::counts_fn_inner(result, tags, simples);
+        return;
+    }
+    // if constexpr (IsExpected<T>) { /* ... */}
+    /* ----------- */
 
     if constexpr (IsUnsignedOrEnum<T> || IsSignedOrEnum<T>) {
         unmatched = false;
@@ -144,45 +212,5 @@ constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &
         result[8]++;
     }
 }
-
-template <auto Concept, typename... Ts> constexpr size_t count_satisfying() {
-    return (requires { Concept.operator()(std::declval<Ts>()); } + ... + 0);
-}
-
-template <auto Concept, typename... Ts> constexpr bool satisfies_atmost_one() { return count_satisfying<Concept, Ts...>() <= 1; }
-
-template <typename Variant, auto... Concepts> struct ValidConceptMapping;
-
-template <template <typename...> typename Variant, typename... Ts, auto... Concepts>
-struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
-    static constexpr auto counts = []() mutable {
-        std::array<int, 9>      result{};
-        std::vector<uint64_t>   tags;
-        std::vector<SimpleType> simples;
-        (getMatchCount<Ts>(result, tags, simples), ...);
-        if (tags.size() > 0) {
-            result[6]++; // If any tag has been duplicated, this will be > 1, i.e invalid
-        }
-        if (simples.size() > 0) {
-            result[7]++; // If any simple type has been duplicated, this will be > 1, i.e invalid
-        }
-        return result;
-    }();
-
-    static constexpr bool types_map_uniquely = std::all_of(counts.begin(), counts.end(), [](int count) { return count <= 1; });
-
-    static constexpr auto number_of_unmatched = counts[counts.size() - 1];
-    static constexpr bool value               = types_map_uniquely;
-    static constexpr auto array               = counts;
-};
-
-template <typename Variant, auto... Concepts>
-inline constexpr bool valid_concept_mapping_v = ValidConceptMapping<Variant, Concepts...>::value;
-
-template <typename Variant, auto... Concepts>
-inline constexpr auto valid_concept_mapping_array_v = ValidConceptMapping<Variant, Concepts...>::array;
-
-template <typename Variant, auto... Concepts>
-inline constexpr auto valid_concept_mapping_n_unmatched_v = ValidConceptMapping<Variant, Concepts...>::number_of_unmatched;
 
 } // namespace cbor::tags

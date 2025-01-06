@@ -644,14 +644,13 @@ TEST_CASE_TEMPLATE(
     std::variant<uint64_t, negative>, std::variant<static_tag<1>, static_tag<2>, static_tag<3>>, std::variant<static_tag<1>, E1>,
     std::variant<static_tag<1>, E1, B2>,
     std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2, A2,
-                 std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>) {
-    using GoodVariant = T;
+                 std::array<int, 5>, std::map<int, std::string>>) {
 
     // Use lambdas to wrap concepts
 
-    auto result    = valid_concept_mapping_v<GoodVariant>;
-    auto array     = valid_concept_mapping_array_v<GoodVariant>;
-    auto unmatched = valid_concept_mapping_n_unmatched_v<GoodVariant>;
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
     fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
 
     CHECK(result);
@@ -663,12 +662,55 @@ TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, neg
                    std::variant<std::vector<std::byte>, std::span<const std::byte>>, std::variant<std::byte, std::uint8_t>,
                    std::variant<static_tag<1>, dynamic_tag<uint64_t>>,
                    std::variant<std::map<int, std::string>, std::unordered_map<int, double>>,
-                   std::variant<static_tag<1>, static_tag<2>, static_tag<1>>, std::variant<static_tag<2>, E1, B2>) {
-    using BadVariant = T;
+                   std::variant<static_tag<1>, static_tag<2>, static_tag<1>>, std::variant<static_tag<2>, E1, B2>,
+                   std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2,
+                                A2, std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>) {
 
-    auto result    = valid_concept_mapping_v<BadVariant>;
-    auto array     = valid_concept_mapping_array_v<BadVariant>;
-    auto unmatched = valid_concept_mapping_n_unmatched_v<BadVariant>;
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
+    fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
+
+    CHECK(!result);
+    CHECK_EQ(unmatched, 0);
+}
+
+struct VA1 {
+    static constexpr std::uint64_t cbor_tag = 1;
+    E1                             e1;
+};
+
+struct VA2 {
+    static constexpr std::uint64_t cbor_tag = 2;
+    E1                             e1;
+};
+
+struct VA3 {
+    static constexpr std::uint64_t cbor_tag = 3;
+    E1                             e1;
+};
+
+struct VA4 {
+    static constexpr std::uint64_t cbor_tag = 4;
+    E1                             e1;
+};
+
+TEST_CASE_TEMPLATE("Nested variants positive", T, std::variant<std::variant<VA1, VA2>, std::variant<VA3, VA4>>,
+                   std::variant<std::variant<double, std::nullptr_t>, std::variant<bool, float>>) {
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
+    fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
+
+    CHECK(result);
+    CHECK_EQ(unmatched, 0);
+}
+
+TEST_CASE_TEMPLATE("Nested variants negative", T, std::variant<std::variant<VA1, VA2>, std::variant<VA3, static_tag<1>>>,
+                   std::variant<std::variant<double, float>, std::variant<bool, float>>) {
+    auto result    = valid_concept_mapping_v<T>;
+    auto array     = valid_concept_mapping_array_v<T>;
+    auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
     fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
 
     CHECK(!result);
