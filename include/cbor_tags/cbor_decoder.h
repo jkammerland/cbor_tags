@@ -48,7 +48,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
 
     template <typename... T> status operator()(T &&...args) noexcept {
         try {
-            (decode(args), ...);
+            std::array<status, sizeof...(T)> results;
+            size_t                           index = 0;
+
+            auto collect_status = [this, &results, &index](auto &&arg) {
+                if constexpr (std::is_same_v<void, decltype(this->decode(arg))>) {
+                    this->decode(arg);
+                    results[index++] = status::success;
+                } else {
+                    results[index++] = this->decode(arg) == true ? status::success : status::placeholder_error;
+                }
+            };
+
+            (collect_status(std::forward<T>(args)), ...);
+
+            // Now you can work with the results array
+            for (const auto &result : results) {
+                if (result != status::success) {
+                    return result; // Return first error
+                }
+            }
+
             return status::success;
         } catch (const std::bad_alloc &) { return status::out_of_memory; } catch (const std::exception &) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
@@ -150,11 +170,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Decoders...>>... {
         value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
         return true;
     }
-
-    // template <HasInlineTag T> constexpr void decode(T &value) {
-    //     decode(static_tag<T::cbor_tag>{});
-    //     std::apply([this](auto &&...args) { (this->decode(args), ...); }, to_tuple(value));
-    // }
 
     template <IsUnsigned T> constexpr void decode(dynamic_tag<T> &value) {
         auto [major, additionalInfo] = read_initial_byte();

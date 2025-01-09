@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tl/expected.hpp>
+
 // Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_simple.h"
@@ -15,6 +17,30 @@
 #include <vector>
 
 namespace cbor::tags {
+
+// Status/Error handling
+enum class status : uint8_t {
+    success = 0,
+    incomplete,
+    invalid_major_type,
+    invalid_container_size,
+    invalid_tag,
+    invalid_tag_value,
+    invalid_major_type_for_variant,
+    invalid_major_type_for_enum,
+    invalid_major_type_for_binary_string,
+    invalid_major_type_for_text_string,
+    invalid_major_type_for_range_of_cbor_values,
+    out_of_memory,
+    placeholder_error
+};
+
+inline bool                  success(status &&value) { return value == status::success; }
+inline std::optional<status> failure(status &&value) { return value == status::success ? std::nullopt : std::optional<status>{value}; }
+
+// TODO: use std::expected when available
+template <typename T> using expected = tl::expected<T, status>;
+// ---------
 
 struct binary_array_view {
     std::span<const std::byte> data;

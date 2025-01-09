@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.1.0)
+project(cbor_tags VERSION 0.2.1)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -28,9 +28,33 @@ endif()
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
+# Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
+option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
+if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
+  set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
+  cpmaddpackage(
+    NAME
+    expected
+    GITHUB_REPOSITORY
+    TartanLlama/expected
+    VERSION
+    1.1.0
+    GIT_TAG
+    v1.1.0)
+else()
+  find_package(tl-expected REQUIRED)
+endif()
+
 # Define public dependencies (if any)
 set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
 # If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
+if(CBOR_TAGS_USE_SYSTEM_EXPECTED)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(tl-expected)")
+endif()
+
+# Link dependencies
+target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 
