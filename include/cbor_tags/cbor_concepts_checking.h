@@ -159,7 +159,7 @@ constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &
     }
     if constexpr (IsNegative<T> || IsSignedOrEnum<T>) {
         unmatched = false;
-        result[1]++;
+        result[1]++; // Helper to check if type exists in options
     }
     if constexpr (IsBinaryString<T>) {
         unmatched = false;

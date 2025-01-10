@@ -35,11 +35,37 @@ enum class status : uint8_t {
     placeholder_error
 };
 
-inline bool                  success(status &&value) { return value == status::success; }
-inline std::optional<status> failure(status &&value) { return value == status::success ? std::nullopt : std::optional<status>{value}; }
+template <typename T> struct Option {
+    using is_option = void;
+    using type      = T;
+};
 
 // TODO: use std::expected when available
-template <typename T> using expected = tl::expected<T, status>;
+template <typename T, typename E> using expected = tl::expected<T, status>;
+template <typename E> using unexpected           = tl::unexpected<E>;
+using default_expected                           = Option<expected<void, status>>;
+
+template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
+    using type = T;
+};
+
+template <typename... T> struct ReturnTypeHelper {
+    static auto get_return_type() {
+        if constexpr (contains<Option<expected<void, status>>, T...>()) {
+            return std::type_identity<expected<void, status>>{};
+        } else if constexpr (contains<Option<expected<std::uint64_t, status>>, T...>()) {
+            return std::type_identity<expected<std::uint64_t, status>>{};
+        } else {
+            return std::type_identity<void>{};
+        }
+    }
+    using type = typename decltype(get_return_type())::type;
+};
+
+template <typename... T> struct Options {
+    using is_options  = void;
+    using return_type = typename ReturnTypeHelper<T...>::type;
+};
 // ---------
 
 struct binary_array_view {

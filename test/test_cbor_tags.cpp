@@ -352,7 +352,8 @@ TEST_CASE("Status handling - memory") {
 
     std::vector<A> v(1e3, A{.cbor_tag = {}, .a = 42});
     auto           result = enc(v);
-    CHECK_EQ(result, status::out_of_memory);
+    REQUIRE(!result);
+    CHECK_EQ(result.error(), status::out_of_memory);
 }
 
 TEST_CASE("Status handling - decode wrong tag") {
@@ -361,7 +362,7 @@ TEST_CASE("Status handling - decode wrong tag") {
 
     using namespace literals;
     auto result = enc(make_tag_pair(140_tag, A1{}));
-    CHECK_EQ(result, status::success);
+    CHECK(result);
 
     auto dec = make_decoder(data);
     A1   a1;
@@ -374,7 +375,7 @@ TEST_CASE("Advanced tag problem positive") {
     auto enc  = make_encoder(data);
 
     std::variant<A1, A2, A3> v = A3{};
-    REQUIRE_EQ(enc(v), status::success);
+    REQUIRE(enc(v));
 
     auto                     dec = make_decoder(data);
     std::variant<A1, A2, A3> result;
@@ -388,7 +389,7 @@ TEST_CASE("Advanced tag problem negative") {
     auto enc  = make_encoder(data);
 
     std::variant<A1, A2, A3> v = A3{};
-    REQUIRE_EQ(enc(v), status::success);
+    REQUIRE(enc(v));
 
     auto                 dec = make_decoder(data);
     std::variant<A1, A2> result;

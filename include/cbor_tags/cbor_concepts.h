@@ -366,4 +366,6 @@ template <char... Chars> constexpr auto operator"" _hex_tag() { return static_ta
 
 } // namespace literals
 
+template <typename T, typename... Ts> static constexpr bool contains() { return (std::is_same_v<T, Ts> || ...); }
+
 } // namespace cbor::tags

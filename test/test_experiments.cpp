@@ -384,3 +384,14 @@ TEST_CASE("TypeHandler test") {
     // Restore the original std::cout buffer
     std::cout.rdbuf(old);
 }
+
+template <typename T> struct OptionsExample {};
+
+template <typename... T> constexpr bool IsDefault(OptionsExample<T...>) { return false; };
+
+template <> constexpr bool IsDefault(OptionsExample<void>) { return true; }
+
+TEST_CASE("OptionsExample") {
+    CHECK(!IsDefault(OptionsExample<int>{}));
+    CHECK(IsDefault(OptionsExample<void>{}));
+}
