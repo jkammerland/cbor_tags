@@ -13,7 +13,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <fmt/base.h>
+// #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
 #include <iterator>
@@ -50,23 +50,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            [[maybe_unused]] size_t index          = 0;
-            [[maybe_unused]] status result         = status::success;
-            auto                    collect_status = [this, &result, &index](auto &&arg) {
-                if constexpr (std::is_same_v<void, decltype(this->decode(arg))>) {
-                    this->decode(arg);
-                } else {
-                    result = this->decode(arg);
-                    return result == status::success ? true : false;
-                }
-                index++;
-                return true;
-            };
+            status_collector<self_t> collect_status{*this};
 
             auto success = (collect_status(args) && ...);
 
             if (!success) {
-                return unexpected(result);
+                return unexpected(collect_status.result);
             }
             return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected(status::out_of_memory); } catch (const std::exception &) {
@@ -132,9 +121,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsRangeOfCborValues T> constexpr status decode(T &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Array && major != major_type::Map) {
-            // throw std::runtime_error("Invalid major type for range of cbor values");
-            return status::invalid_major_type_for_range_of_cbor_values;
+        if constexpr (IsMap<T>) {
+            if (major != major_type::Map) {
+                // throw std::runtime_error("Not map");
+                return status::invalid_major_type_for_map;
+            }
+        } else {
+            if (major != major_type::Array) {
+                // throw std::runtime_error("Not array");
+                return status::invalid_major_type_for_array;
+            }
         }
 
         const auto length = decode_unsigned(additionalInfo);
@@ -146,12 +142,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (IsMap<T>) {
                 using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
                 value_type result;
-                decode(result);
+                if (decode(result) != status::success) {
+                    return status::error;
+                }
                 appender_(value, result);
             } else {
                 using value_type = typename T::value_type;
                 value_type result;
-                decode(result);
+                if (decode(result) != status::success) {
+                    return status::error;
+                }
                 appender_(value, result);
             }
         }
@@ -162,7 +162,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <std::uint64_t N> constexpr status decode(static_tag<N>, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             // throw std::runtime_error("Invalid major type for tag");
-            return status::invalid_major_type;
+            return status::invalid_major_type_for_tag;
         }
         if (decode_unsigned(additionalInfo) != N) {
             // throw std::runtime_error("Invalid tag value");
@@ -173,14 +173,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <std::uint64_t N> constexpr status decode(static_tag<N> value) {
         auto [major, additionalInfo] = read_initial_byte();
-        decode(value, major, additionalInfo);
-        return status::success;
+        return decode(value, major, additionalInfo);
     }
 
     template <IsUnsigned T> constexpr status decode(dynamic_tag<T> &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            throw std::runtime_error("Invalid major type for dynamic tag");
-            return status::invalid_major_type;
+            // throw std::runtime_error("Invalid major type for dynamic tag");
+            return status::invalid_major_type_for_tag;
         }
 
         // TODO: FIX NARROWING PROBLEM!!!
@@ -190,40 +189,54 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsUnsigned T> constexpr status decode(dynamic_tag<T> &value) {
         auto [major, additionalInfo] = read_initial_byte();
-        decode(value, major, additionalInfo);
-        return status::success;
+        return decode(value, major, additionalInfo);
     }
 
     template <IsTaggedTuple T> constexpr status decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            throw std::runtime_error("Invalid major type for tagged object");
-            return status::invalid_major_type;
+            // throw std::runtime_error("Invalid major type for tagged object");
+            return status::invalid_major_type_for_tag;
         }
 
         auto tag = decode_unsigned(additionalInfo);
 
         if (tag != std::get<0>(t)) {
-            throw std::runtime_error("Invalid tag for tagged object");
+            // throw std::runtime_error("Invalid tag for tagged object");
             return status::invalid_tag_value;
         }
 
-        std::apply([this](auto &&...args) { (this->decode(args), ...); }, detail::tuple_tail(t));
-        return status::success;
+        return std::apply(
+            [this](auto &&...args) {
+                status_collector<self_t> collect_status{*this};
+                [[maybe_unused]] auto    success = (collect_status(args) && ...);
+                (this->decode(args), ...);
+                return collect_status.result;
+            },
+            detail::tuple_tail(t));
     }
 
     template <IsAggregate T> constexpr status decode(T &value) {
         const auto &tuple = to_tuple(value);
 
         if constexpr (HasInlineTag<T>) {
-            decode(static_tag<T::cbor_tag>{});
+            auto result = decode(static_tag<T::cbor_tag>{});
+            if (result != status::success) {
+                return result;
+            }
         }
-        std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
-        return status::success;
+        return std::apply(
+            [this](auto &&...args) {
+                status_collector<self_t> collect_status{*this};
+                [[maybe_unused]] auto    success = (collect_status(args) && ...);
+                return collect_status.result;
+            },
+            tuple);
     }
 
     template <IsAggregate T> constexpr status decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            throw std::runtime_error("Invalid major type for tagged object");
+            // throw std::runtime_error("Invalid major type for tagged object");
+            return status::invalid_major_type_for_tag;
         }
 
         const auto &tuple = to_tuple(value);
@@ -233,7 +246,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 // throw std::runtime_error("Invalid tag for tagged object");
                 return status::invalid_tag_value;
             }
-            std::apply([this](auto &&...args) { (this->decode(args), ...); }, tuple);
+            return std::apply(
+                [this](auto &&...args) {
+                    status_collector<self_t> collect_status{*this};
+                    [[maybe_unused]] auto    success = (collect_status(args) && ...);
+                    return collect_status.result;
+                },
+                tuple);
         } else {
             if constexpr (HasStaticTag<T>) {
                 if (tag != std::get<0>(tuple)) {
@@ -244,28 +263,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 std::get<0>(tuple) = tag;
             }
 
-            std::apply([this](auto &&...args) { (this->decode(args), ...); }, detail::tuple_tail(tuple));
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); },
+                              detail::tuple_tail(tuple));
         }
-
-        return status::success;
     }
 
     template <IsUntaggedTuple T> constexpr status decode(T &value) {
-        std::apply([this](auto &&...args) { (this->decode(args), ...); }, value);
-        return status::success;
+        return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, value);
     }
 
     constexpr status decode(bool &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            throw std::runtime_error("Invalid major type for boolean");
-            return status::invalid_major_type;
+            // throw std::runtime_error("Invalid major type for boolean");
+            return status::invalid_major_type_for_simple;
         }
         if (additionalInfo == static_cast<byte>(20)) {
             value = false;
         } else if (additionalInfo == static_cast<byte>(21)) {
             value = true;
         } else {
-            throw std::runtime_error("Invalid additional info for boolean");
+            // throw std::runtime_error("Invalid additional info for boolean");
             return status::invalid_tag_for_simple;
         }
         return status::success;
@@ -273,16 +290,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status decode(std::nullptr_t &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple || additionalInfo != static_cast<byte>(22)) {
-            throw std::runtime_error("Invalid additional info for null");
-            return status::invalid_tag_for_simple;
+            // throw std::runtime_error("Invalid additional info for null");
+            return status::invalid_tag_for_optional;
         }
         value = nullptr;
         return status::success;
     }
 
     constexpr status decode(float16_t &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Simple || additionalInfo != static_cast<byte>(25)) {
-            throw std::runtime_error("Invalid additional info for float16");
+        if (major != major_type::Simple) {
+            return status::invalid_major_type_for_simple;
+        } else if (additionalInfo != static_cast<byte>(25)) {
             return status::invalid_tag_for_simple;
         }
         value = read_float16();
@@ -290,8 +308,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr status decode(float &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Simple || additionalInfo != static_cast<byte>(26)) {
-            throw std::runtime_error("Invalid additional info for float");
+        if (major != major_type::Simple) {
+            return status::invalid_major_type_for_simple;
+        } else if (additionalInfo != static_cast<byte>(26)) {
             return status::invalid_tag_for_simple;
         }
         value = read_float();
@@ -299,34 +318,43 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr status decode(double &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Simple || additionalInfo != static_cast<byte>(27)) {
-            throw std::runtime_error("Invalid additional info for double");
+        if (major != major_type::Simple) {
+            return status::invalid_major_type_for_simple;
+        } else if (additionalInfo != static_cast<byte>(27)) {
             return status::invalid_tag_for_simple;
         }
         value = read_double();
         return status::success;
     }
 
-    constexpr status decode(std::string &value, major_type, byte additionalInfo) {
+    constexpr status decode(std::string &value, major_type major, byte additionalInfo) {
+        if (major != major_type::TextString) {
+            return status::invalid_major_type_for_text_string;
+        }
         value = std::string(decode_text(additionalInfo));
         return status::success;
     }
 
-    constexpr status decode(std::string_view &value, major_type, byte additionalInfo) {
+    constexpr status decode(std::string_view &value, major_type major, byte additionalInfo) {
+        if (major != major_type::TextString) {
+            return status::invalid_major_type_for_text_string;
+        }
         value = decode_text(additionalInfo);
         return status::success;
     }
 
     template <IsCborMajor T> constexpr status decode(std::optional<T> &value, major_type major, byte additionalInfo) {
-        if (additionalInfo == static_cast<byte>(22)) {
+        if (major == major_type::Simple && additionalInfo == static_cast<byte>(22)) {
             value = std::nullopt;
+            return status::success;
         } else {
             using value_type = std::remove_cvref_t<T>;
             value_type t;
-            decode(t, major, additionalInfo);
-            value = std::move(t);
+            auto       result = decode(t, major, additionalInfo);
+            value             = std::move(t);
+            return result;
         }
-        return status::success;
+        return status::invalid_tag_for_optional;
     }
 
     template <IsCborMajor... T> constexpr status decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
@@ -354,14 +382,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_full_type<U>(), magic_enum::enum_name(major),
             //            additionalInfo);
 
-            U decoded_value;
+            U      decoded_value;
+            status result;
             if constexpr (IsSimple<U>) {
                 if (!compare_simple_value<U>(additionalInfo)) {
                     return false;
                 }
-                this->decode(decoded_value, major, additionalInfo);
+                result = this->decode(decoded_value, major, additionalInfo);
             } else if constexpr (IsTag<U>) {
-                if (decode(decoded_value, major, additionalInfo) != status::success) {
+                result = this->decode(decoded_value, major, additionalInfo);
+                if (result != status::success) {
                     // TODO: THIS WILL LEAVE IN A BAD STATE FOR INCOMPLETE PARSING OF STRUCTS!!!
 
                     // Attempt reverse reader position depending on additionalInfo
@@ -383,18 +413,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     return false;
                 }
             } else {
-                this->decode(decoded_value, major, additionalInfo);
+                result = this->decode(decoded_value, major, additionalInfo);
             }
 
             value = std::move(decoded_value);
-            return true;
+            return result == status::success;
         };
 
         try {
             bool found = (try_decode.template operator()<T>() || ...);
             if (!found) {
-                throw std::runtime_error("Invalid major type for variant");
-                return status::invalid_major_type_for_variant;
+                // throw std::runtime_error("Invalid major type for variant");
+                return status::no_matching_major_type_in_variant;
             }
         } catch (...) { std::rethrow_exception(std::current_exception()); }
         return status::success;
@@ -402,7 +432,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename T> constexpr status decode(T &value) {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            // throw std::runtime_error("Unexpected end of input");
             return status::incomplete;
         }
 
@@ -411,8 +441,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_short_type<T>(), magic_enum::enum_name(majorType),
         //            additionalInfo);
 
-        decode(value, majorType, additionalInfo);
-        return status::success;
+        return decode(value, majorType, additionalInfo);
     }
 
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
@@ -451,18 +480,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size());
         } else {
             return char_range_view{bytes.range};
-        }
-    }
-
-    constexpr variant decodeSimpleOrFloat(byte additionalInfo) {
-        switch (static_cast<uint8_t>(additionalInfo)) {
-        case 20: return false;
-        case 21: return true;
-        case 22: return nullptr;
-        case 25: return read_float16();
-        case 26: return read_float();
-        case 27: return read_double();
-        default: throw std::runtime_error("Unsupported simple value or float");
         }
     }
 
@@ -543,6 +560,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return std::make_pair(majorType, additionalInfo);
     }
 
+    template <typename Dec> struct status_collector {
+        Dec                    &dec_;
+        [[maybe_unused]] size_t index{0};
+        [[maybe_unused]] status result{status::success};
+
+        template <typename U> constexpr bool operator()(U &&arg) {
+            if constexpr (std::is_same_v<void, decltype(dec_.decode(arg))>) {
+                dec_.decode(arg);
+            } else {
+                result = dec_.decode(arg);
+                index++;
+                return result == status::success ? true : false;
+            }
+            return false;
+        }
+    };
+
+    template <typename... Args> constexpr auto applier(Args &&...args) {
+        status_collector<self_t> collect_status{*this};
+        [[maybe_unused]] auto    success = (collect_status(args) && ...);
+        return collect_status.result;
+    }
+
     // Variadic friends only in c++26, must be public
     const InputBuffer          &data_;
     detail::reader<InputBuffer> reader_;
@@ -581,29 +621,28 @@ template <typename T> struct enum_decoder {
         using underlying_type = std::underlying_type_t<U>;
         if constexpr (IsSigned<underlying_type>) {
             if (major > major_type::NegativeInteger) {
-                throw std::runtime_error("Invalid major type for enum");
+                // throw std::runtime_error("Invalid major type for enum");
                 return status::invalid_major_type_for_enum;
             }
         } else if constexpr (IsUnsigned<underlying_type>) {
             if (major != major_type::UnsignedInteger) {
-                throw std::runtime_error("Invalid major type for enum");
+                // throw std::runtime_error("Invalid major type for enum");
                 return status::invalid_major_type_for_enum;
             }
         } else {
-            throw std::runtime_error("Invalid enum type");
+            // throw std::runtime_error("Invalid enum type");
             return status::error;
         }
 
         underlying_type result;
-        detail::underlying<T>(this).decode(result, major, additionalInfo);
-        value = static_cast<U>(result);
-        return status::success;
+        auto            status = detail::underlying<T>(this).decode(result, major, additionalInfo);
+        value                  = static_cast<U>(result);
+        return status;
     }
 
     template <IsEnum U> constexpr status decode(U &value) {
         auto [major, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
-        decode(value, major, additionalInfo);
-        return status::success;
+        return decode(value, major, additionalInfo);
     }
 };
 

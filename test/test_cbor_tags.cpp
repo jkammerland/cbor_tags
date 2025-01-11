@@ -393,5 +393,5 @@ TEST_CASE("Advanced tag problem negative") {
 
     auto                 dec = make_decoder(data);
     std::variant<A1, A2> result;
-    REQUIRE_EQ(dec(result).error(), status::error);
+    REQUIRE_EQ(dec(result).error(), status::no_matching_major_type_in_variant);
 }

@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_encoder.h"
 
 #include <doctest/doctest.h>
+#include <type_traits>
 
 using namespace cbor::tags;
 using namespace cbor::tags::literals;
@@ -36,6 +37,16 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(T{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status::error);
+        if constexpr (std::is_same_v<T, std::string>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_text_string);
+        } else if constexpr (std::is_same_v<T, std::vector<std::byte>>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_binary_string);
+        } else if constexpr (std::is_same_v<T, std::map<int, int>>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_map);
+        } else if constexpr (std::is_same_v<T, static_tag<140>>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_tag);
+        } else if constexpr (std::is_same_v<T, float>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_simple);
+        }
     }
 }
