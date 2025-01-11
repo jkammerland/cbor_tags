@@ -35,7 +35,7 @@ enum class status : uint8_t {
     invalid_major_type_for_map,
     invalid_major_type_for_tag,
     invalid_major_type_for_simple,
-    no_matching_major_type_in_variant,
+    no_matching_tag_value_in_variant,
     invalid_container_size,
     out_of_memory,
     error

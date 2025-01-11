@@ -182,8 +182,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status::invalid_major_type_for_tag;
         }
 
-        // TODO: FIX NARROWING PROBLEM!!!
-        value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
+        auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
+        if (decoded_value.value != value.value) {
+            // throw std::runtime_error("Invalid tag value for dynamic tag");
+            return status::invalid_tag_value;
+        }
+
         return status::success;
     }
 
@@ -289,9 +293,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr status decode(std::nullptr_t &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Simple || additionalInfo != static_cast<byte>(22)) {
+        if (major != major_type::Simple) {
             // throw std::runtime_error("Invalid additional info for null");
-            return status::invalid_tag_for_optional;
+            return status::invalid_major_type_for_simple;
+        } else if (additionalInfo != static_cast<byte>(22)) {
+            // throw std::runtime_error("Invalid additional info for null");
+            return status::invalid_tag_for_simple;
         }
         value = nullptr;
         return status::success;
@@ -424,7 +431,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             bool found = (try_decode.template operator()<T>() || ...);
             if (!found) {
                 // throw std::runtime_error("Invalid major type for variant");
-                return status::no_matching_major_type_in_variant;
+                return status::no_matching_tag_value_in_variant;
             }
         } catch (...) { std::rethrow_exception(std::current_exception()); }
         return status::success;

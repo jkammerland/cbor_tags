@@ -1,8 +1,14 @@
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_integer.h"
+#include "magic_enum/magic_enum.hpp"
 
+#include <cstddef>
 #include <doctest/doctest.h>
+#include <fmt/base.h>
+#include <memory_resource>
 #include <type_traits>
 
 using namespace cbor::tags;
@@ -28,7 +34,8 @@ TEST_SUITE("Decoding the wrong thing") {
         }
     }
 
-    TEST_CASE_TEMPLATE("Decode wrong major types", T, std::string, std::vector<std::byte>, std::map<int, int>, static_tag<140>, float) {
+    TEST_CASE_TEMPLATE("Decode wrong major types, from int", T, negative, std::string, std::vector<std::byte>, std::map<int, int>,
+                       static_tag<140>, float) {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
@@ -37,16 +44,120 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(T{});
         REQUIRE(!result);
-        if constexpr (std::is_same_v<T, std::string>) {
+        if constexpr (IsNegative<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_negative_integer);
+        } else if constexpr (IsTextString<T>) {
             CHECK_EQ(result.error(), status::invalid_major_type_for_text_string);
-        } else if constexpr (std::is_same_v<T, std::vector<std::byte>>) {
+        } else if constexpr (IsBinaryString<T>) {
             CHECK_EQ(result.error(), status::invalid_major_type_for_binary_string);
-        } else if constexpr (std::is_same_v<T, std::map<int, int>>) {
+        } else if constexpr (IsMap<T>) {
             CHECK_EQ(result.error(), status::invalid_major_type_for_map);
-        } else if constexpr (std::is_same_v<T, static_tag<140>>) {
+        } else if constexpr (IsTag<T>) {
             CHECK_EQ(result.error(), status::invalid_major_type_for_tag);
-        } else if constexpr (std::is_same_v<T, float>) {
+        } else if constexpr (IsSimple<T>) {
             CHECK_EQ(result.error(), status::invalid_major_type_for_simple);
         }
+    }
+
+    TEST_CASE_TEMPLATE("Decode wrong major types, from tag", T, positive, negative, std::string_view, std::vector<std::byte>,
+                       std::map<int, int>, bool, std::nullptr_t, double) {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(make_tag_pair(140_tag, 42)));
+
+        auto dec    = make_decoder(data);
+        auto result = dec(T{});
+        REQUIRE(!result);
+        if constexpr (IsUnsigned<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_unsigned_integer);
+        } else if constexpr (IsNegative<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_negative_integer);
+        } else if constexpr (IsTextString<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_text_string);
+        } else if constexpr (IsBinaryString<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_binary_string);
+        } else if constexpr (IsMap<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_map);
+        } else if constexpr (IsSimple<T>) {
+            CHECK_EQ(result.error(), status::invalid_major_type_for_simple);
+        }
+    }
+
+    TEST_CASE_TEMPLATE("Decode wrong simple tag", T, float, double, bool, std::nullptr_t) {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(25_tag, float16_t{3.1f}));
+
+        auto dec    = make_decoder(data);
+        auto result = dec(25_tag, T{});
+        REQUIRE(!result);
+        CHECK_EQ(result.error(), status::invalid_tag_for_simple);
+    }
+
+    TEST_CASE_TEMPLATE("Decode, too little memory", T, std::pmr::vector<int>) {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(T{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
+
+        // Limit memory for decoding
+        std::array<std::byte, 16>           R;
+        std::pmr::monotonic_buffer_resource resource(R.data(), R.size(), std::pmr::null_memory_resource());
+        T                                   our_decoded_array(&resource);
+
+        auto dec    = make_decoder(data);
+        auto result = dec(our_decoded_array);
+        REQUIRE(!result);
+        CHECK_EQ(result.error(), status::out_of_memory);
+    }
+
+    TEST_CASE("Decode wrong major type in variant") {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(140_tag, "Hello world!"sv));
+
+        auto dec    = make_decoder(data);
+        auto result = dec(std::variant<int, float, double, bool, std::nullptr_t>{});
+        REQUIRE(!result);
+        CHECK_EQ(result.error(), status::no_matching_tag_value_in_variant);
+    }
+
+    TEST_CASE("Decode wrong major type in variant, with matching types") {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(140_tag, "Hello world!"sv));
+
+        {
+            auto dec    = make_decoder(data);
+            auto result = dec(std::variant<std::pair<static_tag<139>, std::string>, std::pair<static_tag<141>, std::string>>{});
+            REQUIRE(!result);
+            CHECK_EQ(result.error(), status::no_matching_tag_value_in_variant);
+        }
+
+        { /* Sanity check with matching tag valu in variant */
+            std::variant<std::pair<static_tag<139>, std::string>, std::pair<static_tag<140>, std::string>> variant;
+            auto                                                                                           dec     = make_decoder(data);
+            auto                                                                                           result2 = dec(variant);
+            if (!result2) {
+                fmt::print("Error: {}\n", magic_enum::enum_name(result2.error()));
+            }
+            CHECK(result2);
+            CHECK(std::holds_alternative<std::pair<static_tag<140>, std::string>>(variant));
+        }
+    }
+
+    TEST_CASE("Decode dynamic tag, with wrong value") {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(dynamic_tag<uint64_t>{140}, "Hello world!"sv));
+
+        auto dec    = make_decoder(data);
+        auto result = dec(dynamic_tag<uint64_t>{141}, std::string{});
+        REQUIRE(!result);
+        CHECK_EQ(result.error(), status::invalid_tag_value);
     }
 }

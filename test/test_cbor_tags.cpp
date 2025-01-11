@@ -128,6 +128,7 @@ TEST_CASE("Test tuple dynamic tag") {
     auto dec = make_decoder(data);
 
     std::tuple<dynamic_tag<std::uint64_t>, int, std::string> result;
+    std::get<0>(result).value = 140;
     dec(result);
 
     CHECK_EQ(std::get<0>(result), 140);
@@ -140,14 +141,14 @@ TEST_CASE("Nested structs") {
         static_tag<140> cbor_tag;
         int             a;
         struct B {
-            dynamic_tag<uint64_t> cbor_tag;
+            dynamic_tag<uint64_t> cbor_tag{5};
             int                   b;
             struct C {
                 static_tag<141> cbor_tag;
                 int             c;
             } c;
         } b;
-    } a{{}, 1, {{5}, 2, {{}, 3}}};
+    } a{.cbor_tag = {}, .a = 1, .b = {.cbor_tag = {5}, .b = 2, .c = {.cbor_tag = {}, .c = 3}}};
 
     auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
@@ -393,5 +394,5 @@ TEST_CASE("Advanced tag problem negative") {
 
     auto                 dec = make_decoder(data);
     std::variant<A1, A2> result;
-    REQUIRE_EQ(dec(result).error(), status::no_matching_major_type_in_variant);
+    REQUIRE_EQ(dec(result).error(), status::no_matching_tag_value_in_variant);
 }

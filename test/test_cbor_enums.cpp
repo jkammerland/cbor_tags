@@ -31,7 +31,7 @@ struct S {
     Extra                        extra;
 
     struct Extra2 {
-        dynamic_tag<std::uint64_t> cbor_tag;
+        dynamic_tag<std::uint64_t> cbor_tag{555};
         H                          h;
     };
 
@@ -226,7 +226,7 @@ TEST_CASE("CBOR - struct with enum + variant") {
                                        .g      = G::C,
                                        .h      = H{static_cast<H>(255)},
                                        .extra  = {.cbor_tag = {}, .s = "Hello"},
-                                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
+                                       .extra2 = {.cbor_tag = {555}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = s;
         enc(v);
 
