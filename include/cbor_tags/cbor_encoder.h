@@ -27,7 +27,7 @@ namespace cbor::tags {
 
 template <typename T> struct cbor_header_encoder;
 
-template <typename OutputBuffer, typename Options, template <typename> typename... Encoders>
+template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
     requires ValidCborBuffer<OutputBuffer>
 struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     using self_t = encoder<OutputBuffer, Options, Encoders...>;
@@ -44,22 +44,11 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
 
     template <typename... T> expected_type operator()(const T &...args) noexcept {
         try {
-            status s;
-            size_t index = 0;
-
-            auto wrap_encode = [&s, &index, this](const auto &) {
-                // s = encode(arg);
-                index++;
-                return s;
-            };
-
-            // auto success = ((wrap_encode(args) == status::success) && ...);
-
             (encode(args), ...);
             return expected_type{};
-        } catch (const std::bad_alloc &) { return unexpected(status::out_of_memory); } catch (const std::exception &e) {
+        } catch (const std::bad_alloc &) { return unexpected(status::out_of_memory); } catch (...) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
-            return unexpected(status::placeholder_error); // placeholder
+            return unexpected(status::error);
         }
     }
 

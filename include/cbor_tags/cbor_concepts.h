@@ -24,6 +24,12 @@ enum class major_type : std::uint8_t {
 };
 
 template <typename T>
+concept IsOptions = requires(T) {
+    typename T::is_options;
+    typename T::return_type;
+};
+
+template <typename T>
 concept ValidCborBuffer = requires(T) {
     std::is_convertible_v<typename T::value_type, std::byte>;
     std::is_convertible_v<typename T::size_type, std::size_t>;

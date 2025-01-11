@@ -23,21 +23,26 @@ enum class status : uint8_t {
     success = 0,
     incomplete,
     invalid_major_type,
-    invalid_container_size,
-    invalid_tag,
+    invalid_tag_for_simple,
     invalid_tag_value,
-    invalid_major_type_for_variant,
+    invalid_major_type_for_unsigned_integer,
+    invalid_major_type_for_negative_integer,
+    invalid_major_type_for_integer,
     invalid_major_type_for_enum,
     invalid_major_type_for_binary_string,
     invalid_major_type_for_text_string,
     invalid_major_type_for_range_of_cbor_values,
+    invalid_major_type_for_map,
+    invalid_major_type_for_optional,
+    invalid_major_type_for_variant,
+    invalid_container_size,
     out_of_memory,
-    placeholder_error
+    error
 };
 
 template <typename T> struct Option {
-    using is_option = void;
-    using type      = T;
+    using is_options = void;
+    using type       = T;
 };
 
 // TODO: use std::expected when available
@@ -65,6 +70,7 @@ template <typename... T> struct ReturnTypeHelper {
 template <typename... T> struct Options {
     using is_options  = void;
     using return_type = typename ReturnTypeHelper<T...>::type;
+    using error_type  = typename ReturnTypeHelper<T...>::type::error_type;
 };
 // ---------
 

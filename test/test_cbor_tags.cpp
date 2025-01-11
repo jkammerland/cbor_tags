@@ -282,7 +282,7 @@ TEST_CASE_TEMPLATE("Variant tags in struct", AX, A1, A2, A3) {
 
     auto        dec = make_decoder(data);
     v1::Version result;
-    REQUIRE_EQ(dec(result), status::success);
+    REQUIRE(dec(result));
 
     CHECK(std::holds_alternative<AX>(result.v));
     CHECK_EQ(result.damage, 3.14);
@@ -311,7 +311,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
 
         auto           dec = make_decoder(data);
         VersionVariant result;
-        REQUIRE_EQ(dec(result), status::success);
+        REQUIRE(dec(result));
 
         REQUIRE(std::holds_alternative<v1::Version>(result));
         CHECK_EQ(std::get<v1::Version>(result).damage, 3.14);
@@ -330,7 +330,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
 
         auto           dec = make_decoder(data);
         VersionVariant result;
-        REQUIRE_EQ(dec(result), status::success);
+        REQUIRE(dec(result));
 
         REQUIRE(std::holds_alternative<v2::Version>(result));
         CHECK_EQ(std::get<v2::Version>(result).damage, 3.14);
@@ -367,7 +367,7 @@ TEST_CASE("Status handling - decode wrong tag") {
     auto dec = make_decoder(data);
     A1   a1;
     auto result2 = dec(make_tag_pair(141_tag, a1));
-    CHECK_EQ(result2, status::placeholder_error); // internal error for now
+    CHECK(!result2); // internal error for now
 }
 
 TEST_CASE("Advanced tag problem positive") {
@@ -379,7 +379,7 @@ TEST_CASE("Advanced tag problem positive") {
 
     auto                     dec = make_decoder(data);
     std::variant<A1, A2, A3> result;
-    REQUIRE_EQ(dec(result), status::success);
+    REQUIRE(dec(result));
 
     CHECK(std::holds_alternative<A3>(result));
 }
@@ -393,5 +393,5 @@ TEST_CASE("Advanced tag problem negative") {
 
     auto                 dec = make_decoder(data);
     std::variant<A1, A2> result;
-    REQUIRE_EQ(dec(result), status::placeholder_error);
+    REQUIRE_EQ(dec(result).error(), status::error);
 }
