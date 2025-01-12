@@ -24,6 +24,12 @@ enum class major_type : std::uint8_t {
 };
 
 template <typename T>
+concept IsOptions = requires(T) {
+    typename T::is_options;
+    typename T::return_type;
+};
+
+template <typename T>
 concept ValidCborBuffer = requires(T) {
     std::is_convertible_v<typename T::value_type, std::byte>;
     std::is_convertible_v<typename T::size_type, std::size_t>;
@@ -32,27 +38,6 @@ concept ValidCborBuffer = requires(T) {
 
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
-
-// Status/Error handling
-enum class status : uint8_t {
-    success = 0,
-    incomplete,
-    invalid_major_type,
-    invalid_container_size,
-    invalid_tag,
-    invalid_tag_value,
-    invalid_major_type_for_variant,
-    invalid_major_type_for_enum,
-    invalid_major_type_for_binary_string,
-    invalid_major_type_for_text_string,
-    invalid_major_type_for_range_of_cbor_values,
-    out_of_memory,
-    placeholder_error
-};
-
-inline bool                  success(status &&value) { return value == status::success; }
-inline std::optional<status> failure(status &&value) { return value == status::success ? std::nullopt : std::optional<status>{value}; }
-// ---------
 
 // Forward declaration of float16_t, implementation that can be used is in float16_ieee754.h
 struct float16_t;
@@ -386,5 +371,7 @@ template <char... Chars> constexpr auto operator"" _tag() { return static_tag<de
 template <char... Chars> constexpr auto operator"" _hex_tag() { return static_tag<detail::parse_hex<Chars...>()>{}; }
 
 } // namespace literals
+
+template <typename T, typename... Ts> static constexpr bool contains() { return (std::is_same_v<T, Ts> || ...); }
 
 } // namespace cbor::tags

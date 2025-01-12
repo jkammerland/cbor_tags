@@ -12,7 +12,7 @@ target_link_libraries(reflection_module_generator PRIVATE fmt::fmt)
 
 # Set specific compile options for reflection_module_generator
 if(MSVC)
-  #target_compile_options(reflection_module_generator PRIVATE /O2)
+  # target_compile_options(reflection_module_generator PRIVATE /O2 /Ob2 /Oi /Ot /GL)
 else()
   target_compile_options(reflection_module_generator PRIVATE -O2 -g0)
 endif()
@@ -20,7 +20,12 @@ endif()
 # Define ranges as a space-separated string
 set(REFLECTION_RANGES
     "1:100" # Default ranges, space-separated
-    CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2)")
+    CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2 ...)")
+foreach(RANGE ${REFLECTION_RANGES})
+  if(NOT RANGE MATCHES "^\"?([0-9]+):([0-9]+)\"?$")
+    message(FATAL_ERROR "Invalid range format: ${RANGE}. Expected format: start:end")
+  endif()
+endforeach()
 
 set(RANGES_CACHE_FILE "${CMAKE_BINARY_DIR}/reflection_ranges.txt")
 set(OUTPUT_HEADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../include/cbor_tags/cbor_reflection_impl.h")

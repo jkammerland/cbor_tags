@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/variant_handling.h"
+#include "tl/expected.hpp"
 
 #include <bit>
 #include <bitset>
@@ -26,27 +27,28 @@ namespace cbor::tags {
 
 template <typename T> struct cbor_header_encoder;
 
-template <typename OutputBuffer = std::vector<std::byte>, template <typename> typename... Encoders>
+template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
     requires ValidCborBuffer<OutputBuffer>
-struct encoder : public Encoders<encoder<OutputBuffer, Encoders...>>... {
-    using self_t = encoder<OutputBuffer, Encoders...>;
+struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
+    using self_t = encoder<OutputBuffer, Options, Encoders...>;
     using Encoders<self_t>::encode...;
 
-    using byte_type  = typename OutputBuffer::value_type;
-    using size_type  = typename OutputBuffer::size_type;
-    using iterator_t = typename detail::iterator_type<OutputBuffer>::type;
-    using subrange   = std::ranges::subrange<iterator_t>;
-    using variant    = variant_t<OutputBuffer>;
+    using byte_type     = typename OutputBuffer::value_type;
+    using size_type     = typename OutputBuffer::size_type;
+    using iterator_type = typename detail::iterator_type<OutputBuffer>::type;
+    using subrange      = std::ranges::subrange<iterator_type>;
+    using variant       = variant_t<OutputBuffer>;
+    using expected_type = typename Options::return_type;
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
-    template <typename... T> status operator()(const T &...args) noexcept {
+    template <typename... T> expected_type operator()(const T &...args) noexcept {
         try {
             (encode(args), ...);
-            return status::success;
-        } catch (const std::bad_alloc &) { return status::out_of_memory; } catch (const std::exception &e) {
+            return expected_type{};
+        } catch (const std::bad_alloc &) { return unexpected<status>(status::out_of_memory); } catch (...) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
-            return status::placeholder_error; // placeholder
+            return unexpected<status>(status::error);
         }
     }
 
@@ -209,6 +211,6 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, cbor_header_encoder, enum_encoder>(buffer);
+    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder>(buffer);
 }
 } // namespace cbor::tags

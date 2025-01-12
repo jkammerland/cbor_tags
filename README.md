@@ -2,7 +2,7 @@
 
 This library is designed with modern C++20 features, providing a simple but flexible API, with full control over memory and protocol customization. 
 
-This library provides a C++ implementation for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️.
+It is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️.
 
 The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
 
@@ -14,34 +14,99 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 - Flexible tag handling for structs and tuples, non-invasive
 - Support for arbitrary containers (concept-based)
 - Header-only library, modules TODO:
+- Uses tl::expected in absence of c++23 std::expected
 
 ## 🔧 Quick Start
 
 ```cpp
-// Define a simple tagged structure
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+
+#include <cassert>
+#include <iostream>
+#include <variant>
+#include <string>
+#include <vector>
+
+enum class roles : std::uint8_t {
+    admin,
+    user,
+    guest
+};
+
+namespace v1 {
 struct UserProfile {
     static constexpr std::uint64_t cbor_tag = 140; // Inline tag
     std::string name;
     int64_t age;
 };
+}
 
-// Encoding
-auto data = std::vector<std::byte>{};
-auto enc = make_encoder(data);
-enc(UserProfile{"John Doe", 30});
+namespace v2 {
+struct UserProfile {
+    static constexpr std::uint64_t cbor_tag = 141; // Inline tag
+    std::string name;
+    int64_t age;
+    roles role;
+};
+}
 
-// Decoding
-auto dec = make_decoder(data);
-UserProfile result;
-dec(result);
+int main() {
+    using namespace cbor::tags;
+
+    // Encoding
+    auto data          = std::vector<std::byte>{};
+    auto enc           = make_encoder(data);
+    auto result_encode = enc(v2::UserProfile{.name = "John Doe", .age = 30, .role = roles::admin});
+    if (!result_encode) {
+        std::cerr << "Encoding status: " << status_to_message(result_encode.error()) << std::endl;
+    }
+    // ...
+
+    // Decoding - supporting multiple versions
+    using variant = std::variant<v1::UserProfile, v2::UserProfile>;
+    auto    dec = make_decoder(data);
+    variant user;
+    auto    result_decode = dec(user);
+    if (!result_decode) {
+        std::cerr << "Decoding status: " << status_to_message(result_decode.error()) << std::endl;
+    }
+    // should now hold a v2::UserProfile
+    // ...
+
+    assert(std::holds_alternative<v2::UserProfile>(user));
+    auto &user_v2 = std::get<v2::UserProfile>(user);
+    std::cout << "Name: " << user_v2.name << std::endl;
+    std::cout << "Age:  " << user_v2.age << std::endl;
+    std::cout << "Role: " << static_cast<int>(user_v2.role) << std::endl;
+
+    return 0;
+}
 ```
+
+## ✨ Advanced Features
+
+- std::variant support, to allow multiple types to be accepted when seen on buffer (e.g tagged types representing a versioned object)
+- options for encoder/decoder, such as index tracking for resuming decoding
+- TODO: streaming support, via api adapter using the return value of an incomplete decode 
+- TODO: CDDL support, for defining custom data structures
+- TODO: unique_ptr support
+- TODO: shared_ptr support
 
 ## 🎨 Custom Tag Handling
 
 > [!NOTE]
 > The library supports three different ways to handle CBOR tags:
 
-### 1. Static Tags
+### 1. Inline Tags
+```cpp
+struct InlineTagged {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::optional<std::string> data;
+};
+```
+
+### 2. Static Tags
 ```cpp
 struct StaticTagged {
     static_tag<140> cbor_tag;
@@ -49,18 +114,12 @@ struct StaticTagged {
 };
 ```
 
-### 2. Dynamic Tags
+### 3. Dynamic Tags
+Dynamic can be set at runtime, will return error if it does not match tag on buffer when decoding.
+Note that this means the tag byte(s) can not easily be optimized away in the resulting structure.
 ```cpp
 struct DynamicTagged {
     dynamic_tag<uint64_t> cbor_tag;
-    std::optional<std::string> data;
-};
-```
-
-### 3. Inline Tags
-```cpp
-struct InlineTagged {
-    static constexpr std::uint64_t cbor_tag = 140;
     std::optional<std::string> data;
 };
 ```
@@ -73,36 +132,23 @@ struct InlineTagged {
 ## 🔄 Automatic Reflection
 
 > [!NOTE]
-> Until C++26 introduces native reflection, this library provides an alternative compiler trick using `to_tuple(...)`:
+> Until C++26 (or later) introduces native reflection, or auto [...ts] = X{}, this library provides an alternative compiler trick using `to_tuple(...)`:
 
 ```cpp
-// to_tuple example here
-// showing how to use fold expression with visitor
-// show how to make a fully custom non cbor serializer
-
-// Note: This will NOT work
 template <size_t N> struct A0 {
     static_tag<N> cbor_tag;
+    std::string name;
 };
 
-using A1 = A0<1>;
-
-template <size_t N> struct DerivedA0 : A0<N> {
-    using A0<N>::cbor_tag;
-    int a;
-};
-
-using DerivedA1 = DerivedA0<1>;
-
-void does_not_compile() {
-    auto [tag, a] = to_tuple(DerivedA1{});
-}
+using A42 = A0<42>;
+auto && [tag, name] = to_tuple(A42{{/*42*/}, "John Doe"});
+//...
 
 ```
 
 ## 🛠️ Requirements
 
-- Any C++20 compatible compiler (gcc 12+, clang 14+, msvc ?)
+- Any C++20 compatible compiler (gcc 12+, clang 14+, msvc (builds but broken))
 - CMake 3.20+
 
 ## 📦 Installation
@@ -118,7 +164,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.1.0 # or specify a particular commit/tag
+  GIT_TAG v0.2.1 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
