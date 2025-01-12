@@ -41,6 +41,31 @@ enum class status : uint8_t {
     error
 };
 
+constexpr std::string_view status_to_message(status s) {
+    switch (s) {
+    case status::success: return "Success";
+    case status::incomplete: return "Incomplete";
+    case status::invalid_tag_for_simple: return "Invalid tag for simple";
+    case status::invalid_tag_for_optional: return "Invalid tag for optional";
+    case status::invalid_tag_value: return "Invalid tag value";
+    case status::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
+    case status::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
+    case status::invalid_major_type_for_integer: return "Invalid major type for integer";
+    case status::invalid_major_type_for_enum: return "Invalid major type for enum";
+    case status::invalid_major_type_for_binary_string: return "Invalid major type for binary string";
+    case status::invalid_major_type_for_text_string: return "Invalid major type for text string";
+    case status::invalid_major_type_for_array: return "Invalid major type for array";
+    case status::invalid_major_type_for_map: return "Invalid major type for map";
+    case status::invalid_major_type_for_tag: return "Invalid major type for tag";
+    case status::invalid_major_type_for_simple: return "Invalid major type for simple";
+    case status::no_matching_tag_value_in_variant: return "No matching tag value in variant";
+    case status::invalid_container_size: return "Invalid container size";
+    case status::out_of_memory: return "Out of memory";
+    case status::error: return "Error";
+    default: return "Unknown status";
+    }
+}
+
 template <typename T> struct Option {
     using is_options = void;
     using type       = T;

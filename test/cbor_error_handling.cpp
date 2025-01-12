@@ -142,7 +142,7 @@ TEST_SUITE("Decoding the wrong thing") {
             auto                                                                                           dec     = make_decoder(data);
             auto                                                                                           result2 = dec(variant);
             if (!result2) {
-                fmt::print("Error: {}\n", magic_enum::enum_name(result2.error()));
+                fmt::print("Error: {}\n", status_to_message(result2.error()));
             }
             CHECK(result2);
             CHECK(std::holds_alternative<std::pair<static_tag<140>, std::string>>(variant));
@@ -161,3 +161,5 @@ TEST_SUITE("Decoding the wrong thing") {
         CHECK_EQ(result.error(), status::invalid_tag_value);
     }
 }
+
+// TEST_SUITE("Decode the right thing") {}

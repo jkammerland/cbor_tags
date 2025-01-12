@@ -19,7 +19,7 @@
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
 #include <map>
-#include <nameof.hpp>
+// #include <nameof.hpp>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -55,12 +55,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto success = (collect_status(args) && ...);
 
             if (!success) {
-                return unexpected(collect_status.result);
+                return unexpected<decltype(collect_status.result)>(collect_status.result);
             }
             return expected_type{};
-        } catch (const std::bad_alloc &) { return unexpected(status::out_of_memory); } catch (const std::exception &) {
+        } catch (const std::bad_alloc &) { return unexpected<status>(status::out_of_memory); } catch (const std::exception &) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
-            return unexpected(status::error); // placeholder
+            return unexpected<status>(status::error); // placeholder
         }
     }
 

@@ -46,9 +46,9 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         try {
             (encode(args), ...);
             return expected_type{};
-        } catch (const std::bad_alloc &) { return unexpected(status::out_of_memory); } catch (...) {
+        } catch (const std::bad_alloc &) { return unexpected<status>(status::out_of_memory); } catch (...) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
-            return unexpected(status::error);
+            return unexpected<status>(status::error);
         }
     }
 

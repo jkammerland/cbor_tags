@@ -33,7 +33,7 @@ class CborTagsConan(ConanFile):
 
     def generate(self):
         tc = CMakeToolchain(self)
-        tc.variables["BUILD_TESTS"] = "OFF"
+        tc.variables["CBOR_TAGS_BUILD_TESTS"] = "OFF"
         tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "ON"
         tc.generate()
         deps = CMakeDeps(self)
