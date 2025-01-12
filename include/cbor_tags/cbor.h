@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tl/expected.hpp>
+
 // Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_simple.h"
@@ -15,6 +17,88 @@
 #include <vector>
 
 namespace cbor::tags {
+
+// Status/Error handling
+enum class status : uint8_t {
+    success = 0,
+    incomplete,
+    invalid_tag_for_simple,
+    invalid_tag_for_optional,
+    invalid_tag_value,
+    invalid_major_type_for_unsigned_integer,
+    invalid_major_type_for_negative_integer,
+    invalid_major_type_for_integer,
+    invalid_major_type_for_enum,
+    invalid_major_type_for_binary_string,
+    invalid_major_type_for_text_string,
+    invalid_major_type_for_array,
+    invalid_major_type_for_map,
+    invalid_major_type_for_tag,
+    invalid_major_type_for_simple,
+    no_matching_tag_value_in_variant,
+    invalid_container_size,
+    out_of_memory,
+    error
+};
+
+constexpr std::string_view status_to_message(status s) {
+    switch (s) {
+    case status::success: return "Success";
+    case status::incomplete: return "Incomplete";
+    case status::invalid_tag_for_simple: return "Invalid tag for simple";
+    case status::invalid_tag_for_optional: return "Invalid tag for optional";
+    case status::invalid_tag_value: return "Invalid tag value";
+    case status::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
+    case status::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
+    case status::invalid_major_type_for_integer: return "Invalid major type for integer";
+    case status::invalid_major_type_for_enum: return "Invalid major type for enum";
+    case status::invalid_major_type_for_binary_string: return "Invalid major type for binary string";
+    case status::invalid_major_type_for_text_string: return "Invalid major type for text string";
+    case status::invalid_major_type_for_array: return "Invalid major type for array";
+    case status::invalid_major_type_for_map: return "Invalid major type for map";
+    case status::invalid_major_type_for_tag: return "Invalid major type for tag";
+    case status::invalid_major_type_for_simple: return "Invalid major type for simple";
+    case status::no_matching_tag_value_in_variant: return "No matching tag value in variant";
+    case status::invalid_container_size: return "Invalid container size";
+    case status::out_of_memory: return "Out of memory";
+    case status::error: return "Error";
+    default: return "Unknown status";
+    }
+}
+
+template <typename T> struct Option {
+    using is_options = void;
+    using type       = T;
+};
+
+// TODO: use std::expected when available
+template <typename T, typename E> using expected = tl::expected<T, status>;
+template <typename E> using unexpected           = tl::unexpected<E>;
+using default_expected                           = Option<expected<void, status>>;
+
+template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
+    using type = T;
+};
+
+template <typename... T> struct ReturnTypeHelper {
+    static auto get_return_type() {
+        if constexpr (contains<Option<expected<void, status>>, T...>()) {
+            return std::type_identity<expected<void, status>>{};
+        } else if constexpr (contains<Option<expected<std::uint64_t, status>>, T...>()) {
+            return std::type_identity<expected<std::uint64_t, status>>{};
+        } else {
+            return std::type_identity<void>{};
+        }
+    }
+    using type = typename decltype(get_return_type())::type;
+};
+
+template <typename... T> struct Options {
+    using is_options  = void;
+    using return_type = typename ReturnTypeHelper<T...>::type;
+    using error_type  = typename ReturnTypeHelper<T...>::type::error_type;
+};
+// ---------
 
 struct binary_array_view {
     std::span<const std::byte> data;

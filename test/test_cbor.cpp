@@ -439,8 +439,7 @@ TEST_CASE("CBOR Encoder - Map of float sorted" * doctest::skip()) {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    auto result = enc(float_map);
-    REQUIRE_EQ(result, status::success);
+    REQUIRE(enc(float_map));
 
     fmt::print("Float map: {}\n", to_hex(data));
 

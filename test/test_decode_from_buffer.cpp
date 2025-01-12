@@ -63,7 +63,7 @@ TEST_CASE_TEMPLATE("Test decode dynamic tag 1", T, std::vector<uint8_t>, std::de
 
     auto dec = make_decoder(bytes);
     struct A {
-        dynamic_tag<std::uint64_t> cbor_tag;
+        dynamic_tag<std::uint64_t> cbor_tag{1};
         std::string                b;
     };
 

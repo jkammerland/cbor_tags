@@ -1,8 +1,17 @@
 {
     "name": "cbor-tags",
-    "version": "0.1.0",
-    "description": "RFC 8949 implementation with generic reflection",
+    "version": "0.2.1",
+    "description": "RFC 8949 implementation with automatic reflection",
     "homepage": "https://github.com/jkammerland/cbor_tags",
     "license": "MIT",
-    "dependencies": []
+    "dependencies": [
+        {
+            "name": "tl-expected",
+            "version>=": "1.1.0"
+        }
+    ],
+    "builtin-baseline": "7476f0d4e77d3333fbb249657df8251c28c4faae",
+    "configureArgs": [
+        "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON"
+    ]
 }
