@@ -26,6 +26,25 @@ template <typename T> struct appender<T, false> {
         }
     }
 
+    template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+        constexpr auto size = sizeof...(Ts);
+        if constexpr (IsMap<T>) {
+            if (size % 2 != 0) {
+                throw std::runtime_error("Invalid number of arguments for map");
+            }
+            for (auto i = 0; i < size; i += 2) {
+                container.insert_or_assign(std::forward<Ts>(values)...);
+            }
+        } else {
+            if constexpr (HasReserve<T>) {
+                auto current_size = container.size();
+                container.resize(current_size + size);
+                decltype(current_size) i = 0;
+                ((container[current_size + i++] = std::forward<Ts>(values)), ...);
+            }
+        }
+    }
+
     constexpr void operator()(T &container, std::span<const std::byte> values) {
         container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
                          reinterpret_cast<const value_type *>(values.data() + values.size()));

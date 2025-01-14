@@ -354,7 +354,7 @@ TEST_CASE("Status handling - memory") {
     std::vector<A> v(1e3, A{.cbor_tag = {}, .a = 42});
     auto           result = enc(v);
     REQUIRE(!result);
-    CHECK_EQ(result.error(), status::out_of_memory);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
 }
 
 TEST_CASE("Status handling - decode wrong tag") {
@@ -394,5 +394,5 @@ TEST_CASE("Advanced tag problem negative") {
 
     auto                 dec = make_decoder(data);
     std::variant<A1, A2> result;
-    REQUIRE_EQ(dec(result).error(), status::no_matching_tag_value_in_variant);
+    REQUIRE_EQ(dec(result).error(), status_code::no_matching_tag_value_in_variant);
 }
