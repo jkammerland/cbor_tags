@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <iostream>
@@ -26,11 +27,11 @@ int basic_array_test(auto seed) {
 
     std::vector<uint64_t> output;
     auto                  dec    = make_decoder(buffer);
-    auto                  result = dec(output);
-    if (!result) {
-        INFO("Error: " << cbor::tags::status_to_message(result.error()));
+    auto                  status = dec(output);
+    if (!status) {
+        INFO("Error: " << cbor::tags::status_message(status.error()));
     }
-    REQUIRE(result);
+    REQUIRE(status);
     REQUIRE(std::ranges::equal(input, output));
     return 0;
 }
@@ -61,7 +62,7 @@ TEST_CASE("basic_variant_test") {
     auto enc           = make_encoder(data);
     auto result_encode = enc(v2::UserProfile{.name = "John Doe", .age = 30, .role = roles::admin});
     if (!result_encode) {
-        std::cerr << "Encoding status: " << status_to_message(result_encode.error()) << std::endl;
+        std::cerr << "Encoding status: " << status_message(result_encode.error()) << std::endl;
     }
     // ...
 
@@ -72,7 +73,7 @@ TEST_CASE("basic_variant_test") {
     variant user;
     auto    result_decode = dec(user);
     if (!result_decode) {
-        std::cerr << "Decoding status: " << status_to_message(result_decode.error()) << std::endl;
+        std::cerr << "Decoding status: " << status_message(result_decode.error()) << std::endl;
     }
     // should now hold a v2::UserProfile
     // ...
@@ -100,8 +101,8 @@ TEST_CASE("decoder benchmarks", "[decoder]") {
         meter.measure([&buffer]() mutable {
             std::array<uint64_t, N> output_array;
             auto                    dec    = make_decoder(buffer);
-            auto                    result = dec(output_array);
-            CHECK(result);
+            auto                    status = dec(output_array);
+            CHECK(status);
             return output_array;
         });
     };
@@ -110,8 +111,8 @@ TEST_CASE("decoder benchmarks", "[decoder]") {
         meter.measure([&buffer]() mutable {
             std::vector<uint64_t> output_array;
             auto                  dec    = make_decoder(buffer);
-            auto                  result = dec(output_array);
-            CHECK(result);
+            auto                  status = dec(output_array);
+            CHECK(status);
             return output_array;
         });
     };
@@ -122,8 +123,8 @@ TEST_CASE("decoder benchmarks", "[decoder]") {
             std::pmr::monotonic_buffer_resource         resource(R.data(), R.size(), std::pmr::null_memory_resource());
             std::pmr::vector<uint64_t>                  output_array(&resource);
             auto                                        dec    = make_decoder(buffer);
-            auto                                        result = dec(output_array);
-            CHECK(result);
+            auto                                        status = dec(output_array);
+            CHECK(status);
             return output_array;
         });
     };
@@ -132,8 +133,8 @@ TEST_CASE("decoder benchmarks", "[decoder]") {
         meter.measure([&buffer]() mutable {
             std::deque<uint64_t> output_array;
             auto                 dec    = make_decoder(buffer);
-            auto                 result = dec(output_array);
-            CHECK(result);
+            auto                 status = dec(output_array);
+            CHECK(status);
             return output_array;
         });
     };
@@ -142,9 +143,74 @@ TEST_CASE("decoder benchmarks", "[decoder]") {
         meter.measure([&buffer]() mutable {
             std::list<uint64_t> output_array;
             auto                dec    = make_decoder(buffer);
-            auto                result = dec(output_array);
-            CHECK(result);
+            auto                status = dec(output_array);
+            CHECK(status);
             return output_array;
+        });
+    };
+}
+
+TEST_CASE("Encoder benchmarks", "[encoder]") {
+    auto seed = Catch::getSeed();
+    INFO("Random seed: " << seed);
+    basic_array_test(seed);
+
+    constexpr uint64_t N = 10000;
+
+    std::array<uint64_t, N> input;
+    std::mt19937_64         gen(seed);
+    std::ranges::generate(input, [&gen] { return gen(); });
+
+    BENCHMARK_ADVANCED("Bench array encoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&input]() {
+            std::array<std::byte, 2 * N * sizeof(uint64_t)> buffer;
+            auto                                            enc    = make_encoder(buffer);
+            auto                                            status = enc(input);
+            CHECK(status);
+            return buffer;
+        });
+    };
+
+    BENCHMARK_ADVANCED("Bench vector encoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&input]() {
+            std::vector<std::byte> buffer;
+            buffer.reserve(10 * N * sizeof(uint64_t));
+            auto enc    = make_encoder(buffer);
+            auto status = enc(input);
+            CHECK(status);
+            return buffer;
+        });
+    };
+
+    // BENCHMARK_ADVANCED("Bench pmr::vector encoding")(Catch::Benchmark::Chronometer meter) {
+    //     meter.measure([&input]() {
+    //         std::array<std::byte, 3 * N * sizeof(uint64_t)> R;
+    //         std::pmr::monotonic_buffer_resource             resource(R.data(), R.size(), std::pmr::null_memory_resource());
+    //         std::pmr::vector<std::byte>                     buffer(&resource);
+    //         auto                                            enc    = make_encoder(buffer);
+    //         auto                                            status = enc(input);
+    //         CHECK(status);
+    //         return buffer;
+    //     });
+    // };
+
+    BENCHMARK_ADVANCED("Bench deque encoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&input]() {
+            std::deque<std::byte> buffer;
+            auto                  enc    = make_encoder(buffer);
+            auto                  status = enc(input);
+            CHECK(status);
+            return buffer;
+        });
+    };
+
+    BENCHMARK_ADVANCED("Bench list encoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&input]() {
+            std::list<std::byte> buffer;
+            auto                 enc    = make_encoder(buffer);
+            auto                 status = enc(input);
+            CHECK(status);
+            return buffer;
         });
     };
 }
