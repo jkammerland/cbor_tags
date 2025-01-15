@@ -104,6 +104,7 @@ template <typename T> struct reader<T, false> {
         ++current_offset_;
         return result;
     }
+
     constexpr value_type read(const T &, size_type offset) noexcept {
         throw std::runtime_error("Not implemented");
         auto it = std::next(position_, offset);
