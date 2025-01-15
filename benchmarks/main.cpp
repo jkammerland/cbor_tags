@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <fmt/base.h>
 #include <iostream>
 #include <list>
 #include <memory_resource>
@@ -182,17 +183,18 @@ TEST_CASE("Encoder benchmarks", "[encoder]") {
         });
     };
 
-    // BENCHMARK_ADVANCED("Bench pmr::vector encoding")(Catch::Benchmark::Chronometer meter) {
-    //     meter.measure([&input]() {
-    //         std::array<std::byte, 3 * N * sizeof(uint64_t)> R;
-    //         std::pmr::monotonic_buffer_resource             resource(R.data(), R.size(), std::pmr::null_memory_resource());
-    //         std::pmr::vector<std::byte>                     buffer(&resource);
-    //         auto                                            enc    = make_encoder(buffer);
-    //         auto                                            status = enc(input);
-    //         CHECK(status);
-    //         return buffer;
-    //     });
-    // };
+    BENCHMARK_ADVANCED("Bench pmr::vector encoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&input]() {
+            std::array<std::byte, 10 * N * sizeof(uint64_t)> R;
+            std::pmr::monotonic_buffer_resource              resource(R.data(), R.size(), std::pmr::null_memory_resource());
+            std::pmr::vector<std::byte>                      buffer(&resource);
+            auto                                             enc    = make_encoder(buffer);
+            auto                                             status = enc(input);
+            // fmt::print("Status: {}\n", status_message(status.error()));
+            CHECK(status);
+            return buffer;
+        });
+    };
 
     BENCHMARK_ADVANCED("Bench deque encoding")(Catch::Benchmark::Chronometer meter) {
         meter.measure([&input]() {
