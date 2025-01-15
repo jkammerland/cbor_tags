@@ -126,8 +126,11 @@ concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
     typename T::value_type;
     requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
     { t.find(std::declval<typename T::key_type>()) } -> std::same_as<typename T::iterator>;
-    { t.at(std::declval<typename T::key_type>()) } -> std::same_as<typename T::mapped_type &>;
-    { t[std::declval<typename T::key_type>()] } -> std::same_as<typename T::mapped_type &>;
+};
+
+template <typename T>
+concept IsMultiMap = IsMap<T> && requires(T t) {
+    { t.equal_range(std::declval<typename T::key_type>()) } -> std::same_as<std::pair<typename T::iterator, typename T::iterator>>;
 };
 
 template <typename T>

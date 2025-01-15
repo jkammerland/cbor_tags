@@ -59,7 +59,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::exception &) {
-            // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
+            std::rethrow_exception(std::current_exception());   // for debugging, this handling is TODO!
             return unexpected<status_code>(status_code::error); // placeholder
         }
     }
@@ -142,15 +142,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (IsMap<T>) {
                 using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
                 value_type result;
-                if (decode(result) != status_code::success) {
-                    return status_code::error;
+                auto       status = decode(result);
+                if (status != status_code::success) {
+                    return status;
                 }
                 appender_(value, result);
             } else {
                 using value_type = typename T::value_type;
                 value_type result;
-                if (decode(result) != status_code::success) {
-                    return status_code::error;
+                auto       status = decode(result);
+                if (status != status_code::success) {
+                    return status;
                 }
                 appender_(value, result);
             }
@@ -642,7 +644,7 @@ template <typename T> struct enum_decoder {
             }
         } else {
             // throw std::runtime_error("Invalid enum type");
-            return status_code::error;
+            return status_code::invalid_major_type_for_enum;
         }
 
         underlying_type result;

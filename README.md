@@ -17,6 +17,7 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 - Uses tl::expected in absence of c++23 std::expected
 
 ## 🔧 Quick Start
+The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
