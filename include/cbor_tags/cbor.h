@@ -19,7 +19,7 @@
 namespace cbor::tags {
 
 // Status/Error handling
-enum class status : uint8_t {
+enum class status_code : uint8_t {
     success = 0,
     incomplete,
     invalid_tag_for_simple,
@@ -41,27 +41,27 @@ enum class status : uint8_t {
     error
 };
 
-constexpr std::string_view status_to_message(status s) {
+constexpr std::string_view status_message(status_code s) {
     switch (s) {
-    case status::success: return "Success";
-    case status::incomplete: return "Incomplete";
-    case status::invalid_tag_for_simple: return "Invalid tag for simple";
-    case status::invalid_tag_for_optional: return "Invalid tag for optional";
-    case status::invalid_tag_value: return "Invalid tag value";
-    case status::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
-    case status::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
-    case status::invalid_major_type_for_integer: return "Invalid major type for integer";
-    case status::invalid_major_type_for_enum: return "Invalid major type for enum";
-    case status::invalid_major_type_for_binary_string: return "Invalid major type for binary string";
-    case status::invalid_major_type_for_text_string: return "Invalid major type for text string";
-    case status::invalid_major_type_for_array: return "Invalid major type for array";
-    case status::invalid_major_type_for_map: return "Invalid major type for map";
-    case status::invalid_major_type_for_tag: return "Invalid major type for tag";
-    case status::invalid_major_type_for_simple: return "Invalid major type for simple";
-    case status::no_matching_tag_value_in_variant: return "No matching tag value in variant";
-    case status::invalid_container_size: return "Invalid container size";
-    case status::out_of_memory: return "Out of memory";
-    case status::error: return "Error";
+    case status_code::success: return "Success";
+    case status_code::incomplete: return "Incomplete";
+    case status_code::invalid_tag_for_simple: return "Invalid tag for simple";
+    case status_code::invalid_tag_for_optional: return "Invalid tag for optional";
+    case status_code::invalid_tag_value: return "Invalid tag value";
+    case status_code::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
+    case status_code::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
+    case status_code::invalid_major_type_for_integer: return "Invalid major type for integer";
+    case status_code::invalid_major_type_for_enum: return "Invalid major type for enum";
+    case status_code::invalid_major_type_for_binary_string: return "Invalid major type for binary string";
+    case status_code::invalid_major_type_for_text_string: return "Invalid major type for text string";
+    case status_code::invalid_major_type_for_array: return "Invalid major type for array";
+    case status_code::invalid_major_type_for_map: return "Invalid major type for map";
+    case status_code::invalid_major_type_for_tag: return "Invalid major type for tag";
+    case status_code::invalid_major_type_for_simple: return "Invalid major type for simple";
+    case status_code::no_matching_tag_value_in_variant: return "No matching tag value in variant";
+    case status_code::invalid_container_size: return "Invalid container size";
+    case status_code::out_of_memory: return "Out of memory";
+    case status_code::error: return "Error";
     default: return "Unknown status";
     }
 }
@@ -72,9 +72,9 @@ template <typename T> struct Option {
 };
 
 // TODO: use std::expected when available
-template <typename T, typename E> using expected = tl::expected<T, status>;
+template <typename T, typename E> using expected = tl::expected<T, status_code>;
 template <typename E> using unexpected           = tl::unexpected<E>;
-using default_expected                           = Option<expected<void, status>>;
+using default_expected                           = Option<expected<void, status_code>>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
@@ -82,10 +82,10 @@ template <typename V1, typename V2, typename T> struct values_equal : std::bool_
 
 template <typename... T> struct ReturnTypeHelper {
     static auto get_return_type() {
-        if constexpr (contains<Option<expected<void, status>>, T...>()) {
-            return std::type_identity<expected<void, status>>{};
-        } else if constexpr (contains<Option<expected<std::uint64_t, status>>, T...>()) {
-            return std::type_identity<expected<std::uint64_t, status>>{};
+        if constexpr (contains<Option<expected<void, status_code>>, T...>()) {
+            return std::type_identity<expected<void, status_code>>{};
+        } else if constexpr (contains<Option<expected<std::uint64_t, status_code>>, T...>()) {
+            return std::type_identity<expected<std::uint64_t, status_code>>{};
         } else {
             return std::type_identity<void>{};
         }

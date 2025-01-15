@@ -45,17 +45,17 @@ TEST_SUITE("Decoding the wrong thing") {
         auto result = dec(T{});
         REQUIRE(!result);
         if constexpr (IsNegative<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_negative_integer);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_negative_integer);
         } else if constexpr (IsTextString<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_text_string);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_text_string);
         } else if constexpr (IsBinaryString<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_binary_string);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_binary_string);
         } else if constexpr (IsMap<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_map);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_map);
         } else if constexpr (IsTag<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_tag);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_tag);
         } else if constexpr (IsSimple<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_simple);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_simple);
         }
     }
 
@@ -70,17 +70,17 @@ TEST_SUITE("Decoding the wrong thing") {
         auto result = dec(T{});
         REQUIRE(!result);
         if constexpr (IsUnsigned<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_unsigned_integer);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_unsigned_integer);
         } else if constexpr (IsNegative<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_negative_integer);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_negative_integer);
         } else if constexpr (IsTextString<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_text_string);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_text_string);
         } else if constexpr (IsBinaryString<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_binary_string);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_binary_string);
         } else if constexpr (IsMap<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_map);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_map);
         } else if constexpr (IsSimple<T>) {
-            CHECK_EQ(result.error(), status::invalid_major_type_for_simple);
+            CHECK_EQ(result.error(), status_code::invalid_major_type_for_simple);
         }
     }
 
@@ -93,7 +93,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(25_tag, T{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status::invalid_tag_for_simple);
+        CHECK_EQ(result.error(), status_code::invalid_tag_for_simple);
     }
 
     TEST_CASE_TEMPLATE("Decode, too little memory", T, std::pmr::vector<int>) {
@@ -109,7 +109,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(our_decoded_array);
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status::out_of_memory);
+        CHECK_EQ(result.error(), status_code::out_of_memory);
     }
 
     TEST_CASE("Decode wrong major type in variant") {
@@ -121,7 +121,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(std::variant<int, float, double, bool, std::nullptr_t>{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status::no_matching_tag_value_in_variant);
+        CHECK_EQ(result.error(), status_code::no_matching_tag_value_in_variant);
     }
 
     TEST_CASE("Decode wrong major type in variant, with matching types") {
@@ -134,7 +134,7 @@ TEST_SUITE("Decoding the wrong thing") {
             auto dec    = make_decoder(data);
             auto result = dec(std::variant<std::pair<static_tag<139>, std::string>, std::pair<static_tag<141>, std::string>>{});
             REQUIRE(!result);
-            CHECK_EQ(result.error(), status::no_matching_tag_value_in_variant);
+            CHECK_EQ(result.error(), status_code::no_matching_tag_value_in_variant);
         }
 
         { /* Sanity check with matching tag valu in variant */
@@ -142,7 +142,7 @@ TEST_SUITE("Decoding the wrong thing") {
             auto                                                                                           dec     = make_decoder(data);
             auto                                                                                           result2 = dec(variant);
             if (!result2) {
-                fmt::print("Error: {}\n", status_to_message(result2.error()));
+                fmt::print("Error: {}\n", status_message(result2.error()));
             }
             CHECK(result2);
             CHECK(std::holds_alternative<std::pair<static_tag<140>, std::string>>(variant));
@@ -158,7 +158,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(dynamic_tag<uint64_t>{141}, std::string{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status::invalid_tag_value);
+        CHECK_EQ(result.error(), status_code::invalid_tag_value);
     }
 }
 

@@ -17,6 +17,7 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 - Uses tl::expected in absence of c++23 std::expected
 
 ## 🔧 Quick Start
+The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
@@ -57,9 +58,10 @@ int main() {
     // Encoding
     auto data          = std::vector<std::byte>{};
     auto enc           = make_encoder(data);
-    auto result_encode = enc(v2::UserProfile{.name = "John Doe", .age = 30, .role = roles::admin});
-    if (!result_encode) {
-        std::cerr << "Encoding status: " << status_to_message(result_encode.error()) << std::endl;
+    auto status = enc(v2::UserProfile{.name = "John Doe", .age = 30, .role = roles::admin});
+    if (!status) {
+        std::cerr << "Encoding status: " << status_message(status.error()) << std::endl;
+        return 1;
     }
     // ...
 
@@ -67,9 +69,10 @@ int main() {
     using variant = std::variant<v1::UserProfile, v2::UserProfile>;
     auto    dec = make_decoder(data);
     variant user;
-    auto    result_decode = dec(user);
-    if (!result_decode) {
-        std::cerr << "Decoding status: " << status_to_message(result_decode.error()) << std::endl;
+    auto    status = dec(user);
+    if (!status) {
+        std::cerr << "Decoding status: " << status_message(status.error()) << std::endl;
+        return 1;
     }
     // should now hold a v2::UserProfile
     // ...
@@ -141,7 +144,7 @@ template <size_t N> struct A0 {
 };
 
 using A42 = A0<42>;
-auto && [tag, name] = to_tuple(A42{{/*42*/}, "John Doe"});
+const auto &tuple = to_tuple(A42{{/*42*/}, "John Doe"});
 //...
 
 ```

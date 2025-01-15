@@ -21,7 +21,6 @@
 #include <new>
 #include <type_traits>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 
@@ -46,9 +45,9 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         try {
             (encode(args), ...);
             return expected_type{};
-        } catch (const std::bad_alloc &) { return unexpected<status>(status::out_of_memory); } catch (...) {
+        } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (...) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
-            return unexpected<status>(status::error);
+            return unexpected<status_code>(status_code::error);
         }
     }
 
@@ -56,28 +55,39 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         if (value < 24) {
             appender_(data_, static_cast<byte_type>(value) | majorType);
         } else if (value <= 0xFF) {
-            appender_(data_, static_cast<byte_type>(24) | majorType);
-            appender_(data_, static_cast<byte_type>(value));
+            // appender_(data_, static_cast<byte_type>(24) | majorType);
+            // appender_(data_, static_cast<byte_type>(value));
+            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(24) | majorType), static_cast<byte_type>(value));
         } else if (value <= 0xFFFF) {
-            appender_(data_, static_cast<byte_type>(25) | majorType);
-            appender_(data_, static_cast<byte_type>(value >> 8));
-            appender_(data_, static_cast<byte_type>(value));
+            // appender_(data_, static_cast<byte_type>(25) | majorType);
+            // appender_(data_, static_cast<byte_type>(value >> 8));
+            // appender_(data_, static_cast<byte_type>(value));
+            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(25) | majorType),
+                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         } else if (value <= 0xFFFFFFFF) {
-            appender_(data_, static_cast<byte_type>(26) | majorType);
-            appender_(data_, static_cast<byte_type>(value >> 24));
-            appender_(data_, static_cast<byte_type>(value >> 16));
-            appender_(data_, static_cast<byte_type>(value >> 8));
-            appender_(data_, static_cast<byte_type>(value));
+            // appender_(data_, static_cast<byte_type>(26) | majorType);
+            // appender_(data_, static_cast<byte_type>(value >> 24));
+            // appender_(data_, static_cast<byte_type>(value >> 16));
+            // appender_(data_, static_cast<byte_type>(value >> 8));
+            // appender_(data_, static_cast<byte_type>(value));
+            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(26) | majorType),
+                                   static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
+                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         } else {
-            appender_(data_, static_cast<byte_type>(27) | majorType);
-            appender_(data_, static_cast<byte_type>(value >> 56));
-            appender_(data_, static_cast<byte_type>(value >> 48));
-            appender_(data_, static_cast<byte_type>(value >> 40));
-            appender_(data_, static_cast<byte_type>(value >> 32));
-            appender_(data_, static_cast<byte_type>(value >> 24));
-            appender_(data_, static_cast<byte_type>(value >> 16));
-            appender_(data_, static_cast<byte_type>(value >> 8));
-            appender_(data_, static_cast<byte_type>(value));
+            // appender_(data_, static_cast<byte_type>(27) | majorType);
+            // appender_(data_, static_cast<byte_type>(value >> 56));
+            // appender_(data_, static_cast<byte_type>(value >> 48));
+            // appender_(data_, static_cast<byte_type>(value >> 40));
+            // appender_(data_, static_cast<byte_type>(value >> 32));
+            // appender_(data_, static_cast<byte_type>(value >> 24));
+            // appender_(data_, static_cast<byte_type>(value >> 16));
+            // appender_(data_, static_cast<byte_type>(value >> 8));
+            // appender_(data_, static_cast<byte_type>(value));
+            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(27) | majorType),
+                                   static_cast<byte_type>(value >> 56), static_cast<byte_type>(value >> 48),
+                                   static_cast<byte_type>(value >> 40), static_cast<byte_type>(value >> 32),
+                                   static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
+                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         }
     }
 

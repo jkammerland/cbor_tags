@@ -1,3 +1,4 @@
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/variant_handling.h"
@@ -129,10 +130,7 @@ TEST_CASE("CBOR variant enum + negative") {
 
     REQUIRE_EQ(v.index(), v2.index());
     CHECK_EQ(std::get<negative>(v).value, std::get<negative>(v2).value);
-    fmt::print("v: {}\n", v.index());
-    fmt::print("v2: {}\n", v2.index());
-    fmt::print("v: {}\n", std::get<negative>(v).value);
-    fmt::print("v2: {}\n", std::get<negative>(v2).value); // TODO: BUUG!
+    fmt::print("v: {} / v2: {} / v: {} / v2: {}\n", v.index(), v2.index(), std::get<negative>(v).value, std::get<negative>(v2).value);
 }
 
 TEST_CASE("Check variant for enums static_assert") {
@@ -199,13 +197,14 @@ TEST_CASE("CBOR - struct with enum + optional") {
                        .g      = G::C,
                        .h      = H{static_cast<H>(255)},
                        .extra  = {.cbor_tag = {}, .s = "Hello"},
-                       .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
+                       .extra2 = {.cbor_tag = {555}, .h = static_cast<H>(-1)}};
     std::optional<S> os = s;
-    enc(os);
+    REQUIRE(enc(os));
 
     auto             dec = make_decoder(data);
     std::optional<S> os2;
-    dec(os2);
+    auto             status = dec(os2);
+    REQUIRE(status);
 
     CHECK_EQ(os->e, os2->e);
     CHECK_EQ(os->f, os2->f);

@@ -20,10 +20,22 @@ template <typename T> struct appender<T, false> {
     constexpr void operator()(T &container, value_type value) {
         if constexpr (IsMap<T>) {
             const auto &[key, mapped_value] = value;
-            container.insert_or_assign(key, mapped_value);
+            if constexpr (IsMultiMap<T>) {
+                container.insert({key, mapped_value});
+            } else {
+                container.insert_or_assign(key, mapped_value);
+            }
         } else {
             container.push_back(value);
         }
+    }
+
+    template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+        static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
+        constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
+        static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
+
+        container.insert(container.end(), {std::forward<Ts>(values)...});
     }
 
     constexpr void operator()(T &container, std::span<const std::byte> values) {
@@ -39,7 +51,15 @@ template <typename T> struct appender<T, false> {
 template <typename T> struct appender<T, true> {
     using size_type  = T::size_type;
     using value_type = T::value_type;
-    size_type      head_{};
+    size_type head_{};
+
+    template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+        static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
+        constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
+        static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
+        ((container[head_++] = std::forward<Ts>(values)), ...);
+    }
+
     constexpr void operator()(T &container, value_type value) { container[head_++] = value; }
     constexpr void operator()(T &container, std::span<const std::byte> values) {
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());
@@ -88,6 +108,7 @@ template <typename T> struct reader<T, false> {
         ++current_offset_;
         return result;
     }
+
     constexpr value_type read(const T &, size_type offset) noexcept {
         throw std::runtime_error("Not implemented");
         auto it = std::next(position_, offset);

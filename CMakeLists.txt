@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.2.1)
+project(cbor_tags VERSION 0.3.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -43,7 +43,7 @@ if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
     GIT_TAG
     v1.1.0
     OPTIONS
-    "EXPECTED_CBOR_TAGS_BUILD_TESTS OFF"
+    "EXPECTED_BUILD_TESTS OFF"
     "EXPECTED_BUILD_PACKAGE OFF")
 else()
   find_package(tl-expected REQUIRED)
