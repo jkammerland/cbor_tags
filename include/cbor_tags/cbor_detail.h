@@ -27,22 +27,11 @@ template <typename T> struct appender<T, false> {
     }
 
     template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
-        constexpr auto size = sizeof...(Ts);
-        if constexpr (IsMap<T>) {
-            if (size % 2 != 0) {
-                throw std::runtime_error("Invalid number of arguments for map");
-            }
-            for (auto i = 0; i < size; i += 2) {
-                container.insert_or_assign(std::forward<Ts>(values)...);
-            }
-        } else {
-            if constexpr (HasReserve<T>) {
-                auto current_size = container.size();
-                container.resize(current_size + size);
-                decltype(current_size) i = 0;
-                ((container[current_size + i++] = std::forward<Ts>(values)), ...);
-            }
-        }
+        static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
+        constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
+        static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
+
+        container.insert(container.end(), {std::forward<Ts>(values)...});
     }
 
     constexpr void operator()(T &container, std::span<const std::byte> values) {
@@ -61,6 +50,9 @@ template <typename T> struct appender<T, true> {
     size_type head_{};
 
     template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+        static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
+        constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
+        static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
         ((container[head_++] = std::forward<Ts>(values)), ...);
     }
 
