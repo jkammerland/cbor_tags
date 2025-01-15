@@ -58,7 +58,12 @@ template <typename T> struct appender<T, false> {
 template <typename T> struct appender<T, true> {
     using size_type  = T::size_type;
     using value_type = T::value_type;
-    size_type      head_{};
+    size_type head_{};
+
+    template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+        ((container[head_++] = std::forward<Ts>(values)), ...);
+    }
+
     constexpr void operator()(T &container, value_type value) { container[head_++] = value; }
     constexpr void operator()(T &container, std::span<const std::byte> values) {
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());

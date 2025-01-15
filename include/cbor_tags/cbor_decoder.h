@@ -356,9 +356,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::success;
         } else {
             using value_type = std::remove_cvref_t<T>;
-            value_type t; // TODO:
+            value_type t;
             auto       result = decode(t, major, additionalInfo);
-            value             = std::move(t);
+            if (result == status_code::success) {
+                value = std::move(t);
+            } else {
+                value = std::nullopt;
+            }
             return result;
         }
         return status_code::invalid_tag_for_optional;
