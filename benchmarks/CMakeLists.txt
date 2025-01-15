@@ -18,3 +18,4 @@ find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
 
 target_link_libraries(benchmarks PRIVATE cbor_tags fmt::fmt Catch2::Catch2WithMain)
+target_include_directories(benchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

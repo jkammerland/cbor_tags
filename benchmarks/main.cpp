@@ -1,4 +1,5 @@
 #include "cbor_tags/cbor.h"
+#include "small_generator.h"
 
 #include <algorithm>
 #include <catch2/benchmark/catch_benchmark.hpp>
@@ -21,7 +22,7 @@ int basic_array_test(auto seed) {
     auto buffer = std::vector<std::byte>{};
     auto enc    = make_encoder(buffer);
 
-    std::mt19937_64            gen(seed);
+    rng::small_generator       gen(seed);
     std::array<uint64_t, 1000> input;
     std::ranges::generate(input, [&gen] { return gen(); });
     REQUIRE(enc(input));
@@ -92,7 +93,7 @@ TEST_CASE("decoder benchmarks", "[decoder]") {
     auto buffer = std::vector<std::byte>{};
     auto enc    = make_encoder(buffer);
 
-    std::mt19937_64         gen(seed);
+    rng::small_generator    gen(seed);
     constexpr uint64_t      N = 10000;
     std::array<uint64_t, N> input;
     std::ranges::generate(input, [&gen] { return gen(); });
@@ -159,7 +160,7 @@ TEST_CASE("Encoder benchmarks", "[encoder]") {
     constexpr uint64_t N = 10000;
 
     std::array<uint64_t, N> input;
-    std::mt19937_64         gen(seed);
+    rng::small_generator    gen(seed);
     std::ranges::generate(input, [&gen] { return gen(); });
 
     BENCHMARK_ADVANCED("Bench array encoding")(Catch::Benchmark::Chronometer meter) {
