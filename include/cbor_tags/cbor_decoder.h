@@ -371,9 +371,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsCborMajor... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
-        using Variant                                                      = std::variant<T...>;
-        constexpr auto                  no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
-        [[maybe_unused]] constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
+        using Variant                                     = std::variant<T...>;
+        constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
+        constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
         static_assert(matching_major_types[0] <= 1, "Multiple types match against major type 0 (unsigned integer)");
         static_assert(matching_major_types[1] <= 1, "Multiple types match against major type 1 (negative integer)");
         static_assert(matching_major_types[2] <= 1, "Multiple types match against major type 2 (byte string)");
@@ -388,7 +388,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                                                           (among the ambigous) would match against a decode. Uncomment the lines above for better diagnostics.");
 
         auto try_decode = [this, major, additionalInfo, &value]<typename U>() -> bool {
-            if (!is_valid_major<decltype(major), U>(major)) {
+            if (!is_valid_major<major_type, U>(major)) {
                 return false;
             }
 

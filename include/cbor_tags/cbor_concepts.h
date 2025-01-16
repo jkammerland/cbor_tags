@@ -131,6 +131,9 @@ concept IsMap = IsRangeOfCborValues<T> && requires(T t) {
 template <typename T>
 concept IsMultiMap = IsMap<T> && requires(T t) {
     { t.equal_range(std::declval<typename T::key_type>()) } -> std::same_as<std::pair<typename T::iterator, typename T::iterator>>;
+    requires !requires {
+        { t.insert_or_assign(std::declval<typename T::key_type>(), std::declval<typename T::mapped_type>()) };
+    };
 };
 
 template <typename T>
@@ -376,5 +379,4 @@ template <char... Chars> constexpr auto operator"" _hex_tag() { return static_ta
 } // namespace literals
 
 template <typename T, typename... Ts> static constexpr bool contains() { return (std::is_same_v<T, Ts> || ...); }
-
 } // namespace cbor::tags

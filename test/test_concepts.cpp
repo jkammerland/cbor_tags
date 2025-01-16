@@ -424,27 +424,27 @@ TEST_CASE("Contiguous range concept") {
     CHECK(!cbor::tags::IsContiguous<std::deque<std::byte>>);
 }
 
-struct A {
+struct AllCborMajorsExample {
     bool is_contiguous;
 
     template <typename T>
         requires IsContiguous<T>
-    A(T) : is_contiguous(true) {
+    AllCborMajorsExample(T) : is_contiguous(true) {
         fmt::print("A() contiguous\n");
     }
 
     template <typename T>
         requires(!IsContiguous<T>)
-    A(T) : is_contiguous(false) {
+    AllCborMajorsExample(T) : is_contiguous(false) {
         fmt::print("A() not contiguous\n");
     }
 };
 
 TEST_CASE("Concept sfinae") {
-    A a(std::array<std::byte, 5>{});
-    A b(std::vector<std::byte>{});
-    A c(std::list<std::byte>{});
-    A d(std::deque<std::byte>{});
+    AllCborMajorsExample a(std::array<std::byte, 5>{});
+    AllCborMajorsExample b(std::vector<std::byte>{});
+    AllCborMajorsExample c(std::list<std::byte>{});
+    AllCborMajorsExample d(std::deque<std::byte>{});
 
     CHECK(a.is_contiguous);
     CHECK(a.is_contiguous);
@@ -715,4 +715,18 @@ TEST_CASE_TEMPLATE("Nested variants negative", T, std::variant<std::variant<VA1,
 
     CHECK(!result);
     CHECK_EQ(unmatched, 0);
+}
+
+TEST_CASE_TEMPLATE("Multimaps concept matching", T, std::multimap<int, std::string>, std::unordered_multimap<int, std::string>) {
+    static_assert(IsMap<T>);
+    static_assert(IsMultiMap<T>);
+    static_assert(IsRangeOfCborValues<T>);
+    static_assert(!IsFixedArray<T>);
+}
+
+TEST_CASE_TEMPLATE("Not multimap concept matching", T, std::map<int, std::string>, std::unordered_map<int, std::string>) {
+    static_assert(IsMap<T>);
+    static_assert(!IsMultiMap<T>);
+    static_assert(IsRangeOfCborValues<T>);
+    static_assert(!IsFixedArray<T>);
 }
