@@ -43,14 +43,17 @@
 using namespace cbor::tags;
 
 std::string some_data = "Hello world!";
-struct A {
+// COMPILER BUG IF YOU RENAME TO "A". OVERLAPS WITH ANOTHER DEFINITION THAT IS NOT CAUGHT BY THE COMPILER
+// Should be a redefinition error, not a segfault in runtime because of wrong type used for deserialization
+// The definitions belong to seperate TUs as well...Only happens in debug, not release mode for some reason too.
+struct A12398 {
     std::int64_t a;
     std::string  s;
 };
 
 // Helper function to print type and value
 template <typename T> constexpr void print_type_and_value(const T &value) {
-    if constexpr (std::is_same_v<T, A>) {
+    if constexpr (std::is_same_v<T, A12398>) {
         fmt::print("Got type <A>: with values a={}, s={}\n", value.a, value.s);
     } else if constexpr (fmt::is_formattable<T>()) {
         fmt::print("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
@@ -74,12 +77,11 @@ TEST_CASE("Basic reflection") {
     CHECK(is_constructible);
 
     // Check if we can construct M with any and any
-    [[maybe_unused]] auto tmp1 = M{any{}, std::optional<int>{any{}}}; // This should compile
-
-    [[maybe_unused]] auto tmp2 = M{any{}, any{}}; // Question is if if we can compile this
+    [[maybe_unused]] auto tmp1 = M{.a = any{}, .b = std::optional<int>{any{}}}; // This should compile
+    [[maybe_unused]] auto tmp2 = M{.a = any{}, .b = any{}};                     // Question is if if we can compile this
 }
 
-TEST_CASE("Advanced reflection") {
+TEST_CASE("Advanced reflection 0") {
     struct Z {
         int                        a;
         float                      b;
@@ -88,7 +90,7 @@ TEST_CASE("Advanced reflection") {
         std::map<std::string, int> e;
         std::deque<double>         f;
 
-        A g;
+        A12398 g;
 
         std::optional<int>            h;
         std::optional<std::list<int>> i;
@@ -97,21 +99,20 @@ TEST_CASE("Advanced reflection") {
         std::set<std::pair<int, int>> l;
     };
 
-    auto z = Z{42,
-               3.14f,
-               "Hello world!",
-               {1, 2, 3},
-               {{"one", 1}, {"two", 2}, {"three", 3}},
-               {1.0, 2.0, 3.0},
-               A{42, "Hello world!"},
-               std::nullopt,
-               std::list<int>{1, 2, 3},           // std::optional<std::list<int>>
-               {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, // std::vector<std::vector<int>>
-               {{1, 2}, {1, 2}, {1, 2}},          // std::multimap<int, int>
-               {{1, 2}, {3, 4}, {5, 6}}};         // std::set<std::pair<int, int>>
+    auto z = Z{.a = 42,
+               .b = 3.14f,
+               .c = "Hello world!",
+               .d = {1, 2, 3},
+               .e = {{"one", 1}, {"two", 2}, {"three", 3}},
+               .f = {1.0, 2.0, 3.0},
+               .g = A12398{.a = 42, .s = "Hello world!"},
+               .h = std::nullopt,
+               .i = std::list<int>{1, 2, 3},           // std::optional<std::list<int>>
+               .j = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, // std::vector<std::vector<int>>
+               .k = {{1, 2}, {1, 2}, {1, 2}},          // std::multimap<int, int>
+               .l = {{1, 2}, {3, 4}, {5, 6}}};         // std::set<std::pair<int, int>>
 
     auto &&tuple = to_tuple(z);
-
     std::apply([](auto &&...args) { (print_type_and_value(args), ...); }, tuple);
     CHECK_EQ(detail::aggregate_binding_count<Z>, 12);
 }

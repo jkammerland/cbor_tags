@@ -34,8 +34,8 @@ struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUn
                                                                             : IsNegative<unwrap_type_t<T>>          ? 1
                                                                             : IsBinaryString<unwrap_type_t<T>>      ? 2
                                                                             : IsTextString<unwrap_type_t<T>>        ? 3
-                                                                            : IsMap<unwrap_type_t<T>>               ? 4
-                                                                            : IsArray<unwrap_type_t<T>>             ? 5
+                                                                            : IsArray<unwrap_type_t<T>>             ? 4
+                                                                            : IsMap<unwrap_type_t<T>>               ? 5
                                                                             : IsTag<unwrap_type_t<T>>               ? 6
                                                                             : IsSimple<unwrap_type_t<T>>            ? 7
                                                                             : IsRangeOfCborValues<unwrap_type_t<T>> ? 5
@@ -201,9 +201,7 @@ constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &
             } else {
                 result[6]++; // If duplicate tag is found
             }
-        }
-
-        else {
+        } else {
             result[6]++;
         }
     }

@@ -1,8 +1,10 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-This library is designed with modern C++20 features, providing a simple but flexible API, with full control over memory and protocol customization. 
+This library is designed with modern C++20 features, with a simple but flexible API, providing full control over memory and protocol customization
 
 It is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️.
+
+The primary advantage of using a library like this is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the CDDL (RFC 8610) definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
 The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
 
@@ -12,13 +14,145 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 - Support Zero-copy encoding by joining multiple buffers
 - Support Zero-copy decoding using views and spans
 - Flexible tag handling for structs and tuples, non-invasive
-- Support for arbitrary containers (concept-based)
-- Header-only library, modules TODO:
+- Support for many (almost arbitrary) containers
 - Uses tl::expected in absence of c++23 std::expected
 
 ## 🔧 Quick Start
-The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
+Here is how you would encode individual CBOR values onto a buffer "data", a type of your choice (e.g it could be a list, deque or pmr::vector)
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
 
+#include <cassert>
+#include <iostream>
+#include <vector>
+
+int main() {
+    using namespace cbor::tags;
+
+    // Encoding
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+    using namespace std::string_view_literals;
+    enc(2, 3.14, "Hello, World!"sv); // Note a plain const char* will not work, without a encode overload
+
+    // Decoding
+    auto dec = make_decoder(data);
+    int  a;
+    double b;
+    std::string c;
+    dec(a, b, c);
+
+    assert(a == 2);
+    assert(b == 3.14);
+    assert(c == "Hello, World!");
+
+    return 0;
+}
+```
+> [!NOTE]
+> The values in above buffer are 3 single items, normally you would send a single object wrapping them to avoid having to deal with different object roots on a application level. 
+
+Here is how you could formulate a struct with a tag from the first example:
+```cpp
+struct Tagged {
+    static constexpr std::uint64_t cbor_tag = 321;
+    int            a;
+    double         b;
+    std::string    c;
+};
+```
+> [!NOTE]
+> Note that if the reciever of the encoded data does not have access to the CDDL or the definition here (together with this library), it will most likely not be able to decode the data correctly. A generic decoder without the definition will at most be able to decode 1 cbor major after the tag. The solution is to wrap members in an array or manually serialize the struct with a array or bstr encapsulating a,b and c. 
+
+```cpp
+Tagged a{.a = 2, .b = 3.14, .c = "Hello, World!"};
+enc(a.cbor_tag, wrap_as_array{3}, a.a, a.b, a.c);
+// Or equivalently
+// enc(a.cbor_tag, wrap_as_array{a.a, a.b, a.c});
+// Now the buffer contains the tag(321) followed by a single array with 3 elements
+```
+
+Here is a larger example of encoding and decoding a struct with all CBOR major types:
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+
+#include <cassert>
+#include <iostream>
+#include <map>
+#include <string>
+#include <unordered_map>
+#include <variant>
+#include <vector>
+
+using namespace cbor::tags;
+
+/* Below is some example mappings of STL types to cbor major types */
+struct AllCborMajorsExample {
+    static constexpr std::uint64_t cbor_tag = 3333; //Major type 6 (tag)
+    positive                   a0; // Major type 0 (unsigned integer)
+    negative                   a1; // Major type 1 (negative integer)
+    int                        a;  // Major type 0 or 1 (unsigned or negative integer)
+    std::string                b;  // Major type 2 (text string)
+    std::vector<std::byte>     c;  // Major type 3 (byte string)
+    std::vector<int>           d;  // Major type 4 (array)
+    std::map<int, std::string> e;  // Major type 5 (map)
+    struct B {
+        static_tag<1337> cbor_tag; // Major type 6 (tag)
+        bool             a;        // Major type 7 (simple value)
+    } f;
+    double g;                      // Major type 7 (float)
+
+    // More advanced types
+    std::variant<int, std::string, std::vector<int>> h; // Major type 0, 1, 2 or 4 (array can take major type 0 or 1)
+    std::unordered_multimap<std::string, std::variant<int, std::map<std::string, double>, std::vector<float>>> i; // Major type 5 (map) ...
+    std::optional<std::map<int, std::string>> j; // Major type 5 (map) or 7 (simple value std::nullopt)
+};
+
+int main() {
+    // Encoding
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    auto a0 = AllCborMajorsExample{
+        .a0 = 42,  // +42
+        .a1 = 42,  // -42 (implicit conversion to negative)
+        .a  = -42, // -42 (integer could be +/-)
+        .b  = "Hello, World!",
+        .c  = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}},
+        .d  = {1, 2, 3, 4, 5},
+        .e  = {{1, "one"}, {2, "two"}, {3, "three"}},
+        .f  = {.cbor_tag = {}, .a = true},
+        .g  = 3.14,
+        .h  = "Hello, World!",
+        .i  = {{"one", 1}, {"two", std::map<std::string, double>({{"0", 1.0}, {"1", 1.1}})}, {"one", std::vector<float>{0.0f, 1.0f, 2.0f}}},
+        .j  = std::nullopt};
+
+    auto result = enc(a0);
+    if (!result) {
+        std::cerr << "Failed to encode A" << std::endl;
+        return 1;
+    }
+
+    // Decoding
+    auto                 dec = make_decoder(data);
+    AllCborMajorsExample a1;
+    result = dec(a1);
+    if (!result) {
+        std::cerr << "Failed to decode A: " << status_message(result.error()) << std::endl;
+        return 1;
+    }
+
+    assert(a0.a0 == a1.a0);
+    return 0;
+}
+```
+> [!NOTE]
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets > the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete".
+
+
+The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
@@ -167,7 +301,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.2.1 # or specify a particular commit/tag
+  GIT_TAG v0.3.2 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
