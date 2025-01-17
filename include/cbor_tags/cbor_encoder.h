@@ -168,14 +168,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         }
     }
 
-    template <typename T> constexpr void encode(const std::optional<T> &value) {
-        if (value.has_value()) {
-            encode(*value);
-        } else {
-            appender_(data_, static_cast<byte_type>(0xF6));
-        }
-    }
-
     template <typename... T> constexpr void encode(const std::variant<T...> &value) {
         // encoding a variant is less strict than decoding
         std::visit([this](const auto &v) { this->encode(v); }, value);
@@ -189,6 +181,16 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
 template <typename T> struct enum_encoder {
     template <IsEnum U> constexpr void encode(U value) {
         detail::underlying<T>(this).encode(static_cast<std::underlying_type_t<U>>(value));
+    }
+};
+
+template <typename T> struct cbor_optional_encoder {
+    template <typename U> constexpr void encode(const std::optional<U> &value) {
+        if (value.has_value()) {
+            detail::underlying<T>(this).encode(*value);
+        } else {
+            detail::underlying<T>(this).appender_(detail::underlying<T>(this).data_, static_cast<typename T::byte_type>(0xF6));
+        }
     }
 };
 
@@ -206,6 +208,6 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder>(buffer);
+    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder, cbor_optional_encoder>(buffer);
 }
 } // namespace cbor::tags
