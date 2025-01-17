@@ -67,7 +67,7 @@ struct Tagged {
 
 ```cpp
 Tagged a{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(a.cbor_tag, wrap_as_array{3}, a.a, a.b, a.c);
+enc(a.cbor_tag, as_array{3}, a.a, a.b, a.c);
 // Or equivalently
 // enc(a.cbor_tag, wrap_as_array{a.a, a.b, a.c});
 // Now the buffer contains the tag(321) followed by a single array with 3 elements
@@ -279,6 +279,9 @@ template <size_t N> struct A0 {
 
 using A42 = A0<42>;
 const auto &tuple = to_tuple(A42{{/*42*/}, "John Doe"});
+
+auto enc = make_encoder(...);
+std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
@@ -301,7 +304,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.3.2 # or specify a particular commit/tag
+  GIT_TAG v0.4.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

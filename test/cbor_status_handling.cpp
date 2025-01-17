@@ -162,4 +162,21 @@ TEST_SUITE("Decoding the wrong thing") {
     }
 }
 
+TEST_SUITE("Open objects - wrap as etc") {
+    TEST_CASE("Basic") {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(140_tag, wrap_as_array{1, 2}));
+
+        auto dec = make_decoder(data);
+        int  a, b;
+        auto c      = wrap_as_array{a, b};
+        auto result = dec(140_tag, c);
+        REQUIRE(result);
+        CHECK_EQ(a, 1);
+        CHECK_EQ(b, 2);
+    }
+}
+
 // TEST_SUITE("Decode the right thing") {}

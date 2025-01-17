@@ -55,34 +55,15 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         if (value < 24) {
             appender_(data_, static_cast<byte_type>(value) | majorType);
         } else if (value <= 0xFF) {
-            // appender_(data_, static_cast<byte_type>(24) | majorType);
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(24) | majorType), static_cast<byte_type>(value));
         } else if (value <= 0xFFFF) {
-            // appender_(data_, static_cast<byte_type>(25) | majorType);
-            // appender_(data_, static_cast<byte_type>(value >> 8));
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(25) | majorType),
                                    static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         } else if (value <= 0xFFFFFFFF) {
-            // appender_(data_, static_cast<byte_type>(26) | majorType);
-            // appender_(data_, static_cast<byte_type>(value >> 24));
-            // appender_(data_, static_cast<byte_type>(value >> 16));
-            // appender_(data_, static_cast<byte_type>(value >> 8));
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(26) | majorType),
                                    static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
                                    static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         } else {
-            // appender_(data_, static_cast<byte_type>(27) | majorType);
-            // appender_(data_, static_cast<byte_type>(value >> 56));
-            // appender_(data_, static_cast<byte_type>(value >> 48));
-            // appender_(data_, static_cast<byte_type>(value >> 40));
-            // appender_(data_, static_cast<byte_type>(value >> 32));
-            // appender_(data_, static_cast<byte_type>(value >> 24));
-            // appender_(data_, static_cast<byte_type>(value >> 16));
-            // appender_(data_, static_cast<byte_type>(value >> 8));
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(27) | majorType),
                                    static_cast<byte_type>(value >> 56), static_cast<byte_type>(value >> 48),
                                    static_cast<byte_type>(value >> 40), static_cast<byte_type>(value >> 32),
@@ -212,10 +193,14 @@ template <typename T> struct enum_encoder {
 };
 
 template <typename T> struct cbor_header_encoder {
-    constexpr void encode(as_array value) {
+    constexpr void encode(const as_array &value) {
         detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
     }
-    constexpr void encode(as_map value) {
+    template <typename... Ts> constexpr void encode(const wrap_as_array<Ts...> &value) {
+        detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
+        std::apply([this](const auto &...args) { (detail::underlying<T>(this).encode(args), ...); }, value.values_);
+    }
+    constexpr void encode(const as_map &value) {
         detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0xA0));
     }
 };

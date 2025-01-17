@@ -188,10 +188,25 @@ struct as_array {
 };
 
 template <typename... T> struct wrap_as_array {
-    std::tuple<T...> &&values_;
-    std::uint64_t      size_{sizeof...(T)};
-    constexpr wrap_as_array(T &&...values) : values_(values...) {}
+    std::tuple<T &&...> values_;
+    std::uint64_t       size_{sizeof...(T)};
+
+    constexpr explicit wrap_as_array(T &&...values) : values_(std::forward<T>(values)...) {}
 };
+
+// Specialization for when a single tuple is passed
+template <typename... TupleArgs> struct wrap_as_array<std::tuple<TupleArgs...>> {
+    std::tuple<TupleArgs...> &values_;
+    std::uint64_t             size_{sizeof...(TupleArgs)};
+
+    constexpr explicit wrap_as_array(std::tuple<TupleArgs...> &tuple) : values_(tuple) {}
+};
+
+// Deduction guide for regular arguments
+template <typename... T> wrap_as_array(T &&...) -> wrap_as_array<T &&...>;
+
+// Deduction guide for tuple
+template <typename... TupleArgs> wrap_as_array(std::tuple<TupleArgs...> &) -> wrap_as_array<std::tuple<TupleArgs...>>;
 
 struct as_indefinite_array {};
 struct end_array {};

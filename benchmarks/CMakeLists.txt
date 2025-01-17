@@ -4,7 +4,7 @@ project(benchmarks CXX)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 
-cpmaddpackage("gh:fmtlib/fmt#11.0.2")
+cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 cpmaddpackage("gh:catchorg/Catch2@3.8.0")
 
 # add executables more if needed

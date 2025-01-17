@@ -5,7 +5,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 
 # As soon as std::format is more widely available, we can remove this
-cpmaddpackage("gh:fmtlib/fmt#11.0.2")
+cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 
 add_executable(reflection_module_generator reflection_module_generator.cpp)
 target_link_libraries(reflection_module_generator PRIVATE fmt::fmt)

@@ -622,6 +622,11 @@ template <typename T> struct cbor_header_decoder {
         validate_size(major_type::Array, value.size_);
         return status_code::success;
     }
+    template <typename... Ts> constexpr status_code decode(wrap_as_array<Ts...> value) {
+        validate_size(major_type::Array, value.size_);
+        return std::apply([this](auto &&...args) { return detail::underlying<T>(this).applier(std::forward<decltype(args)>(args)...); },
+                          value.values_);
+    }
     constexpr status_code decode(as_map value) {
         validate_size(major_type::Map, value.size_);
         return status_code::success;
