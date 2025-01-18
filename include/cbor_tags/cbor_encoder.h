@@ -28,7 +28,7 @@ template <typename T> struct cbor_header_encoder;
 
 template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
     requires ValidCborBuffer<OutputBuffer>
-struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
+struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     using self_t = encoder<OutputBuffer, Options, Encoders...>;
     using Encoders<self_t>::encode...;
 
@@ -167,11 +167,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         }
     }
 
-    template <typename... T> constexpr void encode(const std::variant<T...> &value) {
-        // encoding a variant is less strict than decoding
-        std::visit([this](const auto &v) { this->encode(v); }, value);
-    }
-
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
@@ -180,6 +175,13 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
 template <typename T> struct enum_encoder {
     template <IsEnum U> constexpr void encode(U value) {
         detail::underlying<T>(this).encode(static_cast<std::underlying_type_t<U>>(value));
+    }
+};
+
+template <typename T> struct cbor_variant_encoder {
+    template <typename... Ts> constexpr void encode(const std::variant<Ts...> &value) {
+        // encoding a variant is less strict than decoding
+        std::visit([this](const auto &v) { detail::underlying<T>(this).encode(v); }, value);
     }
 };
 
@@ -207,6 +209,7 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder, cbor_optional_encoder>(buffer);
+    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder, cbor_optional_encoder, cbor_variant_encoder>(
+        buffer);
 }
 } // namespace cbor::tags
