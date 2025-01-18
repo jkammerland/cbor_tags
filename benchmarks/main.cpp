@@ -217,3 +217,26 @@ TEST_CASE("Encoder benchmarks", "[encoder]") {
         });
     };
 }
+
+TEST_CASE("Encode optionals", "[encoder]") {
+    rng::small_generator gen(Catch::getSeed());
+
+    BENCHMARK_ADVANCED("Just rng")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() { return gen(); });
+    };
+
+    BENCHMARK_ADVANCED("Just rng with optional generation")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() { return gen() % 2 == 0 ? std::optional<int>{gen()} : std::optional<int>{}; });
+    };
+
+    BENCHMARK_ADVANCED("Bench optional encoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() {
+            std::vector<std::byte> buffer;
+            auto                   enc    = make_encoder(buffer);
+            auto                   value  = gen() % 2 == 0 ? std::optional<int>{gen()} : std::optional<int>{};
+            auto                   status = enc(value);
+            CHECK(status);
+            return buffer;
+        });
+    };
+}
