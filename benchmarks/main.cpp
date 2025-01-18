@@ -227,6 +227,23 @@ TEST_CASE("Encoder benchmarks", "[encoder]") {
     };
 }
 
+TEST_CASE("Encode doubles", "[encoder]") {
+    rng::small_generator gen(Catch::getSeed());
+
+    BENCHMARK_ADVANCED("Array of doubles")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() {
+            std::array<double, N> input;
+            std::ranges::generate(input, [&gen] { return gen(); });
+
+            std::vector<std::byte> buffer;
+            auto                   enc    = make_encoder(buffer);
+            auto                   status = enc(input);
+            CHECK(status);
+            return buffer;
+        });
+    };
+}
+
 TEST_CASE("Encode optionals", "[encoder]") {
     rng::small_generator gen(Catch::getSeed());
 

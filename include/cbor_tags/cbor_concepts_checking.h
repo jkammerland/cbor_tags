@@ -26,8 +26,6 @@ namespace cbor::tags {
 // 6           | tag of number N   | 1 data item
 // 7           | simple/float      | specific encoding of a simple type
 
-// HOW TO FIX IsNegative, and use IsSigned for signed integers to represent both negative and positive integers?
-
 // Modified ConceptType
 template <typename ByteType, typename T>
 struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUnsigned<unwrap_type_t<T>>            ? 0

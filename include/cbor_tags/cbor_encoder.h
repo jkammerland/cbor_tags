@@ -128,31 +128,21 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     constexpr void encode(float16_t value) {
-        appender_(data_, static_cast<byte_type>(0xf9)); // CBOR Float16 tag
-        appender_(data_, static_cast<byte_type>(value.value >> 8));
-        appender_(data_, static_cast<byte_type>(value.value & 0xff));
+        appender_.multi_append(data_, static_cast<byte_type>(0xF9), static_cast<byte_type>(value.value >> 8),
+                               static_cast<byte_type>(value.value & 0xFF));
     }
 
     constexpr void encode(float value) {
-        appender_(data_, static_cast<byte_type>(0xFA));
         const auto bits = std::bit_cast<std::uint32_t>(value);
-        appender_(data_, static_cast<byte_type>(bits >> 24));
-        appender_(data_, static_cast<byte_type>(bits >> 16));
-        appender_(data_, static_cast<byte_type>(bits >> 8));
-        appender_(data_, static_cast<byte_type>(bits));
+        appender_.multi_append(data_, static_cast<byte_type>(0xFA), static_cast<byte_type>(bits >> 24), static_cast<byte_type>(bits >> 16),
+                               static_cast<byte_type>(bits >> 8), static_cast<byte_type>(bits));
     }
 
     constexpr void encode(double value) {
-        appender_(data_, static_cast<byte_type>(0xFB));
         const auto bits = std::bit_cast<std::uint64_t>(value);
-        appender_(data_, static_cast<byte_type>(bits >> 56));
-        appender_(data_, static_cast<byte_type>(bits >> 48));
-        appender_(data_, static_cast<byte_type>(bits >> 40));
-        appender_(data_, static_cast<byte_type>(bits >> 32));
-        appender_(data_, static_cast<byte_type>(bits >> 24));
-        appender_(data_, static_cast<byte_type>(bits >> 16));
-        appender_(data_, static_cast<byte_type>(bits >> 8));
-        appender_(data_, static_cast<byte_type>(bits));
+        appender_.multi_append(data_, static_cast<byte_type>(0xFB), static_cast<byte_type>(bits >> 56), static_cast<byte_type>(bits >> 48),
+                               static_cast<byte_type>(bits >> 40), static_cast<byte_type>(bits >> 32), static_cast<byte_type>(bits >> 24),
+                               static_cast<byte_type>(bits >> 16), static_cast<byte_type>(bits >> 8), static_cast<byte_type>(bits));
     }
 
     constexpr void encode(bool value) { appender_(data_, value ? static_cast<byte_type>(0xF5) : static_cast<byte_type>(0xF4)); }
