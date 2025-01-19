@@ -192,7 +192,7 @@ constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &
             } else {
                 result[6]++; // If duplicate tag is found
             }
-        } else if constexpr (IsTaggedTuple<T>) {
+        } else if constexpr (IsTaggedPair<T>) {
             auto it = std::find(tags.begin(), tags.end(), std::get<0>(T{}).cbor_tag);
             if (it == tags.end()) {
                 tags.push_back(std::get<0>(T{}).cbor_tag);

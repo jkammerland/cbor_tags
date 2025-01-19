@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
 #include "magic_enum/magic_enum.hpp"
+#include "test_util.h"
 
 #include <cstddef>
 #include <doctest/doctest.h>
@@ -168,6 +169,8 @@ TEST_SUITE("Open objects - wrap as etc") {
         auto enc  = make_encoder(data);
 
         REQUIRE(enc(140_tag, wrap_as_array{1, 2}));
+
+        fmt::print("data: {}\n", to_hex(data));
 
         auto dec = make_decoder(data);
         int  a, b;
