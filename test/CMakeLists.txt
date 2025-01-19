@@ -3,7 +3,7 @@ project(tests VERSION 1.0.0)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 
-cpmaddpackage("gh:fmtlib/fmt#11.0.2")
+cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 cpmaddpackage("gh:Neargye/nameof@0.10.4")
 cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
 

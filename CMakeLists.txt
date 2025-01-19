@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.3.2)
+project(cbor_tags VERSION 0.4.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -13,14 +13,14 @@ if(CBOR_TAGS_USE_DEV_SETTINGS)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
 endif()
 
-# add tools - reflection module generator primarily
+# add tools - reflection module generator - makes cbor_reflection_impl.h
 option(CBOR_TAGS_BUILD_TOOLS "Build tools" ON)
 if(CBOR_TAGS_BUILD_TOOLS)
   add_subdirectory(tools)
 else()
   message(STATUS "Skipping tools - reflections headers must exist.")
-  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/cbor_tags/reflection_module.hpp")
-    message(FATAL_ERROR "reflection_module.hpp not found. Enable CBOR_TAGS_BUILD_TOOLS to generate it.")
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/cbor_tags/cbor_reflection_impl.h")
+    message(FATAL_ERROR "cbor_reflection_impl.h not found. Enable CBOR_TAGS_BUILD_TOOLS to generate it.")
   endif()
 endif()
 
@@ -64,15 +64,21 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 # Make ${PROJECT_NAME} depend on the generated header
 add_dependencies(${PROJECT_NAME} generate_reflection_module)
 
-# add tests
+# Extra options
 option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
-if(CBOR_TAGS_BUILD_TESTS)
+option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
+if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
+  include(CTest)
   enable_testing()
-  add_subdirectory(test)
-  # add_subdirectory(doc/test_readme)
 endif()
 
-option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
+# add tests
+if(CBOR_TAGS_BUILD_TESTS)
+  add_subdirectory(test)
+  # add_subdirectory(doc/test_readme) # TODO:
+endif()
+
+# add benchmarks
 if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()

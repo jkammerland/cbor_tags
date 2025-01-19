@@ -125,6 +125,8 @@ TEST_CASE("Test tuple dynamic tag") {
     auto tag = make_tag_pair(140_tag, std::tuple<int, std::string>{42, "Hello world!"});
     enc(tag);
 
+    fmt::print("data: {}\n", to_hex(data));
+
     auto dec = make_decoder(data);
 
     std::tuple<dynamic_tag<std::uint64_t>, int, std::string> result;
@@ -174,7 +176,7 @@ TEST_CASE("Variant") {
     auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
 
-    D d{{}, "Hello world!"};
+    D d{.cbor_tag = {}, .v = "Hello world!"};
     enc(d);
 
     auto dec = make_decoder(data);
@@ -190,7 +192,7 @@ TEST_CASE("Multi tag handling") {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        enc(141_tag, D{{}, "Hello world!"});
+        enc(141_tag, D{.cbor_tag = {}, .v = "Hello world!"});
 
         fmt::print("data: {}\n", to_hex(data));
 
@@ -222,7 +224,10 @@ TEST_CASE("Multi tag handling") {
         enc(MultiObj{.cbor_tag = {}, .a = {.cbor_tag = {}, .a = 1}, .b = {.cbor_tag = {}, .b = 2}});
 
         fmt::print("data: {}\n", to_hex(data));
-        REQUIRE_EQ(to_hex(data), "d88cd88e01d88d02");
+
+        if (decltype(enc)::options::wrap_groups) {
+            REQUIRE_EQ(to_hex(data), "d88c82d88e01d88d02");
+        }
 
         auto     dec = make_decoder(data);
         MultiObj result;
@@ -235,11 +240,12 @@ TEST_CASE("Multi tag handling") {
 
 template <size_t N> struct A0 {
     static_tag<N> cbor_tag;
+    int           a;
 };
 
-using A1 = A0<1>;
-using A2 = A0<2>;
-using A3 = A0<3>;
+using A1 = A0<111>;
+using A2 = A0<222>;
+using A3 = A0<333>;
 
 TEST_CASE_TEMPLATE("Variant tags", AX, A1, A2, A3) {
     using variant = std::variant<A1, A2, A3>;
@@ -305,15 +311,18 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        VersionVariant v{v1::Version{{}, AX{}, 3.14}};
+        VersionVariant v{v1::Version{{}, AX{.a = 2}, 3.14}};
         enc(v);
 
         fmt::print("data: {}\n", to_hex(data));
 
         auto           dec = make_decoder(data);
         VersionVariant result;
-        REQUIRE(dec(result));
-
+        auto           status = dec(result);
+        if (!status) {
+            fmt::print("Error: {}\n", status_message(status.error()));
+        }
+        REQUIRE(status);
         REQUIRE(std::holds_alternative<v1::Version>(result));
         CHECK_EQ(std::get<v1::Version>(result).damage, 3.14);
     }

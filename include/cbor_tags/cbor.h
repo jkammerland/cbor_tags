@@ -76,6 +76,12 @@ template <typename T, typename E> using expected = tl::expected<T, status_code>;
 template <typename E> using unexpected           = tl::unexpected<E>;
 using default_expected                           = Option<expected<void, status_code>>;
 
+namespace detail {
+struct wrap_groups {};
+}; // namespace detail
+
+using default_wrapping = Option<detail::wrap_groups>;
+
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
 };
@@ -97,6 +103,11 @@ template <typename... T> struct Options {
     using is_options  = void;
     using return_type = typename ReturnTypeHelper<T...>::type;
     using error_type  = typename ReturnTypeHelper<T...>::type::error_type;
+
+    // When false, a tagged type or tuple of multiple items will not be wrapped in an array by default
+    static constexpr bool wrap_groups = contains<default_wrapping, T...>();
+
+    constexpr Options() = default;
 };
 // ---------
 
@@ -188,10 +199,25 @@ struct as_array {
 };
 
 template <typename... T> struct wrap_as_array {
-    std::tuple<T...> &&values_;
-    std::uint64_t      size_{sizeof...(T)};
-    constexpr wrap_as_array(T &&...values) : values_(values...) {}
+    std::tuple<T &&...> values_;
+    std::uint64_t       size_{sizeof...(T)};
+
+    constexpr explicit wrap_as_array(T &&...values) : values_(std::forward<T>(values)...) {}
 };
+
+// Specialization for when a single tuple is passed
+template <typename... TupleArgs> struct wrap_as_array<std::tuple<TupleArgs...>> {
+    std::tuple<TupleArgs...> &values_;
+    std::uint64_t             size_{sizeof...(TupleArgs)};
+
+    constexpr explicit wrap_as_array(std::tuple<TupleArgs...> &tuple) : values_(tuple) {}
+};
+
+// Deduction guide for regular arguments
+template <typename... T> wrap_as_array(T &&...) -> wrap_as_array<T &&...>;
+
+// Deduction guide for tuple
+template <typename... TupleArgs> wrap_as_array(std::tuple<TupleArgs...> &) -> wrap_as_array<std::tuple<TupleArgs...>>;
 
 struct as_indefinite_array {};
 struct end_array {};

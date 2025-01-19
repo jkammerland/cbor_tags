@@ -26,8 +26,6 @@ namespace cbor::tags {
 // 6           | tag of number N   | 1 data item
 // 7           | simple/float      | specific encoding of a simple type
 
-// HOW TO FIX IsNegative, and use IsSigned for signed integers to represent both negative and positive integers?
-
 // Modified ConceptType
 template <typename ByteType, typename T>
 struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUnsigned<unwrap_type_t<T>>            ? 0
@@ -194,7 +192,7 @@ constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &
             } else {
                 result[6]++; // If duplicate tag is found
             }
-        } else if constexpr (IsTaggedTuple<T>) {
+        } else if constexpr (IsTaggedPair<T>) {
             auto it = std::find(tags.begin(), tags.end(), std::get<0>(T{}).cbor_tag);
             if (it == tags.end()) {
                 tags.push_back(std::get<0>(T{}).cbor_tag);

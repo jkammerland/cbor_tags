@@ -298,11 +298,12 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(static_tag<511>{}, A{3.14f, 3.14})};
+        std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(static_tag<511>{}, A{.a = 3.14f, .b = 3.14})};
         enc(number_and_stuff);
         fmt::print("Number and stuff: {}\n", to_hex(data));
-        REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901fff94247fb40091eb851eb851f");
-
+        if (decltype(enc)::options::wrap_groups) {
+            REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901ff82f94247fb40091eb851eb851f");
+        }
         std::vector<variant> number_and_stuff_result;
         dec(number_and_stuff_result);
 

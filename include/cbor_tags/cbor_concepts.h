@@ -27,6 +27,7 @@ template <typename T>
 concept IsOptions = requires(T) {
     typename T::is_options;
     typename T::return_type;
+    { T::wrap_groups } -> std::convertible_to<bool>;
 };
 
 template <typename T>
@@ -162,6 +163,10 @@ template <typename T> struct is_static_tag_t : std::false_type {};
 template <std::uint64_t T> struct is_static_tag_t<static_tag<T>> : std::true_type {};
 
 template <typename T>
+concept is_dynamic_tag_t = std::is_same_v<T, dynamic_tag<uint8_t>> || std::is_same_v<T, dynamic_tag<uint16_t>> ||
+                           std::is_same_v<T, dynamic_tag<uint32_t>> || std::is_same_v<T, dynamic_tag<uint64_t>>;
+
+template <typename T>
 concept HasStaticTag = requires {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
     requires is_static_tag_t<decltype(T::cbor_tag)>::value;
@@ -177,16 +182,17 @@ concept HasInlineTag = requires {
 };
 
 template <typename T>
-concept IsTaggedTuple = requires(T t) {
+concept IsTaggedPair = requires(T t) {
     requires IsTuple<T>;
-    requires is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value;
+    requires(is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value ||
+             is_dynamic_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>);
 };
 
 template <typename T>
-concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T>;
+concept IsUntaggedTuple = IsTuple<T> && !IsTaggedPair<T>;
 
 template <typename T>
-concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T>;
+concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedPair<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {

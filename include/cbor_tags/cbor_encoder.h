@@ -18,7 +18,6 @@
 #include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
-#include <new>
 #include <type_traits>
 #include <variant>
 
@@ -28,7 +27,7 @@ template <typename T> struct cbor_header_encoder;
 
 template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
     requires ValidCborBuffer<OutputBuffer>
-struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
+struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     using self_t = encoder<OutputBuffer, Options, Encoders...>;
     using Encoders<self_t>::encode...;
 
@@ -36,8 +35,8 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
     using size_type     = typename OutputBuffer::size_type;
     using iterator_type = typename detail::iterator_type<OutputBuffer>::type;
     using subrange      = std::ranges::subrange<iterator_type>;
-    using variant       = variant_t<OutputBuffer>;
     using expected_type = typename Options::return_type;
+    using options       = Options;
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
@@ -55,34 +54,15 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         if (value < 24) {
             appender_(data_, static_cast<byte_type>(value) | majorType);
         } else if (value <= 0xFF) {
-            // appender_(data_, static_cast<byte_type>(24) | majorType);
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(24) | majorType), static_cast<byte_type>(value));
         } else if (value <= 0xFFFF) {
-            // appender_(data_, static_cast<byte_type>(25) | majorType);
-            // appender_(data_, static_cast<byte_type>(value >> 8));
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(25) | majorType),
                                    static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         } else if (value <= 0xFFFFFFFF) {
-            // appender_(data_, static_cast<byte_type>(26) | majorType);
-            // appender_(data_, static_cast<byte_type>(value >> 24));
-            // appender_(data_, static_cast<byte_type>(value >> 16));
-            // appender_(data_, static_cast<byte_type>(value >> 8));
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(26) | majorType),
                                    static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
                                    static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
         } else {
-            // appender_(data_, static_cast<byte_type>(27) | majorType);
-            // appender_(data_, static_cast<byte_type>(value >> 56));
-            // appender_(data_, static_cast<byte_type>(value >> 48));
-            // appender_(data_, static_cast<byte_type>(value >> 40));
-            // appender_(data_, static_cast<byte_type>(value >> 32));
-            // appender_(data_, static_cast<byte_type>(value >> 24));
-            // appender_(data_, static_cast<byte_type>(value >> 16));
-            // appender_(data_, static_cast<byte_type>(value >> 8));
-            // appender_(data_, static_cast<byte_type>(value));
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(27) | majorType),
                                    static_cast<byte_type>(value >> 56), static_cast<byte_type>(value >> 48),
                                    static_cast<byte_type>(value >> 40), static_cast<byte_type>(value >> 32),
@@ -123,56 +103,95 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         appender_(data_, value);
     }
 
-    template <IsRangeOfCborValues T> constexpr void encode(const T &value) {
-        encode_major_and_size(value.size(), static_cast<byte_type>(IsMap<T> ? 0xA0 : 0x80));
+    template <IsArray T> constexpr void encode(const T &value) {
+        encode_major_and_size(value.size(), static_cast<byte_type>(0x80));
         for (const auto &item : value) {
             encode(item);
         }
     }
 
-    template <IsTaggedTuple T> constexpr void encode(const T &value) {
+    template <IsMap T> constexpr void encode(const T &value) {
+        encode_major_and_size(value.size(), static_cast<byte_type>(0xA0));
+        for (const auto &[key, mapped_value] : value) {
+            encode(key);
+            encode(mapped_value);
+        }
+    }
+
+    template <IsTaggedPair T> constexpr void encode(const T &value) {
         encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
         encode(value.second);
     }
 
     template <IsAggregate T> constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
+            const auto &&tuple = to_tuple(value);
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
+            std::apply(
+                [this](const auto &...args) {
+                    constexpr auto   size_        = sizeof...(args);
+                    constexpr size_t has_tag_or_1 = std::conditional_t < HasStaticTag<T> || HasDynamicTag<T>,
+                                     std::integral_constant<size_t, 2>, std::integral_constant < size_t, 1 >> ::value;
+                    if constexpr (size_ > has_tag_or_1 && Options::wrap_groups) {
+                        this->encode(as_array{size_});
+                    }
+                    (this->encode(args), ...);
+                },
+                tuple);
+        } else if constexpr (IsTag<T>) {
+            const auto &&tuple = to_tuple(value);
+            encode_major_and_size(std::get<0>(tuple), static_cast<byte_type>(0xC0));
+            std::apply(
+                [this](const auto &...args) {
+                    constexpr auto size_ = sizeof...(args);
+                    if constexpr (size_ > 1 && Options::wrap_groups) {
+                        this->encode(as_array{size_});
+                    }
+                    (this->encode(args), ...);
+                },
+                detail::tuple_tail(tuple));
+        } else {
+            const auto &&tuple = to_tuple(value);
+            std::apply(
+                [this](const auto &...args) {
+                    constexpr auto size_ = sizeof...(args);
+                    if constexpr (size_ > 1 && Options::wrap_groups) {
+                        this->encode(as_array{size_});
+                    }
+                    (this->encode(args), ...);
+                },
+                tuple);
         }
-        const auto &tuple = to_tuple(value);
-        std::apply([this](const auto &...args) { (this->encode(args), ...); }, tuple);
     }
 
     template <IsUntaggedTuple T> constexpr void encode(const T &value) {
-        std::apply([this](const auto &...args) { (this->encode(args), ...); }, value);
+        std::apply(
+            [this](const auto &...args) {
+                constexpr auto size_ = sizeof...(args);
+                if constexpr (size_ > 1 && Options::wrap_groups) {
+                    this->encode(as_array{size_});
+                }
+                (this->encode(args), ...);
+            },
+            value);
     }
 
     constexpr void encode(float16_t value) {
-        appender_(data_, static_cast<byte_type>(0xf9)); // CBOR Float16 tag
-        appender_(data_, static_cast<byte_type>(value.value >> 8));
-        appender_(data_, static_cast<byte_type>(value.value & 0xff));
+        appender_.multi_append(data_, static_cast<byte_type>(0xF9), static_cast<byte_type>(value.value >> 8),
+                               static_cast<byte_type>(value.value & 0xFF));
     }
 
     constexpr void encode(float value) {
-        appender_(data_, static_cast<byte_type>(0xFA));
         const auto bits = std::bit_cast<std::uint32_t>(value);
-        appender_(data_, static_cast<byte_type>(bits >> 24));
-        appender_(data_, static_cast<byte_type>(bits >> 16));
-        appender_(data_, static_cast<byte_type>(bits >> 8));
-        appender_(data_, static_cast<byte_type>(bits));
+        appender_.multi_append(data_, static_cast<byte_type>(0xFA), static_cast<byte_type>(bits >> 24), static_cast<byte_type>(bits >> 16),
+                               static_cast<byte_type>(bits >> 8), static_cast<byte_type>(bits));
     }
 
     constexpr void encode(double value) {
-        appender_(data_, static_cast<byte_type>(0xFB));
         const auto bits = std::bit_cast<std::uint64_t>(value);
-        appender_(data_, static_cast<byte_type>(bits >> 56));
-        appender_(data_, static_cast<byte_type>(bits >> 48));
-        appender_(data_, static_cast<byte_type>(bits >> 40));
-        appender_(data_, static_cast<byte_type>(bits >> 32));
-        appender_(data_, static_cast<byte_type>(bits >> 24));
-        appender_(data_, static_cast<byte_type>(bits >> 16));
-        appender_(data_, static_cast<byte_type>(bits >> 8));
-        appender_(data_, static_cast<byte_type>(bits));
+        appender_.multi_append(data_, static_cast<byte_type>(0xFB), static_cast<byte_type>(bits >> 56), static_cast<byte_type>(bits >> 48),
+                               static_cast<byte_type>(bits >> 40), static_cast<byte_type>(bits >> 32), static_cast<byte_type>(bits >> 24),
+                               static_cast<byte_type>(bits >> 16), static_cast<byte_type>(bits >> 8), static_cast<byte_type>(bits));
     }
 
     constexpr void encode(bool value) { appender_(data_, value ? static_cast<byte_type>(0xF5) : static_cast<byte_type>(0xF4)); }
@@ -187,19 +206,6 @@ struct encoder : public Encoders<encoder<OutputBuffer, Options, Encoders...>>...
         }
     }
 
-    template <typename T> constexpr void encode(const std::optional<T> &value) {
-        if (value.has_value()) {
-            encode(*value);
-        } else {
-            appender_(data_, static_cast<byte_type>(0xF6));
-        }
-    }
-
-    template <typename... T> constexpr void encode(const std::variant<T...> &value) {
-        // encoding a variant is less strict than decoding
-        std::visit([this](const auto &v) { this->encode(v); }, value);
-    }
-
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
@@ -211,16 +217,38 @@ template <typename T> struct enum_encoder {
     }
 };
 
+template <typename T> struct cbor_variant_encoder {
+    template <typename... Ts> constexpr void encode(const std::variant<Ts...> &value) {
+        // encoding a variant is less strict than decoding
+        std::visit([this](const auto &v) { detail::underlying<T>(this).encode(v); }, value);
+    }
+};
+
+template <typename T> struct cbor_optional_encoder {
+    template <typename U> constexpr void encode(const std::optional<U> &value) {
+        if (value.has_value()) {
+            detail::underlying<T>(this).encode(*value);
+        } else {
+            detail::underlying<T>(this).appender_(detail::underlying<T>(this).data_, static_cast<typename T::byte_type>(0xF6));
+        }
+    }
+};
+
 template <typename T> struct cbor_header_encoder {
-    constexpr void encode(as_array value) {
+    constexpr void encode(const as_array &value) {
         detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
     }
-    constexpr void encode(as_map value) {
+    template <typename... Ts> constexpr void encode(const wrap_as_array<Ts...> &value) {
+        detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0x80));
+        std::apply([this](const auto &...args) { (detail::underlying<T>(this).encode(args), ...); }, value.values_);
+    }
+    constexpr void encode(const as_map &value) {
         detail::underlying<T>(this).encode_major_and_size(value.size_, static_cast<typename T::byte_type>(0xA0));
     }
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder>(buffer);
+    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, enum_encoder, cbor_optional_encoder,
+                   cbor_variant_encoder>(buffer);
 }
 } // namespace cbor::tags

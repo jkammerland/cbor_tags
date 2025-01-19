@@ -51,7 +51,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The values in above buffer are 3 single items, normally you would send a single object wrapping them to avoid having to deal with different object roots on a application level. 
+> CBOR basically requires one to wrap a group into a CBOR array, in order for it to be a single item with known length. This is so that generic parsers can decode tags without knowing their semantic meaning or exact order. It is possible to turn this off in this library, but then it is no longer truly standard cbor, depending on how you interpret the standard. If you set wrap_groups = false, then values in above buffer are 3 single items, and the exact sequence of cbor items is known from the type itself.
 
 Here is how you could formulate a struct with a tag from the first example:
 ```cpp
@@ -62,16 +62,18 @@ struct Tagged {
     std::string    c;
 };
 ```
-> [!NOTE]
-> Note that if the reciever of the encoded data does not have access to the CDDL or the definition here (together with this library), it will most likely not be able to decode the data correctly. A generic decoder without the definition will at most be able to decode 1 cbor major after the tag. The solution is to wrap members in an array or manually serialize the struct with a array or bstr encapsulating a,b and c. 
 
+Here is a manual way to encode the struct, 
 ```cpp
 Tagged a{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(a.cbor_tag, wrap_as_array{3}, a.a, a.b, a.c);
-// Or equivalently
+enc(a.cbor_tag, as_array{3}, a.a, a.b, a.c);
+// Or equivalently any of the 2 lines below
 // enc(a.cbor_tag, wrap_as_array{a.a, a.b, a.c});
+// enc(a);
 // Now the buffer contains the tag(321) followed by a single array with 3 elements
+
 ```
+this is what happens under the hood when you pass the whole item "a".
 
 Here is a larger example of encoding and decoding a struct with all CBOR major types:
 ```cpp
@@ -149,8 +151,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets > the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete".
-
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets > the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, which is not yet implemented.
 
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp
@@ -279,6 +280,9 @@ template <size_t N> struct A0 {
 
 using A42 = A0<42>;
 const auto &tuple = to_tuple(A42{{/*42*/}, "John Doe"});
+
+auto enc = make_encoder(...);
+std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
@@ -301,7 +305,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.3.2 # or specify a particular commit/tag
+  GIT_TAG v0.4.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

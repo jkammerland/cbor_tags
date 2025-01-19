@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
 #include "magic_enum/magic_enum.hpp"
+#include "test_util.h"
 
 #include <cstddef>
 #include <doctest/doctest.h>
@@ -159,6 +160,25 @@ TEST_SUITE("Decoding the wrong thing") {
         auto result = dec(dynamic_tag<uint64_t>{141}, std::string{});
         REQUIRE(!result);
         CHECK_EQ(result.error(), status_code::invalid_tag_value);
+    }
+}
+
+TEST_SUITE("Open objects - wrap as etc") {
+    TEST_CASE("Basic") {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        REQUIRE(enc(140_tag, wrap_as_array{1, 2}));
+
+        fmt::print("data: {}\n", to_hex(data));
+
+        auto dec = make_decoder(data);
+        int  a, b;
+        auto c      = wrap_as_array{a, b};
+        auto result = dec(140_tag, c);
+        REQUIRE(result);
+        CHECK_EQ(a, 1);
+        CHECK_EQ(b, 2);
     }
 }
 

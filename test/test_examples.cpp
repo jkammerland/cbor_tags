@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "test_util.h"
 
 #include <cassert>
 #include <doctest/doctest.h>
@@ -15,6 +16,8 @@ using namespace cbor::tags;
 
 /* Below is some example mappings of STL types to cbor major types */
 struct AllCborMajorsExample {
+    // static constexpr std::uint64_t cbor_tag = 123;
+
     positive                   a0; // Major type 0 (unsigned integer)
     negative                   a1; // Major type 1 (negative integer)
     int                        a;  // Major type 0 or 1 (unsigned or negative integer)
@@ -58,6 +61,8 @@ TEST_CASE("CBOR - Advanced types") {
         std::cerr << "Failed to encode A" << std::endl;
         CHECK(false);
     }
+
+    fmt::print("Encoded: {}\n", to_hex(data));
 
     // Decoding
     auto                 dec = make_decoder(data);

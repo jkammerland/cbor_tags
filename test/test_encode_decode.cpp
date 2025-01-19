@@ -106,7 +106,9 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
 
     auto hex = to_hex(data);
     fmt::print("to_hex: {}\n", hex);
-    REQUIRE_EQ(hex, "d87b01fb40091eb851eb851f6548656c6c6f83010203");
+    if (decltype(enc)::options::wrap_groups) {
+        REQUIRE_EQ(hex, "d87b8401fb40091eb851eb851f6548656c6c6f83010203");
+    }
 
     auto dec    = make_decoder(data);
     auto result = make_tag_pair(123_tag, A{});

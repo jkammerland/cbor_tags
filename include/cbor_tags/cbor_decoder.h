@@ -16,6 +16,7 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
+// #include <fmt/base.h>
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
 #include <map>
@@ -42,9 +43,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using byte            = std::byte;
     using iterator_t      = typename detail::iterator_type<InputBuffer>::type;
     using subrange        = std::ranges::subrange<iterator_t>;
-    using variant         = variant_t<InputBuffer>;
     using expected_type   = typename Options::return_type;
     using unexpected_type = typename Options::error_type;
+    using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
@@ -59,7 +60,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::exception &) {
-            std::rethrow_exception(std::current_exception());   // for debugging, this handling is TODO!
+            // std::rethrow_exception(std::current_exception());   // for debugging, this handling is TODO!
             return unexpected<status_code>(status_code::error); // placeholder
         }
     }
@@ -142,7 +143,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (IsMap<T>) {
                 using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
                 value_type result;
-                auto       status = decode(result);
+                auto &[key, mapped_value] = result;
+                auto status               = decode(key);
+                status                    = status == status_code::success ? decode(mapped_value) : status;
                 if (status != status_code::success) {
                     return status;
                 }
@@ -198,7 +201,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode(value, major, additionalInfo);
     }
 
-    template <IsTaggedTuple T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTaggedPair T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             // throw std::runtime_error("Invalid major type for tagged object");
             return status_code::invalid_major_type_for_tag;
@@ -211,32 +214,44 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::invalid_tag_value;
         }
 
-        return std::apply(
-            [this](auto &&...args) {
-                status_collector<self_t> collect_status{*this};
-                [[maybe_unused]] auto    success = (collect_status(args) && ...);
-                (this->decode(args), ...);
-                return collect_status.result;
-            },
-            detail::tuple_tail(t));
+        auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
+        if (array_header_status != status_code::success) {
+            return array_header_status;
+        }
+        return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, detail::tuple_tail(t));
     }
 
     template <IsAggregate T> constexpr status_code decode(T &value) {
         const auto &tuple = to_tuple(value);
 
+        auto result = status_code::success;
         if constexpr (HasInlineTag<T>) {
-            auto result = decode(static_tag<T::cbor_tag>{});
-            if (result != status_code::success) {
-                return result;
-            }
+            result = decode(static_tag<T::cbor_tag>{});
+        } else if constexpr (IsTag<T>) {
+            result = decode(std::get<0>(tuple));
         }
-        return std::apply(
-            [this](auto &&...args) {
-                status_collector<self_t> collect_status{*this};
-                [[maybe_unused]] auto    success = (collect_status(args) && ...);
-                return collect_status.result;
-            },
-            tuple);
+        // ...
+        if (result != status_code::success) {
+            return result;
+        }
+
+        auto array_header_status = status_code::success;
+        if constexpr (HasInlineTag<T> || !IsTag<T>) {
+            array_header_status = this->decode_wrapped_group(tuple);
+        } else {
+            array_header_status = this->decode_wrapped_group(detail::tuple_tail(tuple));
+        }
+        // ...
+        if (array_header_status != status_code::success) {
+            return array_header_status;
+        }
+
+        if constexpr (HasInlineTag<T> || !IsTag<T>) {
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
+        } else {
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); },
+                              detail::tuple_tail(tuple));
+        }
     }
 
     template <IsAggregate T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
@@ -252,29 +267,30 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 // throw std::runtime_error("Invalid tag for tagged object");
                 return status_code::invalid_tag_value;
             }
-            return std::apply(
-                [this](auto &&...args) {
-                    status_collector<self_t> collect_status{*this};
-                    [[maybe_unused]] auto    success = (collect_status(args) && ...);
-                    return collect_status.result;
-                },
-                tuple);
-        } else {
-            if constexpr (HasStaticTag<T>) {
-                if (tag != std::get<0>(tuple)) {
-                    // throw std::runtime_error("Invalid tag for tagged object");
-                    return status_code::invalid_tag_value;
-                }
-            } else {
-                std::get<0>(tuple) = tag;
+            auto array_header_status = this->decode_wrapped_group(tuple);
+            if (array_header_status != status_code::success) {
+                return array_header_status;
             }
-
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
+        } else {
+            if (tag != std::get<0>(tuple)) {
+                // throw std::runtime_error("Invalid tag for tagged object");
+                return status_code::invalid_tag_value;
+            }
+            auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(tuple));
+            if (array_header_status != status_code::success) {
+                return array_header_status;
+            }
             return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); },
                               detail::tuple_tail(tuple));
         }
     }
 
     template <IsUntaggedTuple T> constexpr status_code decode(T &value) {
+        auto array_header_status = this->decode_wrapped_group(value);
+        if (array_header_status != status_code::success) {
+            return array_header_status;
+        }
         return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, value);
     }
 
@@ -382,10 +398,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         static_assert(matching_major_types[5] <= 1, "Multiple types match against major type 5 (map)");
         static_assert(matching_major_types[6] <= 1, "Multiple types match against major type 6 (tag)");
         static_assert(matching_major_types[7] <= 1, "Multiple types match against major type 7 (simple)");
-        // static_assert(matching_major_types[8] == 0, "Unmatched major types in variant");
+        // static_assert(matching_major_types[8] == 0, "Unmatched major types in variant"); // If no untagged is allowed TODO: Option<>
 
         static_assert(no_ambigous_major_types_in_variant, "Variant has ambigous major types, if this would compile, only the first type \
-                                                          (among the ambigous) would match against a decode. Uncomment the lines above for better diagnostics.");
+                                                          (among the ambigous) would get decoded.");
 
         auto try_decode = [this, major, additionalInfo, &value]<typename U>() -> bool {
             if (!is_valid_major<major_type, U>(major)) {
@@ -583,12 +599,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 dec_.decode(arg);
             } else {
                 result = dec_.decode(arg);
+                // fmt::print("status: {}, for index {}\n", status_message(result), index);
                 index++;
                 return result == status_code::success ? true : false;
             }
             return false;
         }
     };
+
+    template <typename T> constexpr auto decode_wrapped_group(T &&) {
+        using tuple_type      = std::decay_t<T>;
+        constexpr auto size_  = std::tuple_size_v<tuple_type>;
+        auto           status = status_code::success;
+        if constexpr (size_ > 1 && Options::wrap_groups) {
+            status = this->decode(as_array{size_});
+        }
+        return status;
+    }
 
     template <typename... Args> constexpr auto applier(Args &&...args) {
         status_collector<self_t> collect_status{*this};
@@ -621,6 +648,11 @@ template <typename T> struct cbor_header_decoder {
     constexpr status_code decode(as_array value) {
         validate_size(major_type::Array, value.size_);
         return status_code::success;
+    }
+    template <typename... Ts> constexpr status_code decode(wrap_as_array<Ts...> value) {
+        validate_size(major_type::Array, value.size_);
+        return std::apply([this](auto &&...args) { return detail::underlying<T>(this).applier(std::forward<decltype(args)>(args)...); },
+                          value.values_);
     }
     constexpr status_code decode(as_map value) {
         validate_size(major_type::Map, value.size_);
@@ -660,7 +692,7 @@ template <typename T> struct enum_decoder {
 };
 
 template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected>, cbor_header_decoder, enum_decoder>(buffer);
+    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, enum_decoder>(buffer);
 }
 
 } // namespace cbor::tags
