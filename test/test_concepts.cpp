@@ -137,7 +137,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
 
     static_assert(HasInlineTag<CBOR1>);
     static_assert(IsTag<CBOR1>);
-    static_assert(!IsTaggedTuple<CBOR1>);
+    static_assert(!IsTaggedPair<CBOR1>);
 
     struct CBOR2 {
         std::uint64_t cbor_ = 2;

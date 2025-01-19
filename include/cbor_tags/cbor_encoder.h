@@ -216,7 +216,7 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, enum_encoder, cbor_optional_encoder,
-                   cbor_variant_encoder>(buffer);
+    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder, cbor_optional_encoder, cbor_variant_encoder>(
+        buffer);
 }
 } // namespace cbor::tags
