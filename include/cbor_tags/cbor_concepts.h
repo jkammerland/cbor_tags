@@ -184,7 +184,8 @@ concept HasInlineTag = requires {
 template <typename T>
 concept IsTaggedPair = requires(T t) {
     requires IsTuple<T>;
-    requires is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value;
+    requires(is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value ||
+             is_dynamic_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>);
 };
 
 template <typename T>

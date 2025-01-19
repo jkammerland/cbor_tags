@@ -102,10 +102,18 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         appender_(data_, value);
     }
 
-    template <IsRangeOfCborValues T> constexpr void encode(const T &value) {
-        encode_major_and_size(value.size(), static_cast<byte_type>(IsMap<T> ? 0xA0 : 0x80));
+    template <IsArray T> constexpr void encode(const T &value) {
+        encode_major_and_size(value.size(), static_cast<byte_type>(0x80));
         for (const auto &item : value) {
             encode(item);
+        }
+    }
+
+    template <IsMap T> constexpr void encode(const T &value) {
+        encode_major_and_size(value.size(), static_cast<byte_type>(0xA0));
+        for (const auto &[key, mapped_value] : value) {
+            encode(key);
+            encode(mapped_value);
         }
     }
 
@@ -116,20 +124,43 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <IsAggregate T> constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
+            const auto &&tuple = to_tuple(value);
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
+            std::apply(
+                [this](const auto &...args) {
+                    constexpr auto   size_        = sizeof...(args);
+                    constexpr size_t has_tag_or_1 = std::conditional_t < HasStaticTag<T> || HasDynamicTag<T>,
+                                     std::integral_constant<size_t, 2>, std::integral_constant < size_t, 1 >> ::value;
+                    if constexpr (size_ > has_tag_or_1 && Options::wrap_groups) {
+                        this->encode(as_array{size_});
+                    }
+                    (this->encode(args), ...);
+                },
+                tuple);
+        } else if constexpr (IsTag<T>) {
+            const auto &&tuple = to_tuple(value);
+            encode_major_and_size(std::get<0>(tuple), static_cast<byte_type>(0xC0));
+            std::apply(
+                [this](const auto &...args) {
+                    constexpr auto size_ = sizeof...(args);
+                    if constexpr (size_ > 1 && Options::wrap_groups) {
+                        this->encode(as_array{size_});
+                    }
+                    (this->encode(args), ...);
+                },
+                detail::tuple_tail(tuple));
+        } else {
+            const auto &&tuple = to_tuple(value);
+            std::apply(
+                [this](const auto &...args) {
+                    constexpr auto size_ = sizeof...(args);
+                    if constexpr (size_ > 1 && Options::wrap_groups) {
+                        this->encode(as_array{size_});
+                    }
+                    (this->encode(args), ...);
+                },
+                tuple);
         }
-        const auto &tuple = to_tuple(value);
-        std::apply(
-            [this](const auto &...args) {
-                constexpr auto   size_        = sizeof...(args);
-                constexpr size_t has_tag_or_1 = std::conditional_t < HasStaticTag<T> || HasDynamicTag<T>, std::integral_constant<size_t, 2>,
-                                 std::integral_constant < size_t, 1 >> ::value;
-                if constexpr (size_ > has_tag_or_1 && Options::wrap_groups) {
-                    this->encode(as_array{size_});
-                }
-                (this->encode(args), ...);
-            },
-            tuple);
     }
 
     template <IsUntaggedTuple T> constexpr void encode(const T &value) {
@@ -216,7 +247,7 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected>, cbor_header_encoder, enum_encoder, cbor_optional_encoder, cbor_variant_encoder>(
-        buffer);
+    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, enum_encoder, cbor_optional_encoder,
+                   cbor_variant_encoder>(buffer);
 }
 } // namespace cbor::tags

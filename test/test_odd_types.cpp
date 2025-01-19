@@ -1,6 +1,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
+#include "test_util.h"
 
 #include <doctest/doctest.h>
 #include <fmt/base.h>
@@ -46,6 +47,9 @@ TEST_CASE("Map with variant") {
 
     std::map<int, std::variant<int, std::string>> map = {{1, 1}, {2, "two"}, {3, "THE THREE"}};
     REQUIRE(enc(map));
+    REQUIRE_EQ(to_hex(data), "a30101026374776f0369544845205448524545");
+
+    fmt::print("Map with variant: {}\n", to_hex(data));
 
     auto                                          dec = make_decoder(data);
     std::map<int, std::variant<int, std::string>> map_result;

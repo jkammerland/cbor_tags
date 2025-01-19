@@ -68,7 +68,7 @@ TEST_CASE_TEMPLATE("Test decode dynamic tag 1", T, std::vector<uint8_t>, std::de
     A a;
     auto &[tag, value_a] = a;
 
-    dec(a);
+    dec(a.cbor_tag, value_a);
     CHECK_EQ(tag, 1);
     CHECK_EQ(value_a, "Hello world!");
 }
@@ -77,7 +77,7 @@ TEST_CASE_TEMPLATE("Test decode static tag 1", T, std::vector<uint8_t>, std::deq
     using namespace std::string_view_literals;
     auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
 
-    auto dec = make_decoder(bytes);
+    auto dec = decoder<decltype(bytes), Options<default_expected /*, default_wrapping*/>, cbor_header_decoder, enum_decoder>(bytes);
     struct A {
         static_tag<1> cbor_tag;
         std::string   b;
