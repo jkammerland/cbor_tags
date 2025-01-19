@@ -36,6 +36,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     using iterator_type = typename detail::iterator_type<OutputBuffer>::type;
     using subrange      = std::ranges::subrange<iterator_type>;
     using expected_type = typename Options::return_type;
+    using options       = Options;
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 

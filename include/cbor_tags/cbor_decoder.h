@@ -45,6 +45,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using subrange        = std::ranges::subrange<iterator_t>;
     using expected_type   = typename Options::return_type;
     using unexpected_type = typename Options::error_type;
+    using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 

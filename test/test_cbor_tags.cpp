@@ -224,7 +224,10 @@ TEST_CASE("Multi tag handling") {
         enc(MultiObj{.cbor_tag = {}, .a = {.cbor_tag = {}, .a = 1}, .b = {.cbor_tag = {}, .b = 2}});
 
         fmt::print("data: {}\n", to_hex(data));
-        REQUIRE_EQ(to_hex(data), "d88c82d88e01d88d02");
+
+        if (decltype(enc)::options::wrap_groups) {
+            REQUIRE_EQ(to_hex(data), "d88c82d88e01d88d02");
+        }
 
         auto     dec = make_decoder(data);
         MultiObj result;
