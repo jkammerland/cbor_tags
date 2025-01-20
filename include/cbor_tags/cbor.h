@@ -161,6 +161,25 @@ template <std::ranges::input_range R> struct char_range_view {
     constexpr operator std::string() const { return {begin(), end()}; }
 };
 
+template <std::ranges::input_range R> struct byte_range_view {
+    R range;
+
+    constexpr auto view() const {
+        return range | std::views::transform([](const auto &c) { return static_cast<const std::byte>(c); });
+    }
+
+    constexpr auto begin() const {
+        auto v = view();
+        return std::ranges::begin(v);
+    }
+    constexpr auto end() const {
+        auto v = view();
+        return std::ranges::end(v);
+    }
+
+    constexpr operator std::vector<std::byte>() const { return {begin(), end()}; }
+};
+
 template <std::ranges::input_range R> struct binary_array_range_view {
     R range;
 };
@@ -342,5 +361,13 @@ template <typename T> constexpr std::byte get_indefinite_start() {
         return static_cast<std::byte>(0x00);
     }
 }
+
+struct parse_integer_exception : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+struct parse_simple_exception : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 } // namespace cbor::tags

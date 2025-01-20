@@ -13,8 +13,8 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 - Support for both contiguous and non-contiguous buffers
 - Support Zero-copy encoding by joining multiple buffers
 - Support Zero-copy decoding using views and spans
-- Flexible tag handling for structs and tuples, non-invasive
-- Support for many (almost arbitrary) containers
+- Flexible tag handling for structs and tuples, can be non-invasive
+- Support for many (almost arbitrary) containers and nesting
 - Uses tl::expected in absence of c++23 std::expected
 
 ## 🔧 Quick Start
@@ -305,7 +305,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.4.0 # or specify a particular commit/tag
+  GIT_TAG v0.4.1 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

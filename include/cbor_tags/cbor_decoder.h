@@ -459,6 +459,61 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
+    constexpr status_code decode(as_text_any &value, major_type major, byte additionalInfo) {
+        if (major != major_type::TextString) {
+            // throw std::runtime_error("Invalid major type for text string");
+            return status_code::invalid_major_type_for_text_string;
+        }
+        value.size = decode_unsigned(additionalInfo);
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            reader_.position_ += value.size;
+        } else {
+            reader_.position_ = std::next(reader_.position_, value.size);
+        }
+
+        return status_code::success;
+    }
+    constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
+        if (major != major_type::ByteString) {
+            // throw std::runtime_error("Invalid major type for binary string");
+            return status_code::invalid_major_type_for_binary_string;
+        }
+        value.size = decode_unsigned(additionalInfo);
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            reader_.position_ += value.size;
+        } else {
+            reader_.position_ = std::next(reader_.position_, value.size);
+        }
+
+        return status_code::success;
+    }
+    constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
+        if (major != major_type::Array) {
+            // throw std::runtime_error("Invalid major type for array");
+            return status_code::invalid_major_type_for_array;
+        }
+        value.size = decode_unsigned(additionalInfo);
+        return status_code::success;
+    }
+    constexpr status_code decode(as_map_any &value, major_type major, byte additionalInfo) {
+        if (major != major_type::Map) {
+            // throw std::runtime_error("Invalid major type for map");
+            return status_code::invalid_major_type_for_map;
+        }
+        value.size = decode_unsigned(additionalInfo);
+        return status_code::success;
+    }
+    constexpr status_code decode(as_tag_any &value, major_type major, byte additionalInfo) {
+        if (major != major_type::Tag) {
+            // throw std::runtime_error("Invalid major type for tag");
+            return status_code::invalid_major_type_for_tag;
+        }
+        value.tag = decode_unsigned(additionalInfo);
+        return status_code::success;
+    }
+
     template <typename T> constexpr status_code decode(T &value) {
         if (reader_.empty(data_)) {
             // throw std::runtime_error("Unexpected end of input");
@@ -499,7 +554,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto it           = std::next(reader_.position_, length);
             auto result       = subrange(reader_.position_, it);
             reader_.position_ = it;
-            return binary_array_range_view{result};
+            return byte_range_view{result};
         }
     }
 
