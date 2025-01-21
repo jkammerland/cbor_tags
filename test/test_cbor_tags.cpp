@@ -16,7 +16,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
-#include <format>
 #include <limits>
 #include <list>
 #include <map>
