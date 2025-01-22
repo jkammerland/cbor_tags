@@ -45,10 +45,10 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 template <typename OutputBuffer, typename... T> constexpr auto CDDL(OutputBuffer &, T &&...) {}
 
 template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer) {
-    if (std::size(cbor_buffer) % 2 != 0) {
-        throw std::invalid_argument("CBOR buffer must have an even number of bytes");
-        return;
-    }
+    // if (std::size(cbor_buffer) % 2 != 0) {
+    //     throw std::invalid_argument("CBOR buffer must have an even number of bytes");
+    //     return;
+    // }
 
     auto dec = make_decoder(cbor_buffer);
 
@@ -94,15 +94,34 @@ template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBu
         }
     };
 
-    auto it = dec.reader_.position_;
+    auto                  it   = dec.reader_.position_;
+    [[maybe_unused]] auto span = std::span<const std::byte>{};
+
     while (dec(value)) {
         auto next_it       = dec.reader_.position_;
         auto should_indent = std::visit(indentation_visitor, value);
 
-        // BREAK OUT THIS BLOCK
         if constexpr (IsContiguous<CborBuffer>) {
-            // auto span = std::span(cbor_buffer.begin() + it, next_it - it);
-            // detail::format_bytes(output_buffer, span.begin(), span.end(), options);
+            span            = std::span<const std::byte>(reinterpret_cast<const std::byte *>(cbor_buffer.data() + it), next_it - it);
+            auto span_begin = span.begin();
+            auto span_end   = span.end();
+
+            if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
+                auto size        = std::visit(string_size_visitor, value);
+                auto header_size = string_length_to_header_size(size);
+                detail::format_bytes(output_buffer, span_begin, span_begin + 1, options); // Major type
+                fmt::format_to(std::back_inserter(output_buffer), " ");
+                detail::format_bytes(output_buffer, span_begin + 1, span_begin + header_size, options); // extra header
+                fmt::format_to(std::back_inserter(output_buffer), "\n");
+                options.indent_level++;
+                options.offset++;
+                detail::format_bytes(output_buffer, span_begin + header_size, span_end, options);
+                options.indent_level--;
+                options.offset--;
+            } else {
+                detail::format_bytes(output_buffer, span_begin, span_begin + 1, options);
+                detail::format_bytes(output_buffer, span_begin + 1, span_end, {.indent_level = 0, .offset = 1});
+            }
         } else {
             if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
                 auto size        = std::visit(string_size_visitor, value);

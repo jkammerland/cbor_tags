@@ -19,14 +19,21 @@ TEST_CASE("CDDL extension") {
 }
 
 struct A1212 {
-    int                        pos;
-    int                        nega;
-    std::string                c;
-    std::vector<std::byte>     d;
-    std::map<int, std::string> e;
+    static constexpr std::uint64_t cbor_tag = 139;
+    int                            pos;
+    int                            nega;
+    std::string                    c;
+    std::vector<std::byte>         d;
+    std::map<int, std::string>     e;
     struct B1212 {
-        static_tag<142> cbor_tag;
-        int             a;
+        static_tag<140> cbor_tag;
+        struct B1313 {
+            static_tag<142> cbor_tag;
+
+            int         a;
+            std::string b;
+        } b1313;
+        int a;
     } f;
     float16_t      g;
     float          h;
@@ -41,14 +48,14 @@ TEST_CASE("Annotate") {
                 .c    = "Hello world!",
                 .d    = {std::byte{'a'}, std::byte{'b'}, std::byte{'c'}, std::byte{'d'}},
                 .e    = {{1, "one"}, {2, "two"}, {3, "three"}},
-                .f    = {.cbor_tag = {}, .a = 42},
+                .f    = {.cbor_tag = {}, .b1313 = {.cbor_tag = {}, .a = 1000000, .b = "aaaaaaaaaaaaaaaaaaaaaaaa"}, .a = 42},
                 .g    = float16_t{3.14f},
                 .h    = 3.14f,
                 .i    = 3.14,
                 .j    = true,
                 .k    = nullptr};
 
-    std::deque<std::byte> buffer;
+    std::vector<std::byte> buffer;
 
     auto enc = make_encoder(buffer);
     REQUIRE(enc(a1212));
