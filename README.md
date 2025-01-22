@@ -151,7 +151,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets > the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, which is not yet implemented.
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, which is not yet implemented.
 
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp
@@ -261,11 +261,6 @@ struct DynamicTagged {
     std::optional<std::string> data;
 };
 ```
-
-> [!IMPORTANT]
-> As per the extended model, when tagging a struct, you implicitly define an object with its own CDDL (RFC 8610) structure.
-> This likely has to be handled manually by decoders that don't have the header definition and this library at hand.
-> Instead one can wrap the struct in an array using `wrap_as_array{}`, so the tag can be handled in a generic way by all decoders.
 
 ## 🔄 Automatic Reflection
 
