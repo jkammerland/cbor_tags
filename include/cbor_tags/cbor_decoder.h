@@ -465,6 +465,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::invalid_major_type_for_text_string;
         }
         value.size = decode_unsigned(additionalInfo);
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            reader_.position_ += value.size;
+        } else {
+            reader_.position_ = std::next(reader_.position_, value.size);
+        }
+
         return status_code::success;
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
@@ -473,6 +480,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::invalid_major_type_for_binary_string;
         }
         value.size = decode_unsigned(additionalInfo);
+
+        if constexpr (IsContiguous<InputBuffer>) {
+            reader_.position_ += value.size;
+        } else {
+            reader_.position_ = std::next(reader_.position_, value.size);
+        }
+
         return status_code::success;
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {

@@ -19,8 +19,9 @@
 namespace cbor::tags {
 
 struct FormattingOptions {
-    bool   pretty_print{false};
     size_t indent_level{0};
+    size_t offset{0};
+    size_t max_depth{std::numeric_limits<size_t>::max()};
 };
 
 namespace detail {
@@ -31,7 +32,9 @@ using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_
 // Helper function to format bytes between iterators
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, FormattingOptions options = {}) {
     std::string indent(options.indent_level * 2, ' ');
-    fmt::format_to(std::back_inserter(output_buffer), "{}", indent);
+    std::string offset(options.offset, ' ');
+    fmt::format_to(std::back_inserter(output_buffer), "{}{}", indent, offset);
+
     while (begin != end) {
         fmt::format_to(std::back_inserter(output_buffer), "{:02x}", static_cast<std::uint8_t>(*begin));
         ++begin;
@@ -54,13 +57,7 @@ template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBu
     std::stack<size_t>        indent_stack;
 
     auto indentation_visitor = [&indent_stack](auto &&value) {
-        if constexpr (IsTextHeader<std::remove_cvref_t<decltype(value)>>) {
-            indent_stack.push(value.size);
-            return true;
-        } else if constexpr (IsBinaryHeader<std::remove_cvref_t<decltype(value)>>) {
-            indent_stack.push(value.size);
-            return true;
-        } else if constexpr (IsArrayHeader<std::remove_cvref_t<decltype(value)>>) {
+        if constexpr (IsArrayHeader<std::remove_cvref_t<decltype(value)>>) {
             indent_stack.push(value.size + 1);
             return true;
         } else if constexpr (IsMapHeader<std::remove_cvref_t<decltype(value)>>) {
@@ -83,22 +80,48 @@ template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBu
         }
     };
 
+    constexpr auto string_length_to_header_size = [](std::uint64_t length) {
+        if (length < 24) {
+            return 1;
+        } else if (length < 0xFF) {
+            return 2;
+        } else if (length < 0xFFFF) {
+            return 3;
+        } else if (length < 0xFFFFFFFF) {
+            return 5;
+        } else {
+            return 9;
+        }
+    };
+
     auto it = dec.reader_.position_;
     while (dec(value)) {
         auto next_it       = dec.reader_.position_;
         auto should_indent = std::visit(indentation_visitor, value);
 
+        // BREAK OUT THIS BLOCK
         if constexpr (IsContiguous<CborBuffer>) {
-            auto span = std::span(cbor_buffer.begin() + it, next_it - it);
-            detail::format_bytes(output_buffer, span.begin(), span.end(), options);
+            // auto span = std::span(cbor_buffer.begin() + it, next_it - it);
+            // detail::format_bytes(output_buffer, span.begin(), span.end(), options);
         } else {
-            detail::format_bytes(output_buffer, it, next_it, options);
             if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
-                auto size = std::visit(string_size_visitor, value);
-                fmt::format_to(std::back_inserter(output_buffer), "\n{}{}", std::string(options.indent_level * 2, ' '), size);
-                std::advance(dec.reader_.position_, size);
+                auto size        = std::visit(string_size_visitor, value);
+                auto header_size = string_length_to_header_size(size);
+                detail::format_bytes(output_buffer, it, it + 1, options); // Major type
+                fmt::format_to(std::back_inserter(output_buffer), " ");
+                detail::format_bytes(output_buffer, it + 1, it + header_size, options); // extra header
+                fmt::format_to(std::back_inserter(output_buffer), "\n");
+                options.indent_level++;
+                options.offset++;
+                detail::format_bytes(output_buffer, it + header_size, next_it, options);
+                options.indent_level--;
+                options.offset--;
+            } else {
+                detail::format_bytes(output_buffer, it, it + 1, options);
+                detail::format_bytes(output_buffer, it + 1, next_it, {.indent_level = 0, .offset = 1});
             }
         }
+
         if (!indent_stack.empty()) {
             indent_stack.top()--;
 
@@ -108,6 +131,7 @@ template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBu
             }
         }
         options.indent_level += should_indent;
+        options.offset = indent_stack.size();
         fmt::format_to(std::back_inserter(output_buffer), "\n");
         it = next_it;
     }
