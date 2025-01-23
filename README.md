@@ -227,6 +227,75 @@ int main() {
 }
 ```
 
+In some cases where more flexability is needed, we can just parse any tag and then switch on it like this:
+
+```cpp
+// Example API structures
+struct Api1 {
+    int a;
+    int b;
+};
+
+struct Api2 {
+    std::string a;
+    std::string b;
+};
+
+int main() {
+    using namespace cbor::tags;
+    auto data = std::vector<std::byte>{};
+    auto enc = make_encoder(data);
+
+    // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
+    enc(make_tag_pair(0x10, Api1{.a = 42, .b = 43}));
+
+    // Encode a binary string in the middle of the buffer [the buffer itself]
+    enc(std::span{data});
+
+    // Encode Api2 with a tag of 0x20
+    enc(make_tag_pair(0x20, Api2{"hello", "world"}));
+
+    // Decoding
+    auto dec = make_decoder(data);
+    std::variant<std::vector<std::byte>, as_tag_any> value;
+
+    auto visitor = [&dec](auto&& value) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
+            if (value.tag == 0x10) {
+                Api1 a{};
+                if (dec(a)) {
+                    std::cout << "Api1: a=" << a.a << ", b=" << a.b << "\n";
+                }
+            } else if (value.tag == 0x20) {
+                Api2 a{};
+                if (dec(a)) {
+                    std::cout << "Api2: a=" << a.a << ", b=" << a.b << "\n";
+                }
+            } else {
+                std::cout << "Unknown tag: " << value.tag << "\n";
+            }
+        } else {
+            std::cout << "Binary data received\n";
+        }
+    };
+
+    // Decode three items
+    if (dec(value)) {
+        std::visit(visitor, value);
+    }
+
+    if (dec(value)) {
+        std::visit(visitor, value);
+    }
+
+    if (dec(value)) {
+        std::visit(visitor, value);
+    }
+
+    return 0;
+}
+```
+
 ## ✨ Advanced Features
 
 - std::variant support, to allow multiple types to be accepted when seen on buffer (e.g tagged types representing a versioned object)
@@ -290,6 +359,24 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ## 🏷️ Annotating CBOR Buffers
 You can use "annotate" from cbor_tags/extensions/cbor_cddl.h to inspect and visualize CBOR data:
 
+For example, here is some annotated data without diagnostic notation:
+```
+Data: d082182a182b46d082182a182bd820826568656c6c6f65776f726c64
+Annotation: 
+d0
+   82
+      18 2a
+      18 2b
+   46
+      d082182a182b
+d8 20
+   82
+      65
+         68656c6c6f
+      65
+         776f726c64
+```
+
 ## 🛠️ Requirements
 
 - Any C++20 compatible compiler (gcc 12+, clang 14+, msvc (builds but broken))
@@ -308,7 +395,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.4.3 # or specify a particular commit/tag
+  GIT_TAG v0.4.4 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

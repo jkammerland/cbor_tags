@@ -404,3 +404,57 @@ TEST_CASE("Advanced tag problem negative") {
     std::variant<A1, A2> result;
     REQUIRE_EQ(dec(result).error(), status_code::no_matching_tag_value_in_variant);
 }
+
+TEST_CASE("Switching instead of variant") {
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    struct F1 {
+        int a{42};
+    };
+    struct F2 {
+        std::string s{"43"};
+    };
+    struct F3 {
+        double d{44.0};
+    };
+
+    using namespace literals;
+    enc(wrap_as_array(make_tag_pair(140_tag, F1{}), make_tag_pair(141_tag, F2{}), make_tag_pair(0xFFFF_hex_tag, F3{})));
+
+    auto dec = make_decoder(data);
+
+    std::optional<as_array_any> arr;
+    auto                        result = dec(arr);
+    REQUIRE(result);
+    for (size_t i = 0; i < arr->size; ++i) {
+        as_tag_any any{};
+        result = dec(any);
+        REQUIRE(result);
+
+        switch (any.tag) {
+        case 140: {
+            F1 f1;
+            result = dec(f1);
+            REQUIRE(result);
+            CHECK_EQ(f1.a, 42);
+            break;
+        }
+        case 141: {
+            F2 f2;
+            result = dec(f2);
+            REQUIRE(result);
+            CHECK_EQ(f2.s, "43");
+            break;
+        }
+        case 0xFFFF: {
+            F3 f3;
+            result = dec(f3);
+            REQUIRE(result);
+            CHECK_EQ(f3.d, 44.0);
+            break;
+        }
+        default: CHECK(false);
+        }
+    }
+}

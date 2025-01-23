@@ -1,13 +1,17 @@
+#include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/extensions/cbor_cddl.h"
 #include "test_util.h"
 
 #include <cassert>
 #include <doctest/doctest.h>
 #include <fmt/base.h>
+#include <fmt/format.h>
 #include <iostream>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -92,4 +96,64 @@ TEST_CASE("Simple ex0") {
     assert(a == 2);
     assert(b == 3.14);
     assert(c == "Hello, World!");
+}
+
+struct Api1 {
+    int a;
+    int b;
+};
+
+struct Api2 {
+    std::string a;
+    std::string b;
+};
+
+TEST_CASE("switch on tag") {
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    using namespace cbor::tags::literals;
+    // Encode Api1 with a tag of 0x10
+    REQUIRE(enc(make_tag_pair(10_hex_tag, Api1{.a = 42, .b = 43})));
+
+    // Encode a binary string in the middle of the buffer [the buffer itself]
+    REQUIRE(enc(std::span{data}));
+
+    // Encode Api2 with a tag of 0x20
+    REQUIRE(enc(make_tag_pair(20_hex_tag, Api2{"hello", "world"})));
+
+    fmt::print("Data: {}\n", to_hex(data));
+    fmt::memory_buffer buffer;
+    annotate(data, buffer);
+    fmt::print("Annotation: \n{}\n", fmt::to_string(buffer));
+
+    auto                                             dec = make_decoder(data);
+    std::variant<std::vector<std::byte>, as_tag_any> value;
+
+    auto visitor = [&dec](auto &&value) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
+            if (value.tag == 0x10) {
+                Api1 a{};
+                REQUIRE(dec(a));
+                fmt::print("Api1: a={}, b={}\n", a.a, a.b);
+            } else if (value.tag == 0x20) {
+                Api2 a{};
+                REQUIRE(dec(a));
+                fmt::print("Api2: a={}, b={}\n", a.a, a.b);
+            } else {
+                fmt::print("Unknown tag: {}\n", value.tag);
+            }
+        } else {
+            fmt::print("Binary data: {}\n", to_hex(value));
+        }
+    };
+
+    REQUIRE(dec(value));
+    std::visit(visitor, value);
+
+    REQUIRE(dec(value));
+    std::visit(visitor, value);
+
+    REQUIRE(dec(value));
+    std::visit(visitor, value);
 }
