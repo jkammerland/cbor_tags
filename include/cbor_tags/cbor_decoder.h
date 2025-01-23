@@ -399,6 +399,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         static_assert(matching_major_types[6] <= 1, "Multiple types match against major type 6 (tag)");
         static_assert(matching_major_types[7] <= 1, "Multiple types match against major type 7 (simple)");
         // static_assert(matching_major_types[8] == 0, "Unmatched major types in variant"); // If no untagged is allowed TODO: Option<>
+        static_assert(matching_major_types[9] == 0,
+                      "Variant cannot contain dynamic tags, must be known at compile time, use as_any_tag to catch any tag");
 
         static_assert(no_ambigous_major_types_in_variant, "Variant has ambigous major types, if this would compile, only the first type \
                                                           (among the ambigous) would get decoded.");
@@ -411,7 +413,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_full_type<U>(), magic_enum::enum_name(major),
             //            additionalInfo);
 
-            U           decoded_value;
+            U decoded_value;
+            if constexpr (IsFixedArray<U>) {
+                decoded_value = U{}; // Initialize arrays, removes warnings
+            }
+
             status_code result;
             if constexpr (IsSimple<U>) {
                 if (!compare_simple_value<U>(additionalInfo)) {

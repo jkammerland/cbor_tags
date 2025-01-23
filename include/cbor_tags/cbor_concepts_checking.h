@@ -81,18 +81,18 @@ constexpr auto CheckSigned   = [](IsSignedWithEnum auto) { return 8; };
 */
 
 template <typename T>
-constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples);
+constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples);
 
 template <typename Variant, auto... Concepts> struct ValidConceptMapping;
 
 template <template <typename...> typename Variant, typename... Ts, auto... Concepts>
 struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
-    static constexpr auto counts_fn_inner = [](std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
+    static constexpr auto counts_fn_inner = [](std::array<int, 10> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
         (getMatchCount<Ts>(result, tags, simples), ...);
     };
 
     static constexpr auto counts_fn_outer = []() mutable {
-        std::array<int, 9>      result{};
+        std::array<int, 10>     result{};
         std::vector<uint64_t>   tags;
         std::vector<SimpleType> simples;
         counts_fn_inner(result, tags, simples);
@@ -109,9 +109,11 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
 
     static constexpr auto counts = counts_fn_outer();
 
-    static constexpr bool types_map_uniquely = std::all_of(counts.begin(), counts.end(), [](int count) { return count <= 1; });
+    static constexpr bool no_dynamic_tags = (counts[9] == 0);
+    static constexpr bool types_map_uniquely =
+        no_dynamic_tags && std::all_of(counts.begin(), counts.end(), [](int count) { return count <= 1; });
 
-    static constexpr auto number_of_unmatched = counts[counts.size() - 1];
+    static constexpr auto number_of_unmatched = counts[counts.size() - 2];
     static constexpr bool value               = types_map_uniquely;
     static constexpr auto array               = counts;
 };
@@ -126,10 +128,15 @@ template <typename Variant, auto... Concepts>
 inline constexpr auto valid_concept_mapping_n_unmatched_v = ValidConceptMapping<Variant, Concepts...>::number_of_unmatched;
 
 template <typename T>
-constexpr void getMatchCount(std::array<int, 9> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
+constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
     bool unmatched = true;
 
     /* SPECIAL CASES */
+    if constexpr (is_dynamic_tag_t<T>) {
+        result[9]++; // Not ok to have dynamic tags
+        return;
+    }
+
     if constexpr (IsOptional<T>) {
         unmatched        = false;
         auto current_tag = get_simple_tag_of_primitive_type<std::nullptr_t>();

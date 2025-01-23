@@ -317,3 +317,45 @@ TEST_CASE("Encode variants", "[encoder]") {
         });
     };
 }
+
+TEST_CASE("decode variants", "[decoder]") {
+    rng::small_generator gen(Catch::getSeed());
+    using variant = std::variant<int, std::string, std::array<int, 3>>;
+
+    BENCHMARK_ADVANCED("Just rng")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() { return gen(); });
+    };
+
+    BENCHMARK_ADVANCED("Just rng variant generation")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() {
+            const auto r = gen() % 3;
+            return r == 0   ? variant{int(gen())}
+                   : r == 1 ? variant{"Hello"}
+                            : variant{std::array<int, 3>{int(gen()), int(gen()), int(gen())}};
+        });
+    };
+
+    BENCHMARK_ADVANCED("Bench variant decoding")(Catch::Benchmark::Chronometer meter) {
+        meter.measure([&gen]() {
+            std::vector<std::byte> buffer;
+            auto                   enc = make_encoder(buffer);
+
+            std::vector<variant> values(N);
+            for (auto &value : values) {
+                const auto r = gen() % 3;
+                value        = r == 0   ? variant{int(gen())}
+                               : r == 1 ? variant{"Hello"}
+                                        : variant{std::array<int, 3>{int(gen()), int(gen()), int(gen())}};
+            }
+
+            auto status = enc(values);
+            CHECK(status);
+
+            auto                 dec = make_decoder(buffer);
+            std::vector<variant> output;
+            auto                 status_decode = dec(output);
+            CHECK(status_decode);
+            return output;
+        });
+    };
+}
