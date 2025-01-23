@@ -3,7 +3,7 @@ from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
 
 class CborTagsConan(ConanFile):
     name = "cbor-tags"
-    version = "0.4.1"
+    version = "0.4.3"
     license = "MIT"
     description = "Binary tagging library with automatic encoding/decoding for CBOR"
     homepage = "https://github.com/jkammerland/cbor_tags"

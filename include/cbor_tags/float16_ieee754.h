@@ -14,6 +14,7 @@ struct float16_t {
     float16_t() = default;
     float16_t(std::uint16_t value) : value(value) {}
     float16_t(float f) { *this = f; }
+    float16_t(double d) { *this = d; }
 
     operator float() const {
         unsigned exp  = (value >> 10) & 0x1f;
@@ -30,6 +31,8 @@ struct float16_t {
 
         return (value & 0x8000) ? -val : val;
     }
+
+    operator double() const { return static_cast<double>(static_cast<float>(*this)); }
 
     float16_t &operator=(float f) {
         std::uint32_t x;
@@ -57,6 +60,11 @@ struct float16_t {
             value = sign | ((exponent + 15) << 10) | (mantissa >> 13);
         }
 
+        return *this;
+    }
+
+    float16_t &operator=(double d) {
+        *this = static_cast<float>(d);
         return *this;
     }
 };

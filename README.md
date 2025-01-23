@@ -29,15 +29,19 @@ Here is how you would encode individual CBOR values onto a buffer "data", a type
 
 int main() {
     using namespace cbor::tags;
+    // make a data buffer - holding the encoded data
+    auto data = std::vector<std::byte>{};
 
     // Encoding
-    auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
     using namespace std::string_view_literals;
     enc(2, 3.14, "Hello, World!"sv); // Note a plain const char* will not work, without a encode overload
 
+    // Emulate transfer of data buffer
+    auto trasmitted_data = data;
+
     // Decoding
-    auto dec = make_decoder(data);
+    auto dec = make_decoder(trasmitted_data);
     int  a;
     double b;
     std::string c;
@@ -113,9 +117,8 @@ struct AllCborMajorsExample {
 };
 
 int main() {
-    // Encoding
+    // Declare data
     auto data = std::vector<std::byte>{};
-    auto enc  = make_encoder(data);
 
     auto a0 = AllCborMajorsExample{
         .a0 = 42,  // +42
@@ -131,6 +134,8 @@ int main() {
         .i  = {{"one", 1}, {"two", std::map<std::string, double>({{"0", 1.0}, {"1", 1.1}})}, {"one", std::vector<float>{0.0f, 1.0f, 2.0f}}},
         .j  = std::nullopt};
 
+    // Encoding
+    auto enc  = make_encoder(data);
     auto result = enc(a0);
     if (!result) {
         std::cerr << "Failed to encode A" << std::endl;
@@ -282,6 +287,9 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 
 ```
 
+## 🏷️ Annotating CBOR Buffers
+You can use "annotate" from cbor_tags/extensions/cbor_cddl.h to inspect and visualize CBOR data:
+
 ## 🛠️ Requirements
 
 - Any C++20 compatible compiler (gcc 12+, clang 14+, msvc (builds but broken))
@@ -300,7 +308,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.4.1 # or specify a particular commit/tag
+  GIT_TAG v0.4.3 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
