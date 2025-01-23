@@ -30,15 +30,33 @@ namespace detail {
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
                                        double, bool, std::nullptr_t>;
 
-// Helper function to format bytes between iterators
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, FormattingOptions options = {}) {
     std::string indent(options.indent_level * 2, ' ');
     std::string offset(options.offset, ' ');
-    fmt::format_to(std::back_inserter(output_buffer), "{}{}", indent, offset);
+
+    const size_t bytes_per_line = options.max_depth == std::numeric_limits<size_t>::max()
+                                      ? std::distance(begin, end) // no wrapping if max_depth is max
+                                      : options.max_depth;
+
+    size_t current_count = 0;
+    bool   is_first_line = true;
 
     while (begin != end) {
+        if (current_count == 0) {
+            if (!is_first_line) {
+                fmt::format_to(std::back_inserter(output_buffer), "\n");
+            }
+            fmt::format_to(std::back_inserter(output_buffer), "{}{}", indent, offset);
+            is_first_line = false;
+        }
+
         fmt::format_to(std::back_inserter(output_buffer), "{:02x}", static_cast<std::uint8_t>(*begin));
         ++begin;
+
+        ++current_count;
+        if (current_count >= bytes_per_line) {
+            current_count = 0;
+        }
     }
 }
 } // namespace detail
