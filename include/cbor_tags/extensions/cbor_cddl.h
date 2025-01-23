@@ -19,6 +19,7 @@
 namespace cbor::tags {
 
 struct FormattingOptions {
+    bool   diagnostic_data{false};
     size_t indent_level{0};
     size_t offset{0};
     size_t max_depth{std::numeric_limits<size_t>::max()};
@@ -44,16 +45,18 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 
 template <typename OutputBuffer, typename... T> constexpr auto CDDL(OutputBuffer &, T &&...) {}
 
-template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer) {
-    // if (std::size(cbor_buffer) % 2 != 0) {
-    //     throw std::invalid_argument("CBOR buffer must have an even number of bytes");
-    //     return;
-    // }
+template <typename CborBuffer, typename OutputBuffer>
+auto annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, FormattingOptions options = {}) {
+    if (cbor_buffer.empty()) {
+        return;
+    }
+    if (options.diagnostic_data) {
+        throw std::runtime_error("Diagnostic data not supported");
+    }
 
     auto dec = make_decoder(cbor_buffer);
 
     detail::catch_all_variant value;
-    FormattingOptions         options;
     std::stack<size_t>        indent_stack;
 
     auto indentation_visitor = [&indent_stack](auto &&value) {
@@ -110,8 +113,8 @@ template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBu
                 auto size        = std::visit(string_size_visitor, value);
                 auto header_size = string_length_to_header_size(size);
                 detail::format_bytes(output_buffer, span_begin, span_begin + 1, options); // Major type
-                fmt::format_to(std::back_inserter(output_buffer), " ");
-                detail::format_bytes(output_buffer, span_begin + 1, span_begin + header_size, options); // extra header
+                detail::format_bytes(output_buffer, span_begin + 1, span_begin + header_size,
+                                     {.indent_level = 0, .offset = 1}); // extra header
                 fmt::format_to(std::back_inserter(output_buffer), "\n");
                 options.indent_level++;
                 options.offset++;
@@ -126,9 +129,8 @@ template <typename CborBuffer, typename OutputBuffer> auto annotate(const CborBu
             if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
                 auto size        = std::visit(string_size_visitor, value);
                 auto header_size = string_length_to_header_size(size);
-                detail::format_bytes(output_buffer, it, it + 1, options); // Major type
-                fmt::format_to(std::back_inserter(output_buffer), " ");
-                detail::format_bytes(output_buffer, it + 1, it + header_size, options); // extra header
+                detail::format_bytes(output_buffer, it, it + 1, options);                                        // Major type
+                detail::format_bytes(output_buffer, it + 1, it + header_size, {.indent_level = 0, .offset = 1}); // extra header
                 fmt::format_to(std::back_inserter(output_buffer), "\n");
                 options.indent_level++;
                 options.offset++;

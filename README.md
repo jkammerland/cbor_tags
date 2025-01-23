@@ -282,6 +282,9 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 
 ```
 
+## 🏷️ Annotating CBOR Buffers
+You can use "annotate" from cbor_tags/extensions/cbor_cddl.h to inspect and visualize CBOR data:
+
 ## 🛠️ Requirements
 
 - Any C++20 compatible compiler (gcc 12+, clang 14+, msvc (builds but broken))
@@ -300,7 +303,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.4.1 # or specify a particular commit/tag
+  GIT_TAG v0.4.2 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
