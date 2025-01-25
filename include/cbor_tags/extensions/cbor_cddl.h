@@ -114,8 +114,8 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 }
 } // namespace detail
 
-template <typename T, bool IsSelf = false> constexpr auto getName(const T &);
-template <typename T, bool IsSelf = false> constexpr auto getName();
+template <typename T> constexpr auto getName(const T &);
+template <typename T> constexpr auto getName();
 
 template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames(const Variant<Ts...> &&) {
     std::string result;
@@ -123,7 +123,16 @@ template <template <typename...> typename Variant, typename... Ts> constexpr aut
     return result.substr(0, result.empty() ? 0 : (result.size() - 3));
 }
 
-template <typename T, bool IsSelf> constexpr auto getName(const T &t) {
+template <IsTag T> constexpr auto getTagDef(const T &t) {
+    if constexpr (HasInlineTag<T>) {
+        return fmt::format("#6.{}", T::cbor_tag);
+    } else {
+        auto tag = std::get<0>(t);
+        return fmt::format("#6.{}", tag);
+    }
+}
+
+template <typename T> constexpr auto getName(const T &t) {
     if constexpr (IsUnsigned<T>) {
         return "uint";
     } else if constexpr (IsSigned<T>) {
@@ -137,14 +146,7 @@ template <typename T, bool IsSelf> constexpr auto getName(const T &t) {
     } else if constexpr (IsMap<T>) {
         return "map";
     } else if constexpr (IsTag<T>) {
-        if constexpr (IsSelf) {
-            return nameof::nameof_short_type<T>();
-        } else if constexpr (HasInlineTag<T>) {
-            return fmt::format("#6.{}({})", T::cbor_tag, getName<T, true>(t));
-        } else {
-            auto tag = std::get<0>(t);
-            return fmt::format("#6.{}({})", tag, getName<T, true>(t));
-        }
+        return nameof::nameof_short_type<T>();
     } else if constexpr (IsSimple<T>) {
         if constexpr (IsBool<T>) {
             return "bool";
@@ -183,20 +185,28 @@ concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
 auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
+    bool use_brackets = false;
+
     if constexpr (IsAggregate<T>) {
-        const auto &&tuple = to_tuple(t);
+        const auto          &&tuple = to_tuple(t);
+        [[maybe_unused]] auto size  = std::apply([](auto &&...args) { return sizeof...(args); }, tuple);
+
         fmt::format_to(std::back_inserter(output_buffer), "{} = ", nameof::nameof_short_type<T>());
+        if constexpr (IsTag<T>) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
+        }
+
+        use_brackets = IsTag<T> && size > 1;
+
         if (options.row_options.format_by_rows) {
-            fmt::format_to(std::back_inserter(output_buffer), "(\n");
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : "(\n");
         } else {
-            fmt::format_to(std::back_inserter(output_buffer), "(");
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : "(");
         }
 
         std::apply(
             [&](auto &&...args) {
-                using std::remove_cvref_t;
                 std::size_t idx{0};
-
                 if (options.row_options.format_by_rows) {
                     ((fmt::format_to(std::back_inserter(output_buffer), "{}{}{}",
                                      idx++ == 0 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
@@ -218,20 +228,18 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
     }
 
     if (options.row_options.format_by_rows) {
-        fmt::format_to(std::back_inserter(output_buffer), "\n)");
+        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "\n]" : "\n)");
     } else {
-        fmt::format_to(std::back_inserter(output_buffer), ")");
+        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "]" : ")");
     }
 
     if constexpr (IsReferenceWrapper<Context>) {
-        fmt::print("Number of definitions: {}\n", context.get().definitions.size());
         for (const auto &def : context.get().definitions) {
-            fmt::format_to(std::back_inserter(output_buffer), "\n\n{}", def.second);
+            fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
         }
     } else {
-        fmt::print("Number of definitions: {}\n", context.definitions.size());
         for (const auto &def : context.definitions) {
-            fmt::format_to(std::back_inserter(output_buffer), "\n\n{}", def.second);
+            fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
         }
     }
 }
