@@ -124,7 +124,7 @@ TEST_CASE("switch on tag") {
 
     fmt::print("Data: {}\n", to_hex(data));
     fmt::memory_buffer buffer;
-    annotate(data, buffer);
+    buffer_annotate(data, buffer);
     fmt::print("Annotation: \n{}\n", fmt::to_string(buffer));
 
     auto                                             dec = make_decoder(data);
@@ -133,13 +133,19 @@ TEST_CASE("switch on tag") {
     auto visitor = [&dec](auto &&value) {
         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
             if (value.tag == 0x10) {
-                Api1 a{};
-                REQUIRE(dec(a));
-                fmt::print("Api1: a={}, b={}\n", a.a, a.b);
+                Api1 a{}; // TODO: remove default initialization
+                auto result = dec(a);
+                REQUIRE(result);
+                if (result) {
+                    fmt::print("Api1: a={}, b={}\n", a.a, a.b);
+                }
             } else if (value.tag == 0x20) {
-                Api2 a{};
-                REQUIRE(dec(a));
-                fmt::print("Api2: a={}, b={}\n", a.a, a.b);
+                Api2 a;
+                auto result = dec(a);
+                REQUIRE(result);
+                if (result) {
+                    fmt::print("Api2: a={}, b={}\n", a.a, a.b);
+                }
             } else {
                 fmt::print("Unknown tag: {}\n", value.tag);
             }

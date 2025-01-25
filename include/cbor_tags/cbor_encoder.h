@@ -118,7 +118,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
     }
 
-    template <IsTaggedPair T> constexpr void encode(const T &value) {
+    template <IsTaggedTuple T> constexpr void encode(const T &value) {
         encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
         encode(value.second);
     }

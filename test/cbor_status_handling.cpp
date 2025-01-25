@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <fmt/base.h>
+#include <map>
 #include <memory_resource>
 #include <type_traits>
 

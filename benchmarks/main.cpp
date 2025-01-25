@@ -1,5 +1,4 @@
 #include "cbor_tags/cbor.h"
-#include "cbor_tags/cbor_integer.h"
 #include "small_generator.h"
 
 #include <algorithm>
@@ -16,7 +15,6 @@
 #include <iostream>
 #include <list>
 #include <memory_resource>
-#include <random>
 
 using namespace cbor::tags;
 

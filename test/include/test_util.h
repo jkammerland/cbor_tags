@@ -1,8 +1,12 @@
 #pragma once
+#include "cbor_tags/cbor.h"
+
 #include <cstddef>
+#include <doctest/doctest.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
+#include <tl/expected.hpp>
 
 template <typename T> inline std::string to_hex(const T &bytes) {
     std::string hex;
@@ -44,3 +48,76 @@ inline std::vector<byte> to_bytes(std::string_view hex) {
 
 // Print using fmt
 inline auto print_bytes = [](const std::vector<std::byte> &bytes) { fmt::print("{}\n", to_hex(bytes)); };
+
+template <std::ranges::range Buffer, typename... Strings>
+tl::expected<void, std::vector<std::string>> substrings_in(Buffer &&buffer, Strings &&...strings) {
+    // Convert buffer to string for non-contiguous ranges support
+    using buffer_type = std::conditional_t<std::ranges::contiguous_range<Buffer>, std::string_view, std::string>;
+    buffer_type buffer_str;
+    if constexpr (std::ranges::contiguous_range<Buffer>) {
+        buffer_str = std::string_view{std::ranges::data(buffer), std::ranges::size(buffer)};
+    } else {
+        buffer_str.assign(std::ranges::begin(buffer), std::ranges::end(buffer));
+    }
+
+    // Vector to store not found strings
+    std::vector<std::string> not_found;
+
+    // Helper function to check each string
+    auto check_string = [&](const auto &str) {
+        // Convert input to string_view for consistent searching
+        std::string_view sv;
+        if constexpr (std::is_convertible_v<decltype(str), std::string_view>) {
+            sv = str;
+        } else {
+            sv = std::string_view{str};
+        }
+
+        if (buffer_str.find(sv) == std::string::npos) {
+            not_found.emplace_back(sv);
+        }
+    };
+
+    // Check all strings
+    (check_string(std::forward<Strings>(strings)), ...);
+
+    // Return result
+    if (not_found.empty()) {
+        return {}; // All strings found
+    } else {
+        return tl::unexpected(std::move(not_found));
+    }
+}
+
+// Add this before your test cases
+namespace doctest {
+template <typename T> struct StringMaker<tl::expected<T, std::vector<std::string>>> {
+    static String convert(const tl::expected<T, std::vector<std::string>> &value) {
+        if (value.has_value()) {
+            return "expected(has_value)";
+        } else {
+            std::string result = "unexpected(";
+            const auto &errors = value.error();
+            for (size_t i = 0; i < errors.size(); ++i) {
+                result += '"' + errors[i] + '"';
+                if (i < errors.size() - 1) {
+                    result += ", ";
+                }
+            }
+            result += ")";
+            return result.c_str();
+        }
+    }
+};
+
+template <typename T> struct StringMaker<tl::expected<T, cbor::tags::status_code>> {
+    static String convert(const tl::expected<T, cbor::tags::status_code> &value) {
+        if (value.has_value()) {
+            return "expected(has_value)";
+        } else {
+            return String(fmt::format("unexpected({})", cbor::tags::status_message(value.error())).c_str());
+        }
+    }
+};
+
+} // namespace doctest

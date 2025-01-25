@@ -5,9 +5,7 @@
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_integer.h"
-#include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
-#include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <bit>
@@ -19,7 +17,6 @@
 // #include <fmt/base.h>
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
-#include <map>
 // #include <nameof.hpp>
 #include <optional>
 #include <ranges>
@@ -201,7 +198,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode(value, major, additionalInfo);
     }
 
-    template <IsTaggedPair T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTaggedTuple T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             // throw std::runtime_error("Invalid major type for tagged object");
             return status_code::invalid_major_type_for_tag;
@@ -414,9 +411,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             //            additionalInfo);
 
             U decoded_value;
-            if constexpr (IsFixedArray<U>) {
-                decoded_value = U{}; // Initialize arrays, removes warnings
-            }
 
             status_code result;
             if constexpr (IsSimple<U>) {
@@ -451,8 +445,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 result = this->decode(decoded_value, major, additionalInfo);
             }
 
-            value = std::move(decoded_value);
-            return result == status_code::success;
+            if (result == status_code::success) {
+                value = std::move(decoded_value);
+                return true;
+            } else {
+                return false;
+            }
         };
 
         try {
@@ -661,8 +659,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else {
                 result = dec_.decode(arg);
                 // fmt::print("status: {}, for index {}\n", status_message(result), index);
-                index++;
-                return result == status_code::success ? true : false;
+                index++; // TODO: Will be used later
+                return result == status_code::success;
             }
             return false;
         }

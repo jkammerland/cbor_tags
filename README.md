@@ -307,10 +307,11 @@ int main() {
 
 ## 🎨 Custom Tag Handling
 
-> [!NOTE]
-> The library supports three different ways to handle CBOR tags:
+> [!IMPORTANT]
+> The library supports multiple different ways to handle CBOR tags:
 
 ### 1. Inline Tags
+If the struct is used as a cbor object, then it makes sense to tag it directly in the struct definition:
 ```cpp
 struct InlineTagged {
     static constexpr std::uint64_t cbor_tag = 140;
@@ -318,7 +319,18 @@ struct InlineTagged {
 };
 ```
 
-### 2. Static Tags
+### 2. Literal Tags
+Inline tagging can be a bit invasive if not strictly cbor, you don't "own" it or want to modify the struct. In this case, you can use a literal tag, which is a constexpr variable of type static_tag<N>:
+```cpp
+using namespace cbor::tags::literals;
+struct A { std::string a; };
+auto &&tagged = make_tag_pair(140_tag, A{"Hello, World!"});
+```
+
+
+### 3. Static Tags
+This is the same as inline tags, but the tag value is a static member of the struct static_tag<N>.
+It is also the same as defining the literal 140_tag. The primary purpose is so that you can tag a struct without modifying it, by making a pair with the tag and the struct. But you can also inline it:
 ```cpp
 struct StaticTagged {
     static_tag<140> cbor_tag;
@@ -326,9 +338,9 @@ struct StaticTagged {
 };
 ```
 
-### 3. Dynamic Tags
-Dynamic can be set at runtime, will return error if it does not match tag on buffer when decoding.
-Note that this means the tag byte(s) can not easily be optimized away in the resulting structure.
+### 4. Dynamic Tags
+Dynamic can be set at runtime, will return error if it does not match tag on the buffer when decoding.
+Note that this means the tag byte(s) can not be optimized away in the resulting structure.
 ```cpp
 struct DynamicTagged {
     dynamic_tag<uint64_t> cbor_tag;
@@ -377,6 +389,77 @@ d8 20
          776f726c64
 ```
 
+```
+CBOR: 8b01206c48656c6c6f20776f726c64214461626364a301636f6e65026374776f03657468726565d88c82d88e821a000f42407818616161616161616161616161616161616161616161616161182af94247fa4048f5c3fb40091eb851eb851ff5f6
+Annotation: 
+8b
+   01
+   20
+   6c
+      48656c6c6f20776f726c6421
+   44
+      61626364
+   a3
+      01
+      63
+         6f6e65
+      02
+      63
+         74776f
+      03
+      65
+         7468726565
+   d8 8c
+      82
+         d8 8e
+            82
+               1a 000f4240
+               78 18
+                  616161616161616161616161616161616161616161616161
+            18 2a
+         f9 4247
+         fa 4048f5c3
+      fb 40091eb851eb851f
+   f5
+   f6
+```
+
+CDDL example:
+``` 
+struct B {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::vector<std::byte>         a;
+    std::map<int, std::string>     b;
+};
+
+struct C {
+    static_tag<141>  cbor_tag;
+    int              a;
+    std::string      b;
+    std::optional<B> c;
+};
+struct A {
+        uint32_t                       a1;
+        negative                       aminus;
+        int                            a;
+        double                         b;
+        float                          c;
+        bool                           d;
+        std::string                    e;
+        std::vector<std::byte>         f;
+        std::map<int, std::string>     g;
+        std::variant<int, std::string> h;
+        std::optional<int>             i;
+        B                              j;
+        C                              k;
+    };
+
+CDDL:
+A = (uint, nint, int, float64, float32, bool, tstr, bstr, map, int / tstr, int / null, B, C)
+C = #6.141([int, tstr, B / null])
+B = #6.140([bstr, map])
+```
+
 ## 🛠️ Requirements
 
 - Any C++20 compatible compiler (gcc 12+, clang 14+, msvc (builds but broken))
@@ -395,7 +478,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.4.4 # or specify a particular commit/tag
+  GIT_TAG v0.5.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
