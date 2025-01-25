@@ -2,21 +2,62 @@
 #include "cbor_tags/extensions/cbor_cddl.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
+#include <map>
 #include <string>
+#include <sys/types.h>
 #include <test_util.h>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
 
+struct B {
+    static constexpr std::uint64_t cbor_tag = 140;
+    std::vector<std::byte>         a;
+};
+
 TEST_CASE("CDDL extension") {
-    fmt::memory_buffer     buffer;
-    std::vector<std::byte> cbor_buffer = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
-    CDDL(cbor_buffer, buffer);
-    fmt::print("CDDL: {}\n", fmt::to_string(buffer));
+    fmt::memory_buffer buffer;
+
+    struct A {
+        uint32_t                       a1;
+        int                            a;
+        double                         b;
+        float                          c;
+        bool                           d;
+        std::string                    e;
+        std::vector<std::byte>         f;
+        std::map<int, std::string>     g;
+        std::variant<int, std::string> h;
+        std::optional<int>             i;
+        B                              j;
+    };
+
+    cddl_to<A>(buffer);
+    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+}
+
+TEST_CASE("CDDL no columns") {
+    fmt::memory_buffer buffer;
+    struct A {
+        uint32_t                       a1;
+        int                            a;
+        double                         b;
+        float                          c;
+        bool                           d;
+        std::string                    e;
+        std::vector<std::byte>         f;
+        std::map<int, std::string>     g;
+        std::variant<int, std::string> h;
+        std::optional<int>             i;
+    };
+
+    cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
+    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
 struct A1212 {
@@ -64,7 +105,7 @@ TEST_CASE_TEMPLATE("Annotate", T, std::vector<std::byte>, std::deque<std::byte>)
     fmt::print("CBOR: {}\n", to_hex(buffer));
 
     fmt::memory_buffer annotation;
-    annotate(buffer, annotation);
+    buffer_annotate(buffer, annotation);
 
     fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
 }
@@ -81,7 +122,7 @@ TEST_CASE_TEMPLATE("Annotate map", T, std::vector<std::byte>, std::deque<std::by
     fmt::print("CBOR: {}\n", to_hex(buffer));
 
     fmt::memory_buffer annotation;
-    annotate(buffer, annotation);
+    buffer_annotate(buffer, annotation);
 
     fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
 }
@@ -93,7 +134,7 @@ TEST_CASE("CWT annotation") {
                  "9c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30");
 
     fmt::memory_buffer annotation;
-    annotate(buffer, annotation);
+    buffer_annotate(buffer, annotation);
 
     fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
 }
@@ -103,6 +144,6 @@ TEST_CASE("CWT payload map annotation") {
                            "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
 
     fmt::memory_buffer annotation;
-    annotate(buffer, annotation);
+    buffer_annotate(buffer, annotation);
     fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
 }

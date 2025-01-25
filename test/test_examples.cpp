@@ -124,7 +124,7 @@ TEST_CASE("switch on tag") {
 
     fmt::print("Data: {}\n", to_hex(data));
     fmt::memory_buffer buffer;
-    annotate(data, buffer);
+    buffer_annotate(data, buffer);
     fmt::print("Annotation: \n{}\n", fmt::to_string(buffer));
 
     auto                                             dec = make_decoder(data);

@@ -1,13 +1,17 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_integer.h"
+#include "cbor_tags/cbor_reflection.h"
 
 #include <cbor_tags/cbor_concepts.h>
 #include <cstddef>
 #include <fmt/base.h>
 #include <fmt/format.h>
+#include <functional>
 #include <iterator>
+#include <memory_resource>
 #include <nameof.hpp>
+#include <optional>
 #include <span>
 #include <stack>
 #include <string>
@@ -18,19 +22,68 @@
 
 namespace cbor::tags {
 
-struct FormattingOptions {
+struct AnnotationOptions {
     bool   diagnostic_data{false};
     size_t indent_level{0};
     size_t offset{0};
     size_t max_depth{std::numeric_limits<size_t>::max()};
 };
 
+struct CDDLOptions {
+    struct RowOptions {
+        bool   format_by_rows{true};
+        size_t offset{2};
+    } row_options;
+    bool always_inline{false};
+};
+
+template <typename T, typename OutputBuffer, typename Context>
+auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions = {}, Context = {});
+
+template <typename T, typename OutputBuffer, typename Context> auto cddl_to(OutputBuffer &output_buffer, CDDLOptions = {});
+
 namespace detail {
+
+struct CDDLContext {
+    using definition_cddl_pair = std::pair<std::pmr::string, std::pmr::string>;
+    std::array<std::byte, 2000>           buffer;
+    std::pmr::monotonic_buffer_resource   memory_resource{buffer.data(), buffer.size()};
+    std::pmr::deque<definition_cddl_pair> definitions{&memory_resource};
+
+    template <typename T> bool contains(const T &name) const {
+        for (const auto &def : definitions) {
+            if (std::equal(name.begin(), name.end(), def.first.begin(), def.first.end())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void insert(std::pmr::string name, std::pmr::string cddl) { definitions.emplace_back(std::move(name), std::move(cddl)); }
+
+    void clear() {
+        definitions.clear();
+        memory_resource.release();
+    }
+
+    template <typename T, typename Context> void register_type(const T &t, CDDLOptions options, Context context) {
+        if constexpr (IsAggregate<T>) {
+            if (contains(nameof::nameof_type<T>())) {
+                return;
+            }
+            auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
+            std::pmr::string cddl(&memory_resource);
+            cddl_to(cddl, t, options, context);
+            insert(std::move(name), std::move(cddl));
+        }
+        /* Else do nothing */
+    }
+};
 
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
                                        double, bool, std::nullptr_t>;
 
-template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, FormattingOptions options = {}) {
+template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
     std::string indent(options.indent_level * 2, ' ');
     std::string offset(options.offset, ' ');
 
@@ -61,10 +114,135 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 }
 } // namespace detail
 
-template <typename OutputBuffer, typename... T> constexpr auto CDDL(OutputBuffer &, T &&...) {}
+template <typename T, bool IsSelf = false> constexpr auto getName(const T &);
+template <typename T, bool IsSelf = false> constexpr auto getName();
+
+template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames(const Variant<Ts...> &&) {
+    std::string result;
+    ((result += std::string(getName(Ts{})) + " / "), ...);
+    return result.substr(0, result.empty() ? 0 : (result.size() - 3));
+}
+
+template <typename T, bool IsSelf> constexpr auto getName(const T &t) {
+    if constexpr (IsUnsigned<T>) {
+        return "uint";
+    } else if constexpr (IsSigned<T>) {
+        return "int";
+    } else if constexpr (IsTextString<T>) {
+        return "tstr";
+    } else if constexpr (IsBinaryString<T>) {
+        return "bstr";
+    } else if constexpr (IsArray<T>) {
+        return "array";
+    } else if constexpr (IsMap<T>) {
+        return "map";
+    } else if constexpr (IsTag<T>) {
+        if constexpr (IsSelf) {
+            return nameof::nameof_short_type<T>();
+        } else if constexpr (HasInlineTag<T>) {
+            return fmt::format("#6.{}({})", T::cbor_tag, getName<T, true>(t));
+        } else {
+            auto tag = std::get<0>(t);
+            return fmt::format("#6.{}({})", tag, getName<T, true>(t));
+        }
+    } else if constexpr (IsSimple<T>) {
+        if constexpr (IsBool<T>) {
+            return "bool";
+        } else if constexpr (IsFloat16<T>) {
+            return "float16";
+        } else if constexpr (IsFloat32<T>) {
+            return "float32";
+        } else if constexpr (IsFloat64<T>) {
+            return "float64";
+        } else if constexpr (IsNull<T>) {
+            return "null";
+        } else {
+            return "simple";
+        }
+    } else {
+        if constexpr (IsOptional<T>) {
+            if (t.has_value())
+                return std::string(getName<typename T::value_type>(t.value()));
+            else {
+                using value_type = typename T::value_type;
+                value_type dummy{};
+                return std::string(getName(dummy));
+            }
+        } else if constexpr (IsVariant<T>) {
+            return getVariantNames(T{});
+        } else {
+            return nameof::nameof_short_type<T>();
+        }
+    }
+}
+
+template <typename T> constexpr auto getName() { return getName(T{}); }
+
+template <typename T>
+concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T::type>>;
+
+template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
+auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
+    if constexpr (IsAggregate<T>) {
+        const auto &&tuple = to_tuple(t);
+        fmt::format_to(std::back_inserter(output_buffer), "{} = ", nameof::nameof_short_type<T>());
+        if (options.row_options.format_by_rows) {
+            fmt::format_to(std::back_inserter(output_buffer), "(\n");
+        } else {
+            fmt::format_to(std::back_inserter(output_buffer), "(");
+        }
+
+        std::apply(
+            [&](auto &&...args) {
+                using std::remove_cvref_t;
+                std::size_t idx{0};
+
+                if (options.row_options.format_by_rows) {
+                    ((fmt::format_to(std::back_inserter(output_buffer), "{}{}{}",
+                                     idx++ == 0 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
+                                     std::string(options.row_options.offset, ' '), getName(args))),
+                     ...);
+                } else {
+                    ((fmt::format_to(std::back_inserter(output_buffer), "{}{}", idx++ == 0 ? "" : ", ", getName(args)), ...));
+                }
+
+                if constexpr (IsReferenceWrapper<Context>) {
+                    ((context.get().register_type(args, options, context), ...));
+                } else {
+                    ((context.register_type(args, options, std::ref(context)), ...));
+                }
+            },
+            tuple);
+    } else {
+        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_type<T>(), getName(t));
+    }
+
+    if (options.row_options.format_by_rows) {
+        fmt::format_to(std::back_inserter(output_buffer), "\n)");
+    } else {
+        fmt::format_to(std::back_inserter(output_buffer), ")");
+    }
+
+    if constexpr (IsReferenceWrapper<Context>) {
+        fmt::print("Number of definitions: {}\n", context.get().definitions.size());
+        for (const auto &def : context.get().definitions) {
+            fmt::format_to(std::back_inserter(output_buffer), "\n\n{}", def.second);
+        }
+    } else {
+        fmt::print("Number of definitions: {}\n", context.definitions.size());
+        for (const auto &def : context.definitions) {
+            fmt::format_to(std::back_inserter(output_buffer), "\n\n{}", def.second);
+        }
+    }
+}
+
+template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
+auto cddl_to(OutputBuffer &output_buffer, CDDLOptions options) {
+    cddl_to(output_buffer, T{}, options);
+}
 
 template <typename CborBuffer, typename OutputBuffer>
-auto annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, FormattingOptions options = {}) {
+auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options = {}) {
     if (cbor_buffer.empty()) {
         return;
     }
