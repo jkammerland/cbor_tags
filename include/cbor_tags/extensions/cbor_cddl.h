@@ -193,13 +193,37 @@ concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
 auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
-    bool use_brackets = false;
+    bool use_brackets     = false;
+    auto applier_register = [&](auto &&...args) {
+        if constexpr (IsReferenceWrapper<Context>) {
+            ((context.get().register_type(args, options, context), ...));
+        } else {
+            ((context.register_type(args, options, std::ref(context)), ...));
+        }
+    };
+    auto applier_formatter = [&](auto &&...args) {
+        int not_has_tag_member = !(HasStaticTag<T> || HasDynamicTag<T>);
+        int idx                = not_has_tag_member ? 0 : -1;
+        if (options.row_options.format_by_rows) {
+            int offset_help = not_has_tag_member;
+            ((fmt::format_to(
+                 std::back_inserter(output_buffer), "{}{}{}", idx++ < 1 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
+                 offset_help++ == 0 ? "" : std::string(options.row_options.offset, ' '), not_has_tag_member++ == 0 ? "" : getName(args))),
+             ...);
+        } else {
+            ((fmt::format_to(std::back_inserter(output_buffer), "{}{}", idx++ < 1 ? "" : ", ",
+                             not_has_tag_member++ == 0 ? "" : getName(args)),
+              ...));
+        }
+
+        applier_register(std::forward<decltype(args)>(args)...);
+    };
 
     if constexpr (IsAggregate<T>) {
-        const auto          &&tuple = to_tuple(t);
-        [[maybe_unused]] auto size  = std::apply([](auto &&...args) { return sizeof...(args); }, tuple);
-
+        const auto &&tuple = to_tuple(t);
         fmt::format_to(std::back_inserter(output_buffer), "{} = ", nameof::nameof_short_type<T>());
+        [[maybe_unused]] auto size = std::apply([](auto &&...args) { return sizeof...(args); }, tuple);
+
         if constexpr (IsTag<T>) {
             fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
         }
@@ -212,32 +236,23 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
             fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : "(");
         }
 
-        std::apply(
-            [&](auto &&...args) {
-                int not_has_tag_member = !(HasStaticTag<T> || HasDynamicTag<T>);
-                int idx                = not_has_tag_member ? 0 : -1;
-                if (options.row_options.format_by_rows) {
-                    int offset_help = not_has_tag_member;
-                    ((fmt::format_to(std::back_inserter(output_buffer), "{}{}{}",
-                                     idx++ < 1 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
-                                     offset_help++ == 0 ? "" : std::string(options.row_options.offset, ' '),
-                                     not_has_tag_member++ == 0 ? "" : getName(args))),
-                     ...);
-                } else {
-                    ((fmt::format_to(std::back_inserter(output_buffer), "{}{}", idx++ < 1 ? "" : ", ",
-                                     not_has_tag_member++ == 0 ? "" : getName(args)),
-                      ...));
-                }
+        std::apply(applier_formatter, tuple);
+    } else if constexpr (IsTuple<T>) {
+        [[maybe_unused]] auto size = std::apply([](auto &&...args) { return sizeof...(args); }, t);
 
-                if constexpr (IsReferenceWrapper<Context>) {
-                    ((context.get().register_type(args, options, context), ...));
-                } else {
-                    ((context.register_type(args, options, std::ref(context)), ...));
-                }
-            },
-            tuple);
-    } else if constexpr (IsTaggedTuple<T>) {
-        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_short_type<T>(), getName(t));
+        // if constexpr (IsTag<T>) {
+        //     fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
+        // }
+
+        // use_brackets = IsTag<T> && size > 1;
+
+        // if (options.row_options.format_by_rows) {
+        //     fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : "(\n");
+        // } else {
+        //     fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : "(");
+        // }
+
+        // std::apply(applier_formatter, t);
     } else {
         fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_type<T>(), getName(t));
     }
