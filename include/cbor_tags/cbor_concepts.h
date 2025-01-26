@@ -180,9 +180,9 @@ concept IsArray = IsArrayHeader<T> || (IsRangeOfCborValues<T> && !IsMap<T>);
 
 template <typename T>
 concept IsTuple = requires {
-    typename std::tuple_size<T>::type;
-    typename std::tuple_element<0, T>::type;
-    requires(!IsFixedArray<T>);
+    typename std::tuple_size<std::remove_cvref_t<T>>::type;
+    typename std::tuple_element<0, std::remove_cvref_t<T>>::type;
+    requires(!IsFixedArray<std::remove_cvref_t<T>>);
 };
 
 template <typename T>
@@ -220,17 +220,17 @@ concept HasInlineTag = requires {
 };
 
 template <typename T>
-concept IsTaggedPair = requires(T t) {
+concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
     requires(is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value ||
              is_dynamic_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>);
 };
 
 template <typename T>
-concept IsUntaggedTuple = IsTuple<T> && !IsTaggedPair<T> && !IsAnyHeader<T>;
+concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsAnyHeader<T>;
 
 template <typename T>
-concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedPair<T> || IsTagHeader<T>;
+concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {

@@ -1,3 +1,4 @@
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/extensions/cbor_cddl.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -29,6 +30,30 @@ struct C {
     std::optional<B> c;
 };
 
+struct A13213 {
+    static constexpr std::uint64_t cbor_tag = 139;
+    int                            pos;
+    int                            nega;
+    std::string                    c;
+    std::vector<std::byte>         d;
+    std::map<int, std::string>     e;
+    struct B1212 {
+        static_tag<140> cbor_tag;
+        struct B1313 {
+            static_tag<142> cbor_tag;
+
+            int         a;
+            std::string b;
+        } b1313;
+        int a;
+    } f;
+    float16_t      g;
+    float          h;
+    double         i;
+    bool           j;
+    std::nullptr_t k;
+};
+
 TEST_CASE("CDDL extension") {
     fmt::memory_buffer buffer;
 
@@ -48,6 +73,12 @@ TEST_CASE("CDDL extension") {
     };
 
     cddl_to<A>(buffer);
+    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+}
+
+TEST_CASE("CDDL aggregate tagged") {
+    fmt::memory_buffer buffer;
+    cddl_to(buffer, A13213{}, {.row_options = {.format_by_rows = true}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
@@ -158,4 +189,16 @@ TEST_CASE("CWT payload map annotation") {
     fmt::memory_buffer annotation;
     buffer_annotate(buffer, annotation);
     fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
+}
+
+// TODO:
+TEST_CASE("CDDL adhoc tagging") {
+    struct A {
+        std::string a;
+    };
+
+    fmt::memory_buffer buffer;
+    using namespace cbor::tags::literals;
+    cddl_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}));
+    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }

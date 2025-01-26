@@ -198,7 +198,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode(value, major, additionalInfo);
     }
 
-    template <IsTaggedPair T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
+    template <IsTaggedTuple T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             // throw std::runtime_error("Invalid major type for tagged object");
             return status_code::invalid_major_type_for_tag;

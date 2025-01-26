@@ -137,7 +137,7 @@ TEST_CASE("Test HasCborTag and IsTagged concepts") {
 
     static_assert(HasInlineTag<CBOR1>);
     static_assert(IsTag<CBOR1>);
-    static_assert(!IsTaggedPair<CBOR1>);
+    static_assert(!IsTaggedTuple<CBOR1>);
 
     struct CBOR2 {
         std::uint64_t cbor_ = 2;
@@ -739,4 +739,37 @@ TEST_CASE_TEMPLATE("Not multimap concept matching", T, std::map<int, std::string
 
 TEST_CASE_TEMPLATE("Is header concept", T, as_array_any, as_map_any, as_tag_any, as_bstr_any, as_text_any) {
     static_assert(IsAnyHeader<T>);
+}
+
+TEST_CASE_TEMPLATE("Tuple Aggregate concepts research", T, std::tuple<int, double>, std::tuple<static_tag<1>, int>) {
+    CHECK(IsTuple<T>);
+    CHECK(!IsAggregate<T>);
+}
+
+struct ATAG {
+    static_tag<1> cbor_tag{};
+    int           a{1};
+};
+
+struct ANOTAG {
+    int a{2};
+};
+
+TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG)
+
+{
+    T a;
+
+    CHECK(!IsTuple<T>);
+    CHECK(IsAggregate<T>);
+
+    auto &&t = to_tuple(a);
+    CHECK(IsTuple<decltype(t)>);
+    CHECK(!IsAggregate<decltype(t)>);
+
+    if constexpr (IsTag<T>) {
+        CHECK(IsTaggedTuple<decltype(t)>);
+    } else {
+        CHECK(IsUntaggedTuple<decltype(t)>);
+    }
 }

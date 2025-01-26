@@ -236,6 +236,8 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
                 }
             },
             tuple);
+    } else if constexpr (IsTaggedTuple<T>) {
+        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_short_type<T>(), getName(t));
     } else {
         fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_type<T>(), getName(t));
     }
