@@ -67,6 +67,10 @@ struct CDDLContext {
     }
 
     template <typename T, typename Context> void register_type(const T &t, CDDLOptions options, Context context) {
+        if constexpr (is_static_tag_t<T>::value || is_dynamic_tag_t<T>) {
+            return;
+        }
+
         if constexpr (IsAggregate<T>) {
             if (contains(nameof::nameof_type<T>())) {
                 return;
@@ -127,8 +131,12 @@ template <IsTag T> constexpr auto getTagDef(const T &t) {
     if constexpr (HasInlineTag<T>) {
         return fmt::format("#6.{}", T::cbor_tag);
     } else {
-        auto tag = std::get<0>(t);
-        return fmt::format("#6.{}", tag);
+        if constexpr (IsTuple<T>) {
+            const auto tag = std::get<0>(t);
+            return fmt::format("#6.{}", tag);
+        } else {
+            return fmt::format("#6.{}", static_cast<std::uint64_t>(t.cbor_tag));
+        }
     }
 }
 
@@ -164,11 +172,11 @@ template <typename T> constexpr auto getName(const T &t) {
     } else {
         if constexpr (IsOptional<T>) {
             if (t.has_value())
-                return std::string(getName<typename T::value_type>(t.value()));
+                return std::string(getName<typename T::value_type>(t.value())) + " / null";
             else {
                 using value_type = typename T::value_type;
                 value_type dummy{};
-                return std::string(getName(dummy));
+                return std::string(getName(dummy)) + " / null";
             }
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
@@ -206,14 +214,19 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
 
         std::apply(
             [&](auto &&...args) {
-                std::size_t idx{0};
+                int not_has_tag_member = !(HasStaticTag<T> || HasDynamicTag<T>);
+                int idx                = not_has_tag_member ? 0 : -1;
                 if (options.row_options.format_by_rows) {
+                    int offset_help = not_has_tag_member;
                     ((fmt::format_to(std::back_inserter(output_buffer), "{}{}{}",
-                                     idx++ == 0 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
-                                     std::string(options.row_options.offset, ' '), getName(args))),
+                                     idx++ < 1 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
+                                     offset_help++ == 0 ? "" : std::string(options.row_options.offset, ' '),
+                                     not_has_tag_member++ == 0 ? "" : getName(args))),
                      ...);
                 } else {
-                    ((fmt::format_to(std::back_inserter(output_buffer), "{}{}", idx++ == 0 ? "" : ", ", getName(args)), ...));
+                    ((fmt::format_to(std::back_inserter(output_buffer), "{}{}", idx++ < 1 ? "" : ", ",
+                                     not_has_tag_member++ == 0 ? "" : getName(args)),
+                      ...));
                 }
 
                 if constexpr (IsReferenceWrapper<Context>) {
@@ -233,11 +246,7 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
         fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "]" : ")");
     }
 
-    if constexpr (IsReferenceWrapper<Context>) {
-        for (const auto &def : context.get().definitions) {
-            fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
-        }
-    } else {
+    if constexpr (!IsReferenceWrapper<Context>) {
         for (const auto &def : context.definitions) {
             fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
         }

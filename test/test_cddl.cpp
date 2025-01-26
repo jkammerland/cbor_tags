@@ -7,6 +7,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <map>
+#include <optional>
 #include <string>
 #include <sys/types.h>
 #include <test_util.h>
@@ -19,6 +20,13 @@ struct B {
     static constexpr std::uint64_t cbor_tag = 140;
     std::vector<std::byte>         a;
     std::map<int, std::string>     b;
+};
+
+struct C {
+    static_tag<141>  cbor_tag;
+    int              a;
+    std::string      b;
+    std::optional<B> c;
 };
 
 TEST_CASE("CDDL extension") {
@@ -36,6 +44,7 @@ TEST_CASE("CDDL extension") {
         std::variant<int, std::string> h;
         std::optional<int>             i;
         B                              j;
+        C                              k;
     };
 
     cddl_to<A>(buffer);
@@ -56,6 +65,7 @@ TEST_CASE("CDDL no columns") {
         std::variant<int, std::string> h;
         std::optional<int>             i;
         B                              j;
+        C                              k;
     };
 
     cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
