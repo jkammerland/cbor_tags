@@ -411,9 +411,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             //            additionalInfo);
 
             U decoded_value;
-            if constexpr (IsFixedArray<U>) {
-                decoded_value = U{}; // Initialize arrays, removes warnings
-            }
 
             status_code result;
             if constexpr (IsSimple<U>) {
@@ -448,8 +445,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 result = this->decode(decoded_value, major, additionalInfo);
             }
 
-            value = std::move(decoded_value);
-            return result == status_code::success;
+            if (result == status_code::success) {
+                value = std::move(decoded_value);
+                return true;
+            } else {
+                return false;
+            }
         };
 
         try {
@@ -658,8 +659,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else {
                 result = dec_.decode(arg);
                 // fmt::print("status: {}, for index {}\n", status_message(result), index);
-                index++;
-                return result == status_code::success ? true : false;
+                index++; // TODO: Will be used later
+                return result == status_code::success;
             }
             return false;
         }
