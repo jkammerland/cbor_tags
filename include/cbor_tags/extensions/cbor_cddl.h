@@ -273,7 +273,8 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
-        for (const auto &def : context.definitions) {
+        // Reverse, higher likelyhood of top - down order
+        for (const auto &def : context.definitions | std::views::reverse) {
             fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
         }
     }
