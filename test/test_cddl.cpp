@@ -191,7 +191,6 @@ TEST_CASE("CWT payload map annotation") {
     fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
 }
 
-// TODO:
 TEST_CASE("CDDL adhoc tagging") {
     struct A {
         std::string a;
@@ -199,6 +198,12 @@ TEST_CASE("CDDL adhoc tagging") {
 
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
-    cddl_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}));
+    cddl_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}), {.row_options = {.format_by_rows = false}});
+    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+}
+
+TEST_CASE("CDDL PRELUDE") {
+    fmt::memory_buffer buffer;
+    cddl_prelude_to(buffer);
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }

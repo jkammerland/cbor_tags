@@ -133,7 +133,7 @@ template <IsTag T> constexpr auto getTagDef(const T &t) {
     } else {
         if constexpr (IsTuple<T>) {
             const auto tag = std::get<0>(t);
-            return fmt::format("#6.{}", tag);
+            return fmt::format("#6.{}", static_cast<std::uint64_t>(tag));
         } else {
             return fmt::format("#6.{}", static_cast<std::uint64_t>(t.cbor_tag));
         }
@@ -194,6 +194,7 @@ concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
 auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
     bool use_brackets     = false;
+    bool use_group        = false;
     auto applier_register = [&](auto &&...args) {
         if constexpr (IsReferenceWrapper<Context>) {
             ((context.get().register_type(args, options, context), ...));
@@ -228,39 +229,45 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
             fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
         }
 
+        use_group    = size > 1 || IsTag<T>;
         use_brackets = IsTag<T> && size > 1;
 
         if (options.row_options.format_by_rows) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : "(\n");
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : (use_group ? "(\n" : ""));
         } else {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : "(");
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : (use_group ? "(" : ""));
         }
 
         std::apply(applier_formatter, tuple);
     } else if constexpr (IsTuple<T>) {
         [[maybe_unused]] auto size = std::apply([](auto &&...args) { return sizeof...(args); }, t);
 
-        // if constexpr (IsTag<T>) {
-        //     fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
-        // }
+        if constexpr (IsTag<T>) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
+        }
 
-        // use_brackets = IsTag<T> && size > 1;
+        use_group    = size > 2 || IsTag<T>;
+        use_brackets = IsTag<T> && size > 2;
 
-        // if (options.row_options.format_by_rows) {
-        //     fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : "(\n");
-        // } else {
-        //     fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : "(");
-        // }
+        if (options.row_options.format_by_rows) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : (use_group ? "(\n" : ""));
+        } else {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : (use_group ? "(" : ""));
+        }
 
-        // std::apply(applier_formatter, t);
+        if constexpr (IsTag<T>) {
+            std::apply(applier_formatter, detail::tuple_tail(t));
+        } else {
+            std::apply(applier_formatter, t);
+        }
     } else {
         fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_type<T>(), getName(t));
     }
 
     if (options.row_options.format_by_rows) {
-        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "\n]" : "\n)");
+        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "\n]" : (use_group ? "\n)" : ""));
     } else {
-        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "]" : ")");
+        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "]" : (use_group ? ")" : ""));
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
@@ -387,4 +394,53 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         it = next_it;
     }
 }
+
+template <typename OutputBuffer> constexpr void cddl_prelude_to(OutputBuffer &buffer) {
+    fmt::format_to(std::back_inserter(buffer), "any = #\n"
+                                               "\n"
+                                               "uint = #0\n"
+                                               "nint = #1\n"
+                                               "int = uint / nint\n"
+                                               "\n"
+                                               "bstr = #2\n"
+                                               "bytes = bstr\n"
+                                               "tstr = #3\n"
+                                               "text = tstr\n"
+                                               "\n"
+                                               "tdate = #6.0(tstr)\n"
+                                               "time = #6.1(number)\n"
+                                               "number = int / float\n"
+                                               "biguint = #6.2(bstr)\n"
+                                               "bignint = #6.3(bstr)\n"
+                                               "bigint = biguint / bignint\n"
+                                               "integer = int / bigint\n"
+                                               "unsigned = uint / biguint\n"
+                                               "decfrac = #6.4([e10: int, m: integer])\n"
+                                               "bigfloat = #6.5([e2: int, m: integer])\n"
+                                               "eb64url = #6.21(any)\n"
+                                               "eb64legacy = #6.22(any)\n"
+                                               "eb16 = #6.23(any)\n"
+                                               "encoded-cbor = #6.24(bstr)\n"
+                                               "uri = #6.32(tstr)\n"
+                                               "b64url = #6.33(tstr)\n"
+                                               "b64legacy = #6.34(tstr)\n"
+                                               "regexp = #6.35(tstr)\n"
+                                               "mime-message = #6.36(tstr)\n"
+                                               "cbor-any = #6.55799(any)\n"
+                                               "\n"
+                                               "float16 = #7.25\n"
+                                               "float32 = #7.26\n"
+                                               "float64 = #7.27\n"
+                                               "float16-32 = float16 / float32\n"
+                                               "float32-64 = float32 / float64\n"
+                                               "float = float16-32 / float64\n"
+                                               "\n"
+                                               "false = #7.20\n"
+                                               "true = #7.21\n"
+                                               "bool = false / true\n"
+                                               "nil = #7.22\n"
+                                               "null = nil\n"
+                                               "undefined = #7.23\n");
+}
+
 } // namespace cbor::tags

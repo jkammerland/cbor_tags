@@ -307,10 +307,11 @@ int main() {
 
 ## 🎨 Custom Tag Handling
 
-> [!NOTE]
-> The library supports three different ways to handle CBOR tags:
+> [!IMPORTANT]
+> The library supports multiple different ways to handle CBOR tags:
 
 ### 1. Inline Tags
+If the struct is used as a cbor object, then it makes sense to tag it directly in the struct definition:
 ```cpp
 struct InlineTagged {
     static constexpr std::uint64_t cbor_tag = 140;
@@ -318,7 +319,18 @@ struct InlineTagged {
 };
 ```
 
-### 2. Static Tags
+### 2. Literal Tags
+Inline tagging can be a bit invasive if not strictly cbor, you don't "own" it or want to modify the struct. In this case, you can use a literal tag, which is a constexpr variable of type static_tag<N>:
+```cpp
+using namespace cbor::tags::literals;
+struct A { std::string a; };
+auto &&tagged = make_tag_pair(140_tag, A{"Hello, World!"});
+```
+
+
+### 3. Static Tags
+This is the same as inline tags, but the tag value is a static member of the struct static_tag<N>.
+It is also the same as defining the literal 140_tag. The primary purpose is so that you can tag a struct without modifying it, by making a pair with the tag and the struct. But you can also inline it:
 ```cpp
 struct StaticTagged {
     static_tag<140> cbor_tag;
@@ -326,9 +338,9 @@ struct StaticTagged {
 };
 ```
 
-### 3. Dynamic Tags
-Dynamic can be set at runtime, will return error if it does not match tag on buffer when decoding.
-Note that this means the tag byte(s) can not easily be optimized away in the resulting structure.
+### 4. Dynamic Tags
+Dynamic can be set at runtime, will return error if it does not match tag on the buffer when decoding.
+Note that this means the tag byte(s) can not be optimized away in the resulting structure.
 ```cpp
 struct DynamicTagged {
     dynamic_tag<uint64_t> cbor_tag;
