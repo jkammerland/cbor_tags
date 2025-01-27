@@ -86,6 +86,7 @@ TEST_CASE("CDDL no columns") {
     fmt::memory_buffer buffer;
     struct A {
         uint32_t                       a1;
+        negative                       aminus;
         int                            a;
         double                         b;
         float                          c;
@@ -101,6 +102,9 @@ TEST_CASE("CDDL no columns") {
 
     cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+
+    CHECK(
+        substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B = #6.140[bstr, map]", "C = #6.141[int, tstr, B / null]"));
 }
 
 struct A1212 {
@@ -200,10 +204,14 @@ TEST_CASE("CDDL adhoc tagging") {
     using namespace cbor::tags::literals;
     cddl_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}), {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+
+    CHECK(substrings_in(fmt::to_string(buffer), "#6.140(A)", "A = tstr"));
 }
 
 TEST_CASE("CDDL PRELUDE") {
     fmt::memory_buffer buffer;
     cddl_prelude_to(buffer);
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+
+    CHECK(substrings_in(fmt::to_string(buffer), "null = nil", "int = uint / nint"));
 }

@@ -143,6 +143,8 @@ template <IsTag T> constexpr auto getTagDef(const T &t) {
 template <typename T> constexpr auto getName(const T &t) {
     if constexpr (IsUnsigned<T>) {
         return "uint";
+    } else if constexpr (IsNegative<T>) {
+        return "nint";
     } else if constexpr (IsSigned<T>) {
         return "int";
     } else if constexpr (IsTextString<T>) {
