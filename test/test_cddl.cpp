@@ -103,8 +103,8 @@ TEST_CASE("CDDL no columns") {
     cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 
-    CHECK(
-        substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B = #6.140[bstr, map]", "C = #6.141[int, tstr, B / null]"));
+    CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B = #6.140([bstr, map])",
+                        "C = #6.141([int, tstr, B / null])"));
 }
 
 struct A1212 {

@@ -235,9 +235,9 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
         use_brackets = IsTag<T> && size > 1;
 
         if (options.row_options.format_by_rows) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : (use_group ? "(\n" : ""));
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "([\n" : (use_group ? "(\n" : ""));
         } else {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : (use_group ? "(" : ""));
+            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "([" : (use_group ? "(" : ""));
         }
 
         std::apply(applier_formatter, tuple);
@@ -267,9 +267,9 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
     }
 
     if (options.row_options.format_by_rows) {
-        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "\n]" : (use_group ? "\n)" : ""));
+        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "\n])" : (use_group ? "\n)" : ""));
     } else {
-        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "]" : (use_group ? ")" : ""));
+        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "])" : (use_group ? ")" : ""));
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
