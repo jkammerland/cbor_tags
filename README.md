@@ -1,28 +1,28 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-This library is designed with modern C++20 features, with a simple but flexible API, providing full control over memory and protocol customization
+This library leverages modern C++20 features to provide a simple yet flexible API, offering full control over memory and protocol customization.
 
 It is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️.
 
-The primary advantage of using a library like this is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the CDDL (RFC 8610) definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
+The primary advantage of using a library like this is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
 See standard specifications for more information:
-- CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
-- CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) 
+- CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) (Concise Data Definition Language)
+- CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
 
-The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
+The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
 
 ## 🎯 Key Features
 
-- Support for both contiguous and non-contiguous buffers
-- Support Zero-copy encoding by joining multiple buffers
-- Support Zero-copy decoding using views and spans
-- Flexible tag handling for structs and tuples, can be non-invasive
-- Support for many (almost arbitrary) containers and nesting
-- Configurable API, defaults to tl::expected<void, cbor::tags::status_code> in absence of c++23 std::expected (has a almost 1 to 1 mapping)
+- Support for both contiguous and non-contiguous buffers.
+- Zero-copy encoding by joining multiple buffers.
+- Zero-copy decoding using views and spans.
+- Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
+- Support for many (almost arbitrary) containers and nesting.
+- Configurable API, defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
 
 ## 🔧 Quick Start
-Here is how you would encode individual CBOR values onto a buffer "data", a type of your choice (e.g it could be a list, deque or pmr::vector)
+Here is how you could cbor encode individual values onto a buffer "data", allowing you to control the memory layout (e.g it could be a list, deque or pmr::vector)
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
@@ -31,15 +31,16 @@ Here is how you would encode individual CBOR values onto a buffer "data", a type
 #include <iostream>
 #include <vector>
 
+using namespace cbor::tags;
+
 int main() {
-    using namespace cbor::tags;
-    // make a data buffer - holding the encoded data
+    // Create a data buffer to hold the encoded data (could be std::deque or std::array too)
     auto data = std::vector<std::byte>{};
 
     // Encoding
     auto enc  = make_encoder(data);
     using namespace std::string_view_literals;
-    enc(2, 3.14, "Hello, World!"sv); // Note a plain const char* will not work, without a encode overload
+    enc(2, 3.14, "Hello, World!"sv);
 
     // Emulate transfer of data buffer
     auto trasmitted_data = data;
@@ -58,8 +59,7 @@ int main() {
     return 0;
 }
 ```
-> [!NOTE]
-> CBOR basically requires one to wrap a group into a CBOR array, in order for it to be a single item with known length. This is so that generic parsers can decode tags without knowing their semantic meaning or exact order. It is possible to turn this off in this library, but then it is no longer truly standard cbor, depending on how you interpret the standard. If you set wrap_groups = false, then values in above buffer are 3 single items, and the exact sequence of cbor items is known from the type itself.
+In this example we encode single values onto the buffer, they are not grouped in any way. For that they would have to be enclosed in a array, map or binary string. If it is a special sequence of items, you can define a tag for it and share that with the other parties.
 
 Here is how you could formulate a struct with a tag from the first example:
 ```cpp
@@ -69,20 +69,25 @@ struct Tagged {
     double         b;
     std::string    c;
 };
+
+Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"}
+enc(tagged);
 ```
 
-Here is a manual way to encode the struct, 
+> [!NOTE]
+> The definition of a tag is a CBOR major type 6 encoded uint, with a concise data definition format of #6.321(any). This allows generic parsers to decode tags without knowing their semantic meaning or the exact order of internal items. It also means the struct implicitly define a cbor array of exact types following the tag, i.e #6.321([int, float64, tstr]). See tuning options for more details.
+
+Equivalent to manually encoding the struct in the following example:
 ```cpp
-Tagged a{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(a.cbor_tag, as_array{3}, a.a, a.b, a.c); // same as enc(a);
+Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
+enc(tagged.cbor_tag, as_array{3}, tagged.a, tagged.b, tagged.c); // same as enc(a);
 // Also equivalent to:
 // enc(a.cbor_tag, wrap_as_array{a.a, a.b, a.c});
 // Now the buffer contains the tag(321) followed by a single array with 3 elements
 
 ```
-this is what happens under the hood when you pass the whole item "a".
 
-Here is a larger example of encoding and decoding a struct with all CBOR major types:
+This can be taken further to any number of members or nesting, e.g a struct with all CBOR major types (and more):
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
@@ -108,7 +113,7 @@ struct AllCborMajorsExample {
     std::vector<int>           d;  // Major type 4 (array)
     std::map<int, std::string> e;  // Major type 5 (map)
     struct B {
-        static_tag<1337> cbor_tag; // Major type 6 (tag)
+        static_tag<123123> cbor_tag; // Major type 6 (tag)
         bool             a;        // Major type 7 (simple value)
     } f;
     double g;                      // Major type 7 (float)
@@ -141,7 +146,7 @@ int main() {
     auto enc  = make_encoder(data);
     auto result = enc(a0);
     if (!result) {
-        std::cerr << "Failed to encode A" << std::endl;
+        std::cerr << "Failed to encode A" << status_message(result.error()) << std::endl;
         return 1;
     }
 
@@ -170,7 +175,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, which is not yet implemented.
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
 
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp
@@ -312,12 +317,13 @@ int main() {
 
 ## ✨ Advanced Features
 
-- std::variant support, to allow multiple types to be accepted when seen on buffer (e.g tagged types representing a versioned object)
-- options for encoder/decoder, such as index tracking for resuming decoding
-- TODO: streaming support, via api adapter using the return value of an incomplete decode 
-- TODO: CDDL support, for defining custom data structures
-- TODO: unique_ptr support
-- TODO: shared_ptr support
+- `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
+- Options for encoder/decoder, such as index tracking for resuming decoding.
+- CDDL support for schema and custom data definitions.
+- Performance tuning options, such as disabling some checks and using a more compact encoding.
+- TODO: Streaming support via API adapter using the return value of an incomplete decode.
+- TODO: `unique_ptr` support.
+- TODO: `shared_ptr` support.
 
 ## 🎨 Custom Tag Handling
 
@@ -325,7 +331,7 @@ int main() {
 > The library supports multiple different ways to handle CBOR tags:
 
 ### 1. Inline Tags
-If the struct is used as a cbor object, then it makes sense to tag it directly in the struct definition:
+If the struct is used as a CBOR object, it makes sense to tag it directly in the struct definition:
 ```cpp
 struct InlineTagged {
     static constexpr std::uint64_t cbor_tag = 140;
@@ -365,7 +371,7 @@ struct DynamicTagged {
 ## 🔄 Automatic Reflection
 
 > [!NOTE]
-> Until C++26 (or later) introduces native reflection, or auto [...ts] = X{}, this library provides an alternative compiler trick using `to_tuple(...)`:
+> Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
 
 ```cpp
 template <size_t N> struct A0 {
@@ -383,7 +389,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ```
 
 ## 🏷️ Annotating CBOR Buffers
-You can use "annotate" from cbor_tags/extensions/cbor_cddl.h to inspect and visualize CBOR data:
+You can use `annotate_buffer` from `cbor_tags/extensions/cbor_cddl.h` to inspect and visualize CBOR data:
 
 For example, here is a cbo web token without diagnostic notation:
 ```
@@ -476,8 +482,8 @@ B = #6.140([bstr, map])
 
 ## 🛠️ Requirements
 
-- Any C++20 compatible compiler (gcc 12+, clang 14+, msvc (builds but broken))
-- CMake 3.20+
+- Any C++20 compatible compiler (GCC 12+, Clang 14+, MSVC (builds but broken)).
+- CMake 3.20+.
 
 ## 📦 Installation
 
