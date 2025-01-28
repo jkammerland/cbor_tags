@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.5.0)
+project(cbor_tags VERSION 0.5.1)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Check minimum compiler version
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/minimum_compiler.cmake)
 
 option(CBOR_TAGS_USE_DEV_SETTINGS "Use dev settings" OFF)
 if(CBOR_TAGS_USE_DEV_SETTINGS)

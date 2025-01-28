@@ -6,6 +6,10 @@ It is primarily a library for encoding and decoding Concise Binary Object Repres
 
 The primary advantage of using a library like this is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the CDDL (RFC 8610) definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
+See standard specifications for more information:
+- CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
+- CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) 
+
 The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
 
 ## 🎯 Key Features
@@ -15,7 +19,7 @@ The design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [
 - Support Zero-copy decoding using views and spans
 - Flexible tag handling for structs and tuples, can be non-invasive
 - Support for many (almost arbitrary) containers and nesting
-- Uses tl::expected in absence of c++23 std::expected
+- Configurable API, defaults to tl::expected<void, cbor::tags::status_code> in absence of c++23 std::expected (has a almost 1 to 1 mapping)
 
 ## 🔧 Quick Start
 Here is how you would encode individual CBOR values onto a buffer "data", a type of your choice (e.g it could be a list, deque or pmr::vector)
@@ -70,10 +74,9 @@ struct Tagged {
 Here is a manual way to encode the struct, 
 ```cpp
 Tagged a{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(a.cbor_tag, as_array{3}, a.a, a.b, a.c);
-// Or equivalently any of the 2 lines below
+enc(a.cbor_tag, as_array{3}, a.a, a.b, a.c); // same as enc(a);
+// Also equivalent to:
 // enc(a.cbor_tag, wrap_as_array{a.a, a.b, a.c});
-// enc(a);
 // Now the buffer contains the tag(321) followed by a single array with 3 elements
 
 ```
@@ -152,6 +155,17 @@ int main() {
     }
 
     assert(a0.a0 == a1.a0);
+    assert(a0.a1 == a1.a1);
+    assert(a0.a == a1.a);
+    assert(a0.b == a1.b);
+    assert(a0.c == a1.c);
+    assert(a0.d == a1.d);
+    assert(a0.e == a1.e);
+    assert(a0.f.a == a1.f.a);
+    assert(a0.g == a1.g);
+    assert(a0.h == a1.h);
+    assert(a0.i == a1.i);
+    assert(a0.j == a1.j);
     return 0;
 }
 ```
@@ -371,22 +385,22 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ## 🏷️ Annotating CBOR Buffers
 You can use "annotate" from cbor_tags/extensions/cbor_cddl.h to inspect and visualize CBOR data:
 
-For example, here is some annotated data without diagnostic notation:
+For example, here is a cbo web token without diagnostic notation:
 ```
-Data: d082182a182b46d082182a182bd820826568656c6c6f65776f726c64
+CBOR Web Token (CWT): d28443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30
 Annotation: 
-d0
-   82
-      18 2a
-      18 2b
-   46
-      d082182a182b
-d8 20
-   82
-      65
-         68656c6c6f
-      65
-         776f726c64
+d2
+   84
+      43
+         a10126
+      a1
+         04
+         52
+            4173796d6d65747269634543445341323536
+      58 50
+         a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71
+      58 40
+         5427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30
 ```
 
 ```
@@ -478,7 +492,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.5.0 # or specify a particular commit/tag
+  GIT_TAG v0.5.1 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -541,8 +555,7 @@ Please see the public online database of [tags](https://www.iana.org/assignments
 
 
 - Supports encoding and decoding of various CBOR data types according to [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) 
-- Streaming TODO:
-- CDDL TODO:
+- CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
 
 For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
 

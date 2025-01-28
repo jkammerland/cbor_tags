@@ -180,6 +180,8 @@ TEST_CASE("CWT annotation") {
                  "37818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f2"
                  "9c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30");
 
+    fmt::print("CBOR Web Token (CWT): {}\n", to_hex(buffer));
+
     fmt::memory_buffer annotation;
     buffer_annotate(buffer, annotation);
 

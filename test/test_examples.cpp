@@ -78,6 +78,17 @@ TEST_CASE("CBOR - Advanced types") {
     }
 
     CHECK_EQ(a0.a0, a1.a0);
+    CHECK_EQ(a0.a1, a1.a1);
+    CHECK_EQ(a0.a, a1.a);
+    CHECK_EQ(a0.b, a1.b);
+    CHECK_EQ(a0.c, a1.c);
+    CHECK_EQ(a0.d, a1.d);
+    CHECK_EQ(a0.e, a1.e);
+    CHECK_EQ(a0.f.a, a1.f.a);
+    CHECK_EQ(a0.g, a1.g);
+    CHECK_EQ(a0.h, a1.h);
+    CHECK_EQ(a0.i, a1.i);
+    CHECK_EQ(a0.j, a1.j);
 }
 
 TEST_CASE("Simple ex0") {
