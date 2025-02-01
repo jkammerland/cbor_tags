@@ -225,6 +225,10 @@ TEST_CASE("Diagnostic data 0") {
                  "9c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30");
 
     fmt::memory_buffer buffer;
-    diagnostic_buffer(data, buffer);
-    fmt::print("Diagnostic: \n{}\n", fmt::to_string(buffer));
+    buffer_annotate(data, buffer);
+    fmt::print("Annotation: \n{}\n", fmt::to_string(buffer));
+
+    fmt::memory_buffer buffer1;
+    diagnostic_buffer(data, buffer1, {});
+    fmt::print("Diagnostic: \n{}\n", fmt::to_string(buffer1));
 }

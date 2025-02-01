@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <fmt/base.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <functional>
 #include <iterator>
 #include <memory_resource>
@@ -35,6 +36,15 @@ struct CDDLOptions {
         size_t offset{2};
     } row_options;
     bool always_inline{false};
+};
+
+struct DiagnosticOptions {
+    struct RowOptions {
+        bool   format_by_rows{true};
+        size_t offset{2};
+    } row_options;
+
+    bool check_tstr_utf8{false};
 };
 
 template <typename T, typename OutputBuffer, typename Context>
@@ -446,31 +456,100 @@ template <typename OutputBuffer> constexpr void cddl_prelude_to(OutputBuffer &bu
                                                "undefined = #7.23\n");
 }
 
-template <ValidCborBuffer CborBuffer, typename OutputBuffer>
-constexpr void diagnostic_buffer(const CborBuffer &buffer, OutputBuffer &output_buffer) {
-    detail::catch_all_variant values;
-    auto                      dec                         = make_decoder(buffer);
-    auto                      diagnostic_notation_visitor = [&](auto &&arg) {
-        if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
-            return fmt::format("unsigned({})", arg);
-        } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
-            return fmt::format("negative({})", arg.value);
-        } else if constexpr (IsBinaryHeader<std::remove_cvref_t<decltype(arg)>>) {
-            return fmt::format(R"('{}')", "bstr");
-        }
+template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
+    OutputBuffer     &output_buffer;
+    Decoder          &dec;
+    DiagnosticOptions options;
 
-        else {
-            return fmt::format("{}", "NOT IMPLEMENTED");
+    template <IsMapHeader T> constexpr void operator()(const T &arg) {
+        fmt::format_to(std::back_inserter(output_buffer), "{{");
+        for (size_t i = 0; i < arg.size; i++) {
+            detail::catch_all_variant key;
+            detail::catch_all_variant value;
+            if (!dec(key) || !dec(value)) {
+                break;
+            }
+            std::visit(diagnostic_visitor{output_buffer, dec, options}, key);
+            fmt::format_to(std::back_inserter(output_buffer), ": ");
+            std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
+            fmt::format_to(std::back_inserter(output_buffer), ",");
         }
-    };
+        output_buffer.resize(output_buffer.size() - 2);
+        fmt::format_to(std::back_inserter(output_buffer), "}}");
+    }
+
+    template <IsTextHeader T> constexpr void operator()(const T &arg) {
+        auto current_pos  = dec.tell();
+        auto after_header = current_pos - arg.size;
+        fmt::format_to(std::back_inserter(output_buffer), "\"{}\"", std::ranges::subrange(after_header, current_pos));
+    }
+
+    template <IsBinaryHeader T> constexpr void operator()(const T &arg) {
+        auto current_pos  = dec.tell();
+        auto after_header = current_pos - arg.size;
+        auto range        = std::ranges::subrange(after_header, current_pos);
+        fmt::format_to(std::back_inserter(output_buffer), "h'{:02x}'", fmt::join(range, ""));
+    }
+
+    template <typename T> constexpr void operator()(const T &arg) {
+        if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", arg);
+        } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
+            fmt::format_to(std::back_inserter(output_buffer), "-{}", arg.value);
+        } else if constexpr (IsArrayHeader<std::remove_cvref_t<decltype(arg)>>) {
+            fmt::format_to(std::back_inserter(output_buffer), "[");
+            for (size_t i = 0; i < arg.size; i++) {
+                detail::catch_all_variant values;
+                if (!dec(values)) {
+                    break;
+                }
+                std::visit(diagnostic_visitor{output_buffer, dec, options}, values);
+                fmt::format_to(std::back_inserter(output_buffer), ", ");
+            }
+            output_buffer.resize(output_buffer.size() - 2);
+            fmt::format_to(std::back_inserter(output_buffer), "]");
+        } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(arg)>>) {
+            detail::catch_all_variant value;
+            fmt::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
+            if (!dec(value)) {
+                return;
+            }
+            std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
+            fmt::format_to(std::back_inserter(output_buffer), ")");
+        } else if constexpr (IsSimple<std::remove_cvref_t<decltype(arg)>>) {
+            if constexpr (IsBool<std::remove_cvref_t<decltype(arg)>>) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}", arg ? "true" : "false");
+            } else if constexpr (IsNull<std::remove_cvref_t<decltype(arg)>>) {
+                fmt::format_to(std::back_inserter(output_buffer), "null");
+            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float16_t>) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
+            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float>) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
+            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, double>) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}", arg);
+            } else {
+                fmt::format_to(std::back_inserter(output_buffer), "simple");
+            }
+        } else {
+            fmt::format_to(std::back_inserter(output_buffer), "unknown");
+        }
+    }
+};
+
+template <ValidCborBuffer CborBuffer, typename OutputBuffer>
+constexpr void diagnostic_buffer(const CborBuffer &buffer, OutputBuffer &output_buffer, DiagnosticOptions options = {}) {
+    detail::catch_all_variant values;
+    auto                      dec = make_decoder(buffer);
 
     fmt::format_to(std::back_inserter(output_buffer), "[\n");
 
     while (dec(values)) {
-        fmt::format_to(std::back_inserter(output_buffer), "  {}\n", std::visit(diagnostic_notation_visitor, values));
+        std::visit(diagnostic_visitor{output_buffer, dec, options}, values);
+        fmt::format_to(std::back_inserter(output_buffer), ",\n");
     }
-
-    fmt::format_to(std::back_inserter(output_buffer), "]");
+    // Remove last comma
+    output_buffer.resize(output_buffer.size() - 2);
+    fmt::format_to(std::back_inserter(output_buffer), "\n]");
 }
 
 } // namespace cbor::tags
