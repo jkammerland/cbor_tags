@@ -412,7 +412,7 @@ fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 data = to_bytes("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
                 "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
 
-buffer_diagnostic(data, buffer, {});s
+buffer_diagnostic(data, buffer, {});
 fmt::print("\n{}\n", fmt::to_string(buffer));
 ```
 Should output:
@@ -484,8 +484,10 @@ struct A {
         B                              j;
         C                              k;
     };
+```
 
-CDDL:
+Should output:
+```
 A = (uint, nint, int, float64, float32, bool, tstr, bstr, map, int / tstr, int / null, B, C)
 C = #6.141([int, tstr, B / null])
 B = #6.140([bstr, map])
