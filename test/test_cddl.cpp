@@ -231,4 +231,11 @@ TEST_CASE("Diagnostic data 0") {
     fmt::memory_buffer buffer1;
     diagnostic_buffer(data, buffer1, {});
     fmt::print("Diagnostic: \n{}\n", fmt::to_string(buffer1));
+    fmt::format_to(std::back_inserter(buffer1), "\n --- \n");
+
+    data = to_bytes("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
+                    "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
+
+    diagnostic_buffer(data, buffer1, {});
+    fmt::print("map: \n{}\n", fmt::to_string(buffer1));
 }
