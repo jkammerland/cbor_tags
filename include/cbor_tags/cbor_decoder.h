@@ -682,6 +682,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return collect_status.result;
     }
 
+    constexpr auto tell() const noexcept {
+        if constexpr (IsContiguous<InputBuffer>) {
+            return /* Iterator */ data_.begin() + reader_.position_;
+        } else {
+            return reader_.position_;
+        }
+    }
+
     // Variadic friends only in c++26, must be public
     const InputBuffer          &data_;
     detail::reader<InputBuffer> reader_;

@@ -43,8 +43,8 @@
 using namespace cbor::tags;
 
 std::string some_data = "Hello world!";
-// COMPILER BUG IF YOU RENAME TO "A". OVERLAPS WITH ANOTHER DEFINITION THAT IS NOT CAUGHT BY THE COMPILER
-// Should be a redefinition error, not a segfault in runtime because of wrong type used for deserialization
+// COMPILER BUG IF YOU RENAME TO "A". Overlaps with another struct A in another TU.
+// Should be a redefinition error, not a segfault in runtime because of wrong type used for deserialization.
 // The definitions belong to seperate TUs as well...Only happens in debug, not release mode for some reason too.
 struct A12398 {
     std::int64_t a;
@@ -395,4 +395,42 @@ template <> constexpr bool IsDefault(OptionsExample<void>) { return true; }
 TEST_CASE("OptionsExample") {
     CHECK(!IsDefault(OptionsExample<int>{}));
     CHECK(IsDefault(OptionsExample<void>{}));
+}
+
+TEST_CASE("Span and ranges from buffer") {
+    auto data = std::array<std::byte, 10>{};
+    for (int i = 0; i < 10; ++i) {
+        data[i] = static_cast<std::byte>(i);
+    }
+
+    auto span = std::span(data);
+    span[0]   = static_cast<std::byte>(42);
+    CHECK_EQ(data[0], static_cast<std::byte>(42));
+
+    auto range = std::ranges::subrange(data.begin(), data.end());
+
+    CHECK(std::ranges::equal(range, data));
+
+    auto begin = data.begin();
+    auto end   = begin + 5;
+
+    auto range2 = std::ranges::subrange(begin, end);
+    CHECK(std::ranges::equal(range2, std::ranges::subrange(range.begin(), range.begin() + 5)));
+
+    // assign range to deque
+    std::deque<std::byte> d;
+    std::ranges::copy(range, std::back_inserter(d));
+    CHECK(std::ranges::equal(d, data));
+
+    // assign range to vector
+    std::vector<std::byte> v;
+    std::ranges::copy(range, std::back_inserter(v));
+    CHECK(std::ranges::equal(v, data));
+
+    // Assign to a list of chars
+    std::list<char> l;
+    std::ranges::transform(range, std::back_inserter(l), [](std::byte b) { return static_cast<char>(b); });
+
+    auto char_view = d | std::views::transform([](std::byte b) { return static_cast<char>(b); });
+    CHECK(std::ranges::equal(l, char_view));
 }

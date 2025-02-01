@@ -389,12 +389,34 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ```
 
 ## 🏷️ Annotating CBOR Buffers
-You can use `annotate_buffer` from `cbor_tags/extensions/cbor_cddl.h` to inspect and visualize CBOR data:
+You can use `annotate_buffer` and `diagnostic_buffer` from `cbor_tags/extensions/cbor_cddl.h` to inspect and visualize CBOR data:
 
-For example, here is a cbo web token without diagnostic notation:
+See code examples here:
+```cpp
+// Data vector of a CWT token
+std::vector<std::byte> data =
+    to_bytes("d28443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b770"
+                "37818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f2"
+                "9c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30");
+
+// Annotate the data vector
+fmt::memory_buffer buffer;
+buffer_annotate(data, buffer);
+fmt::format_to(std::back_inserter(buffer), "\n --- \n");
+
+// Diagnostic notation of the data vector
+diagnostic_buffer(data, buffer, {});
+fmt::format_to(std::back_inserter(buffer), "\n --- \n");
+
+// Take the payload map (unwrapping the 3rd bstr element) and make it into diagnostic notation too
+data = to_bytes("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
+                "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
+
+diagnostic_buffer(data, buffer, {});s
+fmt::print("\n{}\n", fmt::to_string(buffer));
 ```
-CBOR Web Token (CWT): d28443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30
-Annotation: 
+Should output:
+```
 d2
    84
       43
@@ -407,45 +429,34 @@ d2
          a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71
       58 40
          5427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30
+
+ --- 
+[
+18([
+  h'a10126',
+  {
+    4: h'4173796d6d65747269634543445341323536'
+  },
+  h'a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71',
+  h'5427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30'
+])
+]
+ --- 
+[
+{
+  1: "coap://as.example.com",
+  2: "erikw",
+  3: "coap://light.example.com",
+  4: 1444064944,
+  5: 1443944944,
+  6: 1443944944,
+  7: h'0b71'
+}
+]
 ```
 
-```
-CBOR: 8b01206c48656c6c6f20776f726c64214461626364a301636f6e65026374776f03657468726565d88c82d88e821a000f42407818616161616161616161616161616161616161616161616161182af94247fa4048f5c3fb40091eb851eb851ff5f6
-Annotation: 
-8b
-   01
-   20
-   6c
-      48656c6c6f20776f726c6421
-   44
-      61626364
-   a3
-      01
-      63
-         6f6e65
-      02
-      63
-         74776f
-      03
-      65
-         7468726565
-   d8 8c
-      82
-         d8 8e
-            82
-               1a 000f4240
-               78 18
-                  616161616161616161616161616161616161616161616161
-            18 2a
-         f9 4247
-         fa 4048f5c3
-      fb 40091eb851eb851f
-   f5
-   f6
-```
-
-CDDL example:
-``` 
+For cddl you can use the `cddl_to` method to get when applying on struct "A":
+```cpp
 struct B {
     static constexpr std::uint64_t cbor_tag = 140;
     std::vector<std::byte>         a;
@@ -479,6 +490,8 @@ A = (uint, nint, int, float64, float32, bool, tstr, bstr, map, int / tstr, int /
 C = #6.141([int, tstr, B / null])
 B = #6.140([bstr, map])
 ```
+See the docs for more info.
+
 
 ## 🛠️ Requirements
 
@@ -498,7 +511,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.5.1 # or specify a particular commit/tag
+  GIT_TAG v0.6.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

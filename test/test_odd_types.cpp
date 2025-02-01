@@ -75,7 +75,7 @@ TEST_CASE_TEMPLATE("Multimap with variant of str and vector", T, std::multimap<s
 
     constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<std::variant<std::string, std::vector<float>>>;
     constexpr auto matching_major_types               = valid_concept_mapping_array_v<std::variant<std::string, std::vector<float>>>;
-    fmt::print("no ambi: {}, {}\n", no_ambigous_major_types_in_variant, matching_major_types);
+    fmt::print("no ambigous ? (arr[i]>1): {}, {}\n", no_ambigous_major_types_in_variant, matching_major_types);
 
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);

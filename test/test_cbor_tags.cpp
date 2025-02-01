@@ -310,7 +310,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        VersionVariant v{v1::Version{{}, AX{.a = 2}, 3.14}};
+        VersionVariant v{v1::Version{{}, AX{.cbor_tag = {}, .a = 2}, 3.14}};
         enc(v);
 
         fmt::print("data: {}\n", to_hex(data));
