@@ -464,7 +464,8 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     DiagnosticOptions options;
 
     template <IsMapHeader T> constexpr void operator()(const T &arg) {
-
+        auto base_offset =
+            std::string(options.row_options.offset * options.row_options.current_indent * options.row_options.format_by_rows, ' ');
         fmt::format_to(std::back_inserter(output_buffer), "{{{}", options.row_options.format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
         for (size_t i = 0; i < arg.size; i++) {
@@ -473,7 +474,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             if (!dec(key) || !dec(value)) {
                 break;
             }
-            fmt::format_to(std::back_inserter(output_buffer), "{}", std::string(options.row_options.offset, ' '));
+            fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
             std::visit(diagnostic_visitor{output_buffer, dec, options}, key);
             fmt::format_to(std::back_inserter(output_buffer), ": ");
             std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
@@ -481,13 +482,12 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         }
         options.row_options.current_indent--;
         output_buffer.resize(output_buffer.size() - 2);
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}}}", std::string(options.row_options.offset, ' '),
-                       options.row_options.format_by_rows ? "\n" : "");
+        fmt::format_to(std::back_inserter(output_buffer), "{}{}}}", options.row_options.format_by_rows ? "\n" : "", base_offset);
     }
 
     template <IsArrayHeader T> constexpr void operator()(const T &arg) {
-
         bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
+        auto base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
         fmt::format_to(std::back_inserter(output_buffer), "[{}", format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
         for (size_t i = 0; i < arg.size; i++) {
@@ -495,12 +495,13 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             if (!dec(values)) {
                 break;
             }
+            fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
             std::visit(diagnostic_visitor{output_buffer, dec, options}, values);
             fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
         }
         options.row_options.current_indent--;
         output_buffer.resize(output_buffer.size() - 2);
-        fmt::format_to(std::back_inserter(output_buffer), "{}]", format_by_rows ? "\n" : "");
+        fmt::format_to(std::back_inserter(output_buffer), "{}{}]", base_offset, format_by_rows ? "\n" : "");
     }
 
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
@@ -566,8 +567,9 @@ constexpr void diagnostic_buffer(const CborBuffer &buffer, OutputBuffer &output_
 
     while (dec(values)) {
         std::visit(diagnostic_visitor{output_buffer, dec, options}, values);
-        fmt::format_to(std::back_inserter(output_buffer), ",\n");
+        fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
     }
+
     // Remove last comma
     output_buffer.resize(output_buffer.size() - 2);
     fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "\n]" : "]");

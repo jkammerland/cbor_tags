@@ -238,4 +238,13 @@ TEST_CASE("Diagnostic data 0") {
 
     diagnostic_buffer(data, buffer1, {});
     fmt::print("map: \n{}\n", fmt::to_string(buffer1));
+
+    CHECK(substrings_in(buffer1, "h'a10126'", "4: h'4173796d6d65747269634543445341323536'",
+                        "h'"
+                        "a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f"
+                        "6d041a5612aeb0051a5610d9f0061a5610d9f007420b71'",
+                        "h'"
+                        "5427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c5"
+                        "7209120e1c9e30'",
+                        R"(3: "coap://light.example.com")", R"(7: h'0b71')", "6: 1443944944"));
 }
