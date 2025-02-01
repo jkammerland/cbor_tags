@@ -188,13 +188,13 @@ TEST_CASE("Annotation and diagnostics example") {
     fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
     // Diagnostic notation of the data vector
-    diagnostic_buffer(data, buffer, {});
+    buffer_diagnostic(data, buffer, {});
     fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
     // Take the payload map (unwrapping the 3rd bstr element) and make it into diagnostic notation too
     data = to_bytes("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
                     "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
 
-    diagnostic_buffer(data, buffer, {});
+    buffer_diagnostic(data, buffer, {});
     fmt::print("\n{}\n", fmt::to_string(buffer));
 }

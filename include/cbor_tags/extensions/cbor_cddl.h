@@ -559,7 +559,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
 };
 
 template <ValidCborBuffer CborBuffer, typename OutputBuffer>
-constexpr void diagnostic_buffer(const CborBuffer &buffer, OutputBuffer &output_buffer, DiagnosticOptions options = {}) {
+constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_buffer, DiagnosticOptions options = {}) {
     detail::catch_all_variant values;
     auto                      dec = make_decoder(buffer);
 

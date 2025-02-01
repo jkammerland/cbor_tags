@@ -389,7 +389,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ```
 
 ## 🏷️ Annotating CBOR Buffers
-You can use `annotate_buffer` and `diagnostic_buffer` from `cbor_tags/extensions/cbor_cddl.h` to inspect and visualize CBOR data:
+You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_cddl.h` to inspect and visualize CBOR data:
 
 See code examples here:
 ```cpp
@@ -405,14 +405,14 @@ buffer_annotate(data, buffer);
 fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
 // Diagnostic notation of the data vector
-diagnostic_buffer(data, buffer, {});
+buffer_diagnostic(data, buffer, {});
 fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
 // Take the payload map (unwrapping the 3rd bstr element) and make it into diagnostic notation too
 data = to_bytes("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
                 "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
 
-diagnostic_buffer(data, buffer, {});s
+buffer_diagnostic(data, buffer, {});s
 fmt::print("\n{}\n", fmt::to_string(buffer));
 ```
 Should output:
@@ -511,7 +511,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.6.0 # or specify a particular commit/tag
+  GIT_TAG v0.6.1 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
