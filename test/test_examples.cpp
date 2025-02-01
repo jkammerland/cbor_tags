@@ -174,3 +174,27 @@ TEST_CASE("switch on tag") {
     REQUIRE(dec(value));
     std::visit(visitor, value);
 }
+
+TEST_CASE("Annotation and diagnostics example") {
+    // Data vector of a CWT token
+    std::vector<std::byte> data =
+        to_bytes("d28443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b770"
+                 "37818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f2"
+                 "9c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30");
+
+    // Annotate the data vector
+    fmt::memory_buffer buffer;
+    buffer_annotate(data, buffer);
+    fmt::format_to(std::back_inserter(buffer), "\n --- \n");
+
+    // Diagnostic notation of the data vector
+    diagnostic_buffer(data, buffer, {});
+    fmt::format_to(std::back_inserter(buffer), "\n --- \n");
+
+    // Take the payload map (unwrapping the 3rd bstr element) and make it into diagnostic notation too
+    data = to_bytes("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
+                    "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
+
+    diagnostic_buffer(data, buffer, {});
+    fmt::print("\n{}\n", fmt::to_string(buffer));
+}
