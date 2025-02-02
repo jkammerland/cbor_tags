@@ -22,6 +22,7 @@
 #include "test_util.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -33,6 +34,7 @@
 #include <memory>
 #include <memory_resource>
 #include <nameof.hpp>
+#include <numeric>
 #include <ranges>
 #include <set>
 #include <sstream>
@@ -433,4 +435,72 @@ TEST_CASE("Span and ranges from buffer") {
 
     auto char_view = d | std::views::transform([](std::byte b) { return static_cast<char>(b); });
     CHECK(std::ranges::equal(l, char_view));
+}
+
+template <typename T, size_t N> constexpr int test_constexpr_array_if(std::array<T, N> arr, T val) {
+    for (auto &v : arr) {
+        if (v == val) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+TEST_CASE("constexpr test") {
+    constexpr auto arr = std::array{0, 1, 2, 3};
+    static_assert(test_constexpr_array_if(arr, 2) == 1);
+    static_assert(test_constexpr_array_if(arr, 4) == 0);
+}
+
+struct NotDefaultConstructible {
+    NotDefaultConstructible() = delete;
+};
+
+template <typename U, typename... T> constexpr bool is_in_variant(std::variant<T...>) { return (std::is_same_v<T, U> || ...); }
+template <typename U, typename T> constexpr bool    is_in_variant() { return is_in_variant<U>(T{}); }
+
+TEST_CASE("Is in variant") {
+    using var = std::variant<int, float, double, NotDefaultConstructible>;
+    static_assert(is_in_variant<int>(var{}));
+    static_assert(is_in_variant<float>(var{}));
+    static_assert(is_in_variant<double>(var{}));
+    static_assert(is_in_variant<NotDefaultConstructible>(var{}));
+
+    static_assert(!is_in_variant<char, var>());
+    static_assert(!is_in_variant<short, var>());
+}
+
+template <typename... T> constexpr auto get_headers_in_pack() {
+    // using Variant = std::variant<T...>;
+    // constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
+
+    std::vector<size_t> headers{0, 1, 2, 3};
+    headers.push_back(4);
+    std::array<size_t, sizeof...(T)> result{};
+    for (size_t i = 0; i < headers.size() && i < sizeof...(T); ++i) {
+        result[i] = headers[i];
+    }
+    return result;
+}
+
+TEST_CASE("get_headers_in_pack overload") {
+    // constexpr auto headers = get_headers_in_pack<int, float, double, std::string, std::vector<int>, std::map<int, int>>();
+    // CHECK_EQ(headers.size(), 4);
+}
+
+constexpr auto compare_sizes() {
+    auto a = std::array<int, 5>{};
+    auto b = std::vector{1, 2, 3, 4, 5};
+    for (size_t i = 0; i < b.size(); ++i) {
+        a[i] = b[i];
+    }
+    return a;
+}
+
+TEST_CASE("Get matching tags") {
+    constexpr auto a = compare_sizes();
+    static_assert(a.size() == 5);
+    static_assert(a[0] == 1);
+    static_assert(a[1] == 2);
+    static_assert(a[2] == 3);
 }

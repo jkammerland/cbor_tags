@@ -647,7 +647,8 @@ TEST_CASE_TEMPLATE(
                  std::array<int, 5>, std::map<int, std::string>>,
     std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2, A2,
                  std::vector<int>, std::map<int, std::string>>,
-    std::variant<int, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, double, float, std::nullptr_t, simple, bool>) {
+    std::variant<int, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, double, float, std::nullptr_t, simple, bool>,
+    std::variant<as_tag_any, static_tag<1>>) {
 
     // Use lambdas to wrap concepts
 
@@ -664,13 +665,14 @@ TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, neg
                    std::variant<E1, negative>, std::variant<E1, positive>, std::variant<std::string, std::string_view>,
                    std::variant<std::vector<std::byte>, std::span<const std::byte>>, std::variant<std::byte, std::uint8_t>,
                    std::variant<static_tag<1>, dynamic_tag<uint64_t>>,
-                   std::variant<std::map<int, std::string>, std::unordered_map<int, double>>,
-                   std::variant<static_tag<1>, static_tag<2>, static_tag<1>>, std::variant<static_tag<2>, E1, B2>,
+                   std::variant<std::map<int, std::string>, std::unordered_map<int, double>>, std::variant<double, float, double>,
+                   std::variant<float, double, float>, std::variant<bool, std::nullptr_t, bool>, std::variant<simple, int, simple>,
+                   std::variant<std::nullptr_t, bool, std::nullptr_t>, std::variant<static_tag<1>, static_tag<2>, static_tag<1>>,
+                   std::variant<static_tag<2>, E1, B2>,
                    std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string_view, std::span<const std::byte>,
                                 B2, A2, std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>,
                    std::variant<as_array_any, std::vector<int>>, std::variant<as_map_any, std::map<int, int>>,
-                   std::variant<as_tag_any, static_tag<1>>, std::variant<as_bstr_any, std::span<const std::byte>>,
-                   std::variant<as_text_any, std::string>) {
+                   std::variant<as_bstr_any, std::span<const std::byte>>, std::variant<as_text_any, std::string>) {
 
     auto result    = valid_concept_mapping_v<T>;
     auto array     = valid_concept_mapping_array_v<T>;
@@ -755,6 +757,13 @@ struct ANOTAG {
     int a{2};
 };
 
+struct INLINEMEEEEE {
+    static constexpr std::uint64_t cbor_tag = 31;
+    int                            a;
+    double                         b;
+    char                           c;
+};
+
 TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG)
 
 {
@@ -772,4 +781,35 @@ TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG)
     } else {
         CHECK(IsUntaggedTuple<decltype(t)>);
     }
+}
+
+TEST_CASE_TEMPLATE("Count tags in variant", T, void) {
+    CHECK_EQ(ValidConceptMapping<std::variant<int, static_tag<1>>>::tags_size_outer(), 1);
+    CHECK_EQ(ValidConceptMapping<std::variant<int, static_tag<1>, static_tag<2>>>::tags_size_outer(), 2);
+    CHECK_EQ(ValidConceptMapping<std::variant<ANOTAG, static_tag<1>, static_tag<2>, static_tag<3>>>::tags_size_outer(), 3);
+    CHECK_EQ(ValidConceptMapping<std::variant<ATAG, static_tag<1000>, INLINEMEEEEE, static_tag<3>, static_tag<4>>>::tags_size_outer(), 5);
+
+    struct Z {
+        static_tag<12313> cbor_tag;
+        int               a;
+        struct F {
+            static_tag<777> cbor_tag;
+            int             b;
+        } f;
+    };
+    static_assert(IsTag<Z>);
+
+    constexpr auto tags      = ValidConceptMapping<std::variant<ATAG, static_tag<1000>, INLINEMEEEEE, Z, static_tag<4>>>::tags;
+    constexpr auto tags_size = ValidConceptMapping<std::variant<ATAG, static_tag<1000>, INLINEMEEEEE, Z, static_tag<4>>>::tags_size_outer();
+
+    for (size_t i = 0; i < tags_size; ++i) {
+        fmt::print("Tag: {}\n", tags[i]);
+    }
+
+    static_assert(tags_size == 5);
+    static_assert(tags[0] == 1);
+    static_assert(tags[1] == 1000);
+    static_assert(tags[2] == 31);
+    static_assert(tags[3] == 12313);
+    static_assert(tags[4] == 4);
 }

@@ -7,6 +7,7 @@
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -80,42 +81,106 @@ constexpr auto CheckSimple   = [](IsSimple auto) { return 7; };
 constexpr auto CheckSigned   = [](IsSignedWithEnum auto) { return 8; };
 */
 
-template <typename T>
-constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples);
+namespace detail {
+struct MajorIndex {
+    static constexpr std::uint64_t Unsigned          = 0;
+    static constexpr std::uint64_t Negative          = 1;
+    static constexpr std::uint64_t BStr              = 2;
+    static constexpr std::uint64_t TStr              = 3;
+    static constexpr std::uint64_t Array             = 4;
+    static constexpr std::uint64_t Map               = 5;
+    static constexpr std::uint64_t Tag               = 6;
+    static constexpr std::uint64_t DEPRECATED_Simple = 7;
+    static constexpr std::uint64_t Unmatched         = 8;
+    static constexpr std::uint64_t DynamicTag        = 9;
+    static constexpr std::uint64_t AnyTagHeader      = 10;
+    static constexpr std::uint64_t beginSimples      = 11;
+    static constexpr std::uint64_t Boolean           = 12;
+    static constexpr std::uint64_t float16           = 13;
+    static constexpr std::uint64_t float32           = 14;
+    static constexpr std::uint64_t float64           = 15;
+    static constexpr std::uint64_t Null              = 16;
+    static constexpr std::uint64_t SimpleValued      = 17;
+    static constexpr std::uint64_t endSimples        = 18;
+};
+
+constexpr std::uint64_t MaxBucketsForVariantChecking = 20;
+constexpr std::uint64_t MaxTagsForVariantChecking    = 2048;
+
+} // namespace detail
 
 template <typename Variant, auto... Concepts> struct ValidConceptMapping;
 
 template <template <typename...> typename Variant, typename... Ts, auto... Concepts>
 struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
-    static constexpr auto counts_fn_inner = [](std::array<int, 10> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
-        (getMatchCount<Ts>(result, tags, simples), ...);
-    };
+
+    static constexpr auto counts_fn_inner = [](std::array<uint64_t, detail::MaxBucketsForVariantChecking> &result,
+                                               std::vector<uint64_t>                                      &tags,
+                                               std::vector<SimpleType> &simples) { (getMatchCount<Ts>(result, tags, simples), ...); };
+
+    static constexpr auto tags_fn_inner = [](std::array<uint64_t, detail::MaxTagsForVariantChecking> &result, std::vector<uint64_t> &tags,
+                                             std::vector<SimpleType> &simples) { (getTagsCounts<Ts>(result, tags, simples), ...); };
 
     static constexpr auto counts_fn_outer = []() mutable {
-        std::array<int, 10>     result{};
-        std::vector<uint64_t>   tags;
-        std::vector<SimpleType> simples;
+        using namespace detail;
+        std::array<uint64_t, detail::MaxBucketsForVariantChecking> result{};
+        std::vector<uint64_t>                                      tags;
+        std::vector<SimpleType>                                    simples;
         counts_fn_inner(result, tags, simples);
 
         /* FINILIZE THE TAG AND SIMPLE BINS */
         if (tags.size() > 0) {
-            result[6]++; // If any tag has been duplicated, this will be > 1, i.e invalid
+            result[MajorIndex::Tag]++; // If any tag has been duplicated, this will be > 1, i.e invalid
         }
         if (simples.size() > 0) {
-            result[7]++; // If any simple type has been duplicated, this will be > 1, i.e invalid
+            result[MajorIndex::beginSimples] = 0;
+            result[MajorIndex::Boolean]      = std::count(simples.begin(), simples.end(), SimpleType::Bool_False);
+            result[MajorIndex::float16]      = std::count(simples.begin(), simples.end(), SimpleType::Float16);
+            result[MajorIndex::float32]      = std::count(simples.begin(), simples.end(), SimpleType::Float32);
+            result[MajorIndex::float64]      = std::count(simples.begin(), simples.end(), SimpleType::Float64);
+            result[MajorIndex::Null]         = std::count(simples.begin(), simples.end(), SimpleType::Null);
+            result[MajorIndex::SimpleValued] = std::count(simples.begin(), simples.end(), SimpleType::Simple);
         }
         return result;
     };
 
-    static constexpr auto counts = counts_fn_outer();
+    static constexpr auto tags_fn_outer = []() mutable {
+        using namespace detail;
+        std::array<uint64_t, detail::MaxTagsForVariantChecking> result{};
+        std::vector<uint64_t>                                   tags;
+        std::vector<SimpleType>                                 simples;
+        tags_fn_inner(result, tags, simples);
 
-    static constexpr bool no_dynamic_tags = (counts[9] == 0);
+        for (uint64_t i = 0; i < tags.size(); i++) {
+            result[i] = tags[i];
+        }
+
+        return result;
+    };
+
+    static constexpr auto tags_size_outer = []() {
+        using namespace detail;
+        std::array<uint64_t, detail::MaxTagsForVariantChecking> result{};
+        std::vector<uint64_t>                                   tags;
+        std::vector<SimpleType>                                 simples;
+        tags_fn_inner(result, tags, simples);
+        return tags.size();
+    };
+
+    static constexpr auto majors_and_subtypes_counts = counts_fn_outer();
+    static constexpr auto tags                       = tags_fn_outer();
+
+    static constexpr uint64_t number_of_tags = (tags_size_outer());
+    static constexpr bool     too_many_tags  = (number_of_tags >= detail::MaxTagsForVariantChecking);
+
+    static constexpr bool no_dynamic_tags    = (majors_and_subtypes_counts[detail::MajorIndex::DynamicTag] == 0);
+    static constexpr bool has_any_tag_header = (majors_and_subtypes_counts[detail::MajorIndex::AnyTagHeader] > 0);
     static constexpr bool types_map_uniquely =
-        no_dynamic_tags && std::all_of(counts.begin(), counts.end(), [](int count) { return count <= 1; });
+        std::all_of(majors_and_subtypes_counts.begin(), majors_and_subtypes_counts.end(), [](int count) { return count <= 1; });
 
-    static constexpr auto number_of_unmatched = counts[counts.size() - 2];
-    static constexpr bool value               = types_map_uniquely;
-    static constexpr auto array               = counts;
+    static constexpr auto number_of_unmatched = majors_and_subtypes_counts[detail::MajorIndex::Unmatched];
+    static constexpr bool value               = types_map_uniquely && no_dynamic_tags && !too_many_tags;
+    static constexpr auto array               = majors_and_subtypes_counts;
 };
 
 template <typename Variant, auto... Concepts>
@@ -128,25 +193,22 @@ template <typename Variant, auto... Concepts>
 inline constexpr auto valid_concept_mapping_n_unmatched_v = ValidConceptMapping<Variant, Concepts...>::number_of_unmatched;
 
 template <typename T>
-constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> &tags, std::vector<SimpleType> &simples) {
+constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantChecking> &result, std::vector<uint64_t> &tags,
+                             std::vector<SimpleType> &simples) {
+    using namespace detail;
     bool unmatched = true;
 
     /* SPECIAL CASES */
     if constexpr (is_dynamic_tag_t<T>) {
-        result[9]++; // Not ok to have dynamic tags
+        unmatched = false;
+        result[MajorIndex::DynamicTag]++; // Not ok to have dynamic tags
         return;
     }
 
     if constexpr (IsOptional<T>) {
         unmatched        = false;
         auto current_tag = get_simple_tag_of_primitive_type<std::nullptr_t>();
-        auto it          = std::ranges::find(simples, current_tag);
-        if (it == simples.end()) {
-            simples.push_back(current_tag);
-        } else {
-            result[7]++; // If duplicate simple type is found
-        }
-
+        simples.push_back(current_tag);
         getMatchCount<typename T::value_type>(result, tags, simples);
         return;
     }
@@ -160,27 +222,27 @@ constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> 
 
     if constexpr (IsUnsignedOrEnum<T> || IsSignedOrEnum<T>) {
         unmatched = false;
-        result[0]++;
+        result[MajorIndex::Unsigned]++;
     }
     if constexpr (IsNegative<T> || IsSignedOrEnum<T>) {
         unmatched = false;
-        result[1]++; // Helper to check if type exists in options
+        result[MajorIndex::Negative]++; // Helper to check if type exists in options
     }
     if constexpr (IsBinaryString<T>) {
         unmatched = false;
-        result[2]++;
+        result[MajorIndex::BStr]++;
     }
     if constexpr (IsTextString<T>) {
         unmatched = false;
-        result[3]++;
+        result[MajorIndex::TStr]++;
     }
     if constexpr (IsArray<T>) {
         unmatched = false;
-        result[4]++;
+        result[MajorIndex::Array]++;
     }
     if constexpr (IsMap<T>) {
         unmatched = false;
-        result[5]++;
+        result[MajorIndex::Map]++;
     }
     if constexpr (IsTag<T>) {
         unmatched = false;
@@ -190,24 +252,26 @@ constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> 
             if (it == tags.end()) {
                 tags.push_back(T::cbor_tag);
             } else {
-                result[6]++; // If duplicate tag is found
+                result[MajorIndex::Tag]++; // If duplicate tag is found
             }
         } else if constexpr (HasStaticTag<T>) {
             auto it = std::find(tags.begin(), tags.end(), decltype(T::cbor_tag){});
             if (it == tags.end()) {
                 tags.push_back(decltype(T::cbor_tag){});
             } else {
-                result[6]++; // If duplicate tag is found
+                result[MajorIndex::Tag]++; // If duplicate tag is found
             }
         } else if constexpr (IsTaggedTuple<T>) {
             auto it = std::find(tags.begin(), tags.end(), std::get<0>(T{}).cbor_tag);
             if (it == tags.end()) {
                 tags.push_back(std::get<0>(T{}).cbor_tag);
             } else {
-                result[6]++; // If duplicate tag is found
+                result[MajorIndex::Tag]++; // If duplicate tag is found
             }
+        } else if constexpr (IsTagHeader<T>) {
+            result[MajorIndex::AnyTagHeader]++;
         } else {
-            result[6]++;
+            result[MajorIndex::Tag]++;
         }
     }
     if constexpr (IsSimple<T>) {
@@ -215,20 +279,61 @@ constexpr void getMatchCount(std::array<int, 10> &result, std::vector<uint64_t> 
 
         auto current_tag = get_simple_tag_of_primitive_type<T>();
         if (current_tag == SimpleType::Undefined) {
-            result[8]++;
+            result[detail::MajorIndex::Unmatched]++;
             return;
         }
 
-        auto it = std::find(simples.begin(), simples.end(), current_tag);
-        if (it == simples.end()) {
-            simples.push_back(current_tag);
-        } else {
-            result[7]++; // If duplicate simple type is found
-        }
+        simples.push_back(current_tag);
     }
 
     if (unmatched) {
-        result[8]++;
+        result[MajorIndex::Unmatched]++;
+    }
+}
+
+template <typename T>
+constexpr void getTagsCounts(std::array<uint64_t, detail::MaxTagsForVariantChecking> &result, std::vector<uint64_t> &tags,
+                             std::vector<SimpleType> &simples) {
+    using namespace detail;
+
+    if constexpr (IsOptional<T>) {
+        auto current_tag = get_simple_tag_of_primitive_type<std::nullptr_t>();
+        simples.push_back(current_tag);
+        getTagsCounts<typename T::value_type>(result, tags, simples);
+        return;
+    }
+    if constexpr (IsVariant<T>) {
+        ValidConceptMapping<T>::tags_fn_inner(result, tags, simples);
+        return;
+    }
+
+    if constexpr (IsTag<T>) {
+        if constexpr (HasInlineTag<T>) {
+            auto it = std::find(tags.begin(), tags.end(), T::cbor_tag);
+            if (it == tags.end()) {
+                tags.push_back(T::cbor_tag);
+            } else {
+                result[MajorIndex::Tag]++; // If duplicate tag is found
+            }
+        } else if constexpr (HasStaticTag<T>) {
+            auto it = std::find(tags.begin(), tags.end(), decltype(T::cbor_tag){});
+            if (it == tags.end()) {
+                tags.push_back(decltype(T::cbor_tag){});
+            } else {
+                result[MajorIndex::Tag]++; // If duplicate tag is found
+            }
+        } else if constexpr (IsTaggedTuple<T>) {
+            auto it = std::find(tags.begin(), tags.end(), std::get<0>(T{}).cbor_tag);
+            if (it == tags.end()) {
+                tags.push_back(std::get<0>(T{}).cbor_tag);
+            } else {
+                result[MajorIndex::Tag]++; // If duplicate tag is found
+            }
+        } else if constexpr (IsTagHeader<T>) {
+            result[MajorIndex::AnyTagHeader]++;
+        } else {
+            result[MajorIndex::Tag]++;
+        }
     }
 }
 

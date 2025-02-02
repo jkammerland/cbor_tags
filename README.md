@@ -1,16 +1,15 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-This library leverages modern C++20 features to provide a simple yet flexible API, offering full control over memory and protocol customization.
+This is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. See [xkcd/927](https://xkcd.com/927/).
 
-It is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️.
-
-The primary advantage of using a library like this is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
+The primary advantage of using this library is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
 See standard specifications for more information:
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) (Concise Data Definition Language)
 - CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
 
-The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
+The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery), but uses the CBOR standard as binary format instead of a custom one. It also provides intuitive error handling and gives full control over memory layouts and buffer management. By supporting all standard containers and abstractions, the API for handling the data before/after encoding/decoding should be familiar without requiring detailed knowledge of the CBOR format.
+
 
 # Index
 
@@ -575,7 +574,7 @@ target_link_libraries(your_target PRIVATE cbor_tags::cbor_tags)
 ## ⚙️ C++20 Requirements Note
 
 > [!NOTE]
-> This library requires C++20 features. However, you can isolate these requirements using the PIMPL idiom - wrapping this library and exposing an API compatible with your target C++ version.
+> This library requires C++20 features. However, you can isolate that requirement by wrapping this library and exposing an API compatible with your target C++ version.
 
 ## 📚 Documentation
 
