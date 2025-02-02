@@ -25,7 +25,7 @@ namespace cbor::tags {
 
 struct AnnotationOptions {
     bool   diagnostic_data{false};
-    size_t indent_level{0};
+    size_t current_indent{0};
     size_t offset{0};
     size_t max_depth{std::numeric_limits<size_t>::max()};
 };
@@ -100,7 +100,7 @@ using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_
                                        double, bool, std::nullptr_t>;
 
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
-    std::string indent(options.indent_level * 2, ' ');
+    std::string indent(options.current_indent * 2, ' ');
     std::string offset(options.offset, ' ');
 
     const size_t bytes_per_line = options.max_depth == std::numeric_limits<size_t>::max()
@@ -349,50 +349,26 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         }
     };
 
-    auto                  it   = dec.reader_.position_;
-    [[maybe_unused]] auto span = std::span<const std::byte>{};
+    auto it = dec.tell();
 
     while (dec(value)) {
-        auto next_it       = dec.reader_.position_;
+        auto next_it       = dec.tell();
         auto should_indent = std::visit(indentation_visitor, value);
 
-        if constexpr (IsContiguous<CborBuffer>) {
-            span            = std::span<const std::byte>(reinterpret_cast<const std::byte *>(cbor_buffer.data() + it), next_it - it);
-            auto span_begin = span.begin();
-            auto span_end   = span.end();
-
-            if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
-                auto size        = std::visit(string_size_visitor, value);
-                auto header_size = string_length_to_header_size(size);
-                detail::format_bytes(output_buffer, span_begin, span_begin + 1, options); // Major type
-                detail::format_bytes(output_buffer, span_begin + 1, span_begin + header_size,
-                                     {.indent_level = 0, .offset = 1}); // extra header
-                fmt::format_to(std::back_inserter(output_buffer), "\n");
-                options.indent_level++;
-                options.offset++;
-                detail::format_bytes(output_buffer, span_begin + header_size, span_end, options);
-                options.indent_level--;
-                options.offset--;
-            } else {
-                detail::format_bytes(output_buffer, span_begin, span_begin + 1, options);
-                detail::format_bytes(output_buffer, span_begin + 1, span_end, {.indent_level = 0, .offset = 1});
-            }
+        if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
+            auto size        = std::visit(string_size_visitor, value);
+            auto header_size = string_length_to_header_size(size);
+            detail::format_bytes(output_buffer, it, it + 1, options);                                          // Major type
+            detail::format_bytes(output_buffer, it + 1, it + header_size, {.current_indent = 0, .offset = 1}); // extra header
+            fmt::format_to(std::back_inserter(output_buffer), "\n");
+            options.current_indent++;
+            options.offset++;
+            detail::format_bytes(output_buffer, it + header_size, next_it, options);
+            options.current_indent--;
+            options.offset--;
         } else {
-            if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
-                auto size        = std::visit(string_size_visitor, value);
-                auto header_size = string_length_to_header_size(size);
-                detail::format_bytes(output_buffer, it, it + 1, options);                                        // Major type
-                detail::format_bytes(output_buffer, it + 1, it + header_size, {.indent_level = 0, .offset = 1}); // extra header
-                fmt::format_to(std::back_inserter(output_buffer), "\n");
-                options.indent_level++;
-                options.offset++;
-                detail::format_bytes(output_buffer, it + header_size, next_it, options);
-                options.indent_level--;
-                options.offset--;
-            } else {
-                detail::format_bytes(output_buffer, it, it + 1, options);
-                detail::format_bytes(output_buffer, it + 1, next_it, {.indent_level = 0, .offset = 1});
-            }
+            detail::format_bytes(output_buffer, it, it + 1, options);
+            detail::format_bytes(output_buffer, it + 1, next_it, {.current_indent = 0, .offset = 1});
         }
 
         if (!indent_stack.empty()) {
@@ -400,10 +376,10 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
 
             if (indent_stack.top() == 0) {
                 indent_stack.pop();
-                options.indent_level--;
+                options.current_indent--;
             }
         }
-        options.indent_level += should_indent;
+        options.current_indent += should_indent;
         options.offset = indent_stack.size();
         fmt::format_to(std::back_inserter(output_buffer), "\n");
         it = next_it;
@@ -509,7 +485,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         auto current_pos  = dec.tell();
         auto after_header = current_pos - arg.size;
         auto range        = std::ranges::subrange(after_header, current_pos);
-        auto char_view    = range | std::views::transform([](std::byte b) { return static_cast<char>(b); });
+        auto char_view    = range | std::views::transform([](auto b) { return static_cast<char>(b); });
         if (options.check_tstr_utf8) {
             throw std::runtime_error("UTF-8 check not implemented");
         }

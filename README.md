@@ -12,6 +12,29 @@ See standard specifications for more information:
 
 The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery)
 
+# Index
+
+- [🎯 Key Features](#-key-features)
+- [🔧 Quick Start](#-quick-start)
+  - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
+  - [Tagged Struct Example](#tagged-struct-example)
+  - [Advanced Type Support](#advanced-type-support)
+  - [Version Handling with Variants](#version-handling-with-variants)
+  - [Manual Tag Parsing](#manual-tag-parsing)
+- [✨ Advanced Features](#-advanced-features)
+- [🎨 Custom Tag Handling](#-custom-tag-handling)
+- [🔄 Automatic Reflection](#-automatic-reflection)
+- [🏷️ Annotating buffers and Diagnostic notation](#️-annotating-cbor-buffers)
+- [🤝 CDDL Schema Generation](#-cddl-schema-generation)
+- [✅ Requirements](#-requirements)
+- [📦 Installation](#-installation)
+- [💡 CMake Integration](#-cmake-integration)
+- [📚 Documentation](#-documentation)
+  - [IANA Tag Registry](#iana-tag-registry)
+- [📄 License](#-license)
+
+---
+
 ## 🎯 Key Features
 
 - Support for both contiguous and non-contiguous buffers.
@@ -22,7 +45,8 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Configurable API, defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
 
 ## 🔧 Quick Start
-Here is how you could cbor encode individual values onto a buffer "data", allowing you to control the memory layout (e.g it could be a list, deque or pmr::vector)
+### Basic Encoding/Decoding Example
+Basic example of encoding and decoding a single cbor items:
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
@@ -34,7 +58,7 @@ Here is how you could cbor encode individual values onto a buffer "data", allowi
 using namespace cbor::tags;
 
 int main() {
-    // Create a data buffer to hold the encoded data (could be std::deque or std::array too)
+    // Create a data buffer to hold the encoded data (could be std::deque, std::pmr::vector, std::array, ...)
     auto data = std::vector<std::byte>{};
 
     // Encoding
@@ -59,8 +83,10 @@ int main() {
     return 0;
 }
 ```
-In this example we encode single values onto the buffer, they are not grouped in any way. For that they would have to be enclosed in a array, map or binary string. If it is a special sequence of items, you can define a tag for it and share that with the other parties.
+> [!IMPORTANT]
+> These values are not grouped in any way. For that they would have to be enclosed in a array, map or binary string. If it is a special sequence of items, you can define a tag for it and share that definition with the recipient(s).
 
+### Tagged Struct Example
 Here is how you could formulate a struct with a tag from the first example:
 ```cpp
 struct Tagged {
@@ -87,6 +113,7 @@ enc(tagged.cbor_tag, as_array{3}, tagged.a, tagged.b, tagged.c); // same as enc(
 
 ```
 
+### Advanced Type Support
 This can be taken further to any number of members or nesting, e.g a struct with all CBOR major types (and more):
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
@@ -177,6 +204,7 @@ int main() {
 > [!NOTE]
 > The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
 
+### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
@@ -246,8 +274,8 @@ int main() {
 }
 ```
 
+### Manual Tag Parsing
 In some cases where more flexability is needed, we can just parse any tag and then switch on it like this:
-
 ```cpp
 // Example API structures
 struct Api1 {
@@ -455,6 +483,7 @@ d2
 ]
 ```
 
+## 🤝 CDDL Schema Generation
 For cddl you can use the `cddl_to` method to get when applying on struct "A":
 ```cpp
 struct B {
@@ -483,7 +512,11 @@ struct A {
         std::optional<int>             i;
         B                              j;
         C                              k;
-    };
+};
+
+fmt::memory_buffer buffer;
+cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
+fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 ```
 
 Should output:
@@ -495,7 +528,7 @@ B = #6.140([bstr, map])
 See the docs for more info.
 
 
-## 🛠️ Requirements
+## ✅ Requirements
 
 - Any C++20 compatible compiler (GCC 12+, Clang 14+, MSVC (builds but broken)).
 - CMake 3.20+.
@@ -513,7 +546,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.6.1 # or specify a particular commit/tag
+  GIT_TAG v0.6.2 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -559,13 +592,13 @@ There are many types of cbor objects defined, the major types are:
 | 6          | tag of number N         | 1 data item           |
 | 7          | simple/float            | -                     |
 
-
-The name cbor_tags refers to the focus on handling tagged types(6) in a user friendly way. 
+The library name cbor_tags refers to the focus on handling tagged types(6) in a user friendly way. 
 
 "A tagged data item ("tag") whose tag number, an integer in the range 0..2^64-1 inclusive, is the argument and whose enclosed data item (tag content) is the single encoded data item that follows the head. See [RFC8949#tags](https://www.rfc-editor.org/rfc/rfc8949.html#tags)"
 
 **This means that if you want to make an object for public use, you can define the exact serialization of that object and tag it.**
 
+### IANA Tag Registry
 Please see the public online database of [tags](https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml), where the tags are grouped as follows:
 
 | Tag Range                   | How to Register         |

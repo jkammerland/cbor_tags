@@ -52,7 +52,7 @@ cbor::tags::cddl_to<Person>(schema, {.row_options = {.format_by_rows = false}});
 std::vector<byte> cbor_data = /* ... */;
 fmt::memory_buffer annotation;
 buffer_annotate(cbor_data, annotation, {
-    .indent_level = 2,
+    .current_indent = 2,
     .max_depth = 16
 });
 ```
