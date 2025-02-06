@@ -24,7 +24,7 @@ enum class status_code : uint8_t {
     incomplete,
     invalid_tag_for_simple,
     invalid_tag_for_optional,
-    invalid_tag_value,
+    invalid_tag,
     invalid_major_type_for_unsigned_integer,
     invalid_major_type_for_negative_integer,
     invalid_major_type_for_integer,
@@ -47,7 +47,7 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::incomplete: return "Incomplete";
     case status_code::invalid_tag_for_simple: return "Invalid tag for simple";
     case status_code::invalid_tag_for_optional: return "Invalid tag for optional";
-    case status_code::invalid_tag_value: return "Invalid tag value";
+    case status_code::invalid_tag: return "Invalid tag value";
     case status_code::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
     case status_code::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
     case status_code::invalid_major_type_for_integer: return "Invalid major type for integer";

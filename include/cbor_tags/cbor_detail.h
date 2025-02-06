@@ -137,8 +137,6 @@ template <typename T>
     requires IsAggregate<T> || IsTuple<T>
 constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
 
-namespace {
 template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr) { return static_cast<T &>(*this_ptr); }
-} // namespace
 
 } // namespace cbor::tags::detail

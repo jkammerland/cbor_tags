@@ -160,7 +160,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(dynamic_tag<uint64_t>{141}, std::string{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status_code::invalid_tag_value);
+        CHECK_EQ(result.error(), status_code::invalid_tag);
     }
 }
 
