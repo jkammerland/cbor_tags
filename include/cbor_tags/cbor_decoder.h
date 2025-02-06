@@ -6,6 +6,7 @@
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <bit>
@@ -463,25 +464,19 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return false;
             }
 
-            // fmt::print("decoding {}, major: {}, additional info: {}\n", nameof::nameof_full_type<U>(), magic_enum::enum_name(major),
-            //    additionalInfo);
-
-            U decoded_value;
-
-            status_code result;
             if constexpr (IsSimple<U>) {
                 if (!compare_simple_value<U>(additionalInfo)) {
                     return false;
                 }
-                result = this->decode(decoded_value, major, additionalInfo);
-            } else if constexpr (IsTag<U>) {
+            }
+
+            U           decoded_value;
+            status_code result;
+            if constexpr (IsTag<U>) {
                 if (!tag) {
                     tag = decode_unsigned(additionalInfo);
                 }
                 result = this->decode(decoded_value, *tag);
-                if (result != status_code::success) {
-                    return false;
-                }
             } else {
                 result = this->decode(decoded_value, major, additionalInfo);
             }
@@ -494,13 +489,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         };
 
-        try {
-            bool found = (try_decode.template operator()<T>() || ...);
-            if (!found) {
-                // throw std::runtime_error("Invalid major type for variant");
-                return status_code::no_matching_tag_value_in_variant;
-            }
-        } catch (...) { std::rethrow_exception(std::current_exception()); }
+        bool found = (try_decode.template operator()<T>() || ...);
+        if (!found) {
+            // throw std::runtime_error("Invalid major type for variant");
+            return status_code::no_matching_tag_value_in_variant;
+        }
         return status_code::success;
     }
 
@@ -560,6 +553,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
     constexpr status_code decode(as_tag_any &value, std::uint64_t tag) {
         value.tag = tag;
+        return status_code::success;
+    }
+
+    constexpr status_code decode(simple &value, major_type major, byte additionalInfo) {
+        if (major != major_type::Simple) {
+            // throw std::runtime_error("Invalid major type for simple");
+            return status_code::invalid_major_type_for_simple;
+        } else if (additionalInfo < static_cast<byte>(24)) {
+            value = simple{static_cast<simple::value_type>(additionalInfo)};
+        } else if (additionalInfo == static_cast<byte>(24)) {
+            value = simple{static_cast<simple::value_type>(read_uint8())};
+        } else {
+            // throw std::runtime_error("Invalid additional info for simple");
+            return status_code::invalid_tag_for_simple;
+        }
+
         return status_code::success;
     }
 
@@ -661,6 +670,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return result;
     }
 
+    constexpr simple read_simple() {
+        if (reader_.empty(data_)) {
+            throw std::runtime_error("Unexpected end of input");
+        }
+        return simple{static_cast<simple::value_type>(reader_.read(data_))};
+    }
+
     // CBOR Float16 decoding function
     constexpr float16_t read_float16() {
         if (reader_.empty(data_, 1)) {
@@ -735,7 +751,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    // Variadic friends only in c++26, must be public
+    // Internal reference, must be public, variadic friends only in c++26
     const InputBuffer          &data_;
     detail::reader<InputBuffer> reader_;
 };

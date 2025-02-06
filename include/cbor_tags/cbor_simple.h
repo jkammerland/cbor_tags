@@ -6,10 +6,11 @@
 namespace cbor::tags {
 
 struct simple {
-    std::uint8_t value;
+    using value_type = std::uint8_t;
+    value_type value;
 
     constexpr simple() = default;
-    constexpr simple(std::uint8_t value) : value(value) {}
+    constexpr simple(value_type value) : value(value) {}
 
     constexpr auto operator<=>(const simple &) const = default;
     constexpr bool operator==(const simple &) const  = default;
