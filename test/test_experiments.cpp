@@ -15,7 +15,9 @@
 
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
+#include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/variant_handling.h"
 #include "doctest/doctest.h"
@@ -503,4 +505,26 @@ TEST_CASE("Get matching tags") {
     static_assert(a[0] == 1);
     static_assert(a[1] == 2);
     static_assert(a[2] == 3);
+}
+
+TEST_CASE("Nested struct without tags") {
+    struct A {
+        struct B {
+            struct C {
+                int a;
+            } c;
+        } b;
+    };
+
+    auto data = std::vector<std::byte>{};
+    auto enc  = make_encoder(data);
+
+    A a{.b = {.c = {.a = 42}}};
+    enc(a);
+
+    auto dec = make_decoder(data);
+    A    result;
+    dec(result);
+
+    CHECK_EQ(result.b.c.a, 42);
 }
