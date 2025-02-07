@@ -1,0 +1,91 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              name: "Windows MSVC",
+              os: windows-latest,
+              cc: "cl",
+              cxx: "cl",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          - {
+              name: "Ubuntu GCC 12",
+              os: ubuntu-latest,
+              cc: "gcc-12",
+              cxx: "g++-12"
+            }
+          - {
+              name: "Ubuntu GCC 14",
+              os: ubuntu-latest,
+              cc: "gcc-14",
+              cxx: "g++-14"
+            }
+          - {
+              name: "Ubuntu Clang 18",
+              os: ubuntu-latest,
+              cc: "clang-18",
+              cxx: "clang++-18"
+            }
+          - {
+              name: "macOS AppleClang",
+              os: macos-latest,
+              cc: "clang",
+              cxx: "clang++"
+            }
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install GCC 12 (Ubuntu)
+      if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'gcc-12'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-12 g++-12
+
+    - name: Install GCC 14 (Ubuntu)
+      if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'gcc-14'
+      run: |
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
+        sudo apt-get install -y gcc-14 g++-14
+
+    - name: Install Clang 18 (Ubuntu)
+      if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'clang-18'
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 18
+        sudo apt-get install -y clang-18
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        if [ "${{ matrix.config.os }}" == "windows-latest" ]; then
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON
+        else
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON \
+            -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }}
+        fi
+
+    - name: Build
+      shell: bash
+      run: cmake --build build --config Release
+
+    - name: Test
+      working-directory: build
+      shell: bash
+      run: ctest -C Release --output-on-failure
