@@ -50,9 +50,9 @@ struct DiagnosticOptions {
 };
 
 template <typename T, typename OutputBuffer, typename Context>
-auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions = {}, Context = {});
+auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions = {}, Context = {});
 
-template <typename T, typename OutputBuffer, typename Context> auto cddl_to(OutputBuffer &output_buffer, CDDLOptions = {});
+template <typename T, typename OutputBuffer, typename Context> auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {});
 
 namespace detail {
 
@@ -89,7 +89,7 @@ struct CDDLContext {
             }
             auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
             std::pmr::string cddl(&memory_resource);
-            cddl_to(cddl, t, options, context);
+            cddl_schema_to(cddl, t, options, context);
             insert(std::move(name), std::move(cddl));
         }
         /* Else do nothing */
@@ -206,7 +206,7 @@ template <typename T>
 concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T::type>>;
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
+auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
     bool use_brackets     = false;
     bool use_group        = false;
     auto applier_register = [&](auto &&...args) {
@@ -293,8 +293,8 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
 }
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_to(OutputBuffer &output_buffer, CDDLOptions options) {
-    cddl_to(output_buffer, T{}, options);
+auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options) {
+    cddl_schema_to(output_buffer, T{}, options);
 }
 
 template <typename CborBuffer, typename OutputBuffer>

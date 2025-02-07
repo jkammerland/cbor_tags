@@ -3,7 +3,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_operators.h"
-#include "cbor_tags/extensions/cbor_cddl.h"
+#include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 

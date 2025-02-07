@@ -416,7 +416,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ```
 
 ## 🏷️ Annotating CBOR Buffers
-You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_cddl.h` to inspect and visualize CBOR data:
+You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
 
 See code examples here:
 ```cpp
@@ -483,7 +483,7 @@ d2
 ```
 
 ## 🤝 CDDL Schema Generation
-For cddl you can use the `cddl_to` method to get when applying on struct "A":
+For Concise Data Definitions schemas you can use the `cddl_schema_to` method, e.g by applying on a struct "A":
 ```cpp
 struct B {
     static constexpr std::uint64_t cbor_tag = 140;
@@ -514,8 +514,8 @@ struct A {
 };
 
 fmt::memory_buffer buffer;
-cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
-fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+cddl_schema_to<A>(buffer, {.row_options = {.format_by_rows = false}});
+fmt::print("Concise Data Definition: \n{}\n", fmt::to_string(buffer));
 ```
 
 Should output:
