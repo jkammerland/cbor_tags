@@ -160,14 +160,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
         if (decode_unsigned(additionalInfo) != N) {
-            return status_code::invalid_tag;
+            return status_code::no_match_for_tag;
         }
         return status_code::success;
     }
 
     template <std::uint64_t N> constexpr status_code decode(static_tag<N>, std::uint64_t tag) {
         if (tag != N) {
-            return status_code::invalid_tag;
+            return status_code::no_match_for_tag;
         }
         return status_code::success;
     }
@@ -184,7 +184,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
         if (decoded_value.value != value.value) {
-            return status_code::invalid_tag;
+            return status_code::no_match_for_tag;
         }
 
         return status_code::success;
@@ -202,7 +202,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         auto tag = decode_unsigned(additionalInfo);
         if (tag != std::get<0>(t)) {
-            return status_code::invalid_tag;
+            return status_code::no_match_for_tag;
         }
 
         auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
@@ -214,7 +214,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsTaggedTuple T> constexpr status_code decode(T &t, std::uint64_t tag) {
         if (tag != std::get<0>(t)) {
-            return status_code::invalid_tag;
+            return status_code::no_match_for_tag;
         }
 
         auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
@@ -281,7 +281,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         if constexpr (HasInlineTag<T>) {
             if (tag != T::cbor_tag) {
-                return status_code::invalid_tag;
+                return status_code::no_match_for_tag;
             }
             auto array_header_status = this->decode_wrapped_group(tuple);
             if (array_header_status != status_code::success) {
@@ -290,7 +290,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
         } else {
             if (tag != std::get<0>(tuple)) {
-                return status_code::invalid_tag;
+                return status_code::no_match_for_tag;
             }
             auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(tuple));
             if (array_header_status != status_code::success) {
@@ -319,7 +319,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             value = true;
         } else {
 
-            return status_code::invalid_tag_for_simple;
+            return status_code::no_match_for_tag_simple_on_buffer;
         }
         return status_code::success;
     }
@@ -328,7 +328,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
         } else if (additionalInfo != static_cast<byte>(22)) {
-            return status_code::invalid_tag_for_simple;
+            return status_code::no_match_for_tag_simple_on_buffer;
         }
         value = nullptr;
         return status_code::success;
@@ -338,7 +338,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
         } else if (additionalInfo != static_cast<byte>(25)) {
-            return status_code::invalid_tag_for_simple;
+            return status_code::no_match_for_tag_simple_on_buffer;
         }
         value = read_float16();
         return status_code::success;
@@ -348,7 +348,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
         } else if (additionalInfo != static_cast<byte>(26)) {
-            return status_code::invalid_tag_for_simple;
+            return status_code::no_match_for_tag_simple_on_buffer;
         }
         value = read_float();
         return status_code::success;
@@ -358,7 +358,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
         } else if (additionalInfo != static_cast<byte>(27)) {
-            return status_code::invalid_tag_for_simple;
+            return status_code::no_match_for_tag_simple_on_buffer;
         }
         value = read_double();
         return status_code::success;
@@ -395,7 +395,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             return result;
         }
-        return status_code::invalid_tag_for_optional;
+        return status_code::no_match_for_optional_on_buffer;
     }
 
     template <IsCborMajor... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
@@ -526,7 +526,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if (additionalInfo == static_cast<byte>(24)) {
             value = simple{static_cast<simple::value_type>(read_uint8())};
         } else {
-            return status_code::invalid_tag_for_simple;
+            return status_code::no_match_for_tag_simple_on_buffer;
         }
 
         return status_code::success;

@@ -95,7 +95,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(25_tag, T{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status_code::invalid_tag_for_simple);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag_simple_on_buffer);
     }
 
     TEST_CASE_TEMPLATE("Decode, too little memory", T, std::pmr::vector<int>) {
@@ -160,7 +160,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(dynamic_tag<uint64_t>{141}, std::string{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status_code::invalid_tag);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag);
     }
 }
 
