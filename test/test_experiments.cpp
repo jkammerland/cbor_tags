@@ -19,7 +19,6 @@
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_reflection.h"
-#include "cbor_tags/variant_handling.h"
 #include "doctest/doctest.h"
 #include "test_util.h"
 

@@ -25,18 +25,17 @@ enum class status_code : uint8_t {
     invalid_tag_for_simple,
     invalid_tag_for_optional,
     invalid_tag,
-    invalid_major_type_for_unsigned_integer,
-    invalid_major_type_for_negative_integer,
-    invalid_major_type_for_integer,
-    invalid_major_type_for_enum,
-    invalid_major_type_for_binary_string,
-    invalid_major_type_for_text_string,
-    invalid_major_type_for_array,
-    invalid_major_type_for_map,
-    invalid_major_type_for_tag,
-    invalid_major_type_for_simple,
-    no_matching_tag_value_in_variant,
-    invalid_container_size,
+    no_match_for_uint_on_buffer,
+    no_match_for_nint_on_buffer,
+    no_match_for_int_on_buffer,
+    no_match_for_enum_on_buffer,
+    no_match_for_bstr_on_buffer,
+    no_match_for_tstr_on_buffer,
+    no_match_for_array_on_buffer,
+    no_match_for_map_on_buffer,
+    no_match_for_tag_on_buffer,
+    no_match_for_simple_on_buffer,
+    no_match_in_variant_on_buffer,
     out_of_memory,
     error
 };
@@ -48,18 +47,17 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::invalid_tag_for_simple: return "Invalid tag for simple";
     case status_code::invalid_tag_for_optional: return "Invalid tag for optional";
     case status_code::invalid_tag: return "Invalid tag value";
-    case status_code::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
-    case status_code::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
-    case status_code::invalid_major_type_for_integer: return "Invalid major type for integer";
-    case status_code::invalid_major_type_for_enum: return "Invalid major type for enum";
-    case status_code::invalid_major_type_for_binary_string: return "Invalid major type for binary string";
-    case status_code::invalid_major_type_for_text_string: return "Invalid major type for text string";
-    case status_code::invalid_major_type_for_array: return "Invalid major type for array";
-    case status_code::invalid_major_type_for_map: return "Invalid major type for map";
-    case status_code::invalid_major_type_for_tag: return "Invalid major type for tag";
-    case status_code::invalid_major_type_for_simple: return "Invalid major type for simple";
-    case status_code::no_matching_tag_value_in_variant: return "No matching tag value in variant";
-    case status_code::invalid_container_size: return "Invalid container size";
+    case status_code::no_match_for_uint_on_buffer: return "Invalid major type for unsigned integer";
+    case status_code::no_match_for_nint_on_buffer: return "Invalid major type for negative integer";
+    case status_code::no_match_for_int_on_buffer: return "Invalid major type for integer";
+    case status_code::no_match_for_enum_on_buffer: return "Invalid major type for enum";
+    case status_code::no_match_for_bstr_on_buffer: return "Invalid major type for binary string";
+    case status_code::no_match_for_tstr_on_buffer: return "Invalid major type for text string";
+    case status_code::no_match_for_array_on_buffer: return "Invalid major type for array";
+    case status_code::no_match_for_map_on_buffer: return "Invalid major type for map";
+    case status_code::no_match_for_tag_on_buffer: return "Invalid major type for tag";
+    case status_code::no_match_for_simple_on_buffer: return "Invalid major type for simple";
+    case status_code::no_match_in_variant_on_buffer: return "No matching tag value in variant";
     case status_code::out_of_memory: return "Out of memory";
     case status_code::error: return "Error";
     default: return "Unknown status";

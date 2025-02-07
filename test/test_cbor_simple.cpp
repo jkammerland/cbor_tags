@@ -162,7 +162,7 @@ TEST_CASE("CBOR check all simples") {
     }
 }
 
-TEST_CASE("Check simple error handling") {
+TEST_CASE("Check simple status_code handling") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
     enc(float16_t{3.14159f});

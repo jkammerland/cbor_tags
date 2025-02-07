@@ -7,7 +7,6 @@
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
-#include "cbor_tags/variant_handling.h"
 #include "tl/expected.hpp"
 
 #include <bit>

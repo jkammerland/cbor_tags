@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_operators.h"
+#include "cbor_tags/extensions/cbor_cddl.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 
@@ -17,6 +18,7 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 #include <functional>
+#include <iterator>
 #include <list>
 #include <map>
 #include <numeric>
@@ -427,7 +429,7 @@ TEST_CASE("Sanity check equal size map unordered_map") {
 }
 
 // TODO:
-TEST_CASE("CBOR Encoder - Map of float sorted" * doctest::skip()) {
+TEST_CASE("CBOR Encoder - Map of float sorted") {
     using namespace cbor::tags;
     using variant = std::variant<int, float, double, bool, std::nullptr_t, std::string>;
 
@@ -462,8 +464,16 @@ TEST_CASE("CBOR Encoder - Map of float sorted" * doctest::skip()) {
             null: 3.14159_2,
         }
     */
-    CHECK_EQ(to_hex(data),
-             "af22fa40490fd021fa40490fd001fa40490fd06568656c6c6ffa40490fd0fac0a00000fa40490fd0fabf800000fa40490fd0fa3f800000fa"
-             "40490fd0fa40000000fa40490fd0fa40400000fa40490fd0fa40800000fa40490fd0fa41200000fa40490fd0fbc008000000000000fa4049"
-             "0fd0fb4008000000000000fa40490fd0f5fa40490fd0f6fa40490fd0");
+    fmt::memory_buffer buffer;
+    buffer_diagnostic(data, buffer, {});
+    fmt::format_to(std::back_inserter(buffer), "\n\n");
+
+    auto expected_hex = "af22fa40490fd021fa40490fd001fa40490fd06568656c6c6ffa40490fd0fac0a00000fa40490fd0fabf800000fa40490fd0fa3f800000fa"
+                        "40490fd0fa40000000fa40490fd0fa40400000fa40490fd0fa40800000fa40490fd0fa41200000fa40490fd0fbc008000000000000fa4049"
+                        "0fd0fb4008000000000000fa40490fd0f5fa40490fd0f6fa40490fd0";
+    buffer_diagnostic(to_bytes(expected_hex), buffer, {});
+
+    fmt::print("{}", fmt::to_string(buffer));
+
+    CHECK_EQ(to_hex(data), std::string_view(expected_hex));
 }

@@ -404,7 +404,7 @@ TEST_CASE("Advanced tag problem negative") {
     std::variant<A1, A2> result;
     auto                 status = dec(result);
     REQUIRE(!status.has_value());
-    REQUIRE_EQ(status.error(), status_code::no_matching_tag_value_in_variant);
+    REQUIRE_EQ(status.error(), status_code::no_match_in_variant_on_buffer);
 }
 
 TEST_CASE("Switching instead of variant") {

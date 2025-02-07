@@ -447,12 +447,15 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant key;
             detail::catch_all_variant value;
-            if (!dec(key) || !dec(value)) {
+            if (!dec(key)) {
                 break;
             }
             fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
             std::visit(diagnostic_visitor{output_buffer, dec, options}, key);
             fmt::format_to(std::back_inserter(output_buffer), ": ");
+            if (!dec(value)) {
+                break;
+            }
             std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
             fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
         }
@@ -481,7 +484,6 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     }
 
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
-
         auto current_pos  = dec.tell();
         auto after_header = current_pos - arg.size;
         auto range        = std::ranges::subrange(after_header, current_pos);
@@ -489,6 +491,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if (options.check_tstr_utf8) {
             throw std::runtime_error("UTF-8 check not implemented");
         }
+        fmt::print("DEBUG: {:02x}\n", fmt::join(range, ""));
         fmt::format_to(std::back_inserter(output_buffer), "\"{}\"", fmt::join(char_view, ""));
     }
 
