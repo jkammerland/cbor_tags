@@ -29,10 +29,15 @@ target_include_directories(tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
 
 # Enable ASAN for linux and macos
-if(UNIX OR APPLE)
-  # target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer) target_link_options(tests PRIVATE -fsanitize=address)
-elseif(WIN32)
-  # target_compile_options(tests PRIVATE /fsanitize=address) target_link_options(tests PRIVATE /fsanitize=address)
+option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
+if(CBOR_TAGS_ENABLE_ASAN)
+  message(STATUS "ASAN enabled in tests")
+  if(UNIX OR APPLE)
+    target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(tests PRIVATE -fsanitize=address)
+  elseif(WIN32)
+    # target_compile_options(tests PRIVATE /fsanitize=address) target_link_options(tests PRIVATE /fsanitize=address)
+  endif()
 endif()
 
 # add tests for ctest
