@@ -1,7 +1,6 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_integer.h"
-#include "cbor_tags/variant_handling.h"
 #include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>

@@ -50,9 +50,9 @@ struct DiagnosticOptions {
 };
 
 template <typename T, typename OutputBuffer, typename Context>
-auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions = {}, Context = {});
+auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions = {}, Context = {});
 
-template <typename T, typename OutputBuffer, typename Context> auto cddl_to(OutputBuffer &output_buffer, CDDLOptions = {});
+template <typename T, typename OutputBuffer, typename Context> auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {});
 
 namespace detail {
 
@@ -89,7 +89,7 @@ struct CDDLContext {
             }
             auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
             std::pmr::string cddl(&memory_resource);
-            cddl_to(cddl, t, options, context);
+            cddl_schema_to(cddl, t, options, context);
             insert(std::move(name), std::move(cddl));
         }
         /* Else do nothing */
@@ -206,7 +206,7 @@ template <typename T>
 concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T::type>>;
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
+auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
     bool use_brackets     = false;
     bool use_group        = false;
     auto applier_register = [&](auto &&...args) {
@@ -293,8 +293,8 @@ auto cddl_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Conte
 }
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_to(OutputBuffer &output_buffer, CDDLOptions options) {
-    cddl_to(output_buffer, T{}, options);
+auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options) {
+    cddl_schema_to(output_buffer, T{}, options);
 }
 
 template <typename CborBuffer, typename OutputBuffer>
@@ -447,12 +447,15 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant key;
             detail::catch_all_variant value;
-            if (!dec(key) || !dec(value)) {
+            if (!dec(key)) {
                 break;
             }
             fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
             std::visit(diagnostic_visitor{output_buffer, dec, options}, key);
             fmt::format_to(std::back_inserter(output_buffer), ": ");
+            if (!dec(value)) {
+                break;
+            }
             std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
             fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
         }
@@ -481,7 +484,6 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     }
 
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
-
         auto current_pos  = dec.tell();
         auto after_header = current_pos - arg.size;
         auto range        = std::ranges::subrange(after_header, current_pos);
@@ -489,6 +491,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if (options.check_tstr_utf8) {
             throw std::runtime_error("UTF-8 check not implemented");
         }
+        fmt::print("DEBUG: {:02x}\n", fmt::join(range, ""));
         fmt::format_to(std::back_inserter(output_buffer), "\"{}\"", fmt::join(char_view, ""));
     }
 

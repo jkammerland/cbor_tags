@@ -22,47 +22,49 @@ namespace cbor::tags {
 enum class status_code : uint8_t {
     success = 0,
     incomplete,
-    invalid_tag_for_simple,
-    invalid_tag_for_optional,
-    invalid_tag_value,
-    invalid_major_type_for_unsigned_integer,
-    invalid_major_type_for_negative_integer,
-    invalid_major_type_for_integer,
-    invalid_major_type_for_enum,
-    invalid_major_type_for_binary_string,
-    invalid_major_type_for_text_string,
-    invalid_major_type_for_array,
-    invalid_major_type_for_map,
-    invalid_major_type_for_tag,
-    invalid_major_type_for_simple,
-    no_matching_tag_value_in_variant,
-    invalid_container_size,
     out_of_memory,
-    error
+    error,
+    begin_no_match_decoding,
+    no_match_for_tag,
+    no_match_for_tag_simple_on_buffer,
+    no_match_for_uint_on_buffer,
+    no_match_for_nint_on_buffer,
+    no_match_for_int_on_buffer,
+    no_match_for_enum_on_buffer,
+    no_match_for_bstr_on_buffer,
+    no_match_for_tstr_on_buffer,
+    no_match_for_array_on_buffer,
+    no_match_for_map_on_buffer,
+    no_match_for_tag_on_buffer,
+    no_match_for_simple_on_buffer,
+    no_match_for_optional_on_buffer,
+    no_match_in_variant_on_buffer,
+    end_no_match_decoding
 };
 
 constexpr std::string_view status_message(status_code s) {
     switch (s) {
     case status_code::success: return "Success";
-    case status_code::incomplete: return "Incomplete";
-    case status_code::invalid_tag_for_simple: return "Invalid tag for simple";
-    case status_code::invalid_tag_for_optional: return "Invalid tag for optional";
-    case status_code::invalid_tag_value: return "Invalid tag value";
-    case status_code::invalid_major_type_for_unsigned_integer: return "Invalid major type for unsigned integer";
-    case status_code::invalid_major_type_for_negative_integer: return "Invalid major type for negative integer";
-    case status_code::invalid_major_type_for_integer: return "Invalid major type for integer";
-    case status_code::invalid_major_type_for_enum: return "Invalid major type for enum";
-    case status_code::invalid_major_type_for_binary_string: return "Invalid major type for binary string";
-    case status_code::invalid_major_type_for_text_string: return "Invalid major type for text string";
-    case status_code::invalid_major_type_for_array: return "Invalid major type for array";
-    case status_code::invalid_major_type_for_map: return "Invalid major type for map";
-    case status_code::invalid_major_type_for_tag: return "Invalid major type for tag";
-    case status_code::invalid_major_type_for_simple: return "Invalid major type for simple";
-    case status_code::no_matching_tag_value_in_variant: return "No matching tag value in variant";
-    case status_code::invalid_container_size: return "Invalid container size";
-    case status_code::out_of_memory: return "Out of memory";
-    case status_code::error: return "Error";
-    default: return "Unknown status";
+    case status_code::incomplete: return "Unexpected end of CBOR data: buffer incomplete";
+    case status_code::out_of_memory: return "Unexpected memory allocation failure during CBOR processing";
+    case status_code::error: return "Unexpected CBOR processing error";
+    case status_code::begin_no_match_decoding: return "Unexpected error at start of CBOR decoding: invalid initial byte";
+    case status_code::no_match_for_tag: return "Unexpected CBOR tag: no matching decoder found";
+    case status_code::no_match_for_tag_simple_on_buffer: return "Unexpected CBOR simple value tag: no matching decoder found";
+    case status_code::no_match_for_uint_on_buffer: return "Unexpected value for CBOR major type 0: unsigned integer decode failed";
+    case status_code::no_match_for_nint_on_buffer: return "Unexpected value for CBOR major type 1: negative integer decode failed";
+    case status_code::no_match_for_int_on_buffer: return "Unexpected integer value in CBOR data: decode failed";
+    case status_code::no_match_for_enum_on_buffer: return "Unexpected enum value in CBOR data: no matching enum constant";
+    case status_code::no_match_for_bstr_on_buffer: return "Unexpected value for CBOR major type 2: byte string decode failed";
+    case status_code::no_match_for_tstr_on_buffer: return "Unexpected value for CBOR major type 3: text string decode failed";
+    case status_code::no_match_for_array_on_buffer: return "Unexpected value for CBOR major type 4: array decode failed";
+    case status_code::no_match_for_map_on_buffer: return "Unexpected value for CBOR major type 5: map decode failed";
+    case status_code::no_match_for_tag_on_buffer: return "Unexpected value for CBOR major type 6: semantic tag decode failed";
+    case status_code::no_match_for_simple_on_buffer: return "Unexpected value for CBOR major type 7: simple value decode failed";
+    case status_code::no_match_for_optional_on_buffer: return "Unexpected CBOR format: optional value decode failed";
+    case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";
+    case status_code::end_no_match_decoding: return "Unexpected error at end of CBOR decoding: invalid terminal state";
+    default: return "Unknown CBOR status code";
     }
 }
 

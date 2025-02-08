@@ -402,7 +402,9 @@ TEST_CASE("Advanced tag problem negative") {
 
     auto                 dec = make_decoder(data);
     std::variant<A1, A2> result;
-    REQUIRE_EQ(dec(result).error(), status_code::no_matching_tag_value_in_variant);
+    auto                 status = dec(result);
+    REQUIRE(!status.has_value());
+    REQUIRE_EQ(status.error(), status_code::no_match_in_variant_on_buffer);
 }
 
 TEST_CASE("Switching instead of variant") {

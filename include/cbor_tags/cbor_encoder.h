@@ -7,7 +7,6 @@
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
-#include "cbor_tags/variant_handling.h"
 #include "tl/expected.hpp"
 
 #include <bit>
@@ -198,13 +197,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
-    constexpr void encode(simple value) {
-        if (value.value < 24 || value.value > 31) {
-            encode_major_and_size(value.value, static_cast<byte_type>(0xE0));
-        } else {
-            throw std::runtime_error("Invalid simple value, use float16_t, float etc");
-        }
-    }
+    constexpr void encode(simple value) { encode_major_and_size(value.value, static_cast<byte_type>(0xE0)); }
 
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;

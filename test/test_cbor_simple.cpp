@@ -1,3 +1,4 @@
+#include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
@@ -5,6 +6,7 @@
 #include <doctest/doctest.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <variant>
 
 using namespace cbor::tags;
 
@@ -125,7 +127,77 @@ TEST_CASE("CBOR Encoder - simple") {
     print_bytes(data);
     CHECK_EQ(to_hex(data), "f3");
 
-    // auto   dec = make_decoder(data);
-    // simple decoded;
-    // dec(decoded);
+    auto   dec = make_decoder(data);
+    simple decoded;
+    REQUIRE(dec(decoded));
+    CHECK_EQ(number, decoded);
+}
+
+TEST_CASE("CBOR check all simples") {
+    { /* The special case when 1 extra byte is required */
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        simple                 number{24};
+        REQUIRE(enc(number));
+
+        auto   dec = make_decoder(data);
+        simple decoded;
+        REQUIRE(dec(decoded));
+        CHECK_EQ(number, decoded);
+    }
+
+    {
+        for (int i = 0; i <= 255; i++) {
+            std::vector<std::byte> data;
+
+            auto   enc = make_encoder(data);
+            simple number{static_cast<simple::value_type>(i)};
+            REQUIRE(enc(number));
+
+            auto   dec = make_decoder(data);
+            simple decoded;
+            REQUIRE(dec(decoded));
+            CHECK_EQ(number, decoded);
+        }
+    }
+}
+
+TEST_CASE("Check simple status_code handling") {
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+    enc(float16_t{3.14159f});
+
+    auto   dec = make_decoder(data);
+    simple decoded;
+    auto   result = dec(decoded);
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_tag_simple_on_buffer);
+
+    { /* Sanity check something that cannot be error handled */
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        enc(true);
+
+        auto   dec = make_decoder(data);
+        simple decoded;
+        auto   result = dec(decoded);
+        REQUIRE(result);
+    }
+}
+
+TEST_CASE("Variant with simples") {
+    std::vector<std::byte>                 data;
+    auto                                   enc   = make_encoder(data);
+    std::variant<double, float, float16_t> value = 3.14159f;
+
+    REQUIRE(enc(value));
+
+    fmt::print("Variant with simples: ");
+    print_bytes(data);
+
+    auto                                   dec = make_decoder(data);
+    std::variant<double, float, float16_t> decoded;
+    REQUIRE(dec(decoded));
+    REQUIRE_EQ(value.index(), decoded.index());
+    CHECK_EQ(std::get<float>(value), std::get<float>(decoded));
 }

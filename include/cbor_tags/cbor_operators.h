@@ -31,8 +31,32 @@ template <typename Compare> struct cbor_variant_visitor {
                 if (lhs.size() != rhs.size()) {
                     return Compare{}(lhs.size(), rhs.size());
                 }
-                auto cmp = std::lexicographical_compare_three_way(std::ranges::begin(lhs), std::ranges::end(lhs), std::ranges::begin(rhs),
-                                                                  std::ranges::end(rhs));
+
+                // Not fully supported yet
+                // auto cmp = std::lexicographical_compare_three_way(std::ranges::begin(lhs), std::ranges::end(lhs),
+                // std::ranges::begin(rhs), std::ranges::end(rhs));
+                auto cmp = [&]() {
+                    auto first1 = std::ranges::begin(lhs);
+                    auto last1  = std::ranges::end(lhs);
+                    auto first2 = std::ranges::begin(rhs);
+                    auto last2  = std::ranges::end(rhs);
+
+                    while (first1 != last1 && first2 != last2) {
+                        if (*first1 < *first2)
+                            return std::weak_ordering::less;
+                        if (*first2 < *first1)
+                            return std::weak_ordering::greater;
+                        ++first1;
+                        ++first2;
+                    }
+
+                    if (first2 != last2)
+                        return std::weak_ordering::less;
+                    if (first1 != last1)
+                        return std::weak_ordering::greater;
+                    return std::weak_ordering::equivalent;
+                }();
+
                 if constexpr (std::is_same_v<Compare, std::less<>>) {
                     return cmp < 0;
                 } else {

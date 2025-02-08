@@ -1,6 +1,6 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/cbor_cddl.h"
+#include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <cstdint>
@@ -71,14 +71,14 @@ TEST_CASE("CDDL extension") {
     };
 
     fmt::memory_buffer buffer;
-    cddl_to<A>(buffer);
+    cddl_schema_to<A>(buffer);
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
     CHECK(substrings_in(fmt::to_string(buffer), "uint,\n", "int / tstr,\n"));
 }
 
 TEST_CASE("CDDL aggregate tagged") {
     fmt::memory_buffer buffer;
-    cddl_to(buffer, A13213{}, {.row_options = {.format_by_rows = true}});
+    cddl_schema_to(buffer, A13213{}, {.row_options = {.format_by_rows = true}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
@@ -100,7 +100,7 @@ TEST_CASE("CDDL no columns") {
         C                              k;
     };
 
-    cddl_to<A>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl_schema_to<A>(buffer, {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B = #6.140([bstr, map])",
@@ -204,7 +204,7 @@ TEST_CASE("CDDL adhoc tagging") {
 
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
-    cddl_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}), {.row_options = {.format_by_rows = false}});
+    cddl_schema_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}), {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "#6.140(A)", "A = tstr"));

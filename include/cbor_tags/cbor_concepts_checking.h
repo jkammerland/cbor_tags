@@ -83,25 +83,25 @@ constexpr auto CheckSigned   = [](IsSignedWithEnum auto) { return 8; };
 
 namespace detail {
 struct MajorIndex {
-    static constexpr std::uint64_t Unsigned          = 0;
-    static constexpr std::uint64_t Negative          = 1;
-    static constexpr std::uint64_t BStr              = 2;
-    static constexpr std::uint64_t TStr              = 3;
-    static constexpr std::uint64_t Array             = 4;
-    static constexpr std::uint64_t Map               = 5;
-    static constexpr std::uint64_t Tag               = 6;
-    static constexpr std::uint64_t DEPRECATED_Simple = 7;
-    static constexpr std::uint64_t Unmatched         = 8;
-    static constexpr std::uint64_t DynamicTag        = 9;
-    static constexpr std::uint64_t AnyTagHeader      = 10;
-    static constexpr std::uint64_t beginSimples      = 11;
-    static constexpr std::uint64_t Boolean           = 12;
-    static constexpr std::uint64_t float16           = 13;
-    static constexpr std::uint64_t float32           = 14;
-    static constexpr std::uint64_t float64           = 15;
-    static constexpr std::uint64_t Null              = 16;
-    static constexpr std::uint64_t SimpleValued      = 17;
-    static constexpr std::uint64_t endSimples        = 18;
+    static constexpr std::uint64_t Unsigned     = 0;
+    static constexpr std::uint64_t Negative     = 1;
+    static constexpr std::uint64_t BStr         = 2;
+    static constexpr std::uint64_t TStr         = 3;
+    static constexpr std::uint64_t Array        = 4;
+    static constexpr std::uint64_t Map          = 5;
+    static constexpr std::uint64_t Tag          = 6;
+    static constexpr std::uint64_t SimpleAny    = 7;
+    static constexpr std::uint64_t Unmatched    = 8;
+    static constexpr std::uint64_t DynamicTag   = 9;
+    static constexpr std::uint64_t AnyTagHeader = 10;
+    static constexpr std::uint64_t beginSimples = 11;
+    static constexpr std::uint64_t Boolean      = 12;
+    static constexpr std::uint64_t float16      = 13;
+    static constexpr std::uint64_t float32      = 14;
+    static constexpr std::uint64_t float64      = 15;
+    static constexpr std::uint64_t Null         = 16;
+    static constexpr std::uint64_t SimpleValued = 17;
+    static constexpr std::uint64_t endSimples   = 18;
 };
 
 constexpr std::uint64_t MaxBucketsForVariantChecking = 20;
@@ -129,11 +129,11 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
         counts_fn_inner(result, tags, simples);
 
         /* FINILIZE THE TAG AND SIMPLE BINS */
-        if (tags.size() > 0) {
+        if (tags.size() > 0 || result[MajorIndex::AnyTagHeader] > 0) {
             result[MajorIndex::Tag]++; // If any tag has been duplicated, this will be > 1, i.e invalid
         }
         if (simples.size() > 0) {
-            result[MajorIndex::beginSimples] = 0;
+            result[MajorIndex::SimpleAny]    = 1;
             result[MajorIndex::Boolean]      = std::count(simples.begin(), simples.end(), SimpleType::Bool_False);
             result[MajorIndex::float16]      = std::count(simples.begin(), simples.end(), SimpleType::Float16);
             result[MajorIndex::float32]      = std::count(simples.begin(), simples.end(), SimpleType::Float32);

@@ -22,7 +22,7 @@ struct MyStruct {
 
 // Generate CDDL schema
 fmt::memory_buffer buffer;
-cbor::tags::cddl_to<MyStruct>(buffer);
+cbor::tags::cddl_schema_to<MyStruct>(buffer);
 // Output: 
 // MyStruct = (
 //   int,
@@ -43,7 +43,7 @@ struct Person {
 };
 
 fmt::memory_buffer schema;
-cbor::tags::cddl_to<Person>(schema, {.row_options = {.format_by_rows = false}});
+cbor::tags::cddl_schema_to<Person>(schema, {.row_options = {.format_by_rows = false}});
 ```
 
 ### CBOR Annotation
@@ -71,7 +71,7 @@ struct CustomTagged {
 
 ## API Highlights
 
-### `cddl_to<Type>(buffer, options)`
+### `cddl_schema_to<Type>(buffer, options)`
 Generates CDDL schema for the given type into output buffer
 
 **Options**:

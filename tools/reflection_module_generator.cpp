@@ -6,6 +6,7 @@
 #include <iostream>
 #include <ranges>
 #include <set>
+#include <sstream>
 #include <string_view>
 #include <vector>
 
