@@ -41,7 +41,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Zero-copy decoding using views and spans.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
-- Configurable API, defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
+- noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
@@ -55,25 +55,31 @@ Basic example of encoding and decoding a single cbor items:
 #include <vector>
 
 using namespace cbor::tags;
+using namespace std::string_view_literals;
 
 int main() {
     // Create a data buffer to hold the encoded data (could be std::deque, std::pmr::vector, std::array, ...)
     auto data = std::vector<std::byte>{};
 
-    // Encoding
+    // Encoding (sender side)
     auto enc  = make_encoder(data);
-    using namespace std::string_view_literals;
-    enc(2, 3.14, "Hello, World!"sv);
+    if(!enc(2, 3.14, "Hello, World!"sv)){
+        std::exit(1);
+    }
 
     // Emulate transfer of data buffer
     auto trasmitted_data = data;
 
-    // Decoding
-    auto dec = make_decoder(trasmitted_data);
+    // Declare variables to hold the decoded data (receiver side)
     int  a;
     double b;
     std::string c;
-    dec(a, b, c);
+
+    // Decoding
+    auto dec = make_decoder(trasmitted_data);
+    if(!dec(a, b, c)){
+        std::exit(1);
+    }
 
     assert(a == 2);
     assert(b == 3.14);
@@ -154,7 +160,7 @@ int main() {
     // Declare data
     auto data = std::vector<std::byte>{};
 
-    auto a0 = AllCborMajorsExample{
+    auto obj1 = AllCborMajorsExample{
         .a0 = 42,  // +42
         .a1 = 42,  // -42 (implicit conversion to negative)
         .a  = -42, // -42 (integer could be +/-)
@@ -170,7 +176,7 @@ int main() {
 
     // Encoding
     auto enc  = make_encoder(data);
-    auto result = enc(a0);
+    auto result = enc(obj1);
     if (!result) {
         std::cerr << "Failed to encode A" << status_message(result.error()) << std::endl;
         return 1;
@@ -178,30 +184,30 @@ int main() {
 
     // Decoding
     auto                 dec = make_decoder(data);
-    AllCborMajorsExample a1;
-    result = dec(a1);
+    AllCborMajorsExample obj2;
+    result = dec(obj2);
     if (!result) {
         std::cerr << "Failed to decode A: " << status_message(result.error()) << std::endl;
         return 1;
     }
 
-    assert(a0.a0 == a1.a0);
-    assert(a0.a1 == a1.a1);
-    assert(a0.a == a1.a);
-    assert(a0.b == a1.b);
-    assert(a0.c == a1.c);
-    assert(a0.d == a1.d);
-    assert(a0.e == a1.e);
-    assert(a0.f.a == a1.f.a);
-    assert(a0.g == a1.g);
-    assert(a0.h == a1.h);
-    assert(a0.i == a1.i);
-    assert(a0.j == a1.j);
+    assert(obj1.a0 == obj2.a0);
+    assert(obj1.a1 == obj2.a1);
+    assert(obj1.a == obj2.a);
+    assert(obj1.b == obj2.b);
+    assert(obj1.c == obj2.c);
+    assert(obj1.d == obj2.d);
+    assert(obj1.e == obj2.e);
+    assert(obj1.f.a == obj2.f.a);
+    assert(obj1.g == obj2.g);
+    assert(obj1.h == obj2.h);
+    assert(obj1.i == obj2.i);
+    assert(obj1.j == obj2.j);
     return 0;
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a error, e.g invalid_major_type_for_*. An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -253,8 +259,8 @@ int main() {
 
     // Decoding - supporting multiple versions
     using variant = std::variant<v1::UserProfile, v2::UserProfile>;
-    auto    dec = make_decoder(data);
     variant user;
+    auto    dec = make_decoder(data);
     auto    status = dec(user);
     if (!status) {
         std::cerr << "Decoding status: " << status_message(status.error()) << std::endl;
@@ -347,7 +353,7 @@ int main() {
 - `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
 - Options for encoder/decoder, such as index tracking for resuming decoding.
 - CDDL support for schema and custom data definitions.
-- Performance tuning options, such as disabling some checks and using a more compact encoding.
+- TODO: Performance tuning options, such as disabling some checks and non-standard encodins.
 - TODO: Streaming support via API adapter using the return value of an incomplete decode.
 - TODO: `unique_ptr` support.
 - TODO: `shared_ptr` support.
@@ -396,9 +402,7 @@ struct DynamicTagged {
 ```
 
 ## 🔄 Automatic Reflection
-
-> [!NOTE]
-> Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
+ Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
 
 ```cpp
 template <size_t N> struct A0 {
@@ -414,6 +418,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
+This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. 
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:

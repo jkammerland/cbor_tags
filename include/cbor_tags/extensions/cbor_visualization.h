@@ -491,7 +491,6 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if (options.check_tstr_utf8) {
             throw std::runtime_error("UTF-8 check not implemented");
         }
-        fmt::print("DEBUG: {:02x}\n", fmt::join(range, ""));
         fmt::format_to(std::back_inserter(output_buffer), "\"{}\"", fmt::join(char_view, ""));
     }
 
