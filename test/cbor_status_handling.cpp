@@ -183,4 +183,19 @@ TEST_SUITE("Open objects - wrap as etc") {
     }
 }
 
-// TEST_SUITE("Decode the right thing") {}
+TEST_SUITE("Try resume decoding") {
+    // TODO:
+    TEST_CASE("After variant tag no match, try to decode any" * doctest::skip()) {
+        auto data = std::vector<std::byte>{};
+        auto enc  = make_encoder(data);
+
+        enc(140_tag, wrap_as_array{1, 2});
+        fmt::print("data: {}\n", to_hex(data));
+
+        auto dec = make_decoder(data);
+        int  a;
+        auto c      = wrap_as_array{a};
+        auto result = dec(140_tag, c);
+        REQUIRE(result);
+    }
+}

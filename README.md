@@ -353,7 +353,7 @@ int main() {
 - `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
 - Options for encoder/decoder, such as index tracking for resuming decoding.
 - CDDL support for schema and custom data definitions.
-- TODO: Performance tuning options, such as disabling some checks and non-standard encodins.
+- TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
 - TODO: Streaming support via API adapter using the return value of an incomplete decode.
 - TODO: `unique_ptr` support.
 - TODO: `shared_ptr` support.
@@ -418,7 +418,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. 
+This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:100".
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
