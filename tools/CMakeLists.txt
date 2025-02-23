@@ -18,7 +18,10 @@ else()
 endif()
 
 # Define ranges as a space-separated string
-option(CBOR_TAGS_REFLECTION_RANGES "Ranges for reflection (format: start1:end1 start2:end2 ...)" "1:100")
+
+set(CBOR_TAGS_REFLECTION_RANGES
+    "1:100" # Default ranges, space-separated
+    CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2 ...)")
 foreach(RANGE ${CBOR_TAGS_REFLECTION_RANGES})
   if(NOT RANGE MATCHES "^\"?([0-9]+):([0-9]+)\"?$")
     message(FATAL_ERROR "Invalid range format: ${RANGE}. Expected format: start:end")
@@ -37,13 +40,13 @@ if(EXISTS "${RANGES_CACHE_FILE}")
   if(NOT "${CACHED_RANGES}" STREQUAL "${CBOR_TAGS_REFLECTION_RANGES}")
     file(REMOVE ${OUTPUT_HEADER_FILE})
     file(WRITE "${RANGES_CACHE_FILE}" "${CBOR_TAGS_REFLECTION_RANGES}")
-    message(STATUS "Reflection ranges changed [${CACHED_RANGES}] -> [${CBOR_TAGS_REFLECTION_RANGES}]")
+    message(STATUS "CBOR_TAGS_REFLECTION_RANGES: changed [${CACHED_RANGES}] -> [${CBOR_TAGS_REFLECTION_RANGES}]")
   else()
-    message(STATUS "Reflection ranges unchanged [${CBOR_TAGS_REFLECTION_RANGES}]")
+    message(STATUS "CBOR_TAGS_REFLECTION_RANGES: unchanged [${CBOR_TAGS_REFLECTION_RANGES}]")
   endif()
 else()
   file(WRITE "${RANGES_CACHE_FILE}" "${CBOR_TAGS_REFLECTION_RANGES}")
-  message(STATUS "Reflection ranges set [${CBOR_TAGS_REFLECTION_RANGES}]")
+  message(STATUS "CBOR_TAGS_REFLECTION_RANGES: set [${CBOR_TAGS_REFLECTION_RANGES}]")
 endif()
 
 # Generate the header

@@ -72,6 +72,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
+create_installation_target(cbor_tags)
 
 # Make ${PROJECT_NAME} depend on the generated header
 add_dependencies(${PROJECT_NAME} generate_reflection_module)
