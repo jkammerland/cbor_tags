@@ -1,38 +1,64 @@
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# Installation settings
-install(
-  TARGETS cbor_tags
-  EXPORT cbor_tags-targets
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  INCLUDES
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+function(create_installation_target TARGET_NAME)
+  if(NOT TARGET ${TARGET_NAME})
+    message(FATAL_ERROR "Target '${TARGET_NAME}' does not exist.")
+  endif()
 
-# Install headers
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  # Get the source directory for this target
+  get_target_property(TARGET_SOURCE_DIR ${TARGET_NAME} SOURCE_DIR)
+  
+  install(
+    TARGETS ${TARGET_NAME}
+    EXPORT ${TARGET_NAME}-targets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${TARGET_NAME})
 
-# Generate and install export file
-install(
-  EXPORT cbor_tags-targets
-  FILE cbor_tags-targets.cmake
-  NAMESPACE cbor_tags::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cbor_tags)
+  # Install headers to a target-specific include directory
+  install(DIRECTORY ${TARGET_SOURCE_DIR}/include/ 
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${TARGET_NAME})
 
-# Generate the version file
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/cbor_tags-config-version.cmake"
-  VERSION ${PROJECT_VERSION}
-  COMPATIBILITY SameMajorVersion)
+  # Check if project has config file
+  if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/include/${TARGET_NAME}/${TARGET_NAME}_config.h)
+    message(DEBUG "Found config file for target: ${TARGET_NAME}")
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/${TARGET_NAME}/${TARGET_NAME}_config.h
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${TARGET_NAME})
+  else()
+    message(DEBUG "No config file found for target: ${TARGET_NAME}")
+  endif()
 
-# Configure the dependencies string for config file
-string(JOIN "\n" CBOR_TAGS_PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
+  install(
+    EXPORT ${TARGET_NAME}-targets
+    FILE ${TARGET_NAME}-targets.cmake
+    NAMESPACE ${TARGET_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${TARGET_NAME})
 
-# Generate the config file
-configure_package_config_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/cbor_tags-config.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/cbor_tags-config.cmake"
-                              INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cbor_tags)
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}-config-version.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
 
-# Install config files
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cbor_tags-config.cmake" "${CMAKE_CURRENT_BINARY_DIR}/cbor_tags-config-version.cmake" DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cbor_tags)
+  string(JOIN "\n" ${TARGET_NAME}_PUBLIC_DEPENDENCIES ${${TARGET_NAME}_PUBLIC_DEPENDENCIES})
+
+  # Look for config template in target's directory first, then project directory
+  if(EXISTS "${TARGET_SOURCE_DIR}/cmake/${TARGET_NAME}-config.cmake.in")
+    set(CONFIG_TEMPLATE "${TARGET_SOURCE_DIR}/cmake/${TARGET_NAME}-config.cmake.in")
+  else()
+    set(CONFIG_TEMPLATE "${PROJECT_SOURCE_DIR}/cmake/${TARGET_NAME}-config.cmake.in")
+  endif()
+
+  configure_package_config_file(
+    "${CONFIG_TEMPLATE}"
+    "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}-config.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${TARGET_NAME})
+
+  install(
+    FILES 
+      "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}-config.cmake"
+      "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}-config-version.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${TARGET_NAME})
+endfunction()

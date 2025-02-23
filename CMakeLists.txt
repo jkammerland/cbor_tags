@@ -5,6 +5,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Add option for debug mode
+option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
+
+# Configure a header file to pass the CMake setting to the source code
+configure_file(
+    "${PROJECT_SOURCE_DIR}/cbor_tags_config.h.in"
+    "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h"
+)
+
 # Check minimum compiler version
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/minimum_compiler.cmake)
 
@@ -17,7 +26,7 @@ if(CBOR_TAGS_USE_DEV_SETTINGS)
 endif()
 
 # add tools - reflection module generator - makes cbor_reflection_impl.h
-option(CBOR_TAGS_BUILD_TOOLS "Build tools" ON)
+option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" ON)
 if(CBOR_TAGS_BUILD_TOOLS)
   add_subdirectory(tools)
 else()
@@ -29,7 +38,7 @@ endif()
 
 # THE LIBRARY
 add_library(${PROJECT_NAME} INTERFACE)
-target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}> )
 
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
@@ -63,6 +72,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
+create_installation_target(cbor_tags)
 
 # Make ${PROJECT_NAME} depend on the generated header
 add_dependencies(${PROJECT_NAME} generate_reflection_module)
@@ -91,3 +101,6 @@ if(CBOR_TAGS_TIDY_TARGET)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/create_tidy_target.cmake)
   create_tidy_target(${CMAKE_CURRENT_SOURCE_DIR}/test)
 endif()
+
+include (${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)
+print_options(DEBUG "^CBOR_TAGS")

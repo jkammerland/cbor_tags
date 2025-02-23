@@ -1,0 +1,48 @@
+function(print_options log_level filter)
+    get_cmake_property(variables CACHE_VARIABLES)
+
+    message(${log_level} "\n=== CMake Options (Filter: ${filter}) ===\n")
+
+    set(max_length 0)
+    set(max_value_length 0)
+    foreach(var ${variables})
+        get_property(type CACHE ${var} PROPERTY TYPE)
+        if(${type} STREQUAL "BOOL" AND var MATCHES "${filter}")
+            string(LENGTH "${var}" var_length)
+            if(var_length GREATER max_length)
+                set(max_length ${var_length})
+            endif()
+        endif()
+    endforeach()
+
+    foreach(var ${variables})
+        get_property(type CACHE ${var} PROPERTY TYPE)
+
+        if(${type} STREQUAL "BOOL" AND var MATCHES "${filter}")
+            get_property(helpstring CACHE ${var} PROPERTY HELPSTRING)
+
+            if(var STREQUAL "CBOR_TAGS_REFLECTION_RANGES")
+                message(${log_level} "${var} [${${var}}] : Space-separated list of possible struct sizes (format: start1:end1 start2:end2 ...)")
+                continue()
+            endif()
+
+            set(extra_space "")
+            if(${${var}})
+                set(value "ON")
+                set(extra_space " ")
+            else()
+                set(value "OFF")
+            endif()
+
+            string(LENGTH "${var}" var_length)
+            string(LENGTH "${value}" value_length)
+            math(EXPR var_padding "${max_length} - ${var_length}")
+            string(REPEAT " " ${var_padding} var_pad)
+            if(helpstring)
+                message(${log_level} "${var}${var_pad} [${value}]${extra_space} : ${helpstring}")
+            endif()
+        endif()
+    endforeach()
+
+    message(${log_level} "\n==================\n")
+endfunction()

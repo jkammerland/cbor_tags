@@ -19,6 +19,8 @@
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
+#include "cbor_tags/cbor_tags_config.h"
+
 #include <optional>
 #include <ranges>
 #include <span>
@@ -27,6 +29,9 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#ifdef CBOR_TAGS_DEBUG
+#include <iostream>
+#endif
 
 namespace cbor::tags {
 
@@ -57,9 +62,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return unexpected<decltype(collect_status.result)>(collect_status.result);
             }
             return expected_type{};
-        } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::exception &) {
-            // std::rethrow_exception(std::current_exception());   // for debugging, this handling is TODO!
-            return unexpected<status_code>(status_code::error); // placeholder
+        } catch (const std::bad_alloc &) {
+            return unexpected<status_code>(status_code::out_of_memory);
+        } catch ([[maybe_unused]] const std::exception &e) {
+#ifdef CBOR_TAGS_DEBUG
+            std::cerr << "Unexpected exception: " << e.what() << std::endl;
+#endif
+            return unexpected<status_code>(status_code::error); // TODO: placeholder
         }
     }
 

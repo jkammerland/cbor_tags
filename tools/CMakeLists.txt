@@ -18,10 +18,11 @@ else()
 endif()
 
 # Define ranges as a space-separated string
-set(REFLECTION_RANGES
+
+set(CBOR_TAGS_REFLECTION_RANGES
     "1:100" # Default ranges, space-separated
     CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2 ...)")
-foreach(RANGE ${REFLECTION_RANGES})
+foreach(RANGE ${CBOR_TAGS_REFLECTION_RANGES})
   if(NOT RANGE MATCHES "^\"?([0-9]+):([0-9]+)\"?$")
     message(FATAL_ERROR "Invalid range format: ${RANGE}. Expected format: start:end")
   endif()
@@ -33,25 +34,25 @@ set(OUTPUT_HEADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../include/cbor_tags/cbor_re
 # Ensure the output directory exists
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../include/cbor_tags")
 
-# Handle REFLECTION_RANGES changes
+# Handle CBOR_TAGS_REFLECTION_RANGES changes
 if(EXISTS "${RANGES_CACHE_FILE}")
   file(READ "${RANGES_CACHE_FILE}" CACHED_RANGES)
-  if(NOT "${CACHED_RANGES}" STREQUAL "${REFLECTION_RANGES}")
+  if(NOT "${CACHED_RANGES}" STREQUAL "${CBOR_TAGS_REFLECTION_RANGES}")
     file(REMOVE ${OUTPUT_HEADER_FILE})
-    file(WRITE "${RANGES_CACHE_FILE}" "${REFLECTION_RANGES}")
-    message(STATUS "Reflection ranges changed [${CACHED_RANGES}] -> [${REFLECTION_RANGES}]")
+    file(WRITE "${RANGES_CACHE_FILE}" "${CBOR_TAGS_REFLECTION_RANGES}")
+    message(STATUS "CBOR_TAGS_REFLECTION_RANGES: changed [${CACHED_RANGES}] -> [${CBOR_TAGS_REFLECTION_RANGES}]")
   else()
-    message(STATUS "Reflection ranges unchanged [${REFLECTION_RANGES}]")
+    message(STATUS "CBOR_TAGS_REFLECTION_RANGES: unchanged [${CBOR_TAGS_REFLECTION_RANGES}]")
   endif()
 else()
-  file(WRITE "${RANGES_CACHE_FILE}" "${REFLECTION_RANGES}")
-  message(STATUS "Reflection ranges set [${REFLECTION_RANGES}]")
+  file(WRITE "${RANGES_CACHE_FILE}" "${CBOR_TAGS_REFLECTION_RANGES}")
+  message(STATUS "CBOR_TAGS_REFLECTION_RANGES: set [${CBOR_TAGS_REFLECTION_RANGES}]")
 endif()
 
 # Generate the header
 add_custom_command(
   OUTPUT ${OUTPUT_HEADER_FILE}
-  COMMAND reflection_module_generator ${REFLECTION_RANGES}
+  COMMAND reflection_module_generator ${CBOR_TAGS_REFLECTION_RANGES}
   DEPENDS reflection_module_generator
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../include/cbor_tags
   COMMENT "Generating reflection module header")
@@ -69,6 +70,6 @@ install(
 # Optional: Keep the manual regeneration target
 add_custom_target(
   run_reflection_module_generator
-  COMMAND reflection_module_generator ${REFLECTION_RANGES}
+  COMMAND reflection_module_generator ${CBOR_TAGS_REFLECTION_RANGES}
   DEPENDS reflection_module_generator
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../include/cbor_tags)
