@@ -29,7 +29,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
-#ifdef CBOR_TAGS_DEBUG
+#if CBOR_TAGS_DEBUG == 1
 #include <iostream>
 #endif
 
@@ -65,9 +65,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } catch (const std::bad_alloc &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch ([[maybe_unused]] const std::exception &e) {
-#ifdef CBOR_TAGS_DEBUG
-            std::cerr << "Unexpected exception: " << e.what() << std::endl;
-#endif
+            debug::println("Caught exception: {}", e.what());
             return unexpected<status_code>(status_code::error); // TODO: placeholder
         }
     }
