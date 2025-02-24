@@ -22,6 +22,7 @@ namespace cbor::tags {
 enum class status_code : uint8_t {
     success = 0,
     incomplete,
+    unexpected_group_size,
     out_of_memory,
     error,
     begin_no_match_decoding,
@@ -46,6 +47,7 @@ constexpr std::string_view status_message(status_code s) {
     switch (s) {
     case status_code::success: return "Success";
     case status_code::incomplete: return "Unexpected end of CBOR data: buffer incomplete";
+    case status_code::unexpected_group_size: return "Unexpected group size in CBOR data(e.g array or map size mismatch)";
     case status_code::out_of_memory: return "Unexpected memory allocation failure during CBOR processing";
     case status_code::error: return "Unexpected CBOR processing error";
     case status_code::begin_no_match_decoding: return "Unexpected error at start of CBOR decoding: invalid initial byte";

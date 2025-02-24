@@ -29,9 +29,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-#if CBOR_TAGS_DEBUG == 1
-#include <iostream>
-#endif
 
 namespace cbor::tags {
 
@@ -730,24 +727,19 @@ template <typename T> struct cbor_header_decoder {
     constexpr auto validate_size(major_type expectedMajor, std::uint64_t expectedSize) {
         auto additionalInfo = get_and_validate_header(expectedMajor);
         auto size           = detail::underlying<T>(this).decode_unsigned(additionalInfo);
-        if (size != expectedSize) {
-            throw std::runtime_error("Invalid container size");
-        }
+        return (size == expectedSize) ? status_code::success : status_code::unexpected_group_size;
     }
 
-    constexpr status_code decode(as_array value) {
-        validate_size(major_type::Array, value.size_);
-        return status_code::success;
-    }
+    constexpr status_code                           decode(as_array value) { return validate_size(major_type::Array, value.size_); }
     template <typename... Ts> constexpr status_code decode(wrap_as_array<Ts...> value) {
-        validate_size(major_type::Array, value.size_);
+        auto result = validate_size(major_type::Array, value.size_);
+        if (result != status_code::success) {
+            return result;
+        }
         return std::apply([this](auto &&...args) { return detail::underlying<T>(this).applier(std::forward<decltype(args)>(args)...); },
                           value.values_);
     }
-    constexpr status_code decode(as_map value) {
-        validate_size(major_type::Map, value.size_);
-        return status_code::success;
-    }
+    constexpr status_code decode(as_map value) { return validate_size(major_type::Map, value.size_); }
 };
 
 template <typename T> struct enum_decoder {
