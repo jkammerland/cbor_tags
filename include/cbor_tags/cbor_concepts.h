@@ -69,6 +69,10 @@ struct as_tag_any {
     std::uint64_t tag;
 };
 
+// TODO:
+struct array_as_map;
+struct map_as_array;
+
 template <typename T>
 concept IsTextHeader = std::is_same_v<T, as_text_any>;
 
@@ -133,7 +137,19 @@ template <typename T>
 concept IsInteger = IsUnsigned<T> || IsSigned<T> || IsNegative<T>;
 
 template <typename T>
-concept IsTextString = IsTextHeader<T> || requires(T t) {
+concept IsView = std::ranges::view<T>;
+
+template <typename T>
+concept IsConstView = IsView<T> && std::is_const_v<typename T::element_type>;
+
+template <typename T>
+concept IsConstBinaryView = IsConstView<T> && std::is_same_v<typename T::value_type, std::byte>;
+
+template <typename T>
+concept IsConstTextView = IsConstView<T> && std::is_same_v<typename T::value_type, char>;
+
+template <typename T>
+concept IsTextString = IsTextHeader<T> || IsConstTextView<T> || requires(T t) {
     requires std::is_signed_v<typename T::value_type>;
     requires std::is_integral_v<typename T::value_type>;
     requires sizeof(typename T::value_type) == 1;
@@ -141,7 +157,8 @@ concept IsTextString = IsTextHeader<T> || requires(T t) {
 };
 
 template <typename T>
-concept IsBinaryString = IsBinaryHeader<T> || std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte>;
+concept IsBinaryString =
+    IsBinaryHeader<T> || std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<T>>, std::byte> || IsConstBinaryView<T>;
 
 template <typename T>
 concept IsString = IsTextString<T> || IsBinaryString<T>;
@@ -186,7 +203,7 @@ concept IsTuple = requires {
 };
 
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
 
 template <std::uint64_t T> struct static_tag;
 template <IsUnsigned T> struct dynamic_tag;

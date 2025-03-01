@@ -132,12 +132,14 @@ struct binary_tag_view {
     std::span<const std::byte> data;
 };
 
-template <std::ranges::input_range R> struct binary_range_view {
+template <std::ranges::input_range R, typename Byte = const std::byte>
+    requires(std::is_same_v<std::remove_cvref_t<Byte>, std::byte>)
+struct bstr_view : std::ranges::view_interface<bstr_view<R, Byte>> {
+    using value_type   = std::byte;
+    using element_type = Byte;
+
     R range;
 
-    constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<const std::byte>(c); });
-    }
     constexpr auto begin() const {
         auto v = view();
         return std::ranges::begin(v);
@@ -148,14 +150,20 @@ template <std::ranges::input_range R> struct binary_range_view {
     }
 
     operator std::vector<std::byte>() const { return {range.begin(), range.end()}; }
+
+  private:
+    constexpr auto view() const {
+        return range | std::views::transform([](const auto &c) { return static_cast<Byte>(c); });
+    }
 };
 
-template <std::ranges::input_range R, typename Char = const char> struct char_range_view {
-    R range;
+template <std::ranges::input_range R, typename Char = const char>
+    requires(std::is_same_v<std::remove_cvref_t<Char>, char>)
+struct tstr_view : std::ranges::view_interface<tstr_view<R, Char>> {
+    using value_type   = char;
+    using element_type = Char;
 
-    constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<Char>(c); });
-    }
+    R range;
 
     constexpr auto begin() const {
         auto v = view();
@@ -167,35 +175,24 @@ template <std::ranges::input_range R, typename Char = const char> struct char_ra
     }
 
     constexpr operator std::string() const { return {begin(), end()}; }
-};
 
-template <std::ranges::input_range R, typename Byte = const std::byte> struct byte_range_view {
-    R range;
-
+  private:
     constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<Byte>(c); });
+        return range | std::views::transform([](const auto &c) { return static_cast<Char>(c); });
     }
-
-    constexpr auto begin() const {
-        auto v = view();
-        return std::ranges::begin(v);
-    }
-    constexpr auto end() const {
-        auto v = view();
-        return std::ranges::end(v);
-    }
-
-    constexpr operator std::vector<std::byte>() const { return {begin(), end()}; }
 };
 
+// TODO: Not implemented!
 template <std::ranges::input_range R> struct binary_array_range_view {
     R range;
 };
 
+// TODO: Not implemented!
 template <std::ranges::input_range R> struct binary_map_range_view {
     R range;
 };
 
+// TODO: Not implemented!
 template <std::ranges::input_range R> struct binary_tag_range_view {
     std::uint64_t tag;
     R             range;
@@ -205,7 +202,7 @@ using variant_contiguous = std::variant<std::uint64_t, std::int64_t, std::span<c
                                         binary_map_view, binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename R>
-using variant_ranges = std::variant<std::uint64_t, std::int64_t, binary_range_view<R>, char_range_view<R>, binary_array_range_view<R>,
+using variant_ranges = std::variant<std::uint64_t, std::int64_t, bstr_view<R>, tstr_view<R>, binary_array_range_view<R>,
                                     binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename T> using subrange  = std::ranges::subrange<typename detail::iterator_type<T>::type>;

@@ -1,9 +1,11 @@
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "test_util.h"
 
 #include <array>
 #include <cstddef>
+#include <deque>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <string_view>
@@ -63,16 +65,16 @@ TEST_CASE("Test view contiguous, bstr") {
     CHECK_EQ(m1, m2);
 }
 
-TEST_CASE("Test view contigous span<std::byte>, non const") {
-    std::vector<std::byte> bstr;
-    std::generate_n(std::back_inserter(bstr), 10, []() { return static_cast<std::byte>(rand()); });
+// TODO:
+TEST_CASE("Test view non contiguous data" * doctest::skip()) {
+    auto        data = std::deque<char>{};
+    auto        enc  = make_encoder(data);
+    std::string str{"hello"};
+    REQUIRE(enc(str));
 
-    auto data = std::vector<std::byte>{};
-    auto enc  = make_encoder(data);
-    REQUIRE(enc(bstr));
-
-    std::span<std::byte> value;
-    auto                 dec = make_decoder(data);
-    REQUIRE(dec(value));
-    CHECK(value.size() == bstr.size());
+    // auto dec    = make_decoder(data);
+    // auto view   = tstr_view<decltype(data)>{};
+    // auto result = dec(view);
+    // REQUIRE(result);
+    // CHECK(std::ranges::equal(view, str));
 }

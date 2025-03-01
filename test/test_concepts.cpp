@@ -50,6 +50,8 @@ TEST_CASE("Test IsTextString concept") {
     static_assert(IsTextString<std::string>);
     static_assert(IsTextString<std::string_view>);
     static_assert(IsTextString<std::basic_string_view<char>>);
+    static_assert(IsConstTextView<tstr_view<std::deque<uint8_t>>>);
+    static_assert(IsTextString<tstr_view<std::deque<std::byte>>>);
     static_assert(!IsTextString<std::basic_string_view<std::byte>>);
     static_assert(!IsTextString<std::vector<char>>);
     static_assert(!IsTextString<std::span<char>>);
@@ -63,6 +65,8 @@ TEST_CASE("Test IsBinaryString concept") {
     static_assert(IsBinaryString<std::array<std::byte, 5>>);
     static_assert(IsBinaryString<std::span<const std::byte>>);
     static_assert(IsBinaryString<std::span<std::byte>>);
+    static_assert(IsConstBinaryView<bstr_view<std::list<char>>>);
+    static_assert(IsBinaryString<bstr_view<std::vector<char>>>);
     static_assert(!IsBinaryString<std::vector<uint8_t>>);
     static_assert(!IsBinaryString<std::span<const uint8_t>>);
     static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
@@ -371,6 +375,13 @@ TEST_CASE("IsAggregate<T>") {
     [[maybe_unused]] auto e = to_tuple(E{});
 }
 
+TEST_CASE_TEMPLATE("Is View positive", T, std::string_view, std::span<char>, tstr_view<std::deque<char>>, bstr_view<std::vector<std::byte>>,
+                   std::span<double>) {
+    CHECK(IsView<T>);
+}
+
+TEST_CASE_TEMPLATE("Is View negative", T, int, double, std::vector<char>, std::deque<std::byte>, std::string) { CHECK(!IsView<T>); }
+
 struct TAGMAJORTYPE {
     static constexpr std::uint64_t cbor_tag = 123;
     int                            a;
@@ -518,7 +529,7 @@ TEST_CASE("Reflection into tuple") {
         char   c;
     };
 
-    A a{1, 3.14, 'a'};
+    A a{.a = 1, .b = 3.14, .c = 'a'};
 
     auto &&t = to_tuple(a);
 
@@ -546,7 +557,7 @@ TEST_CASE("Reflection into tuple") {
         std::string  k;
     };
 
-    Eleven e{1, 2, 3, 4, 5, 6, {7, 8}, 9, 10, 11, "12"};
+    Eleven e{.a = 1, .b = 2, .c = 3, .d = 4, .e = 5, .f = 6, .c1 = {.g = 7, .h = 8}, .h = 9, .i = 10, .j = 11, .k = "12"};
 
     auto &&t2 = to_tuple(e);
     CHECK_EQ(std::get<0>(t2), 1);

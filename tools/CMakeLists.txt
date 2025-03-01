@@ -20,7 +20,7 @@ endif()
 # Define ranges as a space-separated string
 
 set(CBOR_TAGS_REFLECTION_RANGES
-    "1:100" # Default ranges, space-separated
+    "1:24" # Default ranges, space-separated
     CACHE STRING "Ranges for reflection (format: start1:end1 start2:end2 ...)")
 foreach(RANGE ${CBOR_TAGS_REFLECTION_RANGES})
   if(NOT RANGE MATCHES "^\"?([0-9]+):([0-9]+)\"?$")
