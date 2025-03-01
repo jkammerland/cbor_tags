@@ -7,10 +7,12 @@
 #include "test_util.h"
 
 #include <cstddef>
+#include <deque>
 #include <doctest/doctest.h>
 #include <fmt/base.h>
 #include <map>
 #include <memory_resource>
+#include <string_view>
 #include <type_traits>
 
 using namespace cbor::tags;
@@ -180,6 +182,35 @@ TEST_SUITE("Open objects - wrap as etc") {
         REQUIRE(result);
         CHECK_EQ(a, 1);
         CHECK_EQ(b, 2);
+    }
+}
+
+TEST_SUITE("Views errors") {
+    TEST_CASE_TEMPLATE("decode contiguous view on non-contiguous data [bstr]", T, std::span<std::byte>, std::span<const std::byte>,
+                       std::basic_string<std::byte>) {
+        auto        data = std::deque<std::byte>{};
+        auto        enc  = make_encoder(data);
+        std::string str{"hello"};
+        REQUIRE(enc(str));
+
+        auto dec    = make_decoder(data);
+        auto view   = T{};
+        auto result = dec(view);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
+    }
+
+    TEST_CASE_TEMPLATE("decode contiguous view on non-contiguous data [tstr]", T, std::string_view) {
+        auto        data = std::deque<std::byte>{};
+        auto        enc  = make_encoder(data);
+        std::string str{"hello"};
+        REQUIRE(enc(str));
+
+        auto dec    = make_decoder(data);
+        auto view   = T{};
+        auto result = dec(view);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
     }
 }
 

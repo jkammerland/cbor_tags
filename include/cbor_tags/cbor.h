@@ -25,6 +25,8 @@ enum class status_code : uint8_t {
     unexpected_group_size,
     out_of_memory,
     error,
+    contiguous_view_on_non_contiguous_data,
+    invalid_utf8_sequence,
     begin_no_match_decoding,
     no_match_for_tag,
     no_match_for_tag_simple_on_buffer,
@@ -50,6 +52,8 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::unexpected_group_size: return "Unexpected group size in CBOR data(e.g array or map size mismatch)";
     case status_code::out_of_memory: return "Unexpected memory allocation failure during CBOR processing";
     case status_code::error: return "Unexpected CBOR processing error";
+    case status_code::contiguous_view_on_non_contiguous_data: return "Attempt to create a contiguous view on non-contiguous data";
+    case status_code::invalid_utf8_sequence: return "Invalid UTF-8 sequence in text string";
     case status_code::begin_no_match_decoding: return "Unexpected error at start of CBOR decoding: invalid initial byte";
     case status_code::no_match_for_tag: return "Unexpected CBOR tag: no matching decoder found";
     case status_code::no_match_for_tag_simple_on_buffer: return "Unexpected CBOR simple value tag: no matching decoder found";
@@ -146,11 +150,11 @@ template <std::ranges::input_range R> struct binary_range_view {
     operator std::vector<std::byte>() const { return {range.begin(), range.end()}; }
 };
 
-template <std::ranges::input_range R> struct char_range_view {
+template <std::ranges::input_range R, typename Char = const char> struct char_range_view {
     R range;
 
     constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<const char>(c); });
+        return range | std::views::transform([](const auto &c) { return static_cast<Char>(c); });
     }
 
     constexpr auto begin() const {
@@ -165,11 +169,11 @@ template <std::ranges::input_range R> struct char_range_view {
     constexpr operator std::string() const { return {begin(), end()}; }
 };
 
-template <std::ranges::input_range R> struct byte_range_view {
+template <std::ranges::input_range R, typename Byte = const std::byte> struct byte_range_view {
     R range;
 
     constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<const std::byte>(c); });
+        return range | std::views::transform([](const auto &c) { return static_cast<Byte>(c); });
     }
 
     constexpr auto begin() const {

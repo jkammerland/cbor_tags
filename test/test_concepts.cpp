@@ -62,6 +62,7 @@ TEST_CASE("Test IsBinaryString concept") {
     static_assert(IsBinaryString<std::vector<std::byte>>);
     static_assert(IsBinaryString<std::array<std::byte, 5>>);
     static_assert(IsBinaryString<std::span<const std::byte>>);
+    static_assert(IsBinaryString<std::span<std::byte>>);
     static_assert(!IsBinaryString<std::vector<uint8_t>>);
     static_assert(!IsBinaryString<std::span<const uint8_t>>);
     static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
@@ -581,7 +582,7 @@ TEST_CASE("to_tupple address") {
             char   c;
         };
 
-        A a{1, 3.14, 'a'};
+        A a{.a = 1, .b = 3.14, .c = 'a'};
 
         auto t = to_tuple(a);
 

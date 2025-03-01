@@ -47,7 +47,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using unexpected_type = typename Options::error_type;
     using options         = Options;
 
-    explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
+    explicit decoder(InputBuffer &data) : data_(data), reader_(data) {}
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
@@ -98,14 +98,19 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsBinaryString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
-        if (major == major_type::ByteString) {
-            auto bstring = decode_bstring(additionalInfo);
-            t            = T(bstring.begin(), bstring.end());
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            return status_code::no_match_for_bstr_on_buffer;
-        }
+            if (major == major_type::ByteString) {
+                std::is_const_v<typename T::value_type>;
+                auto bstring = decode_bstring(additionalInfo);
+                t            = T(bstring.begin(), bstring.end());
+            } else {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
 
-        return status_code::success;
+            return status_code::success;
+        }
     }
 
     template <IsTextString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
@@ -376,12 +381,48 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    constexpr status_code decode(std::string_view &value, major_type major, byte additionalInfo) {
-        if (major != major_type::TextString) {
-            return status_code::no_match_for_tstr_on_buffer;
+    constexpr status_code decode(std::span<std::byte> &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            if (major != major_type::ByteString) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            auto length = decode_unsigned(additionalInfo);
+            if (reader_.empty(data_, length - 1)) {
+                return status_code::incomplete;
+            }
+            value = std::span<std::byte>(reinterpret_cast<byte *>(&data_[reader_.position_]), length);
+            return status_code::success;
         }
-        value = decode_text(additionalInfo);
-        return status_code::success;
+    }
+
+    constexpr status_code decode(std::basic_string_view<std::byte> &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            if (major != major_type::ByteString) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            auto length = decode_unsigned(additionalInfo);
+            if (reader_.empty(data_, length - 1)) {
+                return status_code::incomplete;
+            }
+            value = std::basic_string_view<std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+            return status_code::success;
+        }
+    }
+
+    constexpr status_code decode(std::string_view &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            if (major != major_type::TextString) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            value = decode_text(additionalInfo);
+            return status_code::success;
+        }
     }
 
     template <IsCborMajor T> constexpr status_code decode(std::optional<T> &value, major_type major, byte additionalInfo) {
@@ -711,7 +752,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     // Internal reference, must be public, variadic friends only in c++26
-    const InputBuffer          &data_;
+    InputBuffer                &data_;
     detail::reader<InputBuffer> reader_;
 };
 
