@@ -9,19 +9,20 @@
 namespace cbor::tags::debug {
 struct ConfigConstants {
     static constexpr bool debug_enabled{static_cast<bool>(CBOR_TAGS_DEBUG)};
+    static constexpr bool using_stdexpected{false};
 };
 
-template <typename T, typename... Args> void print([[maybe_unused]] const T &fmt, [[maybe_unused]] const Args &...args) {
-#if CBOR_TAGS_DEBUG == 1
-    fmt::print(fmt::runtime(fmt), args...);
-#endif
+template <typename... Args> inline constexpr void print([[maybe_unused]] std::string_view fmt, [[maybe_unused]] const Args &...args) {
+    if constexpr (ConfigConstants::debug_enabled) {
+        fmt::print(fmt::runtime(fmt), args...);
+    }
 }
 
-template <typename T, typename... Args> void println([[maybe_unused]] const T &fmt, [[maybe_unused]] const Args &...args) {
-#if CBOR_TAGS_DEBUG == 1
-    print(fmt, args...);
-    print("\n");
-#endif
+template <typename... Args> inline constexpr void println([[maybe_unused]] std::string_view fmt, [[maybe_unused]] const Args &...args) {
+    if constexpr (ConfigConstants::debug_enabled) {
+        print(fmt, args...);
+        fmt::print("\n");
+    }
 }
 
 } // namespace cbor::tags::debug

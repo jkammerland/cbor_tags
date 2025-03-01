@@ -6,6 +6,7 @@ set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 
 cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 cpmaddpackage("gh:catchorg/Catch2@3.8.0")
+cpmaddpackage("gh:martinus/nanobench@4.3.11")
 
 # add executables more if needed
 add_executable(${PROJECT_NAME})
