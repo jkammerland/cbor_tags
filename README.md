@@ -405,13 +405,13 @@ struct DynamicTagged {
  Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
 
 ```cpp
-template <size_t N> struct A0 {
+template <size_t N> struct A {
     static_tag<N> cbor_tag;
     std::string name;
 };
 
-using A42 = A0<42>;
-const auto &tuple = to_tuple(A42{{/*42*/}, "John Doe"});
+const auto a42 = A<42>{{/*42*/}, "John Doe"};
+const auto &tuple = to_tuple(a42);
 
 auto enc = make_encoder(...);
 std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
