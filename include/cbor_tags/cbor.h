@@ -132,11 +132,9 @@ struct binary_tag_view {
     std::span<const std::byte> data;
 };
 
-template <std::ranges::input_range R, typename Byte = const std::byte>
-    requires(std::is_same_v<std::remove_cvref_t<Byte>, std::byte>)
-struct bstr_view : std::ranges::view_interface<bstr_view<R, Byte>> {
+template <std::ranges::input_range R> struct bstr_view : std::ranges::view_interface<bstr_view<R>> {
     using value_type   = std::byte;
-    using element_type = Byte;
+    using element_type = const std::byte;
 
     R range;
 
@@ -153,15 +151,13 @@ struct bstr_view : std::ranges::view_interface<bstr_view<R, Byte>> {
 
   private:
     constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<Byte>(c); });
+        return range | std::views::transform([](const auto &c) { return static_cast<element_type>(c); });
     }
 };
 
-template <std::ranges::input_range R, typename Char = const char>
-    requires(std::is_same_v<std::remove_cvref_t<Char>, char>)
-struct tstr_view : std::ranges::view_interface<tstr_view<R, Char>> {
+template <std::ranges::input_range R> struct tstr_view : std::ranges::view_interface<tstr_view<R>> {
     using value_type   = char;
-    using element_type = Char;
+    using element_type = const char;
 
     R range;
 
@@ -178,7 +174,7 @@ struct tstr_view : std::ranges::view_interface<tstr_view<R, Char>> {
 
   private:
     constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<Char>(c); });
+        return range | std::views::transform([](const auto &c) { return static_cast<element_type>(c); });
     }
 };
 

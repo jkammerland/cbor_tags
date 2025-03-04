@@ -25,6 +25,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -38,11 +39,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
-    using size_type       = typename InputBuffer::size_type;
-    using buffer_byte_t   = typename InputBuffer::value_type;
-    using byte            = std::byte;
-    using iterator_t      = typename detail::iterator_type<InputBuffer>::type;
-    using subrange        = std::ranges::subrange<iterator_t>;
+    using size_type     = typename InputBuffer::size_type;
+    using buffer_byte_t = typename InputBuffer::value_type;
+    using byte          = std::byte;
+
+    using iterator_t  = std::ranges::iterator_t<const InputBuffer>;
+    using subrange    = std::ranges::subrange<iterator_t>;
+    using bstr_view_t = bstr_view<subrange>;
+    using tstr_view_t = tstr_view<subrange>;
+
     using expected_type   = typename Options::return_type;
     using unexpected_type = typename Options::error_type;
     using options         = Options;
@@ -106,7 +111,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (major == major_type::ByteString) {
                 std::is_const_v<typename T::value_type>;
                 auto bstring = decode_bstring(additionalInfo);
-                t            = T(bstring.begin(), bstring.end());
+                if constexpr (std::is_same_v<T, decltype(bstring)>) {
+                    t = std::move(bstring);
+                } else {
+                    t = T(bstring.begin(), bstring.end());
+                }
             } else {
                 return status_code::no_match_for_bstr_on_buffer;
             }
@@ -556,7 +565,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(simple &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-
             return status_code::no_match_for_simple_on_buffer;
         } else if (additionalInfo < static_cast<byte>(24)) {
             value = simple{static_cast<simple::value_type>(additionalInfo)};
@@ -571,7 +579,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename T> constexpr status_code decode(T &value) {
         if (reader_.empty(data_)) {
-
             return status_code::incomplete;
         }
         const auto [majorType, additionalInfo] = read_initial_byte();
@@ -605,16 +612,25 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto it           = std::next(reader_.position_, length);
             auto result       = subrange(reader_.position_, it);
             reader_.position_ = it;
-            return bstr_view<decltype(result), const byte>{.range = result};
+            return bstr_view_t{.range = result};
         }
     }
 
     constexpr auto decode_text(byte additionalInfo) {
-        auto bytes = decode_bstring(additionalInfo);
+        auto length = decode_unsigned(additionalInfo);
+        if (reader_.empty(data_, length - 1)) {
+            throw std::runtime_error("Unexpected end of input");
+        }
+
         if constexpr (IsContiguous<InputBuffer>) {
-            return std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+            auto result = std::string_view(reinterpret_cast<const char *>(&data_[reader_.position_]), length);
+            reader_.position_ += length;
+            return result;
         } else {
-            return tstr_view<decltype(bytes.range), const char>{.range = bytes.range};
+            auto it           = std::next(reader_.position_, length);
+            auto result       = subrange(reader_.position_, it);
+            reader_.position_ = it;
+            return tstr_view_t{.range = result};
         }
     }
 
