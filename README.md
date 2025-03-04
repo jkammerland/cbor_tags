@@ -64,7 +64,7 @@ int main() {
     // Encoding (sender side)
     auto enc  = make_encoder(data);
     if(!enc(2, 3.14, "Hello, World!"sv)){
-        std::exit(1);
+        return 1;
     }
 
     // Emulate transfer of data buffer
@@ -78,7 +78,7 @@ int main() {
     // Decoding
     auto dec = make_decoder(trasmitted_data);
     if(!dec(a, b, c)){
-        std::exit(1);
+        return 1;
     }
 
     assert(a == 2);
@@ -405,15 +405,16 @@ struct DynamicTagged {
  Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
 
 ```cpp
-template <size_t N> struct A0 {
-    static_tag<N> cbor_tag;
-    std::string name;
+struct A42 {
+    static_tag<42> cbor_tag;
+    std::string    name;
 };
 
-using A42 = A0<42>;
-const auto &tuple = to_tuple(A42{{/*42*/}, "John Doe"});
+const auto  a42   = A42{{/*42*/}, "John Doe"};
+const auto &tuple = to_tuple(a42);
 
-auto enc = make_encoder(...);
+std::vector<uint8_t> buffer;
+auto                 enc = make_encoder(buffer);
 std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
@@ -550,7 +551,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.7.4 # or specify a particular commit/tag
+  GIT_TAG v0.7.5 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

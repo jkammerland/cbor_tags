@@ -3,11 +3,14 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "test_util.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
+#include <list>
 #include <string_view>
 
 using namespace cbor::tags;
@@ -65,16 +68,52 @@ TEST_CASE("Test view contiguous, bstr") {
     CHECK_EQ(m1, m2);
 }
 
-// TODO:
-TEST_CASE("Test view non contiguous data" * doctest::skip()) {
-    auto        data = std::deque<char>{};
+TEST_CASE("Test view non contiguous data tstr") {
+    auto        data = std::deque<uint8_t>{};
     auto        enc  = make_encoder(data);
     std::string str{"hello"};
     REQUIRE(enc(str));
 
-    // auto dec    = make_decoder(data);
-    // auto view   = tstr_view<decltype(data)>{};
-    // auto result = dec(view);
-    // REQUIRE(result);
-    // CHECK(std::ranges::equal(view, str));
+    auto dec    = make_decoder(data);
+    auto view   = decltype(dec)::tstr_view_t{};
+    auto result = dec(view);
+    REQUIRE(result);
+    CHECK(std::ranges::equal(view, str));
+
+    // Check that view is of original memory
+    data.back() = 'x';
+    CHECK_EQ(std::string(view), "hellx");
+}
+
+TEST_CASE("Test view non contiguous data bstr") {
+    auto                   data = std::deque<char>{};
+    auto                   enc  = make_encoder(data);
+    std::vector<std::byte> vec{std::byte(0x01), std::byte(0x02), std::byte(0x03)};
+    REQUIRE(enc(vec));
+
+    auto dec    = make_decoder(data);
+    auto view   = decltype(dec)::bstr_view_t{};
+    auto result = dec(view);
+    REQUIRE(result);
+
+    CHECK(std::equal(view.begin(), view.end(), vec.begin()));
+}
+
+TEST_CASE_TEMPLATE("Test big data chunk view", T, std::deque<char>, std::list<uint8_t>) {
+    auto                   data = T{};
+    auto                   enc  = make_encoder(data);
+    std::vector<std::byte> vec;
+
+    std::ranges::generate_n(std::back_inserter(vec), 10000, []() { return static_cast<std::byte>(std::rand() % 256); });
+    REQUIRE(enc(vec));
+
+    auto dec    = make_decoder(data);
+    auto view   = typename decltype(dec)::bstr_view_t{};
+    auto result = dec(view);
+    REQUIRE(result);
+
+    REQUIRE(std::equal(view.begin(), view.end(), vec.begin()));
+
+    data.back() = 0xff;
+    CHECK_EQ(view.back(), std::byte{0xff});
 }
