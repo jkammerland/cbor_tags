@@ -16,18 +16,12 @@ set(CMAKE_WARN_DEPRECATED
     ON
     CACHE BOOL "" FORCE)
 cpmaddpackage("gh:martinus/nanobench@4.3.11")
+cpmaddpackage("gh:Neargye/nameof@0.10.4")
 
-# add executables more if needed
-add_executable(${PROJECT_NAME})
+add_subdirectory(encoder)
+#add_subdirectory(decoder)
 
-# add target_sources, all .cpp files in this directory
-target_sources(${PROJECT_NAME} PRIVATE main.cpp)
-
-find_package(fmt CONFIG REQUIRED)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE cbor_tags fmt::fmt doctest nanobench benchmark_util)
-
-# add tests for ctest
-add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
-
-add_subdirectory(old_benchmarks)
+option(CBOR_TAGS_OLD_BENCHMARKS "Run old benchmarks" OFF)
+if (CBOR_TAGS_OLD_BENCHMARKS)
+    add_subdirectory(old_benchmarks)
+endif()

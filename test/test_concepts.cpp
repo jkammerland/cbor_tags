@@ -131,6 +131,7 @@ TEST_CASE("Test IsRangeOfCborValues concept") {
 TEST_CASE_TEMPLATE("Test IsArray", T, std::vector<int>, std::deque<int>, std::list<int>, std::array<int, 5>) {
     static_assert(IsArray<T>);
     static_assert(IsRangeOfCborValues<T>);
+    static_assert(!IsArray<std::array<std::byte, 5>>);
     static_assert(!IsMap<T>);
     static_assert(!IsAggregate<T>);
 }
