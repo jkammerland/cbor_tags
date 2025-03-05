@@ -105,39 +105,53 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <IsBinaryString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g std::span<const std::byte>");
 
-        if constexpr (IsView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
-            return status_code::contiguous_view_on_non_contiguous_data;
-        } else {
-            if (major == major_type::ByteString) {
-                std::is_const_v<typename T::value_type>;
-                auto bstring = decode_bstring(additionalInfo);
-                if constexpr (std::is_same_v<T, decltype(bstring)>) {
-                    t = std::move(bstring);
-                } else {
-                    t = T(bstring.begin(), bstring.end());
-                }
-            } else {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-
-            return status_code::success;
+        // Early validation
+        if (major != major_type::ByteString) {
+            return status_code::no_match_for_bstr_on_buffer;
         }
+
+        // Decode to intermediate form
+        auto bstring = decode_bstring(additionalInfo);
+
+        // Now handle the target assignment based on contiguity constraints
+        if constexpr (std::is_same_v<T, decltype(bstring)>) {
+            // Direct assignment for same types
+            t = std::move(bstring);
+        } else if constexpr (IsContiguous<T> && !IsContiguous<decltype(bstring)>) {
+            // Can't directly construct a contiguous container from non-contiguous data
+            // Either return an error or implement a copy-based approach
+
+            // Error approach:
+            return status_code::contiguous_view_on_non_contiguous_data;
+
+            // Copy approach (if ownership semantics allow):
+            // std::vector<typename T::value_type> temp(bstring.begin(), bstring.end());
+            // t = T(...); // Construct from temp somehow
+        } else {
+            // Standard case - construct from iterators
+            t = T(bstring.begin(), bstring.end());
+        }
+
+        return status_code::success;
     }
 
     template <IsTextString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g tstr_view<std::deque<char>>");
 
+        // Early return for incompatible view/buffer combination
         if constexpr (IsView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
             return status_code::contiguous_view_on_non_contiguous_data;
-        } else {
-            if (major == major_type::TextString) {
-                t = decode_text(additionalInfo);
-            } else {
-                return status_code::no_match_for_tstr_on_buffer;
-            }
-
-            return status_code::success;
         }
+
+        // Type check
+        if (major != major_type::TextString) {
+            return status_code::no_match_for_tstr_on_buffer;
+        }
+
+        // Decode the text string
+        t = decode_text(additionalInfo);
+
+        return status_code::success;
     }
 
     template <IsRangeOfCborValues T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
