@@ -2,6 +2,7 @@
 #include <cbor_tags/cbor.h>
 #include <deque>
 #include <doctest/doctest.h>
+#include <fmt/base.h>
 #include <iomanip>
 #include <ranges>
 #include <string>
@@ -119,4 +120,47 @@ TEST_CASE("Transforming view 3 - wrapper_view") {
 
     REQUIRE(complex_view.size() == 3);
     CHECK_EQ(std::string{complex_view.begin(), complex_view.end()}, "ELL");
+}
+
+namespace actions {
+struct sort_fn {
+    template <std::ranges::random_access_range R> auto operator()(R &&r) const -> decltype(auto) {
+        std::ranges::sort(r);
+        return std::forward<R>(r);
+    }
+
+    // Pipeline syntax support
+    template <std::ranges::random_access_range R> friend auto operator|(R &&r, const sort_fn &sorter) { return sorter(std::forward<R>(r)); }
+};
+
+inline constexpr sort_fn sort{};
+
+// Another example: an action that squares elements in place
+struct square_in_place_fn {
+    template <std::ranges::forward_range R>
+        requires std::ranges::output_range<R, std::ranges::range_value_t<R>>
+    auto operator()(R &&r) const -> decltype(auto) {
+        for (auto &elem : r) {
+            elem = elem * elem;
+        }
+        return std::forward<R>(r);
+    }
+
+    // Pipeline syntax support
+    template <std::ranges::forward_range R> friend auto operator|(R &&r, const square_in_place_fn &squarer) {
+        return squarer(std::forward<R>(r));
+    }
+};
+
+inline constexpr square_in_place_fn square_in_place{};
+} // namespace actions
+
+// Usage
+TEST_CASE("Custom Actions") {
+    std::vector<int> vec = {5, 3, 1, 4, 2};
+
+    // Use our custom actions with pipeline syntax
+    vec = vec | actions::square_in_place | actions::sort;
+
+    CHECK(vec == (std::vector{1, 4, 9, 16, 25}));
 }

@@ -188,10 +188,10 @@ TEST_SUITE("Open objects - wrap as etc") {
 TEST_SUITE("Views errors") {
     TEST_CASE_TEMPLATE("decode contiguous view on non-contiguous data [bstr]", T, std::span<const std::byte>,
                        std::basic_string_view<std::byte>) {
-        auto        data = std::deque<std::byte>{};
-        auto        enc  = make_encoder(data);
-        std::string str{"hello"};
-        REQUIRE(enc(str));
+        auto data = std::deque<std::byte>{};
+        auto enc  = make_encoder(data);
+        auto bstr = std::basic_string<std::byte>{static_cast<std::byte>('a'), static_cast<std::byte>('b')};
+        REQUIRE(enc(bstr));
 
         auto dec    = make_decoder(data);
         auto view   = T{};

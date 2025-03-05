@@ -23,7 +23,7 @@ file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.c
 target_sources(tests PRIVATE ${TEST_SOURCES})
 
 # add test include directories
-target_include_directories(tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(tests PUBLIC test_util)
 
 # add link libraries
 target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)

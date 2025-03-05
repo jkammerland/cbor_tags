@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstdio>
 #include <cstring>
+#include <ranges>
 #include <stdexcept>
 #include <type_traits>
 

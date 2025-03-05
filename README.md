@@ -419,7 +419,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:100".
+This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:24". This means a struct can at maximum have 24 members, but it can handle any number of nested structs, as long as they have less than 25 members each! The format can take multiple space separated ranges, e.g. "1:24 30:50 1000:1000", just make sure it matches your usage. Any changes to this option will trigger a regeneration the header automatically, for cmake targets that depend on cbor_tags. The tool can be run separately if not using cmake in your build process.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -551,7 +551,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.7.5 # or specify a particular commit/tag
+  GIT_TAG v0.7.6 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
