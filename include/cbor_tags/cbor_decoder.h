@@ -130,7 +130,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             // Fixed-size array assignment
             if (bstring.size() > t.size()) {
-                debug::println("Error: BString size exceeds target array size, {} > {}", bstring.size(), t.size());
+                debug::println("Error: bstr size exceeds target array size, {} > {}", bstring.size(), t.size());
                 return status_code::out_of_memory;
             }
             std::copy_n(bstring.begin(), t.size(), t.data());
@@ -146,7 +146,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g tstr_view<std::deque<char>>");
 
         // Early return for incompatible view/buffer combination
-        if constexpr (IsView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
+        if constexpr (IsConstView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
             return status_code::contiguous_view_on_non_contiguous_data;
         }
 

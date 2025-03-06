@@ -83,6 +83,9 @@ option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
   include(CTest)
   enable_testing()
+
+  add_library(test_util INTERFACE)
+  target_include_directories(test_util INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test_util)
 endif()
 
 # add tests

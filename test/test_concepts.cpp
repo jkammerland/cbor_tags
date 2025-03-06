@@ -203,8 +203,7 @@ TEST_CASE_TEMPLATE("IsCborMajor negative", T, NotCbor, std::variant<int, NotCbor
     static_assert(!IsCborMajor<T>);
 }
 
-TEST_CASE("Test IsTextString concept with various string types") {
-    using string_1 = std::string;
+TEST_CASE_TEMPLATE("Test IsTextString concept with various string types", string_1, std::string, std::string_view) {
     static_assert(IsTextString<string_1>);
     static_assert(!IsRangeOfCborValues<string_1>);
     static_assert(!IsBinaryString<string_1>);
