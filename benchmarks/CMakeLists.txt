@@ -19,7 +19,7 @@ cpmaddpackage("gh:martinus/nanobench@4.3.11")
 cpmaddpackage("gh:Neargye/nameof@0.10.4")
 
 add_subdirectory(encoder)
-#add_subdirectory(decoder)
+add_subdirectory(decoder)
 
 option(CBOR_TAGS_OLD_BENCHMARKS "Run old benchmarks" OFF)
 if (CBOR_TAGS_OLD_BENCHMARKS)

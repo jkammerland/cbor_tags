@@ -117,7 +117,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (std::is_same_v<T, decltype(bstring)>) {
             // Direct assignment for same types
             t = std::move(bstring);
-        } else if constexpr (IsContiguous<T> && !IsContiguous<decltype(bstring)>) {
+        } else if constexpr (IsConstView<T> && !IsContiguous<decltype(bstring)>) {
             // Can't directly construct a contiguous container from non-contiguous data
             // Either return an error or implement a copy-based approach
 
@@ -127,6 +127,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // Copy approach (if ownership semantics allow):
             // std::vector<typename T::value_type> temp(bstring.begin(), bstring.end());
             // t = T(...); // Construct from temp somehow
+        } else if constexpr (IsFixedArray<T>) {
+            // Fixed-size array assignment
+            if (bstring.size() > t.size()) {
+                debug::println("Error: BString size exceeds target array size, {} > {}", bstring.size(), t.size());
+                return status_code::out_of_memory;
+            }
+            std::copy_n(bstring.begin(), t.size(), t.data());
         } else {
             // Standard case - construct from iterators
             t = T(bstring.begin(), bstring.end());

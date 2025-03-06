@@ -1,3 +1,4 @@
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
@@ -5,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <fmt/base.h>
 #include <map>
 #include <nameof.hpp>
 #include <random>
