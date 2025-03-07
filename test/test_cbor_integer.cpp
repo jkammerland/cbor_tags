@@ -1,4 +1,6 @@
 #include <cbor_tags/cbor_concepts.h>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_integer.h>
 #include <doctest/doctest.h>
 #include <limits>
@@ -181,4 +183,19 @@ TEST_CASE("Just integer maths") {
     result = b % a;
     CHECK_EQ(result.value, 0);
     CHECK(!result.is_negative);
+}
+
+TEST_CASE("Encode, Decode 0s") {
+    auto data = std::vector<std::uint8_t>{};
+    auto enc  = make_encoder(data);
+    REQUIRE(enc(0));
+    REQUIRE(enc(-1));
+
+    auto dec = make_decoder(data);
+    int  result;
+    REQUIRE(dec(result));
+    CHECK_EQ(result, 0);
+
+    REQUIRE(dec(result));
+    CHECK_EQ(result, -1);
 }
