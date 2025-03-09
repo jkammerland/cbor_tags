@@ -68,6 +68,23 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
     CHECK_EQ(result.second, values);
 }
 
+TEST_CASE("Decode just string in deque") {
+    auto data = std::deque<char>{};
+    auto enc  = make_encoder(data);
+
+    std::string value = "Hello world";
+    REQUIRE(enc(value));
+
+    // fmt::print("{}\n", to_hex(data));
+
+    std::string result;
+    auto        dec = make_decoder(data);
+    REQUIRE(dec(result));
+
+    CHECK_EQ(value.size(), result.size());
+    CHECK_EQ(result, value);
+}
+
 TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>, std::deque<char>, std::list<uint8_t>) {
     T data;
     if constexpr (HasReserve<T>) {
@@ -77,11 +94,11 @@ TEST_CASE_TEMPLATE("Decode array of strings", T, std::vector<char>, std::deque<c
 
     std::vector<std::string> values(10);
     std::generate(values.begin(), values.end(), [i = 0]() mutable { return fmt::format("Hello world {}", i++); });
-    enc(values);
+    REQUIRE(enc(values));
 
     auto                     dec = make_decoder(data);
     std::vector<std::string> result;
-    dec(result);
+    REQUIRE(dec(result));
 
     REQUIRE_EQ(values.size(), result.size());
     CHECK_EQ(std::equal(values.begin(), values.end(), result.begin()), true);
@@ -207,7 +224,7 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
     {
         std::vector<std::byte> buffer1;
         auto                   enc = make_encoder(buffer1);
-        variant                v;
+        T                      v;
         if constexpr (IsVariant<T>) {
             if (std::rand() % 2 == 0) {
                 v = negative(std::rand() % 100000);
@@ -225,9 +242,9 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
 
         auto buffer2 = buffer1;
 
-        auto    dec = make_decoder(buffer2);
-        variant result;
-        dec(result);
+        auto dec = make_decoder(buffer2);
+        T    result;
+        REQUIRE(dec(result));
         CHECK_EQ(v, result);
     }
 }

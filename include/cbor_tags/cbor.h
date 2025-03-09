@@ -147,9 +147,11 @@ template <std::ranges::input_range R> struct bstr_view : std::ranges::view_inter
         return std::ranges::end(v);
     }
 
-    operator std::vector<std::byte>() const { return {range.begin(), range.end()}; }
+    operator std::vector<std::byte>() const {
+        auto v = view();
+        return {v.begin(), v.end()};
+    }
 
-  private:
     constexpr auto view() const {
         return range | std::views::transform([](const auto &c) { return static_cast<element_type>(c); });
     }
@@ -170,9 +172,11 @@ template <std::ranges::input_range R> struct tstr_view : std::ranges::view_inter
         return std::ranges::end(v);
     }
 
-    constexpr operator std::string() const { return {begin(), end()}; }
+    constexpr operator std::string() const {
+        auto v = view();
+        return {v.begin(), v.end()};
+    }
 
-  private:
     constexpr auto view() const {
         return range | std::views::transform([](const auto &c) { return static_cast<element_type>(c); });
     }

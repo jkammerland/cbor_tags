@@ -3,7 +3,6 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_operators.h"
-#include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 
@@ -41,6 +40,21 @@ TEST_CASE("CBOR Encoder") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
+        REQUIRE(enc(255, 256));
+
+        fmt::print("{}", to_hex(data));
+
+        uint64_t value;
+        REQUIRE(dec(value));
+        CHECK_EQ(value, 255);
+        REQUIRE(dec(value));
+        CHECK_EQ(value, 256);
+    }
+
+    SUBCASE("Encode unsigned integers") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        auto                   dec = make_decoder(data);
 
         enc(as_array{10}, 0, 1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296);
 
@@ -48,7 +62,7 @@ TEST_CASE("CBOR Encoder") {
 
         std::array<std::uint64_t, 10> values;
         static_assert(IsUnsigned<decltype(values)::value_type>);
-        dec(values);
+        REQUIRE(dec(values));
         CHECK_EQ(values[0], 0);
         CHECK_EQ(values[1], 1);
         CHECK_EQ(values[2], 23);
@@ -463,16 +477,8 @@ TEST_CASE("CBOR Encoder - Map of float sorted") {
             "hello": 3.14159_2,
         }
     */
-    fmt::memory_buffer buffer;
-    buffer_diagnostic(data, buffer, {});
-    fmt::format_to(std::back_inserter(buffer), "\n\n");
-
     auto expected_hex = "af22fa40490fd021fa40490fd001fa40490fd0fac0a00000fa40490fd0fabf800000fa40490fd0fa3f800000fa40490fd0fa40000000fa4049"
                         "0fd0fa40400000fa40490fd0fa40800000fa40490fd0fa41200000fa40490fd0fbc008000000000000fa40490fd0fb4008000000000000fa40"
                         "490fd0f5fa40490fd0f6fa40490fd06568656c6c6ffa40490fd0";
-    buffer_diagnostic(to_bytes(expected_hex), buffer, {});
-
-    fmt::print("{}", fmt::to_string(buffer));
-
     CHECK_EQ(to_hex(data), std::string_view(expected_hex));
 }

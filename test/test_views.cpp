@@ -78,7 +78,7 @@ TEST_CASE("Test view non contiguous data tstr") {
     auto view   = decltype(dec)::tstr_view_t{};
     auto result = dec(view);
     REQUIRE(result);
-    CHECK(std::ranges::equal(view, str));
+    CHECK(std::ranges::equal(view.view(), str));
 
     // Check that view is of original memory
     data.back() = 'x';
@@ -96,7 +96,7 @@ TEST_CASE("Test view non contiguous data bstr") {
     auto result = dec(view);
     REQUIRE(result);
 
-    CHECK(std::equal(view.begin(), view.end(), vec.begin()));
+    CHECK(std::ranges::equal(view.view(), vec));
 }
 
 TEST_CASE_TEMPLATE("Test big data chunk view", T, std::deque<char>, std::list<uint8_t>) {
@@ -112,8 +112,8 @@ TEST_CASE_TEMPLATE("Test big data chunk view", T, std::deque<char>, std::list<ui
     auto result = dec(view);
     REQUIRE(result);
 
-    REQUIRE(std::equal(view.begin(), view.end(), vec.begin()));
+    REQUIRE(std::ranges::equal(view.view(), vec));
 
     data.back() = 0xff;
-    CHECK_EQ(view.back(), std::byte{0xff});
+    CHECK_EQ(view.view().back(), std::byte{0xff});
 }
