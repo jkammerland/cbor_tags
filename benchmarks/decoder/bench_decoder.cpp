@@ -86,11 +86,11 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
 
     // Prepare tstr data
     {
-        std::string original;
-        original.resize(4);
-        std::ranges::generate(original, gen);
+        std::string s;
+        s.resize(4);
+        std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
         auto enc = make_encoder(data.tstr_data);
-        enc(original);
+        enc(s);
     }
 
     // Prepare array data
@@ -431,10 +431,10 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
     bench.run("Decoding a tstr", [&gen]() {
         Buffer      data;
         auto        enc = make_encoder(data);
-        std::string original;
-        original.resize(4);
-        std::ranges::generate(original, gen);
-        enc(original);
+        std::string s;
+        s.resize(4);
+        std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
+        enc(s);
 
         auto        dec = make_decoder(data);
         std::string value;
@@ -445,10 +445,10 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
     bench.run("Decoding a tstr with check", [&gen]() {
         Buffer      data;
         auto        enc = make_encoder(data);
-        std::string original;
-        original.resize(4);
-        std::ranges::generate(original, gen);
-        enc(original);
+        std::string s;
+        s.resize(4);
+        std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
+        enc(s);
 
         auto        dec = make_decoder(data);
         std::string value;

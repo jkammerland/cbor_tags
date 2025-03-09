@@ -83,7 +83,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
         auto        enc = make_encoder(data);
         std::string s;
         s.resize(4);
-        std::ranges::generate(s, gen);
+        std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
         enc(s);
         ankerl::nanobench::doNotOptimizeAway(data);
     });
@@ -93,7 +93,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
         auto        enc = make_encoder(data);
         std::string s;
         s.resize(4);
-        std::ranges::generate(s, gen);
+        std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
         CHECK(enc(s));
         ankerl::nanobench::doNotOptimizeAway(data);
     });

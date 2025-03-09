@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
@@ -164,11 +165,11 @@ TEST_CASE("CBOR Encoder") {
         // Make big vector
         {
             std::vector<int> big_vector(1e5);
-            std::iota(big_vector.begin(), big_vector.end(), -1e4);
-            enc(big_vector);
+            std::iota(big_vector.begin(), big_vector.end(), static_cast<int>(-1e4));
+            REQUIRE(enc(big_vector));
 
             std::deque<int> big_vector_result;
-            dec(big_vector_result);
+            REQUIRE(dec(big_vector_result));
             CHECK(std::equal(big_vector.begin(), big_vector.end(), big_vector_result.begin()));
         }
     }

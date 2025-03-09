@@ -176,7 +176,7 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
     static constexpr bool no_dynamic_tags    = (majors_and_subtypes_counts[detail::MajorIndex::DynamicTag] == 0);
     static constexpr bool has_any_tag_header = (majors_and_subtypes_counts[detail::MajorIndex::AnyTagHeader] > 0);
     static constexpr bool types_map_uniquely =
-        std::all_of(majors_and_subtypes_counts.begin(), majors_and_subtypes_counts.end(), [](int count) { return count <= 1; });
+        std::all_of(majors_and_subtypes_counts.begin(), majors_and_subtypes_counts.end(), [](auto count) { return count <= 1; });
 
     static constexpr auto number_of_unmatched = majors_and_subtypes_counts[detail::MajorIndex::Unmatched];
     static constexpr bool value               = types_map_uniquely && no_dynamic_tags && !too_many_tags;
