@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/float16_ieee754.h"
 
@@ -78,7 +79,7 @@ TEST_CASE("CDDL extension") {
 
 TEST_CASE("CDDL aggregate tagged") {
     fmt::memory_buffer buffer;
-    cddl_schema_to(buffer, A13213{}, {.row_options = {.format_by_rows = true}});
+    cddl_schema_to<A13213>(buffer, {.row_options = {.format_by_rows = true}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
@@ -202,9 +203,12 @@ TEST_CASE("CDDL adhoc tagging") {
         std::string a;
     };
 
+    debug::print("HELLOOO {}\n", "WOOORLD");
+
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
-    cddl_schema_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}), {.row_options = {.format_by_rows = false}});
+    using tagA = std::pair<static_tag<140>, A>;
+    cddl_schema_to<tagA>(buffer, {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "#6.140(A)", "A = tstr"));

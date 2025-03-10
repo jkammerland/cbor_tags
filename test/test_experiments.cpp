@@ -605,10 +605,11 @@ template <typename promise> class coroutine {
 };
 
 template <typename T> struct promise1 {
+    T                   result; // Add this to store the returned value
     auto                get_return_object() { return std::coroutine_handle<std::remove_cvref_t<decltype(*this)>>::from_promise(*this); }
     std::suspend_always initial_suspend() { return {}; }
     std::suspend_always final_suspend() noexcept { return {}; }
-    T                   return_value(T i) { return i; }
+    void                return_value(T i) { result = i; } // Changed to void return type
     void                unhandled_exception() { std::rethrow_exception(std::current_exception()); }
 };
 
