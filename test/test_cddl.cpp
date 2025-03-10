@@ -203,8 +203,6 @@ TEST_CASE("CDDL adhoc tagging") {
         std::string a;
     };
 
-    debug::print("HELLOOO {}\n", "WOOORLD");
-
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
     using tagA = std::pair<static_tag<140>, A>;

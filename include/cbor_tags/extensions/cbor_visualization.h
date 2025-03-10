@@ -96,10 +96,13 @@ struct CDDLContext {
                 debug::println("Skipping already registered type: {}", nameof::nameof_type<T>());
                 return;
             }
+            debug::println("Registering type: {}", nameof::nameof_type<T>());
             auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
             std::pmr::string cddl(&memory_resource);
-            cddl_schema_to<T, decltype(cddl), Context>(cddl, options, context);
+            cddl_schema_to<T, decltype(cddl), Context>(cddl, options, std::ref(context));
             insert(std::move(name), std::move(cddl));
+        } else {
+            debug::println("Skipping non-aggregate type: {}", nameof::nameof_type<T>());
         }
         /* Else do nothing */
     }
@@ -269,12 +272,12 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
             debug::println("ReferenceWrapper");
             // std::remove_cvref_t<decltype(args)>
             ((debug::println("register_type: {}", nameof::nameof_full_type<decltype(args)>()), ...));
-            ((context.get().template register_type<decltype(args), Context>(options, context), ...));
+            ((context.get().template register_type<std::remove_cvref_t<decltype(args)>, Context>(options, context), ...));
             debug::println("ReferenceWrapper end");
         } else {
             debug::println("Not ReferenceWrapper");
             ((debug::println("register_type: {}", nameof::nameof_full_type<decltype(args)>()), ...));
-            ((context.template register_type<decltype(args), Context>(options, std::ref(context)), ...));
+            ((context.template register_type<std::remove_cvref_t<decltype(args)>, Context>(options, std::ref(context)), ...));
             debug::println("Not ReferenceWrapper end");
         }
     };
@@ -347,6 +350,8 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
+        debug::println("size: {}", context.definitions.size());
+
         // Reverse, higher likelyhood of top - down order
         for (const auto &def : context.definitions | std::views::reverse) {
             fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);

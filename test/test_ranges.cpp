@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <ranges>
 #include <string>
+#include <utility>
 
 using namespace cbor::tags;
 
@@ -65,7 +66,7 @@ template <typename Iter1, typename Iter2> class zip_iterator {
     Iter2 it2;
 
   public:
-    zip_iterator(Iter1 it1, Iter2 it2) : it1(it1), it2(it2) {}
+    zip_iterator(Iter1 it1, Iter2 it2) : it1(std::move(it1)), it2(std::move(it2)) {}
 
     auto operator*() const { return std::make_pair(*it1, *it2); }
 

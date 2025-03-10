@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add option for debug mode
-option(CBOR_TAGS_DEBUG "Enable debug mode" ON)
+option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
 
 # Configure a header file to pass the CMake setting to the source code
 configure_file(
