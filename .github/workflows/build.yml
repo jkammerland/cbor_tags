@@ -39,12 +39,6 @@ jobs:
               cc: "clang-18",
               cxx: "clang++-18"
             }
-          - {
-              name: "macOS AppleClang",
-              os: macos-latest,
-              cc: "clang",
-              cxx: "clang++"
-            }
 
     steps:
     - uses: actions/checkout@v3

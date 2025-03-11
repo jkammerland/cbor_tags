@@ -535,7 +535,7 @@ See the docs for more info.
 
 ## ✅ Requirements
 
-- Any C++20 compatible compiler (GCC 12+, Clang 14+, MSVC (builds but broken)).
+- Any C++20 compatible compiler (GCC 12+, Clang 18+, MSVC, AppleClang(WIP, doesn't work yet)).
 - CMake 3.20+.
 
 ## 📦 Installation

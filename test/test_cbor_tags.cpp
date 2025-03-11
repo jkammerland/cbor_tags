@@ -34,13 +34,13 @@
 
 using namespace cbor::tags;
 
-struct B {
+struct B12120 {
     std::int64_t a;
     std::string  s;
 };
 struct inline_tag_example {
     static constexpr std::uint64_t cbor_tag = 140;
-    B                              b;
+    B12120                         b;
 };
 
 TEST_CASE("Basic tag") {
@@ -50,7 +50,7 @@ TEST_CASE("Basic tag") {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        auto tag_B = make_tag_pair(140_tag, B{-42, "Hello world!"});
+        auto tag_B = make_tag_pair(140_tag, B12120{-42, "Hello world!"});
         enc(tag_B);
         s1 = to_hex(data);
     }
