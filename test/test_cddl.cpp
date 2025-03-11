@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/float16_ieee754.h"
 
@@ -17,17 +18,17 @@
 
 using namespace cbor::tags;
 
-struct B {
+struct B129058 {
     static constexpr std::uint64_t cbor_tag = 140;
     std::vector<std::byte>         a;
     std::map<int, std::string>     b;
 };
 
-struct C {
-    static_tag<141>  cbor_tag;
-    int              a;
-    std::string      b;
-    std::optional<B> c;
+struct C122999 {
+    static_tag<141>        cbor_tag;
+    int                    a;
+    std::string            b;
+    std::optional<B129058> c;
 };
 
 struct A13213 {
@@ -54,57 +55,58 @@ struct A13213 {
     std::nullptr_t k;
 };
 
-TEST_CASE("CDDL extension") {
-    struct A {
-        uint32_t                       a1;
-        int                            a;
-        double                         b;
-        float                          c;
-        bool                           d;
-        std::string                    e;
-        std::vector<std::byte>         f;
-        std::map<int, std::string>     g;
-        std::variant<int, std::string> h;
-        std::optional<int>             i;
-        B                              j;
-        C                              k;
-    };
+struct A42121 {
+    uint32_t                       a1;
+    int                            a;
+    double                         b;
+    float                          c;
+    bool                           d;
+    std::string                    e;
+    std::vector<std::byte>         f;
+    std::map<int, std::string>     g;
+    std::variant<int, std::string> h;
+    std::optional<int>             i;
+    B129058                        j;
+    C122999                        k;
+};
 
+TEST_CASE("CDDL extension") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<A>(buffer);
+    cddl_schema_to<A42121>(buffer);
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
     CHECK(substrings_in(fmt::to_string(buffer), "uint,\n", "int / tstr,\n"));
 }
 
 TEST_CASE("CDDL aggregate tagged") {
     fmt::memory_buffer buffer;
-    cddl_schema_to(buffer, A13213{}, {.row_options = {.format_by_rows = true}});
+    cddl_schema_to<A13213>(buffer, {.row_options = {.format_by_rows = true}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
+struct A0001 {
+    uint32_t                       a1;
+    negative                       aminus;
+    int                            a;
+    double                         b;
+    float                          c;
+    bool                           d;
+    std::string                    e;
+    std::vector<std::byte>         f;
+    std::map<int, std::string>     g;
+    std::variant<int, std::string> h;
+    std::optional<int>             i;
+    B129058                        j;
+    C122999                        k;
+};
+
 TEST_CASE("CDDL no columns") {
     fmt::memory_buffer buffer;
-    struct A {
-        uint32_t                       a1;
-        negative                       aminus;
-        int                            a;
-        double                         b;
-        float                          c;
-        bool                           d;
-        std::string                    e;
-        std::vector<std::byte>         f;
-        std::map<int, std::string>     g;
-        std::variant<int, std::string> h;
-        std::optional<int>             i;
-        B                              j;
-        C                              k;
-    };
 
-    cddl_schema_to<A>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl_schema_to<A0001>(buffer, {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 
-    CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B = #6.140([bstr, map])",
-                        "C = #6.141([int, tstr, B / null])"));
+    CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B129058 = #6.140([bstr, map])",
+                        "C122999 = #6.141([int, tstr, B129058 / null])"));
 }
 
 struct A1212 {
@@ -204,7 +206,8 @@ TEST_CASE("CDDL adhoc tagging") {
 
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
-    cddl_schema_to(buffer, make_tag_pair(140_tag, A{"Hello world!"}), {.row_options = {.format_by_rows = false}});
+    using tagA = std::pair<static_tag<140>, A>;
+    cddl_schema_to<tagA>(buffer, {.row_options = {.format_by_rows = false}});
     fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "#6.140(A)", "A = tstr"));

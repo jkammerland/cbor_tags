@@ -415,7 +415,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::TextString) {
             return status_code::no_match_for_tstr_on_buffer;
         }
-        value = std::string(decode_text(additionalInfo));
+        auto text = decode_text(additionalInfo);
+        value     = std::string(text);
         return status_code::success;
     }
 
@@ -644,7 +645,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto result = std::string_view(reinterpret_cast<const char *>(&data_[reader_.position_]), length);
+            auto result =
+                length > 0 ? std::string_view(reinterpret_cast<const char *>(&data_[reader_.position_]), length) : std::string_view{};
             reader_.position_ += length;
             return result;
         } else {
@@ -676,28 +678,35 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        uint16_t result = (static_cast<uint16_t>(reader_.read(data_)) << 8) | static_cast<uint16_t>(reader_.read(data_));
-        return result;
+        auto byte0 = static_cast<uint16_t>(reader_.read(data_));
+        auto byte1 = static_cast<uint16_t>(reader_.read(data_));
+        return static_cast<uint16_t>(byte0 << 8 | byte1);
     }
 
     constexpr uint32_t read_uint32() {
         if (reader_.empty(data_, 3)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        uint32_t result = (static_cast<uint32_t>(reader_.read(data_)) << 24) | (static_cast<uint32_t>(reader_.read(data_)) << 16) |
-                          (static_cast<uint32_t>(reader_.read(data_)) << 8) | static_cast<uint32_t>(reader_.read(data_));
-        return result;
+        auto byte0 = static_cast<uint32_t>(reader_.read(data_));
+        auto byte1 = static_cast<uint32_t>(reader_.read(data_));
+        auto byte2 = static_cast<uint32_t>(reader_.read(data_));
+        auto byte3 = static_cast<uint32_t>(reader_.read(data_));
+        return (byte0 << 24) | (byte1 << 16) | (byte2 << 8) | byte3;
     }
 
     constexpr uint64_t read_uint64() {
         if (reader_.empty(data_, 7)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        uint64_t result = (static_cast<uint64_t>(reader_.read(data_)) << 56) | (static_cast<uint64_t>(reader_.read(data_)) << 48) |
-                          (static_cast<uint64_t>(reader_.read(data_)) << 40) | (static_cast<uint64_t>(reader_.read(data_)) << 32) |
-                          (static_cast<uint64_t>(reader_.read(data_)) << 24) | (static_cast<uint64_t>(reader_.read(data_)) << 16) |
-                          (static_cast<uint64_t>(reader_.read(data_)) << 8) | static_cast<uint64_t>(reader_.read(data_));
-        return result;
+        auto byte0 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte1 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte2 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte3 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte4 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte5 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte6 = static_cast<uint64_t>(reader_.read(data_));
+        auto byte7 = static_cast<uint64_t>(reader_.read(data_));
+        return (byte0 << 56) | (byte1 << 48) | (byte2 << 40) | (byte3 << 32) | (byte4 << 24) | (byte5 << 16) | (byte6 << 8) | (byte7);
     }
 
     constexpr simple read_simple() {
@@ -712,9 +721,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
-
-        std::uint16_t value = (static_cast<std::uint16_t>(reader_.read(data_)) << 8) | static_cast<std::uint16_t>(reader_.read(data_));
-        return float16_t{value};
+        auto byte0 = static_cast<uint16_t>(reader_.read(data_));
+        auto byte1 = static_cast<uint16_t>(reader_.read(data_));
+        return float16_t{static_cast<uint16_t>((byte0 << 8) | byte1)};
     }
 
     constexpr float read_float() {
@@ -732,9 +741,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             throw std::runtime_error("Unexpected end of input");
         }
 
-        const auto   initialByte    = reader_.read(data_);
-        const auto &&majorType      = static_cast<major_type>(static_cast<byte>(initialByte) >> 5);
-        const auto &&additionalInfo = initialByte & static_cast<byte>(0x1F);
+        const auto initialByte    = reader_.read(data_);
+        const auto majorType      = static_cast<major_type>(static_cast<byte>(initialByte) >> 5);
+        const auto additionalInfo = initialByte & static_cast<byte>(0x1F);
 
         return std::make_pair(majorType, additionalInfo);
     }
@@ -823,7 +832,6 @@ template <typename T> struct enum_decoder {
             }
         } else if constexpr (IsUnsigned<underlying_type>) {
             if (major != major_type::UnsignedInteger) {
-
                 return status_code::no_match_for_enum_on_buffer;
             }
         } else {

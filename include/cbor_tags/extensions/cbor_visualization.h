@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/cbor_tags_config.h"
 
 #include <cbor_tags/cbor_concepts.h>
 #include <cstddef>
@@ -50,9 +51,7 @@ struct DiagnosticOptions {
 };
 
 template <typename T, typename OutputBuffer, typename Context>
-auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions = {}, Context = {});
-
-template <typename T, typename OutputBuffer, typename Context> auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {});
+auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {}, Context = {});
 
 namespace detail {
 
@@ -61,6 +60,15 @@ struct CDDLContext {
     std::array<std::byte, 2000>           buffer;
     std::pmr::monotonic_buffer_resource   memory_resource{buffer.data(), buffer.size()};
     std::pmr::deque<definition_cddl_pair> definitions{&memory_resource};
+
+    CDDLContext() {}
+
+    explicit CDDLContext(const CDDLContext &other) {
+        for (const auto &[name, cddl] : other.definitions) {
+            debug::println("copying definition: {} -> {}", name, cddl);
+            insert(std::pmr::string(name, &memory_resource), std::pmr::string(cddl, &memory_resource));
+        }
+    }
 
     template <typename T> bool contains(const T &name) const {
         for (const auto &def : definitions) {
@@ -78,19 +86,23 @@ struct CDDLContext {
         memory_resource.release();
     }
 
-    template <typename T, typename Context> void register_type(const T &t, CDDLOptions options, Context context) {
+    template <typename T, typename Context> void register_type(CDDLOptions options, Context context) {
         if constexpr (is_static_tag_t<T>::value || is_dynamic_tag_t<T>) {
             return;
         }
 
         if constexpr (IsAggregate<T>) {
             if (contains(nameof::nameof_type<T>())) {
+                debug::println("Skipping already registered type: {}", nameof::nameof_type<T>());
                 return;
             }
+            debug::println("Registering type: {}", nameof::nameof_type<T>());
             auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
             std::pmr::string cddl(&memory_resource);
-            cddl_schema_to(cddl, t, options, context);
+            cddl_schema_to<T, decltype(cddl), Context>(cddl, options, std::ref(context));
             insert(std::move(name), std::move(cddl));
+        } else {
+            debug::println("Skipping non-aggregate type: {}", nameof::nameof_type<T>());
         }
         /* Else do nothing */
     }
@@ -133,9 +145,15 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 template <typename T> constexpr auto getName(const T &);
 template <typename T> constexpr auto getName();
 
+template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames() {
+    std::string result;
+    ((result += std::string(getName<Ts>()) + " / "), ...);
+    return result.substr(0, result.empty() ? 0 : (result.size() - 3));
+}
+
 template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames(const Variant<Ts...> &&) {
     std::string result;
-    ((result += std::string(getName(Ts{})) + " / "), ...);
+    ((result += std::string(getName<Ts>()) + " / "), ...);
     return result.substr(0, result.empty() ? 0 : (result.size() - 3));
 }
 
@@ -152,7 +170,7 @@ template <IsTag T> constexpr auto getTagDef(const T &t) {
     }
 }
 
-template <typename T> constexpr auto getName(const T &t) {
+template <typename T> constexpr auto getName(const T &) {
     if constexpr (IsUnsigned<T>) {
         return "uint";
     } else if constexpr (IsNegative<T>) {
@@ -185,13 +203,9 @@ template <typename T> constexpr auto getName(const T &t) {
         }
     } else {
         if constexpr (IsOptional<T>) {
-            if (t.has_value())
-                return std::string(getName<typename T::value_type>(t.value())) + " / null";
-            else {
-                using value_type = typename T::value_type;
-                value_type dummy{};
-                return std::string(getName(dummy)) + " / null";
-            }
+            using value_type = typename T::value_type;
+            auto name        = getName<value_type>();
+            return std::string(name) + " / null";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
@@ -200,20 +214,71 @@ template <typename T> constexpr auto getName(const T &t) {
     }
 }
 
-template <typename T> constexpr auto getName() { return getName(T{}); }
+template <typename T> constexpr auto getName() {
+    if constexpr (IsUnsigned<T>) {
+        return "uint";
+    } else if constexpr (IsNegative<T>) {
+        return "nint";
+    } else if constexpr (IsSigned<T>) {
+        return "int";
+    } else if constexpr (IsTextString<T>) {
+        return "tstr";
+    } else if constexpr (IsBinaryString<T>) {
+        return "bstr";
+    } else if constexpr (IsArray<T>) {
+        return "array";
+    } else if constexpr (IsMap<T>) {
+        return "map";
+    } else if constexpr (IsTag<T>) {
+        return nameof::nameof_short_type<T>();
+    } else if constexpr (IsSimple<T>) {
+        if constexpr (IsBool<T>) {
+            return "bool";
+        } else if constexpr (IsFloat16<T>) {
+            return "float16";
+        } else if constexpr (IsFloat32<T>) {
+            return "float32";
+        } else if constexpr (IsFloat64<T>) {
+            return "float64";
+        } else if constexpr (IsNull<T>) {
+            return "null";
+        } else {
+            return "simple";
+        }
+    } else {
+        if constexpr (IsOptional<T>) {
+            using value_type = typename T::value_type;
+            auto name        = getName<value_type>();
+            return std::string(name) + " / null";
+        } else if constexpr (IsVariant<T>) {
+            return getVariantNames(T{});
+        } else {
+            return nameof::nameof_short_type<T>();
+        }
+    }
+}
 
 template <typename T>
 concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T::type>>;
 
 template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options, Context context) {
+auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context context) {
+    T t{};
+    debug::println("cddl_schema_to: {}", nameof::nameof_short_type<T>());
     bool use_brackets     = false;
     bool use_group        = false;
     auto applier_register = [&](auto &&...args) {
         if constexpr (IsReferenceWrapper<Context>) {
-            ((context.get().register_type(args, options, context), ...));
+            debug::println("ReferenceWrapper");
+            // std::remove_cvref_t<decltype(args)>
+            ((debug::println("register_type: {}", nameof::nameof_full_type<decltype(args)>()), ...));
+            ((context.get().template register_type<std::remove_cvref_t<decltype(args)>, Context>(options, context), ...));
+            debug::println("ReferenceWrapper end");
         } else {
-            ((context.register_type(args, options, std::ref(context)), ...));
+            debug::println("Not ReferenceWrapper");
+            ((debug::println("register_type: {}", nameof::nameof_full_type<decltype(args)>()), ...));
+            ((context.template register_type<std::remove_cvref_t<decltype(args)>, Context>(options, std::ref(context)), ...));
+            debug::println("Not ReferenceWrapper end");
         }
     };
     auto applier_formatter = [&](auto &&...args) {
@@ -285,16 +350,13 @@ auto cddl_schema_to(OutputBuffer &output_buffer, const T &t, CDDLOptions options
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
+        debug::println("size: {}", context.definitions.size());
+
         // Reverse, higher likelyhood of top - down order
         for (const auto &def : context.definitions | std::views::reverse) {
             fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
         }
     }
-}
-
-template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options) {
-    cddl_schema_to(output_buffer, T{}, options);
 }
 
 template <typename CborBuffer, typename OutputBuffer>
@@ -536,6 +598,11 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     }
 };
 
+template <typename OutputBuffer, typename Decoder>
+auto make_diagnostic_visitor(OutputBuffer &output_buffer, Decoder &dec, DiagnosticOptions options) {
+    return diagnostic_visitor<OutputBuffer, Decoder>{output_buffer, dec, options};
+}
+
 template <ValidCborBuffer CborBuffer, typename OutputBuffer>
 constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_buffer, DiagnosticOptions options = {}) {
     detail::catch_all_variant values;
@@ -544,7 +611,7 @@ constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_
     fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
 
     while (dec(values)) {
-        std::visit(diagnostic_visitor{output_buffer, dec, options}, values);
+        std::visit(make_diagnostic_visitor(output_buffer, dec, options), values);
         fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
     }
 

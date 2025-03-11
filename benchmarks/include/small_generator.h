@@ -5,33 +5,40 @@ namespace rng {
 
 class small_generator {
   public:
+    using state_type  = uint32_t;
     using result_type = uint64_t;
 
-    small_generator(result_type seed) { init(seed); }
+    small_generator(state_type seed) { init(seed); }
 
-    static constexpr result_type min() { return 0; }
+    static constexpr state_type min() { return 0; }
 
-    static constexpr result_type max() { return std::numeric_limits<result_type>::max(); }
+    static constexpr state_type max() { return std::numeric_limits<state_type>::max(); }
 
-    result_type operator()() {
-        result_type e = a - rot(b, 27);
-        a             = b ^ rot(c, 17);
-        b             = c + d;
-        c             = d + e;
-        d             = e + a;
+    [[nodiscard]] result_type operator()() {
+        auto r1 = static_cast<result_type>(generate());
+        auto r2 = static_cast<result_type>(generate());
+        return (r2 << 32) | r1;
+    }
+
+    state_type generate() {
+        state_type e = a - rot(b, 27);
+        a            = b ^ rot(c, 17);
+        b            = c + d;
+        c            = d + e;
+        d            = e + a;
         return d;
     }
 
   private:
-    void init(result_type seed) {
+    void init(state_type seed) {
         a = 0xf1ea5eed, b = c = d = seed;
-        for (result_type i = 0; i < 20; ++i) {
-            this->operator()();
+        for (state_type i = 0; i < 20; ++i) {
+            [[maybe_unused]] auto _ = this->operator()();
         }
     }
 
-    result_type            a, b, c, d;
-    static inline uint64_t rot(result_type x, result_type k) { return ((x) << (k)) | ((x) >> (32 - (k))); }
+    state_type             a, b, c, d;
+    static inline uint64_t rot(state_type x, state_type k) { return ((x) << (k)) | ((x) >> (32 - (k))); }
 };
 
 } // namespace rng
