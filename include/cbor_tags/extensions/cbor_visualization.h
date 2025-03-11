@@ -54,21 +54,9 @@ template <typename T, typename OutputBuffer, typename Context>
 auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {}, Context = {});
 
 namespace detail {
-
 struct CDDLContext {
-    using definition_cddl_pair = std::pair<std::pmr::string, std::pmr::string>;
-    std::array<std::byte, 2000>           buffer;
-    std::pmr::monotonic_buffer_resource   memory_resource{buffer.data(), buffer.size()};
-    std::pmr::deque<definition_cddl_pair> definitions{&memory_resource};
-
-    CDDLContext() {}
-
-    explicit CDDLContext(const CDDLContext &other) {
-        for (const auto &[name, cddl] : other.definitions) {
-            debug::println("copying definition: {} -> {}", name, cddl);
-            insert(std::pmr::string(name, &memory_resource), std::pmr::string(cddl, &memory_resource));
-        }
-    }
+    using definition_cddl_pair = std::pair<std::string, std::string>;
+    std::deque<definition_cddl_pair> definitions;
 
     template <typename T> bool contains(const T &name) const {
         for (const auto &def : definitions) {
@@ -79,12 +67,9 @@ struct CDDLContext {
         return false;
     }
 
-    void insert(std::pmr::string name, std::pmr::string cddl) { definitions.emplace_back(std::move(name), std::move(cddl)); }
+    void insert(std::string name, std::string cddl) { definitions.emplace_back(std::move(name), std::move(cddl)); }
 
-    void clear() {
-        definitions.clear();
-        memory_resource.release();
-    }
+    void clear() { definitions.clear(); }
 
     template <typename T, typename Context> void register_type(CDDLOptions options, Context context) {
         if constexpr (is_static_tag_t<T>::value || is_dynamic_tag_t<T>) {
@@ -97,8 +82,8 @@ struct CDDLContext {
                 return;
             }
             debug::println("Registering type: {}", nameof::nameof_type<T>());
-            auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
-            std::pmr::string cddl(&memory_resource);
+            auto        name = std::string(nameof::nameof_type<T>());
+            std::string cddl;
             cddl_schema_to<T, decltype(cddl), Context>(cddl, options, std::ref(context));
             insert(std::move(name), std::move(cddl));
         } else {
