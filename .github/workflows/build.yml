@@ -21,6 +21,47 @@ jobs:
               cxx: "cl",
               environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
             }
+          # Windows Clang-CL configs - only include versions 15-17 which are supported
+          - {
+              name: "Windows Clang-CL 15",
+              os: windows-latest,
+              cc: "clang-cl",
+              cxx: "clang-cl",
+              clang_version: "15",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          - {
+              name: "Windows Clang-CL 16",
+              os: windows-latest,
+              cc: "clang-cl",
+              cxx: "clang-cl",
+              clang_version: "16",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          - {
+              name: "Windows Clang-CL 17",
+              os: windows-latest,
+              cc: "clang-cl",
+              cxx: "clang-cl",
+              clang_version: "17",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          # macOS AppleClang configs
+          - {
+              name: "macOS AppleClang 15",
+              os: macos-latest,
+              cc: "clang",
+              cxx: "clang++",
+              xcode_version: "15.0"
+            }
+          - {
+              name: "macOS AppleClang 16",
+              os: macos-latest,
+              cc: "clang",
+              cxx: "clang++",
+              xcode_version: "16.2.0"
+            }
+          # Ubuntu GCC configs
           - {
               name: "Ubuntu GCC 12",
               os: ubuntu-latest,
@@ -28,16 +69,35 @@ jobs:
               cxx: "g++-12"
             }
           - {
+              name: "Ubuntu GCC 13",
+              os: ubuntu-latest,
+              cc: "gcc-13",
+              cxx: "g++-13"
+            }
+          - {
               name: "Ubuntu GCC 14",
               os: ubuntu-latest,
               cc: "gcc-14",
               cxx: "g++-14"
+            }
+          # Ubuntu Clang configs
+          - {
+              name: "Ubuntu Clang 17",
+              os: ubuntu-latest,
+              cc: "clang-17",
+              cxx: "clang++-17"
             }
           - {
               name: "Ubuntu Clang 18",
               os: ubuntu-latest,
               cc: "clang-18",
               cxx: "clang++-18"
+            }
+          - {
+              name: "Ubuntu Clang 19",
+              os: ubuntu-latest,
+              cc: "clang-19",
+              cxx: "clang++-19"
             }
 
     steps:
@@ -49,12 +109,27 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gcc-12 g++-12
 
+    - name: Install GCC 13 (Ubuntu)
+      if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'gcc-13'
+      run: |
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
+        sudo apt-get install -y gcc-13 g++-13
+
     - name: Install GCC 14 (Ubuntu)
       if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'gcc-14'
       run: |
         sudo add-apt-repository ppa:ubuntu-toolchain-r/test
         sudo apt-get update
         sudo apt-get install -y gcc-14 g++-14
+
+    - name: Install Clang 17 (Ubuntu)
+      if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'clang-17'
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 17
+        sudo apt-get install -y clang-17
 
     - name: Install Clang 18 (Ubuntu)
       if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'clang-18'
@@ -64,16 +139,45 @@ jobs:
         sudo ./llvm.sh 18
         sudo apt-get install -y clang-18
 
-    - name: Configure CMake
+    - name: Install Clang 19 (Ubuntu)
+      if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'clang-19'
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 19
+        sudo apt-get install -y clang-19
+
+    - name: Setup Xcode (macOS)
+      if: matrix.config.os == 'macos-latest'
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: ${{ matrix.config.xcode_version }}
+
+    - name: Install LLVM and Clang (Windows Clang-CL)
+      if: matrix.config.os == 'windows-latest' && matrix.config.cc == 'clang-cl'
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: ${{ matrix.config.clang_version }}
+        directory: ${{ runner.temp }}/llvm
+
+    - name: Configure CMake (Windows)
+      if: matrix.config.os == 'windows-latest'
+      shell: cmd
+      run: |
+        if "${{ matrix.config.cc }}" == "clang-cl" (
+          call "${{ matrix.config.environment_script }}"
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL -DCBOR_TAGS_BUILD_TESTS=ON
+        ) else (
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON
+        )
+
+    - name: Configure CMake (Unix)
+      if: matrix.config.os != 'windows-latest'
       shell: bash
       run: |
-        if [ "${{ matrix.config.os }}" == "windows-latest" ]; then
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON
-        else
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON \
-            -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }}
-        fi
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }}
 
     - name: Build
       shell: bash

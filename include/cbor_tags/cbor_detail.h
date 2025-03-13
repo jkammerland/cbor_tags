@@ -17,10 +17,11 @@ struct appender;
 
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
-
-    constexpr void operator()(T &container, value_type value) {
+    
+    constexpr void operator()(T &container, const value_type& value) { 
         if constexpr (IsMap<T>) {
             const auto &[key, mapped_value] = value;
+            
             if constexpr (IsMultiMap<T>) {
                 container.insert({key, mapped_value});
             } else {

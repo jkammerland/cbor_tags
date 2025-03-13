@@ -84,6 +84,33 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
+    template <IsEnum U> constexpr status_code decode(U &value, major_type major, std::byte additionalInfo) {
+        using underlying_type = std::underlying_type_t<U>;
+        if constexpr (IsSigned<underlying_type>) {
+            if (major > major_type::NegativeInteger) {
+
+                return status_code::no_match_for_enum_on_buffer;
+            }
+        } else if constexpr (IsUnsigned<underlying_type>) {
+            if (major != major_type::UnsignedInteger) {
+                return status_code::no_match_for_enum_on_buffer;
+            }
+        } else {
+
+            return status_code::no_match_for_enum_on_buffer;
+        }
+
+        underlying_type result;
+        auto            status = this->decode(result, major, additionalInfo);
+        value                  = static_cast<U>(result);
+        return status;
+    }
+
+    template <IsEnum U> constexpr status_code decode(U &value) {
+        auto [major, additionalInfo] = read_initial_byte();
+        return decode(value, major, additionalInfo);
+    }
+
     template <IsUnsigned T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::UnsignedInteger) {
             return status_code::no_match_for_uint_on_buffer;
@@ -821,38 +848,8 @@ template <typename T> struct cbor_header_decoder {
     constexpr status_code decode(as_map value) { return validate_size(major_type::Map, value.size_); }
 };
 
-template <typename T> struct enum_decoder {
-
-    template <IsEnum U> constexpr status_code decode(U &value, major_type major, std::byte additionalInfo) {
-        using underlying_type = std::underlying_type_t<U>;
-        if constexpr (IsSigned<underlying_type>) {
-            if (major > major_type::NegativeInteger) {
-
-                return status_code::no_match_for_enum_on_buffer;
-            }
-        } else if constexpr (IsUnsigned<underlying_type>) {
-            if (major != major_type::UnsignedInteger) {
-                return status_code::no_match_for_enum_on_buffer;
-            }
-        } else {
-
-            return status_code::no_match_for_enum_on_buffer;
-        }
-
-        underlying_type result;
-        auto            status = detail::underlying<T>(this).decode(result, major, additionalInfo);
-        value                  = static_cast<U>(result);
-        return status;
-    }
-
-    template <IsEnum U> constexpr status_code decode(U &value) {
-        auto [major, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
-        return decode(value, major, additionalInfo);
-    }
-};
-
 template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, enum_decoder>(buffer);
+    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder>(buffer);
 }
 
 } // namespace cbor::tags

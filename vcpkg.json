@@ -1,6 +1,6 @@
 {
     "name": "cbor-tags",
-    "version": "0.7.7",
+    "version": "0.8.0",
     "description": "RFC 8949 implementation with automatic reflection",
     "homepage": "https://github.com/jkammerland/cbor_tags",
     "license": "MIT",

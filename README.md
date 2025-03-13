@@ -535,7 +535,7 @@ See the docs for more info.
 
 ## ✅ Requirements
 
-- Any C++20 compatible compiler (GCC 12+, Clang 18+, MSVC, AppleClang(WIP, does not work yet)).
+- Any C++20 compatible compiler (GCC 12+, Clang 15+, Clang-CL 15+, MSVC-latest, AppleClang 15+).
 - CMake 3.20+.
 
 ## 📦 Installation
@@ -551,7 +551,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.7.7 # or specify a particular commit/tag
+  GIT_TAG v0.8.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
