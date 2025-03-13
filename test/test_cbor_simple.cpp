@@ -112,7 +112,7 @@ TEST_CASE("CBOR Encoder - NaN double") {
     enc(value);
     fmt::print("NaN double: ");
     print_bytes(data);
-    CHECK(data.size() == 9);
+    REQUIRE(data.size() == 9);
     CHECK(data[0] == static_cast<std::byte>(0xFB));
     CHECK((data[1] & static_cast<std::byte>(0x7F)) == static_cast<std::byte>(0x7F));
     CHECK((data[2] & static_cast<std::byte>(0xF0)) == static_cast<std::byte>(0xF0));

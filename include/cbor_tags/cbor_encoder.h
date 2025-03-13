@@ -175,6 +175,8 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             value);
     }
 
+    template <IsEnum T> constexpr void encode(T value) { this->encode(static_cast<std::underlying_type_t<T>>(value)); }
+
     constexpr void encode(float16_t value) {
         appender_.multi_append(data_, static_cast<byte_type>(0xF9), static_cast<byte_type>(value.value >> 8),
                                static_cast<byte_type>(value.value & 0xFF));
@@ -202,12 +204,6 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
-};
-
-template <typename T> struct enum_encoder {
-    template <IsEnum U> constexpr void encode(U value) {
-        detail::underlying<T>(this).encode(static_cast<std::underlying_type_t<U>>(value));
-    }
 };
 
 template <typename T> struct cbor_variant_encoder {
@@ -241,7 +237,7 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, enum_encoder, cbor_optional_encoder,
+    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_optional_encoder,
                    cbor_variant_encoder>(buffer);
 }
 } // namespace cbor::tags

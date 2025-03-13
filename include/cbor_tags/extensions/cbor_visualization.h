@@ -496,6 +496,8 @@ template <typename OutputBuffer> constexpr void cddl_prelude_to(OutputBuffer &bu
                                                "undefined = #7.23\n");
 }
 
+template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor;
+
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     OutputBuffer     &output_buffer;
     Decoder          &dec;
@@ -513,12 +515,12 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
                 break;
             }
             fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
-            std::visit(diagnostic_visitor{output_buffer, dec, options}, key);
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, key);
             fmt::format_to(std::back_inserter(output_buffer), ": ");
             if (!dec(value)) {
                 break;
             }
-            std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, value);
             fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
         }
         options.row_options.current_indent--;
@@ -537,7 +539,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
                 break;
             }
             fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
-            std::visit(diagnostic_visitor{output_buffer, dec, options}, values);
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, values);
             fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
         }
         options.row_options.current_indent--;
@@ -576,7 +578,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             if (!dec(value)) {
                 return;
             }
-            std::visit(diagnostic_visitor{output_buffer, dec, options}, value);
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, value);
             fmt::format_to(std::back_inserter(output_buffer), ")");
         } else if constexpr (IsSimple<std::remove_cvref_t<decltype(arg)>>) {
             if constexpr (IsBool<std::remove_cvref_t<decltype(arg)>>) {
