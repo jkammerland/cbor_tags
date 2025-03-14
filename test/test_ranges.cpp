@@ -1,5 +1,10 @@
+#include "cbor_tags/cbor_ranges.h"
+#include "test_util.h"
+
 #include <algorithm>
 #include <cbor_tags/cbor.h>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/base.h>
@@ -164,4 +169,164 @@ TEST_CASE("Custom Actions") {
     vec = vec | actions::square_in_place | actions::sort;
 
     CHECK(vec == (std::vector{1, 4, 9, 16, 25}));
+}
+
+TEST_CASE("view joining of multiple buffers") {
+    // Example buffers
+    std::vector<char> buffer1 = {0x01, 0x02, 0x03, 0x04};
+    std::vector<char> buffer2 = {0x05, 0x06, 0x07};
+    std::vector<char> buffer3 = {0x08, 0x09, 0x0A, 0x0B, 0x0C};
+
+    // Method 1: Using ranges::join
+    auto joined_view = std::vector<std::ranges::ref_view<std::vector<char>>>{std::ranges::ref_view(buffer1), std::ranges::ref_view(buffer2),
+                                                                             std::ranges::ref_view(buffer3)} |
+                       std::ranges::views::join;
+
+    fmt::print("All data joined: {}\n", to_hex(joined_view));
+
+    // Method 2: Process each buffer separately
+    std::vector<std::reference_wrapper<std::vector<char>>> buffers = {buffer1, buffer2, buffer3};
+
+    fmt::print("\nEach buffer separately:\n");
+    for (auto &buffer : buffers) {
+        fmt::print("Buffer: {}\n", to_hex(buffer.get()));
+    }
+}
+
+TEST_CASE("joining views of different types") {
+    // Example buffers of different types
+    std::vector<char>   char_buffer   = {0x01, 0x02, 0x03};
+    std::string         string_buffer = "Hello";
+    std::array<char, 4> array_buffer  = {'W', 'o', 'r', 'l'};
+
+    // Print individual buffers
+    fmt::print("Vector buffer: {}\n", to_hex(char_buffer));
+    fmt::print("String buffer: {}\n", to_hex(string_buffer));
+    fmt::print("Array buffer: {}\n", to_hex(array_buffer));
+
+    // Method 1: Concatenate the hex strings
+    std::string combined_hex = to_hex(char_buffer) + to_hex(string_buffer) + to_hex(array_buffer);
+    fmt::print("\nConcatenated hex: {}\n", combined_hex);
+
+    // Method 2: Using a tuple and transforming each element
+    auto buffers_tuple =
+        std::make_tuple(std::ranges::ref_view(char_buffer), std::ranges::ref_view(string_buffer), std::ranges::ref_view(array_buffer));
+
+    std::string tuple_hex;
+    std::apply([&](const auto &...views) { ((tuple_hex += to_hex(views)), ...); }, buffers_tuple);
+
+    fmt::print("Tuple-joined hex: {}\n", tuple_hex);
+
+    // Method 3: Create a custom view that concatenates iterators
+    auto char_view   = std::ranges::ref_view(char_buffer);
+    auto string_view = std::ranges::ref_view(string_buffer);
+    auto array_view  = std::ranges::ref_view(array_buffer);
+    auto deq         = std::deque<char>{static_cast<char>(1), static_cast<char>(2)};
+    auto deq_view    = std::ranges::ref_view(deq);
+
+    auto        concatenated_view = concat(char_view, string_view, array_view, deq_view);
+    std::string joined_hex;
+    for (const auto &byte : concatenated_view) {
+        joined_hex += fmt::format("{:02x}", byte);
+    }
+    fmt::print("Joined hex: {}\n", joined_hex);
+}
+
+TEST_CASE("testing concat_view implementation") {
+    // Test data
+    std::vector<char>   vec = {0x01, 0x02, 0x03};
+    std::string         str = "Hello";
+    std::array<char, 4> arr = {'W', 'o', 'r', 'l'};
+    std::deque<char>    deq = {0x0A, 0x0B};
+
+    // Create the expected result for comparison
+    std::vector<char> expected;
+    expected.insert(expected.end(), vec.begin(), vec.end()); // 01 02 03
+    expected.insert(expected.end(), str.begin(), str.end()); // 48 65 6c 6c 6f
+    expected.insert(expected.end(), arr.begin(), arr.end()); // 57 6f 72 6c
+    expected.insert(expected.end(), deq.begin(), deq.end()); // 0A 0B
+
+    SUBCASE("Concatenating multiple ranges") {
+        auto concatenated =
+            concat(std::ranges::ref_view(vec), std::ranges::ref_view(str), std::ranges::ref_view(arr), std::ranges::ref_view(deq));
+
+        // Verify contents match expected
+        std::vector<char> actual(concatenated.begin(), concatenated.end());
+        CHECK(actual == expected);
+
+        // Verify size
+        CHECK(actual.size() == expected.size());
+        CHECK(actual.size() == 14); // 3 + 5 + 4 + 2
+    }
+
+    SUBCASE("Handling empty ranges") {
+        std::vector<char> empty;
+
+        auto with_empty = concat(std::ranges::ref_view(empty), std::ranges::ref_view(vec), std::ranges::ref_view(empty),
+                                 std::ranges::ref_view(str), std::ranges::ref_view(arr), std::ranges::ref_view(deq));
+
+        std::vector<char> actual(with_empty.begin(), with_empty.end());
+        CHECK(actual == expected);
+
+        auto only_empty = concat(std::ranges::ref_view(empty), std::ranges::ref_view(empty));
+
+        std::vector<char> empty_result(only_empty.begin(), only_empty.end());
+        CHECK(empty_result.empty());
+    }
+
+    SUBCASE("Reflecting source range modifications") {
+        auto concatenated = concat(std::ranges::ref_view(vec), std::ranges::ref_view(str));
+
+        // Save initial state
+        std::vector<char> before(concatenated.begin(), concatenated.end());
+
+        // Modify source ranges
+        vec[0] = 0xFF;
+        str[0] = 'X';
+
+        // Verify changes are reflected
+        std::vector<char> after(concatenated.begin(), concatenated.end());
+
+        CHECK(after[0] == 0xFF);
+        CHECK(after[3] == 'X'); // First char of string at index 3
+        CHECK(before != after);
+    }
+
+    SUBCASE("Correct iteration across range boundaries") {
+        auto concatenated = concat(std::ranges::ref_view(vec), std::ranges::ref_view(str));
+
+        auto it = concatenated.begin();
+
+        // Iterate to the boundary
+        for (size_t i = 0; i < vec.size(); ++i) {
+            CHECK(*it == vec[i]);
+            ++it;
+        }
+
+        // Now we should be at the start of the string
+        for (size_t i = 0; i < str.size(); ++i) {
+            CHECK(*it == str[i]);
+            ++it;
+        }
+
+        // Should now be at the end
+        CHECK(it == concatenated.end());
+    }
+
+    SUBCASE("to_hex validation for concat") {
+        auto concatenated =
+            concat(std::ranges::ref_view(vec), std::ranges::ref_view(str), std::ranges::ref_view(arr), std::ranges::ref_view(deq));
+
+        std::string hex_result   = to_hex(concatenated);
+        std::string expected_hex = to_hex(expected);
+
+        CHECK(hex_result == expected_hex);
+
+        // Manual validation of hex output
+        std::string manual_hex;
+        for (char c : concatenated) {
+            manual_hex += fmt::format("{:02x}", static_cast<unsigned char>(c));
+        }
+        CHECK(manual_hex == expected_hex);
+    }
 }
