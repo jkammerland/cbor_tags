@@ -2,6 +2,7 @@
 #include "test_util.h"
 
 #include <algorithm>
+#include <bits/ranges_algo.h>
 #include <cbor_tags/cbor.h>
 #include <cstddef>
 #include <cstdint>
@@ -9,6 +10,7 @@
 #include <doctest/doctest.h>
 #include <fmt/base.h>
 #include <iomanip>
+#include <range/v3/view/concat.hpp>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -204,11 +206,7 @@ TEST_CASE("joining views of different types") {
     fmt::print("String buffer: {}\n", to_hex(string_buffer));
     fmt::print("Array buffer: {}\n", to_hex(array_buffer));
 
-    // Method 1: Concatenate the hex strings
-    std::string combined_hex = to_hex(char_buffer) + to_hex(string_buffer) + to_hex(array_buffer);
-    fmt::print("\nConcatenated hex: {}\n", combined_hex);
-
-    // Method 2: Using a tuple and transforming each element
+    // # 1.
     auto buffers_tuple =
         std::make_tuple(std::ranges::ref_view(char_buffer), std::ranges::ref_view(string_buffer), std::ranges::ref_view(array_buffer));
 
@@ -217,7 +215,7 @@ TEST_CASE("joining views of different types") {
 
     fmt::print("Tuple-joined hex: {}\n", tuple_hex);
 
-    // Method 3: Create a custom view that concatenates iterators
+    // # 2.
     auto char_view   = std::ranges::ref_view(char_buffer);
     auto string_view = std::ranges::ref_view(string_buffer);
     auto array_view  = std::ranges::ref_view(array_buffer);
@@ -230,4 +228,36 @@ TEST_CASE("joining views of different types") {
         joined_hex += fmt::format("{:02x}", byte);
     }
     fmt::print("Joined hex: {}\n", joined_hex);
+
+    // Check joined content
+    CHECK_EQ(joined_hex, "01020348656c6c6f576f726c0102");
+    CHECK_EQ(joined_hex.size(), 28); // 14 characters * 2 hex digits
+
+    // Check size of each component in the concatenated view
+    CHECK_EQ(std::ranges::size(char_view), 3);
+    CHECK_EQ(std::ranges::size(string_view), 5);
+    CHECK_EQ(std::ranges::size(array_view), 4);
+    CHECK_EQ(std::ranges::size(deq_view), 2);
+    CHECK_EQ(std::ranges::size(char_view) + std::ranges::size(string_view) + std::ranges::size(array_view) + std::ranges::size(deq_view),
+             14);
+
+    // # 3.
+    auto v3_view = ranges::views::concat(char_view, string_view, array_view, deq_view);
+    fmt::print("v3_view size: {}\n", std::ranges::distance(v3_view));
+    CHECK_EQ(std::ranges::distance(v3_view), 14);
+    fmt::print("v3_view to_hex: {}\n", to_hex(v3_view));
+
+    // Verify the contents of v3_view
+    CHECK_EQ(to_hex(v3_view), "01020348656c6c6f576f726c0102");
+
+    // Check first and last elements of the concatenated view
+    CHECK_EQ(static_cast<int>(*v3_view.begin()), 1);
+    CHECK_EQ(static_cast<int>(*std::ranges::prev(v3_view.end())), 2);
+
+    // Modify the original buffers and check that views reflect the changes
+    char_buffer[0]   = 0xFF;
+    string_buffer[0] = 'h';
+
+    CHECK_NE(to_hex(v3_view), "01020348656c6c6f576f726c0102"); // Should be different after modification
+    CHECK_EQ(to_hex(v3_view), "ff020368656c6c6f576f726c0102");
 }

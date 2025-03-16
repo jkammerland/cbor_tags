@@ -1,5 +1,7 @@
 # A C++20 CBOR Library with Automatic Reflection
 
+[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml)
+
 This is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. See [xkcd/927](https://xkcd.com/927/).
 
 The primary advantage of using this library is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
@@ -551,7 +553,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.8.0 # or specify a particular commit/tag
+  GIT_TAG v0.8.1 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
