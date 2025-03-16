@@ -10,9 +10,23 @@
 
 template <typename T> inline std::string to_hex(const T &bytes) {
     std::string hex;
-    hex.reserve(bytes.size() * 2);
 
-    fmt::format_to(std::back_inserter(hex), "{:02x}", fmt::join(bytes, ""));
+    if constexpr (std::is_integral_v<std::decay_t<T>> || std::is_same_v<std::decay_t<T>, std::byte>) {
+        // Handle single byte/integral value
+        unsigned char value;
+        if constexpr (std::is_same_v<std::decay_t<T>, std::byte>) {
+            value = std::to_integer<unsigned char>(bytes);
+        } else {
+            value = static_cast<unsigned char>(bytes);
+        }
+        fmt::format_to(std::back_inserter(hex), "{:02x}", value);
+    } else if constexpr (std::ranges::range<T>) {
+        // Handle any range (containers and views)
+        hex.reserve(std::distance(std::begin(bytes), std::end(bytes)) * 2);
+        for (const auto &byte : bytes) {
+            hex += to_hex(byte);
+        }
+    }
 
     return hex;
 }

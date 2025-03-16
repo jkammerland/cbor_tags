@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.8.0)
+project(cbor_tags VERSION 0.8.1)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -17,23 +17,15 @@ configure_file(
 # Check minimum compiler version
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/minimum_compiler.cmake)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
+set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
+
 option(CBOR_TAGS_USE_DEV_SETTINGS "Use dev settings" OFF)
 if(CBOR_TAGS_USE_DEV_SETTINGS)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ccache.cmake)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_mold_linker.cmake)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common_settings.cmake)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
-endif()
-
-# add tools - reflection module generator - makes cbor_reflection_impl.h
-option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" ON)
-if(CBOR_TAGS_BUILD_TOOLS)
-  add_subdirectory(tools)
-else()
-  message(STATUS "Skipping tools - reflections headers must exist.")
-  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/cbor_tags/cbor_reflection_impl.h")
-    message(FATAL_ERROR "cbor_reflection_impl.h not found. Enable CBOR_TAGS_BUILD_TOOLS to generate it.")
-  endif()
 endif()
 
 # THE LIBRARY
@@ -75,7 +67,18 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
 create_installation_target(cbor_tags)
 
 # Make ${PROJECT_NAME} depend on the generated header
-add_dependencies(${PROJECT_NAME} generate_reflection_module)
+# add tools - reflection module generator - makes cbor_reflection_impl.h
+option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
+if(CBOR_TAGS_BUILD_TOOLS)
+  add_subdirectory(tools)
+  message(DEBUG "Setting ${PROJECT_NAME} to depend on generate_reflection_module, which generates cbor_reflection_impl.h")
+  add_dependencies(${PROJECT_NAME} generate_reflection_module)
+else()
+  message(STATUS "Skipping generator tools - cbor_reflection_impl.h must exist.")
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/cbor_tags/cbor_reflection_impl.h")
+    message(FATAL_ERROR "cbor_reflection_impl.h not found. Enable CBOR_TAGS_BUILD_TOOLS to generate it.")
+  endif()
+endif()
 
 # Extra options
 option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)

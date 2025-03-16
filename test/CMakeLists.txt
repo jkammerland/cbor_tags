@@ -6,6 +6,7 @@ set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 cpmaddpackage("gh:Neargye/nameof@0.10.4")
 cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
+cpmaddpackage("gh:ericniebler/range-v3#7e6f34b1e820fb8321346888ef0558a0ec842b8e")
 
 set(CMAKE_WARN_DEPRECATED
     OFF
@@ -26,7 +27,7 @@ target_sources(tests PRIVATE ${TEST_SOURCES})
 target_link_libraries(tests PUBLIC test_util)
 
 # add link libraries
-target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
+target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum range-v3::range-v3)
 
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
