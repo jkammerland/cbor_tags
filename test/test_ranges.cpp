@@ -2,7 +2,6 @@
 #include "test_util.h"
 
 #include <algorithm>
-#include <bits/ranges_algo.h>
 #include <cbor_tags/cbor.h>
 #include <cstddef>
 #include <cstdint>
