@@ -9,6 +9,8 @@
 #include <doctest/doctest.h>
 #include <fmt/base.h>
 #include <iomanip>
+#include <range/v3/action/join.hpp>
+#include <range/v3/range_fwd.hpp>
 #include <range/v3/view/concat.hpp>
 #include <ranges>
 #include <string>
@@ -181,7 +183,7 @@ TEST_CASE("view joining of multiple buffers") {
     // Method 1: Using ranges::join
     auto joined_view = std::vector<std::ranges::ref_view<std::vector<char>>>{std::ranges::ref_view(buffer1), std::ranges::ref_view(buffer2),
                                                                              std::ranges::ref_view(buffer3)} |
-                       std::ranges::views::join;
+                       ranges::actions::join;
 
     fmt::print("All data joined: {}\n", to_hex(joined_view));
 
@@ -192,6 +194,8 @@ TEST_CASE("view joining of multiple buffers") {
     for (auto &buffer : buffers) {
         fmt::print("Buffer: {}\n", to_hex(buffer.get()));
     }
+
+    CHECK_EQ(to_hex(joined_view), "0102030405060708090a0b0c");
 }
 
 TEST_CASE("joining views of different types") {
