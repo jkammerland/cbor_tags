@@ -68,13 +68,13 @@ create_installation_target(cbor_tags)
 
 # Make ${PROJECT_NAME} depend on the generated header
 # add tools - reflection module generator - makes cbor_reflection_impl.h
-option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" ON)
+option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 if(CBOR_TAGS_BUILD_TOOLS)
   add_subdirectory(tools)
   message(DEBUG "Setting ${PROJECT_NAME} to depend on generate_reflection_module, which generates cbor_reflection_impl.h")
   add_dependencies(${PROJECT_NAME} generate_reflection_module)
 else()
-  message(STATUS "Skipping tools - reflections headers must exist.")
+  message(STATUS "Skipping generator tools - cbor_reflection_impl.h must exist.")
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/cbor_tags/cbor_reflection_impl.h")
     message(FATAL_ERROR "cbor_reflection_impl.h not found. Enable CBOR_TAGS_BUILD_TOOLS to generate it.")
   endif()
