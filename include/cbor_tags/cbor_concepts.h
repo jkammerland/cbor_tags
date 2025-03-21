@@ -208,38 +208,60 @@ concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader
 template <typename T>
 concept IsClass = std::is_class_v<T> && !IsAggregate<T>;
 
+namespace detail {
+
+template <typename T, typename Class>
+concept has_transcode_inner = requires(T t, Class c) {
+    { c.transcode(t).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept has_encode_inner = requires(T t, Class c) {
+    { c.encode(t).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept has_decode_inner = requires(T t, Class c) {
+    { c.decode(t).has_value() } -> std::convertible_to<bool>;
+};
+
+} // namespace detail
+
 struct TranscodeAccess {
-    template <typename T, typename Class> constexpr auto operator()(T &transcoder, Class &&obj) { return obj.transcode(transcoder); }
+    template <typename T, typename Class> constexpr auto operator()(T &transcoder, Class &&obj) {
+        if constexpr (detail::has_transcode_inner<T, Class>) {
+            return obj.transcode(transcoder);
+        }
+    }
 };
 struct EncodeAccess {
-    template <typename T, typename Class> constexpr auto operator()(T &encoder, Class &&obj) { return obj.encode(encoder); }
+    template <typename T, typename Class> constexpr auto operator()(T &encoder, Class &&obj) {
+        if constexpr (detail::has_encode_inner<T, Class>) {
+            return obj.encode(encoder);
+        }
+    }
 };
 struct DecodeAccess {
-    template <typename T, typename Class> constexpr auto operator()(T &decoder, Class &&obj) { return obj.decode(decoder); }
-};
-
-template <typename T, typename Class> using transcode_result_t = decltype(std::declval<Class>().transcode(std::declval<T &>()));
-
-template <typename T, typename Class> using encode_result_t = decltype(std::declval<Class>().encode(std::declval<T &>()));
-
-template <typename T, typename Class> using decode_result_t = decltype(std::declval<Class>().decode(std::declval<T &>()));
-
-template <typename T, typename Class>
-concept HasTranscodeMethod = requires {
-    typename transcode_result_t<T, Class>;
-    requires requires(transcode_result_t<T, Class> r) { r.has_value(); };
+    template <typename T, typename Class> constexpr auto operator()(T &decoder, Class &&obj) {
+        if constexpr (detail::has_decode_inner<T, Class>) {
+            return obj.decode(decoder);
+        }
+    }
 };
 
 template <typename T, typename Class>
-concept HasEncodeMethod = requires {
-    typename encode_result_t<T, Class>;
-    requires requires(encode_result_t<T, Class> r) { r.has_value(); };
+concept HasTranscodeMethod = requires(T t, Class c) {
+    { TranscodeAccess{}(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
 template <typename T, typename Class>
-concept HasDecodeMethod = requires {
-    typename decode_result_t<T, Class>;
-    requires requires(decode_result_t<T, Class> r) { r.has_value(); };
+concept HasEncodeMethod = requires(T t, Class c) {
+    { EncodeAccess{}(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasDecodeMethod = requires(T t, Class c) {
+    { DecodeAccess{}(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
 template <std::uint64_t T> struct static_tag;
