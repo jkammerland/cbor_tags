@@ -1,12 +1,15 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
+#include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_reflection_impl.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
+#include "tl/expected.hpp"
 
 #include <array>
 #include <cstddef>
@@ -824,4 +827,39 @@ TEST_CASE_TEMPLATE("Count tags in variant", T, void) {
     static_assert(tags[2] == 31);
     static_assert(tags[3] == 12313);
     static_assert(tags[4] == 4);
+}
+
+TEST_SUITE("Classes") {
+    struct class1 {
+        class1() = default;
+
+        friend class TranscodeAccess;
+        friend class EncodeAccess;
+        friend class DecodeAccess;
+        template <typename T> constexpr auto transcode(T &transcoder) { return tl::expected<void, int>{}; }
+        template <typename T> constexpr auto encode(T &encoder) { return tl::expected<void, int>{}; }
+        template <typename T> constexpr auto decode(T &decoder) { return tl::expected<void, int>{}; }
+    };
+    struct struct1 {
+        int    a;
+        double b;
+    };
+
+    TEST_CASE("IsClass") {
+        static_assert(IsClass<class1>);
+        static_assert(!IsClass<struct1>);
+
+        [[maybe_unused]] TranscodeAccess transcoder;
+        [[maybe_unused]] auto            buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto            encoder = make_encoder(buffer);
+        [[maybe_unused]] auto            decoder = make_decoder(buffer);
+
+        [[maybe_unused]] auto result = transcoder(encoder, class1{});
+        CHECK(std::is_same_v<tl::expected<void, int>, decltype(result)>);
+
+        static_assert(HasTranscodeMethod<decltype(encoder), class1>);
+        static_assert(HasEncodeMethod<decltype(encoder), class1>);
+        static_assert(HasDecodeMethod<decltype(decoder), class1>);
+        static_assert(!HasTranscodeMethod<decltype(encoder), struct1>);
+    }
 }

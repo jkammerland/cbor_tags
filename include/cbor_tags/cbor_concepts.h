@@ -205,6 +205,43 @@ concept IsTuple = requires {
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
 
+template <typename T>
+concept IsClass = std::is_class_v<T> && !IsAggregate<T>;
+
+struct TranscodeAccess {
+    template <typename T, typename Class> constexpr auto operator()(T &transcoder, Class &&obj) { return obj.transcode(transcoder); }
+};
+struct EncodeAccess {
+    template <typename T, typename Class> constexpr auto operator()(T &encoder, Class &&obj) { return obj.encode(encoder); }
+};
+struct DecodeAccess {
+    template <typename T, typename Class> constexpr auto operator()(T &decoder, Class &&obj) { return obj.decode(decoder); }
+};
+
+template <typename T, typename Class> using transcode_result_t = decltype(std::declval<Class>().transcode(std::declval<T &>()));
+
+template <typename T, typename Class> using encode_result_t = decltype(std::declval<Class>().encode(std::declval<T &>()));
+
+template <typename T, typename Class> using decode_result_t = decltype(std::declval<Class>().decode(std::declval<T &>()));
+
+template <typename T, typename Class>
+concept HasTranscodeMethod = requires {
+    typename transcode_result_t<T, Class>;
+    requires requires(transcode_result_t<T, Class> r) { r.has_value(); };
+};
+
+template <typename T, typename Class>
+concept HasEncodeMethod = requires {
+    typename encode_result_t<T, Class>;
+    requires requires(encode_result_t<T, Class> r) { r.has_value(); };
+};
+
+template <typename T, typename Class>
+concept HasDecodeMethod = requires {
+    typename decode_result_t<T, Class>;
+    requires requires(decode_result_t<T, Class> r) { r.has_value(); };
+};
+
 template <std::uint64_t T> struct static_tag;
 template <IsUnsigned T> struct dynamic_tag;
 
