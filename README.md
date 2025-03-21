@@ -39,11 +39,13 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 ## 🎯 Key Features
 
 - Support for both contiguous and non-contiguous buffers.
+- Ranges support.
 - Zero-copy encoding by joining multiple buffers.
 - Zero-copy decoding using views and spans.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
+- CDDL support for schema and custom data definitions.
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
@@ -303,16 +305,17 @@ int main() {
     // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
     enc(make_tag_pair(0x10, Api1{.a = 42, .b = 43}));
 
-    // Encode a binary string in the middle of the buffer [the buffer itself]
-    enc(std::span{data});
+    // Encode a 0 length binary string in the middle of the buffer
+    enc(std::vector<std::byte>{});
 
     // Encode Api2 with a tag of 0x20
     enc(make_tag_pair(0x20, Api2{"hello", "world"}));
 
-    // Decoding
+    // Decoding - accept bstr and any tagged value
     auto dec = make_decoder(data);
     std::variant<std::vector<std::byte>, as_tag_any> value;
 
+    // Define a visitor for our variant type
     auto visitor = [&dec](auto&& value) {
         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
             if (value.tag == 0x10) {
@@ -329,11 +332,12 @@ int main() {
                 std::cout << "Unknown tag: " << value.tag << "\n";
             }
         } else {
-            std::cout << "Binary data received\n";
+            // Since it was not a tag, it must be a bstr, otherwise the decoding would return the unexpected type.
+            std::cout << "Binary data received (aka bstr)\n";
         }
     };
 
-    // Decode three items
+    // Decode the three items
     if (dec(value)) {
         std::visit(visitor, value);
     }
@@ -350,13 +354,13 @@ int main() {
 }
 ```
 
-## ✨ Advanced Features
+## ✨ WIP Features
 
-- `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
-- Options for encoder/decoder, such as index tracking for resuming decoding.
-- CDDL support for schema and custom data definitions.
+- Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
+- WIP: Complete ranges support
+- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
+- TODO: Options for encoder/decoder, such as (un)expected type tuning
 - TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
-- TODO: Streaming support via API adapter using the return value of an incomplete decode.
 - TODO: `unique_ptr` support.
 - TODO: `shared_ptr` support.
 
@@ -537,7 +541,10 @@ See the docs for more info.
 
 ## ✅ Requirements
 
-- Any C++20 compatible compiler (GCC 12+, Clang 15+, Clang-CL 15+, MSVC-latest, AppleClang 15+).
+- tl::expected (required, if not using c++23 std::expected)
+- fmt (optional, but required for cddl)
+- nameof (optional, but required for cddl)
+- C++20 compatible compiler, tested with (GCC 12+, Clang 15+, Clang-CL 15+, MSVC-latest, AppleClang 15+).
 - CMake 3.20+.
 
 ## 📦 Installation
