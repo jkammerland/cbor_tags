@@ -205,9 +205,6 @@ concept IsTuple = requires {
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
 
-template <typename T>
-concept IsClass = std::is_class_v<T> && !IsAggregate<T>;
-
 namespace detail {
 
 template <typename T, typename Class>
@@ -227,41 +224,43 @@ concept has_decode_inner = requires(T t, Class c) {
 
 } // namespace detail
 
-struct TranscodeAccess {
-    template <typename T, typename Class> constexpr auto operator()(T &transcoder, Class &&obj) {
-        if constexpr (detail::has_transcode_inner<T, Class>) {
+struct Access {
+    // Transcode function
+    template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
+        if constexpr (detail::has_transcode_inner<T, std::remove_cvref_t<Class>>) {
             return obj.transcode(transcoder);
         }
     }
-};
-struct EncodeAccess {
-    template <typename T, typename Class> constexpr auto operator()(T &encoder, Class &&obj) {
-        if constexpr (detail::has_encode_inner<T, Class>) {
+
+    // Encode function
+    template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
+        if constexpr (detail::has_encode_inner<T, std::remove_cvref_t<Class>>) {
             return obj.encode(encoder);
         }
     }
-};
-struct DecodeAccess {
-    template <typename T, typename Class> constexpr auto operator()(T &decoder, Class &&obj) {
-        if constexpr (detail::has_decode_inner<T, Class>) {
+
+    // Decode function
+    template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
+        if constexpr (detail::has_decode_inner<T, std::remove_cvref_t<Class>>) {
             return obj.decode(decoder);
         }
     }
 };
 
+// Concepts using the named functions
 template <typename T, typename Class>
 concept HasTranscodeMethod = requires(T t, Class c) {
-    { TranscodeAccess{}(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
 template <typename T, typename Class>
 concept HasEncodeMethod = requires(T t, Class c) {
-    { EncodeAccess{}(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::encode(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
 template <typename T, typename Class>
 concept HasDecodeMethod = requires(T t, Class c) {
-    { DecodeAccess{}(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
 template <std::uint64_t T> struct static_tag;
@@ -372,6 +371,11 @@ concept IsVariantWithoutIntegers = !IsVariantWithSignedInteger<T> && !IsVariantW
 template <typename T>
 concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
 
+// TODO: Need to check if has any transcoding methods
+template <typename T>
+concept IsClass = std::is_class_v<T> && !IsAggregate<T> && !IsAnyHeader<T> && !IsString<T> && !IsArray<T> && !IsMap<T> && !IsTag<T> &&
+                  !IsSimple<T> && !IsOptional<T> && !IsVariant<T> && !IsTuple<T>;
+
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
 template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
@@ -384,9 +388,10 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 
 // TODO: cleanup or simplify
 template <typename T>
-concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
-                      (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T>;
+concept IsCborMajor =
+    IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+    (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
+    (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T> || IsClass<T>;
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);

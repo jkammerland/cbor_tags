@@ -834,9 +834,7 @@ TEST_SUITE("Classes") {
         class1() = default;
 
       private:
-        friend struct cbor::tags::TranscodeAccess;
-        friend struct cbor::tags::EncodeAccess;
-        friend struct cbor::tags::DecodeAccess;
+        friend cbor::tags::Access;
         template <typename T> constexpr auto transcode(T &transcoder) { return expected<void, int>{}; }
         template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
         template <typename T> constexpr auto decode(T &decoder) { return expected<void, int>{}; }
@@ -846,6 +844,7 @@ TEST_SUITE("Classes") {
         double b;
 
         template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
     };
 
     TEST_CASE("IsClass") {
@@ -856,16 +855,18 @@ TEST_SUITE("Classes") {
     }
 
     TEST_CASE("has transcode encode decode") {
-        [[maybe_unused]] TranscodeAccess transcoder;
-        [[maybe_unused]] auto            buffer  = std::vector<uint8_t>{};
-        [[maybe_unused]] auto            encoder = make_encoder(buffer);
-        [[maybe_unused]] auto            decoder = make_decoder(buffer);
+        [[maybe_unused]] Access accessor;
+        [[maybe_unused]] auto   buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto   encoder = make_encoder(buffer);
+        [[maybe_unused]] auto   decoder = make_decoder(buffer);
+
+        [[maybe_unused]] auto result = accessor.transcode(encoder, class1{});
 
         static_assert(HasTranscodeMethod<decltype(encoder), class1>);
         static_assert(HasEncodeMethod<decltype(encoder), class1>);
         static_assert(HasDecodeMethod<decltype(decoder), class1>);
         static_assert(!HasTranscodeMethod<decltype(encoder), struct1>);
-        static_assert(HasEncodeMethod<decltype(encoder), struct1>); // Only has encode
-        static_assert(!HasDecodeMethod<decltype(decoder), struct1>);
+        static_assert(HasEncodeMethod<decltype(encoder), struct1>);  // Only has encode
+        static_assert(!HasDecodeMethod<decltype(decoder), struct1>); // Should not work, returns void
     }
 }

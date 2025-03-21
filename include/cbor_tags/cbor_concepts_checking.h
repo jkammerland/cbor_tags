@@ -57,7 +57,6 @@ template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteTy
         if constexpr (IsEnum<U>) {
             using enum_type = std::underlying_type_t<Type>;
             return is_valid_major<ByteType, enum_type>(m);
-
         } else if constexpr (IsSigned<Type>) {
             return m <= static_cast<ByteType>(major_type::NegativeInteger);
         } else {

@@ -175,6 +175,22 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             value);
     }
 
+    template <IsClass C> constexpr void encode(const C &value) {
+        constexpr bool has_transcode = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_encode    = HasEncodeMethod<self_t, C>;
+        static_assert(
+            has_transcode ^ has_encode,
+            "Class must have either transcode or encode method, also do not forget to return value from the transcoding operation! "
+            "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
+
+        // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
+        if constexpr (has_transcode) {
+            [[maybe_unused]] auto result = Access{}.transcode(*this, value);
+        } else if constexpr (has_encode) {
+            [[maybe_unused]] auto result = Access{}.encode(*this, value);
+        }
+    }
+
     template <IsEnum T> constexpr void encode(T value) { this->encode(static_cast<std::underlying_type_t<T>>(value)); }
 
     constexpr void encode(float16_t value) {

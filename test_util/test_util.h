@@ -103,7 +103,6 @@ tl::expected<void, std::vector<std::string>> substrings_in(Buffer &&buffer, Stri
     }
 }
 
-// Add this before your test cases
 namespace doctest {
 template <typename T> struct StringMaker<tl::expected<T, std::vector<std::string>>> {
     static String convert(const tl::expected<T, std::vector<std::string>> &value) {
