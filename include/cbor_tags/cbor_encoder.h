@@ -122,7 +122,9 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode(value.second);
     }
 
-    template <IsAggregate T> constexpr void encode(const T &value) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithCodingOverload<self_t, T>)
+    constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
@@ -175,12 +177,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             value);
     }
 
-    template <IsClass C> constexpr void encode(const C &value) {
+    template <typename C>
+        requires(IsClassWithCodingOverload<self_t, C>)
+    constexpr void encode(const C &value) {
         constexpr bool has_transcode = HasTranscodeMethod<self_t, C>;
         constexpr bool has_encode    = HasEncodeMethod<self_t, C>;
         static_assert(
             has_transcode ^ has_encode,
-            "Class must have either transcode or encode method, also do not forget to return value from the transcoding operation! "
+            "Class must have either (const) transcode or encode method, also do not forget to return value from the transcoding operation! "
             "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
         // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top

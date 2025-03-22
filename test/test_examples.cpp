@@ -5,6 +5,7 @@
 #include "test_util.h"
 
 #include <cassert>
+#include <cstddef>
 #include <doctest/doctest.h>
 #include <fmt/base.h>
 #include <fmt/format.h>
@@ -128,7 +129,7 @@ TEST_CASE("switch on tag") {
     REQUIRE(enc(make_tag_pair(10_hex_tag, Api1{.a = 42, .b = 43})));
 
     // Encode a binary string in the middle of the buffer [the buffer itself]
-    REQUIRE(enc(std::span{data}));
+    REQUIRE(enc(std::vector<std::byte>{}));
 
     // Encode Api2 with a tag of 0x20
     REQUIRE(enc(make_tag_pair(20_hex_tag, Api2{"hello", "world"})));

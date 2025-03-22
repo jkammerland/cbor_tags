@@ -298,7 +298,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, detail::tuple_tail(t));
     }
 
-    template <IsAggregate T> constexpr status_code decode(T &value) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithCodingOverload<self_t, T>)
+    constexpr status_code decode(T &value) {
         auto &&tuple = to_tuple(value);
 
         // Decode the tag
@@ -334,7 +336,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <IsAggregate T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithCodingOverload<self_t, T>)
+    constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
@@ -344,7 +348,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
-    template <IsAggregate T> constexpr status_code decode(T &value, std::uint64_t tag) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithCodingOverload<self_t, T>)
+    constexpr status_code decode(T &value, std::uint64_t tag) {
         auto &&tuple = to_tuple(value);
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
@@ -626,6 +632,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
+    template <typename C>
+        requires(IsClassWithCodingOverload<self_t, C>)
+    constexpr status_code decode(C &value) {
+        constexpr bool has_transcode = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_decode    = HasDecodeMethod<self_t, C>;
+        static_assert(has_transcode ^ has_decode,
+                      "Class must have either (non-const) transcode or decode method, also do not forget to return value from the "
+                      "transcoding operation! "
+                      "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
+
+        // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
+        if constexpr (has_transcode) {
+            auto result = Access{}.transcode(*this, value);
+            return result ? status_code::success : result.error();
+        } else if constexpr (has_decode) {
+            auto result = Access{}.decode(*this, value);
+            return result ? status_code::success : result.error();
+        }
+
+        throw std::runtime_error("This should never happen");
+        return status_code::success;
+    }
+
     template <typename T> constexpr status_code decode(T &value) {
         if (reader_.empty(data_)) {
             return status_code::incomplete;
@@ -812,7 +841,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (IsContiguous<InputBuffer>) {
             return /* Iterator */ data_.begin() + reader_.position_;
         } else {
-            return /* Iterator */ reader_.position_;
+            return /* Iterator */ reader_.position_; // TODO: actual Iterator
         }
     }
 

@@ -202,9 +202,6 @@ concept IsTuple = requires {
     requires(!IsFixedArray<std::remove_cvref_t<T>>);
 };
 
-template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
-
 namespace detail {
 
 template <typename T, typename Class>
@@ -371,10 +368,12 @@ concept IsVariantWithoutIntegers = !IsVariantWithSignedInteger<T> && !IsVariantW
 template <typename T>
 concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
 
-// TODO: Need to check if has any transcoding methods
+template <typename T, typename C>
+concept IsClassWithCodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> || HasDecodeMethod<T, C>);
+
+// TODO: somehow add IsClassWithCodingOverload here
 template <typename T>
-concept IsClass = std::is_class_v<T> && !IsAggregate<T> && !IsAnyHeader<T> && !IsString<T> && !IsArray<T> && !IsMap<T> && !IsTag<T> &&
-                  !IsSimple<T> && !IsOptional<T> && !IsVariant<T> && !IsTuple<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
@@ -388,10 +387,9 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 
 // TODO: cleanup or simplify
 template <typename T>
-concept IsCborMajor =
-    IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
-    (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-    (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T> || IsClass<T>;
+concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+                      (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
+                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T>;
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);

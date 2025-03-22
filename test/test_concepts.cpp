@@ -848,8 +848,15 @@ TEST_SUITE("Classes") {
     };
 
     TEST_CASE("IsClass") {
-        static_assert(IsClass<class1>);
-        static_assert(!IsClass<struct1>);
+        auto                  buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto encoder = make_encoder(buffer);
+        [[maybe_unused]] auto decoder = make_decoder(buffer);
+
+        using Encoder = decltype(encoder);
+        using Decoder = decltype(decoder);
+
+        static_assert(IsClassWithCodingOverload<Encoder, class1>);
+        static_assert(IsClassWithCodingOverload<Decoder, struct1>);
         static_assert(!IsAggregate<class1>);
         static_assert(IsAggregate<struct1>);
     }
