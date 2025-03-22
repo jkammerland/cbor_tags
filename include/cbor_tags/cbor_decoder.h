@@ -481,7 +481,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <IsCborMajor T> constexpr status_code decode(std::optional<T> &value, major_type major, byte additionalInfo) {
+    template <typename T> constexpr status_code decode(std::optional<T> &value, major_type major, byte additionalInfo) {
         if (major == major_type::Simple && additionalInfo == static_cast<byte>(22)) {
             value = std::nullopt;
             return status_code::success;
@@ -491,8 +491,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto       result = decode(t, major, additionalInfo);
             if (result == status_code::success) {
                 value = std::move(t);
-            } else {
-                value = std::nullopt;
             }
             return result;
         }
@@ -653,6 +651,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         throw std::runtime_error("This should never happen");
         return status_code::success;
+    }
+
+    template <typename C>
+        requires(IsClassWithCodingOverload<self_t, C>)
+    constexpr status_code decode(C &value, major_type, byte) {
+        reader_.seek(-1);
+        return this->decode(value);
     }
 
     template <typename T> constexpr status_code decode(T &value) {

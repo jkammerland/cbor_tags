@@ -17,11 +17,11 @@ struct appender;
 
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
-    
-    constexpr void operator()(T &container, const value_type& value) { 
+
+    constexpr void operator()(T &container, const value_type &value) {
         if constexpr (IsMap<T>) {
             const auto &[key, mapped_value] = value;
-            
+
             if constexpr (IsMultiMap<T>) {
                 container.insert({key, mapped_value});
             } else {
@@ -91,6 +91,8 @@ template <typename T> struct reader<T, true> {
     constexpr value_type read(const T &container, size_type offset) noexcept {
         return static_cast<value_type>(container[position_ + offset]);
     }
+
+    constexpr void seek(int i) { position_ += i; }
 };
 
 template <typename T> struct reader<T, false> {
@@ -115,6 +117,11 @@ template <typename T> struct reader<T, false> {
         throw std::runtime_error("Not implemented");
         auto it = std::next(position_, offset);
         return static_cast<value_type>(*it);
+    }
+
+    constexpr void seek(int i) {
+        position_ = std::next(position_, i);
+        current_offset_ += i;
     }
 };
 

@@ -229,6 +229,10 @@ TEST_SUITE("Decoding Classes") {
         auto dec    = make_decoder(buffer);
 
         std::optional<Class124> a;
-        // REQUIRE(dec(a));
+        REQUIRE(dec(a));
+        REQUIRE(a);
+        CHECK_EQ(a->a, 4);
+        CHECK_EQ(a->b, 5.0);
+        CHECK_EQ(a->get_c(), "hello");
     }
 }
