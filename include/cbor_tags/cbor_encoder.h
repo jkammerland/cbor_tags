@@ -142,40 +142,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         } else if constexpr (IsTag<T>) {
             const auto &&tuple = to_tuple(value);
             encode_major_and_size(std::get<0>(tuple), static_cast<byte_type>(0xC0));
-            std::apply(
-                [this](const auto &...args) {
-                    constexpr auto size_ = sizeof...(args);
-                    if constexpr (size_ > 1 && Options::wrap_groups) {
-                        this->encode(as_array{size_});
-                    }
-                    (this->encode(args), ...);
-                },
-                detail::tuple_tail(tuple));
+            aggregate_encode(detail::tuple_tail(tuple));
         } else {
             const auto &&tuple = to_tuple(value);
-            std::apply(
-                [this](const auto &...args) {
-                    constexpr auto size_ = sizeof...(args);
-                    if constexpr (size_ > 1 && Options::wrap_groups) {
-                        this->encode(as_array{size_});
-                    }
-                    (this->encode(args), ...);
-                },
-                tuple);
+            aggregate_encode(std::forward<decltype(tuple)>(tuple));
         }
     }
 
-    template <IsUntaggedTuple T> constexpr void encode(const T &value) {
-        std::apply(
-            [this](const auto &...args) {
-                constexpr auto size_ = sizeof...(args);
-                if constexpr (size_ > 1 && Options::wrap_groups) {
-                    this->encode(as_array{size_});
-                }
-                (this->encode(args), ...);
-            },
-            value);
-    }
+    template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
     template <typename C>
         requires(IsClassWithCodingOverload<self_t, C>)
@@ -224,6 +198,20 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
+
+  private:
+    // Helper method to avoid code duplication
+    template <typename Tuple> void aggregate_encode(Tuple &&tuple) {
+        std::apply(
+            [this](const auto &...args) {
+                constexpr auto size_ = sizeof...(args);
+                if constexpr (size_ > 1 && Options::wrap_groups) {
+                    this->encode(as_array{size_});
+                }
+                (this->encode(args), ...);
+            },
+            std::forward<Tuple>(tuple));
+    }
 };
 
 template <typename T> struct cbor_variant_encoder {
