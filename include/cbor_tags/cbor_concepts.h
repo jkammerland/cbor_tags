@@ -37,6 +37,8 @@ concept ValidCborBuffer = requires(T) {
     requires std::input_or_output_iterator<typename T::iterator>;
 };
 
+template <typename T> constexpr auto cbor_tag(const T &obj);
+
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
 
@@ -204,6 +206,8 @@ concept IsTuple = requires {
 
 namespace detail {
 
+// Compiler firewalls by nesting below concepts in "if constexpr". Unfortunately, needed because of hard compile error, not only concept
+// returning false.
 template <typename T, typename Class>
 concept has_transcode_inner = requires(T t, Class c) {
     { c.transcode(t).has_value() } -> std::convertible_to<bool>;
@@ -219,8 +223,14 @@ concept has_decode_inner = requires(T t, Class c) {
     { c.decode(t).has_value() } -> std::convertible_to<bool>;
 };
 
+template <typename T>
+concept has_cbor_tag_inner = requires(T t) {
+    { t.cbor_tag() } -> std::convertible_to<std::uint64_t>;
+};
+
 } // namespace detail
 
+// A proxy that can have access to a number of predefined functions
 struct Access {
     // Transcode function
     template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
@@ -242,6 +252,13 @@ struct Access {
             return obj.decode(decoder);
         }
     }
+
+    // cbor_tag function
+    template <typename T> static constexpr auto cbor_tag(const T &obj) {
+        if constexpr (detail::has_cbor_tag_inner<T>) {
+            return obj.cbor_tag();
+        }
+    }
 };
 
 // Concepts using the named functions
@@ -258,6 +275,16 @@ concept HasEncodeMethod = requires(T t, Class c) {
 template <typename T, typename Class>
 concept HasDecodeMethod = requires(T t, Class c) {
     { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T>
+concept HasTagFreeFunction = requires(T t) {
+    { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
+};
+
+template <typename T>
+concept HasTagMemberFunction = requires(T t) {
+    { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
 };
 
 template <std::uint64_t T> struct static_tag;
@@ -371,7 +398,9 @@ concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnly
 template <typename T, typename C>
 concept IsClassWithCodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> || HasDecodeMethod<T, C>);
 
-// TODO: somehow add IsClassWithCodingOverload here
+template <typename T>
+concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMemberFunction<T>);
+
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
 

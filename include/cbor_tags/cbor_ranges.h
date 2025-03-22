@@ -1,5 +1,7 @@
 #pragma once
 
+// DEPRECATED - use std::ranges or ranges-v3 instead
+
 #include <concepts>
 #include <ranges>
 #include <stdexcept>

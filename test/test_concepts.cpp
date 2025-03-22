@@ -829,6 +829,18 @@ TEST_CASE_TEMPLATE("Count tags in variant", T, void) {
     static_assert(tags[4] == 4);
 }
 
+struct struct1 {
+    int    a;
+    double b;
+
+    template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
+    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+};
+
+namespace cbor::tags {
+template <> constexpr auto cbor_tag(const struct1 &) { return 2000u; }
+} // namespace cbor::tags
+
 TEST_SUITE("Classes") {
     struct class1 {
         class1() = default;
@@ -838,13 +850,7 @@ TEST_SUITE("Classes") {
         template <typename T> constexpr auto transcode(T &transcoder) { return expected<void, int>{}; }
         template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
         template <typename T> constexpr auto decode(T &decoder) { return expected<void, int>{}; }
-    };
-    struct struct1 {
-        int    a;
-        double b;
-
-        template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
-        template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+        constexpr uint16_t                   cbor_tag() const { return 1000; }
     };
 
     TEST_CASE("IsClass") {
@@ -875,5 +881,18 @@ TEST_SUITE("Classes") {
         static_assert(!HasTranscodeMethod<decltype(encoder), struct1>);
         static_assert(HasEncodeMethod<decltype(encoder), struct1>);  // Only has encode
         static_assert(!HasDecodeMethod<decltype(decoder), struct1>); // Should not work, returns void
+    }
+
+    struct DummyNoTag {
+        static constexpr std::uint64_t cbor_tag{123};
+    };
+
+    TEST_CASE("IsClassWithTagOverload") {
+        static_assert(IsClassWithTagOverload<class1>);
+        static_assert(!IsClassWithTagOverload<DummyNoTag>);
+        static_assert(IsClassWithTagOverload<struct1>);
+        static_assert(HasTagMemberFunction<class1>);
+        static_assert(!HasTagMemberFunction<struct1>);
+        static_assert(!HasTagFreeFunction<class1>);
     }
 }
