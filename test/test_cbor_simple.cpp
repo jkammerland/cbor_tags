@@ -201,3 +201,21 @@ TEST_CASE("Variant with simples") {
     REQUIRE_EQ(value.index(), decoded.index());
     CHECK_EQ(std::get<float>(value), std::get<float>(decoded));
 }
+
+TEST_CASE("Test std::variant<int, double>") {
+    auto buffer = std::vector<std::byte>{};
+    auto enc    = make_encoder(buffer);
+
+    std::variant<int, double> value{3.14};
+    REQUIRE(enc(value));
+
+    fmt::print("Variant with int and double: ");
+    print_bytes(buffer);
+
+    auto dec = make_decoder(buffer);
+
+    std::variant<int, double> decoded;
+    REQUIRE(dec(decoded));
+    CHECK_EQ(value.index(), decoded.index());
+    CHECK_EQ(std::get<double>(value), std::get<double>(decoded));
+}

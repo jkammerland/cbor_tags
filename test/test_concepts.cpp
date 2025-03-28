@@ -31,6 +31,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 using namespace cbor::tags;
@@ -833,9 +834,19 @@ struct struct1 {
     int    a;
     double b;
 
-    template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
     template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
 };
+
+struct struct2 {
+    int    a;
+    double b;
+
+    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+};
+
+// Also works
+template <typename T> constexpr auto transcode(T &transcoder, struct2 &&obj) { return expected<void, int>{}; }
+template <typename T> constexpr auto encode(T &encoder, const struct1 &obj) { return expected<void, int>{}; }
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag(const struct1 &) { return 2000u; }
@@ -853,6 +864,19 @@ TEST_SUITE("Classes") {
         constexpr uint16_t                   cbor_tag() const { return 1000; }
     };
 
+    TEST_CASE("HasTranscodeFreeFunction") {
+        auto                  buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto encoder = make_encoder(buffer);
+        [[maybe_unused]] auto decoder = make_decoder(buffer);
+        static_assert(!HasTranscodeFreeFunction<decltype(encoder), class1>);
+
+        struct2 a;
+        REQUIRE(transcode(encoder, std::forward<struct2>(a)));
+        static_assert(HasTranscodeFreeFunction<decltype(encoder), struct2>);
+
+        static_assert(HasEncodeFreeFunction<decltype(encoder), struct1>);
+    }
+
     TEST_CASE("IsClass") {
         auto                  buffer  = std::vector<uint8_t>{};
         [[maybe_unused]] auto encoder = make_encoder(buffer);
@@ -861,8 +885,8 @@ TEST_SUITE("Classes") {
         using Encoder = decltype(encoder);
         using Decoder = decltype(decoder);
 
-        static_assert(IsClassWithCodingOverload<Encoder, class1>);
-        static_assert(IsClassWithCodingOverload<Decoder, struct1>);
+        static_assert(IsClassWithEncodingOverload<Encoder, class1>);
+        static_assert(!IsClassWithDecodingOverload<Decoder, struct1>); // Returns void, so not a valid overload.
         static_assert(!IsAggregate<class1>);
         static_assert(IsAggregate<struct1>);
     }
@@ -879,7 +903,7 @@ TEST_SUITE("Classes") {
         static_assert(HasEncodeMethod<decltype(encoder), class1>);
         static_assert(HasDecodeMethod<decltype(decoder), class1>);
         static_assert(!HasTranscodeMethod<decltype(encoder), struct1>);
-        static_assert(HasEncodeMethod<decltype(encoder), struct1>);  // Only has encode
+        static_assert(HasEncodeFreeFunction<decltype(encoder), struct1>);
         static_assert(!HasDecodeMethod<decltype(decoder), struct1>); // Should not work, returns void
     }
 

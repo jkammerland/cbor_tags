@@ -123,7 +123,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithCodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T>)
     constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
@@ -152,12 +152,13 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
     template <typename C>
-        requires(IsClassWithCodingOverload<self_t, C>)
+        requires(IsClassWithEncodingOverload<self_t, C>)
     constexpr void encode(const C &value) {
-        constexpr bool has_transcode = HasTranscodeMethod<self_t, C>;
-        constexpr bool has_encode    = HasEncodeMethod<self_t, C>;
+        constexpr bool has_transcode   = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_encode      = HasEncodeMethod<self_t, C>;
+        constexpr bool has_free_encode = HasEncodeFreeFunction<self_t, C>;
         static_assert(
-            has_transcode ^ has_encode,
+            has_transcode ^ has_encode ^ has_free_encode,
             "Class must have either (const) transcode or encode method, also do not forget to return value from the transcoding operation! "
             "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 

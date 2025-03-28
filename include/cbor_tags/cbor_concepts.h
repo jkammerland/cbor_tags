@@ -3,9 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <ranges>
-#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -38,6 +36,22 @@ concept ValidCborBuffer = requires(T) {
 };
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
+
+// Free function variants of coding functions
+template <typename T, typename Class>
+concept HasTranscodeFreeFunction = requires(T t, Class c) {
+    { transcode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasEncodeFreeFunction = requires(T t, Class c) {
+    { encode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasDecodeFreeFunction = requires(T t, Class c) {
+    { decode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+};
 
 template <typename T>
 concept IsContiguous = requires(T) { requires std::ranges::contiguous_range<T>; };
@@ -261,7 +275,7 @@ struct Access {
     }
 };
 
-// Concepts using the named functions
+// Overload of coding functions, as member function
 template <typename T, typename Class>
 concept HasTranscodeMethod = requires(T t, Class c) {
     { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
@@ -277,11 +291,13 @@ concept HasDecodeMethod = requires(T t, Class c) {
     { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
+// Free function variants of tag functions
 template <typename T>
 concept HasTagFreeFunction = requires(T t) {
     { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
 };
 
+// Member function variants of tag functions
 template <typename T>
 concept HasTagMemberFunction = requires(T t) {
     { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
@@ -396,7 +412,17 @@ template <typename T>
 concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
 
 template <typename T, typename C>
-concept IsClassWithCodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> || HasDecodeMethod<T, C>);
+concept IsClassWithCodingOverload =
+    std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> || HasDecodeMethod<T, C> || HasTranscodeFreeFunction<T, C> ||
+                           HasEncodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
+
+template <typename T, typename C>
+concept IsClassWithEncodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> ||
+                                                             HasTranscodeFreeFunction<T, C> || HasEncodeFreeFunction<T, C>);
+
+template <typename T, typename C>
+concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasDecodeMethod<T, C> ||
+                                                             HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
 concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMemberFunction<T>);
