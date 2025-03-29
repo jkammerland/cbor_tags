@@ -907,16 +907,32 @@ TEST_SUITE("Classes") {
         static_assert(!HasDecodeMethod<decltype(decoder), struct1>); // Should not work, returns void
     }
 
-    struct DummyNoTag {
+    struct TrulyTagged0 {
         static constexpr std::uint64_t cbor_tag{123};
     };
 
+    struct TrulyTagged1 {
+        static_tag<555> cbor_tag;
+    };
+
+    struct TrulyTagged2 {
+      private:
+        friend cbor::tags::Access;
+        dynamic_tag<uint16_t> cbor_tag{512};
+    };
+
+    struct TrulyTagged3 {};
+    constexpr auto cbor_tag(const TrulyTagged3 &) { return 5u; }
+
     TEST_CASE("IsClassWithTagOverload") {
-        static_assert(IsClassWithTagOverload<class1>);
-        static_assert(!IsClassWithTagOverload<DummyNoTag>);
+        static_assert(!IsClassWithTagOverload<class1>);
+        static_assert(IsClassWithTagOverload<TrulyTagged0>);
+        static_assert(IsClassWithTagOverload<TrulyTagged1>);
+        static_assert(IsClassWithTagOverload<TrulyTagged2>);
+        static_assert(IsClassWithTagOverload<TrulyTagged3>);
         static_assert(IsClassWithTagOverload<struct1>);
-        static_assert(HasTagMemberFunction<class1>);
-        static_assert(!HasTagMemberFunction<struct1>);
+        static_assert(!HasTagMember<class1>);
+        static_assert(!HasTagMember<struct1>);
         static_assert(!HasTagFreeFunction<class1>);
     }
 }

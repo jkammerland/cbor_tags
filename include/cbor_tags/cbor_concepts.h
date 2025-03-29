@@ -220,8 +220,8 @@ concept IsTuple = requires {
 
 namespace detail {
 
-// Compiler firewalls by nesting below concepts in "if constexpr". Unfortunately, needed because of hard compile error, not only concept
-// returning false.
+// Compiler firewalls by nesting below concepts in "if constexpr". Unfortunately, needed because of hard compile error, concept
+// returning false is not enough.
 template <typename T, typename Class>
 concept has_transcode_inner = requires(T t, Class c) {
     { c.transcode(t).has_value() } -> std::convertible_to<bool>;
@@ -239,7 +239,7 @@ concept has_decode_inner = requires(T t, Class c) {
 
 template <typename T>
 concept has_cbor_tag_inner = requires(T t) {
-    { t.cbor_tag() } -> std::convertible_to<std::uint64_t>;
+    { t.cbor_tag } -> std::convertible_to<std::uint64_t>;
 };
 
 } // namespace detail
@@ -270,7 +270,7 @@ struct Access {
     // cbor_tag function
     template <typename T> static constexpr auto cbor_tag(const T &obj) {
         if constexpr (detail::has_cbor_tag_inner<T>) {
-            return obj.cbor_tag();
+            return obj.cbor_tag;
         }
     }
 };
@@ -299,7 +299,7 @@ concept HasTagFreeFunction = requires(T t) {
 
 // Member function variants of tag functions
 template <typename T>
-concept HasTagMemberFunction = requires(T t) {
+concept HasTagMember = requires(T t) {
     { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
 };
 
@@ -420,7 +420,7 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMemberFunction<T>);
+concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMember<T>);
 
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;

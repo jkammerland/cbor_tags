@@ -101,6 +101,7 @@ struct MajorIndex {
     static constexpr std::uint64_t Null         = 16;
     static constexpr std::uint64_t SimpleValued = 17;
     static constexpr std::uint64_t endSimples   = 18;
+    // static constexpr std::uint64_t ClassWithTag = 19;
 };
 
 constexpr std::uint64_t MaxBucketsForVariantChecking = 20;
@@ -170,7 +171,7 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
     static constexpr auto tags                       = tags_fn_outer();
 
     static constexpr uint64_t number_of_tags = (tags_size_outer());
-    static constexpr bool     too_many_tags  = (number_of_tags >= detail::MaxTagsForVariantChecking);
+    static constexpr bool     too_many_tags  = (number_of_tags >= detail::MaxTagsForVariantChecking); // Use a runtime map instead
 
     static constexpr bool no_dynamic_tags    = (majors_and_subtypes_counts[detail::MajorIndex::DynamicTag] == 0);
     static constexpr bool has_any_tag_header = (majors_and_subtypes_counts[detail::MajorIndex::AnyTagHeader] > 0);
