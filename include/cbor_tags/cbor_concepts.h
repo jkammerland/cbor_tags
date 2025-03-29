@@ -412,11 +412,6 @@ template <typename T>
 concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
 
 template <typename T, typename C>
-concept IsClassWithCodingOverload =
-    std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> || HasDecodeMethod<T, C> || HasTranscodeFreeFunction<T, C> ||
-                           HasEncodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
-
-template <typename T, typename C>
 concept IsClassWithEncodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> ||
                                                              HasTranscodeFreeFunction<T, C> || HasEncodeFreeFunction<T, C>);
 

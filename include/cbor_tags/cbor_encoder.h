@@ -154,11 +154,13 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     template <typename C>
         requires(IsClassWithEncodingOverload<self_t, C>)
     constexpr void encode(const C &value) {
-        constexpr bool has_transcode   = HasTranscodeMethod<self_t, C>;
-        constexpr bool has_encode      = HasEncodeMethod<self_t, C>;
-        constexpr bool has_free_encode = HasEncodeFreeFunction<self_t, C>;
+        constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_encode         = HasEncodeMethod<self_t, C>;
+        constexpr bool has_free_encode    = HasEncodeFreeFunction<self_t, C>;
+        constexpr bool has_free_transcode = HasTranscodeFreeFunction<self_t, C>;
+        static_assert(!has_free_encode, "Not yet supported because of ADL problems, use free transcode instead");
         static_assert(
-            has_transcode ^ has_encode ^ has_free_encode,
+            has_transcode ^ has_encode ^ has_free_encode ^ has_free_transcode,
             "Class must have either (const) transcode or encode method, also do not forget to return value from the transcoding operation! "
             "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
@@ -167,6 +169,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             [[maybe_unused]] auto result = Access{}.transcode(*this, value);
         } else if constexpr (has_encode) {
             [[maybe_unused]] auto result = Access{}.encode(*this, value);
+        } else if constexpr (has_free_encode) {
+            throw std::runtime_error("Not implemented");
+        } else if constexpr (has_free_transcode) {
+            [[maybe_unused]] auto result = transcode(*this, value);
         }
     }
 

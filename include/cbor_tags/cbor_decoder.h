@@ -633,12 +633,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename C>
         requires(IsClassWithDecodingOverload<self_t, C>)
     constexpr status_code decode(C &value) {
-        constexpr bool has_transcode   = HasTranscodeMethod<self_t, C>;
-        constexpr bool has_decode      = HasDecodeMethod<self_t, C>;
-        constexpr bool has_free_decode = HasDecodeFreeFunction<self_t, C>;
+        constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
+        constexpr bool has_free_decode    = HasDecodeFreeFunction<self_t, C>;
+        constexpr bool has_free_transcode = HasTranscodeFreeFunction<self_t, C>;
 
-        static_assert(has_transcode ^ has_decode ^ has_free_decode,
-                      "Class must have either (non-const) transcode or decode method, also do not forget to return value from the "
+        static_assert(has_transcode ^ has_decode ^ has_free_decode ^ has_free_transcode,
+                      "Class must have either (non-const) transcode(T& transcoder, O&& obj) or decode method, also do not forget to return "
+                      "value from the "
                       "transcoding operation! "
                       "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
@@ -649,10 +651,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (has_decode) {
             auto result = Access{}.decode(*this, value);
             return result ? status_code::success : result.error();
+        } else if constexpr (has_free_decode) {
+            auto result = decode(*this, std::forward<C>(value));
+            return result ? status_code::success : result.error();
+        } else if (has_free_transcode) {
+            auto result = transcode(*this, std::forward<C>(value));
+            return result ? status_code::success : result.error();
         }
 
         // throw std::runtime_error("This should never happen");
-        return status_code::success;
+        return status_code::error;
     }
 
     template <typename C>
