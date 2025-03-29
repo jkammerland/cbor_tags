@@ -119,6 +119,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <IsTaggedTuple T> constexpr void encode(const T &value) {
+        /* Tag being first already garanteed by the concept */
         encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
         encode(value.second);
     }
@@ -142,6 +143,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                 tuple);
         } else if constexpr (IsTag<T>) {
             const auto &&tuple = to_tuple(value);
+            static_assert(IsTag<std::remove_cvref_t<decltype(std::get<0>(tuple))>>, "Tag must be first element of tuple");
             encode_major_and_size(std::get<0>(tuple), static_cast<byte_type>(0xC0));
             aggregate_encode(detail::tuple_tail(tuple));
         } else {
