@@ -18,6 +18,7 @@
 // #include <fmt/base.h>
 // #include <nameof.hpp>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace cbor::tags {
@@ -158,7 +159,6 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         constexpr bool has_encode         = HasEncodeMethod<self_t, C>;
         constexpr bool has_free_encode    = HasEncodeFreeFunction<self_t, C>;
         constexpr bool has_free_transcode = HasTranscodeFreeFunction<self_t, C>;
-        static_assert(!has_free_encode, "Not yet supported because of ADL problems, use free transcode instead");
         static_assert(
             has_transcode ^ has_encode ^ has_free_encode ^ has_free_transcode,
             "Class must have either (const) transcode or encode method, also do not forget to return value from the transcoding operation! "
@@ -170,8 +170,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         } else if constexpr (has_encode) {
             [[maybe_unused]] auto result = Access{}.encode(*this, value);
         } else if constexpr (has_free_encode) {
-            throw std::runtime_error("Not implemented");
+            /* This requires an indirect call in order for some compilers to find the overload.  */
+            [[maybe_unused]] auto result = detail::adl_indirect_encode(*this, value);
         } else if constexpr (has_free_transcode) {
+            /* Transcode does not require an indirect call, because no other methods exist as it does with encode. */
             [[maybe_unused]] auto result = transcode(*this, value);
         }
     }

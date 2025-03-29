@@ -148,4 +148,9 @@ constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
 
 template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr) { return static_cast<T &>(*this_ptr); }
 
+template <typename Encoder, typename C> inline constexpr auto adl_indirect_encode(Encoder &enc, const C &c) { return encode(enc, c); }
+template <typename Decoder, typename C> inline constexpr auto adl_indirect_decode(Decoder &dec, C &&c) {
+    return decode(dec, std::forward<C>(c));
+}
+
 } // namespace cbor::tags::detail

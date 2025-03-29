@@ -644,7 +644,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                       "transcoding operation! "
                       "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
-        // For now, the only errors from encoding are exceptions.It will be caught by the operator(...) function, up top
         if constexpr (has_transcode) {
             auto result = Access{}.transcode(*this, value);
             return result ? status_code::success : result.error();
@@ -652,9 +651,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto result = Access{}.decode(*this, value);
             return result ? status_code::success : result.error();
         } else if constexpr (has_free_decode) {
-            auto result = decode(*this, std::forward<C>(value));
+            /* This requires an indirect call in order for some compilers to find the overload.  */
+            auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
             return result ? status_code::success : result.error();
         } else if (has_free_transcode) {
+            /* Transcode does not require an indirect call, because no other methods exist as it does with encode. */
             auto result = transcode(*this, std::forward<C>(value));
             return result ? status_code::success : result.error();
         }
