@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.8.1)
+project(cbor_tags VERSION 0.9.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
