@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_detail.h"
 
 // #include <fmt/core.h>
 // #include <magic_enum/magic_enum.hpp>
@@ -268,10 +269,15 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
             if (it == tags.end()) {
                 tags.push_back(std::get<0>(T{}).cbor_tag);
             } else {
-                result[MajorIndex::Tag]++; // If duplicate tag is found
+                result[MajorIndex::Tag]++;
             }
         } else if constexpr (IsClassWithTagOverload<T>) {
-            // TODO: Implement this
+            auto it = std::find(tags.begin(), tags.end(), detail::get_major_6_tag_from_class(T{}));
+            if (it == tags.end()) {
+                tags.push_back(detail::get_major_6_tag_from_class(T{}));
+            } else {
+                result[MajorIndex::Tag]++;
+            }
         } else if constexpr (IsTagHeader<T>) {
             result[MajorIndex::AnyTagHeader]++;
         } else {

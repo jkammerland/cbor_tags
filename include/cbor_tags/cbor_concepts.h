@@ -344,11 +344,13 @@ concept IsTaggedTuple = requires(T t) {
 template <typename T>
 concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsAnyHeader<T>;
 
+// Must have either a cbor_tag(T) exlusive or a .cbor_tag member
 template <typename T>
-concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMember<T>);
+concept IsClassWithTagOverload = std::is_class_v<T> && static_cast<bool>(HasTagFreeFunction<T> ^ HasTagMember<T>);
 
 template <typename T>
-concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> || IsClassWithTagOverload<T>;
+concept IsTag = static_cast<bool>(HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> ||
+                                  IsClassWithTagOverload<T>);
 
 template <typename T>
 concept IsOptional = requires(T t) {

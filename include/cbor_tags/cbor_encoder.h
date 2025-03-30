@@ -167,10 +167,8 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
         // Automatic tag encoding
-        if constexpr (HasTagFreeFunction<C>) {
-            this->encode(cbor_tag(value));
-        } else if constexpr (HasTagMember<C>) {
-            this->encode(Access{}.cbor_tag(value));
+        if constexpr (IsClassWithTagOverload<C>) {
+            this->encode(detail::get_major_6_tag_from_class(value));
         }
 
         // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top

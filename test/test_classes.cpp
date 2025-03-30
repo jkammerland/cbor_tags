@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "test_util.h"
@@ -8,6 +9,7 @@
 #include <fmt/base.h>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 using namespace cbor::tags;
@@ -156,8 +158,20 @@ TEST_CASE("Test classes nested free and member functions - reverse") {
     CHECK_EQ(c1, c2);
 }
 
+struct X {
+    enum class Enum { A, B, C };
+    static_tag<555> cbor_tag;
+    Enum            e1{Enum::B};
+    bool            operator==(const X &other) const = default;
+};
+
+// constexpr auto cbor_tag(const X &) { return static_tag<55555>{}; }
+
 TEST_CASE_TEMPLATE("Class with tag", T, static_tag<1>, static_tag<2>, Class6) {
-    std::variant<static_tag<1>, static_tag<2>, Class6> v = T{};
+    std::variant<static_tag<1>, static_tag<2>, Class6, X> v = T{};
+    if constexpr (std::is_same_v<T, X>) {
+        v = X{.e1 = X::Enum::C};
+    }
 
     auto buffer = std::vector<uint8_t>{};
     auto enc    = make_encoder(buffer);
@@ -168,6 +182,37 @@ TEST_CASE_TEMPLATE("Class with tag", T, static_tag<1>, static_tag<2>, Class6) {
     decltype(v) v2;
     REQUIRE(dec(v2));
     CHECK_EQ(v, v2);
+}
+
+template <std::uint64_t N> struct F {
+    static constexpr std::uint64_t cbor_tag{N};
+    int                            a;
+};
+
+template <std::uint64_t N> struct Class7 {
+    std::optional<Class4> c0;
+    double                d_;
+
+    bool operator==(const Class7 &other) const = default;
+
+    Class7() = default;
+    Class7(Class4 &&c, double d) : c0(std::move(c)), d_{d} {}
+
+  private:
+    friend cbor::tags::Access;
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(wrap_as_array{c0, d_}); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(wrap_as_array{c0, d_}); }
+    static_tag<N>                              cbor_tag;
+};
+
+TEST_CASE_TEMPLATE("Class with variant tag collision", T, std::variant<F<12>, static_tag<12>>, std::variant<F<12>, Class6>,
+                   std::variant<Class6, Class7<12>>) {
+    static_assert(!valid_concept_mapping_v<T>);
+}
+
+TEST_CASE_TEMPLATE("Class with variant tag NO collision", T, std::variant<F<11>, static_tag<12>>, std::variant<F<11>, Class6>,
+                   std::variant<Class6, Class7<13>>) {
+    static_assert(valid_concept_mapping_v<T>);
 }
 
 } // namespace test_classes

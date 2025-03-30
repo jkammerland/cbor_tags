@@ -182,7 +182,7 @@ template <std::ranges::input_range R> struct tstr_view : std::ranges::view_inter
     }
 };
 
-// TODO: Not implemented!
+// TODO: Not implemented! This is not the way I think.
 template <std::ranges::input_range R> struct binary_array_range_view {
     R range;
 };

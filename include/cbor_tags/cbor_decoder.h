@@ -513,8 +513,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::no_match_for_optional_on_buffer;
     }
 
-    template <IsCborMajor... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
         using namespace detail;
+        static_assert((IsCborMajor<T> && ...),
+                      "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
+        static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
+                                                                   "decode into the type, it must be default constructed first.");
+
+        // Check ambiguous types in the variant.
         using Variant                                     = std::variant<T...>;
         constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
         constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
@@ -664,12 +670,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // In a variant context the tag is already decoded. The reason is that
         // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
         // alternatives. If we are here, then we have already checked that this is the right tag.
-        if constexpr (DecodeTag) {
-            if constexpr (HasTagFreeFunction<C>) {
-                this->decode(cbor_tag(value));
-            } else if constexpr (HasTagMember<C>) {
-                this->decode(Access{}.cbor_tag(value));
-            }
+        if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
+            this->decode(detail::get_major_6_tag_from_class(value));
         }
 
         if constexpr (has_transcode) {
