@@ -273,7 +273,6 @@ template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {
     } else if constexpr (IsSimple<T>) {
         return static_cast<std::byte>(0xE0);
     } else {
-        // std::unreachable(); // Due to IsCborMajor concept, this should never happen
         return static_cast<std::byte>(0xFF);
     }
 }

@@ -345,7 +345,10 @@ template <typename T>
 concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsAnyHeader<T>;
 
 template <typename T>
-concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T>;
+concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMember<T>);
+
+template <typename T>
+concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> || IsClassWithTagOverload<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -420,9 +423,6 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsClassWithTagOverload = std::is_class_v<T> && (HasTagFreeFunction<T> || HasTagMember<T>);
-
-template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
@@ -439,7 +439,8 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 template <typename T>
 concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
                       (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T>;
+                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T> ||
+                      (IsClassWithTagOverload<T>);
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);

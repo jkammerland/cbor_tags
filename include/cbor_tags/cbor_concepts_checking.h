@@ -59,6 +59,8 @@ template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteTy
             return is_valid_major<ByteType, enum_type>(m);
         } else if constexpr (IsSigned<Type>) {
             return m <= static_cast<ByteType>(major_type::NegativeInteger);
+        } else if constexpr (IsClassWithTagOverload<U>) {
+            return m == static_cast<ByteType>(major_type::Tag);
         } else {
             return m == ConceptType<ByteType, Type>::value;
         }
@@ -268,6 +270,8 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
             } else {
                 result[MajorIndex::Tag]++; // If duplicate tag is found
             }
+        } else if constexpr (IsClassWithTagOverload<T>) {
+            // TODO: Implement this
         } else if constexpr (IsTagHeader<T>) {
             result[MajorIndex::AnyTagHeader]++;
         } else {

@@ -154,6 +154,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
+    // TODO: Remove DecodeTag workaround
     template <typename C>
         requires(IsClassWithEncodingOverload<self_t, C>)
     constexpr void encode(const C &value) {
@@ -166,16 +167,23 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             "Class must have either (const) transcode or encode method, also do not forget to return value from the transcoding operation! "
             "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
+        // Automatic tag encoding
+        if constexpr (HasTagFreeFunction<C>) {
+            this->encode(cbor_tag(value));
+        } else if constexpr (HasTagMember<C>) {
+            this->encode(Access{}.cbor_tag(value));
+        }
+
         // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
         if constexpr (has_transcode) {
             [[maybe_unused]] auto result = Access{}.transcode(*this, value);
         } else if constexpr (has_encode) {
             [[maybe_unused]] auto result = Access{}.encode(*this, value);
         } else if constexpr (has_free_encode) {
-            /* This requires an indirect call in order for some compilers to find the overload.  */
+            /* This requires an indirect call in order for some compilers to find the overload. */
             [[maybe_unused]] auto result = detail::adl_indirect_encode(*this, value);
         } else if constexpr (has_free_transcode) {
-            /* Transcode does not require an indirect call, because no other methods exist as it does with encode. */
+            /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
             [[maybe_unused]] auto result = transcode(*this, value);
         }
     }

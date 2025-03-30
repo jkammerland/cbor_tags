@@ -122,6 +122,9 @@ TEST_CASE("Test classes nested free and member functions") {
     CHECK_EQ(c1, c2);
 }
 
+struct Class6;
+constexpr auto cbor_tag(const Class6 &) { return static_tag<12>{}; }
+
 struct Class6 {
     std::optional<Class4> c0;
     double                d_;
@@ -145,12 +148,26 @@ TEST_CASE("Test classes nested free and member functions - reverse") {
     Class6 c1(Class4(), 3.2);
     REQUIRE(enc(c1));
 
-    CHECK_EQ(to_hex(buffer), "8282f6fb0000000000000000fb400999999999999a");
+    CHECK_EQ(to_hex(buffer), "cc8282f6fb0000000000000000fb400999999999999a");
 
     auto   dec = make_decoder(buffer);
     Class6 c2;
     REQUIRE(dec(c2));
     CHECK_EQ(c1, c2);
+}
+
+TEST_CASE_TEMPLATE("Class with tag", T, static_tag<1>, static_tag<2>, Class6) {
+    std::variant<static_tag<1>, static_tag<2>, Class6> v = T{};
+
+    auto buffer = std::vector<uint8_t>{};
+    auto enc    = make_encoder(buffer);
+
+    REQUIRE(enc(v));
+
+    auto        dec = make_decoder(buffer);
+    decltype(v) v2;
+    REQUIRE(dec(v2));
+    CHECK_EQ(v, v2);
 }
 
 } // namespace test_classes
