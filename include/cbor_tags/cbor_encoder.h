@@ -154,7 +154,6 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
-    // TODO: Remove DecodeTag workaround
     template <typename C>
         requires(IsClassWithEncodingOverload<self_t, C>)
     constexpr void encode(const C &value) {

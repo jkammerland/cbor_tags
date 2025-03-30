@@ -646,9 +646,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    template <typename C>
+    template <typename C, bool DecodeTag = true>
         requires(IsClassWithDecodingOverload<self_t, C>)
-    constexpr status_code decode(C &value) {
+    constexpr status_code decode_class_impl(C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
         constexpr bool has_free_decode    = HasDecodeFreeFunction<self_t, C>;
@@ -660,11 +660,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                       "transcoding operation! "
                       "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
-        // Automatic tag decoding
-        if constexpr (HasTagFreeFunction<C>) {
-            this->decode(cbor_tag(value));
-        } else if constexpr (HasTagMember<C>) {
-            this->decode(Access{}.cbor_tag(value));
+        // Automatic tag decoding - only performed if DecodeTag is true
+        if constexpr (DecodeTag) {
+            if constexpr (HasTagFreeFunction<C>) {
+                this->decode(cbor_tag(value));
+            } else if constexpr (HasTagMember<C>) {
+                this->decode(Access{}.cbor_tag(value));
+            }
         }
 
         if constexpr (has_transcode) {
@@ -687,39 +689,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::error;
     }
 
-    // TODO: Remove code duplication with above function
+    template <typename C>
+        requires(IsClassWithDecodingOverload<self_t, C>)
+    constexpr status_code decode(C &value) {
+        return decode_class_impl<C, true>(value);
+    }
+
     template <typename C>
         requires(IsClassWithDecodingOverload<self_t, C>)
     constexpr status_code decode_without_tag(C &value) {
-        constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
-        constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
-        constexpr bool has_free_decode    = HasDecodeFreeFunction<self_t, C>;
-        constexpr bool has_free_transcode = HasTranscodeFreeFunction<self_t, C>;
-
-        static_assert(has_transcode ^ has_decode ^ has_free_decode ^ has_free_transcode,
-                      "Class must have either (non-const) transcode(T& transcoder, O&& obj) or decode method, also do not forget to return "
-                      "value from the "
-                      "transcoding operation! "
-                      "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
-
-        if constexpr (has_transcode) {
-            auto result = Access{}.transcode(*this, value);
-            return result ? status_code::success : result.error();
-        } else if constexpr (has_decode) {
-            auto result = Access{}.decode(*this, value);
-            return result ? status_code::success : result.error();
-        } else if constexpr (has_free_decode) {
-            /* This requires an indirect call in order for some compilers to find the overload. */
-            auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
-        } else if (has_free_transcode) {
-            /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
-            auto result = transcode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
-        }
-
-        // throw std::runtime_error("This should never happen");
-        return status_code::error;
+        return decode_class_impl<C, false>(value);
     }
 
     template <typename C>
