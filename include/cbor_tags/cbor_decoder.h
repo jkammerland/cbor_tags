@@ -660,7 +660,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                       "transcoding operation! "
                       "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
-        // Automatic tag decoding - only performed if DecodeTag is true
+        // Automatic tag decoding - only performed if NOT in a variant context
+        // In a variant context the tag is already decoded. The reason is that
+        // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
+        // alternatives. If we are here, then we have already checked that this is the right tag.
         if constexpr (DecodeTag) {
             if constexpr (HasTagFreeFunction<C>) {
                 this->decode(cbor_tag(value));
