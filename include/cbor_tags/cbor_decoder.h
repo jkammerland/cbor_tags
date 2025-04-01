@@ -356,7 +356,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsClassWithDecodingOverload<self_t, T>)
+        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T>
     constexpr status_code decode(T &value, std::uint64_t tag) {
         std::uint64_t class_tag;
         if constexpr (HasTagMember<T>) {

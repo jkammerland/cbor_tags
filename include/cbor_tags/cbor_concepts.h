@@ -3,6 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <type_traits>
 #include <utility>
@@ -220,27 +221,7 @@ concept IsTuple = requires {
 
 namespace detail {
 
-// Compiler firewalls by nesting below concepts in "if constexpr". Unfortunately, needed because of hard compile error, concept
-// returning false is not enough.
-template <typename T, typename Class>
-concept has_transcode_inner = requires(T t, Class c) {
-    { c.transcode(t).has_value() } -> std::convertible_to<bool>;
-};
-
-template <typename T, typename Class>
-concept has_encode_inner = requires(T t, Class c) {
-    { c.encode(t).has_value() } -> std::convertible_to<bool>;
-};
-
-template <typename T, typename Class>
-concept has_decode_inner = requires(T t, Class c) {
-    { c.decode(t).has_value() } -> std::convertible_to<bool>;
-};
-
-template <typename T>
-concept has_cbor_tag_inner = requires(T t) {
-    { t.cbor_tag } -> std::convertible_to<std::uint64_t>;
-};
+struct FalseType {};
 
 } // namespace detail
 
@@ -248,29 +229,37 @@ concept has_cbor_tag_inner = requires(T t) {
 struct Access {
     // Transcode function
     template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
-        if constexpr (detail::has_transcode_inner<T, std::remove_cvref_t<Class>>) {
+        if constexpr (requires { obj.transcode(transcoder).has_value(); }) {
             return obj.transcode(transcoder);
+        } else {
+            return detail::FalseType{};
         }
     }
 
     // Encode function
     template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
-        if constexpr (detail::has_encode_inner<T, std::remove_cvref_t<Class>>) {
+        if constexpr (requires { obj.encode(encoder).has_value(); }) {
             return obj.encode(encoder);
+        } else {
+            return detail::FalseType{};
         }
     }
 
     // Decode function
     template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
-        if constexpr (detail::has_decode_inner<T, std::remove_cvref_t<Class>>) {
+        if constexpr (requires { obj.decode(decoder).has_value(); }) {
             return obj.decode(decoder);
+        } else {
+            return detail::FalseType{};
         }
     }
 
     // cbor_tag function
     template <typename T> static constexpr auto cbor_tag(const T &obj) {
-        if constexpr (detail::has_cbor_tag_inner<T>) {
+        if constexpr (requires { obj.cbor_tag; }) {
             return obj.cbor_tag;
+        } else {
+            return detail::FalseType{};
         }
     }
 };
