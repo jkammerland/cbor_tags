@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <variant>

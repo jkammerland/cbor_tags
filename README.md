@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml)
 
-This is primarily a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. See [xkcd/927](https://xkcd.com/927/).
+This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. See [xkcd/927](https://xkcd.com/927/).
 
 The primary advantage of using this library is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
@@ -213,6 +213,169 @@ int main() {
 > [!NOTE]
 > The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
 
+## Working with Private Class Members or explicit overloading
+Should the need arise for overloading, or encoding private members, you have two options. The first is to use the `Access` friend class as shown in the example above. This will allow you to access private members of your class for encoding/decoding purposes.
+
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include <vector>
+#include <string>
+#include <variant>
+
+using namespace cbor::tags;
+
+class PrivateDataClass {
+public:
+    PrivateDataClass() = default;
+    explicit PrivateDataClass(int id, std::string name) 
+        : id_(id), name_(std::move(name)) {}
+    
+    bool operator==(const PrivateDataClass& other) const = default;
+    
+private:
+    int id_ = 0;
+    std::string name_;
+
+    /* Optional, and IS AUTOMATICALLY USED IF DEFINED
+       This is required for because of some details in std::variant handling with classes
+    */
+    static_tag<12345> cbor_tag; 
+    
+    // Method 1: Use member functions for encoding/decoding
+    friend cbor::tags::Access;  // Grant access to the library
+    
+    // You need one or both of these functions, depending on your needs
+    // Remember that if this is an object, wrap it in a array or map, as 
+    // single items is most likely not what you want. 
+    // But if there is only 1 item you don't need any wrapping of course.
+
+    template <typename Encoder>
+    constexpr auto encode(Encoder& enc) const {
+        return enc(wrap_as_array{id_, name_});  // Encode as array with 2 elements
+    }
+    
+    template <typename Decoder>
+    constexpr auto decode(Decoder& dec) {
+        return dec(wrap_as_array{id_, name_});  // Decode as array with 2 elements
+    }
+};
+
+int main() {
+    // Create an object with private data
+    PrivateDataClass obj{123, "Private Data"};
+    
+    // Encode the object
+    std::vector<uint8_t> buffer;
+    auto enc = make_encoder(buffer);
+    [[maybe_unused]] _ = enc(obj);
+    
+    // Decode into a new object
+    auto dec = make_decoder(buffer);
+    PrivateDataClass decoded_obj;
+    [[maybe_unused]] _ = dec(decoded_obj);
+    
+    // Objects should be equal
+    assert(obj == decoded_obj);
+    
+    return 0;
+}
+```
+
+Method 2 is to use an overload of encode or decode as free functions. This approach is useful when you cannot or do not want to modify the original class:
+
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include <vector>
+#include <string>
+
+using namespace cbor::tags;
+
+// A class we can't modify (perhaps from a third-party library)
+class ExternalClass {
+public:
+    ExternalClass() = default;
+    ExternalClass(int id, std::string name) : id_(id), name_(std::move(name)) {}
+    
+    bool operator==(const ExternalClass& other) const = default;
+    
+    // Getters for accessing private data
+    int getId() const { return id_; }
+    const std::string& getName() const { return name_; }
+    
+    // Setters for modifying private data
+    void setId(int id) { id_ = id; }
+    void setName(const std::string& name) { name_ = name; }
+    
+private:
+    int id_ = 0;
+    std::string name_;
+};
+
+// Method 2: Define free functions for encoding and decoding
+// This is used when you cannot modify the class itself
+
+// Tag function (optional) - defines a tag for this type when used in a variant
+constexpr auto cbor_tag(const ExternalClass&) { return static_tag<54321>{}; }
+
+// Encode function - converts the object to CBOR
+template <typename Encoder>
+constexpr auto encode(Encoder& enc, const ExternalClass& obj) {
+    // Access the private data through getters
+    return enc(wrap_as_array{obj.getId(), obj.getName()});
+}
+
+// Decode function - reconstructs the object from CBOR
+template <typename Decoder>
+constexpr auto decode(Decoder& dec, ExternalClass& obj) {
+    // Temporary variables to hold the decoded values
+    int id;
+    std::string name;
+    
+    // Decode into temporaries
+    auto result = dec(wrap_as_array{id, name});
+    
+    // If successful, update the object using setters
+    if (result) {
+        obj.setId(id);
+        obj.setName(name);
+    }
+    
+    return result;
+}
+
+int main() {
+    // Create an object
+    ExternalClass obj{456, "External Data"};
+    
+    // Encode the object
+    std::vector<uint8_t> buffer;
+    auto enc = make_encoder(buffer);
+    auto result = enc(obj);
+    
+    if (!result) {
+        std::cerr << "Encoding failed: " << status_message(result.error()) << std::endl;
+        return 1;
+    }
+    
+    // Decode into a new object
+    auto dec = make_decoder(buffer);
+    ExternalClass decoded_obj;
+    result = dec(decoded_obj);
+    
+    if (!result) {
+        std::cerr << "Decoding failed: " << status_message(result.error()) << std::endl;
+        return 1;
+    }
+    
+    // Objects should be equal
+    assert(obj == decoded_obj);
+    
+    return 0;
+}
+```
+
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp
@@ -309,7 +472,7 @@ int main() {
     enc(std::vector<std::byte>{});
 
     // Encode Api2 with a tag of 0x20
-    enc(make_tag_pair(0x20, Api2{"hello", "world"}));
+    enc(make_tag_pair(0x20, Api2{"hello", "world"})); 
 
     // Decoding - accept bstr and any tagged value
     auto dec = make_decoder(data);
@@ -425,7 +588,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:24". This means a struct can at maximum have 24 members, but it can handle any number of nested structs, as long as they have less than 25 members each! The format can take multiple space separated ranges, e.g. "1:24 30:50 1000:1000", just make sure it matches your usage. Any changes to this option will trigger a regeneration the header automatically, for cmake targets that depend on cbor_tags. The tool can be run separately if not using cmake in your build process.
+This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:24". This means a struct can at maximum have 24 members, but it can handle any number of nested structs, as long as they are within the max member requirement too. The format can take multiple space separated ranges, e.g. "1:24 30:50 1000:1000", just make sure it matches your usage. Any changes to this option will trigger a regeneration the header automatically, for cmake targets that depend on cbor_tags. The tool can be run separately if not using cmake in your build process.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -626,6 +789,13 @@ Please see the public online database of [tags](https://www.iana.org/assignments
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
 
 For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
+
+## 🌟 Practical Use Cases
+
+- **IoT Communication**: Efficiently encode sensor data in memory-constrained environments
+- **Configuration Serialization**: Save and load application settings with schema validation
+- **Cross-Platform Communication**: Exchange data between different systems with a well-defined standard
+- **Storage**: Store structured data in a compact binary format
 
 ## 📄 License
 
