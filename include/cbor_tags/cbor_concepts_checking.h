@@ -124,7 +124,7 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
     static constexpr auto tags_fn_inner = [](std::array<uint64_t, detail::MaxTagsForVariantChecking> &result, std::vector<uint64_t> &tags,
                                              std::vector<SimpleType> &simples) { (getTagsCounts<Ts>(result, tags, simples), ...); };
 
-    static constexpr auto counts_fn_outer = []() mutable {
+    static constexpr auto counts_fn_outer = []() {
         using namespace detail;
         std::array<uint64_t, detail::MaxBucketsForVariantChecking> result{};
         std::vector<uint64_t>                                      tags;

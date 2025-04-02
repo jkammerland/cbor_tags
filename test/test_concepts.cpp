@@ -861,7 +861,6 @@ TEST_SUITE("Classes") {
         template <typename T> constexpr auto transcode(T &transcoder) { return expected<void, int>{}; }
         template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
         template <typename T> constexpr auto decode(T &decoder) { return expected<void, int>{}; }
-        constexpr uint16_t                   cbor_tag() const { return 1000; }
     };
 
     TEST_CASE("HasTranscodeFreeFunction") {
