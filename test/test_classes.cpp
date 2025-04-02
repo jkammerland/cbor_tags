@@ -124,22 +124,22 @@ TEST_CASE("Test classes nested free and member functions") {
     CHECK_EQ(c1, c2);
 }
 
-struct Class6;
-constexpr auto cbor_tag(const Class6 &) { return static_tag<12>{}; }
-
 struct Class6 {
     std::optional<Class4> c0;
     double                d_;
 
     bool operator==(const Class6 &other) const = default;
 
-    Class6() = default;
-    Class6(Class4 &&c, double d) : c0(std::move(c)), d_{d} {}
+    constexpr Class6() = default;
+    constexpr Class6(Class4 &&c, double d) : c0(std::move(c)), d_{d} {}
+    constexpr ~Class6() = default;
 
   private:
     friend cbor::tags::Access;
     template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(wrap_as_array{c0, d_}); }
 };
+
+constexpr auto cbor_tag(const Class6 &) { return static_tag<12>{}; }
 
 template <typename Decoder> constexpr auto decode(Decoder &dec, Class6 &&c) { return dec(wrap_as_array{c.c0, c.d_}); }
 
