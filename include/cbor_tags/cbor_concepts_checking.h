@@ -170,8 +170,8 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
         return tags.size();
     };
 
-    static constexpr auto majors_and_subtypes_counts = counts_fn_outer();
-    static constexpr auto tags                       = tags_fn_outer();
+    static constexpr auto majors_and_subtypes_counts = (counts_fn_outer());
+    static constexpr auto tags                       = (tags_fn_outer());
 
     static constexpr uint64_t number_of_tags = (tags_size_outer());
     static constexpr bool     too_many_tags  = (number_of_tags >= detail::MaxTagsForVariantChecking); // Use a runtime map instead
@@ -181,9 +181,9 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
     static constexpr bool types_map_uniquely =
         std::all_of(majors_and_subtypes_counts.begin(), majors_and_subtypes_counts.end(), [](auto count) { return count <= 1; });
 
-    static constexpr auto number_of_unmatched = majors_and_subtypes_counts[detail::MajorIndex::Unmatched];
-    static constexpr bool value               = types_map_uniquely && no_dynamic_tags && !too_many_tags;
-    static constexpr auto array               = majors_and_subtypes_counts;
+    static constexpr auto number_of_unmatched = (majors_and_subtypes_counts[detail::MajorIndex::Unmatched]);
+    static constexpr bool value               = (types_map_uniquely && no_dynamic_tags && !too_many_tags);
+    static constexpr auto array               = (majors_and_subtypes_counts);
 };
 
 template <typename Variant, auto... Concepts>
