@@ -207,12 +207,12 @@ template <std::uint64_t N> struct Class7 {
 
 TEST_CASE_TEMPLATE("Class with variant tag collision", T, std::variant<F<12>, static_tag<12>>, std::variant<F<12>, Class6>,
                    std::variant<Class6, Class7<12>>) {
-    static_assert(!valid_concept_mapping_v<T>);
+    CHECK(!valid_concept_mapping_v<T>);
 }
 
 TEST_CASE_TEMPLATE("Class with variant tag NO collision", T, std::variant<F<11>, static_tag<12>>, std::variant<F<11>, Class6>,
                    std::variant<Class6, Class7<13>>) {
-    static_assert(valid_concept_mapping_v<T>);
+    CHECK(valid_concept_mapping_v<T>);
 }
 
 } // namespace test_classes
