@@ -173,9 +173,9 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
         // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
         if constexpr (has_transcode) {
-            [[maybe_unused]] auto result = Access{}.transcode(*this, value);
+            [[maybe_unused]] auto result = Access::transcode(*this, value);
         } else if constexpr (has_encode) {
-            [[maybe_unused]] auto result = Access{}.encode(*this, value);
+            [[maybe_unused]] auto result = Access::encode(*this, value);
         } else if constexpr (has_free_encode) {
             /* This requires an indirect call in order for some compilers to find the overload. */
             [[maybe_unused]] auto result = detail::adl_indirect_encode(*this, value);

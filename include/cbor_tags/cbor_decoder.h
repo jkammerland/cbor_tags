@@ -360,7 +360,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr status_code decode(T &value, std::uint64_t tag) {
         std::uint64_t class_tag;
         if constexpr (HasTagMember<T>) {
-            class_tag = Access{}.cbor_tag(value);
+            class_tag = Access::cbor_tag(value);
         } else if constexpr (HasTagFreeFunction<T>) {
             class_tag = cbor_tag(value);
         }
@@ -675,10 +675,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         if constexpr (has_transcode) {
-            auto result = Access{}.transcode(*this, value);
+            auto result = Access::transcode(*this, value);
             return result ? status_code::success : result.error();
         } else if constexpr (has_decode) {
-            auto result = Access{}.decode(*this, value);
+            auto result = Access::decode(*this, value);
             return result ? status_code::success : result.error();
         } else if constexpr (has_free_decode) {
             /* This requires an indirect call in order for some compilers to find the overload. */

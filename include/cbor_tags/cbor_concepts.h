@@ -255,6 +255,16 @@ struct Access {
     }
 
     // cbor_tag function
+    template <typename T> static constexpr auto cbor_tag() {
+        if constexpr (requires { T::cbor_tag; }) {
+            return T::cbor_tag;
+        } else if constexpr (requires { cbor_tag<T>(); }) {
+            return cbor_tag<T>();
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
     template <typename T> static constexpr auto cbor_tag(const T &obj) {
         if constexpr (requires { obj.cbor_tag; }) {
             return obj.cbor_tag;

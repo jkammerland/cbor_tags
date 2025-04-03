@@ -530,3 +530,41 @@ TEST_CASE("Nested struct without tags") {
 
     CHECK_EQ(result.b.c.a, 42);
 }
+
+template <typename T> constexpr auto TAGX() {
+    struct False {};
+    return False{};
+}
+
+struct ACCESSTEST {
+    template <typename T> static constexpr auto tag() {
+        if constexpr (requires { T::X; }) {
+            return T::X;
+        } else if constexpr (requires { TAGX<T>(); }) {
+            return TAGX<T>();
+        }
+    }
+};
+
+struct uniqueARFG {
+    int a;
+
+  private:
+    friend ACCESSTEST;
+    static constexpr int X = 1;
+};
+
+struct uniqueASDOR {
+    int a;
+
+  private:
+    int y;
+};
+
+template <> constexpr auto TAGX<uniqueASDOR>() { return 1; }
+
+TEST_CASE("Non default initialization testing tags") {
+    using type = decltype(uniqueARFG::a);
+    static_assert(ACCESSTEST::tag<uniqueARFG>() == 1);
+    static_assert(ACCESSTEST::tag<uniqueASDOR>() == 1);
+}
