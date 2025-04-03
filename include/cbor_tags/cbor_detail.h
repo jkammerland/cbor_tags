@@ -159,12 +159,30 @@ template <typename T> inline constexpr auto get_major_6_tag_from_tuple(const T &
     }
 }
 
-template <typename T> inline constexpr auto get_major_6_tag_from_class(const T &t) {
-    static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
+template <typename T> static constexpr auto get_major_6_tag_from_class(const T &t) {
+    // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
     if constexpr (HasTagMember<T>) {
-        return Access{}.cbor_tag(t);
+        return Access::cbor_tag(t);
+    } else if constexpr (HasTagNonConstructible<T>) {
+        return cbor::tags::cbor_tag<T>();
     } else if constexpr (HasTagFreeFunction<T>) {
         return cbor_tag(t);
+    } else {
+        return detail::FalseType{};
     }
 }
+
+template <typename T> static constexpr auto get_major_6_tag_from_class() {
+    // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
+    if constexpr (HasTagMember<T>) {
+        return Access::cbor_tag(T{});
+    } else if constexpr (HasTagNonConstructible<T>) {
+        return cbor::tags::cbor_tag<T>();
+    } else if constexpr (HasTagFreeFunction<T>) {
+        return cbor_tag(T{});
+    } else {
+        return detail::FalseType{};
+    }
+}
+
 } // namespace cbor::tags::detail

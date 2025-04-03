@@ -530,3 +530,41 @@ TEST_CASE("Nested struct without tags") {
 
     CHECK_EQ(result.b.c.a, 42);
 }
+
+template <typename T> constexpr auto TAGX() {
+    struct False {};
+    return False{};
+}
+
+struct ACCESSTEST {
+    template <typename T> static constexpr auto tag() {
+        if constexpr (requires { T::X; }) {
+            return T::X;
+        } else if constexpr (requires { TAGX<T>(); }) {
+            return TAGX<T>();
+        }
+    }
+};
+
+struct asdkalö {
+    int a;
+
+  private:
+    friend ACCESSTEST;
+    static constexpr int X = 1;
+};
+
+struct asdkalå {
+    int a;
+
+  private:
+    int y;
+};
+
+template <> constexpr auto TAGX<asdkalå>() { return 1; }
+
+TEST_CASE("SAD") {
+    using type = decltype(asdkalö::a);
+    static_assert(ACCESSTEST::tag<asdkalö>() == 1);
+    static_assert(ACCESSTEST::tag<asdkalå>() == 1);
+}

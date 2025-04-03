@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add option for debug mode
 option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
+# set(CMAKE_MAKE_PROGRAM "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja\\ninja.exe")
 
 # Configure a header file to pass the CMake setting to the source code
 configure_file(
@@ -25,8 +26,9 @@ if(CBOR_TAGS_USE_DEV_SETTINGS)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ccache.cmake)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_mold_linker.cmake)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common_settings.cmake)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
+  
 endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_compiler_and_flags.cmake)
 
 # THE LIBRARY
 add_library(${PROJECT_NAME} INTERFACE)
@@ -37,7 +39,7 @@ option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
 if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
   set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
-  cpmaddpackage(
+  CPMAddPackage(
     NAME
     expected
     GITHUB_REPOSITORY

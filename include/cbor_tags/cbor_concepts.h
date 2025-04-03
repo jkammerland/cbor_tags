@@ -37,6 +37,10 @@ concept ValidCborBuffer = requires(T) {
 };
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
+template <typename T> constexpr auto cbor_tag() {
+    struct Anonymous {};
+    return Anonymous{};
+}
 
 // Free function variants of coding functions
 template <typename T, typename Class>
@@ -225,6 +229,37 @@ struct FalseType {};
 
 } // namespace detail
 
+template <std::uint64_t T> struct static_tag;
+template <IsUnsigned T> struct dynamic_tag;
+
+template <typename T>
+concept HasDynamicTag = std::is_same_v<T, dynamic_tag<typename T::value_type>> || requires(T t) {
+    { t.cbor_tag } -> std::convertible_to<std::uint64_t>;
+    requires std::is_same_v<decltype(t.cbor_tag), dynamic_tag<typename decltype(t.cbor_tag)::value_type>>;
+};
+
+template <typename T> struct is_static_tag_t : std::false_type {};
+template <std::uint64_t T> struct is_static_tag_t<static_tag<T>> : std::true_type {};
+
+template <typename T>
+concept is_dynamic_tag_t = std::is_same_v<T, dynamic_tag<uint8_t>> || std::is_same_v<T, dynamic_tag<uint16_t>> ||
+                           std::is_same_v<T, dynamic_tag<uint32_t>> || std::is_same_v<T, dynamic_tag<uint64_t>>;
+
+template <typename T>
+concept HasStaticTag = requires {
+    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
+    requires is_static_tag_t<decltype(T::cbor_tag)>::value;
+    requires(!HasDynamicTag<T>);
+}; // namespace cbor::tags
+
+template <typename T>
+concept HasInlineTag = requires {
+    requires IsUnsigned<decltype(T::cbor_tag)>;
+    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
+    requires(!HasDynamicTag<T>);
+    requires(!HasStaticTag<T>);
+};
+
 // A proxy that can have access to a number of predefined functions
 struct Access {
     // Transcode function
@@ -262,6 +297,25 @@ struct Access {
             return detail::FalseType{};
         }
     }
+
+    // cbor_tag function
+    template <typename T> static constexpr auto cbor_tag() {
+        if constexpr (requires { T::cbor_tag; }) {
+            if constexpr (is_static_tag_t<decltype(T::cbor_tag)>::value) {
+                return decltype(T::cbor_tag){};
+            } else if constexpr (HasInlineTag<T>) {
+                return T::cbor_tag;
+            } else {
+                return detail::FalseType{};
+            }
+        } else if constexpr (requires { cbor_tag<T>(); }) {
+            return cbor_tag<T>();
+        } else if constexpr (requires { cbor_tag(T{}); }) {
+            return cbor_tag(T{});
+        } else {
+            return detail::FalseType{};
+        }
+    }
 };
 
 // Overload of coding functions, as member function
@@ -280,9 +334,14 @@ concept HasDecodeMethod = requires(T t, Class c) {
     { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
 };
 
+template <typename T>
+concept HasTagNonConstructible = requires(T) {
+    { cbor::tags::cbor_tag<T>() } -> std::convertible_to<std::uint64_t>;
+};
+
 // Free function variants of tag functions
 template <typename T>
-concept HasTagFreeFunction = requires(T t) {
+concept HasTagFreeFunction = HasTagNonConstructible<T> || requires(T t) {
     { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
 };
 
@@ -290,37 +349,6 @@ concept HasTagFreeFunction = requires(T t) {
 template <typename T>
 concept HasTagMember = requires(T t) {
     { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
-};
-
-template <std::uint64_t T> struct static_tag;
-template <IsUnsigned T> struct dynamic_tag;
-
-template <typename T>
-concept HasDynamicTag = std::is_same_v<T, dynamic_tag<typename T::value_type>> || requires(T t) {
-    { t.cbor_tag } -> std::convertible_to<std::uint64_t>;
-    requires std::is_same_v<decltype(t.cbor_tag), dynamic_tag<typename decltype(t.cbor_tag)::value_type>>;
-};
-
-template <typename T> struct is_static_tag_t : std::false_type {};
-template <std::uint64_t T> struct is_static_tag_t<static_tag<T>> : std::true_type {};
-
-template <typename T>
-concept is_dynamic_tag_t = std::is_same_v<T, dynamic_tag<uint8_t>> || std::is_same_v<T, dynamic_tag<uint16_t>> ||
-                           std::is_same_v<T, dynamic_tag<uint32_t>> || std::is_same_v<T, dynamic_tag<uint64_t>>;
-
-template <typename T>
-concept HasStaticTag = requires {
-    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
-    requires is_static_tag_t<decltype(T::cbor_tag)>::value;
-    requires(!HasDynamicTag<T>);
-}; // namespace cbor::tags
-
-template <typename T>
-concept HasInlineTag = requires {
-    requires IsUnsigned<decltype(T::cbor_tag)>;
-    { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
-    requires(!HasDynamicTag<T>);
-    requires(!HasStaticTag<T>);
 };
 
 template <typename T>

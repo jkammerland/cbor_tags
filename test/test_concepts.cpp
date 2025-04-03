@@ -912,6 +912,10 @@ TEST_SUITE("Classes") {
     };
 
     struct TrulyTagged1 {
+        constexpr TrulyTagged1() = default;
+
+      private:
+        friend cbor::tags::Access;
         static_tag<555> cbor_tag;
     };
 
