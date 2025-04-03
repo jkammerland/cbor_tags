@@ -127,8 +127,7 @@ TEST_CASE("Test classes nested free and member functions") {
 struct Class6 {
     std::optional<Class4> c0;
     double                d_;
-
-    bool operator==(const Class6 &other) const = default;
+    bool                  operator==(const Class6 &other) const = default;
 
     constexpr Class6() = default;
     constexpr Class6(Class4 &&c, double d) : c0(std::move(c)), d_{d} {}
@@ -136,10 +135,19 @@ struct Class6 {
 
   private:
     friend cbor::tags::Access;
+    // static_tag<12> cbor_tag;
+
     template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(wrap_as_array{c0, d_}); }
 };
+} // namespace test_classes
 
-constexpr auto cbor_tag(const Class6 &) { return static_tag<12>{}; }
+// TODO: cause build fail on clang-cl windows
+// constexpr auto cbor_tag(const Class6 &) { return static_tag<12>{}; }
+namespace cbor::tags {
+template <> constexpr auto cbor_tag<test_classes::Class6>() { return static_tag<12>{}; }
+} // namespace cbor::tags
+
+namespace test_classes {
 
 template <typename Decoder> constexpr auto decode(Decoder &dec, Class6 &&c) { return dec(wrap_as_array{c.c0, c.d_}); }
 
@@ -178,8 +186,8 @@ TEST_CASE_TEMPLATE("Class with tag", T, static_tag<1>, static_tag<2>, Class6) {
 
     REQUIRE(enc(v));
 
-    auto        dec = make_decoder(buffer);
-    decltype(v) v2;
+    auto                                                  dec = make_decoder(buffer);
+    std::variant<static_tag<1>, static_tag<2>, Class6, X> v2;
     REQUIRE(dec(v2));
     CHECK_EQ(v, v2);
 }
@@ -205,13 +213,29 @@ template <std::uint64_t N> struct Class7 {
     static_tag<N>                              cbor_tag;
 };
 
+template <std::uint64_t N> class Class8 {
+  public:
+    int a;
+
+  private:
+    friend cbor::tags::Access;
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(a); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(a); }
+
+    static constexpr std::uint64_t cbor_tag{N};
+};
+
+TEST_CASE("Test class8 for static inline tag") { static_assert(HasTagMember<Class8<12>>); }
+
 TEST_CASE_TEMPLATE("Class with variant tag collision", T, std::variant<F<12>, static_tag<12>>, std::variant<F<12>, Class6>,
                    std::variant<Class6, Class7<12>>) {
+    fmt::println("Testing: {}", valid_concept_mapping_array_v<T>);
     CHECK(!valid_concept_mapping_v<T>);
 }
 
 TEST_CASE_TEMPLATE("Class with variant tag NO collision", T, std::variant<F<11>, static_tag<12>>, std::variant<F<11>, Class6>,
                    std::variant<Class6, Class7<13>>) {
+    fmt::println("Testing: {}", valid_concept_mapping_array_v<T>);
     CHECK(valid_concept_mapping_v<T>);
 }
 

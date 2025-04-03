@@ -37,6 +37,10 @@ concept ValidCborBuffer = requires(T) {
 };
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
+template <typename T> constexpr auto cbor_tag() {
+    struct Anonymous {};
+    return Anonymous{};
+}
 
 // Free function variants of coding functions
 template <typename T, typename Class>
@@ -225,83 +229,6 @@ struct FalseType {};
 
 } // namespace detail
 
-// A proxy that can have access to a number of predefined functions
-struct Access {
-    // Transcode function
-    template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
-        if constexpr (requires { obj.transcode(transcoder).has_value(); }) {
-            return obj.transcode(transcoder);
-        } else {
-            return detail::FalseType{};
-        }
-    }
-
-    // Encode function
-    template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
-        if constexpr (requires { obj.encode(encoder).has_value(); }) {
-            return obj.encode(encoder);
-        } else {
-            return detail::FalseType{};
-        }
-    }
-
-    // Decode function
-    template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
-        if constexpr (requires { obj.decode(decoder).has_value(); }) {
-            return obj.decode(decoder);
-        } else {
-            return detail::FalseType{};
-        }
-    }
-
-    // cbor_tag function
-    template <typename T> static constexpr auto cbor_tag() {
-        if constexpr (requires { T::cbor_tag; }) {
-            return T::cbor_tag;
-        } else if constexpr (requires { cbor_tag<T>(); }) {
-            return cbor_tag<T>();
-        } else {
-            return detail::FalseType{};
-        }
-    }
-
-    template <typename T> static constexpr auto cbor_tag(const T &obj) {
-        if constexpr (requires { obj.cbor_tag; }) {
-            return obj.cbor_tag;
-        } else {
-            return detail::FalseType{};
-        }
-    }
-};
-
-// Overload of coding functions, as member function
-template <typename T, typename Class>
-concept HasTranscodeMethod = requires(T t, Class c) {
-    { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
-};
-
-template <typename T, typename Class>
-concept HasEncodeMethod = requires(T t, Class c) {
-    { Access::encode(t, c).has_value() } -> std::convertible_to<bool>;
-};
-
-template <typename T, typename Class>
-concept HasDecodeMethod = requires(T t, Class c) {
-    { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
-};
-
-// Free function variants of tag functions
-template <typename T>
-concept HasTagFreeFunction = requires(T t) {
-    { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
-};
-
-// Member function variants of tag functions
-template <typename T>
-concept HasTagMember = requires(T t) {
-    { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
-};
-
 template <std::uint64_t T> struct static_tag;
 template <IsUnsigned T> struct dynamic_tag;
 
@@ -331,6 +258,96 @@ concept HasInlineTag = requires {
     { T::cbor_tag } -> std::convertible_to<std::uint64_t>;
     requires(!HasDynamicTag<T>);
     requires(!HasStaticTag<T>);
+};
+
+// A proxy that can have access to a number of predefined functions
+struct Access {
+    // Transcode function
+    template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
+        if constexpr (requires { obj.transcode(transcoder).has_value(); }) {
+            return obj.transcode(transcoder);
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    // Encode function
+    template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
+        if constexpr (requires { obj.encode(encoder).has_value(); }) {
+            return obj.encode(encoder);
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    // Decode function
+    template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
+        if constexpr (requires { obj.decode(decoder).has_value(); }) {
+            return obj.decode(decoder);
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    template <typename T> static constexpr auto cbor_tag(const T &obj) {
+        if constexpr (requires { obj.cbor_tag; }) {
+            return obj.cbor_tag;
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    // cbor_tag function
+    template <typename T> static constexpr auto cbor_tag() {
+        if constexpr (requires { T::cbor_tag; }) {
+            if constexpr (is_static_tag_t<decltype(T::cbor_tag)>::value) {
+                return decltype(T::cbor_tag){};
+            } else if constexpr (HasInlineTag<T>) {
+                return T::cbor_tag;
+            } else {
+                return detail::FalseType{};
+            }
+        } else if constexpr (requires { cbor_tag<T>(); }) {
+            return cbor_tag<T>();
+        } else if constexpr (requires { cbor_tag(T{}); }) {
+            return cbor_tag(T{});
+        } else {
+            return detail::FalseType{};
+        }
+    }
+};
+
+// Overload of coding functions, as member function
+template <typename T, typename Class>
+concept HasTranscodeMethod = requires(T t, Class c) {
+    { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasEncodeMethod = requires(T t, Class c) {
+    { Access::encode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasDecodeMethod = requires(T t, Class c) {
+    { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T>
+concept HasTagNonConstructible = requires(T) {
+    { cbor::tags::cbor_tag<T>() } -> std::convertible_to<std::uint64_t>;
+};
+
+// Free function variants of tag functions
+template <typename T>
+concept HasTagFreeFunction = HasTagNonConstructible<T> || requires(T t) {
+    { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
+};
+
+// Member function variants of tag functions
+template <typename T>
+concept HasTagMember = requires(T t) {
+    { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T>

@@ -272,12 +272,29 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
                 result[MajorIndex::Tag]++;
             }
         } else if constexpr (IsClassWithTagOverload<T>) {
-            auto it = std::find(tags.begin(), tags.end(), detail::get_major_6_tag_from_class(T{}));
-            if (it == tags.end()) {
-                tags.push_back(detail::get_major_6_tag_from_class(T{}));
-            } else {
-                result[MajorIndex::Tag]++;
+            if constexpr (HasTagFreeFunction<T>) {
+                auto it = std::find(tags.begin(), tags.end(), detail::get_major_6_tag_from_class<T>());
+                if (it == tags.end()) {
+                    tags.push_back(detail::get_major_6_tag_from_class<T>());
+                } else {
+                    result[MajorIndex::Tag]++;
+                }
+            } else if constexpr (HasTagMember<T>) {
+                auto it = std::find(tags.begin(), tags.end(), Access::cbor_tag<T>());
+                if (it == tags.end()) {
+                    tags.push_back(Access::cbor_tag<T>());
+                } else {
+                    result[MajorIndex::Tag]++;
+                }
             }
+
+            // TODO: THIS IS THE LINE:
+            // auto it = std::find(tags.begin(), tags.end(), detail::get_major_6_tag_from_class(T{}));
+            // if (it == tags.end()) {
+            //     tags.push_back(detail::get_major_6_tag_from_class(T{}));
+            // } else {
+            //     result[MajorIndex::Tag]++;
+            // }
         } else if constexpr (IsTagHeader<T>) {
             result[MajorIndex::AnyTagHeader]++;
         } else {

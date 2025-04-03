@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cbor_concepts.h"
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
@@ -361,6 +362,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         std::uint64_t class_tag;
         if constexpr (HasTagMember<T>) {
             class_tag = Access::cbor_tag(value);
+        } else if constexpr (HasTagNonConstructible<T>) {
+            class_tag = cbor_tag<T>();
         } else if constexpr (HasTagFreeFunction<T>) {
             class_tag = cbor_tag(value);
         }
@@ -517,6 +520,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         using namespace detail;
         static_assert((IsCborMajor<T> && ...),
                       "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
+
+        // TODO: Remove this requirement
         static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
                                                                    "decode into the type, it must be default constructed first.");
 
