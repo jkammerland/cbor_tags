@@ -95,7 +95,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_major_and_size(N, static_cast<byte_type>(0xC0)); }
     template <IsUnsigned T> constexpr void    encode(dynamic_tag<T> value) {
-        encode_major_and_size(value.value, static_cast<byte_type>(0xC0));
+        encode_major_and_size(value.cbor_tag, static_cast<byte_type>(0xC0));
     }
 
     template <IsString T> constexpr void encode(const T &value) {

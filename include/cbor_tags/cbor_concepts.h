@@ -521,8 +521,8 @@ template <std::uint64_t N> struct static_tag {
 
 template <IsUnsigned T> struct dynamic_tag {
     using value_type = T;
-    value_type value;
-    constexpr  operator value_type() const { return value; }
+    value_type cbor_tag;
+    constexpr  operator value_type() const { return cbor_tag; }
 };
 
 template <typename T>

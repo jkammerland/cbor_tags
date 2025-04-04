@@ -258,7 +258,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
-        if (decoded_value.value != value.value) {
+        if (decoded_value.cbor_tag != value.cbor_tag) {
             return status_code::no_match_for_tag;
         }
 

@@ -9,6 +9,7 @@
 // #include <nameof.hpp>
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -202,7 +203,7 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
     bool unmatched = true;
 
     /* SPECIAL CASES */
-    if constexpr (is_dynamic_tag_t<T>) {
+    if constexpr (is_dynamic_tag_t<T> || HasDynamicTag<T>) {
         unmatched = false;
         result[MajorIndex::DynamicTag]++; // Not ok to have dynamic tags
         return;
@@ -247,50 +248,23 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         unmatched = false;
         result[MajorIndex::Map]++;
     }
-    if constexpr (IsTag<T>) {
+    // This is a special case for tagged types
+    if constexpr (IsTagHeader<T>) {
+        result[MajorIndex::AnyTagHeader]++;
+    } else if constexpr (IsTag<T>) {
         unmatched = false;
 
-        if constexpr (HasInlineTag<T>) {
-            auto it = std::find(tags.begin(), tags.end(), T::cbor_tag);
+        constexpr auto tag     = detail::get_tag_from_any<T>();
+        constexpr bool IsTagOk = !IsSigned<decltype(tag)> && static_cast<int>(tag) != -1;
+        static_assert(IsTagOk, "T must be a tagged type");
+
+        if constexpr (IsTagOk) {
+            auto it = std::find(tags.begin(), tags.end(), tag);
             if (it == tags.end()) {
-                tags.push_back(T::cbor_tag);
+                tags.push_back(tag);
             } else {
                 result[MajorIndex::Tag]++; // If duplicate tag is found
             }
-        } else if constexpr (HasStaticTag<T>) {
-            auto it = std::find(tags.begin(), tags.end(), decltype(T::cbor_tag){});
-            if (it == tags.end()) {
-                tags.push_back(decltype(T::cbor_tag){});
-            } else {
-                result[MajorIndex::Tag]++; // If duplicate tag is found
-            }
-        } else if constexpr (IsTaggedTuple<T>) {
-            auto it = std::find(tags.begin(), tags.end(), std::get<0>(T{}).cbor_tag);
-            if (it == tags.end()) {
-                tags.push_back(std::get<0>(T{}).cbor_tag);
-            } else {
-                result[MajorIndex::Tag]++;
-            }
-        } else if constexpr (IsClassWithTagOverload<T>) {
-            if constexpr (HasTagNonConstructible<T> || HasTagFreeFunction<T>) {
-                auto it = std::find(tags.begin(), tags.end(), detail::get_major_6_tag_from_class<T>());
-                if (it == tags.end()) {
-                    tags.push_back(detail::get_major_6_tag_from_class<T>());
-                } else {
-                    result[MajorIndex::Tag]++;
-                }
-            } else if constexpr (HasTagMember<T>) {
-                auto it = std::find(tags.begin(), tags.end(), Access::cbor_tag<T>());
-                if (it == tags.end()) {
-                    tags.push_back(Access::cbor_tag<T>());
-                } else {
-                    result[MajorIndex::Tag]++;
-                }
-            }
-        } else if constexpr (IsTagHeader<T>) {
-            result[MajorIndex::AnyTagHeader]++;
-        } else {
-            result[MajorIndex::Tag]++;
         }
     }
     if constexpr (IsSimple<T>) {

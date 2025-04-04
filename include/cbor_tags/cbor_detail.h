@@ -175,13 +175,29 @@ template <typename T> static constexpr auto get_major_6_tag_from_class(const T &
 template <typename T> static constexpr auto get_major_6_tag_from_class() {
     // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
     if constexpr (HasTagMember<T>) {
-        return Access::cbor_tag(T{});
+        return Access::cbor_tag<T>();
     } else if constexpr (HasTagNonConstructible<T>) {
         return cbor::tags::cbor_tag<T>();
     } else if constexpr (HasTagFreeFunction<T>) {
         return cbor_tag(T{});
     } else {
-        return detail::FalseType{};
+        return -1;
+        // return detail::FalseType{}; // This doesn't work so well across compilers
+    }
+}
+
+template <typename T> static constexpr auto get_tag_from_any() {
+    if constexpr (HasInlineTag<T>)
+        return T::cbor_tag;
+    else if constexpr (HasStaticTag<T> || HasDynamicTag<T>)
+        return decltype(T::cbor_tag){};
+    else if constexpr (IsTaggedTuple<T>) {
+        using FirstTupleMemberType = std::remove_reference_t<decltype(std::get<0>(T{}))>;
+        static_assert(is_static_tag_t<FirstTupleMemberType>::value || is_dynamic_tag_t<FirstTupleMemberType>,
+                      "T must be a static or dynamic tag");
+        return std::get<0>(T{}).cbor_tag;
+    } else {
+        return get_major_6_tag_from_class<T>();
     }
 }
 

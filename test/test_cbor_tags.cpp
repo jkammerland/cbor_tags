@@ -88,7 +88,7 @@ TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
 
     T t;
     if constexpr (std::is_same_v<T, DYNAMIC_EX1>) {
-        t.cbor_tag.value = 140;
+        t.cbor_tag.cbor_tag = 140;
     }
     t.s = "Hello world!";
 
@@ -129,7 +129,7 @@ TEST_CASE("Test tuple dynamic tag") {
     auto dec = make_decoder(data);
 
     std::tuple<dynamic_tag<std::uint64_t>, int, std::string> result;
-    std::get<0>(result).value = 140;
+    std::get<0>(result).cbor_tag = 140;
     dec(result);
 
     CHECK_EQ(std::get<0>(result), 140);
@@ -160,7 +160,7 @@ TEST_CASE("Nested structs") {
     dec(result);
 
     CHECK_EQ(a.a, result.a);
-    CHECK_EQ(a.b.cbor_tag.value, result.b.cbor_tag.value);
+    CHECK_EQ(a.b.cbor_tag.cbor_tag, result.b.cbor_tag.cbor_tag);
     CHECK_EQ(a.b.b, result.b.b);
     CHECK_EQ(a.b.c.c, result.b.c.c);
 }
@@ -310,7 +310,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        VersionVariant v{v1::Version{{}, AX{.cbor_tag = {}, .a = 2}, 3.14}};
+        VersionVariant v{v1::Version{.cbor_tag = {}, .v = AX{.cbor_tag = {}, .a = 2}, .damage = 3.14}};
         enc(v);
 
         fmt::print("data: {}\n", to_hex(data));
