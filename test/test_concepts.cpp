@@ -939,3 +939,19 @@ TEST_SUITE("Classes") {
         static_assert(!HasTagFreeFunction<class1>);
     }
 }
+
+struct TrulyTagged4 {
+    static constexpr uint64_t cbor_tag = 5u;
+};
+namespace cbor::tags {
+template <> constexpr auto cbor_tag<TrulyTagged4>() { return static_tag<5u>{}; }
+} // namespace cbor::tags
+
+TEST_CASE("Is tagged negative, dual tagged") {
+    static_assert(!HasTagFreeFunction<TrulyTagged4>);
+    static_assert(!IsClassWithTagOverload<TrulyTagged4>);
+    static_assert(!IsClassWithTagOverload<TrulyTagged4>);
+
+    // This one should still be true
+    static_assert(HasTagNonConstructible<TrulyTagged4>);
+}

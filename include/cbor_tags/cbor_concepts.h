@@ -340,7 +340,7 @@ concept HasTagNonConstructible = requires(T) {
 
 // Free function variants of tag functions
 template <typename T>
-concept HasTagFreeFunction = HasTagNonConstructible<T> || requires(T t) {
+concept HasTagFreeFunction = requires(T t) {
     { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
 };
 
@@ -362,7 +362,8 @@ concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsAnyHeader<T>;
 
 // Must have either a cbor_tag(T) exlusive or a .cbor_tag member
 template <typename T>
-concept IsClassWithTagOverload = std::is_class_v<T> && static_cast<bool>(HasTagFreeFunction<T> ^ HasTagMember<T>);
+concept IsClassWithTagOverload =
+    std::is_class_v<T> && static_cast<bool>(HasTagFreeFunction<T> ^ HasTagMember<T> ^ HasTagNonConstructible<T>);
 
 template <typename T>
 concept IsTag = static_cast<bool>(HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> ||
