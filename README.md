@@ -330,7 +330,7 @@ constexpr auto encode(Encoder& enc, const ExternalClass& obj) {
 
 // Decode function - reconstructs the object from CBOR
 template <typename Decoder>
-constexpr auto decode(Decoder& dec, ExternalClass& obj) {
+constexpr auto decode(Decoder& dec, ExternalClass&& /*Must use "&&" to match free function signature, and to allow temporary objects */ obj) {
     // Temporary variables to hold the decoded values
     int id;
     std::string name;

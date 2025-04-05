@@ -24,7 +24,9 @@ Checks: >-
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-init-variables,
   -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-rvalue-reference-param-not-moved,
   -cppcoreguidelines-missing-std-forward,
   misc-*,
-  -misc-non-private-member-variables-in-classes
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-internal-linkage
 HeaderFilterRegex: '^src/.*|^include/.*'
