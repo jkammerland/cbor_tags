@@ -1,4 +1,4 @@
-name: Windows Build
+name: Windows Tests (MSVC-latest, Clang-CL 15+)
 
 on:
   push:

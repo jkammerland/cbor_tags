@@ -1,4 +1,4 @@
-name: macOS Build
+name: MacOS Tests (AppleClang 15+)
 
 on:
   push:

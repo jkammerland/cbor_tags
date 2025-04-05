@@ -1,6 +1,6 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
+[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
 [![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
 [![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
 
