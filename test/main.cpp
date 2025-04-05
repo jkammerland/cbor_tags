@@ -21,12 +21,17 @@ struct TestCaseLogger : public IReporter {
 
     void test_case_start(const TestCaseData &in) override {
         tc = &in;
+        // INFO("\033[35mBEGIN: " << tc->m_name << "\033[0m");
+        // INFO("test_case_start: " + tc->m_name
         stdout_stream << "\033[35mBEGIN: " << tc->m_name << "\033[0m" << std::endl;
     }
 
     void test_case_reenter(const TestCaseData & /*in*/) override {}
 
-    void test_case_end(const CurrentTestCaseStats & /*in*/) override { stdout_stream << "\033[35mEND:   " << tc->m_name << "\033[0m\n\n"; }
+    void test_case_end(const CurrentTestCaseStats & /*in*/) override {
+        // INFO("\033[35mEND:   " << tc->m_name << "\033[0m\n\n");
+        stdout_stream << "\033[35mEND:   " << tc->m_name << "\033[0m\n\n";
+    }
 
     void test_case_exception(const TestCaseException & /*in*/) override {}
 

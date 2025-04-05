@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_encoder.h"
@@ -27,6 +28,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -88,7 +90,7 @@ TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
 
     T t;
     if constexpr (std::is_same_v<T, DYNAMIC_EX1>) {
-        t.cbor_tag.value = 140;
+        t.cbor_tag.cbor_tag = 140;
     }
     t.s = "Hello world!";
 
@@ -129,7 +131,7 @@ TEST_CASE("Test tuple dynamic tag") {
     auto dec = make_decoder(data);
 
     std::tuple<dynamic_tag<std::uint64_t>, int, std::string> result;
-    std::get<0>(result).value = 140;
+    std::get<0>(result).cbor_tag = 140;
     dec(result);
 
     CHECK_EQ(std::get<0>(result), 140);
@@ -160,7 +162,7 @@ TEST_CASE("Nested structs") {
     dec(result);
 
     CHECK_EQ(a.a, result.a);
-    CHECK_EQ(a.b.cbor_tag.value, result.b.cbor_tag.value);
+    CHECK_EQ(a.b.cbor_tag.cbor_tag, result.b.cbor_tag.cbor_tag);
     CHECK_EQ(a.b.b, result.b.b);
     CHECK_EQ(a.b.c.c, result.b.c.c);
 }
@@ -266,7 +268,7 @@ template <size_t N> struct DerivedA0 : A0<N> {
 };
 using DerivedA1 = DerivedA0<1>;
 
-TEST_CASE_TEMPLATE("Derived tags", AX, A1, DerivedA1) {
+TEST_CASE("Derived tags") {
     // This cannot work as far as I know, need manual encoding/decoding
     // auto &&[p1] = DerivedA1{};
 }
@@ -306,11 +308,15 @@ struct Version {
 TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
     {
         using VersionVariant = std::variant<v1::Version, v2::Version>;
+        using VariantXXX     = std::variant<A1, A2, A3>;
+        CHECK_EQ(valid_concept_mapping_n_unmatched_v<VersionVariant>, 0);
+        CHECK_EQ(valid_concept_mapping_n_unmatched_v<VariantXXX>, 0);
 
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        VersionVariant v{v1::Version{{}, AX{.cbor_tag = {}, .a = 2}, 3.14}};
+        VersionVariant v{v1::Version{.cbor_tag = {}, .v = AX{.cbor_tag = {}, .a = 2}, .damage = 3.14}};
+
         enc(v);
 
         fmt::print("data: {}\n", to_hex(data));
@@ -458,5 +464,52 @@ TEST_CASE("Switching instead of variant") {
         }
         default: CHECK(false);
         }
+    }
+}
+
+struct MaxTag {
+    static_tag<std::numeric_limits<uint64_t>::max()> cbor_tag;
+    int                                              a;
+};
+
+struct MaxTag2 {
+    static constexpr uint64_t cbor_tag = std::numeric_limits<uint64_t>::max();
+    int                       a;
+};
+
+namespace v3 {
+struct Version {
+    static_tag<std::numeric_limits<std::uint64_t>::max()> cbor_tag;
+    std::variant<A1, A2, A3>                              v;
+    double                                                damage;
+    int                                                   a;
+    std::string                                           s;
+};
+} // namespace v3
+
+TEST_CASE("Max tag") {
+    {
+        auto tag = detail::get_tag_from_any<MaxTag>();
+        static_assert(tag == std::numeric_limits<uint64_t>::max());
+
+        constexpr auto tag2 = detail::get_tag_from_any<MaxTag2>();
+        static_assert(tag2 == std::numeric_limits<uint64_t>::max());
+
+        auto tagged3 = std::make_tuple(static_tag<std::numeric_limits<uint64_t>::max()>{}, MaxTag{}, 1);
+        static_assert(IsTaggedTuple<decltype(tagged3)>);
+
+        constexpr auto tag4 = detail::get_tag_from_any<v3::Version>();
+        static_assert(tag4 == std::numeric_limits<uint64_t>::max());
+
+        auto tagged5 = std::make_tuple(static_tag<std::numeric_limits<uint64_t>::max()>{}, v3::Version{}, 1);
+        static_assert(IsTaggedTuple<decltype(tagged5)>);
+    }
+
+    {
+        // This was used to debug incorrect variant check. Edge case caused "max uint64_t == -1";
+        using V3 = v3::Version;
+        using V2 = v2::Version;
+        auto a   = valid_concept_mapping_n_unmatched_v<std::variant<V2, V3>>;
+        CHECK_EQ(a, 0);
     }
 }

@@ -103,6 +103,11 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+      with:
+        cmakeVersion: '3.31.5'  # Specify your desired version here
+
     - name: Install GCC 12 (Ubuntu)
       if: matrix.config.os == 'ubuntu-latest' && matrix.config.cc == 'gcc-12'
       run: |

@@ -1,12 +1,15 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
+#include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_reflection_impl.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
+#include "tl/expected.hpp"
 
 #include <array>
 #include <cstddef>
@@ -28,6 +31,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 using namespace cbor::tags;
@@ -161,6 +165,8 @@ TEST_CASE("Test IsTuple concept") {
     static_assert(!IsMap<tuple_1>);
     static_assert(!IsOptional<tuple_1>);
 }
+
+TEST_CASE_TEMPLATE("IsTag T", T, static_tag<1>, dynamic_tag<std::uint64_t>) { static_assert(IsTag<T>); }
 
 TEST_CASE("Test IsTagged concept with tagged tuples") {
     auto tagged = std::make_tuple(static_tag<1>{}, 1);
@@ -776,9 +782,7 @@ struct INLINEMEEEEE {
     char                           c;
 };
 
-TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG)
-
-{
+TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG) {
     T a;
 
     CHECK(!IsTuple<T>);
@@ -824,4 +828,130 @@ TEST_CASE_TEMPLATE("Count tags in variant", T, void) {
     static_assert(tags[2] == 31);
     static_assert(tags[3] == 12313);
     static_assert(tags[4] == 4);
+}
+
+struct struct1 {
+    int    a;
+    double b;
+
+    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+};
+
+struct struct2 {
+    int    a;
+    double b;
+
+    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+};
+
+// Also works
+template <typename T> constexpr auto transcode(T &transcoder, struct2 &&obj) { return expected<void, int>{}; }
+template <typename T> constexpr auto encode(T &encoder, const struct1 &obj) { return expected<void, int>{}; }
+
+namespace cbor::tags {
+template <> constexpr auto cbor_tag(const struct1 &) { return 2000u; }
+} // namespace cbor::tags
+
+TEST_SUITE("Classes") {
+    struct class1 {
+        class1() = default;
+
+      private:
+        friend cbor::tags::Access;
+        template <typename T> constexpr auto transcode(T &transcoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto decode(T &decoder) { return expected<void, int>{}; }
+    };
+
+    TEST_CASE("HasTranscodeFreeFunction") {
+        auto                  buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto encoder = make_encoder(buffer);
+        [[maybe_unused]] auto decoder = make_decoder(buffer);
+        static_assert(!HasTranscodeFreeFunction<decltype(encoder), class1>);
+
+        struct2 a;
+        REQUIRE(transcode(encoder, std::forward<struct2>(a)));
+        static_assert(HasTranscodeFreeFunction<decltype(encoder), struct2>);
+
+        static_assert(HasEncodeFreeFunction<decltype(encoder), struct1>);
+    }
+
+    TEST_CASE("IsClass") {
+        auto                  buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto encoder = make_encoder(buffer);
+        [[maybe_unused]] auto decoder = make_decoder(buffer);
+
+        using Encoder = decltype(encoder);
+        using Decoder = decltype(decoder);
+
+        static_assert(IsClassWithEncodingOverload<Encoder, class1>);
+        static_assert(!IsClassWithDecodingOverload<Decoder, struct1>); // Returns void, so not a valid overload.
+        static_assert(!IsAggregate<class1>);
+        static_assert(IsAggregate<struct1>);
+    }
+
+    TEST_CASE("has transcode encode decode") {
+        [[maybe_unused]] Access accessor;
+        [[maybe_unused]] auto   buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto   encoder = make_encoder(buffer);
+        [[maybe_unused]] auto   decoder = make_decoder(buffer);
+
+        [[maybe_unused]] auto result = accessor.transcode(encoder, class1{});
+
+        static_assert(HasTranscodeMethod<decltype(encoder), class1>);
+        static_assert(HasEncodeMethod<decltype(encoder), class1>);
+        static_assert(HasDecodeMethod<decltype(decoder), class1>);
+        static_assert(!HasTranscodeMethod<decltype(encoder), struct1>);
+        static_assert(HasEncodeFreeFunction<decltype(encoder), struct1>);
+        static_assert(!HasDecodeMethod<decltype(decoder), struct1>); // Should not work, returns void
+    }
+
+    struct TrulyTagged0 {
+        static constexpr std::uint64_t cbor_tag{123};
+    };
+
+    struct TrulyTagged1 {
+        constexpr TrulyTagged1() = default;
+
+      private:
+        friend cbor::tags::Access;
+        static_tag<555> cbor_tag;
+    };
+
+    struct TrulyTagged2 {
+      private:
+        friend cbor::tags::Access;
+        dynamic_tag<uint16_t> cbor_tag{512};
+    };
+
+    struct TrulyTagged3 {};
+    constexpr auto cbor_tag(const TrulyTagged3 &) { return 5u; }
+
+    TEST_CASE("IsClassWithTagOverload") {
+        static_assert(!IsClassWithTagOverload<class1>);
+        static_assert(IsClassWithTagOverload<TrulyTagged0>);
+        static_assert(IsClassWithTagOverload<TrulyTagged1>);
+        static_assert(IsClassWithTagOverload<TrulyTagged2>);
+        static_assert(IsClassWithTagOverload<TrulyTagged3>);
+        static_assert(IsClassWithTagOverload<struct1>);
+        static_assert(!HasTagMember<class1>);
+        static_assert(!HasTagMember<struct1>);
+        static_assert(!HasTagFreeFunction<class1>);
+    }
+}
+
+struct TrulyTagged4 {
+    static constexpr uint64_t cbor_tag = 5u;
+};
+namespace cbor::tags {
+template <> constexpr auto cbor_tag<TrulyTagged4>() { return static_tag<5u>{}; }
+} // namespace cbor::tags
+
+TEST_CASE("Is tagged negative, dual tagged") {
+    static_assert(!HasTagFreeFunction<TrulyTagged4>);
+    static_assert(!IsClassWithTagOverload<TrulyTagged4>);
+    static_assert(!IsClassWithTagOverload<TrulyTagged4>);
+
+    // This one should still be true
+    static_assert(HasTagNonConstructible<TrulyTagged4>);
 }

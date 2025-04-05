@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cbor_concepts.h"
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
@@ -257,7 +258,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
-        if (decoded_value.value != value.value) {
+        if (decoded_value.cbor_tag != value.cbor_tag) {
             return status_code::no_match_for_tag;
         }
 
@@ -298,7 +299,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, detail::tuple_tail(t));
     }
 
-    template <IsAggregate T> constexpr status_code decode(T &value) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+    constexpr status_code decode(T &value) {
         auto &&tuple = to_tuple(value);
 
         // Decode the tag
@@ -334,7 +337,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <IsAggregate T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+    constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
@@ -344,14 +349,34 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
-    template <IsAggregate T> constexpr status_code decode(T &value, std::uint64_t tag) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+    constexpr status_code decode(T &value, std::uint64_t tag) {
         auto &&tuple = to_tuple(value);
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
+    template <typename T>
+        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T>
+    constexpr status_code decode(T &value, std::uint64_t tag) {
+        std::uint64_t class_tag;
+        if constexpr (HasTagMember<T>) {
+            class_tag = Access::cbor_tag(value);
+        } else if constexpr (HasTagNonConstructible<T>) {
+            class_tag = cbor_tag<T>();
+        } else if constexpr (HasTagFreeFunction<T>) {
+            class_tag = cbor_tag(value);
+        }
+
+        if (static_cast<decltype(tag)>(class_tag) != tag) {
+            return status_code::no_match_for_tag;
+        }
+        return this->decode_without_tag(value);
+    }
+
     template <typename T> constexpr status_code decode_tagged_aggregate(T &, const std::uint64_t tag, auto &&tuple) {
         static_assert(IsTag<T>, "Only tagged objects end up here. Otherwise they should have called the array overload because of tuple "
-                                "cast. Are you calling this manually? Please don't.");
+                                "cast. Are you calling this directly? Please don't.");
 
         if constexpr (HasInlineTag<T>) {
             if (tag != T::cbor_tag) {
@@ -475,7 +500,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <IsCborMajor T> constexpr status_code decode(std::optional<T> &value, major_type major, byte additionalInfo) {
+    template <typename T> constexpr status_code decode(std::optional<T> &value, major_type major, byte additionalInfo) {
         if (major == major_type::Simple && additionalInfo == static_cast<byte>(22)) {
             value = std::nullopt;
             return status_code::success;
@@ -485,16 +510,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto       result = decode(t, major, additionalInfo);
             if (result == status_code::success) {
                 value = std::move(t);
-            } else {
-                value = std::nullopt;
             }
             return result;
         }
         return status_code::no_match_for_optional_on_buffer;
     }
 
-    template <IsCborMajor... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
         using namespace detail;
+        static_assert((IsCborMajor<T> && ...),
+                      "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
+
+        // TODO: Remove this requirement
+        static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
+                                                                   "decode into the type, it must be default constructed first.");
+
+        // Check ambiguous types in the variant.
         using Variant                                     = std::variant<T...>;
         constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
         constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
@@ -539,7 +570,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     tag = decode_unsigned(additionalInfo);
                 }
                 result = this->decode(decoded_value, *tag);
-            } else {
+            } else /* Not tag */ {
                 result = this->decode(decoded_value, major, additionalInfo);
             }
 
@@ -624,6 +655,67 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         return status_code::success;
+    }
+
+    template <typename C, bool DecodeTag = true>
+        requires(IsClassWithDecodingOverload<self_t, C>)
+    constexpr status_code decode_class_impl(C &value) {
+        constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
+        constexpr bool has_free_decode    = HasDecodeFreeFunction<self_t, C>;
+        constexpr bool has_free_transcode = HasTranscodeFreeFunction<self_t, C>;
+
+        static_assert(has_transcode ^ has_decode ^ has_free_decode ^ has_free_transcode,
+                      "Class must have either (non-const) transcode(T& transcoder, O&& obj) or decode method, also do not forget to return "
+                      "value from the "
+                      "transcoding operation! "
+                      "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
+
+        // Automatic tag decoding - only performed if NOT in a variant context
+        // In a variant context the tag is already decoded. The reason is that
+        // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
+        // alternatives. If we are here, then we have already checked that this is the right tag.
+        if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
+            this->decode(detail::get_major_6_tag_from_class(value));
+        }
+
+        if constexpr (has_transcode) {
+            auto result = Access::transcode(*this, value);
+            return result ? status_code::success : result.error();
+        } else if constexpr (has_decode) {
+            auto result = Access::decode(*this, value);
+            return result ? status_code::success : result.error();
+        } else if constexpr (has_free_decode) {
+            /* This requires an indirect call in order for some compilers to find the overload. */
+            auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
+            return result ? status_code::success : result.error();
+        } else if (has_free_transcode) {
+            /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
+            auto result = transcode(*this, std::forward<C>(value));
+            return result ? status_code::success : result.error();
+        }
+
+        // throw std::runtime_error("This should never happen");
+        return status_code::error;
+    }
+
+    template <typename C>
+        requires(IsClassWithDecodingOverload<self_t, C>)
+    constexpr status_code decode(C &value) {
+        return decode_class_impl<C, true>(value);
+    }
+
+    template <typename C>
+        requires(IsClassWithDecodingOverload<self_t, C>)
+    constexpr status_code decode_without_tag(C &value) {
+        return decode_class_impl<C, false>(value);
+    }
+
+    template <typename C>
+        requires(IsClassWithDecodingOverload<self_t, C>)
+    constexpr status_code decode(C &value, major_type, byte) {
+        reader_.seek(-1);
+        return this->decode(value);
     }
 
     template <typename T> constexpr status_code decode(T &value) {
@@ -812,7 +904,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (IsContiguous<InputBuffer>) {
             return /* Iterator */ data_.begin() + reader_.position_;
         } else {
-            return /* Iterator */ reader_.position_;
+            return /* Iterator */ reader_.position_; // TODO: actual Iterator
         }
     }
 

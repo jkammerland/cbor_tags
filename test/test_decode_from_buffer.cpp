@@ -188,3 +188,51 @@ TEST_CASE_TEMPLATE("Test decode tag 1 variant", T, std::vector<char>, std::deque
         CHECK_EQ(value_a.b, std::nullopt);
     }
 }
+
+TEST_SUITE("Decoding Classes") {
+    struct Class124 {
+        int    a;
+        double b;
+
+        std::string get_c() const { return c; }
+
+      private:
+        std::string c;
+
+        friend cbor::tags::Access;
+        template <typename T> constexpr auto decode(T &transcoder) { return transcoder(wrap_as_array{a, b, c}); }
+    };
+
+    TEST_CASE("Has decode") {
+        [[maybe_unused]] Access accessor;
+        [[maybe_unused]] auto   buffer  = std::vector<uint8_t>{};
+        [[maybe_unused]] auto   decoder = make_decoder(buffer);
+
+        [[maybe_unused]] auto result = accessor.decode(decoder, Class124{});
+        static_assert(HasDecodeMethod<decltype(decoder), Class124>);
+        static_assert(!HasEncodeMethod<decltype(decoder), Class124>);
+    }
+
+    TEST_CASE("Decode class with coding overload") {
+        auto buffer = to_bytes("8304fb40140000000000006568656c6c6f");
+        auto dec    = make_decoder(buffer);
+
+        Class124 a;
+        REQUIRE(dec(a));
+        CHECK_EQ(a.a, 4);
+        CHECK_EQ(a.b, 5.0);
+        CHECK_EQ(a.get_c(), "hello");
+    }
+
+    TEST_CASE("Decode optional class") {
+        auto buffer = to_bytes("8304fb40140000000000006568656c6c6f");
+        auto dec    = make_decoder(buffer);
+
+        std::optional<Class124> a;
+        REQUIRE(dec(a));
+        REQUIRE(a);
+        CHECK_EQ(a->a, 4);
+        CHECK_EQ(a->b, 5.0);
+        CHECK_EQ(a->get_c(), "hello");
+    }
+}

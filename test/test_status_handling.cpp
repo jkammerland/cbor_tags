@@ -31,7 +31,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto        result2 = dec(141_tag, result);
         CHECK(!result2);
 
-        { /* Sanity check recovery - TODO: is this what we want? */
+        { /* Sanity check recovery */
             auto result3 = dec(result);
             CHECK(result3);
             CHECK_EQ(result, "Hello world!");

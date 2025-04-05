@@ -18,6 +18,7 @@
 // #include <fmt/base.h>
 // #include <nameof.hpp>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace cbor::tags {
@@ -94,7 +95,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_major_and_size(N, static_cast<byte_type>(0xC0)); }
     template <IsUnsigned T> constexpr void    encode(dynamic_tag<T> value) {
-        encode_major_and_size(value.value, static_cast<byte_type>(0xC0));
+        encode_major_and_size(value.cbor_tag, static_cast<byte_type>(0xC0));
     }
 
     template <IsString T> constexpr void encode(const T &value) {
@@ -118,11 +119,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <IsTaggedTuple T> constexpr void encode(const T &value) {
+        /* Tag being first already garanteed by the concept */
         encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
         encode(value.second);
     }
 
-    template <IsAggregate T> constexpr void encode(const T &value) {
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T>)
+    constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
             encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
@@ -139,40 +143,46 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                 tuple);
         } else if constexpr (IsTag<T>) {
             const auto &&tuple = to_tuple(value);
+            static_assert(IsTag<std::remove_cvref_t<decltype(std::get<0>(tuple))>>, "Tag must be first element of tuple");
             encode_major_and_size(std::get<0>(tuple), static_cast<byte_type>(0xC0));
-            std::apply(
-                [this](const auto &...args) {
-                    constexpr auto size_ = sizeof...(args);
-                    if constexpr (size_ > 1 && Options::wrap_groups) {
-                        this->encode(as_array{size_});
-                    }
-                    (this->encode(args), ...);
-                },
-                detail::tuple_tail(tuple));
+            aggregate_encode(detail::tuple_tail(tuple));
         } else {
             const auto &&tuple = to_tuple(value);
-            std::apply(
-                [this](const auto &...args) {
-                    constexpr auto size_ = sizeof...(args);
-                    if constexpr (size_ > 1 && Options::wrap_groups) {
-                        this->encode(as_array{size_});
-                    }
-                    (this->encode(args), ...);
-                },
-                tuple);
+            aggregate_encode(std::forward<decltype(tuple)>(tuple));
         }
     }
 
-    template <IsUntaggedTuple T> constexpr void encode(const T &value) {
-        std::apply(
-            [this](const auto &...args) {
-                constexpr auto size_ = sizeof...(args);
-                if constexpr (size_ > 1 && Options::wrap_groups) {
-                    this->encode(as_array{size_});
-                }
-                (this->encode(args), ...);
-            },
-            value);
+    template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
+
+    template <typename C>
+        requires(IsClassWithEncodingOverload<self_t, C>)
+    constexpr void encode(const C &value) {
+        constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
+        constexpr bool has_encode         = HasEncodeMethod<self_t, C>;
+        constexpr bool has_free_encode    = HasEncodeFreeFunction<self_t, C>;
+        constexpr bool has_free_transcode = HasTranscodeFreeFunction<self_t, C>;
+        static_assert(
+            has_transcode ^ has_encode ^ has_free_encode ^ has_free_transcode,
+            "Class must have either (const) transcode or encode method, also do not forget to return value from the transcoding operation! "
+            "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
+
+        // Automatic tag encoding
+        if constexpr (IsClassWithTagOverload<C>) {
+            this->encode(detail::get_major_6_tag_from_class(value));
+        }
+
+        // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
+        if constexpr (has_transcode) {
+            [[maybe_unused]] auto result = Access::transcode(*this, value);
+        } else if constexpr (has_encode) {
+            [[maybe_unused]] auto result = Access::encode(*this, value);
+        } else if constexpr (has_free_encode) {
+            /* This requires an indirect call in order for some compilers to find the overload. */
+            [[maybe_unused]] auto result = detail::adl_indirect_encode(*this, value);
+        } else if constexpr (has_free_transcode) {
+            /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
+            [[maybe_unused]] auto result = transcode(*this, value);
+        }
     }
 
     template <IsEnum T> constexpr void encode(T value) { this->encode(static_cast<std::underlying_type_t<T>>(value)); }
@@ -204,6 +214,20 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
+
+  private:
+    // Helper method to avoid code duplication
+    template <typename Tuple> void aggregate_encode(Tuple &&tuple) {
+        std::apply(
+            [this](const auto &...args) {
+                constexpr auto size_ = sizeof...(args);
+                if constexpr (size_ > 1 && Options::wrap_groups) {
+                    this->encode(as_array{size_});
+                }
+                (this->encode(args), ...);
+            },
+            std::forward<Tuple>(tuple));
+    }
 };
 
 template <typename T> struct cbor_variant_encoder {

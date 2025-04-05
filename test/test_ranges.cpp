@@ -1,4 +1,3 @@
-#include "cbor_tags/cbor_ranges.h"
 #include "test_util.h"
 
 #include <algorithm>
@@ -225,7 +224,7 @@ TEST_CASE("joining views of different types") {
     auto deq         = std::deque<char>{static_cast<char>(1), static_cast<char>(2)};
     auto deq_view    = std::ranges::ref_view(deq);
 
-    auto        concatenated_view = concat(char_view, string_view, array_view, deq_view);
+    auto        concatenated_view = ranges::concat_view(char_view, string_view, array_view, deq_view);
     std::string joined_hex;
     for (const auto &byte : concatenated_view) {
         joined_hex += fmt::format("{:02x}", byte);

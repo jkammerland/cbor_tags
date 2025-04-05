@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -182,7 +183,7 @@ template <std::ranges::input_range R> struct tstr_view : std::ranges::view_inter
     }
 };
 
-// TODO: Not implemented!
+// TODO: Not implemented! This is not the way I think.
 template <std::ranges::input_range R> struct binary_array_range_view {
     R range;
 };
@@ -273,7 +274,6 @@ template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {
     } else if constexpr (IsSimple<T>) {
         return static_cast<std::byte>(0xE0);
     } else {
-        // std::unreachable(); // Due to IsCborMajor concept, this should never happen
         return static_cast<std::byte>(0xFF);
     }
 }

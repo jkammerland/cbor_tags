@@ -1,5 +1,6 @@
 
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "test_util.h"
 
@@ -182,5 +183,28 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
 
         auto expected_sv = "f6"sv;
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
+    }
+}
+
+TEST_SUITE("Encoding Classes") {
+    struct Class123 {
+        int    a{4};
+        double b{5.0};
+
+      private:
+        std::string c{"hello"};
+
+        friend cbor::tags::Access;
+        template <typename T> constexpr auto transcode(T &transcoder) const { return transcoder(wrap_as_array{a, b, c}); }
+    };
+
+    TEST_CASE("Class123") {
+        auto buffer = std::vector<uint8_t>{};
+        auto enc    = make_encoder(buffer);
+
+        REQUIRE(enc(Class123{}));
+
+        REQUIRE_GE(buffer.size(), 0);
+        CHECK_EQ("8304fb40140000000000006568656c6c6f", to_hex(buffer));
     }
 }

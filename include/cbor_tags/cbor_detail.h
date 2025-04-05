@@ -17,11 +17,11 @@ struct appender;
 
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
-    
-    constexpr void operator()(T &container, const value_type& value) { 
+
+    constexpr void operator()(T &container, const value_type &value) {
         if constexpr (IsMap<T>) {
             const auto &[key, mapped_value] = value;
-            
+
             if constexpr (IsMultiMap<T>) {
                 container.insert({key, mapped_value});
             } else {
@@ -91,6 +91,8 @@ template <typename T> struct reader<T, true> {
     constexpr value_type read(const T &container, size_type offset) noexcept {
         return static_cast<value_type>(container[position_ + offset]);
     }
+
+    constexpr void seek(int i) { position_ += i; }
 };
 
 template <typename T> struct reader<T, false> {
@@ -116,6 +118,11 @@ template <typename T> struct reader<T, false> {
         auto it = std::next(position_, offset);
         return static_cast<value_type>(*it);
     }
+
+    constexpr void seek(int i) {
+        position_ = std::next(position_, i);
+        current_offset_ += i;
+    }
 };
 
 template <typename Tuple> constexpr auto tuple_tail(Tuple &&tuple) {
@@ -140,5 +147,60 @@ template <typename T>
 constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
 
 template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr) { return static_cast<T &>(*this_ptr); }
+
+template <typename Encoder, typename C> inline constexpr auto adl_indirect_encode(Encoder &enc, const C &c) { return encode(enc, c); }
+template <typename Decoder, typename C> inline constexpr auto adl_indirect_decode(Decoder &dec, C &&c) {
+    return decode(dec, std::forward<C>(c));
+}
+
+template <typename T> inline constexpr auto get_major_6_tag_from_tuple(const T &t) {
+    if constexpr (HasDynamicTag<T> || HasStaticTag<T>) {
+        return std::get<0>(t);
+    }
+}
+
+template <typename T> static constexpr auto get_major_6_tag_from_class(const T &t) {
+    // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
+
+    if constexpr (HasTagMember<T>) {
+        return Access::cbor_tag(t);
+    } else if constexpr (HasTagNonConstructible<T>) {
+        return cbor::tags::cbor_tag<T>();
+    } else if constexpr (HasTagFreeFunction<T>) {
+        return cbor_tag(t);
+    } else {
+        return -1;
+        // return detail::FalseType{}; // This doesn't work so well across compilers
+    }
+}
+
+template <typename T> static constexpr auto get_major_6_tag_from_class() {
+    // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
+    if constexpr (HasTagMember<T>) {
+        return Access::cbor_tag<T>();
+    } else if constexpr (HasTagNonConstructible<T>) {
+        return cbor::tags::cbor_tag<T>();
+    } else if constexpr (HasTagFreeFunction<T>) {
+        return cbor_tag(T{});
+    } else {
+        return -1;
+        // return detail::FalseType{}; // This doesn't work so well across compilers
+    }
+}
+
+template <typename T> static constexpr auto get_tag_from_any() {
+    if constexpr (HasInlineTag<T> || is_static_tag_t<T>::value)
+        return T::cbor_tag;
+    else if constexpr (HasStaticTag<T> || HasDynamicTag<T>)
+        return decltype(T::cbor_tag){};
+    else if constexpr (IsTaggedTuple<T>) {
+        using FirstTupleMemberType = std::remove_reference_t<decltype(std::get<0>(T{}))>;
+        static_assert(is_static_tag_t<FirstTupleMemberType>::value || is_dynamic_tag_t<FirstTupleMemberType>,
+                      "T must be a static or dynamic tag");
+        return std::get<0>(T{}).cbor_tag;
+    } else {
+        return get_major_6_tag_from_class<T>();
+    }
+}
 
 } // namespace cbor::tags::detail

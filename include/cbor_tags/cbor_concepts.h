@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
-#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -35,6 +34,28 @@ concept ValidCborBuffer = requires(T) {
     std::is_convertible_v<typename T::value_type, std::byte>;
     std::is_convertible_v<typename T::size_type, std::size_t>;
     requires std::input_or_output_iterator<typename T::iterator>;
+};
+
+template <typename T> constexpr auto cbor_tag(const T &obj);
+template <typename T> constexpr auto cbor_tag() {
+    struct Anonymous {};
+    return Anonymous{};
+}
+
+// Free function variants of coding functions
+template <typename T, typename Class>
+concept HasTranscodeFreeFunction = requires(T t, Class c) {
+    { transcode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasEncodeFreeFunction = requires(T t, Class c) {
+    { encode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasDecodeFreeFunction = requires(T t, Class c) {
+    { decode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
 };
 
 template <typename T>
@@ -202,8 +223,11 @@ concept IsTuple = requires {
     requires(!IsFixedArray<std::remove_cvref_t<T>>);
 };
 
-template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
+namespace detail {
+
+struct FalseType {};
+
+} // namespace detail
 
 template <std::uint64_t T> struct static_tag;
 template <IsUnsigned T> struct dynamic_tag;
@@ -236,6 +260,96 @@ concept HasInlineTag = requires {
     requires(!HasStaticTag<T>);
 };
 
+// A proxy that can have access to a number of predefined functions
+struct Access {
+    // Transcode function
+    template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
+        if constexpr (requires { obj.transcode(transcoder).has_value(); }) {
+            return obj.transcode(transcoder);
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    // Encode function
+    template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
+        if constexpr (requires { obj.encode(encoder).has_value(); }) {
+            return obj.encode(encoder);
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    // Decode function
+    template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
+        if constexpr (requires { obj.decode(decoder).has_value(); }) {
+            return obj.decode(decoder);
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    template <typename T> static constexpr auto cbor_tag(const T &obj) {
+        if constexpr (requires { obj.cbor_tag; }) {
+            return obj.cbor_tag;
+        } else {
+            return detail::FalseType{};
+        }
+    }
+
+    // cbor_tag function
+    template <typename T> static constexpr auto cbor_tag() {
+        if constexpr (requires { T::cbor_tag; }) {
+            if constexpr (is_static_tag_t<decltype(T::cbor_tag)>::value) {
+                return decltype(T::cbor_tag){};
+            } else if constexpr (HasInlineTag<T>) {
+                return T::cbor_tag;
+            } else {
+                return detail::FalseType{};
+            }
+        } else if constexpr (requires { cbor_tag<T>(); }) {
+            return cbor_tag<T>();
+        } else if constexpr (requires { cbor_tag(T{}); }) {
+            return cbor_tag(T{});
+        } else {
+            return detail::FalseType{};
+        }
+    }
+};
+
+// Overload of coding functions, as member function
+template <typename T, typename Class>
+concept HasTranscodeMethod = requires(T t, Class c) {
+    { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasEncodeMethod = requires(T t, Class c) {
+    { Access::encode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T, typename Class>
+concept HasDecodeMethod = requires(T t, Class c) {
+    { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
+};
+
+template <typename T>
+concept HasTagNonConstructible = requires(T) {
+    { cbor::tags::cbor_tag<T>() } -> std::convertible_to<std::uint64_t>;
+};
+
+// Free function variants of tag functions
+template <typename T>
+concept HasTagFreeFunction = requires(T t) {
+    { cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
+};
+
+// Member function variants of tag functions
+template <typename T>
+concept HasTagMember = requires(T t) {
+    { Access::cbor_tag(t) } -> std::convertible_to<std::uint64_t>;
+};
+
 template <typename T>
 concept IsTaggedTuple = requires(T t) {
     requires IsTuple<T>;
@@ -246,8 +360,14 @@ concept IsTaggedTuple = requires(T t) {
 template <typename T>
 concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsAnyHeader<T>;
 
+// Must have either a cbor_tag(T) exlusive or a .cbor_tag member
 template <typename T>
-concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T>;
+concept IsClassWithTagOverload =
+    std::is_class_v<T> && static_cast<bool>(HasTagFreeFunction<T> ^ HasTagMember<T> ^ HasTagNonConstructible<T>);
+
+template <typename T>
+concept IsTag = static_cast<bool>(HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> ||
+                                  IsClassWithTagOverload<T>);
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -313,6 +433,17 @@ concept IsVariantWithoutIntegers = !IsVariantWithSignedInteger<T> && !IsVariantW
 template <typename T>
 concept IsStrictVariant = IsVariantWithOnlySignedInteger<T> || IsVariantWithOnlyUnsignedInteger<T> || IsVariantWithoutIntegers<T>;
 
+template <typename T, typename C>
+concept IsClassWithEncodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasEncodeMethod<T, C> ||
+                                                             HasTranscodeFreeFunction<T, C> || HasEncodeFreeFunction<T, C>);
+
+template <typename T, typename C>
+concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasDecodeMethod<T, C> ||
+                                                             HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
+
+template <typename T>
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
+
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
 template <typename T, bool Map = IsMap<T>> struct ContainsCborMajor;
@@ -327,7 +458,8 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 template <typename T>
 concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
                       (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T>;
+                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T> ||
+                      (IsClassWithTagOverload<T>);
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);
@@ -389,8 +521,8 @@ template <std::uint64_t N> struct static_tag {
 
 template <IsUnsigned T> struct dynamic_tag {
     using value_type = T;
-    value_type value;
-    constexpr  operator value_type() const { return value; }
+    value_type cbor_tag;
+    constexpr  operator value_type() const { return cbor_tag; }
 };
 
 template <typename T>
