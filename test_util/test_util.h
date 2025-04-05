@@ -1,6 +1,5 @@
 #pragma once
 #include "cbor_tags/cbor.h"
-#include "small_generator.h"
 
 #include <cstddef>
 #include <doctest/doctest.h>
@@ -62,10 +61,10 @@ inline std::vector<byte> to_bytes(std::string_view hex) {
 }
 
 // Print using fmt
-inline auto print_bytes = [](const std::vector<std::byte> &bytes) { fmt::print("{}\n", to_hex(bytes)); };
+inline const auto print_bytes = [](const std::vector<std::byte> &bytes) { fmt::print("{}\n", to_hex(bytes)); };
 
 template <std::ranges::range Buffer, typename... Strings>
-tl::expected<void, std::vector<std::string>> substrings_in(Buffer &&buffer, Strings &&...strings) {
+tl::expected<void, std::vector<std::string>> substrings_in(const Buffer &buffer, Strings &&...strings) {
     // Convert buffer to string for non-contiguous ranges support
     using buffer_type = std::conditional_t<std::ranges::contiguous_range<Buffer>, std::string_view, std::string>;
     buffer_type buffer_str;

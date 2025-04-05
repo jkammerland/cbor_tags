@@ -1,6 +1,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "small_generator.h"
 #include "test_util.h"
 
 #include <algorithm>

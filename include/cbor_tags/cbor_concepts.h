@@ -366,8 +366,7 @@ concept IsClassWithTagOverload =
     std::is_class_v<T> && static_cast<bool>(HasTagFreeFunction<T> ^ HasTagMember<T> ^ HasTagNonConstructible<T>);
 
 template <typename T>
-concept IsTag = static_cast<bool>(HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> ||
-                                  IsClassWithTagOverload<T>);
+concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTaggedTuple<T> || IsTagHeader<T> || IsClassWithTagOverload<T>;
 
 template <typename T>
 concept IsOptional = requires(T t) {
@@ -487,10 +486,8 @@ struct CborStream {
 template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
-namespace {
-template <class T> static constexpr bool is_optional_v                   = false;
-template <class T> static constexpr bool is_optional_v<std::optional<T>> = true;
-} // namespace
+template <class T> constexpr bool is_optional_v                   = false;
+template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
 
 struct any {
     template <class T> constexpr operator T() const {
