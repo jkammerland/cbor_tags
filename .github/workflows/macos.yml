@@ -1,0 +1,57 @@
+name: MacOS Tests (AppleClang 15+)
+
+on:
+  push:
+    branches: [ master, integration ]
+  pull_request:
+    branches: [ master, integration ]
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              name: "macOS AppleClang 15",
+              cc: "clang",
+              cxx: "clang++",
+              xcode_version: "15.0"
+            }
+          - {
+              name: "macOS AppleClang 16",
+              cc: "clang",
+              cxx: "clang++",
+              xcode_version: "16.2.0"
+            }
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Setup Xcode (macOS)
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: ${{ matrix.config.xcode_version }}
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }}
+
+    - name: Build
+      shell: bash
+      run: cmake --build build --config Release
+
+    - name: Test
+      working-directory: build
+      shell: bash
+      run: ctest -C Release --output-on-failure

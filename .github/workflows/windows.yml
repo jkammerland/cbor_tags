@@ -1,0 +1,78 @@
+name: Windows Tests (MSVC-latest, Clang-CL 15+)
+
+on:
+  push:
+    branches: [ master, integration ]
+  pull_request:
+    branches: [ master, integration ]
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              name: "Windows MSVC",
+              cc: "cl",
+              cxx: "cl",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          # Windows Clang-CL configs
+          - {
+              name: "Windows Clang-CL 15",
+              cc: "clang-cl",
+              cxx: "clang-cl",
+              clang_version: "15",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          - {
+              name: "Windows Clang-CL 16",
+              cc: "clang-cl",
+              cxx: "clang-cl",
+              clang_version: "16",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+          - {
+              name: "Windows Clang-CL 17",
+              cc: "clang-cl",
+              cxx: "clang-cl",
+              clang_version: "17",
+              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+            }
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install LLVM and Clang (Windows Clang-CL)
+      if: matrix.config.cc == 'clang-cl'
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: ${{ matrix.config.clang_version }}
+        directory: ${{ runner.temp }}/llvm
+
+    - name: Configure CMake (Windows)
+      shell: cmd
+      run: |
+        if "${{ matrix.config.cc }}" == "clang-cl" (
+          call "${{ matrix.config.environment_script }}"
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL -DCBOR_TAGS_BUILD_TESTS=ON
+        ) else (
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON
+        )
+
+    - name: Build
+      shell: bash
+      run: cmake --build build --config Release
+
+    - name: Test
+      working-directory: build
+      shell: bash
+      run: ctest -C Release --output-on-failure

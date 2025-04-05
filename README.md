@@ -1,6 +1,8 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/build.yml)
+[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
+[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
+[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
 
 This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. See [xkcd/927](https://xkcd.com/927/).
 
