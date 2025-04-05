@@ -161,6 +161,7 @@ template <typename T> inline constexpr auto get_major_6_tag_from_tuple(const T &
 
 template <typename T> static constexpr auto get_major_6_tag_from_class(const T &t) {
     // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
+
     if constexpr (HasTagMember<T>) {
         return Access::cbor_tag(t);
     } else if constexpr (HasTagNonConstructible<T>) {
@@ -168,7 +169,8 @@ template <typename T> static constexpr auto get_major_6_tag_from_class(const T &
     } else if constexpr (HasTagFreeFunction<T>) {
         return cbor_tag(t);
     } else {
-        return detail::FalseType{};
+        return -1;
+        // return detail::FalseType{}; // This doesn't work so well across compilers
     }
 }
 
@@ -187,7 +189,7 @@ template <typename T> static constexpr auto get_major_6_tag_from_class() {
 }
 
 template <typename T> static constexpr auto get_tag_from_any() {
-    if constexpr (HasInlineTag<T>)
+    if constexpr (HasInlineTag<T> || is_static_tag_t<T>::value)
         return T::cbor_tag;
     else if constexpr (HasStaticTag<T> || HasDynamicTag<T>)
         return decltype(T::cbor_tag){};

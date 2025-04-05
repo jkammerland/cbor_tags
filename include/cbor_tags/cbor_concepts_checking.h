@@ -250,12 +250,15 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
     }
     // This is a special case for tagged types
     if constexpr (IsTagHeader<T>) {
+        unmatched = false;
         result[MajorIndex::AnyTagHeader]++;
     } else if constexpr (IsTag<T>) {
         unmatched = false;
 
-        constexpr auto tag     = detail::get_tag_from_any<T>();
-        constexpr bool IsTagOk = !IsSigned<decltype(tag)> && static_cast<int>(tag) != -1;
+        constexpr auto tag          = detail::get_tag_from_any<T>();
+        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
+        constexpr bool IsTagOk      = !IsTagInvalid;
+
         static_assert(IsTagOk, "T must be a tagged type");
 
         if constexpr (IsTagOk) {
@@ -265,6 +268,9 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
             } else {
                 result[MajorIndex::Tag]++; // If duplicate tag is found
             }
+        } else /* Will never happen because of static_assert */ {
+            result[MajorIndex::Tag]++;
+            result[MajorIndex::Unmatched]++;
         }
     }
     if constexpr (IsSimple<T>) {
@@ -300,32 +306,25 @@ constexpr void getTagsCounts(std::array<uint64_t, detail::MaxTagsForVariantCheck
         return;
     }
 
-    if constexpr (IsTag<T>) {
-        if constexpr (HasInlineTag<T>) {
-            auto it = std::find(tags.begin(), tags.end(), T::cbor_tag);
+    if constexpr (IsTagHeader<T>) {
+        result[MajorIndex::AnyTagHeader]++;
+    } else if constexpr (IsTag<T>) {
+        constexpr auto tag          = detail::get_tag_from_any<T>();
+        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
+        constexpr bool IsTagOk      = !IsTagInvalid;
+
+        static_assert(IsTagOk, "T must be a tagged type");
+
+        if constexpr (IsTagOk) {
+            auto it = std::find(tags.begin(), tags.end(), tag);
             if (it == tags.end()) {
-                tags.push_back(T::cbor_tag);
+                tags.push_back(tag);
             } else {
                 result[MajorIndex::Tag]++; // If duplicate tag is found
             }
-        } else if constexpr (HasStaticTag<T>) {
-            auto it = std::find(tags.begin(), tags.end(), decltype(T::cbor_tag){});
-            if (it == tags.end()) {
-                tags.push_back(decltype(T::cbor_tag){});
-            } else {
-                result[MajorIndex::Tag]++; // If duplicate tag is found
-            }
-        } else if constexpr (IsTaggedTuple<T>) {
-            auto it = std::find(tags.begin(), tags.end(), std::get<0>(T{}).cbor_tag);
-            if (it == tags.end()) {
-                tags.push_back(std::get<0>(T{}).cbor_tag);
-            } else {
-                result[MajorIndex::Tag]++; // If duplicate tag is found
-            }
-        } else if constexpr (IsTagHeader<T>) {
-            result[MajorIndex::AnyTagHeader]++;
-        } else {
+        } else /* Will never happen because of static_assert */ {
             result[MajorIndex::Tag]++;
+            result[MajorIndex::Unmatched]++;
         }
     }
 }

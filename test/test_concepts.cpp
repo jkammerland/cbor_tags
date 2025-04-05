@@ -166,6 +166,8 @@ TEST_CASE("Test IsTuple concept") {
     static_assert(!IsOptional<tuple_1>);
 }
 
+TEST_CASE_TEMPLATE("IsTag T", T, static_tag<1>, dynamic_tag<std::uint64_t>) { static_assert(IsTag<T>); }
+
 TEST_CASE("Test IsTagged concept with tagged tuples") {
     auto tagged = std::make_tuple(static_tag<1>{}, 1);
     static_assert(IsTag<decltype(tagged)>);
@@ -780,9 +782,7 @@ struct INLINEMEEEEE {
     char                           c;
 };
 
-TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG)
-
-{
+TEST_CASE_TEMPLATE("Aggregate to tuple research", T, ATAG, ANOTAG) {
     T a;
 
     CHECK(!IsTuple<T>);
