@@ -63,7 +63,7 @@ TEST_CASE("CBOR - Advanced types") {
 
     auto result = enc(a0);
     if (!result) {
-        std::cerr << "Failed to encode A" << std::endl;
+        std::cerr << "Failed to encode A" << '\n';
         CHECK(false);
     }
 
@@ -74,7 +74,7 @@ TEST_CASE("CBOR - Advanced types") {
     AllCborMajorsExample a1;
     result = dec(a1);
     if (!result) {
-        std::cerr << "Failed to decode A: " << status_message(result.error()) << std::endl;
+        std::cerr << "Failed to decode A: " << status_message(result.error()) << '\n';
         CHECK(false);
     }
 

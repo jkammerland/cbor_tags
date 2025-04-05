@@ -4,7 +4,7 @@
 [![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
 [![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
 
-This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. See [xkcd/927](https://xkcd.com/927/).
+This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. Some good examples of different binary formats can be found here [rfc8949-name-conciseness-on-the-wire](https://www.rfc-editor.org/rfc/rfc8949.html#name-conciseness-on-the-wire). Also obligatory [xkcd/927](https://xkcd.com/927/). 
 
 The primary advantage of using this library is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
@@ -24,6 +24,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
   - [Advanced Type Support](#advanced-type-support)
   - [Version Handling with Variants](#version-handling-with-variants)
   - [Manual Tag Parsing](#manual-tag-parsing)
+  - [Private class members or explicit overloading](#private-class-members-or-explicit-overloading)
 - [✨ Advanced Features](#-advanced-features)
 - [🎨 Custom Tag Handling](#-custom-tag-handling)
 - [🔄 Automatic Reflection](#-automatic-reflection)
@@ -34,7 +35,10 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [💡 CMake Integration](#-cmake-integration)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
+- [🌟 Practical Use Cases](#-practical-use-cases)
+- [ Testing Performance and Benchmarks](#testing-performance-and-benchmarks)
 - [📄 License](#-license)
+
 
 ---
 
@@ -74,7 +78,7 @@ int main() {
     }
 
     // Emulate transfer of data buffer
-    auto trasmitted_data = data;
+    auto transmitted_data = data;
 
     // Declare variables to hold the decoded data (receiver side)
     int  a;
@@ -82,7 +86,7 @@ int main() {
     std::string c;
 
     // Decoding
-    auto dec = make_decoder(trasmitted_data);
+    auto dec = make_decoder(transmitted_data);
     if(!dec(a, b, c)){
         return 1;
     }
@@ -214,169 +218,6 @@ int main() {
 ```
 > [!NOTE]
 > The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
-
-## Working with Private Class Members or explicit overloading
-Should the need arise for overloading, or encoding private members, you have two options. The first is to use the `Access` friend class as shown in the example above. This will allow you to access private members of your class for encoding/decoding purposes.
-
-```cpp
-#include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/cbor_encoder.h"
-#include <vector>
-#include <string>
-#include <variant>
-
-using namespace cbor::tags;
-
-class PrivateDataClass {
-public:
-    PrivateDataClass() = default;
-    explicit PrivateDataClass(int id, std::string name) 
-        : id_(id), name_(std::move(name)) {}
-    
-    bool operator==(const PrivateDataClass& other) const = default;
-    
-private:
-    int id_ = 0;
-    std::string name_;
-
-    /* Optional, and IS AUTOMATICALLY USED IF DEFINED
-       This is required for because of some details in std::variant handling with classes
-    */
-    static_tag<12345> cbor_tag; 
-    
-    // Method 1: Use member functions for encoding/decoding
-    friend cbor::tags::Access;  // Grant access to the library
-    
-    // You need one or both of these functions, depending on your needs
-    // Remember that if this is an object, wrap it in a array or map, as 
-    // single items is most likely not what you want. 
-    // But if there is only 1 item you don't need any wrapping of course.
-
-    template <typename Encoder>
-    constexpr auto encode(Encoder& enc) const {
-        return enc(wrap_as_array{id_, name_});  // Encode as array with 2 elements
-    }
-    
-    template <typename Decoder>
-    constexpr auto decode(Decoder& dec) {
-        return dec(wrap_as_array{id_, name_});  // Decode as array with 2 elements
-    }
-};
-
-int main() {
-    // Create an object with private data
-    PrivateDataClass obj{123, "Private Data"};
-    
-    // Encode the object
-    std::vector<uint8_t> buffer;
-    auto enc = make_encoder(buffer);
-    [[maybe_unused]] _ = enc(obj);
-    
-    // Decode into a new object
-    auto dec = make_decoder(buffer);
-    PrivateDataClass decoded_obj;
-    [[maybe_unused]] _ = dec(decoded_obj);
-    
-    // Objects should be equal
-    assert(obj == decoded_obj);
-    
-    return 0;
-}
-```
-
-Method 2 is to use an overload of encode or decode as free functions. This approach is useful when you cannot or do not want to modify the original class:
-
-```cpp
-#include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/cbor_encoder.h"
-#include <vector>
-#include <string>
-
-using namespace cbor::tags;
-
-// A class we can't modify (perhaps from a third-party library)
-class ExternalClass {
-public:
-    ExternalClass() = default;
-    ExternalClass(int id, std::string name) : id_(id), name_(std::move(name)) {}
-    
-    bool operator==(const ExternalClass& other) const = default;
-    
-    // Getters for accessing private data
-    int getId() const { return id_; }
-    const std::string& getName() const { return name_; }
-    
-    // Setters for modifying private data
-    void setId(int id) { id_ = id; }
-    void setName(const std::string& name) { name_ = name; }
-    
-private:
-    int id_ = 0;
-    std::string name_;
-};
-
-// Method 2: Define free functions for encoding and decoding
-// This is used when you cannot modify the class itself
-
-// Tag function (optional) - defines a tag for this type when used in a variant
-constexpr auto cbor_tag(const ExternalClass&) { return static_tag<54321>{}; }
-
-// Encode function - converts the object to CBOR
-template <typename Encoder>
-constexpr auto encode(Encoder& enc, const ExternalClass& obj) {
-    // Access the private data through getters
-    return enc(wrap_as_array{obj.getId(), obj.getName()});
-}
-
-// Decode function - reconstructs the object from CBOR
-template <typename Decoder>
-constexpr auto decode(Decoder& dec, ExternalClass&& /*Must use "&&" to match free function signature, and to allow temporary objects */ obj) {
-    // Temporary variables to hold the decoded values
-    int id;
-    std::string name;
-    
-    // Decode into temporaries
-    auto result = dec(wrap_as_array{id, name});
-    
-    // If successful, update the object using setters
-    if (result) {
-        obj.setId(id);
-        obj.setName(name);
-    }
-    
-    return result;
-}
-
-int main() {
-    // Create an object
-    ExternalClass obj{456, "External Data"};
-    
-    // Encode the object
-    std::vector<uint8_t> buffer;
-    auto enc = make_encoder(buffer);
-    auto result = enc(obj);
-    
-    if (!result) {
-        std::cerr << "Encoding failed: " << status_message(result.error()) << std::endl;
-        return 1;
-    }
-    
-    // Decode into a new object
-    auto dec = make_decoder(buffer);
-    ExternalClass decoded_obj;
-    result = dec(decoded_obj);
-    
-    if (!result) {
-        std::cerr << "Decoding failed: " << status_message(result.error()) << std::endl;
-        return 1;
-    }
-    
-    // Objects should be equal
-    assert(obj == decoded_obj);
-    
-    return 0;
-}
-```
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -519,15 +360,176 @@ int main() {
 }
 ```
 
-## ✨ WIP Features
+### Private Class Members or explicit overloading
+Should the need arise for overloading, or encoding private members, you have two options. The first is to use the `Access` friend class as shown in the example above. This will allow you to access private members of your class for encoding/decoding purposes.
 
-- Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
-- WIP: Complete ranges support
-- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
-- TODO: Options for encoder/decoder, such as (un)expected type tuning
-- TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
-- TODO: `unique_ptr` support.
-- TODO: `shared_ptr` support.
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include <vector>
+#include <string>
+
+using namespace cbor::tags;
+
+class PrivateDataClass {
+public:
+    PrivateDataClass() = default;
+    explicit PrivateDataClass(int id, std::string name) 
+        : id_(id), name_(std::move(name)) {}
+    
+    bool operator==(const PrivateDataClass& other) const = default;
+    
+private:
+    int id_ = 0;
+    std::string name_;
+
+    /* 
+       IMPORTANT: The tag below is always used when encoding/decoding automatically.
+       It is optional to define unless the class is used with std::variant.
+    */
+    static_tag<12345> cbor_tag; 
+    
+    // Method 1: Use member functions for encoding/decoding
+    friend cbor::tags::Access;  // Grant access to the library
+    
+    // You need one or both of these functions, depending on your needs
+    // Remember that if this is an object, wrap it in a array or map, as 
+    // single items is most likely not what you want. 
+    // But if there is only 1 item you don't need any wrapping of course.
+
+    template <typename Encoder>
+    constexpr auto encode(Encoder& enc) /* Must be const -> */ const /* <- Must be const */ {
+        // Do not encode the tag manually, it is handled by the library
+        return enc(wrap_as_array{id_, name_});  // Encode as array with 2 elements
+    }
+    
+    template <typename Decoder>
+    constexpr auto decode(Decoder& dec) {
+        // Do not decode the tag manually, it is handled by the library
+        return dec(wrap_as_array{id_, name_});  // Decode as array with 2 elements
+    }
+};
+
+int main() {
+    // Create an object with private data
+    PrivateDataClass obj{123, "Private Data"};
+    
+    // Encode the object
+    std::vector<uint8_t> buffer;
+    auto                 enc = make_encoder(buffer);
+    { [[maybe_unused]] auto _ = enc(obj); }
+
+    // Decode into a new object
+    auto             dec = make_decoder(buffer);
+    PrivateDataClass decoded_obj;
+    { [[maybe_unused]] auto _ = dec(decoded_obj); }
+    
+    // Objects should be equal
+    assert(obj == decoded_obj);
+    
+    return 0;
+}
+```
+
+Method 2 is to use an overload of encode or decode as free functions. This approach is useful when you cannot or do not want to modify the original class:
+
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include <vector>
+#include <string>
+
+using namespace cbor::tags;
+
+// A class we can't modify (perhaps from a third-party library)
+class ExternalClass {
+public:
+    ExternalClass() = default;
+    ExternalClass(int id, std::string name) : id_(id), name_(std::move(name)) {}
+    
+    bool operator==(const ExternalClass& other) const = default;
+    
+    // Getters for accessing private data
+    int getId() const { return id_; }
+    const std::string& getName() const { return name_; }
+    
+    // Setters for modifying private data
+    void setId(int id) { id_ = id; }
+    void setName(const std::string& name) { name_ = name; }
+    
+private:
+    int id_ = 0;
+    std::string name_;
+};
+
+// Method 2: Define free functions for encoding and decoding
+// This is used when you cannot modify the class itself
+
+// Tag function (optional) - defines a tag for this type when used in a variant
+constexpr auto cbor_tag(const ExternalClass&) { return static_tag<54321>{}; }
+
+// Encode function - converts the object to CBOR
+template <typename Encoder>
+constexpr auto encode(Encoder& enc, const ExternalClass& obj) {
+    // Access the private data through getters
+    return enc(wrap_as_array{obj.getId(), obj.getName()});
+}
+
+// Decode function - reconstructs the object from CBOR
+// IMPORTANT: Must use "&&" in the overloaded type to match free function signature, and to allow temporary objects */ 
+template <typename Decoder>
+constexpr auto decode(Decoder& dec, ExternalClass /* --> */ && /* <--*/ obj) {
+    // Temporary variables to hold the decoded values
+    int id;
+    std::string name;
+    
+    // Decode into temporaries
+    auto result = dec(wrap_as_array{id, name});
+    
+    // If successful, update the object using setters
+    if (result) {
+        obj.setId(id);
+        obj.setName(name);
+    }
+    
+    return result;
+}
+
+int main() {
+    // Create an object
+    ExternalClass obj{456, "External Data"};
+    
+    // Encode the object
+    std::vector<uint8_t> buffer;
+    auto enc = make_encoder(buffer);
+    auto result = enc(obj);
+    
+    if (!result) {
+        std::cerr << "Encoding failed: " << status_message(result.error()) << std::endl;
+        return 1;
+    }
+    
+    // Decode into a new object
+    auto dec = make_decoder(buffer);
+    ExternalClass decoded_obj;
+    result = dec(decoded_obj);
+    
+    if (!result) {
+        std::cerr << "Decoding failed: " << status_message(result.error()) << std::endl;
+        return 1;
+    }
+    
+    // Objects should be equal
+    assert(obj == decoded_obj);
+    
+    return 0;
+}
+```
+
+> [!NOTE]
+> You can mix and match these methods above. For example, you can can use a free form cbor_tag with member functions for encoding/decoding. Or you could use a static tag with free form encode/decode methods. By not defining a tag or a cbor_tag() function you can also manually encode/decode the tag inside of your encode/decode functions.
+
+More examples on alternative methods can be found in wiki, such as how to handle non-default constructible types.
 
 ## 🎨 Custom Tag Handling
 
@@ -756,6 +758,16 @@ target_link_libraries(your_target PRIVATE cbor_tags::cbor_tags)
 > [!NOTE]
 > This library requires C++20 features. However, you can isolate that requirement by wrapping this library and exposing an API compatible with your target C++ version.
 
+## ✨ WIP Features
+
+- Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
+- WIP: Complete ranges support
+- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
+- TODO: Options for encoder/decoder, such as (un)expected type tuning
+- TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
+- TODO: `unique_ptr` support.
+- TODO: `shared_ptr` support.
+
 ## 📚 Documentation
 
 There are many types of cbor objects defined, the major types are:
@@ -798,6 +810,14 @@ For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
 - **Configuration Serialization**: Save and load application settings with schema validation
 - **Cross-Platform Communication**: Exchange data between different systems with a well-defined standard
 - **Storage**: Store structured data in a compact binary format
+
+## Testing Performance and Benchmarks
+
+Tests can be built after configuring with `-DCBOR_TAGS_BUILD_TESTS=ON`, which will create a target called `tests`. This is what the CI currently runs for all supported compilers/platforms.
+
+Numbers with comparisons are coming soon. The current benchmarks can be run by configuring with `-DCBOR_TAGS_BUILD_BENCHMARKS=ON`. It creates two targets, `bench_encoder` and `bench_decoder`.
+
+These can all be collectively run with `make/ninja test`, ctest will only run `tests`.
 
 ## 📄 License
 
