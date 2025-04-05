@@ -10,7 +10,11 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
+#include <iterator>
 #include <list>
+#include <random>
+#include <span>
+#include <string>
 #include <string_view>
 
 using namespace cbor::tags;
@@ -35,8 +39,8 @@ TEST_CASE("Test view contiguous, tstr") {
     CHECK_EQ(b, "hello");
 
     // Check that view is in original data
-    auto m1 = static_cast<const void *>(b.data());
-    auto m2 = static_cast<const void *>(&data[5]);
+    const auto *m1 = static_cast<const void *>(b.data());
+    const auto *m2 = static_cast<const void *>(&data[5]);
     CHECK_EQ(m1, m2);
 }
 
@@ -63,8 +67,8 @@ TEST_CASE("Test view contiguous, bstr") {
     CHECK_EQ(b[4], static_cast<std::byte>('o'));
 
     // Check that the view is still in the original memory location.
-    auto m1 = static_cast<const std::byte *>(&data[5]);
-    auto m2 = static_cast<const std::byte *>(b.data());
+    const auto *m1 = static_cast<const std::byte *>(&data[5]);
+    const auto *m2 = static_cast<const std::byte *>(b.data());
     CHECK_EQ(m1, m2);
 }
 
@@ -104,7 +108,8 @@ TEST_CASE_TEMPLATE("Test big data chunk view", T, std::deque<char>, std::list<ui
     auto                   enc  = make_encoder(data);
     std::vector<std::byte> vec;
 
-    std::ranges::generate_n(std::back_inserter(vec), 10000, []() { return static_cast<std::byte>(std::rand() % 256); });
+    rng::small_generator rng(std::random_device{}());
+    std::ranges::generate_n(std::back_inserter(vec), 10000, [&rng]() { return static_cast<std::byte>(rng() % 256); });
     REQUIRE(enc(vec));
 
     auto dec    = make_decoder(data);

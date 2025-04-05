@@ -39,6 +39,7 @@ function(create_tidy_target target_dir)
   set(TIDY_OUTPUT_FILE "${CMAKE_BINARY_DIR}/clang-tidy-output.txt")
 
   # Create custom tidy target
+  message(DEBUG "Created custom tidy target")
   add_custom_target(
     tidy
     COMMAND
@@ -48,5 +49,6 @@ function(create_tidy_target target_dir)
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   # Ensure compile_commands.json is generated for Clang-Tidy
+  message(STATUS "Generating compile_commands.json for Clang-Tidy")
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endfunction()

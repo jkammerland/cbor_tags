@@ -30,7 +30,6 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 
@@ -59,7 +58,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         try {
             status_collector<self_t> collect_status{*this};
 
-            auto success = (collect_status(args) && ...);
+            auto success = (collect_status(std::forward<T>(args)) && ...);
 
             if (!success) {
                 return unexpected<decltype(collect_status.result)>(collect_status.result);
@@ -855,7 +854,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return std::bit_cast<double>(bits);
     }
 
-    inline constexpr auto read_initial_byte() {
+    constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
             throw std::runtime_error("Unexpected end of input");
         }
@@ -872,7 +871,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         [[maybe_unused]] size_t      index{0};
         [[maybe_unused]] status_code result{status_code::success};
 
-        template <typename U> constexpr bool operator()(U &&arg) {
+        template <typename U> constexpr bool operator()(U &&arg) /* TODO: missing forward, or just by ref */ {
             if constexpr (std::is_same_v<void, decltype(dec_.decode(arg))>) {
                 dec_.decode(arg);
             } else {
@@ -896,7 +895,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... Args> constexpr auto applier(Args &&...args) {
         status_collector<self_t> collect_status{*this};
-        [[maybe_unused]] auto    success = (collect_status(args) && ...);
+        [[maybe_unused]] auto    success = (collect_status(std::forward<Args>(args)) && ...);
         return collect_status.result;
     }
 

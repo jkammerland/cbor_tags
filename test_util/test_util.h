@@ -1,5 +1,6 @@
 #pragma once
 #include "cbor_tags/cbor.h"
+#include "small_generator.h"
 
 #include <cstddef>
 #include <doctest/doctest.h>
