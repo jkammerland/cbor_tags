@@ -568,10 +568,10 @@ template <char... Chars> constexpr std::uint64_t parse_hex() {
 namespace literals {
 
 // Decimal tag literal
-template <char... Chars> constexpr auto operator"" _tag() { return static_tag<detail::parse_decimal<Chars...>()>{}; }
+template <char... Chars> constexpr auto operator""_tag() { return static_tag<detail::parse_decimal<Chars...>()>{}; }
 
 // Hexadecimal tag literal
-template <char... Chars> constexpr auto operator"" _hex_tag() { return static_tag<detail::parse_hex<Chars...>()>{}; }
+template <char... Chars> constexpr auto operator""_hex_tag() { return static_tag<detail::parse_hex<Chars...>()>{}; }
 
 } // namespace literals
 

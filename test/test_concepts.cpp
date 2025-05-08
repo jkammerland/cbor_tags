@@ -193,6 +193,13 @@ struct DefCbor {
     static constexpr std::uint64_t cbor_tag = 1;
 };
 
+// Specialize std::hash for DefCbor
+namespace std {
+template <> struct hash<DefCbor> {
+    size_t operator()(const DefCbor &) const { return std::hash<std::uint64_t>{}(DefCbor::cbor_tag); }
+};
+} // namespace std
+
 struct NotCbor {};
 
 TEST_CASE_TEMPLATE("IsCborMajor Positive", T, std::uint8_t, int, double, std::string, std::vector<int>, std::map<int, int>,
