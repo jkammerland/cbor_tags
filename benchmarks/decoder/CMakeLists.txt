@@ -8,7 +8,20 @@ target_sources(${PROJECT_NAME} PRIVATE bench_decoder.cpp)
 
 find_package(fmt CONFIG REQUIRED)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE cbor_tags fmt::fmt doctest nanobench nameof benchmark_util test_util)
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE cbor_tags
+          fmt::fmt
+          doctest
+          nanobench
+          nameof
+          benchmark_util
+          test_util)
 
 # add tests for ctest
 add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
+
+if(CBOR_TAGS_TIDY_TARGET)
+  message(STATUS "Tidy enabled in ${PROJECT_NAME}")
+  register_project_sources(${PROJECT_NAME})
+endif()

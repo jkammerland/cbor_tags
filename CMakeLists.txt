@@ -93,6 +93,13 @@ if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
   target_include_directories(test_util INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test_util)
 endif()
 
+option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
+if(CBOR_TAGS_TIDY_TARGET)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
+  set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
+  cpmaddpackage("gh:jkammerland/clang-tidy.cmake@1.0.2")
+endif()
+
 # add tests
 if(CBOR_TAGS_BUILD_TESTS)
   add_subdirectory(test)
@@ -104,10 +111,8 @@ if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
-option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
 if(CBOR_TAGS_TIDY_TARGET)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/create_tidy_target.cmake)
-  create_tidy_target(${CMAKE_CURRENT_SOURCE_DIR}/test)
+  finalize_clang_tidy_targets()
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)

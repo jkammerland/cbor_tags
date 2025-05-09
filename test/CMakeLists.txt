@@ -34,5 +34,10 @@ if(CBOR_TAGS_ENABLE_ASAN)
   endif()
 endif()
 
+if(CBOR_TAGS_TIDY_TARGET)
+  message(STATUS "Tidy enabled in tests")
+  register_project_sources(tests)
+endif()
+
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
