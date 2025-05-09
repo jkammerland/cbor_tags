@@ -13,7 +13,7 @@ function(create_tidy_target target_dir)
   # Check if STL_INCLUDE_PATH is not already set in the cache
   if(NOT DEFINED STL_INCLUDE_PATH)
     if(UNIX AND NOT APPLE)
-      set(STL_DEFAULT_PATH "/usr/include/c++/14")
+      set(STL_DEFAULT_PATH "/usr/include/c++/15")
     elseif(APPLE)
       # For macOS, adapt the path as necessary, this is just a generic example set(STL_DEFAULT_PATH "/Applications/Xcode.app/path-to-STL-headers")
     elseif(WIN32)

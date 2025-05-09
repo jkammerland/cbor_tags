@@ -38,8 +38,8 @@ class small_generator {
         }
     }
 
-    state_type             a, b, c, d;
-    static inline uint64_t rot(state_type x, state_type k) { return ((x) << (k)) | ((x) >> (32 - (k))); }
+    state_type      a, b, c, d;
+    static uint64_t rot(state_type x, state_type k) { return ((x) << (k)) | ((x) >> (32 - (k))); }
 };
 
 } // namespace rng
