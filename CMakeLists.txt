@@ -14,8 +14,8 @@ configure_file("${PROJECT_SOURCE_DIR}/cbor_tags_config.h.in" "${PROJECT_BINARY_D
 # Check minimum compiler version
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/minimum_compiler.cmake)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
 
 option(CBOR_TAGS_USE_DEV_SETTINGS "Use dev settings" OFF)
 if(CBOR_TAGS_USE_DEV_SETTINGS)
@@ -41,9 +41,9 @@ if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
     GITHUB_REPOSITORY
     TartanLlama/expected
     VERSION
-    1.1.0
+    1.2.0
     GIT_TAG
-    v1.1.0
+    v1.2.0
     OPTIONS
     "EXPECTED_BUILD_TESTS OFF"
     "EXPECTED_BUILD_PACKAGE OFF")
@@ -61,9 +61,6 @@ endif()
 # Link dependencies
 target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/installation_target.cmake)
-create_installation_target(cbor_tags)
-
 # Make ${PROJECT_NAME} depend on the generated header add tools - reflection module generator - makes cbor_reflection_impl.h
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 if(CBOR_TAGS_BUILD_TOOLS)
@@ -77,6 +74,7 @@ else()
   endif()
 endif()
 
+# TODO: this is for testing docs
 set(BaseName
     "binary"
     CACHE STRING "BaseName chosen by the user at CMake configure time")
@@ -88,16 +86,13 @@ option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
   include(CTest)
   enable_testing()
-
   add_library(test_util INTERFACE)
   target_include_directories(test_util INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test_util)
 endif()
 
 option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
 if(CBOR_TAGS_TIDY_TARGET)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
-  set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
-  cpmaddpackage("gh:jkammerland/clang-tidy.cmake@1.0.2")
+  cpmaddpackage("gh:jkammerland/clang-tidy.cmake@1.2.0")
 endif()
 
 # add tests
@@ -109,10 +104,6 @@ endif()
 # add benchmarks
 if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
-endif()
-
-if(CBOR_TAGS_TIDY_TARGET)
-  finalize_clang_tidy_targets()
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)
