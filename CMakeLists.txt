@@ -26,9 +26,18 @@ if(CBOR_TAGS_USE_DEV_SETTINGS)
 endif()
 
 # THE LIBRARY
+file(GLOB_RECURSE CBOR_HEADERS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
-target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-                                                     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_sources(
+  ${PROJECT_NAME}
+  INTERFACE FILE_SET
+            HEADERS
+            BASE_DIRS
+            "include"
+            "${PROJECT_BINARY_DIR}/include/"
+            FILES
+            "${CBOR_HEADERS}"
+            "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
 
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
@@ -104,6 +113,11 @@ endif()
 # add benchmarks
 if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+
+option(CBOR_TAGS_INSTALL "Install the library" OFF)
+if(CBOR_TAGS_INSTALL)
+  cpmaddpackage(gh:jkammerland/target_install_package.cmake@5.3.1)
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)

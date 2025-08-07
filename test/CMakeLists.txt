@@ -36,7 +36,7 @@ endif()
 
 if(CBOR_TAGS_TIDY_TARGET)
   message(STATUS "Tidy enabled in tests")
-  register_project_sources(tests)
+  target_tidy_sources(tests)
 endif()
 
 # add tests for ctest
