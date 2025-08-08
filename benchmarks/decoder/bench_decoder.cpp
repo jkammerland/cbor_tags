@@ -20,6 +20,8 @@
 #include <nanobench.h>
 #include <small_generator.h>
 
+using std::nullptr_t;
+
 using namespace std::string_view_literals;
 using namespace cbor::tags;
 
@@ -90,7 +92,7 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
         s.resize(4);
         std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
         auto enc = make_encoder(data.tstr_data);
-        enc(s);
+        CHECK(enc(s));
     }
 
     // Prepare array data
@@ -113,13 +115,13 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
     {
         A    original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
         auto enc    = make_encoder(data.tag_data);
-        std::ignore = enc(original);
+        CHECK(enc(original));
     }
 
     // Prepare nullptr data
     {
         auto enc = make_encoder(data.nullptr_data);
-        enc(std::nullptr_t{});
+        CHECK(enc(nullptr_t{}));
     }
 
     // Prepare bool data
@@ -434,7 +436,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::string s;
         s.resize(4);
         std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
-        enc(s);
+        std::ignore = enc(s);
 
         auto        dec = make_decoder(data);
         std::string value;
@@ -448,7 +450,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::string s;
         s.resize(4);
         std::transform(s.begin(), s.end(), s.begin(), [&gen](auto) { return static_cast<char>(gen.generate()); });
-        enc(s);
+        std::ignore = enc(s);
 
         auto        dec = make_decoder(data);
         std::string value;
@@ -540,7 +542,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
     bench.run("Decoding a nullptr", [&gen]() {
         Buffer data;
         auto   enc = make_encoder(data);
-        enc(std::nullptr_t{});
+        std::ignore = enc(std::nullptr_t{});
 
         auto           dec = make_decoder(data);
         std::nullptr_t value;
@@ -650,9 +652,9 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         using variant = std::variant<int, double>;
         auto i        = gen();
         if (i % 2 == 0) {
-            enc(static_cast<double>(gen()));
+            std::ignore = enc(static_cast<double>(gen()));
         } else {
-            enc(static_cast<int>(gen()));
+            std::ignore = enc(static_cast<int>(gen()));
         }
 
         auto    dec = make_decoder(data);
@@ -671,11 +673,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         using variant = std::variant<int, double, std::string_view>;
         auto i        = gen();
         if (i % 3 == 0) {
-            enc(std::string_view{"hello"});
+            std::ignore = enc(std::string_view{"hello"});
         } else if (i % 3 == 1) {
-            enc(static_cast<double>(gen()));
+            std::ignore = enc(static_cast<double>(gen()));
         } else {
-            enc(static_cast<int>(gen()));
+            std::ignore = enc(static_cast<int>(gen()));
         }
 
         auto    dec = make_decoder(data);
@@ -694,13 +696,13 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         using variant = std::variant<int, double, std::string_view, A>;
         auto i        = gen();
         if (i % 4 == 0) {
-            enc(std::string_view{"hello"});
+            std::ignore = enc(std::string_view{"hello"});
         } else if (i % 4 == 1) {
-            enc(static_cast<double>(gen()));
+            std::ignore = enc(static_cast<double>(gen()));
         } else if (i % 4 == 2) {
-            enc(A{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
+            std::ignore = enc(A{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
         } else {
-            enc(static_cast<int>(gen()));
+            std::ignore = enc(static_cast<int>(gen()));
         }
 
         auto    dec = make_decoder(data);
@@ -719,13 +721,13 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         using variant = std::variant<int, double, B<100>, B<101>>;
         auto i        = gen();
         if (i % 4 == 0) {
-            enc(B<100>{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
+            std::ignore = enc(B<100>{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
         } else if (i % 4 == 1) {
-            enc(static_cast<double>(gen()));
+            std::ignore = enc(static_cast<double>(gen()));
         } else if (i % 4 == 2) {
-            enc(B<101>{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
+            std::ignore = enc(B<101>{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
         } else {
-            enc(static_cast<int>(gen()));
+            std::ignore = enc(static_cast<int>(gen()));
         }
 
         auto    dec = make_decoder(data);

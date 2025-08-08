@@ -57,7 +57,7 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        enc(as_array{10}, 0, 1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296);
+        CHECK(enc(as_array{10}, 0, 1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296));
 
         REQUIRE_EQ(to_hex(data), "8a000117181818ff19010019ffff1a000100001affffffff1b0000000100000000");
 
@@ -77,7 +77,7 @@ TEST_CASE("CBOR Encoder") {
 
         int  first, second, third;
         auto dec2 = make_decoder(data);
-        dec2(as_array{10}, first, second, third);
+        std::ignore = dec2(as_array{10}, first, second, third);
         CHECK_EQ(first, 0);
         CHECK_EQ(second, 1);
         CHECK_EQ(third, 23);
@@ -88,13 +88,13 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        enc(as_array{8}, 0, -1, -24, -25, -256, -257, -4294967296, -42949672960);
+        CHECK(enc(as_array{8}, 0, -1, -24, -25, -256, -257, -4294967296, -42949672960));
 
         REQUIRE_EQ(to_hex(data), "88002037381838ff3901003affffffff3b00000009ffffffff");
 
         std::array<std::int64_t, 8> values;
         static_assert(IsSigned<decltype(values)::value_type>);
-        dec(values);
+        CHECK(dec(values));
         CHECK_EQ(values[0], 0); // Will be unsigned
         CHECK_EQ(values[1], -1);
         CHECK_EQ(values[2], -24);
@@ -111,13 +111,13 @@ TEST_CASE("CBOR Encoder") {
         auto                   dec = make_decoder(data);
         using namespace std::string_view_literals;
 
-        enc(as_array{3}, "IETF"sv, ""sv, "Hello world!"sv);
+        CHECK(enc(as_array{3}, "IETF"sv, ""sv, "Hello world!"sv));
 
         REQUIRE_EQ(to_hex(data), "836449455446606c48656c6c6f20776f726c6421");
 
         std::array<std::string, 3> values;
         CHECK(IsTextString<decltype(values)::value_type>);
-        dec(values);
+        CHECK(dec(values));
 
         CHECK_EQ(values[0], "IETF");
         CHECK_EQ(values[1], "");
@@ -132,13 +132,13 @@ TEST_CASE("CBOR Encoder") {
         std::array<std::byte, 3> binary1{std::byte(0x01), std::byte(0x02), std::byte(0x03)};
         std::array<std::byte, 1> binary2{std::byte(0x00)};
 
-        enc(as_array{2}, binary1, binary2);
+        CHECK(enc(as_array{2}, binary1, binary2));
 
         REQUIRE_EQ(to_hex(data), "82430102034100");
 
         std::array<std::vector<std::byte>, 2> values;
         CHECK(IsBinaryString<decltype(values)::value_type>);
-        dec(values);
+        CHECK(dec(values));
 
         CHECK(std::equal(values[0].begin(), values[0].end(), binary1.begin()));
         CHECK(std::equal(values[1].begin(), values[1].end(), binary2.begin()));
@@ -149,13 +149,13 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        enc(as_array{4}, std::vector<int>{1, 2, 3}, std::array<int, 3>{4, 5, 6}, std::deque<int>{7, 8, 9}, std::list<int>{10, 11, 12});
+        CHECK(enc(as_array{4}, std::vector<int>{1, 2, 3}, std::array<int, 3>{4, 5, 6}, std::deque<int>{7, 8, 9}, std::list<int>{10, 11, 12}));
 
         REQUIRE_EQ(to_hex(data), "84830102038304050683070809830a0b0c");
 
         std::array<std::vector<int>, 4> values;
         static_assert(IsRangeOfCborValues<decltype(values)::value_type>);
-        dec(values);
+        CHECK(dec(values));
 
         CHECK_EQ(values[0], std::vector<int>{1, 2, 3});
         CHECK_EQ(values[1], std::vector<int>{4, 5, 6});
@@ -179,7 +179,7 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        enc(as_array{3}, float16_t(3.14f), float(3.14f), double(3.14));
+        CHECK(enc(as_array{3}, float16_t(3.14f), float(3.14f), double(3.14)));
 
         REQUIRE_EQ(to_hex(data), "83f94247fa4048f5c3fb40091eb851eb851f");
 
@@ -191,7 +191,7 @@ TEST_CASE("CBOR Encoder") {
         static_assert(IsSimple<float>);
         static_assert(IsSimple<double>);
 
-        dec(values);
+        CHECK(dec(values));
         auto f16          = static_cast<float>(std::get<float16_t>(values[0]));
         auto expected_f16 = static_cast<float>(float16_t(3.14f));
         CHECK_EQ(f16, expected_f16);
@@ -204,12 +204,12 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        enc(as_array{2}, true, false);
+        CHECK(enc(as_array{2}, true, false));
 
         REQUIRE_EQ(to_hex(data), "82f5f4");
 
         std::array<bool, 2> values;
-        dec(values);
+        CHECK(dec(values));
         CHECK_EQ(values[0], true);
         CHECK_EQ(values[1], false);
     }
@@ -219,12 +219,12 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        enc(as_array{2}, std::optional<int>(std::nullopt), 42);
+        CHECK(enc(as_array{2}, std::optional<int>(std::nullopt), 42));
 
         REQUIRE_EQ(to_hex(data), "82f6182a");
 
         std::array<std::optional<int>, 2> values;
-        dec(values);
+        CHECK(dec(values));
         CHECK_EQ(values[0], std::nullopt);
         CHECK_EQ(values[1].value(), 42);
     }
@@ -236,12 +236,12 @@ TEST_CASE("CBOR Encoder") {
             auto                   dec = make_decoder(data);
 
             std::map<int, int> map{{1, 2}, {3, 4}, {5, 6}};
-            enc(map);
+            CHECK(enc(map));
 
             REQUIRE_EQ(to_hex(data), "a3010203040506");
 
             std::map<int, int> map_result;
-            dec(map_result);
+            CHECK(dec(map_result));
 
             CHECK_EQ(map_result, map);
         }
@@ -252,10 +252,10 @@ TEST_CASE("CBOR Encoder") {
             auto                   dec = make_decoder(data);
 
             std::unordered_map<int, int> unordered_map{{1, 2}, {3, 4}, {5, 6}};
-            enc(unordered_map);
+            CHECK(enc(unordered_map));
 
             std::unordered_map<int, int> map_result;
-            dec(map_result);
+            CHECK(dec(map_result));
 
             CHECK_EQ(map_result, unordered_map);
         }
@@ -267,12 +267,12 @@ TEST_CASE("CBOR Encoder") {
             auto                   dec = make_decoder(data);
 
             std::unordered_map<std::string_view, std::string_view> unordered_map{{"a", "b"}, {"c", "d"}, {"e", "f"}};
-            enc(unordered_map);
+            CHECK(enc(unordered_map));
 
             // Could look like "a3616561666163616461616162"
 
             std::unordered_map<std::string_view, std::string_view> map_result;
-            dec(map_result);
+            CHECK(dec(map_result));
 
             CHECK_EQ(map_result, unordered_map);
         }
@@ -289,14 +289,14 @@ TEST_CASE("CBOR Encoder") {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
-        enc(float_map);
+        CHECK(enc(float_map));
 
         fmt::print("Float map: ");
         print_bytes(data);
         CHECK(data == expected);
 
         std::map<float, float> map_result;
-        dec(map_result);
+        CHECK(dec(map_result));
         CHECK_EQ(map_result, float_map);
     }
 
@@ -315,13 +315,13 @@ TEST_CASE("CBOR Encoder") {
         auto                   dec = make_decoder(data);
 
         std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(static_tag<511>{}, A{.a = 3.14f, .b = 3.14})};
-        enc(number_and_stuff);
+        CHECK(enc(number_and_stuff));
         fmt::print("Number and stuff: {}\n", to_hex(data));
         if (decltype(enc)::options::wrap_groups) {
             REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901ff82f94247fb40091eb851eb851f");
         }
         std::vector<variant> number_and_stuff_result;
-        dec(number_and_stuff_result);
+        CHECK(dec(number_and_stuff_result));
 
         REQUIRE_EQ(number_and_stuff_result.size(), number_and_stuff.size());
         for (std::size_t i = 0; i < number_and_stuff.size(); ++i) {
@@ -376,14 +376,14 @@ TEST_CASE("Sorting strings and binary strings std::map") {
     auto                   enc = make_encoder(data);
     auto                   dec = make_decoder(data);
 
-    enc(string_map);
+    CHECK(enc(string_map));
 
     fmt::print("String map: {}\n", to_hex(data));
 
     CHECK_EQ(to_hex(data), "a720fb400800000000000001fb40080000000000006161f66162fb40080000000000006163f5626162fa40a00000626163f4");
 
     std::map<variant, variant, variant_comparator<>> map_result;
-    dec(map_result);
+    CHECK(dec(map_result));
 
     CHECK_EQ(map_result.size(), string_map.size());
     CHECK_EQ(map_result, string_map);
@@ -402,13 +402,13 @@ TEST_CASE("Test std::greater in std::map<variant,...>") {
 
     {
         auto enc = make_encoder(data);
-        enc(string_map1);
+        CHECK(enc(string_map1));
         hex1 = to_hex(data);
     }
     data.clear();
     {
         auto enc = make_encoder(data);
-        enc(string_map2);
+        CHECK(enc(string_map2));
         hex2 = to_hex(data);
     }
     CHECK_EQ(string_map1.size(), string_map2.size());
@@ -424,12 +424,12 @@ TEST_CASE("Unordered maps") {
     auto                   enc = make_encoder(data);
     auto                   dec = make_decoder(data);
 
-    enc(string_map);
+    CHECK(enc(string_map));
 
     fmt::print("Unordered map: {}\n", to_hex(data));
 
     std::unordered_map<variant, variant, variant_hasher> map_result;
-    dec(map_result);
+    CHECK(dec(map_result));
 
     CHECK_EQ(map_result.size(), string_map.size());
     CHECK_EQ(map_result, string_map);

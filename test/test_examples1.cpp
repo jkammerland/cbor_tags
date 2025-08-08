@@ -96,14 +96,14 @@ TEST_CASE("Simple ex0") {
     auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
     using namespace std::string_view_literals;
-    enc(2, 3.14, "Hello, World!"sv);
+    CHECK(enc(2, 3.14, "Hello, World!"sv));
 
     // Decoding
     auto        dec = make_decoder(data);
     int         a;
     double      b;
     std::string c;
-    dec(a, b, c);
+    CHECK(dec(a, b, c));
 
     assert(a == 2);
     assert(b == 3.14);

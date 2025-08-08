@@ -11,3 +11,4 @@ python-bindings/testenv/*
 .vs/*
 out/
 CMakeSettings.json
+CLAUDE.md

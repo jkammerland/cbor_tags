@@ -33,7 +33,7 @@ TEST_CASE_TEMPLATE("CBOR Decoder", T, std::vector<char>, std::deque<std::byte>, 
 
     for (const auto &value : bytes) {
         variant_type result;
-        dec(result);
+        CHECK(dec(result));
         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
         CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
     }
@@ -46,7 +46,7 @@ TEST_CASE_TEMPLATE("CBOR decode from array", T, std::array<unsigned char, 8>, st
 
     for (const auto &value : data) {
         variant_type result;
-        dec(result);
+        CHECK(dec(result));
         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
         CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
     }
@@ -68,7 +68,7 @@ TEST_CASE_TEMPLATE("Test decode dynamic tag 1", T, std::vector<uint8_t>, std::de
     A a;
     auto &[tag, value_a] = a;
 
-    dec(a.cbor_tag, value_a);
+    CHECK(dec(a.cbor_tag, value_a));
     CHECK_EQ(tag, 1);
     CHECK_EQ(value_a, "Hello world!");
 }
@@ -89,7 +89,7 @@ TEST_CASE_TEMPLATE("Test decode static tag 1", T, std::vector<uint8_t>, std::deq
     A a;
     auto &[tag, value_a] = a;
 
-    dec(a);
+    CHECK(dec(a));
     CHECK_EQ(tag, 1);
     CHECK_EQ(value_a, "Hello world!");
 }
@@ -111,7 +111,7 @@ TEST_CASE_TEMPLATE("Test decode static tag 1 reverse", T, std::vector<uint8_t>, 
     STATICTAGINLINE a;
     auto &[s] = a;
 
-    dec(a);
+    CHECK(dec(a));
     CHECK_EQ(s, "Hello world!");
 }
 
@@ -128,7 +128,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<char>, std::dequ
         auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
 
-        dec(a);
+        CHECK(dec(a));
         CHECK_EQ(value_a.b, "Hello world!");
     }
     {
@@ -143,7 +143,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 optional", T, std::vector<char>, std::dequ
 
         auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
-        dec(a);
+        CHECK(dec(a));
         CHECK_EQ(value_a.b, std::nullopt);
     }
 }
@@ -168,7 +168,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 variant", T, std::vector<char>, std::deque
 
         REQUIRE(contains_major(static_cast<T::value_type>(3), value_a.b));
 
-        dec(a);
+        CHECK(dec(a));
         REQUIRE(std::holds_alternative<std::string>(value_a.b));
         CHECK_EQ(std::get<std::string>(value_a.b), "Hello world!");
     }
@@ -184,7 +184,7 @@ TEST_CASE_TEMPLATE("Test decode tag 1 variant", T, std::vector<char>, std::deque
 
         auto a               = make_tag_pair(static_tag<1>{}, A{});
         auto &[tag, value_a] = a;
-        dec(a);
+        CHECK(dec(a));
         CHECK_EQ(value_a.b, std::nullopt);
     }
 }

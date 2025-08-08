@@ -36,7 +36,7 @@ TEST_CASE_TEMPLATE("Roundtrip", T, std::vector<std::byte>, std::deque<std::byte>
     std::vector<uint64_t> values(1e5);
     std::iota(values.begin(), values.end(), 0);
     for (const auto &value : values) {
-        enc(value);
+        CHECK(enc(value));
     }
 
     // Emulate data transfer
@@ -45,7 +45,7 @@ TEST_CASE_TEMPLATE("Roundtrip", T, std::vector<std::byte>, std::deque<std::byte>
 
     for (const auto &value : values) {
         std::variant<uint64_t, std::string> result;
-        dec(result);
+        CHECK(dec(result));
         CHECK_EQ(std::holds_alternative<uint64_t>(result), true);
         CHECK_EQ(std::get<uint64_t>(result), static_cast<uint64_t>(value));
     }
@@ -59,11 +59,11 @@ TEST_CASE_TEMPLATE("Roundtrip binary cbor tagged array", T, std::vector<char>, s
     std::iota(values.begin(), values.end(), 0);
 
     auto t = make_tag_pair(static_tag<123>{}, values);
-    enc(t);
+    CHECK(enc(t));
 
     auto dec    = make_decoder(data);
     auto result = make_tag_pair(static_tag<123>{}, std::vector<int>{});
-    dec(result);
+    CHECK(dec(result));
 
     CHECK_EQ(result.second, values);
 }
@@ -119,7 +119,7 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     };
 
     using namespace cbor::tags::literals;
-    enc(make_tag_pair(123_tag, A{1, 3.14, "Hello", {1, 2, 3}}));
+    CHECK(enc(make_tag_pair(123_tag, A{1, 3.14, "Hello", {1, 2, 3}})));
 
     auto hex = to_hex(data);
     fmt::print("to_hex: {}\n", hex);
@@ -129,7 +129,7 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
 
     auto dec    = make_decoder(data);
     auto result = make_tag_pair(123_tag, A{});
-    dec(result);
+    CHECK(dec(result));
 
     CHECK_EQ(result.second.a, 1);
     CHECK_EQ(result.second.b, 3.14);
@@ -155,12 +155,12 @@ TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::vari
             optional = T{};
         }
 
-        enc(optional);
+        CHECK(enc(optional));
         auto buffer2 = buffer1;
 
         auto dec = make_decoder(buffer2);
         opt  result;
-        dec(result);
+        CHECK(dec(result));
 
         CHECK_EQ(result.has_value(), true);
     }
@@ -169,13 +169,13 @@ TEST_CASE_TEMPLATE("Test optional types", T, int, double, std::string, std::vari
         std::vector<std::byte> buffer1;
         auto                   enc      = make_encoder(buffer1);
         opt                    optional = std::nullopt;
-        enc(optional);
+        CHECK(enc(optional));
 
         auto buffer2 = buffer1;
 
         auto dec = make_decoder(buffer2);
         opt  result;
-        dec(result);
+        CHECK(dec(result));
 
         CHECK_EQ(result.has_value(), false);
     }
@@ -192,12 +192,12 @@ TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::
     std::iota(values.begin(), values.end(), 0);
     // make negative
     std::transform(values.begin(), values.end(), values.begin(), [](auto v) { return -v; });
-    enc(values);
+    CHECK(enc(values));
     fmt::print("Data: {}\n", to_hex(data));
 
     auto                 dec = make_decoder(data);
     std::vector<int64_t> result;
-    dec(result);
+    CHECK(dec(result));
 
     REQUIRE_EQ(values.size(), result.size());
     CHECK_EQ(values, result);
@@ -210,13 +210,13 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
         auto                   enc = make_encoder(buffer1);
         variant                v;
         v = static_cast<uint64_t>(std::rand() % 100000);
-        enc(v);
+        CHECK(enc(v));
 
         auto buffer2 = buffer1;
 
         auto    dec = make_decoder(buffer2);
         variant result;
-        dec(result);
+        CHECK(dec(result));
         CHECK_EQ(std::holds_alternative<positive>(result), true);
         CHECK_EQ(v, result);
     }
@@ -236,7 +236,7 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
         } else {
             v = T{};
         }
-        enc(v);
+        CHECK(enc(v));
         fmt::print("Variant: {}\n", to_hex(buffer1));
         fmt::print("int64_t casted from int {}\n", static_cast<int64_t>(-100));
 
@@ -256,13 +256,13 @@ TEST_CASE("Test strings and binary strings in std::variant") {
         auto                   enc = make_encoder(buffer);
         variant                v;
         v = std::string("Hello world!");
-        enc(v);
+        CHECK(enc(v));
 
         auto buffer2 = buffer;
 
         auto    dec = make_decoder(buffer2);
         variant result;
-        dec(result);
+        CHECK(dec(result));
         CHECK_EQ(std::get<std::string>(v), std::get<std::string>(result));
         fmt::print("String: {}\n", std::get<std::string>(result));
     }
@@ -272,13 +272,13 @@ TEST_CASE("Test strings and binary strings in std::variant") {
         variant                v;
         auto                   vec = std::vector<std::byte>({std::byte(0x01), std::byte(0x02), std::byte(0x03)});
         v                          = std::span<std::byte>(vec);
-        enc(v);
+        CHECK(enc(v));
 
         auto buffer2 = buffer;
 
         auto    dec = make_decoder(buffer2);
         variant result;
-        dec(result);
+        CHECK(dec(result));
         for (size_t i = 0; i < vec.size(); ++i) {
             CHECK_EQ(std::get<std::span<const std::byte>>(v)[i], std::get<std::span<const std::byte>>(result)[i]);
         }
