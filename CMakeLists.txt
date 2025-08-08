@@ -84,12 +84,6 @@ else()
   endif()
 endif()
 
-# TODO: this is for testing docs
-set(BaseName
-    "binary"
-    CACHE STRING "BaseName chosen by the user at CMake configure time")
-set_property(CACHE BaseName PROPERTY STRINGS binary octal decimal hexadecimal)
-
 # Extra options
 option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
@@ -108,7 +102,6 @@ endif()
 # add tests
 if(CBOR_TAGS_BUILD_TESTS)
   add_subdirectory(test)
-  # add_subdirectory(doc/test_readme) # TODO:
 endif()
 
 # add benchmarks
@@ -124,3 +117,12 @@ endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)
 print_options(DEBUG "^CBOR_TAGS")
+
+# TODO: this is for testing docs
+# ~~~
+# set(BaseName
+#     "binary"
+#     CACHE STRING "BaseName chosen by the user at CMake configure time")
+# set_property(CACHE BaseName PROPERTY STRINGS binary octal decimal hexadecimal)
+# add_subdirectory(doc/test_readme) # TODO:
+# ~~~
