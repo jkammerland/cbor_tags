@@ -96,8 +96,13 @@ TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
 
     CHECK(enc(t));
 
+    fmt::println("buffer {}", to_hex(data));
+
     auto dec = make_decoder(data);
     T    result;
+    if constexpr (std::is_same_v<T, DYNAMIC_EX1>) {
+        result.cbor_tag.cbor_tag = 140;
+    }
     CHECK(dec(result));
 }
 

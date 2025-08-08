@@ -6,6 +6,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <fmt/base.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
@@ -151,8 +152,10 @@ TEST_CASE("CBOR - struct with enum") {
         .g      = G::C,
         .h      = H{static_cast<H>(255)},
         .extra  = {.cbor_tag = {}, .s = "Hello"},
-        .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
+        .extra2 = {.cbor_tag = {555}, .h = static_cast<H>(-1)}};
     CHECK(enc(s));
+
+    fmt::println("buffer: {}", to_hex(data));
 
     auto dec = make_decoder(data);
     S    s2;
