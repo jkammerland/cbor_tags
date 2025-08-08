@@ -19,6 +19,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <nanobench.h>
 #include <small_generator.h>
+#include <variant>
 
 using std::nullptr_t;
 
@@ -747,7 +748,7 @@ template <typename ContainerType> void run_decoding_benchmark_roundtrip() {
 
     bench.title(std::string(nameof::nameof_type<ContainerType>()) + " buffer, ROUNDTRIP");
     bench.minEpochIterations(100);
-    bench.unit(options.unit.data());
+    bench.unit(std::string(options.unit));
     bench.performanceCounters(true);
     bench.relative(options.relative);
 
