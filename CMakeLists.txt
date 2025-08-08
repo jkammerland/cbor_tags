@@ -38,6 +38,7 @@ target_sources(
             FILES
             "${CBOR_HEADERS}"
             "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
+add_library(cbor::tags ALIAS ${PROJECT_NAME})
 
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
@@ -117,7 +118,8 @@ endif()
 
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
 if(CBOR_TAGS_INSTALL)
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@5.3.1)
+  cpmaddpackage(gh:jkammerland/target_install_package.cmake@5.4.0)
+  target_install_package(${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)

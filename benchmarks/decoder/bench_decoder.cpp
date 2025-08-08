@@ -64,14 +64,14 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
     {
         auto original = gen();
         auto enc      = make_encoder(data.uint_data);
-        enc(original);
+        std::ignore   = enc(original);
     }
 
     // Prepare int data
     {
         auto original = static_cast<int64_t>(gen());
         auto enc      = make_encoder(data.int_data);
-        enc(original);
+        std::ignore   = enc(original);
     }
 
     // Prepare bstr data
@@ -80,8 +80,8 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
         for (auto &b : original) {
             b = std::byte(gen());
         }
-        auto enc = make_encoder(data.bstr_data);
-        enc(original);
+        auto enc    = make_encoder(data.bstr_data);
+        std::ignore = enc(original);
     }
 
     // Prepare tstr data
@@ -98,7 +98,7 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
         std::array<int16_t, 4> original{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
                                         static_cast<short>(gen())};
         auto                   enc = make_encoder(data.array_data);
-        enc(original);
+        std::ignore                = enc(original);
     }
 
     // Prepare map data
@@ -106,14 +106,14 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
         std::map<int16_t, int32_t> original{{static_cast<short>(gen()), static_cast<int>(gen())},
                                             {static_cast<short>(gen()), static_cast<int>(gen())}};
         auto                       enc = make_encoder(data.map_data);
-        enc(original);
+        std::ignore                    = enc(original);
     }
 
     // Prepare tag data
     {
         A    original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
-        auto enc = make_encoder(data.tag_data);
-        enc(original);
+        auto enc    = make_encoder(data.tag_data);
+        std::ignore = enc(original);
     }
 
     // Prepare nullptr data
@@ -126,35 +126,35 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
     {
         bool original = static_cast<bool>(gen() % 2);
         auto enc      = make_encoder(data.bool_data);
-        enc(original);
+        std::ignore   = enc(original);
     }
 
     // Prepare float16 data
     {
         auto original = static_cast<float16_t>(static_cast<float>(gen()));
         auto enc      = make_encoder(data.float16_data);
-        enc(original);
+        std::ignore   = enc(original);
     }
 
     // Prepare float32 data
     {
         auto original = static_cast<float>(gen());
         auto enc      = make_encoder(data.float32_data);
-        enc(original);
+        std::ignore   = enc(original);
     }
 
     // Prepare float64 data
     {
         auto original = static_cast<double>(gen());
         auto enc      = make_encoder(data.float64_data);
-        enc(original);
+        std::ignore   = enc(original);
     }
 
     // Prepare simple data
     {
         simple original{static_cast<simple::value_type>(gen())};
-        auto   enc = make_encoder(data.simple_data);
-        enc(original);
+        auto   enc  = make_encoder(data.simple_data);
+        std::ignore = enc(original);
     }
 
     return data;
@@ -171,7 +171,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a uint", [&test_data]() {
         auto     dec = make_decoder(test_data.uint_data);
         uint64_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -185,7 +185,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a int", [&test_data]() {
         auto    dec = make_decoder(test_data.int_data);
         int64_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -199,7 +199,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a bstr", [&test_data]() {
         auto                     dec = make_decoder(test_data.bstr_data);
         std::array<std::byte, 4> value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -213,7 +213,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a tstr", [&test_data]() {
         auto        dec = make_decoder(test_data.tstr_data);
         std::string value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -227,7 +227,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding an array", [&test_data]() {
         auto                   dec = make_decoder(test_data.array_data);
         std::array<int16_t, 4> value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -241,7 +241,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a map", [&test_data]() {
         auto                       dec = make_decoder(test_data.map_data);
         std::map<int16_t, int32_t> value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -255,7 +255,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a tag", [&test_data]() {
         auto dec = make_decoder(test_data.tag_data);
         A    value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -269,7 +269,7 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a nullptr", [&test_data]() {
         auto           dec = make_decoder(test_data.nullptr_data);
         std::nullptr_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -283,21 +283,21 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
     bench.run("Decoding a float16", [&test_data]() {
         auto      dec = make_decoder(test_data.float16_data);
         float16_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float32", [&test_data]() {
         auto  dec = make_decoder(test_data.float32_data);
         float value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float64", [&test_data]() {
         auto   dec = make_decoder(test_data.float64_data);
         double value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -353,12 +353,12 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = gen();
-        enc(original);
+        std::ignore     = enc(original);
 
         // Decode and benchmark
         auto     dec = make_decoder(data);
         uint64_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -366,7 +366,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = gen();
-        enc(original);
+        std::ignore     = enc(original);
 
         auto     dec = make_decoder(data);
         uint64_t value;
@@ -378,11 +378,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<int64_t>(gen());
-        enc(original);
+        std::ignore     = enc(original);
 
         auto    dec = make_decoder(data);
         int64_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -390,7 +390,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<int64_t>(gen());
-        enc(original);
+        std::ignore     = enc(original);
 
         auto    dec = make_decoder(data);
         int64_t value;
@@ -405,11 +405,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         for (auto &b : original) {
             b = std::byte(gen());
         }
-        enc(original);
+        std::ignore = enc(original);
 
         auto                     dec = make_decoder(data);
         std::array<std::byte, 4> value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -420,7 +420,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         for (auto &b : original) {
             b = std::byte(gen());
         }
-        enc(original);
+        std::ignore = enc(original);
 
         auto                     dec = make_decoder(data);
         std::array<std::byte, 4> value;
@@ -438,7 +438,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
 
         auto        dec = make_decoder(data);
         std::string value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -461,11 +461,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         auto                   enc = make_encoder(data);
         std::array<int16_t, 4> original{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
                                         static_cast<short>(gen())};
-        enc(original);
+        std::ignore = enc(original);
 
         auto                   dec = make_decoder(data);
         std::array<int16_t, 4> value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -474,7 +474,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         auto                   enc = make_encoder(data);
         std::array<int16_t, 4> original{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
                                         static_cast<short>(gen())};
-        enc(original);
+        std::ignore = enc(original);
 
         auto                   dec = make_decoder(data);
         std::array<int16_t, 4> value;
@@ -487,11 +487,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         auto                       enc = make_encoder(data);
         std::map<int16_t, int32_t> original{{static_cast<short>(gen()), static_cast<int>(gen())},
                                             {static_cast<short>(gen()), static_cast<int>(gen())}};
-        enc(original);
+        std::ignore = enc(original);
 
         auto                       dec = make_decoder(data);
         std::map<int16_t, int32_t> value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -500,7 +500,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         auto                       enc = make_encoder(data);
         std::map<int16_t, int32_t> original{{static_cast<short>(gen()), static_cast<int>(gen())},
                                             {static_cast<short>(gen()), static_cast<int>(gen())}};
-        enc(original);
+        std::ignore = enc(original);
 
         auto                       dec = make_decoder(data);
         std::map<int16_t, int32_t> value;
@@ -517,11 +517,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc = make_encoder(data);
         A      original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
-        enc(original);
+        std::ignore = enc(original);
 
         auto dec = make_decoder(data);
         A    value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -529,7 +529,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc = make_encoder(data);
         A      original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
-        enc(original);
+        std::ignore = enc(original);
 
         auto dec = make_decoder(data);
         A    value;
@@ -544,7 +544,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
 
         auto           dec = make_decoder(data);
         std::nullptr_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -552,7 +552,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         bool   original = static_cast<bool>(gen() % 2);
-        enc(original);
+        std::ignore     = enc(original);
 
         auto dec = make_decoder(data);
         bool value;
@@ -564,11 +564,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float16_t>(static_cast<float>(gen()));
-        enc(original);
+        std::ignore     = enc(original);
 
         auto      dec = make_decoder(data);
         float16_t value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -576,11 +576,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float>(gen());
-        enc(original);
+        std::ignore     = enc(original);
 
         auto  dec = make_decoder(data);
         float value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -588,11 +588,11 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<double>(gen());
-        enc(original);
+        std::ignore     = enc(original);
 
         auto   dec = make_decoder(data);
         double value;
-        dec(value);
+        std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
@@ -600,7 +600,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float16_t>(static_cast<float>(gen()));
-        enc(original);
+        std::ignore     = enc(original);
 
         auto      dec = make_decoder(data);
         float16_t value;
@@ -612,7 +612,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float>(gen());
-        enc(original);
+        std::ignore     = enc(original);
 
         auto  dec = make_decoder(data);
         float value;
@@ -624,7 +624,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<double>(gen());
-        enc(original);
+        std::ignore     = enc(original);
 
         auto   dec = make_decoder(data);
         double value;
@@ -636,7 +636,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         Buffer data;
         auto   enc = make_encoder(data);
         simple original{static_cast<simple::value_type>(gen())};
-        enc(original);
+        std::ignore = enc(original);
 
         auto   dec = make_decoder(data);
         simple value;
