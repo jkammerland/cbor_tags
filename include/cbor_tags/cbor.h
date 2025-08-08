@@ -56,7 +56,7 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::contiguous_view_on_non_contiguous_data: return "Attempt to create a contiguous view on non-contiguous data";
     case status_code::invalid_utf8_sequence: return "Invalid UTF-8 sequence in text string";
     case status_code::begin_no_match_decoding: return "Unexpected error at start of CBOR decoding: invalid initial byte";
-    case status_code::no_match_for_tag: return "Unexpected CBOR tag: no matching decoder found";
+    case status_code::no_match_for_tag: return "Unexpected CBOR tag: no matching decoder found, incase of dynamic tags, they must be correctly assigned before decoding(or encoding)";
     case status_code::no_match_for_tag_simple_on_buffer: return "Unexpected CBOR simple value tag: no matching decoder found";
     case status_code::no_match_for_uint_on_buffer: return "Unexpected value for CBOR major type 0: unsigned integer decode failed";
     case status_code::no_match_for_nint_on_buffer: return "Unexpected value for CBOR major type 1: negative integer decode failed";
@@ -65,8 +65,8 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::no_match_for_bstr_on_buffer: return "Unexpected value for CBOR major type 2: byte string decode failed";
     case status_code::no_match_for_tstr_on_buffer: return "Unexpected value for CBOR major type 3: text string decode failed";
     case status_code::no_match_for_array_on_buffer: return "Unexpected value for CBOR major type 4: array decode failed";
-    case status_code::no_match_for_map_on_buffer: return "Unexpected value for CBOR major type 5: map decode failed";
-    case status_code::no_match_for_tag_on_buffer: return "Unexpected value for CBOR major type 6: semantic tag decode failed";
+    case status_code::no_match_for_map_on_buffer: return "Unexpected value for CBOR major type 5: incorrect major type for map";
+    case status_code::no_match_for_tag_on_buffer: return "Unexpected value for CBOR major type 6: incorrect major type for tag";
     case status_code::no_match_for_simple_on_buffer: return "Unexpected value for CBOR major type 7: simple value decode failed";
     case status_code::no_match_for_optional_on_buffer: return "Unexpected CBOR format: optional value decode failed";
     case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";

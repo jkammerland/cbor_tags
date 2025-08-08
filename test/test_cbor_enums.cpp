@@ -6,6 +6,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <fmt/base.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
@@ -41,15 +42,15 @@ TEST_CASE("CBOR - Enum class") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
-    enc(E::A);
-    enc(F::B);
-    enc(G::C);
+    CHECK(enc(E::A));
+    CHECK(enc(F::B));
+    CHECK(enc(G::C));
 
     auto dec = make_decoder(data);
     E    e;
     F    f;
     G    g;
-    dec(e, f, g);
+    CHECK(dec(e, f, g));
 
     CHECK_EQ(e, E::A);
     CHECK_EQ(f, F::B);
@@ -64,17 +65,17 @@ TEST_CASE("CBOR - optional enum") {
     std::optional<F> f = F::B;
     std::optional<G> g = std::nullopt;
 
-    enc(e);
-    enc(f);
-    enc(g);
+    CHECK(enc(e));
+    CHECK(enc(f));
+    CHECK(enc(g));
 
     auto             dec = make_decoder(data);
     std::optional<E> e2;
     std::optional<F> f2;
     std::optional<G> g2;
-    dec(e2);
-    dec(f2);
-    dec(g2);
+    CHECK(dec(e2));
+    CHECK(dec(f2));
+    CHECK(dec(g2));
 
     CHECK_EQ(e, e2);
     CHECK_EQ(f, f2);
@@ -87,11 +88,11 @@ TEST_CASE("CBOR variant enum") {
         auto                   enc = make_encoder(data);
 
         std::variant<F, std::string> v = F::D;
-        enc(v);
+        CHECK(enc(v));
 
         auto                         dec = make_decoder(data);
         std::variant<F, std::string> v2;
-        dec(v2);
+        CHECK(dec(v2));
 
         CHECK_EQ(v, v2);
     }
@@ -101,11 +102,11 @@ TEST_CASE("CBOR variant enum") {
         auto                   enc = make_encoder(data);
 
         std::variant<E, std::string> v = "Hello world!";
-        enc(v);
+        CHECK(enc(v));
 
         auto                         dec = make_decoder(data);
         std::variant<E, std::string> v2;
-        dec(v2);
+        CHECK(dec(v2));
 
         CHECK_EQ(v, v2);
     }
@@ -117,14 +118,14 @@ TEST_CASE("CBOR variant enum + negative") {
 
     std::variant<G, negative> v = negative{42};
 
-    enc(v);
+    CHECK(enc(v));
 
     fmt::print("buffer: {}\n", to_hex(data));
 
     auto                      dec = make_decoder(data);
     std::variant<G, negative> v2;
 
-    dec(v2);
+    CHECK(dec(v2));
 
     REQUIRE_EQ(v.index(), v2.index());
     CHECK_EQ(std::get<negative>(v).value, std::get<negative>(v2).value);
@@ -151,12 +152,14 @@ TEST_CASE("CBOR - struct with enum") {
         .g      = G::C,
         .h      = H{static_cast<H>(255)},
         .extra  = {.cbor_tag = {}, .s = "Hello"},
-        .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
-    enc(s);
+        .extra2 = {.cbor_tag = {555}, .h = static_cast<H>(-1)}};
+    CHECK(enc(s));
+
+    fmt::println("buffer: {}", to_hex(data));
 
     auto dec = make_decoder(data);
     S    s2;
-    dec(s2);
+    CHECK(dec(s2));
 
     CHECK_EQ(s.e, s2.e);
     CHECK_EQ(s.f, s2.f);
@@ -177,11 +180,11 @@ TEST_CASE("CBOR - struct with enum") {
     auto                   enc = make_encoder(data);
 
     std::optional<TEST0> s = TEST0{1};
-    enc(s);
+    CHECK(enc(s));
 
     auto                 dec = make_decoder(data);
     std::optional<TEST0> s2;
-    dec(s2);
+    CHECK(dec(s2));
 
     CHECK_EQ(s->e, s2->e);
 }
@@ -225,11 +228,11 @@ TEST_CASE("CBOR - struct with enum + variant") {
                                        .extra  = {.cbor_tag = {}, .s = "Hello"},
                                        .extra2 = {.cbor_tag = {555}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = s;
-        enc(v);
+        CHECK(enc(v));
 
         auto                         dec = make_decoder(data);
         std::variant<S, std::string> v2;
-        dec(v2);
+        CHECK(dec(v2));
 
         CHECK_EQ(v.index(), v2.index());
         const auto &s1 = std::get<S>(v);
@@ -254,11 +257,11 @@ TEST_CASE("CBOR - struct with enum + variant") {
                                        .extra  = {.cbor_tag = {}, .s = "Hello"},
                                        .extra2 = {.cbor_tag = {}, .h = static_cast<H>(-1)}};
         std::variant<S, std::string> v = "Hello world!";
-        enc(v);
+        CHECK(enc(v));
 
         auto                         dec = make_decoder(data);
         std::variant<S, std::string> v2;
-        dec(v2);
+        CHECK(dec(v2));
 
         CHECK_EQ(v.index(), v2.index());
         CHECK_EQ(std::get<std::string>(v), std::get<std::string>(v2));

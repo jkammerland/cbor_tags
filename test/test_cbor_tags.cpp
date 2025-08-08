@@ -53,14 +53,14 @@ TEST_CASE("Basic tag") {
         auto enc  = make_encoder(data);
 
         auto tag_B = make_tag_pair(140_tag, B{-42, "Hello world!"});
-        enc(tag_B);
+        CHECK(enc(tag_B));
         s1 = to_hex(data);
     }
     {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        enc(inline_tag_example{-42, "Hello world!"});
+        CHECK(enc(inline_tag_example{-42, "Hello world!"}));
         s2 = to_hex(data);
     }
 
@@ -94,11 +94,16 @@ TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
     }
     t.s = "Hello world!";
 
-    enc(t);
+    CHECK(enc(t));
+
+    fmt::println("buffer {}", to_hex(data));
 
     auto dec = make_decoder(data);
     T    result;
-    dec(result);
+    if constexpr (std::is_same_v<T, DYNAMIC_EX1>) {
+        result.cbor_tag.cbor_tag = 140;
+    }
+    CHECK(dec(result));
 }
 
 TEST_CASE("Test tuple static tag") {
@@ -107,12 +112,12 @@ TEST_CASE("Test tuple static tag") {
     auto enc  = make_encoder(data);
 
     auto tag = make_tag_pair(140_tag, std::tuple<int, std::string>{42, "Hello world!"});
-    enc(tag);
+    CHECK(enc(tag));
 
     auto                         dec = make_decoder(data);
     std::tuple<int, std::string> result;
     auto                         tag_result = make_tag_pair(140_tag, result);
-    dec(tag_result);
+    CHECK(dec(tag_result));
 
     CHECK_EQ(std::get<0>(result), 42);
     CHECK_EQ(std::get<1>(result), "Hello world!");
@@ -124,7 +129,7 @@ TEST_CASE("Test tuple dynamic tag") {
     auto enc  = make_encoder(data);
 
     auto tag = make_tag_pair(140_tag, std::tuple<int, std::string>{42, "Hello world!"});
-    enc(tag);
+    CHECK(enc(tag));
 
     fmt::print("data: {}\n", to_hex(data));
 
@@ -132,7 +137,7 @@ TEST_CASE("Test tuple dynamic tag") {
 
     std::tuple<dynamic_tag<std::uint64_t>, int, std::string> result;
     std::get<0>(result).cbor_tag = 140;
-    dec(result);
+    CHECK(dec(result));
 
     CHECK_EQ(std::get<0>(result), 140);
     CHECK_EQ(std::get<1>(result), 42);
@@ -155,11 +160,11 @@ TEST_CASE("Nested structs") {
 
     auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
-    enc(a);
+    CHECK(enc(a));
 
     auto dec = make_decoder(data);
     A    result;
-    dec(result);
+    CHECK(dec(result));
 
     CHECK_EQ(a.a, result.a);
     CHECK_EQ(a.b.cbor_tag.cbor_tag, result.b.cbor_tag.cbor_tag);
@@ -178,11 +183,11 @@ TEST_CASE("Variant") {
     auto enc  = make_encoder(data);
 
     D d{.cbor_tag = {}, .v = "Hello world!"};
-    enc(d);
+    CHECK(enc(d));
 
     auto dec = make_decoder(data);
     D    result;
-    dec(result);
+    CHECK(dec(result));
 
     CHECK_EQ(std::get<std::string>(d.v), std::get<std::string>(result.v));
 }
@@ -193,13 +198,13 @@ TEST_CASE("Multi tag handling") {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        enc(141_tag, D{.cbor_tag = {}, .v = "Hello world!"});
+        CHECK(enc(141_tag, D{.cbor_tag = {}, .v = "Hello world!"}));
 
         fmt::print("data: {}\n", to_hex(data));
 
         auto dec = make_decoder(data);
         D    result;
-        dec(141_tag, result);
+        CHECK(dec(141_tag, result));
 
         CHECK_EQ(std::get<std::string>(result.v), "Hello world!");
     }
@@ -222,7 +227,7 @@ TEST_CASE("Multi tag handling") {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        enc(MultiObj{.cbor_tag = {}, .a = {.cbor_tag = {}, .a = 1}, .b = {.cbor_tag = {}, .b = 2}});
+        CHECK(enc(MultiObj{.cbor_tag = {}, .a = {.cbor_tag = {}, .a = 1}, .b = {.cbor_tag = {}, .b = 2}}));
 
         fmt::print("data: {}\n", to_hex(data));
 
@@ -232,7 +237,7 @@ TEST_CASE("Multi tag handling") {
 
         auto     dec = make_decoder(data);
         MultiObj result;
-        dec(result);
+        CHECK(dec(result));
 
         CHECK_EQ(result.a.a, 1);
         CHECK_EQ(result.b.b, 2);
@@ -254,11 +259,11 @@ TEST_CASE_TEMPLATE("Variant tags", AX, A1, A2, A3) {
 
     auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
-    enc(v0);
+    CHECK(enc(v0));
 
     auto    dec = make_decoder(data);
     variant v;
-    dec(v);
+    CHECK(dec(v));
 
     CHECK(std::holds_alternative<AX>(v));
 }
@@ -286,7 +291,7 @@ TEST_CASE_TEMPLATE("Variant tags in struct", AX, A1, A2, A3) {
     auto enc  = make_encoder(data);
 
     v1::Version v{{}, AX{}, 3.14};
-    enc(v);
+    CHECK(enc(v));
 
     auto        dec = make_decoder(data);
     v1::Version result;
@@ -317,7 +322,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
 
         VersionVariant v{v1::Version{.cbor_tag = {}, .v = AX{.cbor_tag = {}, .a = 2}, .damage = 3.14}};
 
-        enc(v);
+        CHECK(enc(v));
 
         fmt::print("data: {}\n", to_hex(data));
 
@@ -339,7 +344,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
         auto enc  = make_encoder(data);
 
         VersionVariant v{v2::Version{{}, AX{}, 3.14, "Hello world!"}};
-        enc(v);
+        CHECK(enc(v));
 
         fmt::print("data: {}\n", to_hex(data));
 
@@ -428,7 +433,7 @@ TEST_CASE("Switching instead of variant") {
     };
 
     using namespace literals;
-    enc(wrap_as_array(make_tag_pair(140_tag, F1{}), make_tag_pair(141_tag, F2{}), make_tag_pair(0xFFFF_hex_tag, F3{})));
+    CHECK(enc(wrap_as_array(make_tag_pair(140_tag, F1{}), make_tag_pair(141_tag, F2{}), make_tag_pair(0xFFFF_hex_tag, F3{}))));
 
     auto dec = make_decoder(data);
 

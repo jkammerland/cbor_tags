@@ -220,7 +220,7 @@ TEST_SUITE("Try resume decoding") {
         auto data = std::vector<std::byte>{};
         auto enc  = make_encoder(data);
 
-        enc(140_tag, wrap_as_array{1, 2});
+        CHECK(enc(140_tag, wrap_as_array{1, 2}));
         fmt::print("data: {}\n", to_hex(data));
 
         auto dec = make_decoder(data);

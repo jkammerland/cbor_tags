@@ -522,11 +522,11 @@ TEST_CASE("Nested struct without tags") {
     auto enc  = make_encoder(data);
 
     A a{.b = {.c = {.a = 42}}};
-    enc(a);
+    CHECK(enc(a));
 
     auto dec = make_decoder(data);
     A    result;
-    dec(result);
+    CHECK(dec(result));
 
     CHECK_EQ(result.b.c.a, 42);
 }

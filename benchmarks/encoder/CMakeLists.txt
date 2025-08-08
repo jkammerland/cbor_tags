@@ -23,5 +23,5 @@ add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
 
 if(CBOR_TAGS_TIDY_TARGET)
   message(STATUS "Tidy enabled in ${PROJECT_NAME}")
-  register_project_sources(${PROJECT_NAME})
+  target_tidy_sources(${PROJECT_NAME})
 endif()

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <regex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -16,7 +17,7 @@ class MarkdownCodeExtractor {
         bool                  verbose = false;
     };
 
-    explicit MarkdownCodeExtractor(const Config &config) : config(config) {
+    explicit MarkdownCodeExtractor(Config config) : config(std::move(config)) {
         validateConfig();
         prepareOutputDirectory();
     }
@@ -24,7 +25,7 @@ class MarkdownCodeExtractor {
     void extractAll() {
         for (const auto &path : config.inputPaths) {
             if (config.verbose) {
-                std::cout << "Processing: " << path << std::endl;
+                std::cout << "Processing: " << path << '\n';
             }
             extractFile(path);
         }
@@ -89,23 +90,23 @@ class MarkdownCodeExtractor {
         }
     }
 
-    void saveCodeToFile(const std::string &code, const fs::path &sourcePath, int blockNumber) {
+    void saveCodeToFile(const std::string &code, const fs::path &sourcePath, int blockNumber) const {
         std::string filename = generateFilename(sourcePath, blockNumber);
         fs::path    fullPath = config.outputDir / filename;
 
         std::ofstream outFile(fullPath);
         if (!outFile) {
-            std::cerr << "Failed to create output file: " << fullPath << std::endl;
+            std::cerr << "Failed to create output file: " << fullPath << '\n';
             return;
         }
 
         outFile << code;
         if (config.verbose) {
-            std::cout << "Created file: " << fullPath << std::endl;
+            std::cout << "Created file: " << fullPath << '\n';
         }
     }
 
-    std::string generateFilename(const fs::path &sourcePath, int blockNumber) {
+    static std::string generateFilename(const fs::path &sourcePath, int blockNumber) {
         std::string baseName = sourcePath.stem().string();
         return baseName + "_example_" + std::to_string(blockNumber) + ".cpp";
     }
@@ -142,7 +143,7 @@ int main(int argc, char *argv[]) {
             } else if (arg == "-v" || arg == "--verbose") {
                 config.verbose = true;
             } else {
-                config.inputPaths.push_back(arg);
+                config.inputPaths.emplace_back(arg);
             }
         }
 
@@ -155,7 +156,7 @@ int main(int argc, char *argv[]) {
 
         return 0;
     } catch (const std::exception &e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
 }

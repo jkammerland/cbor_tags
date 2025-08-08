@@ -20,7 +20,7 @@ target_sources(tests PRIVATE ${TEST_SOURCES})
 target_link_libraries(tests PUBLIC test_util)
 
 # add link libraries
-target_link_libraries(tests PRIVATE cbor_tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum range-v3::range-v3)
+target_link_libraries(tests PRIVATE cbor::tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum range-v3::range-v3)
 
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
@@ -36,7 +36,7 @@ endif()
 
 if(CBOR_TAGS_TIDY_TARGET)
   message(STATUS "Tidy enabled in tests")
-  register_project_sources(tests)
+  target_tidy_sources(tests)
 endif()
 
 # add tests for ctest
