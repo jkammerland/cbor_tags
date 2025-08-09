@@ -17,6 +17,7 @@
 #include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -173,15 +174,15 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
         // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
         if constexpr (has_transcode) {
-            [[maybe_unused]] auto result = Access::transcode(*this, value);
+            std::ignore = Access::transcode(*this, value);
         } else if constexpr (has_encode) {
-            [[maybe_unused]] auto result = Access::encode(*this, value);
+            std::ignore = Access::encode(*this, value);
         } else if constexpr (has_free_encode) {
             /* This requires an indirect call in order for some compilers to find the overload. */
-            [[maybe_unused]] auto result = detail::adl_indirect_encode(*this, value);
+            std::ignore = detail::adl_indirect_encode(*this, value);
         } else if constexpr (has_free_transcode) {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
-            [[maybe_unused]] auto result = transcode(*this, value);
+            std::ignore = transcode(*this, value);
         }
     }
 
