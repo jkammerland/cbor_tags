@@ -21,56 +21,111 @@ namespace cbor::tags {
 
 // Status/Error handling
 enum class status_code : uint8_t {
-    success = 0,
-    incomplete,
-    unexpected_group_size,
-    out_of_memory,
-    error,
-    contiguous_view_on_non_contiguous_data,
-    invalid_utf8_sequence,
-    begin_no_match_decoding,
-    no_match_for_tag,
-    no_match_for_tag_simple_on_buffer,
-    no_match_for_uint_on_buffer,
-    no_match_for_nint_on_buffer,
-    no_match_for_int_on_buffer,
-    no_match_for_enum_on_buffer,
-    no_match_for_bstr_on_buffer,
-    no_match_for_tstr_on_buffer,
-    no_match_for_array_on_buffer,
-    no_match_for_map_on_buffer,
-    no_match_for_tag_on_buffer,
-    no_match_for_simple_on_buffer,
-    no_match_for_optional_on_buffer,
-    no_match_in_variant_on_buffer,
-    end_no_match_decoding
+    // Success state
+    success,
+    
+    // General errors
+    incomplete,                         // Buffer ended unexpectedly
+    error,                               // Generic error (being phased out)
+    out_of_memory,                       // Memory allocation failed
+    
+    // Data format errors
+    unexpected_group_size,               // Array/map size mismatch
+    invalid_utf8_sequence,               // Text string contains invalid UTF-8
+    contiguous_view_on_non_contiguous_data,  // Cannot create contiguous view
+    
+    // Type mismatch errors - when CBOR type doesn't match expected C++ type
+    type_mismatch_uint,                  // Expected unsigned int, got different type
+    type_mismatch_nint,                  // Expected negative int, got different type  
+    type_mismatch_int,                   // Expected int (signed/unsigned), got different type
+    type_mismatch_bstr,                  // Expected byte string, got different type
+    type_mismatch_tstr,                  // Expected text string, got different type
+    type_mismatch_array,                 // Expected array, got different type
+    type_mismatch_map,                   // Expected map, got different type
+    type_mismatch_tag,                   // Expected tagged value, got different type
+    type_mismatch_simple,                // Expected simple value, got different type
+    
+    // Value decoding errors - correct type but invalid value
+    invalid_enum_value,                  // No matching enum constant for value
+    invalid_optional_format,             // Optional value has invalid format
+    invalid_variant_match,               // No variant alternative matches data
+    
+    // Tag-specific errors  
+    unknown_tag,                         // Tag number not recognized
+    dynamic_tag_not_registered,          // Dynamic tag needs registration before use
+    
+    // Deprecated - kept for compatibility (use the new names above)
+    begin_no_match_decoding = 100,       // Use type_mismatch_* instead
+    no_match_for_tag,                    // Use unknown_tag or dynamic_tag_not_registered
+    no_match_for_tag_simple_on_buffer,   // Use type_mismatch_simple
+    no_match_for_uint_on_buffer,         // Use type_mismatch_uint
+    no_match_for_nint_on_buffer,         // Use type_mismatch_nint
+    no_match_for_int_on_buffer,          // Use type_mismatch_int
+    no_match_for_enum_on_buffer,         // Use invalid_enum_value
+    no_match_for_bstr_on_buffer,         // Use type_mismatch_bstr
+    no_match_for_tstr_on_buffer,         // Use type_mismatch_tstr
+    no_match_for_array_on_buffer,        // Use type_mismatch_array
+    no_match_for_map_on_buffer,          // Use type_mismatch_map
+    no_match_for_tag_on_buffer,          // Use type_mismatch_tag
+    no_match_for_simple_on_buffer,       // Use type_mismatch_simple
+    no_match_for_optional_on_buffer,     // Use invalid_optional_format
+    no_match_in_variant_on_buffer,       // Use invalid_variant_match
+    end_no_match_decoding                // Use appropriate type_mismatch_*
 };
 
 constexpr std::string_view status_message(status_code s) {
     switch (s) {
+    // Success
     case status_code::success: return "Success";
-    case status_code::incomplete: return "Unexpected end of CBOR data: buffer incomplete";
-    case status_code::unexpected_group_size: return "Unexpected group size in CBOR data(e.g array or map size mismatch)";
-    case status_code::out_of_memory: return "Unexpected memory allocation failure during CBOR processing";
-    case status_code::error: return "Unexpected CBOR processing error";
-    case status_code::contiguous_view_on_non_contiguous_data: return "Attempt to create a contiguous view on non-contiguous data";
-    case status_code::invalid_utf8_sequence: return "Invalid UTF-8 sequence in text string";
-    case status_code::begin_no_match_decoding: return "Unexpected error at start of CBOR decoding: invalid initial byte";
-    case status_code::no_match_for_tag: return "Unexpected CBOR tag: no matching decoder found, incase of dynamic tags, they must be correctly assigned before decoding(or encoding)";
-    case status_code::no_match_for_tag_simple_on_buffer: return "Unexpected CBOR simple value tag: no matching decoder found";
-    case status_code::no_match_for_uint_on_buffer: return "Unexpected value for CBOR major type 0: unsigned integer decode failed";
-    case status_code::no_match_for_nint_on_buffer: return "Unexpected value for CBOR major type 1: negative integer decode failed";
-    case status_code::no_match_for_int_on_buffer: return "Unexpected integer value in CBOR data: decode failed";
-    case status_code::no_match_for_enum_on_buffer: return "Unexpected enum value in CBOR data: no matching enum constant";
-    case status_code::no_match_for_bstr_on_buffer: return "Unexpected value for CBOR major type 2: byte string decode failed";
-    case status_code::no_match_for_tstr_on_buffer: return "Unexpected value for CBOR major type 3: text string decode failed";
-    case status_code::no_match_for_array_on_buffer: return "Unexpected value for CBOR major type 4: array decode failed";
-    case status_code::no_match_for_map_on_buffer: return "Unexpected value for CBOR major type 5: incorrect major type for map";
-    case status_code::no_match_for_tag_on_buffer: return "Unexpected value for CBOR major type 6: incorrect major type for tag";
-    case status_code::no_match_for_simple_on_buffer: return "Unexpected value for CBOR major type 7: simple value decode failed";
-    case status_code::no_match_for_optional_on_buffer: return "Unexpected CBOR format: optional value decode failed";
-    case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";
-    case status_code::end_no_match_decoding: return "Unexpected error at end of CBOR decoding: invalid terminal state";
+    
+    // General errors
+    case status_code::incomplete: return "Buffer ended unexpectedly while reading CBOR data";
+    case status_code::error: return "Generic CBOR processing error";
+    case status_code::out_of_memory: return "Memory allocation failed during CBOR processing";
+    
+    // Data format errors
+    case status_code::unexpected_group_size: return "Array or map size doesn't match expected count";
+    case status_code::invalid_utf8_sequence: return "Text string contains invalid UTF-8 sequence";
+    case status_code::contiguous_view_on_non_contiguous_data: return "Cannot create contiguous view from fragmented data";
+    
+    // Type mismatch errors
+    case status_code::type_mismatch_uint: return "Expected unsigned integer (major type 0), got different CBOR type";
+    case status_code::type_mismatch_nint: return "Expected negative integer (major type 1), got different CBOR type";
+    case status_code::type_mismatch_int: return "Expected integer, got different CBOR type";
+    case status_code::type_mismatch_bstr: return "Expected byte string (major type 2), got different CBOR type";
+    case status_code::type_mismatch_tstr: return "Expected text string (major type 3), got different CBOR type";
+    case status_code::type_mismatch_array: return "Expected array (major type 4), got different CBOR type";
+    case status_code::type_mismatch_map: return "Expected map (major type 5), got different CBOR type";
+    case status_code::type_mismatch_tag: return "Expected tagged value (major type 6), got different CBOR type";
+    case status_code::type_mismatch_simple: return "Expected simple value (major type 7), got different CBOR type";
+    
+    // Value decoding errors
+    case status_code::invalid_enum_value: return "Integer value doesn't match any enum constant";
+    case status_code::invalid_optional_format: return "Optional value has invalid CBOR format";
+    case status_code::invalid_variant_match: return "CBOR data doesn't match any variant alternative";
+    
+    // Tag-specific errors
+    case status_code::unknown_tag: return "CBOR tag number not recognized by decoder";
+    case status_code::dynamic_tag_not_registered: return "Dynamic tag must be registered before encoding/decoding";
+    
+    // Deprecated status codes - kept for backward compatibility
+    case status_code::begin_no_match_decoding: return "[Deprecated] Invalid initial byte in CBOR data (use type_mismatch_*)";
+    case status_code::no_match_for_tag: return "[Deprecated] CBOR tag not recognized (use unknown_tag or dynamic_tag_not_registered)";
+    case status_code::no_match_for_tag_simple_on_buffer: return "[Deprecated] Simple value type mismatch (use type_mismatch_simple)";
+    case status_code::no_match_for_uint_on_buffer: return "[Deprecated] Unsigned integer type mismatch (use type_mismatch_uint)";
+    case status_code::no_match_for_nint_on_buffer: return "[Deprecated] Negative integer type mismatch (use type_mismatch_nint)";
+    case status_code::no_match_for_int_on_buffer: return "[Deprecated] Integer type mismatch (use type_mismatch_int)";
+    case status_code::no_match_for_enum_on_buffer: return "[Deprecated] Invalid enum value (use invalid_enum_value)";
+    case status_code::no_match_for_bstr_on_buffer: return "[Deprecated] Byte string type mismatch (use type_mismatch_bstr)";
+    case status_code::no_match_for_tstr_on_buffer: return "[Deprecated] Text string type mismatch (use type_mismatch_tstr)";
+    case status_code::no_match_for_array_on_buffer: return "[Deprecated] Array type mismatch (use type_mismatch_array)";
+    case status_code::no_match_for_map_on_buffer: return "[Deprecated] Map type mismatch (use type_mismatch_map)";
+    case status_code::no_match_for_tag_on_buffer: return "[Deprecated] Tag type mismatch (use type_mismatch_tag)";
+    case status_code::no_match_for_simple_on_buffer: return "[Deprecated] Simple value type mismatch (use type_mismatch_simple)";
+    case status_code::no_match_for_optional_on_buffer: return "[Deprecated] Invalid optional format (use invalid_optional_format)";
+    case status_code::no_match_in_variant_on_buffer: return "[Deprecated] Invalid variant match (use invalid_variant_match)";
+    case status_code::end_no_match_decoding: return "[Deprecated] Invalid terminal state in CBOR decoding";
+    
     default: return "Unknown CBOR status code";
     }
 }
