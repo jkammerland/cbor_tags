@@ -79,7 +79,7 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
 
     // Prepare bstr data
     {
-        std::array<std::byte, 4> original;
+        std::array<std::byte, 4u> original;
         for (auto &b : original) {
             b = std::byte(gen());
         }
@@ -201,14 +201,14 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Decoding a bstr", [&test_data]() {
         auto                     dec = make_decoder(test_data.bstr_data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4u> value;
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a bstr with check", [&test_data]() {
         auto                     dec = make_decoder(test_data.bstr_data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4u> value;
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -339,7 +339,7 @@ template <typename ContainerType> void run_decoding_benchmark() {
 
     bench.title(std::string(nameof::nameof_type<ContainerType>()) + " buffer (decoding)");
     bench.minEpochIterations(100);
-    bench.unit(options.unit.data());
+    bench.unit(std::string(options.unit));
     bench.performanceCounters(true);
     bench.relative(options.relative);
 
@@ -404,14 +404,14 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
     bench.run("Decoding a bstr", [&gen]() {
         Buffer                   data;
         auto                     enc = make_encoder(data);
-        std::array<std::byte, 4> original;
+        std::array<std::byte, 4u> original;
         for (auto &b : original) {
             b = std::byte(gen());
         }
         std::ignore = enc(original);
 
         auto                     dec = make_decoder(data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4u> value;
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -419,14 +419,14 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
     bench.run("Decoding a bstr with check", [&gen]() {
         Buffer                   data;
         auto                     enc = make_encoder(data);
-        std::array<std::byte, 4> original;
+        std::array<std::byte, 4u> original;
         for (auto &b : original) {
             b = std::byte(gen());
         }
         std::ignore = enc(original);
 
         auto                     dec = make_decoder(data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4u> value;
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });

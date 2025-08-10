@@ -841,19 +841,19 @@ struct struct1 {
     int    a;
     double b;
 
-    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+    template <typename T> constexpr auto decode(T &) { return /* void */; }
 };
 
 struct struct2 {
     int    a;
     double b;
 
-    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+    template <typename T> constexpr auto decode(T &) { return /* void */; }
 };
 
 // Also works
-template <typename T> constexpr auto transcode(T &transcoder, struct2 &&obj) { return expected<void, int>{}; }
-template <typename T> constexpr auto encode(T &encoder, const struct1 &obj) { return expected<void, int>{}; }
+template <typename T> constexpr auto transcode(T &, struct2 &&) { return expected<void, int>{}; }
+template <typename T> constexpr auto encode(T &, const struct1 &) { return expected<void, int>{}; }
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag(const struct1 &) { return 2000u; }
@@ -865,9 +865,9 @@ TEST_SUITE("Classes") {
 
       private:
         friend cbor::tags::Access;
-        template <typename T> constexpr auto transcode(T &transcoder) { return expected<void, int>{}; }
-        template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
-        template <typename T> constexpr auto decode(T &decoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto transcode(T &) { return expected<void, int>{}; }
+        template <typename T> constexpr auto encode(T &) { return expected<void, int>{}; }
+        template <typename T> constexpr auto decode(T &) { return expected<void, int>{}; }
     };
 
     TEST_CASE("HasTranscodeFreeFunction") {
@@ -903,7 +903,7 @@ TEST_SUITE("Classes") {
         [[maybe_unused]] auto   encoder = make_encoder(buffer);
         [[maybe_unused]] auto   decoder = make_decoder(buffer);
 
-        [[maybe_unused]] auto result = accessor.transcode(encoder, class1{});
+        [[maybe_unused]] auto result = cbor::tags::Access::transcode(encoder, class1{});
 
         static_assert(HasTranscodeMethod<decltype(encoder), class1>);
         static_assert(HasEncodeMethod<decltype(encoder), class1>);

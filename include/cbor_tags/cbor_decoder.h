@@ -148,7 +148,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // Can't directly construct a contiguous container from non-contiguous data
             // Either return an error or implement a copy-based approach
 
-            // Error approach:
+            // We will error for now:
             return status_code::contiguous_view_on_non_contiguous_data;
 
             // Copy approach (if ownership semantics allow):

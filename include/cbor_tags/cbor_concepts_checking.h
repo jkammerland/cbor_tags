@@ -256,7 +256,7 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         unmatched = false;
 
         constexpr auto tag          = detail::get_tag_from_any<T>();
-        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
+        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && static_cast<int64_t>(tag) == -1;
         constexpr bool IsTagOk      = !IsTagInvalid;
 
         static_assert(IsTagOk, "T must be a tagged type");

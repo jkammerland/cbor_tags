@@ -61,7 +61,7 @@ struct CDDLContext {
     std::pmr::monotonic_buffer_resource   memory_resource{buffer.data(), buffer.size()};
     std::pmr::deque<definition_cddl_pair> definitions{&memory_resource};
 
-    CDDLContext() {}
+    CDDLContext() = default;
 
     explicit CDDLContext(const CDDLContext &other) {
         for (const auto &[name, cddl] : other.definitions) {
