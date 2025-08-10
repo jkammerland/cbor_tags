@@ -105,5 +105,5 @@ TEST_CASE_TEMPLATE("Map with variant failing", T, std::map<int, std::variant<int
     T    map_result;
     auto status = dec(map_result);
     REQUIRE_FALSE(status);
-    CHECK_EQ(status.error(), status_code::no_match_in_variant_on_buffer);
+    CHECK_EQ(status.error(), status_code::invalid_variant_match);
 }
