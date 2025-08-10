@@ -78,7 +78,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if (major == major_type::NegativeInteger) {
             value = decode_integer(additionalInfo);
         } else {
-            return status_code::no_match_for_int_on_buffer;
+            return status_code::type_mismatch_int;
         }
 
         return status_code::success;
@@ -89,15 +89,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (IsSigned<underlying_type>) {
             if (major > major_type::NegativeInteger) {
 
-                return status_code::no_match_for_enum_on_buffer;
+                return status_code::invalid_enum_value;
             }
         } else if constexpr (IsUnsigned<underlying_type>) {
             if (major != major_type::UnsignedInteger) {
-                return status_code::no_match_for_enum_on_buffer;
+                return status_code::invalid_enum_value;
             }
         } else {
 
-            return status_code::no_match_for_enum_on_buffer;
+            return status_code::invalid_enum_value;
         }
 
         underlying_type result;
@@ -113,7 +113,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsUnsigned T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::UnsignedInteger) {
-            return status_code::no_match_for_uint_on_buffer;
+            return status_code::type_mismatch_uint;
         }
         value = decode_unsigned(additionalInfo);
 
@@ -122,7 +122,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(negative &value, major_type major, byte additionalInfo) {
         if (major != major_type::NegativeInteger) {
-            return status_code::no_match_for_nint_on_buffer;
+            return status_code::type_mismatch_nint;
         }
         value = negative(decode_unsigned(additionalInfo) + 1);
 
@@ -134,7 +134,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         // Early validation
         if (major != major_type::ByteString) {
-            return status_code::no_match_for_bstr_on_buffer;
+            return status_code::type_mismatch_bstr;
         }
 
         // Decode to intermediate form
@@ -179,7 +179,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         // Type check
         if (major != major_type::TextString) {
-            return status_code::no_match_for_tstr_on_buffer;
+            return status_code::type_mismatch_tstr;
         }
 
         // Decode the text string
@@ -191,11 +191,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <IsRangeOfCborValues T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if constexpr (IsMap<T>) {
             if (major != major_type::Map) {
-                return status_code::no_match_for_map_on_buffer;
+                return status_code::type_mismatch_map;
             }
         } else {
             if (major != major_type::Array) {
-                return status_code::no_match_for_array_on_buffer;
+                return status_code::type_mismatch_array;
             }
         }
 
@@ -231,17 +231,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <std::uint64_t N> constexpr status_code decode(static_tag<N>, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
+            return status_code::type_mismatch_tag;
         }
         if (decode_unsigned(additionalInfo) != N) {
-            return status_code::no_match_for_tag;
+            return status_code::unknown_tag;  // Static tag mismatch
         }
         return status_code::success;
     }
 
     template <std::uint64_t N> constexpr status_code decode(static_tag<N>, std::uint64_t tag) {
         if (tag != N) {
-            return status_code::no_match_for_tag;
+            return status_code::unknown_tag;  // Static tag mismatch
         }
         return status_code::success;
     }
@@ -253,12 +253,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsUnsigned T> constexpr status_code decode(dynamic_tag<T> &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
+            return status_code::type_mismatch_tag;
         }
 
         auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
         if (decoded_value.cbor_tag != value.cbor_tag) {
-            return status_code::no_match_for_tag;
+            return status_code::dynamic_tag_not_registered;  // Dynamic tag mismatch
         }
 
         return status_code::success;
@@ -271,12 +271,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsTaggedTuple T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
+            return status_code::type_mismatch_tag;
         }
 
         auto tag = decode_unsigned(additionalInfo);
         if (tag != std::get<0>(t)) {
-            return status_code::no_match_for_tag;
+            return status_code::unknown_tag;  // Tagged tuple mismatch
         }
 
         auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
@@ -288,7 +288,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsTaggedTuple T> constexpr status_code decode(T &t, std::uint64_t tag) {
         if (tag != std::get<0>(t)) {
-            return status_code::no_match_for_tag;
+            return status_code::unknown_tag;  // Tagged tuple mismatch
         }
 
         auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
@@ -340,7 +340,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
+            return status_code::type_mismatch_tag;
         }
 
         auto &&tuple = to_tuple(value);
@@ -368,7 +368,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         if (static_cast<decltype(tag)>(class_tag) != tag) {
-            return status_code::no_match_for_tag;
+            return status_code::unknown_tag;  // Class tag mismatch
         }
         return this->decode_without_tag(value);
     }
@@ -379,7 +379,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         if constexpr (HasInlineTag<T>) {
             if (tag != T::cbor_tag) {
-                return status_code::no_match_for_tag;
+                return status_code::unknown_tag;  // Inline tag mismatch
             }
             auto array_header_status = this->decode_wrapped_group(tuple);
             if (array_header_status != status_code::success) {
@@ -388,7 +388,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
         } else {
             if (tag != std::get<0>(tuple)) {
-                return status_code::no_match_for_tag;
+                return status_code::unknown_tag;  // Aggregate tag mismatch
             }
             auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(tuple));
             if (array_header_status != status_code::success) {
@@ -409,7 +409,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(bool &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            return status_code::no_match_for_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
         if (additionalInfo == static_cast<byte>(20)) {
             value = false;
@@ -417,16 +417,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             value = true;
         } else {
 
-            return status_code::no_match_for_tag_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
         return status_code::success;
     }
 
     constexpr status_code decode(std::nullptr_t &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            return status_code::no_match_for_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         } else if (additionalInfo != static_cast<byte>(22)) {
-            return status_code::no_match_for_tag_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
         value = nullptr;
         return status_code::success;
@@ -434,9 +434,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(float16_t &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            return status_code::no_match_for_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         } else if (additionalInfo != static_cast<byte>(25)) {
-            return status_code::no_match_for_tag_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
         value = read_float16();
         return status_code::success;
@@ -444,9 +444,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(float &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            return status_code::no_match_for_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         } else if (additionalInfo != static_cast<byte>(26)) {
-            return status_code::no_match_for_tag_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
         value = read_float();
         return status_code::success;
@@ -454,9 +454,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(double &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            return status_code::no_match_for_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         } else if (additionalInfo != static_cast<byte>(27)) {
-            return status_code::no_match_for_tag_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
         value = read_double();
         return status_code::success;
@@ -464,7 +464,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(std::string &value, major_type major, byte additionalInfo) {
         if (major != major_type::TextString) {
-            return status_code::no_match_for_tstr_on_buffer;
+            return status_code::type_mismatch_tstr;
         }
         auto text = decode_text(additionalInfo);
         value     = std::string(text);
@@ -476,7 +476,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
             if (major != major_type::ByteString) {
-                return status_code::no_match_for_bstr_on_buffer;
+                return status_code::type_mismatch_bstr;
             }
             auto length = decode_unsigned(additionalInfo);
             if (reader_.empty(data_, length - 1)) {
@@ -492,7 +492,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
             if (major != major_type::TextString) {
-                return status_code::no_match_for_tstr_on_buffer;
+                return status_code::type_mismatch_tstr;
             }
             value = decode_text(additionalInfo);
             return status_code::success;
@@ -512,7 +512,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             return result;
         }
-        return status_code::no_match_for_optional_on_buffer;
+        return status_code::invalid_optional_format;
     }
 
     template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
@@ -583,14 +583,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         bool found = (try_decode.template operator()<T>() || ...);
         if (!found) {
-            return status_code::no_match_in_variant_on_buffer;
+            return status_code::invalid_variant_match;
         }
         return status_code::success;
     }
 
     constexpr status_code decode(as_text_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::TextString) {
-            return status_code::no_match_for_tstr_on_buffer;
+            return status_code::type_mismatch_tstr;
         }
         value.size = decode_unsigned(additionalInfo);
 
@@ -604,7 +604,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::ByteString) {
-            return status_code::no_match_for_bstr_on_buffer;
+            return status_code::type_mismatch_bstr;
         }
         value.size = decode_unsigned(additionalInfo);
 
@@ -618,21 +618,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Array) {
-            return status_code::no_match_for_array_on_buffer;
+            return status_code::type_mismatch_array;
         }
         value.size = decode_unsigned(additionalInfo);
         return status_code::success;
     }
     constexpr status_code decode(as_map_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Map) {
-            return status_code::no_match_for_map_on_buffer;
+            return status_code::type_mismatch_map;
         }
         value.size = decode_unsigned(additionalInfo);
         return status_code::success;
     }
     constexpr status_code decode(as_tag_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
+            return status_code::type_mismatch_tag;
         }
         value.tag = decode_unsigned(additionalInfo);
         return status_code::success;
@@ -644,13 +644,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(simple &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
-            return status_code::no_match_for_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         } else if (additionalInfo < static_cast<byte>(24)) {
             value = simple{static_cast<simple::value_type>(additionalInfo)};
         } else if (additionalInfo == static_cast<byte>(24)) {
             value = simple{static_cast<simple::value_type>(read_uint8())};
         } else {
-            return status_code::no_match_for_tag_simple_on_buffer;
+            return status_code::type_mismatch_simple;
         }
 
         return status_code::success;

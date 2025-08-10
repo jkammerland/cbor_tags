@@ -171,7 +171,7 @@ TEST_CASE("Check simple status_code handling") {
     simple decoded;
     auto   result = dec(decoded);
     REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::no_match_for_tag_simple_on_buffer);
+    CHECK_EQ(result.error(), status_code::type_mismatch_simple);
 
     { /* Sanity check something that cannot be error handled */
         std::vector<std::byte> data;

@@ -49,17 +49,17 @@ TEST_SUITE("Decoding the wrong thing") {
         auto result = dec(T{});
         REQUIRE(!result);
         if constexpr (IsNegative<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_nint_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_nint);
         } else if constexpr (IsTextString<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_tstr);
         } else if constexpr (IsBinaryString<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_bstr);
         } else if constexpr (IsMap<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_map);
         } else if constexpr (IsTag<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_tag_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_tag);
         } else if constexpr (IsSimple<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_simple_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_simple);
         }
     }
 
@@ -74,17 +74,17 @@ TEST_SUITE("Decoding the wrong thing") {
         auto result = dec(T{});
         REQUIRE(!result);
         if constexpr (IsUnsigned<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_uint);
         } else if constexpr (IsNegative<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_nint_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_nint);
         } else if constexpr (IsTextString<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_tstr);
         } else if constexpr (IsBinaryString<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_bstr);
         } else if constexpr (IsMap<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_map);
         } else if constexpr (IsSimple<T>) {
-            CHECK_EQ(result.error(), status_code::no_match_for_simple_on_buffer);
+            CHECK_EQ(result.error(), status_code::type_mismatch_simple);
         }
     }
 
@@ -97,7 +97,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(25_tag, T{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status_code::no_match_for_tag_simple_on_buffer);
+        CHECK_EQ(result.error(), status_code::type_mismatch_simple);
     }
 
     TEST_CASE_TEMPLATE("Decode, too little memory", T, std::pmr::vector<int>) {
@@ -125,7 +125,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(std::variant<int, float, double, bool, std::nullptr_t>{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status_code::no_match_in_variant_on_buffer);
+        CHECK_EQ(result.error(), status_code::invalid_variant_match);
     }
 
     TEST_CASE("Decode wrong major type in variant, with matching types") {
@@ -138,7 +138,7 @@ TEST_SUITE("Decoding the wrong thing") {
             auto dec    = make_decoder(data);
             auto result = dec(std::variant<std::pair<static_tag<139>, std::string>, std::pair<static_tag<141>, std::string>>{});
             REQUIRE(!result);
-            CHECK_EQ(result.error(), status_code::no_match_in_variant_on_buffer);
+            CHECK_EQ(result.error(), status_code::invalid_variant_match);
         }
 
         { /* Sanity check with matching tag valu in variant */
@@ -162,7 +162,7 @@ TEST_SUITE("Decoding the wrong thing") {
         auto dec    = make_decoder(data);
         auto result = dec(dynamic_tag<uint64_t>{141}, std::string{});
         REQUIRE(!result);
-        CHECK_EQ(result.error(), status_code::no_match_for_tag);
+        CHECK_EQ(result.error(), status_code::dynamic_tag_not_registered);
     }
 }
 

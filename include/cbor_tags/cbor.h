@@ -52,25 +52,7 @@ enum class status_code : uint8_t {
     
     // Tag-specific errors  
     unknown_tag,                         // Tag number not recognized
-    dynamic_tag_not_registered,          // Dynamic tag needs registration before use
-    
-    // Deprecated - kept for compatibility (use the new names above)
-    begin_no_match_decoding = 100,       // Use type_mismatch_* instead
-    no_match_for_tag,                    // Use unknown_tag or dynamic_tag_not_registered
-    no_match_for_tag_simple_on_buffer,   // Use type_mismatch_simple
-    no_match_for_uint_on_buffer,         // Use type_mismatch_uint
-    no_match_for_nint_on_buffer,         // Use type_mismatch_nint
-    no_match_for_int_on_buffer,          // Use type_mismatch_int
-    no_match_for_enum_on_buffer,         // Use invalid_enum_value
-    no_match_for_bstr_on_buffer,         // Use type_mismatch_bstr
-    no_match_for_tstr_on_buffer,         // Use type_mismatch_tstr
-    no_match_for_array_on_buffer,        // Use type_mismatch_array
-    no_match_for_map_on_buffer,          // Use type_mismatch_map
-    no_match_for_tag_on_buffer,          // Use type_mismatch_tag
-    no_match_for_simple_on_buffer,       // Use type_mismatch_simple
-    no_match_for_optional_on_buffer,     // Use invalid_optional_format
-    no_match_in_variant_on_buffer,       // Use invalid_variant_match
-    end_no_match_decoding                // Use appropriate type_mismatch_*
+    dynamic_tag_not_registered           // Dynamic tag needs registration before use
 };
 
 constexpr std::string_view status_message(status_code s) {
@@ -107,24 +89,6 @@ constexpr std::string_view status_message(status_code s) {
     // Tag-specific errors
     case status_code::unknown_tag: return "CBOR tag number not recognized by decoder";
     case status_code::dynamic_tag_not_registered: return "Dynamic tag must be registered before encoding/decoding";
-    
-    // Deprecated status codes - kept for backward compatibility
-    case status_code::begin_no_match_decoding: return "[Deprecated] Invalid initial byte in CBOR data (use type_mismatch_*)";
-    case status_code::no_match_for_tag: return "[Deprecated] CBOR tag not recognized (use unknown_tag or dynamic_tag_not_registered)";
-    case status_code::no_match_for_tag_simple_on_buffer: return "[Deprecated] Simple value type mismatch (use type_mismatch_simple)";
-    case status_code::no_match_for_uint_on_buffer: return "[Deprecated] Unsigned integer type mismatch (use type_mismatch_uint)";
-    case status_code::no_match_for_nint_on_buffer: return "[Deprecated] Negative integer type mismatch (use type_mismatch_nint)";
-    case status_code::no_match_for_int_on_buffer: return "[Deprecated] Integer type mismatch (use type_mismatch_int)";
-    case status_code::no_match_for_enum_on_buffer: return "[Deprecated] Invalid enum value (use invalid_enum_value)";
-    case status_code::no_match_for_bstr_on_buffer: return "[Deprecated] Byte string type mismatch (use type_mismatch_bstr)";
-    case status_code::no_match_for_tstr_on_buffer: return "[Deprecated] Text string type mismatch (use type_mismatch_tstr)";
-    case status_code::no_match_for_array_on_buffer: return "[Deprecated] Array type mismatch (use type_mismatch_array)";
-    case status_code::no_match_for_map_on_buffer: return "[Deprecated] Map type mismatch (use type_mismatch_map)";
-    case status_code::no_match_for_tag_on_buffer: return "[Deprecated] Tag type mismatch (use type_mismatch_tag)";
-    case status_code::no_match_for_simple_on_buffer: return "[Deprecated] Simple value type mismatch (use type_mismatch_simple)";
-    case status_code::no_match_for_optional_on_buffer: return "[Deprecated] Invalid optional format (use invalid_optional_format)";
-    case status_code::no_match_in_variant_on_buffer: return "[Deprecated] Invalid variant match (use invalid_variant_match)";
-    case status_code::end_no_match_decoding: return "[Deprecated] Invalid terminal state in CBOR decoding";
     
     default: return "Unknown CBOR status code";
     }
