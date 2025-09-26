@@ -394,4 +394,21 @@ struct parse_simple_exception : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+// A variant that can hold any CBOR element for skipping/iteration
+using cbor_any = std::variant<
+    std::uint64_t,           // Unsigned
+    negative,                // Negative  
+    as_bstr_any,            // Byte string (skip)
+    as_text_any,            // Text string (skip)
+    as_array_any,           // Array header
+    as_map_any,             // Map header
+    as_tag_any,             // Tag
+    bool,                   // Boolean
+    std::nullptr_t,         // Null
+    float16_t,              // Float16
+    float,                  // Float32
+    double,                 // Float64
+    simple                  // Simple value
+>;
+
 } // namespace cbor::tags

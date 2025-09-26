@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.20)
 project(cbor_tags VERSION 0.9.3)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add option for debug mode
 option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
@@ -28,6 +26,7 @@ endif()
 # THE LIBRARY
 file(GLOB_RECURSE CBOR_HEADERS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 target_sources(
   ${PROJECT_NAME}
   INTERFACE FILE_SET
