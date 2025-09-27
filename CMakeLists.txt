@@ -111,7 +111,7 @@ endif()
 
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
 if(CBOR_TAGS_INSTALL)
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@5.4.0)
+  cpmaddpackage(gh:jkammerland/target_install_package.cmake@6.0.1)
   target_install_package(${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
 endif()
 
