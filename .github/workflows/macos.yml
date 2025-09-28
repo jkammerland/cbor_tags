@@ -1,4 +1,4 @@
-name: MacOS Tests (AppleClang 15+)
+name: MacOS Tests (AppleClang 26/16)
 
 on:
   push:
@@ -15,10 +15,10 @@ jobs:
       matrix:
         config:
           - {
-              name: "macOS AppleClang 15",
+              name: "macOS AppleClang 26",
               cc: "clang",
               cxx: "clang++",
-              xcode_version: "15.0"
+              xcode_version: "26.0.0"
             }
           - {
               name: "macOS AppleClang 16",
