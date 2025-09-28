@@ -75,7 +75,7 @@ TEST_CASE("Decode just string in deque") {
     std::string value = "Hello world";
     REQUIRE(enc(value));
 
-    // fmt::print("{}\n", to_hex(data));
+    // CBOR_TAGS_TEST_LOG("{}\n", to_hex(data));
 
     std::string result;
     auto        dec = make_decoder(data);
@@ -122,7 +122,7 @@ TEST_CASE_TEMPLATE("Decode tagged types", T, std::vector<std::byte>, std::deque<
     CHECK(enc(make_tag_pair(123_tag, A{1, 3.14, "Hello", {1, 2, 3}})));
 
     auto hex = to_hex(data);
-    fmt::print("to_hex: {}\n", hex);
+    CBOR_TAGS_TEST_LOG("to_hex: {}\n", hex);
     if (decltype(enc)::options::wrap_groups) {
         REQUIRE_EQ(hex, "d87b8401fb40091eb851eb851f6548656c6c6f83010203");
     }
@@ -193,7 +193,7 @@ TEST_CASE_TEMPLATE("Test int64_t input output", T, std::vector<std::byte>, std::
     // make negative
     std::transform(values.begin(), values.end(), values.begin(), [](auto v) { return -v; });
     CHECK(enc(values));
-    fmt::print("Data: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("Data: {}\n", to_hex(data));
 
     auto                 dec = make_decoder(data);
     std::vector<int64_t> result;
@@ -237,8 +237,8 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
             v = T{};
         }
         CHECK(enc(v));
-        fmt::print("Variant: {}\n", to_hex(buffer1));
-        fmt::print("int64_t casted from int {}\n", static_cast<int64_t>(-100));
+        CBOR_TAGS_TEST_LOG("Variant: {}\n", to_hex(buffer1));
+        CBOR_TAGS_TEST_LOG("int64_t casted from int {}\n", static_cast<int64_t>(-100));
 
         auto buffer2 = buffer1;
 
@@ -264,7 +264,7 @@ TEST_CASE("Test strings and binary strings in std::variant") {
         variant result;
         CHECK(dec(result));
         CHECK_EQ(std::get<std::string>(v), std::get<std::string>(result));
-        fmt::print("String: {}\n", std::get<std::string>(result));
+        CBOR_TAGS_TEST_LOG("String: {}\n", std::get<std::string>(result));
     }
     {
         std::vector<std::byte> buffer;
@@ -282,6 +282,6 @@ TEST_CASE("Test strings and binary strings in std::variant") {
         for (size_t i = 0; i < vec.size(); ++i) {
             CHECK_EQ(std::get<std::span<const std::byte>>(v)[i], std::get<std::span<const std::byte>>(result)[i]);
         }
-        fmt::print("Binary string: {}\n", to_hex(std::get<std::span<const std::byte>>(result)));
+        CBOR_TAGS_TEST_LOG("Binary string: {}\n", to_hex(std::get<std::span<const std::byte>>(result)));
     }
 }

@@ -2,6 +2,8 @@
 
 #cmakedefine01 CBOR_TAGS_DEBUG
 
+#include <string_view>
+
 #if CBOR_TAGS_DEBUG == 1
 #include <fmt/format.h>
 #endif

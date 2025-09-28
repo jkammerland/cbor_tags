@@ -43,7 +43,7 @@ TEST_CASE("CBOR Encoder") {
         auto                   dec = make_decoder(data);
         REQUIRE(enc(255, 256));
 
-        fmt::print("{}", to_hex(data));
+        CBOR_TAGS_TEST_LOG("{}", to_hex(data));
 
         uint64_t value;
         REQUIRE(dec(value));
@@ -291,8 +291,7 @@ TEST_CASE("CBOR Encoder") {
         auto                   dec = make_decoder(data);
         CHECK(enc(float_map));
 
-        fmt::print("Float map: ");
-        print_bytes(data);
+        CBOR_TAGS_TEST_LOG("Float map: {}", to_hex(data));
         CHECK(data == expected);
 
         std::map<float, float> map_result;
@@ -316,7 +315,7 @@ TEST_CASE("CBOR Encoder") {
 
         std::vector<variant> number_and_stuff = {1, 2, "hello", 3, 4.0f, make_tag_pair(static_tag<511>{}, A{.a = 3.14f, .b = 3.14})};
         CHECK(enc(number_and_stuff));
-        fmt::print("Number and stuff: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("Number and stuff: {}\n", to_hex(data));
         if (decltype(enc)::options::wrap_groups) {
             REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901ff82f94247fb40091eb851eb851f");
         }
@@ -378,7 +377,7 @@ TEST_CASE("Sorting strings and binary strings std::map") {
 
     CHECK(enc(string_map));
 
-    fmt::print("String map: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("String map: {}\n", to_hex(data));
 
     CHECK_EQ(to_hex(data), "a720fb400800000000000001fb40080000000000006161f66162fb40080000000000006163f5626162fa40a00000626163f4");
 
@@ -426,7 +425,7 @@ TEST_CASE("Unordered maps") {
 
     CHECK(enc(string_map));
 
-    fmt::print("Unordered map: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("Unordered map: {}\n", to_hex(data));
 
     std::unordered_map<variant, variant, variant_hasher> map_result;
     CHECK(dec(map_result));
@@ -457,7 +456,7 @@ TEST_CASE("CBOR Encoder - Map of float sorted") {
 
     REQUIRE(enc(float_map));
 
-    fmt::print("Float map: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("Float map: {}\n", to_hex(data));
 
     /*
         {

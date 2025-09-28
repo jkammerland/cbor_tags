@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor.h"
 
 #include <cstddef>
+#include <cstdlib>
 #include <doctest/doctest.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -60,8 +61,29 @@ inline std::vector<byte> to_bytes(std::string_view hex) {
     return bytes;
 }
 
-// Print using fmt
-inline const auto print_bytes = [](const std::vector<std::byte> &bytes) { fmt::print("{}\n", to_hex(bytes)); };
+namespace cbor::tags::test::detail {
+inline bool logs_always_enabled() {
+    static const bool enabled = [] {
+        if (const char *env = std::getenv("CBOR_TAGS_TEST_LOGS")) {
+            return env[0] != '\0' && env[0] != '0';
+        }
+        return false;
+    }();
+    return enabled;
+}
+} // namespace cbor::tags::test::detail
+
+#ifndef CBOR_TAGS_TEST_LOG
+#define CBOR_TAGS_TEST_LOG(...)                                                                                           \
+    do {                                                                                                                   \
+        auto _cbor_tags_formatted_message = fmt::format(__VA_ARGS__);                                                      \
+        if (cbor::tags::test::detail::logs_always_enabled()) {                                                             \
+            MESSAGE(_cbor_tags_formatted_message);                                                                         \
+        } else {                                                                                                           \
+            INFO(_cbor_tags_formatted_message);                                                                            \
+        }                                                                                                                  \
+    } while (false)
+#endif
 
 template <std::ranges::range Buffer, typename... Strings>
 tl::expected<void, std::vector<std::string>> substrings_in(const Buffer &buffer, Strings &&...strings) {

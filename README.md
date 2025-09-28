@@ -819,6 +819,16 @@ Numbers with comparisons are coming soon. The current benchmarks can be run by c
 
 These can all be collectively run with `make/ninja test`, ctest will only run `tests`.
 
+### Test Logging
+
+Unit tests rely on doctest's `INFO` context for diagnostics, so log lines now surface only when an assertion fails. Set the environment variable `CBOR_TAGS_TEST_LOGS=1` to force the helper logs to emit immediately via `MESSAGE`, for example:
+
+```bash
+CBOR_TAGS_TEST_LOGS=1 ./build/test/tests --reporter=console
+```
+
+Leave the variable unset (default) to keep passing runs quiet while still capturing context on failures.
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

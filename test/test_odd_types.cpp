@@ -49,7 +49,7 @@ TEST_CASE("Map with variant") {
     REQUIRE(enc(map));
     REQUIRE_EQ(to_hex(data), "a30101026374776f0369544845205448524545");
 
-    fmt::print("Map with variant: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("Map with variant: {}\n", to_hex(data));
 
     auto                                          dec = make_decoder(data);
     std::map<int, std::variant<int, std::string>> map_result;
@@ -75,7 +75,7 @@ TEST_CASE_TEMPLATE("Multimap with variant of str and vector", T, std::multimap<s
 
     constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<std::variant<std::string, std::vector<float>>>;
     constexpr auto matching_major_types               = valid_concept_mapping_array_v<std::variant<std::string, std::vector<float>>>;
-    fmt::print("no ambigous ? (arr[i]>1): {}, {}\n", no_ambigous_major_types_in_variant, matching_major_types);
+    CBOR_TAGS_TEST_LOG("no ambigous ? (arr[i]>1): {}, {}\n", no_ambigous_major_types_in_variant, matching_major_types);
 
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
@@ -87,7 +87,7 @@ TEST_CASE_TEMPLATE("Multimap with variant of str and vector", T, std::multimap<s
     T    map_result;
     auto status = dec(map_result);
     if (!status) {
-        fmt::print("Error: {}\n", status_message(status.error()));
+        CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(status.error()));
     }
     REQUIRE(status);
     CHECK_EQ(map_result, map);

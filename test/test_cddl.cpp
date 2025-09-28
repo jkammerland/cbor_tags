@@ -73,14 +73,14 @@ struct A42121 {
 TEST_CASE("CDDL extension") {
     fmt::memory_buffer buffer;
     cddl_schema_to<A42121>(buffer);
-    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
     CHECK(substrings_in(fmt::to_string(buffer), "uint,\n", "int / tstr,\n"));
 }
 
 TEST_CASE("CDDL aggregate tagged") {
     fmt::memory_buffer buffer;
     cddl_schema_to<A13213>(buffer, {.row_options = {.format_by_rows = true}});
-    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
 struct A0001 {
@@ -103,7 +103,7 @@ TEST_CASE("CDDL no columns") {
     fmt::memory_buffer buffer;
 
     cddl_schema_to<A0001>(buffer, {.row_options = {.format_by_rows = false}});
-    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B129058 = #6.140([bstr, map])",
                         "C122999 = #6.141([int, tstr, B129058 / null])"));
@@ -151,12 +151,12 @@ TEST_CASE_TEMPLATE("Annotate", T, std::vector<std::byte>, std::deque<std::byte>)
     auto enc = make_encoder(buffer);
     REQUIRE(enc(a1212));
 
-    fmt::print("CBOR: {}\n", to_hex(buffer));
+    CBOR_TAGS_TEST_LOG("CBOR: {}\n", to_hex(buffer));
 
     fmt::memory_buffer annotation;
     buffer_annotate(buffer, annotation);
 
-    fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
+    CBOR_TAGS_TEST_LOG("Annotation: \n{}\n", fmt::to_string(annotation));
 }
 
 TEST_CASE_TEMPLATE("Annotate map", T, std::vector<std::byte>, std::deque<std::byte>) {
@@ -168,12 +168,12 @@ TEST_CASE_TEMPLATE("Annotate map", T, std::vector<std::byte>, std::deque<std::by
     auto enc = make_encoder(buffer);
     REQUIRE(enc(map));
 
-    fmt::print("CBOR: {}\n", to_hex(buffer));
+    CBOR_TAGS_TEST_LOG("CBOR: {}\n", to_hex(buffer));
 
     fmt::memory_buffer annotation;
     buffer_annotate(buffer, annotation);
 
-    fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
+    CBOR_TAGS_TEST_LOG("Annotation: \n{}\n", fmt::to_string(annotation));
 }
 
 TEST_CASE("CWT annotation") {
@@ -182,12 +182,12 @@ TEST_CASE("CWT annotation") {
                  "37818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f2"
                  "9c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30");
 
-    fmt::print("CBOR Web Token (CWT): {}\n", to_hex(buffer));
+    CBOR_TAGS_TEST_LOG("CBOR Web Token (CWT): {}\n", to_hex(buffer));
 
     fmt::memory_buffer annotation;
     buffer_annotate(buffer, annotation);
 
-    fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
+    CBOR_TAGS_TEST_LOG("Annotation: \n{}\n", fmt::to_string(annotation));
 }
 
 TEST_CASE("CWT payload map annotation") {
@@ -196,7 +196,7 @@ TEST_CASE("CWT payload map annotation") {
 
     fmt::memory_buffer annotation;
     buffer_annotate(buffer, annotation);
-    fmt::print("Annotation: \n{}\n", fmt::to_string(annotation));
+    CBOR_TAGS_TEST_LOG("Annotation: \n{}\n", fmt::to_string(annotation));
 }
 
 TEST_CASE("CDDL adhoc tagging") {
@@ -208,7 +208,7 @@ TEST_CASE("CDDL adhoc tagging") {
     using namespace cbor::tags::literals;
     using tagA = std::pair<static_tag<140>, A>;
     cddl_schema_to<tagA>(buffer, {.row_options = {.format_by_rows = false}});
-    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "#6.140(A)", "A = tstr"));
 }
@@ -216,7 +216,7 @@ TEST_CASE("CDDL adhoc tagging") {
 TEST_CASE("CDDL PRELUDE") {
     fmt::memory_buffer buffer;
     cddl_prelude_to(buffer);
-    fmt::print("CDDL: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "null = nil", "int = uint / nint"));
 }
@@ -229,18 +229,18 @@ TEST_CASE_TEMPLATE("Diagnostic data 0", T, std::byte, uint8_t, char) {
 
     fmt::memory_buffer buffer;
     buffer_annotate(data, buffer);
-    fmt::print("Annotation: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("Annotation: \n{}\n", fmt::to_string(buffer));
 
     fmt::memory_buffer buffer1;
     buffer_diagnostic(data, buffer1, {});
-    fmt::print("Diagnostic: \n{}\n", fmt::to_string(buffer1));
+    CBOR_TAGS_TEST_LOG("Diagnostic: \n{}\n", fmt::to_string(buffer1));
     fmt::format_to(std::back_inserter(buffer1), "\n --- \n");
 
     data = to_bytes<T>("a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e6"
                        "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
 
     buffer_diagnostic(data, buffer1, {});
-    fmt::print("map: \n{}\n", fmt::to_string(buffer1));
+    CBOR_TAGS_TEST_LOG("map: \n{}\n", fmt::to_string(buffer1));
 
     CHECK(substrings_in(buffer1, "h'a10126'", "4: h'4173796d6d65747269634543445341323536'",
                         "h'"

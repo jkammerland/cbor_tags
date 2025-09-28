@@ -50,7 +50,7 @@ TEST_CASE("Test classes") {
     static_assert(IsClassWithEncodingOverload<decltype(enc), decltype(c1)>);
     REQUIRE(enc(c1));
 
-    fmt::print("buffer: {}\n", to_hex(buffer));
+    CBOR_TAGS_TEST_LOG("buffer: {}\n", to_hex(buffer));
 
     auto   dec = make_decoder(buffer);
     Class3 c2;
@@ -229,13 +229,13 @@ TEST_CASE("Test class8 for static inline tag") { static_assert(HasTagMember<Clas
 
 TEST_CASE_TEMPLATE("Class with variant tag collision", T, std::variant<F<12>, static_tag<12>>, std::variant<F<12>, Class6>,
                    std::variant<Class6, Class7<12>>) {
-    fmt::println("Testing: {}", valid_concept_mapping_array_v<T>);
+    CBOR_TAGS_TEST_LOG("Testing: {}", valid_concept_mapping_array_v<T>);
     CHECK(!valid_concept_mapping_v<T>);
 }
 
 TEST_CASE_TEMPLATE("Class with variant tag NO collision", T, std::variant<F<11>, static_tag<12>>, std::variant<F<11>, Class6>,
                    std::variant<Class6, Class7<13>>) {
-    fmt::println("Testing: {}", valid_concept_mapping_array_v<T>);
+    CBOR_TAGS_TEST_LOG("Testing: {}", valid_concept_mapping_array_v<T>);
     CHECK(valid_concept_mapping_v<T>);
 }
 

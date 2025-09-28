@@ -27,7 +27,7 @@ TEST_CASE("Test view contiguous, tstr") {
     auto enc  = make_encoder(data);
 
     CHECK(enc(140_tag, wrap_as_array{1, "hello"sv}));
-    fmt::print("data: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
     auto             dec = make_decoder(data);
     int              a;
@@ -52,7 +52,7 @@ TEST_CASE("Test view contiguous, bstr") {
     CHECK(enc(140_tag,
               wrap_as_array{1, std::array<std::byte, 5>{static_cast<std::byte>('h'), static_cast<std::byte>('e'), static_cast<std::byte>('l'),
                                                         static_cast<std::byte>('l'), static_cast<std::byte>('o')}}));
-    fmt::print("data: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
     auto                       dec = make_decoder(data);
     int                        a;
