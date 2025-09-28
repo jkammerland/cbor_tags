@@ -77,7 +77,9 @@ TEST_CASE_TEMPLATE("Test decode static tag 1", T, std::vector<uint8_t>, std::deq
     using namespace std::string_view_literals;
     auto bytes = to_bytes("c16c48656c6c6f20776f726c6421"sv);
 
-    auto dec = decoder<decltype(bytes), Options<default_expected /*, default_wrapping*/>, cbor_header_decoder>(bytes);
+    auto dec = decoder<decltype(bytes), Options<default_expected /*, default_wrapping*/>, cbor_header_decoder, cbor_optional_decoder,
+                      cbor_variant_decoder, cbor_tag_decoder, cbor_integer_decoder, cbor_string_decoder, cbor_range_decoder,
+                      cbor_probe_decoder, cbor_aggregate_decoder, cbor_tuple_decoder, cbor_class_decoder, cbor_simple_decoder>(bytes);
     struct A {
         static_tag<1> cbor_tag;
         std::string   b;
