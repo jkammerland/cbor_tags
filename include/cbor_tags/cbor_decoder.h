@@ -71,10 +71,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
-    using size_type         = typename InputBuffer::size_type;
-    using buffer_byte_t     = typename InputBuffer::value_type;
-    using byte              = std::byte;
-    using input_buffer_type = InputBuffer;
+    using traits            = detail::decoder_traits<self_t>;
+    using size_type         = typename traits::size_type;
+    using buffer_byte_t     = typename traits::buffer_byte_t;
+    using byte              = typename traits::byte;
+    using input_buffer_type = typename traits::input_buffer_type;
 
     using iterator_t  = std::ranges::iterator_t<const InputBuffer>;
     using subrange    = std::ranges::subrange<iterator_t>;
@@ -83,7 +84,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     using expected_type   = typename Options::return_type;
     using unexpected_type = typename Options::error_type;
-    using options         = Options;
+    using options         = typename traits::options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
