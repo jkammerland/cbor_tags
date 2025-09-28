@@ -14,6 +14,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
@@ -191,39 +192,44 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return static_cast<uint8_t>(reader_.read(data_));
     }
 
+    template <typename UInt>
+    constexpr UInt read_big_endian_integral() {
+        static_assert(std::is_unsigned_v<UInt>, "read_big_endian_integral requires an unsigned type");
+        if constexpr (IsContiguous<InputBuffer>) {
+            auto *begin = std::ranges::data(data_) + reader_.position_;
+            reader_.position_ += sizeof(UInt);
+            UInt value{};
+            std::memcpy(&value, begin, sizeof(UInt));
+            return detail::big_to_native(value);
+        } else {
+            UInt result = 0;
+            for (std::size_t i = 0; i < sizeof(UInt); ++i) {
+                auto byte = static_cast<UInt>(reader_.read(data_));
+                result    = static_cast<UInt>((result << 8) | byte);
+            }
+            return result;
+        }
+    }
+
     constexpr uint16_t read_uint16() {
         if (reader_.empty(data_, 1)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        auto byte0 = static_cast<uint16_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint16_t>(reader_.read(data_));
-        return static_cast<uint16_t>(byte0 << 8 | byte1);
+        return read_big_endian_integral<uint16_t>();
     }
 
     constexpr uint32_t read_uint32() {
         if (reader_.empty(data_, 3)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        auto byte0 = static_cast<uint32_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint32_t>(reader_.read(data_));
-        auto byte2 = static_cast<uint32_t>(reader_.read(data_));
-        auto byte3 = static_cast<uint32_t>(reader_.read(data_));
-        return (byte0 << 24) | (byte1 << 16) | (byte2 << 8) | byte3;
+        return read_big_endian_integral<uint32_t>();
     }
 
     constexpr uint64_t read_uint64() {
         if (reader_.empty(data_, 7)) {
             throw std::runtime_error("Unexpected end of input");
         }
-        auto byte0 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte2 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte3 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte4 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte5 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte6 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte7 = static_cast<uint64_t>(reader_.read(data_));
-        return (byte0 << 56) | (byte1 << 48) | (byte2 << 40) | (byte3 << 32) | (byte4 << 24) | (byte5 << 16) | (byte6 << 8) | byte7;
+        return read_big_endian_integral<uint64_t>();
     }
 
     constexpr simple read_simple() {
@@ -234,12 +240,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr float16_t read_float16() {
-        if (reader_.empty(data_, 1)) {
-            throw std::runtime_error("Unexpected end of input");
-        }
-        auto byte0 = static_cast<uint16_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint16_t>(reader_.read(data_));
-        return float16_t{static_cast<uint16_t>((byte0 << 8) | byte1)};
+        auto bits = read_uint16();
+        return float16_t{bits};
     }
 
     constexpr float read_float() {

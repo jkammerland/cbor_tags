@@ -2,10 +2,17 @@
 
 #include "cbor_tags/cbor_concepts.h"
 
+#include <array>
+#include <bit>
 #include <concepts>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#if defined(_MSC_VER)
+#    include <intrin.h>
+#endif
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 
@@ -76,6 +83,76 @@ template <typename T> struct appender<T, true> {
 template <typename T, bool IsContiguous = IsContiguous<T>>
     requires ValidCborBuffer<T>
 struct reader;
+
+template <typename UInt>
+[[nodiscard]] constexpr UInt portable_byteswap(UInt value) noexcept {
+    static_assert(std::is_unsigned_v<UInt>, "portable_byteswap requires an unsigned type");
+    UInt result = 0;
+    for (std::size_t i = 0; i < sizeof(UInt); ++i) {
+        result <<= 8;
+        result |= static_cast<UInt>((value >> (i * 8)) & static_cast<UInt>(0xFF));
+    }
+    return result;
+}
+
+template <typename UInt>
+[[nodiscard]] constexpr UInt intrinsic_byteswap(UInt value) noexcept {
+    static_assert(std::is_unsigned_v<UInt>, "intrinsic_byteswap requires an unsigned type");
+#if defined(__clang__) || defined(__GNUC__)
+    if constexpr (sizeof(UInt) == 2) {
+        return static_cast<UInt>(__builtin_bswap16(static_cast<unsigned short>(value)));
+    } else if constexpr (sizeof(UInt) == 4) {
+        return static_cast<UInt>(__builtin_bswap32(static_cast<unsigned int>(value)));
+    } else if constexpr (sizeof(UInt) == 8) {
+        return static_cast<UInt>(__builtin_bswap64(static_cast<unsigned long long>(value)));
+    }
+#elif defined(_MSC_VER)
+    if constexpr (sizeof(UInt) == 2) {
+        return static_cast<UInt>(_byteswap_ushort(static_cast<unsigned short>(value)));
+    } else if constexpr (sizeof(UInt) == 4) {
+        return static_cast<UInt>(_byteswap_ulong(static_cast<unsigned long>(value)));
+    } else if constexpr (sizeof(UInt) == 8) {
+        return static_cast<UInt>(_byteswap_uint64(static_cast<unsigned long long>(value)));
+    }
+#endif
+    return portable_byteswap(value);
+}
+
+template <typename UInt>
+[[nodiscard]] constexpr UInt big_to_native(UInt value) noexcept {
+    static_assert(std::is_unsigned_v<UInt>, "big_to_native requires an unsigned type");
+    if constexpr (std::endian::native == std::endian::big) {
+        return value;
+    } else {
+        return intrinsic_byteswap(value);
+    }
+}
+
+template <typename UInt>
+[[nodiscard]] constexpr UInt native_to_big(UInt value) noexcept {
+    static_assert(std::is_unsigned_v<UInt>, "native_to_big requires an unsigned type");
+    if constexpr (std::endian::native == std::endian::big) {
+        return value;
+    } else {
+        return intrinsic_byteswap(value);
+    }
+}
+
+template <typename UInt>
+[[nodiscard]] constexpr std::array<std::byte, sizeof(UInt)> make_big_endian_bytes(UInt value) noexcept {
+    static_assert(std::is_unsigned_v<UInt>, "make_big_endian_bytes requires an unsigned type");
+    auto big = native_to_big(value);
+    std::array<std::byte, sizeof(UInt)> bytes{};
+    std::memcpy(bytes.data(), &big, sizeof(UInt));
+    return bytes;
+}
+
+template <typename Appender, typename Buffer, typename UInt>
+constexpr void append_big_endian(Appender &appender, Buffer &buffer, UInt value) {
+    static_assert(std::is_unsigned_v<UInt>, "append_big_endian requires an unsigned type");
+    auto bytes = make_big_endian_bytes(value);
+    appender(buffer, std::span<const std::byte>(bytes));
+}
 
 template <typename T> struct reader<T, true> {
     using size_type  = T::size_type;

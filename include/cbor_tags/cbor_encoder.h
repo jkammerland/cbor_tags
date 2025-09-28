@@ -66,18 +66,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         } else if (value <= 0xFF) {
             appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(24) | majorType), static_cast<byte_type>(value));
         } else if (value <= 0xFFFF) {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(25) | majorType),
-                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
+            appender_(data_, static_cast<byte_type>(static_cast<byte_type>(25) | majorType));
+            detail::append_big_endian(appender_, data_, static_cast<std::uint16_t>(value));
         } else if (value <= 0xFFFFFFFF) {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(26) | majorType),
-                                   static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
-                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
+            appender_(data_, static_cast<byte_type>(static_cast<byte_type>(26) | majorType));
+            detail::append_big_endian(appender_, data_, static_cast<std::uint32_t>(value));
         } else {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(27) | majorType),
-                                   static_cast<byte_type>(value >> 56), static_cast<byte_type>(value >> 48),
-                                   static_cast<byte_type>(value >> 40), static_cast<byte_type>(value >> 32),
-                                   static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
-                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
+            appender_(data_, static_cast<byte_type>(static_cast<byte_type>(27) | majorType));
+            detail::append_big_endian(appender_, data_, value);
         }
     }
 
