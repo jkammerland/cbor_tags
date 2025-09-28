@@ -15,8 +15,7 @@ TEST_CASE("CBOR Encoder - Positive float") {
     auto                   enc   = make_encoder(data);
     float                  value = 3.14159f;
     CHECK(enc(value));
-    fmt::print("Positive float: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Positive float: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fa40490fd0");
 
     auto  dec = make_decoder(data);
@@ -30,8 +29,7 @@ TEST_CASE("CBOR Encoder - Negative float") {
     auto                   enc   = make_encoder(data);
     float                  value = -3.14159f;
     CHECK(enc(value));
-    fmt::print("Negative float: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Negative float: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fac0490fd0");
 }
 
@@ -40,8 +38,7 @@ TEST_CASE("CBOR Encoder - Zero float") {
     auto                   enc   = make_encoder(data);
     float                  value = 0.0f;
     CHECK(enc(value));
-    fmt::print("Zero: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Zero: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fa00000000");
 }
 
@@ -50,8 +47,7 @@ TEST_CASE("CBOR Encoder - Infinity float") {
     auto                   enc   = make_encoder(data);
     float                  value = std::numeric_limits<float>::infinity();
     CHECK(enc(value));
-    fmt::print("Infinity: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Infinity: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fa7f800000");
 }
 
@@ -60,8 +56,7 @@ TEST_CASE("CBOR Encoder - NaN float") {
     auto                   enc   = make_encoder(data);
     float                  value = std::numeric_limits<float>::quiet_NaN();
     CHECK(enc(value));
-    fmt::print("NaN: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("NaN: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fa7fc00000");
 }
 
@@ -70,8 +65,7 @@ TEST_CASE("CBOR Encoder - Positive double") {
     auto                   enc   = make_encoder(data);
     double                 value = 3.14159265358979323846;
     CHECK(enc(value));
-    fmt::print("Positive double: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Positive double: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fb400921fb54442d18");
 }
 
@@ -80,8 +74,7 @@ TEST_CASE("CBOR Encoder - Negative double") {
     auto                   enc   = make_encoder(data);
     double                 value = -3.14159265358979323846;
     CHECK(enc(value));
-    fmt::print("Negative double: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Negative double: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fbc00921fb54442d18");
 }
 
@@ -90,8 +83,7 @@ TEST_CASE("CBOR Encoder - Zero double") {
     auto                   enc   = make_encoder(data);
     double                 value = 0.0;
     CHECK(enc(value));
-    fmt::print("Zero double: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Zero double: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fb0000000000000000");
 }
 
@@ -100,8 +92,7 @@ TEST_CASE("CBOR Encoder - Infinity double") {
     auto                   enc   = make_encoder(data);
     double                 value = std::numeric_limits<double>::infinity();
     CHECK(enc(value));
-    fmt::print("Infinity double: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Infinity double: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fb7ff0000000000000");
 }
 
@@ -110,8 +101,7 @@ TEST_CASE("CBOR Encoder - NaN double") {
     auto                   enc   = make_encoder(data);
     double                 value = std::numeric_limits<double>::quiet_NaN();
     CHECK(enc(value));
-    fmt::print("NaN double: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("NaN double: {}", to_hex(data));
     REQUIRE(data.size() == 9);
     CHECK(data[0] == static_cast<std::byte>(0xFB));
     CHECK((data[1] & static_cast<std::byte>(0x7F)) == static_cast<std::byte>(0x7F));
@@ -123,8 +113,7 @@ TEST_CASE("CBOR Encoder - simple") {
     auto                   enc = make_encoder(data);
     simple                 number{19};
     CHECK(enc(number));
-    fmt::print("Simple: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Simple: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "f3");
 
     auto   dec = make_decoder(data);
@@ -192,8 +181,7 @@ TEST_CASE("Variant with simples") {
 
     REQUIRE(enc(value));
 
-    fmt::print("Variant with simples: ");
-    print_bytes(data);
+    CBOR_TAGS_TEST_LOG("Variant with simples: {}", to_hex(data));
 
     auto                                   dec = make_decoder(data);
     std::variant<double, float, float16_t> decoded;
@@ -209,8 +197,7 @@ TEST_CASE("Test std::variant<int, double>") {
     std::variant<int, double> value{3.14};
     REQUIRE(enc(value));
 
-    fmt::print("Variant with int and double: ");
-    print_bytes(buffer);
+    CBOR_TAGS_TEST_LOG("Variant with int and double: {}", to_hex(buffer));
 
     auto dec = make_decoder(buffer);
 

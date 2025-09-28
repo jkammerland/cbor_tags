@@ -58,13 +58,13 @@ struct A12398 {
 };
 
 // Helper function to print type and value
-template <typename T> constexpr void print_type_and_value(const T &value) {
+template <typename T> void print_type_and_value(const T &value) {
     if constexpr (std::is_same_v<T, A12398>) {
-        fmt::print("Got type <A>: with values a={}, s={}\n", value.a, value.s);
+        CBOR_TAGS_TEST_LOG("Got type <A>: with values a={}, s={}\n", value.a, value.s);
     } else if constexpr (fmt::is_formattable<T>()) {
-        fmt::print("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
+        CBOR_TAGS_TEST_LOG("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
     } else {
-        fmt::print("Got type <{}>\n", nameof::nameof_short_type<T>());
+        CBOR_TAGS_TEST_LOG("Got type <{}>\n", nameof::nameof_short_type<T>());
     }
 }
 
@@ -75,11 +75,11 @@ TEST_CASE("Basic reflection") {
     };
 
     auto count = detail::aggregate_binding_count<M>;
-    fmt::print("M has {} members\n", count);
+    CBOR_TAGS_TEST_LOG("M has {} members\n", count);
     CHECK_EQ(count, 2);
 
     auto is_constructible = IsBracesContructible<M, any, any>;
-    fmt::print("M is braces construct with 2 members: {}\n", is_constructible);
+    CBOR_TAGS_TEST_LOG("M is braces construct with 2 members: {}\n", is_constructible);
     CHECK(is_constructible);
 
     // Check if we can construct M with any and any
@@ -154,11 +154,11 @@ struct Test {
 
 struct TEST_SUITE {
     struct test_iostream : Test {
-        void run() override { std::cout << "Hello world!" << std::endl; }
+        void run() override { CBOR_TAGS_TEST_LOG("Hello world!"); }
     } a;
 
     struct test_doctest : Test {
-        void run() override { std::cout << "Hello doctest!" << std::endl; }
+        void run() override { CBOR_TAGS_TEST_LOG("Hello doctest!"); }
     } b;
 };
 

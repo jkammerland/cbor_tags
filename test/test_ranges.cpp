@@ -184,14 +184,14 @@ TEST_CASE("view joining of multiple buffers") {
                                                                              std::ranges::ref_view(buffer3)} |
                        ranges::actions::join;
 
-    fmt::print("All data joined: {}\n", to_hex(joined_view));
+    CBOR_TAGS_TEST_LOG("All data joined: {}\n", to_hex(joined_view));
 
     // Method 2: Process each buffer separately
     std::vector<std::reference_wrapper<std::vector<char>>> buffers = {buffer1, buffer2, buffer3};
 
-    fmt::print("\nEach buffer separately:\n");
+    CBOR_TAGS_TEST_LOG("\nEach buffer separately:\n");
     for (auto &buffer : buffers) {
-        fmt::print("Buffer: {}\n", to_hex(buffer.get()));
+        CBOR_TAGS_TEST_LOG("Buffer: {}\n", to_hex(buffer.get()));
     }
 
     CHECK_EQ(to_hex(joined_view), "0102030405060708090a0b0c");
@@ -204,9 +204,9 @@ TEST_CASE("joining views of different types") {
     std::array<char, 4> array_buffer  = {'W', 'o', 'r', 'l'};
 
     // Print individual buffers
-    fmt::print("Vector buffer: {}\n", to_hex(char_buffer));
-    fmt::print("String buffer: {}\n", to_hex(string_buffer));
-    fmt::print("Array buffer: {}\n", to_hex(array_buffer));
+    CBOR_TAGS_TEST_LOG("Vector buffer: {}\n", to_hex(char_buffer));
+    CBOR_TAGS_TEST_LOG("String buffer: {}\n", to_hex(string_buffer));
+    CBOR_TAGS_TEST_LOG("Array buffer: {}\n", to_hex(array_buffer));
 
     // # 1.
     auto buffers_tuple =
@@ -215,7 +215,7 @@ TEST_CASE("joining views of different types") {
     std::string tuple_hex;
     std::apply([&](const auto &...views) { ((tuple_hex += to_hex(views)), ...); }, buffers_tuple);
 
-    fmt::print("Tuple-joined hex: {}\n", tuple_hex);
+    CBOR_TAGS_TEST_LOG("Tuple-joined hex: {}\n", tuple_hex);
 
     // # 2.
     auto char_view   = std::ranges::ref_view(char_buffer);
@@ -229,7 +229,7 @@ TEST_CASE("joining views of different types") {
     for (const auto &byte : concatenated_view) {
         joined_hex += fmt::format("{:02x}", byte);
     }
-    fmt::print("Joined hex: {}\n", joined_hex);
+    CBOR_TAGS_TEST_LOG("Joined hex: {}\n", joined_hex);
 
     // Check joined content
     CHECK_EQ(joined_hex, "01020348656c6c6f576f726c0102");
@@ -245,9 +245,9 @@ TEST_CASE("joining views of different types") {
 
     // # 3.
     auto v3_view = ranges::views::concat(char_view, string_view, array_view, deq_view);
-    fmt::print("v3_view size: {}\n", std::ranges::distance(v3_view));
+    CBOR_TAGS_TEST_LOG("v3_view size: {}\n", std::ranges::distance(v3_view));
     CHECK_EQ(std::ranges::distance(v3_view), 14);
-    fmt::print("v3_view to_hex: {}\n", to_hex(v3_view));
+    CBOR_TAGS_TEST_LOG("v3_view to_hex: {}\n", to_hex(v3_view));
 
     // Verify the contents of v3_view
     CHECK_EQ(to_hex(v3_view), "01020348656c6c6f576f726c0102");

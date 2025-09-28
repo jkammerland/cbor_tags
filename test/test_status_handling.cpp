@@ -145,10 +145,7 @@ TEST_SUITE("Decoding the wrong thing") {
             std::variant<std::pair<static_tag<139>, std::string>, std::pair<static_tag<140>, std::string>> variant;
             auto                                                                                           dec     = make_decoder(data);
             auto                                                                                           result2 = dec(variant);
-            if (!result2) {
-                fmt::print("Error: {}\n", status_message(result2.error()));
-            }
-            CHECK(result2);
+            CHECK_MESSAGE(result2, "Error: {}\n", status_message(result2.error()));
             CHECK(std::holds_alternative<std::pair<static_tag<140>, std::string>>(variant));
         }
     }
@@ -173,7 +170,7 @@ TEST_SUITE("Open objects - wrap as etc") {
 
         REQUIRE(enc(140_tag, wrap_as_array{1, 2}));
 
-        fmt::print("data: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
         auto dec = make_decoder(data);
         int  a, b;
@@ -221,7 +218,7 @@ TEST_SUITE("Try resume decoding") {
         auto enc  = make_encoder(data);
 
         CHECK(enc(140_tag, wrap_as_array{1, 2}));
-        fmt::print("data: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
         auto dec = make_decoder(data);
         int  a;

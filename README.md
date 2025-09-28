@@ -727,7 +727,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.9.3 # or specify a particular commit/tag
+  GIT_TAG v0.9.4 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -818,6 +818,16 @@ Tests can be built after configuring with `-DCBOR_TAGS_BUILD_TESTS=ON`, which wi
 Numbers with comparisons are coming soon. The current benchmarks can be run by configuring with `-DCBOR_TAGS_BUILD_BENCHMARKS=ON`. It creates two targets, `bench_encoder` and `bench_decoder`.
 
 These can all be collectively run with `make/ninja test`, ctest will only run `tests`.
+
+### Test Logging
+
+Unit tests rely on doctest's `INFO` context for diagnostics, so log lines now surface only when an assertion fails. Set the environment variable `CBOR_TAGS_TEST_LOGS=1` to force the helper logs to emit immediately via `MESSAGE`, for example:
+
+```bash
+CBOR_TAGS_TEST_LOGS=1 ./build/test/tests --reporter=console
+```
+
+Leave the variable unset (default) to keep passing runs quiet while still capturing context on failures.
 
 ## 📄 License
 

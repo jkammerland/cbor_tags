@@ -72,13 +72,13 @@ TEST_CASE("CBOR Encoder on deque") {
         auto size2 = buffer.size();
 
         CHECK_EQ(size2 - size1, 1 + big_string.size());
-        // fmt::print("big_string: {}\n", to_hex(buffer));
+        // CBOR_TAGS_TEST_LOG("big_string: {}\n", to_hex(buffer));
     }
 }
 
 TEST_CASE_TEMPLATE("CBOR with std::pmr", T, std::pmr::vector<std::byte>, std::pmr::deque<char>, std::pmr::deque<uint8_t>,
                    std::pmr::list<char>, std::pmr::list<uint8_t>) {
-    fmt::print("Testing with T: {}\n", nameof::nameof_type<T>());
+    CBOR_TAGS_TEST_LOG("Testing with T: {}\n", nameof::nameof_type<T>());
 
     std::array<std::byte, 1024>         buffer;
     std::pmr::monotonic_buffer_resource resource(buffer.data(), buffer.size());
@@ -104,7 +104,7 @@ TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::by
         auto span = std::span(buffer_array);
 
         enc.encode(span);
-        // fmt::print("span: {}\n", to_hex(data));
+        // CBOR_TAGS_TEST_LOG("span: {}\n", to_hex(data));
         CHECK_EQ(
             to_hex(data),
             "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f18201821182218231824182518261827182818291"
@@ -118,7 +118,7 @@ TEST_CASE_TEMPLATE("CBOR test mix types with containers", T, std::vector<std::by
         std::iota(buffer_list.begin(), buffer_list.end(), 0);
 
         enc.encode(buffer_list);
-        // fmt::print("list: {}\n", to_hex(data));
+        // CBOR_TAGS_TEST_LOG("list: {}\n", to_hex(data));
         CHECK_EQ(to_hex(data),
                  "9864000102030405060708090a0b0c0d0e0f101112131415161718181819181a181b181c181d181e181f1820182118221823182418251826182718281"
                  "829182a182b182c182d182e182f1830183118321833183418351836183718381839183a183b183c183d183e183f184018411842184318441845184618"

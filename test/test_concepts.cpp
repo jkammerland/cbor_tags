@@ -9,6 +9,7 @@
 #include "cbor_tags/cbor_reflection_impl.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
+#include "test_util.h"
 #include "tl/expected.hpp"
 
 #include <array>
@@ -405,7 +406,10 @@ struct NONMAJORTYPE {
 };
 
 template <typename Byte, typename... Types> auto collect_concept_types() {
-    (fmt::print("Types: {}, value: <{}>\n", nameof::nameof_type<Types>(), static_cast<int>(ConceptType<Byte, Types>::value)), ...);
+    auto log_type = []<typename Type>() {
+        CBOR_TAGS_TEST_LOG("Types: {}, value: <{}>\n", nameof::nameof_type<Type>(), static_cast<int>(ConceptType<Byte, Type>::value));
+    };
+    (log_type.template operator()<Types>(), ...);
     return std::set<Byte>{ConceptType<Byte, Types>::value...};
 }
 
@@ -413,7 +417,7 @@ TEST_CASE_TEMPLATE("Test which concept type major type", T, std::byte, char, uin
     auto set = collect_concept_types<T, std::uint8_t, double, float, negative, std::int8_t, std::map<int, std::string>,
                                      std::array<uint8_t, 5>, std::string, std::vector<std::byte>, TAGMAJORTYPE, NONMAJORTYPE>();
 
-    fmt::print("Set contains: [{}], size of set is <{}>\n", fmt::join(set, ", "), set.size());
+    CBOR_TAGS_TEST_LOG("Set contains: [{}], size of set is <{}>\n", fmt::join(set, ", "), set.size());
     CHECK_EQ(set.size(), 9);
 }
 
@@ -435,7 +439,7 @@ TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, 
 }
 
 TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, unsigned char) {
-    fmt::print("Testing concept with T: {}\n", nameof::nameof_type<T>());
+    CBOR_TAGS_TEST_LOG("Testing concept with T: {}\n", nameof::nameof_type<T>());
     CHECK(cbor::tags::ValidCborBuffer<std::array<T, 5>>);
     CHECK(cbor::tags::ValidCborBuffer<std::vector<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::list<T>>);
@@ -455,13 +459,13 @@ struct AllCborMajorsExample {
     template <typename T>
         requires IsContiguous<T>
     AllCborMajorsExample(T) : is_contiguous(true) {
-        fmt::print("A() contiguous\n");
+        CBOR_TAGS_TEST_LOG("A() contiguous\n");
     }
 
     template <typename T>
         requires(!IsContiguous<T>)
     AllCborMajorsExample(T) : is_contiguous(false) {
-        fmt::print("A() not contiguous\n");
+        CBOR_TAGS_TEST_LOG("A() not contiguous\n");
     }
 };
 
@@ -488,7 +492,7 @@ TEST_CASE_TEMPLATE("Cbor stream", T, std::vector<uint8_t>, const std::vector<uin
     T          buffer;
     CborStream stream(buffer);
 
-    fmt::print("name: {}\n", nameof::nameof_full_type<decltype(stream.buffer)>());
+    CBOR_TAGS_TEST_LOG("name: {}\n", nameof::nameof_full_type<decltype(stream.buffer)>());
     if constexpr (std::is_const_v<T>) {
         CHECK(std::is_reference_v<decltype(stream.buffer)>);
         CHECK(std::is_const_v<std::remove_reference_t<decltype(stream.buffer)>>);
@@ -635,7 +639,7 @@ TEST_CASE("to_tupple address") {
 }
 
 // Example function that uses tags
-template <std::uint64_t N> constexpr void process_tag(static_tag<N>) { fmt::print("Processing tag value: 0x{:x} ({})\n", N, N); }
+template <std::uint64_t N> void process_tag(static_tag<N>) { CBOR_TAGS_TEST_LOG("Processing tag value: 0x{:x} ({})\n", N, N); }
 
 TEST_CASE("Literals") {
     using namespace cbor::tags::literals;
@@ -680,7 +684,7 @@ TEST_CASE_TEMPLATE(
     auto result    = valid_concept_mapping_v<T>;
     auto array     = valid_concept_mapping_array_v<T>;
     auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
-    fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
+    CBOR_TAGS_TEST_LOG("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
 
     CHECK(result);
     CHECK_EQ(unmatched, 0);
@@ -702,7 +706,7 @@ TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, neg
     auto result    = valid_concept_mapping_v<T>;
     auto array     = valid_concept_mapping_array_v<T>;
     auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
-    fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
+    CBOR_TAGS_TEST_LOG("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
 
     CHECK(!result);
     CHECK_EQ(unmatched, 0);
@@ -733,7 +737,7 @@ TEST_CASE_TEMPLATE("Nested variants positive", T, std::variant<std::variant<VA1,
     auto result    = valid_concept_mapping_v<T>;
     auto array     = valid_concept_mapping_array_v<T>;
     auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
-    fmt::print("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
+    CBOR_TAGS_TEST_LOG("Array: {}, Expecting <true>: Got: <{}>\n", array, result);
 
     CHECK(result);
     CHECK_EQ(unmatched, 0);
@@ -744,7 +748,7 @@ TEST_CASE_TEMPLATE("Nested variants negative", T, std::variant<std::variant<VA1,
     auto result    = valid_concept_mapping_v<T>;
     auto array     = valid_concept_mapping_array_v<T>;
     auto unmatched = valid_concept_mapping_n_unmatched_v<T>;
-    fmt::print("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
+    CBOR_TAGS_TEST_LOG("Array: {}, Expecting <false>: Got: <{}>\n", array, result);
 
     CHECK(!result);
     CHECK_EQ(unmatched, 0);
@@ -826,7 +830,7 @@ TEST_CASE_TEMPLATE("Count tags in variant", T, void) {
     constexpr auto tags_size = ValidConceptMapping<std::variant<ATAG, static_tag<1000>, INLINEMEEEEE, Z, static_tag<4>>>::tags_size_outer();
 
     for (size_t i = 0; i < tags_size; ++i) {
-        fmt::print("Tag: {}\n", tags[i]);
+        CBOR_TAGS_TEST_LOG("Tag: {}\n", tags[i]);
     }
 
     static_assert(tags_size == 5);

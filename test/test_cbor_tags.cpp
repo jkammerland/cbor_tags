@@ -96,7 +96,7 @@ TEST_CASE_TEMPLATE("Test tag 140", T, STATIC_EX1, DYNAMIC_EX1, INLINE_EX1) {
 
     CHECK(enc(t));
 
-    fmt::println("buffer {}", to_hex(data));
+    CBOR_TAGS_TEST_LOG("buffer {}", to_hex(data));
 
     auto dec = make_decoder(data);
     T    result;
@@ -131,7 +131,7 @@ TEST_CASE("Test tuple dynamic tag") {
     auto tag = make_tag_pair(140_tag, std::tuple<int, std::string>{42, "Hello world!"});
     CHECK(enc(tag));
 
-    fmt::print("data: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
     auto dec = make_decoder(data);
 
@@ -200,7 +200,7 @@ TEST_CASE("Multi tag handling") {
 
         CHECK(enc(141_tag, D{.cbor_tag = {}, .v = "Hello world!"}));
 
-        fmt::print("data: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
         auto dec = make_decoder(data);
         D    result;
@@ -229,7 +229,7 @@ TEST_CASE("Multi tag handling") {
 
         CHECK(enc(MultiObj{.cbor_tag = {}, .a = {.cbor_tag = {}, .a = 1}, .b = {.cbor_tag = {}, .b = 2}}));
 
-        fmt::print("data: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
         if (decltype(enc)::options::wrap_groups) {
             REQUIRE_EQ(to_hex(data), "d88c82d88e01d88d02");
@@ -324,13 +324,13 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
 
         CHECK(enc(v));
 
-        fmt::print("data: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
         auto           dec = make_decoder(data);
         VersionVariant result;
         auto           status = dec(result);
         if (!status) {
-            fmt::print("Error: {}\n", status_message(status.error()));
+            CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(status.error()));
         }
         REQUIRE(status);
         REQUIRE(std::holds_alternative<v1::Version>(result));
@@ -346,7 +346,7 @@ TEST_CASE_TEMPLATE("Nested tagged variant and structs", AX, A1, A2, A3) {
         VersionVariant v{v2::Version{{}, AX{}, 3.14, "Hello world!"}};
         CHECK(enc(v));
 
-        fmt::print("data: {}\n", to_hex(data));
+        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
 
         auto           dec = make_decoder(data);
         VersionVariant result;

@@ -10,6 +10,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +26,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -139,6 +141,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         // Decode to intermediate form
         auto bstring = decode_bstring(additionalInfo);
+        const auto bstring_size = static_cast<std::size_t>(std::ranges::distance(bstring.begin(), bstring.end()));
 
         // Now handle the target assignment based on contiguity constraints
         if constexpr (std::is_same_v<T, decltype(bstring)>) {
@@ -155,12 +158,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // std::vector<typename T::value_type> temp(bstring.begin(), bstring.end());
             // t = T(...); // Construct from temp somehow
         } else if constexpr (IsFixedArray<T>) {
-            // Fixed-size array assignment
-            if (bstring.size() > t.size()) {
-                debug::println("Error: bstr size exceeds target array size, {} > {}", bstring.size(), t.size());
-                return status_code::out_of_memory;
+            // Fixed-size array assignment requires exact match
+            if (bstring_size != t.size()) {
+                debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
+                return status_code::unexpected_group_size;
             }
-            std::copy_n(bstring.begin(), t.size(), t.data());
+            std::ranges::copy(bstring, t.begin());
         } else {
             // Standard case - construct from iterators
             t = T(bstring.begin(), bstring.end());
@@ -739,40 +742,59 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr auto decode_bstring(byte additionalInfo) {
-        auto length = decode_unsigned(additionalInfo);
-        if (reader_.empty(data_, length - 1)) {
-            throw std::runtime_error("Unexpected end of input");
-        }
+        const auto length      = decode_unsigned(additionalInfo);
+        const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto result = std::span<const byte>(reinterpret_cast<const byte *>(&data_[reader_.position_]), length);
-            reader_.position_ += length;
+            auto *begin = std::ranges::data(data_) + reader_.position_;
+            auto  result = std::span<const byte>(reinterpret_cast<const byte *>(begin), span_length);
+            reader_.position_ += span_length;
             return result;
         } else {
-            auto it           = std::next(reader_.position_, length);
-            auto result       = subrange(reader_.position_, it);
+            auto start = reader_.position_;
+            auto it    = start;
+            for (size_type i = 0; i < span_length; ++i) {
+                ++it;
+            }
+            auto result = subrange(start, it);
             reader_.position_ = it;
             return bstr_view_t{.range = result};
         }
     }
 
     constexpr auto decode_text(byte additionalInfo) {
-        auto length = decode_unsigned(additionalInfo);
-        if (reader_.empty(data_, length - 1)) {
-            throw std::runtime_error("Unexpected end of input");
-        }
+        const auto length      = decode_unsigned(additionalInfo);
+        const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto result =
-                length > 0 ? std::string_view(reinterpret_cast<const char *>(&data_[reader_.position_]), length) : std::string_view{};
-            reader_.position_ += length;
+            auto *begin = std::ranges::data(data_) + reader_.position_;
+            auto  result = std::string_view(reinterpret_cast<const char *>(begin), span_length);
+            reader_.position_ += span_length;
             return result;
         } else {
-            auto it           = std::next(reader_.position_, length);
-            auto result       = subrange(reader_.position_, it);
+            auto start = reader_.position_;
+            auto it    = start;
+            for (size_type i = 0; i < span_length; ++i) {
+                ++it;
+            }
+            auto result = subrange(start, it);
             reader_.position_ = it;
             return tstr_view_t{.range = result};
         }
+    }
+
+    constexpr size_type require_bytes(std::uint64_t length) {
+        if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+            throw std::runtime_error("CBOR item exceeds buffer limits");
+        }
+        const auto needed = static_cast<size_type>(length);
+        if (needed == 0) {
+            return 0;
+        }
+        if (reader_.empty(data_, needed - 1)) {
+            throw std::runtime_error("Unexpected end of input");
+        }
+        return needed;
     }
 
     constexpr uint64_t read_unsigned(byte additionalInfo) {

@@ -120,7 +120,7 @@ TEST_CASE("CBOR variant enum + negative") {
 
     CHECK(enc(v));
 
-    fmt::print("buffer: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("buffer: {}\n", to_hex(data));
 
     auto                      dec = make_decoder(data);
     std::variant<G, negative> v2;
@@ -129,7 +129,7 @@ TEST_CASE("CBOR variant enum + negative") {
 
     REQUIRE_EQ(v.index(), v2.index());
     CHECK_EQ(std::get<negative>(v).value, std::get<negative>(v2).value);
-    fmt::print("v: {} / v2: {} / v: {} / v2: {}\n", v.index(), v2.index(), std::get<negative>(v).value, std::get<negative>(v2).value);
+    CBOR_TAGS_TEST_LOG("v: {} / v2: {} / v: {} / v2: {}\n", v.index(), v2.index(), std::get<negative>(v).value, std::get<negative>(v2).value);
 }
 
 TEST_CASE("Check variant for enums static_assert") {
@@ -155,7 +155,7 @@ TEST_CASE("CBOR - struct with enum") {
         .extra2 = {.cbor_tag = {555}, .h = static_cast<H>(-1)}};
     CHECK(enc(s));
 
-    fmt::println("buffer: {}", to_hex(data));
+    CBOR_TAGS_TEST_LOG("buffer: {}", to_hex(data));
 
     auto dec = make_decoder(data);
     S    s2;

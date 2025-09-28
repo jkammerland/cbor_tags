@@ -63,20 +63,20 @@ TEST_CASE("CBOR - Advanced types") {
 
     auto result = enc(a0);
     if (!result) {
-        std::cerr << "Failed to encode A" << '\n';
-        CHECK(false);
+        CAPTURE(status_message(result.error()));
     }
+    REQUIRE(result);
 
-    fmt::print("Encoded: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("Encoded: {}\n", to_hex(data));
 
     // Decoding
     auto                 dec = make_decoder(data);
     AllCborMajorsExample a1;
     result = dec(a1);
     if (!result) {
-        std::cerr << "Failed to decode A: " << status_message(result.error()) << '\n';
-        CHECK(false);
+        CAPTURE(status_message(result.error()));
     }
+    REQUIRE(result);
 
     CHECK_EQ(a0.a0, a1.a0);
     CHECK_EQ(a0.a1, a1.a1);
@@ -134,10 +134,10 @@ TEST_CASE("switch on tag") {
     // Encode Api2 with a tag of 0x20
     REQUIRE(enc(make_tag_pair(20_hex_tag, Api2{"hello", "world"})));
 
-    fmt::print("Data: {}\n", to_hex(data));
+    CBOR_TAGS_TEST_LOG("Data: {}\n", to_hex(data));
     fmt::memory_buffer buffer;
     buffer_annotate(data, buffer);
-    fmt::print("Annotation: \n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("Annotation: \n{}\n", fmt::to_string(buffer));
 
     auto                                             dec = make_decoder(data);
     std::variant<std::vector<std::byte>, as_tag_any> value;
@@ -149,20 +149,20 @@ TEST_CASE("switch on tag") {
                 auto result = dec(a);
                 REQUIRE(result);
                 if (result) {
-                    fmt::print("Api1: a={}, b={}\n", a.a, a.b);
+                    CBOR_TAGS_TEST_LOG("Api1: a={}, b={}\n", a.a, a.b);
                 }
             } else if (value.tag == 0x20) {
                 Api2 a;
                 auto result = dec(a);
                 REQUIRE(result);
                 if (result) {
-                    fmt::print("Api2: a={}, b={}\n", a.a, a.b);
+                    CBOR_TAGS_TEST_LOG("Api2: a={}, b={}\n", a.a, a.b);
                 }
             } else {
-                fmt::print("Unknown tag: {}\n", value.tag);
+                CBOR_TAGS_TEST_LOG("Unknown tag: {}\n", value.tag);
             }
         } else {
-            fmt::print("Binary data: {}\n", to_hex(value));
+            CBOR_TAGS_TEST_LOG("Binary data: {}\n", to_hex(value));
         }
     };
 
@@ -197,5 +197,5 @@ TEST_CASE("Annotation and diagnostics example") {
                     "36f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71");
 
     buffer_diagnostic(data, buffer, {});
-    fmt::print("\n{}\n", fmt::to_string(buffer));
+    CBOR_TAGS_TEST_LOG("\n{}\n", fmt::to_string(buffer));
 }
