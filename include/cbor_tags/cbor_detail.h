@@ -55,19 +55,34 @@ template <typename T> struct appender<T, true> {
     using value_type = T::value_type;
     size_type head_{};
 
+    constexpr void ensure_capacity(const T &container, size_type additional) const {
+        if (additional == 0) {
+            return;
+        }
+        if (head_ > container.size() || (container.size() - head_) < additional) {
+            throw std::runtime_error("CBOR output buffer too small");
+        }
+    }
+
     template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
         static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
         constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
         static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
+        ensure_capacity(container, static_cast<size_type>(sizeof...(Ts)));
         ((container[head_++] = std::forward<Ts>(values)), ...);
     }
 
-    constexpr void operator()(T &container, value_type value) { container[head_++] = value; }
+    constexpr void operator()(T &container, value_type value) {
+        ensure_capacity(container, 1);
+        container[head_++] = value;
+    }
     constexpr void operator()(T &container, std::span<const std::byte> values) {
+        ensure_capacity(container, static_cast<size_type>(values.size()));
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());
         head_ += values.size();
     }
     constexpr void operator()(T &container, std::string_view value) {
+        ensure_capacity(container, static_cast<size_type>(value.size()));
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(value.data()), value.size());
         head_ += value.size();
     }

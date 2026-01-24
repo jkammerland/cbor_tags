@@ -203,6 +203,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         const auto length = decode_unsigned(additionalInfo);
+        if constexpr (IsFixedArray<T>) {
+            if (length != static_cast<std::uint64_t>(value.size())) {
+                return status_code::unexpected_group_size;
+            }
+        }
         if constexpr (HasReserve<T>) {
             value.reserve(length);
         }
@@ -481,11 +486,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (major != major_type::ByteString) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
-            auto length = decode_unsigned(additionalInfo);
+            const auto length_u64 = decode_unsigned(additionalInfo);
+            if (length_u64 == 0) {
+                value = {};
+                return status_code::success;
+            }
+
+            if (length_u64 > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+                return status_code::error;
+            }
+
+            const auto length = static_cast<size_type>(length_u64);
             if (reader_.empty(data_, length - 1)) {
                 return status_code::incomplete;
             }
-            value = std::basic_string_view<std::byte>(reinterpret_cast<const std::byte *>(&data_[reader_.position_]), length);
+
+            const auto *begin = std::ranges::data(data_) + reader_.position_;
+            value             = std::basic_string_view<std::byte>(reinterpret_cast<const std::byte *>(begin), length);
+            reader_.position_ += length;
             return status_code::success;
         }
     }
@@ -596,11 +614,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tstr_on_buffer;
         }
         value.size = decode_unsigned(additionalInfo);
+        if (value.size == 0) {
+            return status_code::success;
+        }
+
+        if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+            return status_code::error;
+        }
+
+        const auto needed = static_cast<size_type>(value.size);
+        if (reader_.empty(data_, needed - 1)) {
+            return status_code::incomplete;
+        }
 
         if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += value.size;
+            reader_.position_ += needed;
         } else {
-            reader_.position_ = std::next(reader_.position_, value.size);
+            if (needed > static_cast<size_type>(std::numeric_limits<std::ptrdiff_t>::max())) {
+                return status_code::error;
+            }
+            reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
+            reader_.current_offset_ += needed;
         }
 
         return status_code::success;
@@ -610,11 +644,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_bstr_on_buffer;
         }
         value.size = decode_unsigned(additionalInfo);
+        if (value.size == 0) {
+            return status_code::success;
+        }
+
+        if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+            return status_code::error;
+        }
+
+        const auto needed = static_cast<size_type>(value.size);
+        if (reader_.empty(data_, needed - 1)) {
+            return status_code::incomplete;
+        }
 
         if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += value.size;
+            reader_.position_ += needed;
         } else {
-            reader_.position_ = std::next(reader_.position_, value.size);
+            if (needed > static_cast<size_type>(std::numeric_limits<std::ptrdiff_t>::max())) {
+                return status_code::error;
+            }
+            reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
+            reader_.current_offset_ += needed;
         }
 
         return status_code::success;
@@ -758,6 +808,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             auto result = subrange(start, it);
             reader_.position_ = it;
+            reader_.current_offset_ += span_length;
             return bstr_view_t{.range = result};
         }
     }
@@ -779,6 +830,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             auto result = subrange(start, it);
             reader_.position_ = it;
+            reader_.current_offset_ += span_length;
             return tstr_view_t{.range = result};
         }
     }
