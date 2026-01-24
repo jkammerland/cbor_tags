@@ -492,8 +492,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return status_code::success;
             }
 
-            if (length_u64 > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                return status_code::error;
+            if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                if (length_u64 > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+                    return status_code::error;
+                }
             }
 
             const auto length = static_cast<size_type>(length_u64);
@@ -618,8 +620,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::success;
         }
 
-        if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-            return status_code::error;
+        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+            if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+                return status_code::error;
+            }
         }
 
         const auto needed = static_cast<size_type>(value.size);
@@ -648,8 +652,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::success;
         }
 
-        if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-            return status_code::error;
+        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+            if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+                return status_code::error;
+            }
         }
 
         const auto needed = static_cast<size_type>(value.size);
@@ -836,8 +842,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr size_type require_bytes(std::uint64_t length) {
-        if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-            throw std::runtime_error("CBOR item exceeds buffer limits");
+        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+            if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+                throw std::runtime_error("CBOR item exceeds buffer limits");
+            }
         }
         const auto needed = static_cast<size_type>(length);
         if (needed == 0) {
