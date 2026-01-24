@@ -18,13 +18,13 @@ jobs:
               name: "macOS AppleClang 26",
               cc: "clang",
               cxx: "clang++",
-              xcode_version: "26.0.0"
+              xcode_version: "^26.0.0"
             }
           - {
               name: "macOS AppleClang 16",
               cc: "clang",
               cxx: "clang++",
-              xcode_version: "16.2.0"
+              xcode_version: "^16.2.0"
             }
 
     steps:
