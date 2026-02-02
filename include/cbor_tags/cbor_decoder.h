@@ -12,11 +12,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <coroutine>
 #include <cstddef>
 #include <cstdint>
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
+#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
 // #include <magic_enum/magic_enum.hpp>
@@ -26,6 +28,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <tuple>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -34,6 +37,143 @@
 #include <variant>
 
 namespace cbor::tags {
+
+namespace detail {
+struct incomplete_error final : std::exception {
+    const char *what() const noexcept override { return "Unexpected end of input"; }
+};
+
+template <typename T> struct stream_arg_store {
+    using type = std::remove_reference_t<T>;
+    static constexpr auto make(T &&value) -> type { return std::forward<T>(value); }
+    static constexpr auto get(type &value) -> type & { return value; }
+};
+
+template <typename T> struct stream_arg_store<T &> {
+    using type = std::reference_wrapper<T>;
+    static constexpr auto make(T &value) -> type { return std::ref(value); }
+    static constexpr auto get(type &value) -> T & { return value.get(); }
+};
+
+template <typename T> using stream_arg_store_t = typename stream_arg_store<T>::type;
+
+template <typename TupleRefs, typename TupleVals, std::size_t... Is>
+constexpr void tuple_assign_impl(TupleRefs &refs, const TupleVals &vals, std::index_sequence<Is...>) {
+    ((std::get<Is>(refs) = std::get<Is>(vals)), ...);
+}
+
+template <typename... Ts> struct stream_value_checkpoint;
+
+template <typename T> struct stream_value_checkpoint<T> {
+    T  *value_;
+    T   saved_;
+    bool active_{true};
+
+    explicit stream_value_checkpoint(T &value) : value_(&value), saved_(value) {}
+    void rollback() {
+        if (!active_) {
+            return;
+        }
+        *value_ = saved_;
+        active_ = false;
+    }
+    void commit() { active_ = false; }
+};
+
+template <typename... Ts> struct stream_value_checkpoint<wrap_as_array<Ts...>> {
+    wrap_as_array<Ts...> &value_;
+    using saved_tuple_t = std::tuple<std::remove_cvref_t<Ts>...>;
+    saved_tuple_t saved_;
+    bool          active_{true};
+
+    explicit stream_value_checkpoint(wrap_as_array<Ts...> &value)
+        : value_(value)
+        , saved_(std::apply([](auto &...refs) { return saved_tuple_t{refs...}; }, value.values_)) {}
+
+    void rollback() {
+        if (!active_) {
+            return;
+        }
+        tuple_assign_impl(value_.values_, saved_, std::index_sequence_for<Ts...>{});
+        active_ = false;
+    }
+    void commit() { active_ = false; }
+};
+
+template <typename... TupleArgs> struct stream_value_checkpoint<wrap_as_array<std::tuple<TupleArgs...>>> {
+    wrap_as_array<std::tuple<TupleArgs...>> &value_;
+    std::tuple<TupleArgs...>                 saved_;
+    bool                                     active_{true};
+
+    explicit stream_value_checkpoint(wrap_as_array<std::tuple<TupleArgs...>> &value) : value_(value), saved_(value.values_) {}
+
+    void rollback() {
+        if (!active_) {
+            return;
+        }
+        value_.values_ = saved_;
+        active_        = false;
+    }
+    void commit() { active_ = false; }
+};
+} // namespace detail
+
+struct stream_decode_op {
+    struct promise_type {
+        status_code status_{status_code::success};
+
+        auto get_return_object() noexcept { return stream_decode_op{handle_type::from_promise(*this)}; }
+        auto initial_suspend() noexcept { return std::suspend_always{}; }
+        auto final_suspend() noexcept { return std::suspend_always{}; }
+        auto yield_value(status_code status) noexcept {
+            status_ = status;
+            return std::suspend_always{};
+        }
+        void unhandled_exception() noexcept { status_ = status_code::error; }
+        void return_value(status_code status) noexcept { status_ = status; }
+
+        using handle_type = std::coroutine_handle<promise_type>;
+    };
+
+    using handle_type = std::coroutine_handle<promise_type>;
+
+    constexpr stream_decode_op() = default;
+    explicit stream_decode_op(handle_type handle) : handle_(handle) {}
+
+    stream_decode_op(const stream_decode_op &)            = delete;
+    stream_decode_op &operator=(const stream_decode_op &) = delete;
+
+    stream_decode_op(stream_decode_op &&other) noexcept : handle_(std::exchange(other.handle_, {})) {}
+    stream_decode_op &operator=(stream_decode_op &&other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        if (handle_) {
+            handle_.destroy();
+        }
+        handle_ = std::exchange(other.handle_, {});
+        return *this;
+    }
+
+    ~stream_decode_op() {
+        if (handle_) {
+            handle_.destroy();
+        }
+    }
+
+    auto resume() -> status_code {
+        if (handle_ && !handle_.done()) {
+            handle_.resume();
+        }
+        return status();
+    }
+
+    auto status() const noexcept -> status_code { return handle_ ? handle_.promise().status_ : status_code::error; }
+    auto done() const noexcept -> bool { return !handle_ || handle_.done(); }
+
+  private:
+    handle_type handle_{};
+};
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
     requires ValidCborBuffer<InputBuffer>
@@ -66,12 +206,75 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return unexpected<decltype(collect_status.result)>(collect_status.result);
             }
             return expected_type{};
+        } catch (const detail::incomplete_error &) {
+            return unexpected<status_code>(status_code::incomplete);
         } catch (const std::bad_alloc &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch ([[maybe_unused]] const std::exception &e) {
             debug::println("Caught exception: {}", e.what());
             return unexpected<status_code>(status_code::error); // TODO: placeholder
         }
+    }
+
+    template <typename... Args> auto stream_decode(Args &&...args) -> stream_decode_op {
+        using args_tuple_t  = std::tuple<Args...>;
+        using stores_tuple_t = std::tuple<detail::stream_arg_store_t<Args>...>;
+
+        stores_tuple_t stored{detail::stream_arg_store<Args>::make(std::forward<Args>(args))...};
+        std::size_t    index = 0;
+
+        constexpr auto count = sizeof...(Args);
+        while (index < count) {
+            status_code result = status_code::error;
+
+            auto decode_one = [this, &stored]<std::size_t I>() -> status_code {
+                using arg_t   = std::tuple_element_t<I, args_tuple_t>;
+                auto &store   = std::get<I>(stored);
+                auto &arg     = detail::stream_arg_store<arg_t>::get(store);
+                auto  reader_checkpoint = reader_;
+                detail::stream_value_checkpoint<std::remove_cvref_t<decltype(arg)>> checkpoint{arg};
+
+                status_code status = status_code::success;
+                try {
+                    if constexpr (std::is_same_v<void, decltype(this->decode(arg))>) {
+                        this->decode(arg);
+                        status = status_code::success;
+                    } else {
+                        status = this->decode(arg);
+                    }
+                } catch (const detail::incomplete_error &) {
+                    status = status_code::incomplete;
+                }
+
+                if (status == status_code::incomplete) {
+                    reader_ = reader_checkpoint;
+                    checkpoint.rollback();
+                } else {
+                    checkpoint.commit();
+                }
+
+                return status;
+            };
+
+            bool matched = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                return ((index == Is ? (result = decode_one.template operator()<Is>(), true) : false) || ...);
+            }(std::make_index_sequence<count>{});
+
+            (void)matched;
+
+            if (result == status_code::success) {
+                ++index;
+                continue;
+            }
+            if (result == status_code::incomplete) {
+                co_yield status_code::incomplete;
+                continue;
+            }
+
+            co_return result;
+        }
+
+        co_return status_code::success;
     }
 
     template <IsSigned T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
@@ -852,7 +1055,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return 0;
         }
         if (reader_.empty(data_, needed - 1)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         return needed;
     }
@@ -869,14 +1072,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr uint8_t read_uint8() {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         return static_cast<uint8_t>(reader_.read(data_));
     }
 
     constexpr uint16_t read_uint16() {
         if (reader_.empty(data_, 1)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         auto byte0 = static_cast<uint16_t>(reader_.read(data_));
         auto byte1 = static_cast<uint16_t>(reader_.read(data_));
@@ -885,7 +1088,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr uint32_t read_uint32() {
         if (reader_.empty(data_, 3)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         auto byte0 = static_cast<uint32_t>(reader_.read(data_));
         auto byte1 = static_cast<uint32_t>(reader_.read(data_));
@@ -896,7 +1099,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr uint64_t read_uint64() {
         if (reader_.empty(data_, 7)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         auto byte0 = static_cast<uint64_t>(reader_.read(data_));
         auto byte1 = static_cast<uint64_t>(reader_.read(data_));
@@ -911,7 +1114,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr simple read_simple() {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         return simple{static_cast<simple::value_type>(reader_.read(data_))};
     }
@@ -919,7 +1122,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     // CBOR Float16 decoding function
     constexpr float16_t read_float16() {
         if (reader_.empty(data_, 1)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
         auto byte0 = static_cast<uint16_t>(reader_.read(data_));
         auto byte1 = static_cast<uint16_t>(reader_.read(data_));
@@ -938,7 +1141,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw detail::incomplete_error{};
         }
 
         const auto initialByte    = reader_.read(data_);
