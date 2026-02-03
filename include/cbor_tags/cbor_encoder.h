@@ -211,6 +211,43 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     constexpr void encode(simple value) { encode_major_and_size(value.value, static_cast<byte_type>(0xE0)); }
 
+    template <typename T> constexpr void encode(as_indefinite<T> value) {
+        if constexpr (IsBinaryString<T> && !IsBinaryHeader<T>) {
+            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_byte_string>()));
+            encode(value.value_);
+            appender_(data_, static_cast<byte_type>(0xFF));
+        } else if constexpr (IsTextString<T> && !IsTextHeader<T>) {
+            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_text_string>()));
+            encode(value.value_);
+            appender_(data_, static_cast<byte_type>(0xFF));
+        } else if constexpr (IsMap<T> && !IsMapHeader<T>) {
+            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_map>()));
+            for (const auto &[key, mapped_value] : value.value_) {
+                encode(key);
+                encode(mapped_value);
+            }
+            appender_(data_, static_cast<byte_type>(0xFF));
+        } else if constexpr (IsArray<T> && !IsArrayHeader<T>) {
+            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_array>()));
+            for (const auto &item : value.value_) {
+                encode(item);
+            }
+            appender_(data_, static_cast<byte_type>(0xFF));
+        } else {
+            throw std::runtime_error("Invalid type for indefinite encoding");
+        }
+    }
+
+    template <typename T> constexpr void encode(as_maybe_indefinite<T> value) {
+        auto &ref = value.get();
+        if constexpr ((IsBinaryString<T> && !IsBinaryHeader<T>) || (IsTextString<T> && !IsTextHeader<T>) ||
+                      (IsMap<T> && !IsMapHeader<T>) || (IsArray<T> && !IsArrayHeader<T>)) {
+            encode(ref);
+        } else {
+            throw std::runtime_error("Invalid type for maybe indefinite encoding");
+        }
+    }
+
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
