@@ -703,92 +703,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    template <typename T> constexpr status_code decode(as_indefinite<T> value) {
-        if (reader_.empty(data_)) {
-            return status_code::incomplete;
-        }
-
-        const auto [major, additionalInfo] = read_initial_byte();
-        if constexpr (IsBinaryString<T> && !IsBinaryHeader<T> && !IsConstView<T>) {
-            if (major != major_type::ByteString || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            return decode_indef_bstr(value.value_);
-        } else if constexpr (IsTextString<T> && !IsTextHeader<T> && !IsConstView<T>) {
-            if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_tstr_on_buffer;
-            }
-            return decode_indef_tstr(value.value_);
-        } else if constexpr (IsMap<T> && !IsMapHeader<T>) {
-            if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_map_on_buffer;
-            }
-            return decode_indef_map(value.value_);
-        } else if constexpr (IsArray<T> && !IsArrayHeader<T>) {
-            if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            return decode_indef_array(value.value_);
-        } else {
-            return status_code::error;
-        }
-    }
-
-    template <typename T> constexpr status_code decode_maybe_indefinite_value(T &value) {
-        if (reader_.empty(data_)) {
-            return status_code::incomplete;
-        }
-
-        const auto [major, additionalInfo] = read_initial_byte();
-        if constexpr (IsBinaryString<T> && !IsBinaryHeader<T> && !IsConstView<T>) {
-            if (major != major_type::ByteString) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return decode_indef_bstr(value);
-            }
-            return decode(value, major, additionalInfo);
-        } else if constexpr (IsTextString<T> && !IsTextHeader<T> && !IsConstView<T>) {
-            if (major != major_type::TextString) {
-                return status_code::no_match_for_tstr_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return decode_indef_tstr(value);
-            }
-            return decode(value, major, additionalInfo);
-        } else if constexpr (IsMap<T> && !IsMapHeader<T>) {
-            if (major != major_type::Map) {
-                return status_code::no_match_for_map_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return decode_indef_map(value);
-            }
-            return decode(value, major, additionalInfo);
-        } else if constexpr (IsArray<T> && !IsArrayHeader<T>) {
-            if (major != major_type::Array) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return decode_indef_array(value);
-            }
-            return decode(value, major, additionalInfo);
-        } else {
-            return status_code::error;
-        }
-    }
-
-    template <typename T>
-        requires std::is_reference_v<T>
-    constexpr status_code decode(as_maybe_indefinite<T> value) {
-        return decode_maybe_indefinite_value(value.get());
-    }
-
-    template <typename T>
-        requires(!std::is_reference_v<T>)
-    constexpr status_code decode(as_maybe_indefinite<T> &value) {
-        return decode_maybe_indefinite_value(value.get());
-    }
-
     constexpr status_code decode(simple &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
@@ -1219,6 +1133,98 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     detail::reader<InputBuffer> reader_;
 };
 
+template <typename T> struct cbor_indefinite_decoder {
+    using byte = std::byte;
+
+    template <typename U> constexpr status_code decode(as_indefinite<U> value) {
+        auto &dec = detail::underlying<T>(this);
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+
+        const auto [major, additionalInfo] = dec.read_initial_byte();
+        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
+            if (major != major_type::ByteString || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            return dec.decode_indef_bstr(value.value_);
+        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
+            if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            return dec.decode_indef_tstr(value.value_);
+        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            return dec.decode_indef_map(value.value_);
+        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            return dec.decode_indef_array(value.value_);
+        } else {
+            return status_code::error;
+        }
+    }
+
+    template <typename U> constexpr status_code decode_maybe_indefinite_value(U &value) {
+        auto &dec = detail::underlying<T>(this);
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+
+        const auto [major, additionalInfo] = dec.read_initial_byte();
+        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
+            if (major != major_type::ByteString) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_bstr(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
+            if (major != major_type::TextString) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_tstr(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            if (major != major_type::Map) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_map(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            if (major != major_type::Array) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_array(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else {
+            return status_code::error;
+        }
+    }
+
+    template <typename U>
+        requires std::is_reference_v<U>
+    constexpr status_code decode(as_maybe_indefinite<U> value) {
+        return decode_maybe_indefinite_value(value.get());
+    }
+
+    template <typename U>
+        requires(!std::is_reference_v<U>)
+    constexpr status_code decode(as_maybe_indefinite<U> &value) {
+        return decode_maybe_indefinite_value(value.get());
+    }
+};
+
 template <typename T> struct cbor_header_decoder {
     constexpr auto get_and_validate_header(major_type expectedMajorType) {
         auto [initialByte, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
@@ -1247,7 +1253,7 @@ template <typename T> struct cbor_header_decoder {
 };
 
 template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder>(buffer);
+    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
 }
 
 } // namespace cbor::tags

@@ -211,43 +211,6 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     constexpr void encode(simple value) { encode_major_and_size(value.value, static_cast<byte_type>(0xE0)); }
 
-    template <typename T> constexpr void encode(as_indefinite<T> value) {
-        if constexpr (IsBinaryString<T> && !IsBinaryHeader<T>) {
-            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_byte_string>()));
-            encode(value.value_);
-            appender_(data_, static_cast<byte_type>(0xFF));
-        } else if constexpr (IsTextString<T> && !IsTextHeader<T>) {
-            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_text_string>()));
-            encode(value.value_);
-            appender_(data_, static_cast<byte_type>(0xFF));
-        } else if constexpr (IsMap<T> && !IsMapHeader<T>) {
-            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_map>()));
-            for (const auto &[key, mapped_value] : value.value_) {
-                encode(key);
-                encode(mapped_value);
-            }
-            appender_(data_, static_cast<byte_type>(0xFF));
-        } else if constexpr (IsArray<T> && !IsArrayHeader<T>) {
-            appender_(data_, static_cast<byte_type>(get_indefinite_start<as_indefinite_array>()));
-            for (const auto &item : value.value_) {
-                encode(item);
-            }
-            appender_(data_, static_cast<byte_type>(0xFF));
-        } else {
-            throw std::runtime_error("Invalid type for indefinite encoding");
-        }
-    }
-
-    template <typename T> constexpr void encode(as_maybe_indefinite<T> value) {
-        auto &ref = value.get();
-        if constexpr ((IsBinaryString<T> && !IsBinaryHeader<T>) || (IsTextString<T> && !IsTextHeader<T>) ||
-                      (IsMap<T> && !IsMapHeader<T>) || (IsArray<T> && !IsArrayHeader<T>)) {
-            encode(ref);
-        } else {
-            throw std::runtime_error("Invalid type for maybe indefinite encoding");
-        }
-    }
-
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;
     OutputBuffer                  &data_;
@@ -264,6 +227,47 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                 (this->encode(args), ...);
             },
             std::forward<Tuple>(tuple));
+    }
+};
+
+template <typename T> struct cbor_indefinite_encoder {
+    template <typename U> constexpr void encode(as_indefinite<U> value) {
+        auto &enc = detail::underlying<T>(this);
+        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U>) {
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_byte_string>()));
+            enc.encode(value.value_);
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
+        } else if constexpr (IsTextString<U> && !IsTextHeader<U>) {
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_text_string>()));
+            enc.encode(value.value_);
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
+        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_map>()));
+            for (const auto &[key, mapped_value] : value.value_) {
+                enc.encode(key);
+                enc.encode(mapped_value);
+            }
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
+        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_array>()));
+            for (const auto &item : value.value_) {
+                enc.encode(item);
+            }
+            enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
+        } else {
+            throw std::runtime_error("Invalid type for indefinite encoding");
+        }
+    }
+
+    template <typename U> constexpr void encode(as_maybe_indefinite<U> value) {
+        auto &enc = detail::underlying<T>(this);
+        auto &ref = value.get();
+        if constexpr ((IsBinaryString<U> && !IsBinaryHeader<U>) || (IsTextString<U> && !IsTextHeader<U>) || (IsMap<U> && !IsMapHeader<U>) ||
+                      (IsArray<U> && !IsArrayHeader<U>)) {
+            enc.encode(ref);
+        } else {
+            throw std::runtime_error("Invalid type for maybe indefinite encoding");
+        }
     }
 };
 
@@ -298,7 +302,7 @@ template <typename T> struct cbor_header_encoder {
 };
 
 template <typename OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_optional_encoder,
-                   cbor_variant_encoder>(buffer);
+    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_indefinite_encoder,
+                   cbor_optional_encoder, cbor_variant_encoder>(buffer);
 }
 } // namespace cbor::tags
