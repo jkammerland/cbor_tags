@@ -137,3 +137,55 @@ multi‑client flow but uses `shm_open` + `mmap` and futex‑based queues instea
 - 10 notifier events to all subscribed clients
 - Read‑only setter → ERROR E_NOT_OK
 - Method request/response and shutdown
+
+## vSomeIP TCP/UDP E2E (optional)
+
+There is an optional vSomeIP‑backed E2E test in `test/vsomeip/vsomeip_e2e.cpp` that exercises the
+same **field/event/method** flow using vSomeIP over **TCP (reliable)** and **UDP (unreliable)**.
+It uses vSomeIP configuration files in `test/vsomeip/conf/` and runs three processes:
+
+- **Server**: vSomeIP routing manager + service provider
+- **Client A**: performs writable setter, receives events, calls method, then sends shutdown
+- **Client B**: subscribes, receives events, verifies read‑only setter error
+
+### Pseudocode (vSomeIP)
+
+```
+main():
+  run_transport(tcp_config, reliable=true)
+  run_transport(udp_config, reliable=false)
+
+run_transport(config):
+  set VSOMEIP_CONFIGURATION=config
+  fork server -> wait for "ready"
+  fork client_b (subscriber)
+  fork client_a (driver)
+  wait client_b done
+  signal client_a to shutdown
+  wait all children
+
+server:
+  offer service + field event
+  on writable setter:
+    reply E_OK
+    send 10 notifications (seq 0..9)
+  on read‑only setter:
+    reply ERROR E_NOT_OK
+  on method:
+    reply with payload
+  on shutdown:
+    stop
+
+client_a:
+  request service, subscribe
+  send writable setter, expect E_OK
+  receive 10 notifications
+  send method request, expect response
+  wait "go" signal, send shutdown
+
+client_b:
+  request service, subscribe
+  receive 10 notifications
+  send read‑only setter, expect ERROR E_NOT_OK
+  signal "done"
+```
