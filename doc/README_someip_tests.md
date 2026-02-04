@@ -126,3 +126,14 @@ readonly_field:
 
 - The test uses AF_UNIX sockets + `fork()`. On Windows, it’s skipped.
 - If the environment forbids `bind()` for AF_UNIX sockets, the test exits early with a note.
+
+## Shared memory variant
+
+There is a Linux‑only shared‑memory E2E test in `test/test_someip_shm_e2e.cpp` that mirrors the same
+multi‑client flow but uses `shm_open` + `mmap` and futex‑based queues instead of sockets. It covers:
+
+- Find/Offer and Subscribe/Ack per client
+- Writable setter → RESPONSE E_OK
+- 10 notifier events to all subscribed clients
+- Read‑only setter → ERROR E_NOT_OK
+- Method request/response and shutdown
