@@ -381,199 +381,243 @@ static int run_server(const std::string &path, int ready_fd) {
     // Signal readiness to parent.
     notify_ready(kReady);
 
-    unique_fd client_fd{::accept(listen_fd.fd(), nullptr, nullptr)};
-    if (!client_fd.valid()) {
-        std::fprintf(stderr, "server: accept() failed: %s\n", std::strerror(errno));
-        return 1;
+    struct client_state {
+        unique_fd fd{};
+        bool      subscribed{false};
+    };
+
+    std::array<client_state, 2> clients{};
+    for (auto &client : clients) {
+        client.fd.reset(::accept(listen_fd.fd(), nullptr, nullptr));
+        if (!client.fd.valid()) {
+            std::fprintf(stderr, "server: accept() failed: %s\n", std::strerror(errno));
+            return 1;
+        }
     }
 
     const someip::ser::config cfg{someip::wire::endian::big};
 
-    bool offered    = false;
-    bool subscribed = false;
+    std::size_t offered_count = 0;
     FieldValue field_value{.value = 0};
     for (;;) {
-        auto frame = recv_someip_frame(client_fd.fd(), 5000);
-        if (frame.empty()) {
-            std::fprintf(stderr, "server: recv frame failed\n");
-            return 1;
+        std::array<pollfd, 2> pfds{};
+        for (std::size_t i = 0; i < clients.size(); ++i) {
+            pfds[i].fd     = clients[i].fd.fd();
+            pfds[i].events = POLLIN;
         }
 
-        auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-        if (!parsed) {
-            std::fprintf(stderr, "server: try_parse_frame failed\n");
-            return 1;
-        }
-
-        const auto payload_base = parsed->tp ? 20u : 16u;
-
-        if (parsed->hdr.msg.service_id == someip::sd::kServiceId && parsed->hdr.msg.method_id == someip::sd::kMethodId) {
-            auto sdmsg = someip::sd::decode_message(std::span<const std::byte>(frame.data(), frame.size()));
-            if (!sdmsg) {
-                std::fprintf(stderr, "server: decode SD failed\n");
-                return 1;
+        int rc = 0;
+        for (;;) {
+            rc = ::poll(pfds.data(), pfds.size(), 5000);
+            if (rc < 0 && errno == EINTR) {
+                continue;
             }
-
-            for (const auto &ent : sdmsg->sd_payload.entries) {
-                if (std::holds_alternative<someip::sd::service_entry>(ent)) {
-                    const auto &se = std::get<someip::sd::service_entry>(ent);
-                    if (se.c.type == someip::sd::entry_type::find_service) {
-                        auto offer = build_sd_offer_service();
-                        if (offer.empty()) {
-                            std::fprintf(stderr, "server: build offer failed\n");
-                            return 1;
-                        }
-                        if (!send_frame(client_fd.fd(), offer, 2000)) {
-                            std::fprintf(stderr, "server: send offer failed\n");
-                            return 1;
-                        }
-                        offered = true;
-                    }
-                } else if (std::holds_alternative<someip::sd::eventgroup_entry>(ent)) {
-                    const auto &eg = std::get<someip::sd::eventgroup_entry>(ent);
-                    if (eg.c.type == someip::sd::entry_type::subscribe_eventgroup) {
-                        auto ack = build_sd_subscribe_ack();
-                        if (ack.empty()) {
-                            std::fprintf(stderr, "server: build ack failed\n");
-                            return 1;
-                        }
-                        if (!send_frame(client_fd.fd(), ack, 2000)) {
-                            std::fprintf(stderr, "server: send ack failed\n");
-                            return 1;
-                        }
-                        subscribed = true;
-                    }
-                }
-            }
-
-            continue;
-        }
-
-        // Shutdown
-        if (parsed->hdr.msg.service_id == 0x1234 && parsed->hdr.msg.method_id == 0x00FF &&
-            parsed->hdr.msg_type == someip::wire::message_type::request_no_return) {
             break;
         }
+        if (rc <= 0) {
+            std::fprintf(stderr, "server: poll failed/timeout\n");
+            return 1;
+        }
 
-        // Field setter (writable)
-        if (someip::iface::is_set_request(parsed->hdr, writable_field)) {
-            FieldValue req{};
-            auto       st = someip::ser::decode(parsed->payload, cfg, req, payload_base);
-            if (!st) {
-                std::fprintf(stderr, "server: decode field set failed\n");
+        bool should_exit = false;
+        for (std::size_t idx = 0; idx < clients.size(); ++idx) {
+            if ((pfds[idx].revents & (POLLERR | POLLHUP)) != 0) {
+                std::fprintf(stderr, "server: client socket error/hangup\n");
                 return 1;
             }
-            field_value = req;
-
-            someip::wire::header rh{};
-            rh.msg.service_id    = parsed->hdr.msg.service_id;
-            rh.msg.method_id     = parsed->hdr.msg.method_id;
-            rh.req.client_id     = parsed->hdr.req.client_id;
-            rh.req.session_id    = parsed->hdr.req.session_id;
-            rh.protocol_version  = 1;
-            rh.interface_version = parsed->hdr.interface_version;
-            rh.msg_type          = someip::wire::message_type::response;
-            rh.return_code       = someip::wire::return_code::E_OK;
-
-            EmptyPayload ep{};
-            auto         resp_frame = build_someip_message(cfg, rh, ep);
-            if (resp_frame.empty()) {
-                std::fprintf(stderr, "server: build set response failed\n");
-                return 1;
+            if ((pfds[idx].revents & POLLIN) == 0) {
+                continue;
             }
-            if (!send_frame(client_fd.fd(), resp_frame, 2000)) {
-                std::fprintf(stderr, "server: send set response failed\n");
+            auto frame = recv_someip_frame(clients[idx].fd.fd(), 5000);
+            if (frame.empty()) {
+                std::fprintf(stderr, "server: recv frame failed\n");
                 return 1;
             }
 
-            if (subscribed) {
-                for (std::uint32_t i = 0; i < 10; ++i) {
-                    auto eh = someip::iface::make_notify_header(writable_field, 1);
-                    FieldEvent evp{.seq = i, .value = field_value.value};
-                    auto       ev = build_someip_message(cfg, eh, evp);
-                    if (ev.empty()) {
-                        std::fprintf(stderr, "server: build event failed\n");
-                        return 1;
-                    }
-                    if (!send_frame(client_fd.fd(), ev, 2000)) {
-                        std::fprintf(stderr, "server: send event failed\n");
-                        return 1;
+            auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
+            if (!parsed) {
+                std::fprintf(stderr, "server: try_parse_frame failed\n");
+                return 1;
+            }
+
+            const auto payload_base = parsed->tp ? 20u : 16u;
+
+            if (parsed->hdr.msg.service_id == someip::sd::kServiceId && parsed->hdr.msg.method_id == someip::sd::kMethodId) {
+                auto sdmsg = someip::sd::decode_message(std::span<const std::byte>(frame.data(), frame.size()));
+                if (!sdmsg) {
+                    std::fprintf(stderr, "server: decode SD failed\n");
+                    return 1;
+                }
+
+                for (const auto &ent : sdmsg->sd_payload.entries) {
+                    if (std::holds_alternative<someip::sd::service_entry>(ent)) {
+                        const auto &se = std::get<someip::sd::service_entry>(ent);
+                        if (se.c.type == someip::sd::entry_type::find_service) {
+                            auto offer = build_sd_offer_service();
+                            if (offer.empty()) {
+                                std::fprintf(stderr, "server: build offer failed\n");
+                                return 1;
+                            }
+                            if (!send_frame(clients[idx].fd.fd(), offer, 2000)) {
+                                std::fprintf(stderr, "server: send offer failed\n");
+                                return 1;
+                            }
+                            offered_count++;
+                        }
+                    } else if (std::holds_alternative<someip::sd::eventgroup_entry>(ent)) {
+                        const auto &eg = std::get<someip::sd::eventgroup_entry>(ent);
+                        if (eg.c.type == someip::sd::entry_type::subscribe_eventgroup) {
+                            auto ack = build_sd_subscribe_ack();
+                            if (ack.empty()) {
+                                std::fprintf(stderr, "server: build ack failed\n");
+                                return 1;
+                            }
+                            if (!send_frame(clients[idx].fd.fd(), ack, 2000)) {
+                                std::fprintf(stderr, "server: send ack failed\n");
+                                return 1;
+                            }
+                            clients[idx].subscribed = true;
+                        }
                     }
                 }
+
+                continue;
             }
-            continue;
+
+            // Shutdown
+            if (parsed->hdr.msg.service_id == 0x1234 && parsed->hdr.msg.method_id == 0x00FF &&
+                parsed->hdr.msg_type == someip::wire::message_type::request_no_return) {
+                should_exit = true;
+                break;
+            }
+
+            // Field setter (writable)
+            if (someip::iface::is_set_request(parsed->hdr, writable_field)) {
+                FieldValue req{};
+                auto       st = someip::ser::decode(parsed->payload, cfg, req, payload_base);
+                if (!st) {
+                    std::fprintf(stderr, "server: decode field set failed\n");
+                    return 1;
+                }
+                field_value = req;
+
+                someip::wire::header rh{};
+                rh.msg.service_id    = parsed->hdr.msg.service_id;
+                rh.msg.method_id     = parsed->hdr.msg.method_id;
+                rh.req.client_id     = parsed->hdr.req.client_id;
+                rh.req.session_id    = parsed->hdr.req.session_id;
+                rh.protocol_version  = 1;
+                rh.interface_version = parsed->hdr.interface_version;
+                rh.msg_type          = someip::wire::message_type::response;
+                rh.return_code       = someip::wire::return_code::E_OK;
+
+                EmptyPayload ep{};
+                auto         resp_frame = build_someip_message(cfg, rh, ep);
+                if (resp_frame.empty()) {
+                    std::fprintf(stderr, "server: build set response failed\n");
+                    return 1;
+                }
+                if (!send_frame(clients[idx].fd.fd(), resp_frame, 2000)) {
+                    std::fprintf(stderr, "server: send set response failed\n");
+                    return 1;
+                }
+
+                for (const auto &client : clients) {
+                    if (!client.subscribed) {
+                        continue;
+                    }
+                    for (std::uint32_t i = 0; i < 10; ++i) {
+                        auto eh = someip::iface::make_notify_header(writable_field, 1);
+                        FieldEvent evp{.seq = i, .value = field_value.value};
+                        auto       ev = build_someip_message(cfg, eh, evp);
+                        if (ev.empty()) {
+                            std::fprintf(stderr, "server: build event failed\n");
+                            return 1;
+                        }
+                        if (!send_frame(client.fd.fd(), ev, 2000)) {
+                            std::fprintf(stderr, "server: send event failed\n");
+                            return 1;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Field setter (read-only -> error)
+            if (someip::iface::is_set_request(parsed->hdr, readonly_field)) {
+                FieldValue req{};
+                auto       st = someip::ser::decode(parsed->payload, cfg, req, payload_base);
+                if (!st) {
+                    std::fprintf(stderr, "server: decode readonly set failed\n");
+                    return 1;
+                }
+
+                someip::wire::header rh{};
+                rh.msg.service_id    = parsed->hdr.msg.service_id;
+                rh.msg.method_id     = parsed->hdr.msg.method_id;
+                rh.req.client_id     = parsed->hdr.req.client_id;
+                rh.req.session_id    = parsed->hdr.req.session_id;
+                rh.protocol_version  = 1;
+                rh.interface_version = parsed->hdr.interface_version;
+                rh.msg_type          = someip::wire::message_type::error;
+                rh.return_code       = someip::wire::return_code::E_NOT_OK;
+
+                EmptyPayload ep{};
+                auto         resp_frame = build_someip_message(cfg, rh, ep);
+                if (resp_frame.empty()) {
+                    std::fprintf(stderr, "server: build readonly error failed\n");
+                    return 1;
+                }
+                if (!send_frame(clients[idx].fd.fd(), resp_frame, 2000)) {
+                    std::fprintf(stderr, "server: send readonly error failed\n");
+                    return 1;
+                }
+                continue;
+            }
+
+            // Method impl: y = x + 1
+            if (parsed->hdr.msg.service_id == 0x1234 && parsed->hdr.msg.method_id == 0x0001 &&
+                parsed->hdr.msg_type == someip::wire::message_type::request) {
+                MethodReq req{};
+                auto      st = someip::ser::decode(parsed->payload, cfg, req, payload_base);
+                if (!st) {
+                    std::fprintf(stderr, "server: decode method req failed\n");
+                    return 1;
+                }
+
+                MethodResp resp{.y = req.x + 1};
+                someip::wire::header rh{};
+                rh.msg.service_id    = parsed->hdr.msg.service_id;
+                rh.msg.method_id     = parsed->hdr.msg.method_id;
+                rh.req.client_id     = parsed->hdr.req.client_id;
+                rh.req.session_id    = parsed->hdr.req.session_id;
+                rh.protocol_version  = 1;
+                rh.interface_version = parsed->hdr.interface_version;
+                rh.msg_type          = someip::wire::message_type::response;
+                rh.return_code       = someip::wire::return_code::E_OK;
+
+                auto resp_frame = build_someip_message(cfg, rh, resp);
+                if (resp_frame.empty()) {
+                    std::fprintf(stderr, "server: build response failed\n");
+                    return 1;
+                }
+                if (!send_frame(clients[idx].fd.fd(), resp_frame, 2000)) {
+                    std::fprintf(stderr, "server: send response failed\n");
+                    return 1;
+                }
+                continue;
+            }
+
+            std::fprintf(stderr,
+                         "server: unexpected message (offers=%zu) sid=0x%04X mid=0x%04X type=0x%02X\n",
+                         offered_count, unsigned(parsed->hdr.msg.service_id), unsigned(parsed->hdr.msg.method_id),
+                         unsigned(parsed->hdr.msg_type));
+            return 1;
         }
 
-        // Field setter (read-only -> error)
-        if (someip::iface::is_set_request(parsed->hdr, readonly_field)) {
-            FieldValue req{};
-            auto       st = someip::ser::decode(parsed->payload, cfg, req, payload_base);
-            if (!st) {
-                std::fprintf(stderr, "server: decode readonly set failed\n");
-                return 1;
-            }
-
-            someip::wire::header rh{};
-            rh.msg.service_id    = parsed->hdr.msg.service_id;
-            rh.msg.method_id     = parsed->hdr.msg.method_id;
-            rh.req.client_id     = parsed->hdr.req.client_id;
-            rh.req.session_id    = parsed->hdr.req.session_id;
-            rh.protocol_version  = 1;
-            rh.interface_version = parsed->hdr.interface_version;
-            rh.msg_type          = someip::wire::message_type::error;
-            rh.return_code       = someip::wire::return_code::E_NOT_OK;
-
-            EmptyPayload ep{};
-            auto         resp_frame = build_someip_message(cfg, rh, ep);
-            if (resp_frame.empty()) {
-                std::fprintf(stderr, "server: build readonly error failed\n");
-                return 1;
-            }
-            if (!send_frame(client_fd.fd(), resp_frame, 2000)) {
-                std::fprintf(stderr, "server: send readonly error failed\n");
-                return 1;
-            }
-            continue;
+        if (should_exit) {
+            break;
         }
-
-        // Method impl: y = x + 1
-        if (parsed->hdr.msg.service_id == 0x1234 && parsed->hdr.msg.method_id == 0x0001 &&
-            parsed->hdr.msg_type == someip::wire::message_type::request) {
-            MethodReq req{};
-            auto      st = someip::ser::decode(parsed->payload, cfg, req, payload_base);
-            if (!st) {
-                std::fprintf(stderr, "server: decode method req failed\n");
-                return 1;
-            }
-
-            MethodResp resp{.y = req.x + 1};
-            someip::wire::header rh{};
-            rh.msg.service_id    = parsed->hdr.msg.service_id;
-            rh.msg.method_id     = parsed->hdr.msg.method_id;
-            rh.req.client_id     = parsed->hdr.req.client_id;
-            rh.req.session_id    = parsed->hdr.req.session_id;
-            rh.protocol_version  = 1;
-            rh.interface_version = parsed->hdr.interface_version;
-            rh.msg_type          = someip::wire::message_type::response;
-            rh.return_code       = someip::wire::return_code::E_OK;
-
-            auto resp_frame = build_someip_message(cfg, rh, resp);
-            if (resp_frame.empty()) {
-                std::fprintf(stderr, "server: build response failed\n");
-                return 1;
-            }
-            if (!send_frame(client_fd.fd(), resp_frame, 2000)) {
-                std::fprintf(stderr, "server: send response failed\n");
-                return 1;
-            }
-            continue;
-        }
-
-        std::fprintf(stderr,
-                     "server: unexpected message (offered=%d subscribed=%d) sid=0x%04X mid=0x%04X type=0x%02X\n",
-                     offered ? 1 : 0, subscribed ? 1 : 0, unsigned(parsed->hdr.msg.service_id), unsigned(parsed->hdr.msg.method_id),
-                     unsigned(parsed->hdr.msg_type));
-        return 1;
     }
 
     ::unlink(path.c_str());
@@ -612,7 +656,7 @@ struct child_guard {
 
 } // namespace
 
-TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
+TEST_CASE("someip: uds e2e multi-client subscribe + setter + notify") {
     const someip::ser::config cfg{someip::wire::endian::big};
 
     const auto socket_path = std::string("/tmp/someip_e2e_") + std::to_string(::getpid()) + ".sock";
@@ -649,16 +693,18 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         FAIL("server initialization failed");
     }
 
-    auto client = connect_with_retry(socket_path, 2000);
-    REQUIRE(client.valid());
+    auto client_a = connect_with_retry(socket_path, 2000);
+    REQUIRE(client_a.valid());
+    auto client_b = connect_with_retry(socket_path, 2000);
+    REQUIRE(client_b.valid());
 
     // Find -> Offer
     {
         const auto find = build_sd_find_service();
         REQUIRE_FALSE(find.empty());
-        REQUIRE(send_frame(client.fd(), find, 2000));
+        REQUIRE(send_frame(client_a.fd(), find, 2000));
 
-        const auto offer_frame = recv_someip_frame(client.fd(), 2000);
+        const auto offer_frame = recv_someip_frame(client_a.fd(), 2000);
         REQUIRE_FALSE(offer_frame.empty());
         auto offer = someip::sd::decode_message(std::span<const std::byte>(offer_frame.data(), offer_frame.size()));
         REQUIRE(offer.has_value());
@@ -678,13 +724,28 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         REQUIRE(std::holds_alternative<someip::sd::ipv4_endpoint_option>(runs->run1[0]));
     }
 
-    // Subscribe -> Ack
+    // Find -> Offer (client B)
+    {
+        const auto find = build_sd_find_service();
+        REQUIRE_FALSE(find.empty());
+        REQUIRE(send_frame(client_b.fd(), find, 2000));
+
+        const auto offer_frame = recv_someip_frame(client_b.fd(), 2000);
+        REQUIRE_FALSE(offer_frame.empty());
+        auto offer = someip::sd::decode_message(std::span<const std::byte>(offer_frame.data(), offer_frame.size()));
+        REQUIRE(offer.has_value());
+        REQUIRE(offer->sd_payload.entries.size() == 1);
+        REQUIRE(offer->sd_payload.options.size() >= 1);
+        REQUIRE(std::holds_alternative<someip::sd::service_entry>(offer->sd_payload.entries[0]));
+    }
+
+    // Subscribe -> Ack (client A)
     {
         const auto sub = build_sd_subscribe_eventgroup();
         REQUIRE_FALSE(sub.empty());
-        REQUIRE(send_frame(client.fd(), sub, 2000));
+        REQUIRE(send_frame(client_a.fd(), sub, 2000));
 
-        const auto ack_frame = recv_someip_frame(client.fd(), 2000);
+        const auto ack_frame = recv_someip_frame(client_a.fd(), 2000);
         REQUIRE_FALSE(ack_frame.empty());
         auto ack = someip::sd::decode_message(std::span<const std::byte>(ack_frame.data(), ack_frame.size()));
         REQUIRE(ack.has_value());
@@ -698,7 +759,21 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         CHECK(eg.eventgroup_id == writable_field.eventgroup_id);
     }
 
-    // Setter (writable) -> Response OK
+    // Subscribe -> Ack (client B)
+    {
+        const auto sub = build_sd_subscribe_eventgroup();
+        REQUIRE_FALSE(sub.empty());
+        REQUIRE(send_frame(client_b.fd(), sub, 2000));
+
+        const auto ack_frame = recv_someip_frame(client_b.fd(), 2000);
+        REQUIRE_FALSE(ack_frame.empty());
+        auto ack = someip::sd::decode_message(std::span<const std::byte>(ack_frame.data(), ack_frame.size()));
+        REQUIRE(ack.has_value());
+        REQUIRE(ack->sd_payload.entries.size() == 1);
+        REQUIRE(std::holds_alternative<someip::sd::eventgroup_entry>(ack->sd_payload.entries[0]));
+    }
+
+    // Setter (writable) -> Response OK (client A)
     {
         const someip::wire::request_id req_id{0x0001, 0x0001};
         auto h = someip::iface::make_set_request_header(writable_field, req_id, 1);
@@ -706,9 +781,9 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
 
         const auto req_frame = build_someip_message(cfg, h, req);
         REQUIRE_FALSE(req_frame.empty());
-        REQUIRE(send_frame(client.fd(), req_frame, 2000));
+        REQUIRE(send_frame(client_a.fd(), req_frame, 2000));
 
-        const auto resp_frame = recv_someip_frame(client.fd(), 2000);
+        const auto resp_frame = recv_someip_frame(client_a.fd(), 2000);
         REQUIRE_FALSE(resp_frame.empty());
         auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(resp_frame.data(), resp_frame.size()));
         REQUIRE(parsed.has_value());
@@ -718,9 +793,9 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         CHECK(parsed->hdr.return_code == someip::wire::return_code::E_OK);
     }
 
-    // Receive 10 notifications after write.
+    // Receive 10 notifications after write (client A).
     for (std::uint32_t i = 0; i < 10; ++i) {
-        const auto ev_frame = recv_someip_frame(client.fd(), 2000);
+        const auto ev_frame = recv_someip_frame(client_a.fd(), 2000);
         REQUIRE_FALSE(ev_frame.empty());
         auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(ev_frame.data(), ev_frame.size()));
         REQUIRE(parsed.has_value());
@@ -735,7 +810,24 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         CHECK(ep.value == 0xBEEFu);
     }
 
-    // Setter (read-only) -> ERROR E_NOT_OK
+    // Receive 10 notifications after write (client B).
+    for (std::uint32_t i = 0; i < 10; ++i) {
+        const auto ev_frame = recv_someip_frame(client_b.fd(), 2000);
+        REQUIRE_FALSE(ev_frame.empty());
+        auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(ev_frame.data(), ev_frame.size()));
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->hdr.msg.service_id == writable_field.service_id);
+        CHECK(parsed->hdr.msg.method_id == writable_field.notifier_event_id);
+        CHECK(parsed->hdr.msg_type == someip::wire::message_type::notification);
+
+        FieldEvent ep{};
+        const auto payload_base = parsed->tp ? 20u : 16u;
+        REQUIRE(someip::ser::decode(parsed->payload, cfg, ep, payload_base).has_value());
+        CHECK(ep.seq == i);
+        CHECK(ep.value == 0xBEEFu);
+    }
+
+    // Setter (read-only) -> ERROR E_NOT_OK (client B)
     {
         const someip::wire::request_id req_id{0x0001, 0x0002};
         auto h = someip::iface::make_set_request_header(readonly_field, req_id, 1);
@@ -743,9 +835,9 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
 
         const auto req_frame = build_someip_message(cfg, h, req);
         REQUIRE_FALSE(req_frame.empty());
-        REQUIRE(send_frame(client.fd(), req_frame, 2000));
+        REQUIRE(send_frame(client_b.fd(), req_frame, 2000));
 
-        const auto resp_frame = recv_someip_frame(client.fd(), 2000);
+        const auto resp_frame = recv_someip_frame(client_b.fd(), 2000);
         REQUIRE_FALSE(resp_frame.empty());
         auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(resp_frame.data(), resp_frame.size()));
         REQUIRE(parsed.has_value());
@@ -770,9 +862,9 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         MethodReq req{.x = 41};
         const auto req_frame = build_someip_message(cfg, h, req);
         REQUIRE_FALSE(req_frame.empty());
-        REQUIRE(send_frame(client.fd(), req_frame, 2000));
+        REQUIRE(send_frame(client_a.fd(), req_frame, 2000));
 
-        const auto resp_frame = recv_someip_frame(client.fd(), 2000);
+        const auto resp_frame = recv_someip_frame(client_a.fd(), 2000);
         REQUIRE_FALSE(resp_frame.empty());
         auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(resp_frame.data(), resp_frame.size()));
         REQUIRE(parsed.has_value());
@@ -804,7 +896,7 @@ TEST_CASE("someip: uds e2e find/offer/subscribe + 10 events + method") {
         EmptyPayload ep{};
         const auto shutdown_frame = build_someip_message(cfg, h, ep);
         REQUIRE_FALSE(shutdown_frame.empty());
-        REQUIRE(send_frame(client.fd(), shutdown_frame, 2000));
+        REQUIRE(send_frame(client_a.fd(), shutdown_frame, 2000));
     }
 
     // Wait for child.

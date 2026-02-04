@@ -11,9 +11,9 @@ The test is implemented in `test/test_someip_uds_e2e.cpp`.
 
 ## Overview
 
-Two processes are used:
+Two processes are used (server + parent), with two client connections:
 
-- **Parent (client)**: drives the E2E scenario.
+- **Parent (client)**: drives the E2E scenario and opens **two** client connections.
 - **Child (server)**: implements SD, field setter, notifications, and a method.
 
 The parent and child communicate over a single AF_UNIX/SOCK_STREAM socket.
@@ -27,48 +27,51 @@ start_server(socket_path):
   create AF_UNIX socket
   bind + listen
   signal parent "ready"
-  accept client
+  accept client A
+  accept client B
 
-  subscribed = false
+  subscribed[A] = false
+  subscribed[B] = false
   field_value = 0
 
   loop:
-    frame = recv_someip_frame()
-    parsed = parse_someip(frame)
+    for each readable client:
+      frame = recv_someip_frame(client)
+      parsed = parse_someip(frame)
 
-    if frame is SD message:
-      if entry == FindService:
-        send OfferService
-      if entry == SubscribeEventgroup:
-        send SubscribeAck
-        subscribed = true
-      continue
+      if frame is SD message:
+        if entry == FindService:
+          send OfferService to that client
+        if entry == SubscribeEventgroup:
+          send SubscribeAck to that client
+          subscribed[client] = true
+        continue
 
-    if message == Shutdown (REQUEST_NO_RETURN):
-      break
+      if message == Shutdown (REQUEST_NO_RETURN):
+        break
 
-    if message == Field Setter (writable):
-      decode new value
-      field_value = new value
-      send RESPONSE (E_OK)
-      if subscribed:
-        for i in 0..9:
-          send NOTIFICATION (seq=i, value=field_value)
-      continue
+      if message == Field Setter (writable):
+        decode new value
+        field_value = new value
+        send RESPONSE (E_OK) to caller
+        for each subscribed client:
+          for i in 0..9:
+            send NOTIFICATION (seq=i, value=field_value)
+        continue
 
-    if message == Field Setter (read‑only):
-      send ERROR (E_NOT_OK)
-      continue
+      if message == Field Setter (read‑only):
+        send ERROR (E_NOT_OK) to caller
+        continue
 
-    if message == Method Request:
-      decode request
-      send RESPONSE (E_OK) with payload
-      continue
+      if message == Method Request:
+        decode request
+        send RESPONSE (E_OK) with payload
+        continue
 
-    else:
-      fail test (unexpected message)
+      else:
+        fail test (unexpected message)
 
-  close socket and exit
+  close sockets and exit
 ```
 
 ### Parent (client)
@@ -77,29 +80,27 @@ start_server(socket_path):
 run_test():
   fork child
   wait for "ready" byte
-  connect to socket
+  connect client A
+  connect client B
 
-  send SD FindService
-  receive OfferService
+  client A: FindService → OfferService
+  client B: FindService → OfferService
 
-  send SD SubscribeEventgroup
-  receive SubscribeAck
+  client A: SubscribeEventgroup → SubscribeAck
+  client B: SubscribeEventgroup → SubscribeAck
 
-  send Field Setter (writable)
-  receive RESPONSE (E_OK)
+  client A: Field Setter (writable)
+  client A: RESPONSE (E_OK)
 
-  for i in 0..9:
-    receive NOTIFICATION
-    assert seq == i
-    assert value == 0xBEEF
+  client A: receive 10 NOTIFICATION events
+  client B: receive 10 NOTIFICATION events
 
-  send Field Setter (read‑only)
-  receive ERROR (E_NOT_OK)
+  client B: Field Setter (read‑only)
+  client B: ERROR (E_NOT_OK)
 
-  send Method Request
-  receive RESPONSE (E_OK)
+  client A: Method Request → RESPONSE (E_OK)
 
-  send Shutdown (REQUEST_NO_RETURN)
+  client A: Shutdown (REQUEST_NO_RETURN)
   wait for child exit
 ```
 
@@ -125,4 +126,3 @@ readonly_field:
 
 - The test uses AF_UNIX sockets + `fork()`. On Windows, it’s skipped.
 - If the environment forbids `bind()` for AF_UNIX sockets, the test exits early with a note.
-
