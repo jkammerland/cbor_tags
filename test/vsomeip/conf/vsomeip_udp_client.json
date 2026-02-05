@@ -4,7 +4,7 @@
     "device" : "lo",
     "logging" :
     {
-        "level" : "info",
+        "level" : "warning",
         "console" : "true",
         "file" : { "enable" : "false", "path" : "/tmp/vsomeip.log" },
         "dlt" : "false"
@@ -15,46 +15,23 @@
         { "name" : "client_a", "id" : "0x1002" },
         { "name" : "client_b", "id" : "0x1003" }
     ],
-    "services" :
-    [
-        {
-            "service" : "0x1234",
-            "instance" : "0x0001",
-            "unicast" : "127.0.0.2",
-            "unreliable" : "30509",
-            "events" :
-            [
-                {
-                    "event" : "0x8001",
-                    "is_field" : "true",
-                    "is_reliable" : "false",
-                    "update-cycle" : 0
-                }
-            ],
-            "eventgroups" :
-            [
-                {
-                    "eventgroup" : "0x0001",
-                    "events" : [ "0x8001" ]
-                }
-            ]
-        }
-    ],
     "clients" :
     [
         {
             "service" : "0x1234",
             "instance" : "0x0001",
-            "unreliable" : [ 30510, 30511 ]
+            "unreliable" : [ "30510", "30511" ]
         }
     ],
     "routing" : "routingmanagerd",
     "service-discovery" :
     {
         "enable" : "true",
-        "multicast" : "224.244.224.245",
+        "unicast" : "127.0.0.1",
+        "multicast" : "239.255.0.1",
         "port" : "30490",
         "protocol" : "udp",
+        "wait_route_netlink_notification" : "false",
         "initial_delay_min" : "10",
         "initial_delay_max" : "50",
         "repetitions_base_delay" : "200",

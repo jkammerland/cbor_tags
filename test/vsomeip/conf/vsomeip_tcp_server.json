@@ -42,9 +42,10 @@
     "service-discovery" :
     {
         "enable" : "true",
-        "multicast" : "224.244.224.245",
+        "multicast" : "239.255.0.1",
         "port" : "30490",
         "protocol" : "udp",
+        "wait_route_netlink_notification" : "false",
         "initial_delay_min" : "10",
         "initial_delay_max" : "50",
         "repetitions_base_delay" : "200",
