@@ -369,12 +369,7 @@
     {
       "name": "build-base",
       "hidden": true,
-      "jobs": 0,
-      "environment": {
-        "CCACHE_DIR": "${sourceDir}/build/.ccache",
-        "CCACHE_BASEDIR": "${sourceDir}",
-        "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache/tmp"
-      }
+      "jobs": 0
     },
     {
       "name": "debug",
@@ -607,11 +602,6 @@
       "output": {
         "outputOnFailure": true,
         "verbosity": "default"
-      },
-      "environment": {
-        "CCACHE_DIR": "${sourceDir}/build/.ccache",
-        "CCACHE_BASEDIR": "${sourceDir}",
-        "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache/tmp"
       }
     },
     {
