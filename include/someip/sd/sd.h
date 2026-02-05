@@ -148,7 +148,9 @@ struct eventgroup_entry_data {
 using entry_data = std::variant<service_entry_data, eventgroup_entry_data>;
 
 struct packet_data {
-    payload_header        hdr{};
+    payload_header          hdr{};
+    std::uint16_t           client_id{0};
+    std::uint16_t           session_id{0};
     std::vector<entry_data> entries{};
 };
 
@@ -438,8 +440,8 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
     wire::header h{};
     h.msg.service_id       = kServiceId;
     h.msg.method_id        = kMethodId;
-    h.req.client_id        = 0;
-    h.req.session_id       = 0;
+    h.req.client_id        = pd.client_id;
+    h.req.session_id       = pd.session_id;
     h.protocol_version     = 1;
     h.interface_version    = 1;
     h.msg_type             = wire::message_type::notification;
