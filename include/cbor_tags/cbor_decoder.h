@@ -41,9 +41,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
-    using size_type     = typename InputBuffer::size_type;
-    using buffer_byte_t = typename InputBuffer::value_type;
-    using byte          = std::byte;
+    using size_type         = typename InputBuffer::size_type;
+    using buffer_byte_t     = typename InputBuffer::value_type;
+    using input_buffer_type = InputBuffer;
+    using byte              = std::byte;
 
     using iterator_t  = std::ranges::iterator_t<const InputBuffer>;
     using subrange    = std::ranges::subrange<iterator_t>;
@@ -55,6 +56,28 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
+
+    template <bool IsContig> struct read_checkpoint;
+    template <> struct read_checkpoint<true> {
+        detail::reader<InputBuffer> &reader_;
+        size_type                    position_;
+
+        constexpr explicit read_checkpoint(detail::reader<InputBuffer> &reader) : reader_(reader), position_(reader.position_) {}
+        constexpr void restore() { reader_.position_ = position_; }
+    };
+
+    template <> struct read_checkpoint<false> {
+        detail::reader<InputBuffer>                   &reader_;
+        typename detail::reader<InputBuffer>::iterator position_;
+        size_type                                      offset_;
+
+        constexpr explicit read_checkpoint(detail::reader<InputBuffer> &reader)
+            : reader_(reader), position_(reader.position_), offset_(reader.current_offset_) {}
+        constexpr void restore() {
+            reader_.position_       = position_;
+            reader_.current_offset_ = offset_;
+        }
+    };
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
@@ -575,8 +598,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         // Holder for the parsed tag value
         [[maybe_unused]] std::optional<std::uint64_t> tag;
+        bool                                          saw_incomplete = false;
 
-        auto try_decode = [this, major, additionalInfo, &value, &tag]<typename U>() -> bool {
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<typename U>() -> bool {
             if (!is_valid_major<major_type, U>(major)) {
                 return false;
             }
@@ -601,6 +625,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (result == status_code::success) {
                 value = std::move(decoded_value);
                 return true;
+            } else if (result == status_code::incomplete) {
+                saw_incomplete = true;
+                return false;
             } else {
                 return false;
             }
@@ -608,6 +635,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         bool found = (try_decode.template operator()<T>() || ...);
         if (!found) {
+            if (saw_incomplete) {
+                return status_code::incomplete;
+            }
             return status_code::no_match_in_variant_on_buffer;
         }
         return status_code::success;
@@ -779,12 +809,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T> constexpr status_code decode(T &value) {
+        read_checkpoint<IsContiguous<InputBuffer>> checkpoint{reader_};
         if (reader_.empty(data_)) {
             return status_code::incomplete;
         }
-        const auto [majorType, additionalInfo] = read_initial_byte();
-
-        return decode(value, majorType, additionalInfo);
+        try {
+            const auto [majorType, additionalInfo] = read_initial_byte();
+            auto status                            = decode(value, majorType, additionalInfo);
+            if (status == status_code::incomplete) {
+                checkpoint.restore();
+            }
+            return status;
+        } catch (const parse_incomplete_exception &) {
+            checkpoint.restore();
+            throw;
+        }
     }
 
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
@@ -1136,13 +1175,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 template <typename T> struct cbor_indefinite_decoder {
     using byte = std::byte;
 
-    template <typename U> constexpr status_code decode(as_indefinite<U> value) {
+    template <typename U>
+    constexpr status_code decode_indefinite_with_major(as_indefinite<U> value, major_type major, byte additionalInfo) {
         auto &dec = detail::underlying<T>(this);
-        if (dec.reader_.empty(dec.data_)) {
-            return status_code::incomplete;
-        }
-
-        const auto [major, additionalInfo] = dec.read_initial_byte();
         if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
             if (major != major_type::ByteString || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
@@ -1168,13 +1203,8 @@ template <typename T> struct cbor_indefinite_decoder {
         }
     }
 
-    template <typename U> constexpr status_code decode_maybe_indefinite_value(U &value) {
+    template <typename U> constexpr status_code decode_maybe_indefinite_with_major(U &value, major_type major, byte additionalInfo) {
         auto &dec = detail::underlying<T>(this);
-        if (dec.reader_.empty(dec.data_)) {
-            return status_code::incomplete;
-        }
-
-        const auto [major, additionalInfo] = dec.read_initial_byte();
         if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
             if (major != major_type::ByteString) {
                 return status_code::no_match_for_bstr_on_buffer;
@@ -1212,6 +1242,50 @@ template <typename T> struct cbor_indefinite_decoder {
         }
     }
 
+    template <typename U> constexpr status_code decode(as_indefinite<U> value) {
+        auto                                                                             &dec = detail::underlying<T>(this);
+        typename T::template read_checkpoint<IsContiguous<typename T::input_buffer_type>> checkpoint{dec.reader_};
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+
+        try {
+            const auto [major, additionalInfo] = dec.read_initial_byte();
+            auto status                        = decode_indefinite_with_major(value, major, additionalInfo);
+            if (status == status_code::incomplete) {
+                checkpoint.restore();
+            }
+            return status;
+        } catch (const parse_incomplete_exception &) {
+            checkpoint.restore();
+            throw;
+        }
+    }
+
+    template <typename U> constexpr status_code decode_maybe_indefinite_value(U &value) {
+        auto                                                                             &dec = detail::underlying<T>(this);
+        typename T::template read_checkpoint<IsContiguous<typename T::input_buffer_type>> checkpoint{dec.reader_};
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+
+        try {
+            const auto [major, additionalInfo] = dec.read_initial_byte();
+            auto status                        = decode_maybe_indefinite_with_major(value, major, additionalInfo);
+            if (status == status_code::incomplete) {
+                checkpoint.restore();
+            }
+            return status;
+        } catch (const parse_incomplete_exception &) {
+            checkpoint.restore();
+            throw;
+        }
+    }
+
+    template <typename U> constexpr status_code decode(as_indefinite<U> value, major_type major, byte additionalInfo) {
+        return decode_indefinite_with_major(value, major, additionalInfo);
+    }
+
     template <typename U>
         requires std::is_reference_v<U>
     constexpr status_code decode(as_maybe_indefinite<U> value) {
@@ -1222,6 +1296,10 @@ template <typename T> struct cbor_indefinite_decoder {
         requires(!std::is_reference_v<U>)
     constexpr status_code decode(as_maybe_indefinite<U> &value) {
         return decode_maybe_indefinite_value(value.get());
+    }
+
+    template <typename U> constexpr status_code decode(as_maybe_indefinite<U> &value, major_type major, byte additionalInfo) {
+        return decode_maybe_indefinite_with_major(value.get(), major, additionalInfo);
     }
 };
 

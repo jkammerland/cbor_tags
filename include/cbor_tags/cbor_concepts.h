@@ -536,6 +536,18 @@ template <typename T> struct ContainsCborMajor<T, true> {
     static constexpr bool value = IsAnyHeader<T> || (IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>);
 };
 
+template <typename T>
+    requires IsIndefiniteWrapper<T>
+struct ContainsCborMajor<T, false> {
+    static constexpr bool value = ContainsCborMajor<indefinite_value_t<T>>::value;
+};
+
+template <typename T>
+    requires IsIndefiniteWrapper<T>
+struct ContainsCborMajor<T, true> {
+    static constexpr bool value = ContainsCborMajor<indefinite_value_t<T>, IsMap<indefinite_value_t<T>>>::value;
+};
+
 template <typename Buffer>
     requires ValidCborBuffer<Buffer>
 struct CborStream {

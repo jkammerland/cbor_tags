@@ -457,6 +457,24 @@ TEST_CASE("roundtrip variant with tstr over tagged class") {
     CHECK_EQ(std::get<std::string>(v), "hello");
 }
 
+TEST_CASE("variant decodes maybe-indefinite array from indefinite input") {
+    std::vector<int> input{1, 2, 3};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_indefinite{input}));
+
+    auto dec = make_decoder(buffer);
+
+    using maybe_array = as_maybe_indefinite<std::vector<int>>;
+    std::variant<int, maybe_array> value;
+    auto                           result = dec(value);
+
+    CHECK_MESSAGE(result, "Variant should decode indefinite array into as_maybe_indefinite.");
+    CHECK(std::holds_alternative<maybe_array>(value));
+    CHECK_EQ(std::get<maybe_array>(value).get(), input);
+}
+
 TEST_CASE("roundtrip nested indefinite structures") {
     IndefNested input{.id = 7,
                       .values = {10, 20},

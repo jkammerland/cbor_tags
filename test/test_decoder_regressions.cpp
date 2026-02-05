@@ -98,6 +98,27 @@ TEST_CASE("decoder should accept empty byte strings for basic_string_view at end
     CHECK(decoded.empty());
 }
 
+TEST_CASE("decoder should allow retry after incomplete byte-string view") {
+    // bstr(2): 0x42, but only 1 byte payload initially
+    std::vector<std::byte> buffer{std::byte{0x42}, std::byte{0x01}};
+
+    auto dec = make_decoder(buffer);
+
+    std::basic_string_view<std::byte> decoded;
+    auto                              result = dec(decoded);
+
+    CHECK_FALSE_MESSAGE(result, "Truncated byte-string view should return incomplete.");
+    CHECK_EQ(result.error(), status_code::incomplete);
+
+    buffer.push_back(std::byte{0x02});
+    auto retry = dec(decoded);
+
+    CHECK_MESSAGE(retry, "Decoder should allow retry after incomplete and consume the full payload.");
+    CHECK_EQ(decoded.size(), 2);
+    CHECK_EQ(decoded[0], std::byte{0x01});
+    CHECK_EQ(decoded[1], std::byte{0x02});
+}
+
 TEST_CASE("decoder should validate as_text_any length against available bytes") {
     // tstr(5): 0x65, but only 3 bytes payload -> truncated
     std::vector<std::byte> buffer{std::byte{0x65}, std::byte{0x61}, std::byte{0x62}, std::byte{0x63}};
