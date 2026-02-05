@@ -138,6 +138,12 @@ multi‑client flow but uses `shm_open` + `mmap` and futex‑based queues instea
 - Read‑only setter → ERROR E_NOT_OK
 - Method request/response and shutdown
 
+## TCP/UDP variant
+
+There are TCP/UDP E2E tests in `test/test_someip_tcp_udp_e2e.cpp` that mirror the same multi‑client
+flow over IP sockets. A dedicated walkthrough (with pseudocode) is in
+`doc/README_someip_tcp_udp_tests.md`.
+
 ## vSomeIP TCP/UDP E2E (optional)
 
 There is an optional vSomeIP‑backed E2E test in `test/vsomeip/vsomeip_e2e.cpp` that exercises the
