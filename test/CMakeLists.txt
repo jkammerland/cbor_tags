@@ -34,7 +34,7 @@ if(CBOR_TAGS_ENABLE_ASAN)
   endif()
 endif()
 
-if(CBOR_TAGS_TIDY_TARGET)
+if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
   message(STATUS "Tidy enabled in tests")
   target_tidy_sources(tests)
 endif()

@@ -37,9 +37,9 @@ struct TestCaseLogger : public IReporter {
 
     void test_case_exception(const TestCaseException & /*in*/) override {}
 
-    void subcase_start(const SubcaseSignature & /*in*/) override { std::lock_guard<std::mutex> lock(mutex); }
+    void subcase_start(const SubcaseSignature & /*in*/) override { std::scoped_lock lock(mutex); }
 
-    void subcase_end() override { std::lock_guard<std::mutex> lock(mutex); }
+    void subcase_end() override { std::scoped_lock lock(mutex); }
 
     void log_assert(const AssertData &in) override {
         // don't include successful asserts by default - this is done here
@@ -51,14 +51,14 @@ struct TestCaseLogger : public IReporter {
         // make sure there are no races - this is done here instead of in the
         // framework itself because doctest doesn't know if reporters/listeners
         // care about successful asserts and thus doesn't lock a mutex unnecessarily
-        std::lock_guard<std::mutex> lock(mutex);
+        std::scoped_lock lock(mutex);
 
         // ...
     }
 
     void log_message(const MessageData & /*in*/) override {
         // messages too can be used in a multi-threaded context - like asserts
-        std::lock_guard<std::mutex> lock(mutex);
+        std::scoped_lock lock(mutex);
 
         // ...
     }

@@ -156,10 +156,14 @@
       "displayName": "Clang-Tidy",
       "description": "Debug build with clang-tidy static analysis",
       "cacheVariables": {
+        "CBOR_TAGS_BUILD_BENCHMARKS": "OFF",
+        "CBOR_TAGS_BUILD_TESTS": "OFF",
         "CBOR_TAGS_TIDY_TARGET": "ON",
+        "CBOR_TAGS_TIDY_TESTS": "OFF",
+        "CBOR_TAGS_TIDY_BENCHMARKS": "OFF",
+        "CLANG_TIDY_EXE": "/usr/bin/clang-tidy",
         "CMAKE_C_COMPILER": "/usr/bin/clang",
-        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
-        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++"
       }
     },
     {
@@ -168,10 +172,14 @@
       "displayName": "Clang-Tidy Fix",
       "description": "Debug build with clang-tidy auto-fixing enabled",
       "cacheVariables": {
+        "CBOR_TAGS_BUILD_BENCHMARKS": "OFF",
+        "CBOR_TAGS_BUILD_TESTS": "OFF",
         "CBOR_TAGS_TIDY_TARGET": "ON",
+        "CBOR_TAGS_TIDY_TESTS": "OFF",
+        "CBOR_TAGS_TIDY_BENCHMARKS": "OFF",
+        "CLANG_TIDY_EXE": "/usr/bin/clang-tidy",
         "CMAKE_C_COMPILER": "/usr/bin/clang",
-        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
-        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;-fix;-fix-errors"
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++"
       }
     },
     {
@@ -429,22 +437,28 @@
       },
       "jobs": 0
     },
-    {
-      "name": "tidy",
-      "inherits": "build-base",
-      "configurePreset": "tidy",
-      "displayName": "Clang-Tidy Build",
-      "description": "Build with clang-tidy static analysis checks",
-      "jobs": 0
-    },
-    {
-      "name": "tidy-fix",
-      "inherits": "build-base",
-      "configurePreset": "tidy-fix",
-      "displayName": "Clang-Tidy Fix Build",
-      "description": "Build with clang-tidy auto-fixing enabled",
-      "jobs": 0
-    },
+  {
+    "name": "tidy",
+    "inherits": "build-base",
+    "configurePreset": "tidy",
+    "displayName": "Clang-Tidy Build",
+    "description": "Build with clang-tidy static analysis checks",
+    "targets": [
+      "tidy"
+    ],
+    "jobs": 0
+  },
+  {
+    "name": "tidy-fix",
+    "inherits": "build-base",
+    "configurePreset": "tidy-fix",
+    "displayName": "Clang-Tidy Fix Build",
+    "description": "Build with clang-tidy auto-fixing enabled",
+    "targets": [
+      "tidy-fix"
+    ],
+    "jobs": 0
+  },
     {
       "name": "profile",
       "inherits": "build-base",
