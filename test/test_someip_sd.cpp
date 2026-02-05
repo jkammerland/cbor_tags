@@ -50,7 +50,7 @@ TEST_CASE("someip-sd: encode OfferService + IPv4 endpoint option and decode back
         // Option IPv4 endpoint (12 bytes)
         std::byte{0x00}, std::byte{0x09}, std::byte{0x04}, std::byte{0x00}, // len, type, discard
         std::byte{0xC0}, std::byte{0xA8}, std::byte{0x00}, std::byte{0x01}, // addr
-        std::byte{0x11}, std::byte{0x12}, std::byte{0x34}, std::byte{0x00}, // proto, port, rsv
+        std::byte{0x00}, std::byte{0x11}, std::byte{0x12}, std::byte{0x34}, // rsv, proto, port
     };
 
     CHECK(*msg == expected);

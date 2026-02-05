@@ -195,3 +195,20 @@ client_b:
   send read‑only setter, expect ERROR E_NOT_OK
   signal "done"
 ```
+
+### vSomeIP interop (optional)
+
+`test/vsomeip/vsomeip_interop_e2e.cpp` exercises interop in two modes:
+
+- custom server with vSomeIP clients
+- vSomeIP server with custom clients
+
+It uses vSomeIP configs in `test/vsomeip/conf/`.
+
+Expected vSomeIP warnings (non‑fatal):
+
+- multicast join errors for SD multicast on `lo`
+- `BLOCKING CALL` warnings
+- `accept_cbk` warnings
+
+These warnings do not indicate failure if the test completes successfully.
