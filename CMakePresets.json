@@ -1,0 +1,999 @@
+{
+  "version": 10,
+  "$comment": [
+    "CMake Presets (schema v10)",
+    "",
+    "Configure presets:",
+    "- debug/release/relwithdebinfo/minsizerel: CMAKE_BUILD_TYPE presets",
+    "- coverage/coverage-release: --coverage instrumentation (non-Windows)",
+    "- tidy/tidy-fix: clang-tidy integration",
+    "- profile/profile-release/profile-gprof/pgo-*: profiling and PGO flags (non-Windows)",
+    "- alsan/alusan/msan/cfihwasan/fullsan: sanitizer configurations",
+    "- valgrind: CTest MemCheck configuration (Linux)",
+    "",
+    "Defaults:",
+    "- Generator: Ninja",
+    "- Compiler launcher: ccache",
+    "- Linker: mold via -fuse-ld=mold (Linux/Darwin)",
+    "",
+    "Examples:",
+    "cmake --preset=debug",
+    "cmake --build --preset=debug",
+    "ctest --preset=debug",
+    "cmake --workflow --preset=debug",
+    "cmake --workflow --preset=valgrind"
+  ],
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 31,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_PROJECT_cbor_tags_INCLUDE": "cmake/cgen_project_init.cmake"
+      }
+    },
+    {
+      "name": "base-debug",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "base-release",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "base-relwithdebinfo",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "base-minsizerel",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel"
+      }
+    },
+    {
+      "name": "base-debug-clang",
+      "hidden": true,
+      "inherits": "base-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base-debug",
+      "displayName": "Debug",
+      "description": "CMAKE_BUILD_TYPE=Debug (typically -O0 -g)"
+    },
+    {
+      "name": "release",
+      "inherits": "base-release",
+      "displayName": "Release",
+      "description": "CMAKE_BUILD_TYPE=Release (typically -O3)"
+    },
+    {
+      "name": "relwithdebinfo",
+      "inherits": "base-relwithdebinfo",
+      "displayName": "Release with Debug Info",
+      "description": "CMAKE_BUILD_TYPE=RelWithDebInfo (typically -O2 -g)"
+    },
+    {
+      "name": "minsizerel",
+      "inherits": "base-minsizerel",
+      "displayName": "Minimum Size Release",
+      "description": "Size-optimized build (-Os), minimal binary size for embedded or space-constrained deployments"
+    },
+    {
+      "name": "coverage",
+      "inherits": "base-debug",
+      "displayName": "Coverage",
+      "description": "Debug build with code coverage instrumentation (gcov/llvm-cov)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_DEBUG": "-g -O0 --coverage",
+        "CMAKE_C_FLAGS_DEBUG": "-g -O0 --coverage",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_SHARED_LINKER_FLAGS": "--coverage",
+        "CMAKE_MODULE_LINKER_FLAGS": "--coverage"
+      }
+    },
+    {
+      "name": "coverage-release",
+      "inherits": "base-release",
+      "displayName": "Release Coverage",
+      "description": "Release build with code coverage instrumentation (gcov/llvm-cov)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_RELEASE": "-g -O3 --coverage -DNDEBUG",
+        "CMAKE_C_FLAGS_RELEASE": "-g -O3 --coverage -DNDEBUG",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_SHARED_LINKER_FLAGS": "--coverage",
+        "CMAKE_MODULE_LINKER_FLAGS": "--coverage"
+      }
+    },
+    {
+      "name": "tidy",
+      "inherits": "base-debug",
+      "displayName": "Clang-Tidy",
+      "description": "Debug build with clang-tidy static analysis",
+      "cacheVariables": {
+        "CBOR_TAGS_TIDY_TARGET": "ON",
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
+      }
+    },
+    {
+      "name": "tidy-fix",
+      "inherits": "base-debug",
+      "displayName": "Clang-Tidy Fix",
+      "description": "Debug build with clang-tidy auto-fixing enabled",
+      "cacheVariables": {
+        "CBOR_TAGS_TIDY_TARGET": "ON",
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;-fix;-fix-errors"
+      }
+    },
+    {
+      "name": "profile",
+      "inherits": "base-relwithdebinfo",
+      "displayName": "Profile (RelWithDebInfo + frame pointers)",
+      "description": "RelWithDebInfo with frame pointers (-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer"
+      }
+    },
+    {
+      "name": "profile-release",
+      "inherits": "base-release",
+      "displayName": "Release Profile",
+      "description": "Release with debug symbols + frame pointers (-g -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -g -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -DNDEBUG",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -g -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -DNDEBUG"
+      }
+    },
+    {
+      "name": "profile-gprof",
+      "inherits": "base-relwithdebinfo",
+      "displayName": "Instrumented Profile (gprof)",
+      "description": "High-overhead profiling with gprof instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -pg -fno-omit-frame-pointer",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -pg -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-pg",
+        "CMAKE_SHARED_LINKER_FLAGS": "-pg"
+      }
+    },
+    {
+      "name": "pgo-generate",
+      "inherits": "base-release",
+      "displayName": "PGO Profile Generation",
+      "description": "Generate profile data for profile-guided optimization",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_RELEASE": "-O2 -fprofile-generate",
+        "CMAKE_C_FLAGS_RELEASE": "-O2 -fprofile-generate",
+        "CMAKE_EXE_LINKER_FLAGS": "-fprofile-generate",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fprofile-generate"
+      }
+    },
+    {
+      "name": "pgo-use",
+      "inherits": "base-release",
+      "displayName": "PGO Optimized Build",
+      "description": "Use profile data for optimized build",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -fprofile-use -fprofile-correction",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -fprofile-use -fprofile-correction",
+        "CMAKE_EXE_LINKER_FLAGS": "-fprofile-use",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fprofile-use"
+      }
+    },
+    {
+      "name": "valgrind",
+      "inherits": "base-debug",
+      "displayName": "Valgrind MemCheck",
+      "description": "CTest MemCheck configuration (MEMORYCHECK_COMMAND_OPTIONS) for valgrind",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CGEN_REQUIRE_VALGRIND": "ON",
+        "CGEN_VALGRIND_LABEL_EXCLUDE_REGEX": "cmake|package|codegen",
+        "MEMORYCHECK_COMMAND_OPTIONS": "--error-exitcode=1 --leak-check=full --show-leak-kinds=all"
+      }
+    },
+    {
+      "name": "alsan",
+      "displayName": "AddressSanitizer + LeakSanitizer",
+      "description": "CGEN_SANITIZERS=address;leak (ASan+LSan) with ASAN_OPTIONS/LSAN_OPTIONS",
+      "inherits": "base-debug",
+      "cacheVariables": {
+        "CGEN_SANITIZERS": "address;leak"
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1:print_stats=1:check_initialization_order=1:strict_init_order=1",
+        "LSAN_OPTIONS": "print_suppressions=false:report_objects=1"
+      }
+    },
+    {
+      "name": "alusan",
+      "displayName": "AddressSanitizer + LeakSanitizer + UndefinedBehaviorSanitizer",
+      "description": "CGEN_SANITIZERS=address;leak;undefined (ASan+LSan+UBSan) with ASAN_OPTIONS/LSAN_OPTIONS/UBSAN_OPTIONS",
+      "inherits": "base-debug",
+      "cacheVariables": {
+        "CGEN_SANITIZERS": "address;leak;undefined"
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1:print_stats=1:check_initialization_order=1:strict_init_order=1",
+        "LSAN_OPTIONS": "print_suppressions=false:report_objects=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:report_error_type=1"
+      }
+    },
+    {
+      "name": "msan",
+      "displayName": "MemorySanitizer",
+      "description": "-fsanitize=memory (Clang) with MSAN_OPTIONS; requires MSan-instrumented libraries",
+      "inherits": "base-debug-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_DEBUG": "-g -O1 -fsanitize=memory -fsanitize-memory-track-origins=2",
+        "CMAKE_C_FLAGS_DEBUG": "-g -O1 -fsanitize=memory -fsanitize-memory-track-origins=2",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=memory",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=memory",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=memory"
+      },
+      "environment": {
+        "MSAN_OPTIONS": "halt_on_error=1:print_stats=1:print_module_map=1"
+      }
+    },
+    {
+      "name": "cfihwasan",
+      "displayName": "Control Flow Integrity + Hardware AddressSanitizer",
+      "description": "Control flow hijacking and hardware memory safety (ARM64 only, requires LTO, -fsanitize=cfi,hwaddress)",
+      "inherits": "base-debug-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_DEBUG": "-g -O1 -fsanitize=cfi,hwaddress -flto -fvisibility=hidden",
+        "CMAKE_C_FLAGS_DEBUG": "-g -O1 -fsanitize=cfi,hwaddress -flto -fvisibility=hidden",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=cfi,hwaddress -flto -fuse-ld=lld",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=cfi,hwaddress -flto -fuse-ld=lld",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=cfi,hwaddress -flto -fuse-ld=lld"
+      },
+      "environment": {
+        "HWASAN_OPTIONS": "halt_on_error=1:print_stats=1",
+        "CFI_OPTIONS": "print_stats=1"
+      }
+    },
+    {
+      "name": "fullsan",
+      "displayName": "All Compatible Sanitizers",
+      "description": "-fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds (Linux/Clang)",
+      "inherits": "base-debug-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS_DEBUG": "-g -O1 -fno-omit-frame-pointer -fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds",
+        "CMAKE_C_FLAGS_DEBUG": "-g -O1 -fno-omit-frame-pointer -fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds"
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1:print_stats=1:check_initialization_order=1:strict_init_order=1:strict_string_checks=1:detect_stack_use_after_return=1",
+        "LSAN_OPTIONS": "print_suppressions=false:report_objects=1:use_unaligned=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:report_error_type=1:silence_unsigned_overflow=0"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-base",
+      "hidden": true,
+      "jobs": 0,
+      "environment": {
+        "CCACHE_DIR": "${sourceDir}/build/.ccache",
+        "CCACHE_BASEDIR": "${sourceDir}",
+        "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache/tmp"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "build-base",
+      "configurePreset": "debug",
+      "displayName": "Debug Build",
+      "description": "Build with debug configuration, no optimizations and full debug symbols",
+      "jobs": 0
+    },
+    {
+      "name": "release",
+      "inherits": "build-base",
+      "configurePreset": "release",
+      "displayName": "Release Build",
+      "description": "Build with release configuration, full optimizations and no debug symbols",
+      "jobs": 0
+    },
+    {
+      "name": "relwithdebinfo",
+      "inherits": "build-base",
+      "configurePreset": "relwithdebinfo",
+      "displayName": "Release with Debug Info Build",
+      "description": "Build with optimizations and debug symbols for profiling and debugging",
+      "jobs": 0
+    },
+    {
+      "name": "minsizerel",
+      "inherits": "build-base",
+      "configurePreset": "minsizerel",
+      "displayName": "Minimum Size Release Build",
+      "description": "Build with size optimizations for minimal binary size",
+      "jobs": 0
+    },
+    {
+      "name": "coverage",
+      "inherits": "build-base",
+      "configurePreset": "coverage",
+      "displayName": "Coverage Build",
+      "description": "Build with code coverage instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "coverage-release",
+      "inherits": "build-base",
+      "configurePreset": "coverage-release",
+      "displayName": "Release Coverage Build",
+      "description": "Build with release+coverage instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "tidy",
+      "inherits": "build-base",
+      "configurePreset": "tidy",
+      "displayName": "Clang-Tidy Build",
+      "description": "Build with clang-tidy static analysis checks",
+      "jobs": 0
+    },
+    {
+      "name": "tidy-fix",
+      "inherits": "build-base",
+      "configurePreset": "tidy-fix",
+      "displayName": "Clang-Tidy Fix Build",
+      "description": "Build with clang-tidy auto-fixing enabled",
+      "jobs": 0
+    },
+    {
+      "name": "profile",
+      "inherits": "build-base",
+      "configurePreset": "profile",
+      "displayName": "Build (Profile)",
+      "description": "Build with profile preset (RelWithDebInfo + frame pointers)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "profile-release",
+      "inherits": "build-base",
+      "configurePreset": "profile-release",
+      "displayName": "Release Profile Build",
+      "description": "Build with profile-release preset (Release + debug symbols + frame pointers)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "profile-gprof",
+      "inherits": "build-base",
+      "configurePreset": "profile-gprof",
+      "displayName": "Instrumented Profile Build",
+      "description": "Build with gprof instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "pgo-generate",
+      "inherits": "build-base",
+      "configurePreset": "pgo-generate",
+      "displayName": "PGO Profile Generation Build",
+      "description": "Build for generating PGO profile data",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "pgo-use",
+      "inherits": "build-base",
+      "configurePreset": "pgo-use",
+      "displayName": "PGO Optimized Build",
+      "description": "Build using PGO profile data for optimization",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "valgrind-build",
+      "inherits": "build-base",
+      "configurePreset": "valgrind",
+      "displayName": "Build (Valgrind)",
+      "description": "Build default target in the valgrind build directory",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "valgrind",
+      "inherits": "build-base",
+      "configurePreset": "valgrind",
+      "displayName": "Run Valgrind MemCheck",
+      "description": "Build `valgrind` target (ctest -T MemCheck)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "targets": [
+        "valgrind"
+      ],
+      "jobs": 0
+    },
+    {
+      "name": "alsan",
+      "inherits": "build-base",
+      "configurePreset": "alsan",
+      "displayName": "Build (ASan+LSan)",
+      "description": "Build with CGEN_SANITIZERS=address;leak",
+      "jobs": 0
+    },
+    {
+      "name": "alusan",
+      "inherits": "build-base",
+      "configurePreset": "alusan",
+      "displayName": "Build (ASan+LSan+UBSan)",
+      "description": "Build with CGEN_SANITIZERS=address;leak;undefined",
+      "jobs": 0
+    },
+    {
+      "name": "msan",
+      "inherits": "build-base",
+      "configurePreset": "msan",
+      "displayName": "Build (MSan)",
+      "description": "Build with -fsanitize=memory (Clang)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "cfihwasan",
+      "inherits": "build-base",
+      "configurePreset": "cfihwasan",
+      "displayName": "Build (CFI+HWASan)",
+      "description": "Build with -fsanitize=cfi,hwaddress -flto",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "jobs": 0
+    },
+    {
+      "name": "fullsan",
+      "inherits": "build-base",
+      "configurePreset": "fullsan",
+      "displayName": "Build (All Sanitizers)",
+      "description": "Build with -fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "default"
+      },
+      "environment": {
+        "CCACHE_DIR": "${sourceDir}/build/.ccache",
+        "CCACHE_BASEDIR": "${sourceDir}",
+        "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache/tmp"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "test-base",
+      "configurePreset": "debug",
+      "displayName": "Debug Tests",
+      "description": "Run all tests in debug mode"
+    },
+    {
+      "name": "release",
+      "inherits": "test-base",
+      "configurePreset": "release",
+      "displayName": "Release Tests",
+      "description": "Run all tests in release mode"
+    },
+    {
+      "name": "relwithdebinfo",
+      "inherits": "test-base",
+      "configurePreset": "relwithdebinfo",
+      "displayName": "Release with Debug Info Tests",
+      "description": "Run all tests with release+debug info"
+    },
+    {
+      "name": "minsizerel",
+      "inherits": "test-base",
+      "configurePreset": "minsizerel",
+      "displayName": "Minimum Size Release Tests",
+      "description": "Run all tests with size-optimized build"
+    },
+    {
+      "name": "coverage",
+      "inherits": "test-base",
+      "configurePreset": "coverage",
+      "displayName": "Coverage Tests",
+      "description": "Run all tests with coverage instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "coverage-release",
+      "inherits": "test-base",
+      "configurePreset": "coverage-release",
+      "displayName": "Release Coverage Tests",
+      "description": "Run all tests with release+coverage instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "tidy",
+      "inherits": "test-base",
+      "configurePreset": "tidy",
+      "displayName": "Clang-Tidy Tests",
+      "description": "Run all tests with clang-tidy checks"
+    },
+    {
+      "name": "tidy-fix",
+      "inherits": "test-base",
+      "configurePreset": "tidy-fix",
+      "displayName": "Clang-Tidy Fix Tests",
+      "description": "Run all tests with clang-tidy auto-fixing"
+    },
+    {
+      "name": "profile",
+      "inherits": "test-base",
+      "configurePreset": "profile",
+      "displayName": "Tests (Profile)",
+      "description": "Run tests with profile preset (RelWithDebInfo + frame pointers)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "profile-release",
+      "inherits": "test-base",
+      "configurePreset": "profile-release",
+      "displayName": "Release Profile Tests",
+      "description": "Run all tests with release+profiling build",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "profile-gprof",
+      "inherits": "test-base",
+      "configurePreset": "profile-gprof",
+      "displayName": "Instrumented Profile Tests",
+      "description": "Run all tests with gprof instrumentation",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "pgo-generate",
+      "inherits": "test-base",
+      "configurePreset": "pgo-generate",
+      "displayName": "PGO Profile Generation Tests",
+      "description": "Run all tests to generate PGO profile data",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "pgo-use",
+      "inherits": "test-base",
+      "configurePreset": "pgo-use",
+      "displayName": "PGO Optimized Tests",
+      "description": "Run all tests with PGO-optimized build",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "alsan",
+      "inherits": "test-base",
+      "configurePreset": "alsan",
+      "displayName": "Tests (ASan+LSan)",
+      "description": "Run tests with CGEN_SANITIZERS=address;leak (ASAN_OPTIONS/LSAN_OPTIONS)",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1:print_stats=1:check_initialization_order=1:strict_init_order=1",
+        "LSAN_OPTIONS": "print_suppressions=false:report_objects=1"
+      }
+    },
+    {
+      "name": "alusan",
+      "inherits": "test-base",
+      "configurePreset": "alusan",
+      "displayName": "Tests (ASan+LSan+UBSan)",
+      "description": "Run tests with CGEN_SANITIZERS=address;leak;undefined (ASAN_OPTIONS/LSAN_OPTIONS/UBSAN_OPTIONS)",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1:print_stats=1:check_initialization_order=1:strict_init_order=1",
+        "LSAN_OPTIONS": "print_suppressions=false:report_objects=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:report_error_type=1"
+      }
+    },
+    {
+      "name": "msan",
+      "inherits": "test-base",
+      "configurePreset": "msan",
+      "displayName": "Tests (MSan)",
+      "description": "Run tests with -fsanitize=memory build (Clang) and MSAN_OPTIONS",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "environment": {
+        "MSAN_OPTIONS": "halt_on_error=1:print_stats=1:print_module_map=1"
+      }
+    },
+    {
+      "name": "cfihwasan",
+      "inherits": "test-base",
+      "configurePreset": "cfihwasan",
+      "displayName": "Tests (CFI+HWASan)",
+      "description": "Run tests with -fsanitize=cfi,hwaddress build (HWASAN_OPTIONS/CFI_OPTIONS)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "environment": {
+        "HWASAN_OPTIONS": "halt_on_error=1:print_stats=1",
+        "CFI_OPTIONS": "print_stats=1"
+      }
+    },
+    {
+      "name": "fullsan",
+      "inherits": "test-base",
+      "configurePreset": "fullsan",
+      "displayName": "Tests (All Sanitizers)",
+      "description": "Run tests with -fsanitize=address,leak,undefined,float-divide-by-zero,float-cast-overflow,bounds build",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1:print_stats=1:check_initialization_order=1:strict_init_order=1:strict_string_checks=1:detect_stack_use_after_return=1",
+        "LSAN_OPTIONS": "print_suppressions=false:report_objects=1:use_unaligned=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:report_error_type=1:silence_unsigned_overflow=0"
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug Workflow",
+      "description": "Standard debug build and test workflow",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug"
+        },
+        {
+          "type": "test",
+          "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "displayName": "Release Workflow",
+      "description": "Standard release build and test workflow",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "Release with Debug Info Workflow",
+      "description": "Release build with debug info for profiling and debugging",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "relwithdebinfo"
+        },
+        {
+          "type": "build",
+          "name": "relwithdebinfo"
+        },
+        {
+          "type": "test",
+          "name": "relwithdebinfo"
+        }
+      ]
+    },
+    {
+      "name": "minsizerel",
+      "displayName": "Minimum Size Release Workflow",
+      "description": "Size-optimized build for embedded or space-constrained deployments",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "minsizerel"
+        },
+        {
+          "type": "build",
+          "name": "minsizerel"
+        },
+        {
+          "type": "test",
+          "name": "minsizerel"
+        }
+      ]
+    },
+    {
+      "name": "tidy",
+      "displayName": "Clang-Tidy Workflow",
+      "description": "Build with clang-tidy static analysis checks",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "tidy"
+        },
+        {
+          "type": "build",
+          "name": "tidy"
+        }
+      ]
+    },
+    {
+      "name": "tidy-fix",
+      "displayName": "Clang-Tidy Fix Workflow",
+      "description": "Build with clang-tidy auto-fixing enabled",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "tidy-fix"
+        },
+        {
+          "type": "build",
+          "name": "tidy-fix"
+        }
+      ]
+    },
+    {
+      "name": "package",
+      "displayName": "Package Workflow",
+      "description": "Complete release workflow: configure → build → test → package with CPack",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "valgrind",
+      "displayName": "Valgrind MemCheck Workflow",
+      "description": "Configure and run CTest MemCheck under valgrind",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "valgrind"
+        },
+        {
+          "type": "build",
+          "name": "valgrind-build"
+        },
+        {
+          "type": "build",
+          "name": "valgrind"
+        }
+      ]
+    },
+    {
+      "name": "alsan",
+      "displayName": "ASan+LSan Workflow",
+      "description": "Configure/build/test with alsan (ASan+LSan)",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "alsan"
+        },
+        {
+          "type": "build",
+          "name": "alsan"
+        },
+        {
+          "type": "test",
+          "name": "alsan"
+        }
+      ]
+    },
+    {
+      "name": "alusan",
+      "displayName": "ASan+LSan+UBSan Workflow",
+      "description": "Configure/build/test with alusan (ASan+LSan+UBSan)",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "alusan"
+        },
+        {
+          "type": "build",
+          "name": "alusan"
+        },
+        {
+          "type": "test",
+          "name": "alusan"
+        }
+      ]
+    }
+  ]
+}

@@ -701,7 +701,15 @@ TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, neg
                    std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string_view, std::span<const std::byte>,
                                 B2, A2, std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>,
                    std::variant<as_array_any, std::vector<int>>, std::variant<as_map_any, std::map<int, int>>,
-                   std::variant<as_bstr_any, std::span<const std::byte>>, std::variant<as_text_any, std::string>) {
+                   std::variant<as_bstr_any, std::span<const std::byte>>, std::variant<as_text_any, std::string>,
+                   std::variant<std::vector<int>, as_maybe_indefinite<std::vector<int>>>,
+                   std::variant<std::map<int, int>, as_maybe_indefinite<std::map<int, int>>>,
+                   std::variant<std::string, as_maybe_indefinite<std::string>>,
+                   std::variant<std::vector<std::byte>, as_maybe_indefinite<std::vector<std::byte>>>,
+                   std::variant<std::vector<int>, as_indefinite<std::vector<int>>>,
+                   std::variant<std::map<int, int>, as_indefinite<std::map<int, int>>>,
+                   std::variant<std::string, as_indefinite<std::string>>,
+                   std::variant<std::vector<std::byte>, as_indefinite<std::vector<std::byte>>>) {
 
     auto result    = valid_concept_mapping_v<T>;
     auto array     = valid_concept_mapping_array_v<T>;

@@ -115,6 +115,54 @@ if(CBOR_TAGS_INSTALL)
   target_install_package(${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
 endif()
 
+# CMake Presets are available for this project
+# Run the following commands to see available presets:
+message(STATUS "CMake Presets available:")
+message(STATUS "  List all presets: cmake --list-presets=all")
+message(STATUS "  Configure: cmake --preset=<preset-name>")
+message(STATUS "  Build: cmake --build --preset=<preset-name>")
+message(STATUS "  Test: ctest --preset=<preset-name>")
+message(STATUS "  Workflow: cmake --workflow --preset=<workflow-name>")
+message(STATUS "")
+message(STATUS "Standard build types: debug, release, relwithdebinfo, minsizerel")
+message(STATUS "Analysis presets: coverage, coverage-release, tidy, tidy-fix")
+message(STATUS "Profiling presets: profile, profile-release, profile-gprof, pgo-generate, pgo-use")
+message(STATUS "Diagnostic presets (platform-dependent): alsan, alusan, msan, cfihwasan, fullsan")
+message(STATUS "Memory-check presets (Linux): valgrind")
+
+# Valgrind MemCheck integration (Linux)
+#
+# The `valgrind` target runs: `ctest -T MemCheck --output-on-failure`.
+# Configure with the `valgrind` preset to set `MEMORYCHECK_COMMAND_OPTIONS`.
+find_program(CGEN_VALGRIND_COMMAND valgrind)
+if(CGEN_VALGRIND_COMMAND)
+  set(CGEN_VALGRIND_LABEL_EXCLUDE_REGEX
+      "cmake|package|codegen"
+      CACHE STRING "CTest label exclude regex for `valgrind` target (ctest -LE <regex>). Set empty to include everything.")
+
+  set(_cgen_ctest_command "${CMAKE_CTEST_COMMAND}")
+  if(NOT _cgen_ctest_command)
+    find_program(_cgen_ctest_command ctest)
+  endif()
+
+  if(_cgen_ctest_command)
+    set(_cgen_valgrind_cmd ${_cgen_ctest_command} -T MemCheck --output-on-failure)
+    if(NOT CGEN_VALGRIND_LABEL_EXCLUDE_REGEX STREQUAL "")
+      string(REPLACE "|" "\\|" _cgen_valgrind_label_exclude_shell "${CGEN_VALGRIND_LABEL_EXCLUDE_REGEX}")
+      list(APPEND _cgen_valgrind_cmd -LE "${_cgen_valgrind_label_exclude_shell}")
+    endif()
+
+    add_custom_target(valgrind
+      COMMAND ${_cgen_valgrind_cmd}
+      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+      USES_TERMINAL
+    )
+    unset(_cgen_valgrind_cmd)
+    unset(_cgen_valgrind_label_exclude_shell)
+  endif()
+  unset(_cgen_ctest_command)
+endif()
+
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_options.cmake)
 print_options(DEBUG "^CBOR_TAGS")
 

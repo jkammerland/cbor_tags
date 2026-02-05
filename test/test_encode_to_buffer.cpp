@@ -133,7 +133,7 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
     using variant_t = std::variant<int, double, std::string, std::optional<uint8_t>>;
 
     {
-        T    buffer;
+        T    buffer{};
         auto enc = make_encoder(buffer);
 
         variant_t var = 42;
@@ -143,7 +143,7 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
     }
     {
-        T    buffer;
+        T    buffer{};
         auto enc = make_encoder(buffer);
 
         variant_t var = 3.14;
@@ -153,7 +153,7 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
         CHECK_EQ(to_hex(buffer).substr(0, expected_sv.size()), expected_sv);
     }
     {
-        T    buffer;
+        T    buffer{};
         auto enc = make_encoder(buffer);
 
         variant_t var = "Hello world!";
@@ -164,7 +164,7 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
     }
 
     {
-        T    buffer;
+        T    buffer{};
         auto enc = make_encoder(buffer);
 
         variant_t var = std::optional<uint8_t>(42);
@@ -175,7 +175,7 @@ TEST_CASE_TEMPLATE("Test variant<...>", T, std::array<uint8_t, 1024>, std::vecto
     }
 
     {
-        T    buffer;
+        T    buffer{};
         auto enc = make_encoder(buffer);
 
         variant_t var = std::nullopt;

@@ -68,6 +68,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return expected_type{};
         } catch (const std::bad_alloc &) {
             return unexpected<status_code>(status_code::out_of_memory);
+        } catch (const parse_incomplete_exception &) {
+            return unexpected<status_code>(status_code::incomplete);
         } catch ([[maybe_unused]] const std::exception &e) {
             debug::println("Caught exception: {}", e.what());
             return unexpected<status_code>(status_code::error); // TODO: placeholder
@@ -841,6 +843,143 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
+    template <typename T> constexpr status_code decode_indef_bstr(T &out) {
+        detail::appender<T> appender_;
+        while (true) {
+            const auto                start_position = reader_.position_;
+            [[maybe_unused]] size_type start_offset{};
+            if constexpr (!IsContiguous<InputBuffer>) {
+                start_offset = reader_.current_offset_;
+            }
+
+            try {
+                auto [major, additionalInfo] = read_initial_byte();
+                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                    return status_code::success;
+                }
+                if (major != major_type::ByteString || additionalInfo == static_cast<byte>(31)) {
+                    return status_code::no_match_for_bstr_on_buffer;
+                }
+
+                auto chunk = decode_bstring(additionalInfo);
+                if constexpr (IsContiguous<decltype(chunk)>) {
+                    appender_(out, chunk);
+                } else {
+                    for (auto b : chunk) {
+                        appender_(out, static_cast<typename T::value_type>(b));
+                    }
+                }
+            } catch (const parse_incomplete_exception &) {
+                reader_.position_ = start_position;
+                if constexpr (!IsContiguous<InputBuffer>) {
+                    reader_.current_offset_ = start_offset;
+                }
+                throw;
+            }
+        }
+    }
+
+    template <typename T> constexpr status_code decode_indef_tstr(T &out) {
+        detail::appender<T> appender_;
+        while (true) {
+            const auto                start_position = reader_.position_;
+            [[maybe_unused]] size_type start_offset{};
+            if constexpr (!IsContiguous<InputBuffer>) {
+                start_offset = reader_.current_offset_;
+            }
+
+            try {
+                auto [major, additionalInfo] = read_initial_byte();
+                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                    return status_code::success;
+                }
+                if (major != major_type::TextString || additionalInfo == static_cast<byte>(31)) {
+                    return status_code::no_match_for_tstr_on_buffer;
+                }
+
+                auto chunk = decode_text(additionalInfo);
+                if constexpr (IsContiguous<decltype(chunk)>) {
+                    appender_(out, chunk);
+                } else {
+                    for (auto c : chunk) {
+                        appender_(out, static_cast<typename T::value_type>(c));
+                    }
+                }
+            } catch (const parse_incomplete_exception &) {
+                reader_.position_ = start_position;
+                if constexpr (!IsContiguous<InputBuffer>) {
+                    reader_.current_offset_ = start_offset;
+                }
+                throw;
+            }
+        }
+    }
+
+    template <typename T> constexpr status_code decode_indef_array(T &value) {
+        detail::appender<T> appender_;
+        while (true) {
+            const auto                start_position = reader_.position_;
+            [[maybe_unused]] size_type start_offset{};
+            if constexpr (!IsContiguous<InputBuffer>) {
+                start_offset = reader_.current_offset_;
+            }
+
+            try {
+                auto [major, additionalInfo] = read_initial_byte();
+                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                    return status_code::success;
+                }
+
+                using value_type = typename T::value_type;
+                value_type result{};
+                auto       status = decode(result, major, additionalInfo);
+                if (status != status_code::success) {
+                    return status;
+                }
+                appender_(value, result);
+            } catch (const parse_incomplete_exception &) {
+                reader_.position_ = start_position;
+                if constexpr (!IsContiguous<InputBuffer>) {
+                    reader_.current_offset_ = start_offset;
+                }
+                throw;
+            }
+        }
+    }
+
+    template <typename T> constexpr status_code decode_indef_map(T &value) {
+        detail::appender<T> appender_;
+        while (true) {
+            const auto                start_position = reader_.position_;
+            [[maybe_unused]] size_type start_offset{};
+            if constexpr (!IsContiguous<InputBuffer>) {
+                start_offset = reader_.current_offset_;
+            }
+
+            try {
+                auto [major, additionalInfo] = read_initial_byte();
+                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                    return status_code::success;
+                }
+
+                using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
+                value_type result{};
+                auto       status = decode(result.first, major, additionalInfo);
+                status            = (status == status_code::success) ? decode(result.second) : status;
+                if (status != status_code::success) {
+                    return status;
+                }
+                appender_(value, result);
+            } catch (const parse_incomplete_exception &) {
+                reader_.position_ = start_position;
+                if constexpr (!IsContiguous<InputBuffer>) {
+                    reader_.current_offset_ = start_offset;
+                }
+                throw;
+            }
+        }
+    }
+
     constexpr size_type require_bytes(std::uint64_t length) {
         if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
             if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
@@ -852,7 +991,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return 0;
         }
         if (reader_.empty(data_, needed - 1)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         return needed;
     }
@@ -869,14 +1008,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr uint8_t read_uint8() {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         return static_cast<uint8_t>(reader_.read(data_));
     }
 
     constexpr uint16_t read_uint16() {
         if (reader_.empty(data_, 1)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         auto byte0 = static_cast<uint16_t>(reader_.read(data_));
         auto byte1 = static_cast<uint16_t>(reader_.read(data_));
@@ -885,7 +1024,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr uint32_t read_uint32() {
         if (reader_.empty(data_, 3)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         auto byte0 = static_cast<uint32_t>(reader_.read(data_));
         auto byte1 = static_cast<uint32_t>(reader_.read(data_));
@@ -896,7 +1035,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr uint64_t read_uint64() {
         if (reader_.empty(data_, 7)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         auto byte0 = static_cast<uint64_t>(reader_.read(data_));
         auto byte1 = static_cast<uint64_t>(reader_.read(data_));
@@ -911,7 +1050,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr simple read_simple() {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         return simple{static_cast<simple::value_type>(reader_.read(data_))};
     }
@@ -919,7 +1058,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     // CBOR Float16 decoding function
     constexpr float16_t read_float16() {
         if (reader_.empty(data_, 1)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
         auto byte0 = static_cast<uint16_t>(reader_.read(data_));
         auto byte1 = static_cast<uint16_t>(reader_.read(data_));
@@ -938,7 +1077,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
-            throw std::runtime_error("Unexpected end of input");
+            throw parse_incomplete_exception("Unexpected end of input");
         }
 
         const auto initialByte    = reader_.read(data_);
@@ -994,6 +1133,98 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     detail::reader<InputBuffer> reader_;
 };
 
+template <typename T> struct cbor_indefinite_decoder {
+    using byte = std::byte;
+
+    template <typename U> constexpr status_code decode(as_indefinite<U> value) {
+        auto &dec = detail::underlying<T>(this);
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+
+        const auto [major, additionalInfo] = dec.read_initial_byte();
+        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
+            if (major != major_type::ByteString || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            return dec.decode_indef_bstr(value.value_);
+        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
+            if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            return dec.decode_indef_tstr(value.value_);
+        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            return dec.decode_indef_map(value.value_);
+        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            return dec.decode_indef_array(value.value_);
+        } else {
+            return status_code::error;
+        }
+    }
+
+    template <typename U> constexpr status_code decode_maybe_indefinite_value(U &value) {
+        auto &dec = detail::underlying<T>(this);
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+
+        const auto [major, additionalInfo] = dec.read_initial_byte();
+        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
+            if (major != major_type::ByteString) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_bstr(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
+            if (major != major_type::TextString) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_tstr(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            if (major != major_type::Map) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_map(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            if (major != major_type::Array) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return dec.decode_indef_array(value);
+            }
+            return dec.decode(value, major, additionalInfo);
+        } else {
+            return status_code::error;
+        }
+    }
+
+    template <typename U>
+        requires std::is_reference_v<U>
+    constexpr status_code decode(as_maybe_indefinite<U> value) {
+        return decode_maybe_indefinite_value(value.get());
+    }
+
+    template <typename U>
+        requires(!std::is_reference_v<U>)
+    constexpr status_code decode(as_maybe_indefinite<U> &value) {
+        return decode_maybe_indefinite_value(value.get());
+    }
+};
+
 template <typename T> struct cbor_header_decoder {
     constexpr auto get_and_validate_header(major_type expectedMajorType) {
         auto [initialByte, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
@@ -1022,7 +1253,7 @@ template <typename T> struct cbor_header_decoder {
 };
 
 template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder>(buffer);
+    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
 }
 
 } // namespace cbor::tags
