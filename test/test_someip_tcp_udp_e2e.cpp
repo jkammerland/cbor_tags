@@ -532,6 +532,7 @@ static int run_server(bool reliable, int ready_fd) {
     while (!shutdown) {
         std::vector<pollfd> poll_fds{};
         poll_fds.push_back({sd_sock.fd(), POLLIN, 0});
+        const std::size_t polled_tcp_clients = tcp_clients.size();
         if (reliable) {
             poll_fds.push_back({listen_sock.fd(), POLLIN, 0});
             for (const auto &client : tcp_clients) {
@@ -619,7 +620,7 @@ static int run_server(bool reliable, int ready_fd) {
             }
             index++;
 
-            for (std::size_t client_index = 0; client_index < tcp_clients.size(); ++client_index, ++index) {
+            for (std::size_t client_index = 0; client_index < polled_tcp_clients; ++client_index, ++index) {
                 if ((poll_fds[index].revents & (POLLERR | POLLHUP)) != 0) {
                     return 1;
                 }
@@ -890,30 +891,25 @@ static bool wait_for_sd_ack(int sd_fd, int timeout_ms) {
 static bool wait_for_response(int fd, bool reliable, std::uint16_t method_id, std::uint8_t expected_type,
                               std::uint8_t expected_rc, const someip::ser::config &cfg,
                               bool expect_payload = false) {
-    someip::wire::parsed_frame parsed{};
+    std::vector<std::byte> frame{};
     if (reliable) {
-        auto frame = recv_someip_frame(fd, 5000);
+        frame = recv_someip_frame(fd, 5000);
         if (frame.empty()) return false;
-        auto tmp = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-        if (!tmp) return false;
-        parsed = *tmp;
     } else {
-        std::vector<std::byte> frame{};
         sockaddr_in sender{};
         if (!recv_udp_datagram(fd, frame, sender, 5000)) return false;
-        auto tmp = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-        if (!tmp) return false;
-        parsed = *tmp;
     }
+    auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
+    if (!parsed) return false;
 
-    if (parsed.hdr.msg.method_id != method_id || parsed.hdr.msg_type != expected_type ||
-        parsed.hdr.return_code != expected_rc) {
+    if (parsed->hdr.msg.method_id != method_id || parsed->hdr.msg_type != expected_type ||
+        parsed->hdr.return_code != expected_rc) {
         return false;
     }
     if (expect_payload) {
         MethodResp resp{};
-        const auto payload_base = parsed.tp ? 20u : 16u;
-        if (!someip::ser::decode(parsed.payload, cfg, resp, payload_base)) {
+        const auto payload_base = parsed->tp ? 20u : 16u;
+        if (!someip::ser::decode(parsed->payload, cfg, resp, payload_base)) {
             return false;
         }
         return resp.y == 42u;
@@ -925,28 +921,23 @@ static bool wait_for_events(int fd, bool reliable, std::size_t count, const some
     std::vector<bool> seen(count, false);
     std::size_t received = 0;
     while (received < count) {
-        someip::wire::parsed_frame parsed{};
+        std::vector<std::byte> frame{};
         if (reliable) {
-            auto frame = recv_someip_frame(fd, 5000);
+            frame = recv_someip_frame(fd, 5000);
             if (frame.empty()) return false;
-            auto tmp = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-            if (!tmp) return false;
-            parsed = *tmp;
         } else {
-            std::vector<std::byte> frame{};
             sockaddr_in sender{};
             if (!recv_udp_datagram(fd, frame, sender, 5000)) return false;
-            auto tmp = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-            if (!tmp) return false;
-            parsed = *tmp;
         }
-        if (parsed.hdr.msg_type != someip::wire::message_type::notification ||
-            parsed.hdr.msg.method_id != writable_field.notifier_event_id) {
+        auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
+        if (!parsed) return false;
+        if (parsed->hdr.msg_type != someip::wire::message_type::notification ||
+            parsed->hdr.msg.method_id != writable_field.notifier_event_id) {
             return false;
         }
         FieldEvent ev{};
-        const auto payload_base = parsed.tp ? 20u : 16u;
-        if (!someip::ser::decode(parsed.payload, cfg, ev, payload_base)) {
+        const auto payload_base = parsed->tp ? 20u : 16u;
+        if (!someip::ser::decode(parsed->payload, cfg, ev, payload_base)) {
             return false;
         }
         if (ev.seq >= count || ev.value != kFieldValue) {
