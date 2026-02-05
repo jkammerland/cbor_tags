@@ -1,16 +1,17 @@
 {
     "unicast" : "127.0.0.1",
+    "netmask" : "255.0.0.0",
     "device" : "lo",
     "logging" :
     {
-        "level" : "warning",
+        "level" : "info",
         "console" : "true",
         "file" : { "enable" : "false", "path" : "/tmp/vsomeip.log" },
         "dlt" : "false"
     },
     "applications" :
     [
-        { "name" : "server",   "id" : "0x1001" },
+        { "name" : "routingmanagerd", "id" : "0x1000" },
         { "name" : "client_a", "id" : "0x1002" },
         { "name" : "client_b", "id" : "0x1003" }
     ],
@@ -19,6 +20,7 @@
         {
             "service" : "0x1234",
             "instance" : "0x0001",
+            "unicast" : "127.0.0.2",
             "unreliable" : "30509",
             "events" :
             [
@@ -38,7 +40,15 @@
             ]
         }
     ],
-    "routing" : "server",
+    "clients" :
+    [
+        {
+            "service" : "0x1234",
+            "instance" : "0x0001",
+            "unreliable" : [ 30510, 30511 ]
+        }
+    ],
+    "routing" : "routingmanagerd",
     "service-discovery" :
     {
         "enable" : "true",

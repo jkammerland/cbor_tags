@@ -1,5 +1,6 @@
 {
     "unicast" : "127.0.0.1",
+    "netmask" : "255.0.0.0",
     "device" : "lo",
     "logging" :
     {
@@ -10,9 +11,8 @@
     },
     "applications" :
     [
-        { "name" : "server",   "id" : "0x1001" },
-        { "name" : "client_a", "id" : "0x1002" },
-        { "name" : "client_b", "id" : "0x1003" }
+        { "name" : "routingmanagerd", "id" : "0x1000" },
+        { "name" : "server", "id" : "0x1001" }
     ],
     "services" :
     [
@@ -38,7 +38,7 @@
             ]
         }
     ],
-    "routing" : "server",
+    "routing" : "routingmanagerd",
     "service-discovery" :
     {
         "enable" : "true",

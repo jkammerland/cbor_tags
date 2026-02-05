@@ -1,5 +1,6 @@
 {
     "unicast" : "127.0.0.1",
+    "netmask" : "255.0.0.0",
     "device" : "lo",
     "logging" :
     {
@@ -10,22 +11,21 @@
     },
     "applications" :
     [
-        { "name" : "server",   "id" : "0x1001" },
-        { "name" : "client_a", "id" : "0x1002" },
-        { "name" : "client_b", "id" : "0x1003" }
+        { "name" : "routingmanagerd", "id" : "0x1000" },
+        { "name" : "server", "id" : "0x1001" }
     ],
     "services" :
     [
         {
             "service" : "0x1234",
             "instance" : "0x0001",
-            "unreliable" : "30509",
+            "reliable" : { "port" : "30509", "magic-cookies" : "false" },
             "events" :
             [
                 {
                     "event" : "0x8001",
                     "is_field" : "true",
-                    "is_reliable" : "false",
+                    "is_reliable" : "true",
                     "update-cycle" : 0
                 }
             ],
@@ -38,7 +38,7 @@
             ]
         }
     ],
-    "routing" : "server",
+    "routing" : "routingmanagerd",
     "service-discovery" :
     {
         "enable" : "true",

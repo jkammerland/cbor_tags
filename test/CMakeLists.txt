@@ -68,13 +68,27 @@ if (CBOR_TAGS_ENABLE_VSOMEIP_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../th
   target_compile_definitions(vsomeip_tests PRIVATE VSOMEIP_TEST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/conf")
   target_link_libraries(vsomeip_tests PRIVATE cbor::tags vsomeip3 vsomeip3-sd vsomeip3-cfg pthread)
   set_target_properties(vsomeip_tests PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/vsomeip")
+  add_executable(vsomeip_interop_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/vsomeip_interop_e2e.cpp
+  )
+  target_compile_definitions(vsomeip_interop_tests PRIVATE VSOMEIP_TEST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/conf")
+  target_link_libraries(vsomeip_interop_tests PRIVATE cbor::tags vsomeip3 vsomeip3-sd vsomeip3-cfg pthread)
+  set_target_properties(vsomeip_interop_tests PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/vsomeip")
   add_test(NAME vsomeip_tests_tcp COMMAND vsomeip_tests tcp)
   add_test(NAME vsomeip_tests_udp COMMAND vsomeip_tests udp)
+  add_test(NAME vsomeip_interop_custom_tcp COMMAND vsomeip_interop_tests custom-server tcp)
+  add_test(NAME vsomeip_interop_custom_udp COMMAND vsomeip_interop_tests custom-server udp)
+  add_test(NAME vsomeip_interop_vsomeip_tcp COMMAND vsomeip_interop_tests vsomeip-server tcp)
+  add_test(NAME vsomeip_interop_vsomeip_udp COMMAND vsomeip_interop_tests vsomeip-server udp)
   if(UNIX AND NOT APPLE)
-    set_tests_properties(vsomeip_tests_tcp vsomeip_tests_udp PROPERTIES
+    set_tests_properties(vsomeip_tests_tcp vsomeip_tests_udp
+      vsomeip_interop_custom_tcp vsomeip_interop_custom_udp
+      vsomeip_interop_vsomeip_tcp vsomeip_interop_vsomeip_udp PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/vsomeip:$ENV{LD_LIBRARY_PATH}")
   elseif(APPLE)
-    set_tests_properties(vsomeip_tests_tcp vsomeip_tests_udp PROPERTIES
+    set_tests_properties(vsomeip_tests_tcp vsomeip_tests_udp
+      vsomeip_interop_custom_tcp vsomeip_interop_custom_udp
+      vsomeip_interop_vsomeip_tcp vsomeip_interop_vsomeip_udp PROPERTIES
       ENVIRONMENT "DYLD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/vsomeip:$ENV{DYLD_LIBRARY_PATH}")
   endif()
 endif()
