@@ -13,7 +13,8 @@
     [
         { "name" : "routingmanagerd", "id" : "0x1000" },
         { "name" : "client_a", "id" : "0x1002" },
-        { "name" : "client_b", "id" : "0x1003" }
+        { "name" : "client_b", "id" : "0x1003" },
+        { "name" : "client_c", "id" : "0x1004" }
     ],
     "clients" :
     [

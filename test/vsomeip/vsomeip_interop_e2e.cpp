@@ -61,6 +61,7 @@ constexpr std::uint8_t  kInterfaceVersion = 0x00;
 
 constexpr const char *kCustomIp   = "127.0.0.2";
 constexpr const char *kCustomIpB  = "127.0.0.3";
+constexpr const char *kCustomIpC  = "127.0.0.4";
 constexpr const char *kVsomeipIp  = "127.0.0.1";
 constexpr const char *kSdMulticastTcp = "239.255.0.1";
 constexpr const char *kSdMulticastUdp = "239.255.0.1";
@@ -561,6 +562,7 @@ static void cleanup_vsomeip_sockets() {
         "/tmp/vsomeip-1001",
         "/tmp/vsomeip-1002",
         "/tmp/vsomeip-1003",
+        "/tmp/vsomeip-1004",
         "/tmp/vsomeip.lck",
     };
     for (const auto *path : paths) {
@@ -585,6 +587,25 @@ static void debug_dump_sockets(const char *label) {
     }
     std::fprintf(stderr, "%s\n", label);
     (void)std::system("ss -u -a -p | rg 30490 || true");
+}
+
+static int read_env_int(const char *name, int default_value) {
+    const char *raw = std::getenv(name);
+    if (raw == nullptr || *raw == '\0') {
+        return default_value;
+    }
+    char *end = nullptr;
+    long value = std::strtol(raw, &end, 10);
+    if (end == raw) {
+        return default_value;
+    }
+    if (value < 0) {
+        return default_value;
+    }
+    if (value > std::numeric_limits<int>::max()) {
+        return default_value;
+    }
+    return static_cast<int>(value);
 }
 
 struct tcp_client_state {
@@ -1595,8 +1616,10 @@ class vsomeip_server_runner {
             std::fprintf(stderr, "vsomeip server: subscribers=%zu before notify\n", subscribed_count_);
         }
         const std::size_t rounds = reliable_ ? 1u : 8u;
+        const std::uint32_t burst = reliable_ ? static_cast<std::uint32_t>(kEventCount)
+                                              : static_cast<std::uint32_t>(kEventBurst);
         for (std::size_t round = 0; round < rounds; ++round) {
-            for (std::uint32_t seq_index = 0; seq_index < kEventBurst; ++seq_index) {
+            for (std::uint32_t seq_index = 0; seq_index < burst; ++seq_index) {
                 FieldEvent ev{.seq = seq_index, .value = field_value_};
                 app_->notify(kServiceId, kInstanceId, kEventId, encode_payload(ev), true);
                 if (!reliable_) {
@@ -1872,7 +1895,10 @@ class custom_client_runner {
                          const char *client_ip,
                          const char *event_ip,
                          bool use_event_tcp,
-                         std::size_t min_events = kEventCount)
+                         std::size_t min_events = kEventCount,
+                         int start_fd = -1,
+                         int ready_fd = -1,
+                         std::uint16_t app_client_id_override = 0)
         : reliable_(reliable),
           is_a_(is_a),
           go_fd_(go_fd),
@@ -1884,7 +1910,11 @@ class custom_client_runner {
           sd_iface_ip_(client_ip_),
           use_event_tcp_(use_event_tcp),
           min_events_(min_events),
+          start_fd_(start_fd),
+          ready_fd_(ready_fd),
           sd_client_id_(is_a ? 0x2001 : 0x2002),
+          app_client_id_(app_client_id_override != 0 ? app_client_id_override
+                                                     : (is_a ? 0x3001 : 0x3002)),
           sd_session_id_(1),
           debug_(std::getenv("SOMEIP_TEST_DEBUG") != nullptr) {}
 
@@ -1897,7 +1927,10 @@ class custom_client_runner {
         if (!sd_.multicast.valid() && debug_) {
             std::fprintf(stderr, "custom client: sd multicast socket unavailable, using unicast only\n");
         }
-
+        if (server_ip_ != nullptr && std::strcmp(server_ip_, kVsomeipIp) == 0) {
+            sd_client_id_ = 0;
+            sd_session_id_ = 0;
+        }
         if (!send_sd_find()) {
             std::fprintf(stderr, "custom client: sd find failed\n");
             return 1;
@@ -1997,8 +2030,18 @@ class custom_client_runner {
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(400));
         }
+        if (ready_fd_ >= 0) {
+            (void)write_byte(ready_fd_, std::byte{0x01});
+        }
 
         if (is_a_) {
+            if (start_fd_ >= 0) {
+                std::byte sig{};
+                if (!read_byte_timeout(start_fd_, sig, 10000)) {
+                    std::fprintf(stderr, "custom client: start signal timeout\n");
+                    return 1;
+                }
+            }
             if (debug_) {
                 std::fprintf(stderr, "custom client: start setter_writable\n");
             }
@@ -2067,25 +2110,23 @@ class custom_client_runner {
                 }
                 return 1;
             }
-            if (!reliable_) {
+            if (debug_) {
+                std::fprintf(stderr, "custom client: send setter_ro\n");
+            }
+            if (!send_setter_readonly()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: send setter_ro\n");
+                    std::fprintf(stderr, "custom client: setter_ro send failed\n");
                 }
-                if (!send_setter_readonly()) {
-                    if (debug_) {
-                        std::fprintf(stderr, "custom client: setter_ro send failed\n");
-                    }
-                    return 1;
-                }
-                if (!wait_for_readonly_err()) {
-                    if (debug_) {
-                        std::fprintf(stderr, "custom client: setter_ro wait failed\n");
-                    }
-                    return 1;
-                }
+                return 1;
+            }
+            if (!wait_for_readonly_err()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: setter_ro ok\n");
+                    std::fprintf(stderr, "custom client: setter_ro wait failed\n");
                 }
+                return 1;
+            }
+            if (debug_) {
+                std::fprintf(stderr, "custom client: setter_ro ok\n");
             }
             if (done_fd_ >= 0) {
                 if (debug_) {
@@ -2263,7 +2304,7 @@ class custom_client_runner {
     }
 
     bool wait_for_subscribe_ack() {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (std::chrono::steady_clock::now() < deadline) {
             std::vector<std::byte> frame{};
             sockaddr_in sender{};
@@ -2320,7 +2361,7 @@ class custom_client_runner {
         someip::wire::header header{};
         header.msg.service_id    = kServiceId;
         header.msg.method_id     = kSetterW;
-        header.req.client_id     = sd_client_id_;
+        header.req.client_id     = app_client_id_;
         header.req.session_id    = next_session_++;
         header.protocol_version  = 1;
         header.interface_version = kInterfaceVersion;
@@ -2336,7 +2377,7 @@ class custom_client_runner {
         someip::wire::header header{};
         header.msg.service_id    = kServiceId;
         header.msg.method_id     = kSetterRO;
-        header.req.client_id     = sd_client_id_;
+        header.req.client_id     = app_client_id_;
         header.req.session_id    = next_session_++;
         header.protocol_version  = 1;
         header.interface_version = kInterfaceVersion;
@@ -2352,7 +2393,7 @@ class custom_client_runner {
         someip::wire::header header{};
         header.msg.service_id    = kServiceId;
         header.msg.method_id     = kMethodId;
-        header.req.client_id     = sd_client_id_;
+        header.req.client_id     = app_client_id_;
         header.req.session_id    = next_session_++;
         header.protocol_version  = 1;
         header.interface_version = kInterfaceVersion;
@@ -2368,7 +2409,7 @@ class custom_client_runner {
         someip::wire::header header{};
         header.msg.service_id    = kServiceId;
         header.msg.method_id     = kShutdown;
-        header.req.client_id     = sd_client_id_;
+        header.req.client_id     = app_client_id_;
         header.req.session_id    = next_session_++;
         header.protocol_version  = 1;
         header.interface_version = kInterfaceVersion;
@@ -2490,12 +2531,6 @@ class custom_client_runner {
     }
 
     bool wait_for_events() {
-        if (reliable_ && use_event_tcp_) {
-            if (!ensure_event_connection()) {
-                std::fprintf(stderr, "custom client: event connection timeout\n");
-                return false;
-            }
-        }
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
 
         if (!reliable_) {
@@ -2569,6 +2604,18 @@ class custom_client_runner {
                     std::fprintf(stderr, "custom client: event deadline reached seq=%zu\n", expected_seq);
                 }
                 return false;
+            }
+            if (reliable_ && use_event_tcp_ && !event_sock_.valid()) {
+                const auto remaining_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now())
+                        .count();
+                if (remaining_ms <= 0) {
+                    return false;
+                }
+                const int wait_ms = static_cast<int>(std::min<long long>(remaining_ms, 2000));
+                if (!ensure_event_connection(wait_ms)) {
+                    continue;
+                }
             }
             if (!pending_events_.empty()) {
                 const auto ev = pending_events_.front();
@@ -2735,7 +2782,7 @@ class custom_client_runner {
         return true;
     }
 
-    bool ensure_event_connection() {
+    bool ensure_event_connection(int timeout_ms) {
         if (!reliable_ || !use_event_tcp_) {
             return true;
         }
@@ -2748,7 +2795,7 @@ class custom_client_runner {
         pollfd pfd{};
         pfd.fd = event_listener_.fd();
         pfd.events = POLLIN;
-        const int rc = ::poll(&pfd, 1, 5000);
+        const int rc = ::poll(&pfd, 1, timeout_ms);
         if (rc <= 0) {
             return false;
         }
@@ -2767,6 +2814,8 @@ class custom_client_runner {
     bool is_a_{false};
     int  go_fd_{-1};
     int  done_fd_{-1};
+    int  start_fd_{-1};
+    int  ready_fd_{-1};
     const char *server_ip_{nullptr};
     const char *client_ip_{nullptr};
     const char *event_ip_{nullptr};
@@ -2775,6 +2824,7 @@ class custom_client_runner {
     std::uint16_t local_port_{0};
     std::uint16_t event_port_{0};
     std::uint16_t sd_client_id_{0};
+    std::uint16_t app_client_id_{0};
     std::uint16_t sd_session_id_{0};
     std::size_t   min_events_{kEventCount};
     sockaddr_in sd_server_addr_{};
@@ -2827,17 +2877,25 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     (void)::unsetenv("VSOMEIP_SD_MULTICAST");
     (void)::unsetenv("VSOMEIP_SD_UNICAST");
 
+    const bool extra_client = read_env_int("SOMEIP_TEST_EXTRA_CLIENTS", 0) > 0;
+
     int server_pipe[2]{-1, -1};
     int server_stop_pipe[2]{-1, -1};
     int done_pipe[2]{-1, -1};
+    int done_c_pipe[2]{-1, -1};
     int go_pipe[2]{-1, -1};
     int routing_ready_pipe[2]{-1, -1};
     int routing_stop_pipe[2]{-1, -1};
     int sub_a_pipe[2]{-1, -1};
     int sub_b_pipe[2]{-1, -1};
-    if (::pipe(server_pipe) != 0 || ::pipe(server_stop_pipe) != 0 || ::pipe(done_pipe) != 0 || ::pipe(go_pipe) != 0 ||
-        ::pipe(routing_ready_pipe) != 0 || ::pipe(routing_stop_pipe) != 0 ||
-        ::pipe(sub_a_pipe) != 0 || ::pipe(sub_b_pipe) != 0) {
+    int sub_c_pipe[2]{-1, -1};
+    bool pipes_ok = (::pipe(server_pipe) == 0 && ::pipe(server_stop_pipe) == 0 && ::pipe(done_pipe) == 0 &&
+                     ::pipe(go_pipe) == 0 && ::pipe(routing_ready_pipe) == 0 && ::pipe(routing_stop_pipe) == 0 &&
+                     ::pipe(sub_a_pipe) == 0 && ::pipe(sub_b_pipe) == 0);
+    if (extra_client) {
+        pipes_ok = pipes_ok && (::pipe(sub_c_pipe) == 0) && (::pipe(done_c_pipe) == 0);
+    }
+    if (!pipes_ok) {
         std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
         return 1;
     }
@@ -2881,6 +2939,18 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         ::close(sub_a_pipe[1]);
         ::close(sub_b_pipe[0]);
         ::close(sub_b_pipe[1]);
+        if (sub_c_pipe[0] >= 0) {
+            ::close(sub_c_pipe[0]);
+        }
+        if (sub_c_pipe[1] >= 0) {
+            ::close(sub_c_pipe[1]);
+        }
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        if (done_c_pipe[1] >= 0) {
+            ::close(done_c_pipe[1]);
+        }
         vsomeip_routing_runner routing{routing_ready_pipe[1], routing_stop_pipe[0]};
         const int rc = routing.run();
         ::close(routing_ready_pipe[1]);
@@ -2914,6 +2984,18 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         ::close(sub_a_pipe[0]);
         ::close(sub_b_pipe[0]);
         ::close(sub_b_pipe[1]);
+        if (sub_c_pipe[0] >= 0) {
+            ::close(sub_c_pipe[0]);
+        }
+        if (sub_c_pipe[1] >= 0) {
+            ::close(sub_c_pipe[1]);
+        }
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        if (done_c_pipe[1] >= 0) {
+            ::close(done_c_pipe[1]);
+        }
         vsomeip_client_runner client_a{"client_a", reliable, true, true, go_pipe[0], -1, -1, sub_a_pipe[1]};
         const int rc = client_a.run();
         ::close(go_pipe[0]);
@@ -2931,6 +3013,18 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         ::close(routing_stop_pipe[1]);
         ::close(sub_b_pipe[0]);
         ::close(sub_a_pipe[0]);
+        if (sub_c_pipe[0] >= 0) {
+            ::close(sub_c_pipe[0]);
+        }
+        if (sub_c_pipe[1] >= 0) {
+            ::close(sub_c_pipe[1]);
+        }
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        if (done_c_pipe[1] >= 0) {
+            ::close(done_c_pipe[1]);
+        }
         vsomeip_client_runner client_b{"client_b", reliable, false, true, -1, done_pipe[1], -1, sub_b_pipe[1]};
         const int rc = client_b.run();
         ::close(done_pipe[1]);
@@ -2940,6 +3034,27 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     }
     ::close(done_pipe[1]);
     ::close(sub_b_pipe[1]);
+
+    pid_t client_c_pid = -1;
+    if (extra_client) {
+        client_c_pid = ::fork();
+        if (client_c_pid == 0) {
+            ::close(done_c_pipe[0]);
+            ::close(go_pipe[1]);
+            ::close(routing_stop_pipe[1]);
+            ::close(sub_c_pipe[0]);
+            ::close(sub_a_pipe[0]);
+            ::close(sub_b_pipe[0]);
+            vsomeip_client_runner client_c{"client_c", reliable, false, true, -1, done_c_pipe[1], -1, sub_c_pipe[1]};
+            const int rc = client_c.run();
+            ::close(done_c_pipe[1]);
+            ::close(routing_stop_pipe[1]);
+            ::close(sub_c_pipe[1]);
+            std::_Exit(rc);
+        }
+        ::close(done_c_pipe[1]);
+        ::close(sub_c_pipe[1]);
+    }
 
     std::byte sub_ready{};
     if (!read_byte_timeout(sub_a_pipe[0], sub_ready, 10000)) {
@@ -2960,6 +3075,20 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         return 1;
     }
     ::close(sub_b_pipe[0]);
+    if (extra_client) {
+        if (!read_byte_timeout(sub_c_pipe[0], sub_ready, 10000)) {
+            std::fprintf(stderr, "client_c subscribe timeout\n");
+            (void)::kill(client_a_pid, SIGKILL);
+            (void)::kill(client_b_pid, SIGKILL);
+            if (client_c_pid > 0) {
+                (void)::kill(client_c_pid, SIGKILL);
+            }
+            (void)::kill(routing_pid, SIGKILL);
+            (void)::kill(server_pid, SIGKILL);
+            return 1;
+        }
+        ::close(sub_c_pipe[0]);
+    }
 
     (void)write_byte(go_pipe[1], std::byte{0x01});
 
@@ -2969,6 +3098,9 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         (void)::kill(client_a_pid, SIGKILL);
         (void)::kill(routing_pid, SIGKILL);
         (void)::kill(server_pid, SIGKILL);
+        if (client_c_pid > 0) {
+            (void)::kill(client_c_pid, SIGKILL);
+        }
         if (server_stop_pipe[1] >= 0) {
             (void)write_byte(server_stop_pipe[1], std::byte{0x01});
             ::close(server_stop_pipe[1]);
@@ -2976,6 +3108,23 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         return 1;
     }
     ::close(done_pipe[0]);
+    if (extra_client) {
+        if (!read_byte_timeout(done_c_pipe[0], done, 20000)) {
+            std::fprintf(stderr, "client_c did not finish in time\n");
+            (void)::kill(client_a_pid, SIGKILL);
+            (void)::kill(routing_pid, SIGKILL);
+            (void)::kill(server_pid, SIGKILL);
+            if (client_c_pid > 0) {
+                (void)::kill(client_c_pid, SIGKILL);
+            }
+            if (server_stop_pipe[1] >= 0) {
+                (void)write_byte(server_stop_pipe[1], std::byte{0x01});
+                ::close(server_stop_pipe[1]);
+            }
+            return 1;
+        }
+        ::close(done_c_pipe[0]);
+    }
 
     (void)write_byte(go_pipe[1], std::byte{0x02});
     ::close(go_pipe[1]);
@@ -2989,6 +3138,17 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
             ::close(server_stop_pipe[1]);
         }
         return 1;
+    }
+    if (extra_client) {
+        (void)::waitpid(client_c_pid, &status, 0);
+        if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+            std::fprintf(stderr, "client_c failed\n");
+            if (server_stop_pipe[1] >= 0) {
+                (void)write_byte(server_stop_pipe[1], std::byte{0x01});
+                ::close(server_stop_pipe[1]);
+            }
+            return 1;
+        }
     }
     (void)::waitpid(client_a_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
@@ -3027,13 +3187,23 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     (void)::unsetenv("VSOMEIP_SD_MULTICAST");
     (void)::unsetenv("VSOMEIP_SD_UNICAST");
 
+    const bool extra_client = read_env_int("SOMEIP_TEST_EXTRA_CLIENTS", 0) > 0;
+
     int server_pipe[2]{-1, -1};
     int done_pipe[2]{-1, -1};
+    int done_c_pipe[2]{-1, -1};
     int go_pipe[2]{-1, -1};
+    int start_pipe[2]{-1, -1};
+    int ready_pipe[2]{-1, -1};
     int routing_ready_pipe[2]{-1, -1};
     int routing_stop_pipe[2]{-1, -1};
-    if (::pipe(server_pipe) != 0 || ::pipe(done_pipe) != 0 || ::pipe(go_pipe) != 0 ||
-        ::pipe(routing_ready_pipe) != 0 || ::pipe(routing_stop_pipe) != 0) {
+    bool pipes_ok = (::pipe(server_pipe) == 0 && ::pipe(done_pipe) == 0 && ::pipe(go_pipe) == 0 &&
+                     ::pipe(start_pipe) == 0 && ::pipe(ready_pipe) == 0 &&
+                     ::pipe(routing_ready_pipe) == 0 && ::pipe(routing_stop_pipe) == 0);
+    if (extra_client) {
+        pipes_ok = pipes_ok && (::pipe(done_c_pipe) == 0);
+    }
+    if (!pipes_ok) {
         std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
         return 1;
     }
@@ -3042,6 +3212,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     pid_t server_pid = -1;
     pid_t client_a_pid = -1;
     pid_t client_b_pid = -1;
+    pid_t client_c_pid = -1;
 
     auto kill_and_wait = [](pid_t pid) {
         if (pid <= 0) {
@@ -3055,6 +3226,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     auto cleanup_failure = [&]() {
         kill_and_wait(client_a_pid);
         kill_and_wait(client_b_pid);
+        kill_and_wait(client_c_pid);
         kill_and_wait(server_pid);
         if (routing_stop_pipe[1] >= 0) {
             (void)write_byte(routing_stop_pipe[1], std::byte{0x01});
@@ -3072,8 +3244,18 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
         ::close(server_pipe[1]);
         ::close(done_pipe[0]);
         ::close(done_pipe[1]);
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        if (done_c_pipe[1] >= 0) {
+            ::close(done_c_pipe[1]);
+        }
         ::close(go_pipe[0]);
         ::close(go_pipe[1]);
+        ::close(start_pipe[0]);
+        ::close(start_pipe[1]);
+        ::close(ready_pipe[0]);
+        ::close(ready_pipe[1]);
         vsomeip_routing_runner routing{routing_ready_pipe[1], routing_stop_pipe[0]};
         const int rc = routing.run();
         ::close(routing_ready_pipe[1]);
@@ -3101,6 +3283,20 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     if (server_pid == 0) {
         ::close(server_pipe[0]);
         ::close(routing_stop_pipe[1]);
+        ::close(done_pipe[0]);
+        ::close(done_pipe[1]);
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        if (done_c_pipe[1] >= 0) {
+            ::close(done_c_pipe[1]);
+        }
+        ::close(go_pipe[0]);
+        ::close(go_pipe[1]);
+        ::close(start_pipe[0]);
+        ::close(start_pipe[1]);
+        ::close(ready_pipe[0]);
+        ::close(ready_pipe[1]);
         vsomeip_server_runner server{reliable, server_pipe[1]};
         const int rc = server.run();
         if (server_pipe[1] >= 0) {
@@ -3121,6 +3317,9 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     }
     ::close(server_pipe[0]);
 
+    const char *client_ip_a = kCustomIp;
+    const char *client_ip_b = kCustomIpB;
+    const char *client_ip_c = kCustomIpC;
     const std::size_t min_events_b = reliable ? kEventCount : 0u;
     client_b_pid = ::fork();
     if (client_b_pid == 0) {
@@ -3128,8 +3327,17 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
         ::close(go_pipe[0]);
         ::close(go_pipe[1]);
         ::close(routing_stop_pipe[1]);
-        custom_client_runner client_b{reliable, false, -1, done_pipe[1], kVsomeipIp, kCustomIpB, kCustomIpB, false,
-                                       min_events_b};
+        ::close(start_pipe[0]);
+        ::close(start_pipe[1]);
+        ::close(ready_pipe[0]);
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        if (done_c_pipe[1] >= 0) {
+            ::close(done_c_pipe[1]);
+        }
+        custom_client_runner client_b{reliable, false, -1, done_pipe[1], kVsomeipIp, client_ip_b, client_ip_b, false,
+                                       min_events_b, -1, ready_pipe[1]};
         const int rc = client_b.run();
         ::close(done_pipe[1]);
         ::close(routing_stop_pipe[1]);
@@ -3137,18 +3345,66 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     }
     ::close(done_pipe[1]);
 
+    if (extra_client) {
+        client_c_pid = ::fork();
+        if (client_c_pid == 0) {
+            ::close(done_c_pipe[0]);
+            ::close(go_pipe[0]);
+            ::close(go_pipe[1]);
+            ::close(done_pipe[0]);
+            ::close(routing_stop_pipe[1]);
+            ::close(start_pipe[0]);
+            ::close(start_pipe[1]);
+            ::close(ready_pipe[0]);
+            custom_client_runner client_c{reliable, false, -1, done_c_pipe[1], kVsomeipIp, client_ip_c, client_ip_c,
+                                           false, min_events_b, -1, ready_pipe[1], 0x3003};
+            const int rc = client_c.run();
+            ::close(done_c_pipe[1]);
+            ::close(routing_stop_pipe[1]);
+            std::_Exit(rc);
+        }
+        ::close(done_c_pipe[1]);
+    }
+
     client_a_pid = ::fork();
     if (client_a_pid == 0) {
         ::close(go_pipe[1]);
         ::close(done_pipe[0]);
         ::close(routing_stop_pipe[1]);
-        custom_client_runner client_a{reliable, true, go_pipe[0], -1, kVsomeipIp, kCustomIp, kCustomIp, false};
+        ::close(ready_pipe[0]);
+        ::close(ready_pipe[1]);
+        ::close(start_pipe[1]);
+        if (done_c_pipe[0] >= 0) {
+            ::close(done_c_pipe[0]);
+        }
+        custom_client_runner client_a{reliable, true, go_pipe[0], -1, kVsomeipIp, client_ip_a, client_ip_a, false,
+                                       kEventCount, start_pipe[0], -1};
         const int rc = client_a.run();
         ::close(go_pipe[0]);
         ::close(routing_stop_pipe[1]);
         std::_Exit(rc);
     }
     ::close(go_pipe[0]);
+    ::close(start_pipe[0]);
+    if (ready_pipe[1] >= 0) {
+        ::close(ready_pipe[1]);
+    }
+
+    const int expected_ready = extra_client ? 2 : 1;
+    std::byte ready_sig{};
+    for (int idx = 0; idx < expected_ready; ++idx) {
+        if (!read_byte_timeout(ready_pipe[0], ready_sig, 10000)) {
+            std::fprintf(stderr, "custom client ready timeout\n");
+            cleanup_failure();
+            return 1;
+        }
+    }
+    ::close(ready_pipe[0]);
+
+    if (start_pipe[1] >= 0) {
+        (void)write_byte(start_pipe[1], std::byte{0x01});
+        ::close(start_pipe[1]);
+    }
 
     std::byte done{};
     if (!read_byte_timeout(done_pipe[0], done, 35000)) {
@@ -3157,6 +3413,14 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
         return 1;
     }
     ::close(done_pipe[0]);
+    if (extra_client) {
+        if (!read_byte_timeout(done_c_pipe[0], done, 35000)) {
+            std::fprintf(stderr, "custom client_c did not finish in time\n");
+            cleanup_failure();
+            return 1;
+        }
+        ::close(done_c_pipe[0]);
+    }
 
     (void)write_byte(go_pipe[1], std::byte{0x01});
     ::close(go_pipe[1]);
@@ -3177,6 +3441,14 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
         report_status("custom client_b", status);
         cleanup_failure();
         return 1;
+    }
+    if (extra_client) {
+        (void)::waitpid(client_c_pid, &status, 0);
+        if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+            report_status("custom client_c", status);
+            cleanup_failure();
+            return 1;
+        }
     }
     (void)::waitpid(client_a_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {

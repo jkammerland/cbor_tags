@@ -80,15 +80,21 @@ if (CBOR_TAGS_ENABLE_VSOMEIP_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../th
   add_test(NAME vsomeip_interop_custom_udp COMMAND vsomeip_interop_tests custom-server udp)
   add_test(NAME vsomeip_interop_vsomeip_tcp COMMAND vsomeip_interop_tests vsomeip-server tcp)
   add_test(NAME vsomeip_interop_vsomeip_udp COMMAND vsomeip_interop_tests vsomeip-server udp)
+  add_test(NAME vsomeip_interop_custom_tcp_extra COMMAND vsomeip_interop_tests custom-server tcp)
+  add_test(NAME vsomeip_interop_vsomeip_tcp_extra COMMAND vsomeip_interop_tests vsomeip-server tcp)
   if(UNIX AND NOT APPLE)
     set_tests_properties(vsomeip_tests_tcp vsomeip_tests_udp
       vsomeip_interop_custom_tcp vsomeip_interop_custom_udp
-      vsomeip_interop_vsomeip_tcp vsomeip_interop_vsomeip_udp PROPERTIES
+      vsomeip_interop_vsomeip_tcp vsomeip_interop_vsomeip_udp
+      vsomeip_interop_custom_tcp_extra vsomeip_interop_vsomeip_tcp_extra PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/vsomeip:$ENV{LD_LIBRARY_PATH}")
   elseif(APPLE)
     set_tests_properties(vsomeip_tests_tcp vsomeip_tests_udp
       vsomeip_interop_custom_tcp vsomeip_interop_custom_udp
-      vsomeip_interop_vsomeip_tcp vsomeip_interop_vsomeip_udp PROPERTIES
+      vsomeip_interop_vsomeip_tcp vsomeip_interop_vsomeip_udp
+      vsomeip_interop_custom_tcp_extra vsomeip_interop_vsomeip_tcp_extra PROPERTIES
       ENVIRONMENT "DYLD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/vsomeip:$ENV{DYLD_LIBRARY_PATH}")
   endif()
+  set_property(TEST vsomeip_interop_custom_tcp_extra vsomeip_interop_vsomeip_tcp_extra
+    APPEND PROPERTY ENVIRONMENT "SOMEIP_TEST_EXTRA_CLIENTS=1")
 endif()
