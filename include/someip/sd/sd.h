@@ -359,22 +359,22 @@ expected<void> encode_option(wire::writer<Out> &out, const option &o) noexcept {
                                  std::is_same_v<O, ipv4_sd_endpoint_option>) {
                 st2 = out.write_bytes(std::span<const std::byte>(opt.address.data(), opt.address.size()));
                 if (!st2) return st2;
+                st2 = wire::write_uint<wire::endian::big>(out, opt.reserved);
+                if (!st2) return st2;
                 st2 = wire::write_uint<wire::endian::big>(out, opt.l4_proto);
                 if (!st2) return st2;
                 st2 = wire::write_uint<wire::endian::big>(out, opt.port);
-                if (!st2) return st2;
-                st2 = wire::write_uint<wire::endian::big>(out, opt.reserved);
                 if (!st2) return st2;
                 return {};
             } else if constexpr (std::is_same_v<O, ipv6_endpoint_option> || std::is_same_v<O, ipv6_multicast_option> ||
                                  std::is_same_v<O, ipv6_sd_endpoint_option>) {
                 st2 = out.write_bytes(std::span<const std::byte>(opt.address.data(), opt.address.size()));
                 if (!st2) return st2;
+                st2 = wire::write_uint<wire::endian::big>(out, opt.reserved);
+                if (!st2) return st2;
                 st2 = wire::write_uint<wire::endian::big>(out, opt.l4_proto);
                 if (!st2) return st2;
                 st2 = wire::write_uint<wire::endian::big>(out, opt.port);
-                if (!st2) return st2;
-                st2 = wire::write_uint<wire::endian::big>(out, opt.reserved);
                 if (!st2) return st2;
                 return {};
             } else if constexpr (std::is_same_v<O, unknown_option>) {
@@ -568,9 +568,9 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
         ipv4_endpoint_option o{};
         o.discardable = discard;
         std::memcpy(o.address.data(), payload_bytes.data(), 4);
-        o.l4_proto = std::to_integer<std::uint8_t>(payload_bytes[4]);
-        o.port     = (std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[5])) << 8) | std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[6]));
-        o.reserved = std::to_integer<std::uint8_t>(payload_bytes[7]);
+        o.reserved = std::to_integer<std::uint8_t>(payload_bytes[4]);
+        o.l4_proto = std::to_integer<std::uint8_t>(payload_bytes[5]);
+        o.port     = (std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[6])) << 8) | std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[7]));
 
         if (*type == option_type::ipv4_endpoint) return option{o};
         if (*type == option_type::ipv4_multicast) return option{ipv4_multicast_option{o}};
@@ -585,9 +585,9 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
         ipv6_endpoint_option o{};
         o.discardable = discard;
         std::memcpy(o.address.data(), payload_bytes.data(), 16);
-        o.l4_proto = std::to_integer<std::uint8_t>(payload_bytes[16]);
-        o.port     = (std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[17])) << 8) | std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[18]));
-        o.reserved = std::to_integer<std::uint8_t>(payload_bytes[19]);
+        o.reserved = std::to_integer<std::uint8_t>(payload_bytes[16]);
+        o.l4_proto = std::to_integer<std::uint8_t>(payload_bytes[17]);
+        o.port     = (std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[18])) << 8) | std::uint16_t(std::to_integer<std::uint8_t>(payload_bytes[19]));
 
         if (*type == option_type::ipv6_endpoint) return option{o};
         if (*type == option_type::ipv6_multicast) return option{ipv6_multicast_option{o}};
