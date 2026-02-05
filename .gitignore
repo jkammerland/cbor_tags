@@ -4,6 +4,7 @@ libs/*
 bin/*
 build/*
 .cache/*
+.ccache/*
 cmake-build-*/
 include/cbor_tags/cbor_reflection_impl.h
 scratch/*
