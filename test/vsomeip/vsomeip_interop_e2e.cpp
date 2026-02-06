@@ -55,6 +55,7 @@ constexpr std::uint16_t kSdTestPort  = 30590;
 constexpr std::uint16_t kServicePort = 30509;
 constexpr std::size_t   kEventCount  = 10;
 constexpr std::size_t   kEventBurst  = 16;
+constexpr std::size_t   kMaxFrameSize = 1024u * 1024u;
 constexpr std::uint32_t kValue       = 0xBEEF;
 constexpr std::uint8_t  kSdMajorVersion = 0x00;
 constexpr std::uint8_t  kInterfaceVersion = 0x00;
@@ -193,6 +194,9 @@ static std::vector<std::byte> recv_someip_frame(int fd, int timeout_ms) {
 
     auto total = someip::wire::frame_size_from_prefix(std::span<const std::byte>(prefix.data(), prefix.size()));
     if (!total || *total < 16u) {
+        return {};
+    }
+    if (*total > kMaxFrameSize) {
         return {};
     }
 
@@ -541,13 +545,15 @@ static std::uint16_t local_port_for_fd(int fd) {
 }
 
 static bool read_byte_timeout(int fd, std::byte &out, int timeout_ms) {
-    pollfd pfd{};
-    pfd.fd     = fd;
-    pfd.events = POLLIN;
-    int rc = ::poll(&pfd, 1, timeout_ms);
+    const int rc = poll_one(fd, POLLIN, timeout_ms);
     if (rc <= 0) return false;
-    const auto n = ::read(fd, &out, 1);
-    return n == 1;
+    for (;;) {
+        const auto n = ::read(fd, &out, 1);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        return n == 1;
+    }
 }
 
 static bool write_byte(int fd, std::byte val) {
@@ -695,6 +701,9 @@ static int run_custom_server(bool reliable,
     std::vector<sockaddr_in>      udp_known_candidates{};
     FieldValue                    field_value{};
     bool                          shutdown = false;
+    bool                          had_reliable_request = false;
+    bool                          tcp_client_error = false;
+    bool                          error = false;
     auto                          last_offer = std::chrono::steady_clock::now();
     auto add_unique = [](std::vector<sockaddr_in> &list, const sockaddr_in &addr) {
         for (const auto &existing : list) {
@@ -909,8 +918,27 @@ static int run_custom_server(bool reliable,
             for (std::size_t map_index = 0; map_index < tcp_poll_map.size(); ++map_index, ++index) {
                 const auto client_index = tcp_poll_map[map_index];
                 auto &client = tcp_clients[client_index];
-                if ((poll_fds[index].revents & (POLLERR | POLLHUP)) != 0) {
-                    std::fprintf(stderr, "custom server: tcp client error\n");
+                if ((poll_fds[index].revents & POLLERR) != 0) {
+                    if (!had_reliable_request) {
+                        std::fprintf(stderr, "custom server: tcp client error (POLLERR before requests)\n");
+                        tcp_client_error = true;
+                        error = true;
+                        shutdown = true;
+                        client.fd.reset();
+                        client.subscribed = false;
+                        break;
+                    }
+                    if (debug) {
+                        std::fprintf(stderr, "custom server: tcp client error (POLLERR after requests)\n");
+                    }
+                    client.fd.reset();
+                    client.subscribed = false;
+                    continue;
+                }
+                if ((poll_fds[index].revents & POLLHUP) != 0) {
+                    if (debug) {
+                        std::fprintf(stderr, "custom server: tcp client hangup\n");
+                    }
                     client.fd.reset();
                     client.subscribed = false;
                     continue;
@@ -928,6 +956,7 @@ static int run_custom_server(bool reliable,
                 auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
                 if (!parsed) {
                     std::fprintf(stderr, "custom server: parse failed\n");
+                    error = true;
                     shutdown = true;
                     break;
                 }
@@ -943,9 +972,11 @@ static int run_custom_server(bool reliable,
                     FieldValue req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
                         std::fprintf(stderr, "custom server: setter decode failed\n");
+                        error = true;
                         shutdown = true;
                         break;
                     }
+                    had_reliable_request = true;
                     field_value = req;
 
                     someip::wire::header response_header{};
@@ -981,6 +1012,7 @@ static int run_custom_server(bool reliable,
                 }
 
                 if (parsed->hdr.msg.service_id == kServiceId && parsed->hdr.msg.method_id == kSetterRO) {
+                    had_reliable_request = true;
                     someip::wire::header response_header{};
                     response_header.msg.service_id    = parsed->hdr.msg.service_id;
                     response_header.msg.method_id     = parsed->hdr.msg.method_id;
@@ -1000,9 +1032,11 @@ static int run_custom_server(bool reliable,
                     MethodReq req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
                         std::fprintf(stderr, "custom server: method decode failed\n");
+                        error = true;
                         shutdown = true;
                         break;
                     }
+                    had_reliable_request = true;
                     MethodResp resp{.y = req.x + 1};
                     someip::wire::header response_header{};
                     response_header.msg.service_id    = parsed->hdr.msg.service_id;
@@ -1018,6 +1052,9 @@ static int run_custom_server(bool reliable,
                     }
                     continue;
                 }
+            }
+            if (error) {
+                break;
             }
         } else {
             if ((poll_fds[index].revents & POLLIN) != 0) {
@@ -1036,6 +1073,8 @@ static int run_custom_server(bool reliable,
                 auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
                 if (!parsed) {
                     std::fprintf(stderr, "custom server: udp parse failed\n");
+                    error = true;
+                    shutdown = true;
                     continue;
                 }
                 if (debug) {
@@ -1054,6 +1093,8 @@ static int run_custom_server(bool reliable,
                     FieldValue req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
                         std::fprintf(stderr, "custom server: udp setter decode failed\n");
+                        error = true;
+                        shutdown = true;
                         continue;
                     }
                     field_value = req;
@@ -1137,6 +1178,8 @@ static int run_custom_server(bool reliable,
                     MethodReq req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
                         std::fprintf(stderr, "custom server: udp method decode failed\n");
+                        error = true;
+                        shutdown = true;
                         continue;
                     }
                     MethodResp resp{.y = req.x + 1};
@@ -1158,6 +1201,23 @@ static int run_custom_server(bool reliable,
         }
     }
 
+    if (error) {
+        return 1;
+    }
+    if (reliable) {
+        if (tcp_client_error) {
+            std::fprintf(stderr, "custom server: tcp client error before requests\n");
+            return 1;
+        }
+        if (!had_tcp_client) {
+            std::fprintf(stderr, "custom server: no tcp clients connected\n");
+            return 1;
+        }
+        if (!had_reliable_request) {
+            std::fprintf(stderr, "custom server: no tcp requests received\n");
+            return 1;
+        }
+    }
     return 0;
 }
 
@@ -1215,10 +1275,16 @@ class vsomeip_client_runner {
 
   private:
     void fail(const char *msg) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!failed_) {
-            failed_ = true;
-            error_  = msg;
+        bool first = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!failed_) {
+                failed_ = true;
+                error_  = msg;
+                first   = true;
+            }
+        }
+        if (first) {
             std::fprintf(stderr, "%s: %s\n", name_.c_str(), msg);
         }
         cv_.notify_all();
@@ -1276,19 +1342,23 @@ class vsomeip_client_runner {
         if (debug_) {
             std::fprintf(stderr, "%s: event seq=%u value=0x%X\n", name_.c_str(), ev.seq, ev.value);
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (ev.seq != expected_seq_) {
-            fail("event: seq mismatch");
-            return;
+        const char *fail_msg = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (ev.seq != expected_seq_) {
+                fail_msg = "event: seq mismatch";
+            } else if (ev.value != kValue) {
+                fail_msg = "event: value mismatch";
+            } else {
+                expected_seq_++;
+                if (expected_seq_ >= kEventCount) {
+                    events_done_ = true;
+                    cv_.notify_all();
+                }
+            }
         }
-        if (ev.value != kValue) {
-            fail("event: value mismatch");
-            return;
-        }
-        expected_seq_++;
-        if (expected_seq_ >= kEventCount) {
-            events_done_ = true;
-            cv_.notify_all();
+        if (fail_msg != nullptr) {
+            fail(fail_msg);
         }
     }
 
@@ -1296,39 +1366,51 @@ class vsomeip_client_runner {
         const auto method = msg->get_method();
         const auto type   = msg->get_message_type();
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (method == kSetterW) {
-            if (type != vsomeip::message_type_e::MT_RESPONSE ||
-                msg->get_return_code() != vsomeip::return_code_e::E_OK) {
-                fail("setter writable: bad response");
-                return;
-            }
-            setter_ok_ = true;
-        } else if (method == kSetterRO) {
-            if ((type != vsomeip::message_type_e::MT_ERROR && type != vsomeip::message_type_e::MT_RESPONSE) ||
-                msg->get_return_code() != vsomeip::return_code_e::E_NOT_OK) {
-                fail("setter readonly: bad response");
-                return;
-            }
-            readonly_ok_ = true;
-        } else if (method == kMethodId) {
-            MethodResp resp{};
+        MethodResp resp{};
+        if (method == kMethodId) {
             if (!decode_payload(msg->get_payload(), resp)) {
                 fail("method: decode failed");
                 return;
             }
-            if (resp.y != 42u) {
-                fail("method: wrong response");
-                return;
-            }
-            method_ok_ = true;
         }
-        cv_.notify_all();
+
+        const char *fail_msg = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (method == kSetterW) {
+                if (type != vsomeip::message_type_e::MT_RESPONSE ||
+                    msg->get_return_code() != vsomeip::return_code_e::E_OK) {
+                    fail_msg = "setter writable: bad response";
+                } else {
+                    setter_ok_ = true;
+                }
+            } else if (method == kSetterRO) {
+                if ((type != vsomeip::message_type_e::MT_ERROR && type != vsomeip::message_type_e::MT_RESPONSE) ||
+                    msg->get_return_code() != vsomeip::return_code_e::E_NOT_OK) {
+                    fail_msg = "setter readonly: bad response";
+                } else {
+                    readonly_ok_ = true;
+                }
+            } else if (method == kMethodId) {
+                if (resp.y != 42u) {
+                    fail_msg = "method: wrong response";
+                } else {
+                    method_ok_ = true;
+                }
+            }
+            if (fail_msg == nullptr) {
+                cv_.notify_all();
+            }
+        }
+        if (fail_msg != nullptr) {
+            fail(fail_msg);
+        }
     }
 
     bool wait_for_flag(bool &flag, std::chrono::milliseconds timeout, const char *msg) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (!cv_.wait_for(lock, timeout, [&] { return flag || failed_; })) {
+            lock.unlock();
             fail(msg);
             return false;
         }
@@ -2510,10 +2592,12 @@ class custom_client_runner {
                 continue;
             }
             if (parsed.hdr.msg_type != someip::wire::message_type::response ||
+                parsed.hdr.return_code != someip::wire::return_code::E_OK ||
                 parsed.hdr.msg.method_id != kMethodId) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: method response mismatch type=0x%02X method=0x%04X\n",
-                                 static_cast<int>(parsed.hdr.msg_type), parsed.hdr.msg.method_id);
+                    std::fprintf(stderr, "custom client: method response mismatch type=0x%02X rc=0x%02X method=0x%04X\n",
+                                 static_cast<int>(parsed.hdr.msg_type), static_cast<int>(parsed.hdr.return_code),
+                                 parsed.hdr.msg.method_id);
                 }
                 continue;
             }
@@ -2900,7 +2984,66 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         return 1;
     }
 
-    const pid_t server_pid = ::fork();
+    pid_t server_pid   = -1;
+    pid_t routing_pid  = -1;
+    pid_t client_a_pid = -1;
+    pid_t client_b_pid = -1;
+    pid_t client_c_pid = -1;
+
+    auto close_fd = [](int &fd) {
+        if (fd >= 0) {
+            ::close(fd);
+            fd = -1;
+        }
+    };
+    auto kill_and_wait = [](pid_t pid) {
+        if (pid <= 0) {
+            return;
+        }
+        int status = 0;
+        auto rc = ::waitpid(pid, &status, WNOHANG);
+        if (rc == 0) {
+            (void)::kill(pid, SIGKILL);
+            (void)::waitpid(pid, &status, 0);
+        }
+    };
+    auto cleanup_failure = [&]() {
+        if (server_stop_pipe[1] >= 0) {
+            (void)write_byte(server_stop_pipe[1], std::byte{0x01});
+        }
+        if (routing_stop_pipe[1] >= 0) {
+            (void)write_byte(routing_stop_pipe[1], std::byte{0x01});
+        }
+
+        close_fd(server_pipe[0]);
+        close_fd(server_pipe[1]);
+        close_fd(server_stop_pipe[0]);
+        close_fd(server_stop_pipe[1]);
+        close_fd(done_pipe[0]);
+        close_fd(done_pipe[1]);
+        close_fd(done_c_pipe[0]);
+        close_fd(done_c_pipe[1]);
+        close_fd(go_pipe[0]);
+        close_fd(go_pipe[1]);
+        close_fd(routing_ready_pipe[0]);
+        close_fd(routing_ready_pipe[1]);
+        close_fd(routing_stop_pipe[0]);
+        close_fd(routing_stop_pipe[1]);
+        close_fd(sub_a_pipe[0]);
+        close_fd(sub_a_pipe[1]);
+        close_fd(sub_b_pipe[0]);
+        close_fd(sub_b_pipe[1]);
+        close_fd(sub_c_pipe[0]);
+        close_fd(sub_c_pipe[1]);
+
+        kill_and_wait(client_a_pid);
+        kill_and_wait(client_b_pid);
+        kill_and_wait(client_c_pid);
+        kill_and_wait(server_pid);
+        kill_and_wait(routing_pid);
+    };
+
+    server_pid = ::fork();
     if (server_pid == 0) {
         ::close(server_pipe[0]);
         ::close(server_stop_pipe[1]);
@@ -2914,20 +3057,20 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         std::_Exit(rc);
     }
     ::close(server_pipe[1]);
+    server_pipe[1] = -1;
     ::close(server_stop_pipe[0]);
+    server_stop_pipe[0] = -1;
 
     std::byte ready{};
     if (!read_byte_timeout(server_pipe[0], ready, 5000)) {
         std::fprintf(stderr, "custom server ready timeout\n");
-        if (server_stop_pipe[1] >= 0) {
-            (void)write_byte(server_stop_pipe[1], std::byte{0x01});
-            ::close(server_stop_pipe[1]);
-        }
+        cleanup_failure();
         return 1;
     }
     ::close(server_pipe[0]);
+    server_pipe[0] = -1;
 
-    const pid_t routing_pid = ::fork();
+    routing_pid = ::fork();
     if (routing_pid == 0) {
         ::close(routing_ready_pipe[0]);
         ::close(routing_stop_pipe[1]);
@@ -2958,25 +3101,26 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         std::_Exit(rc);
     }
     ::close(routing_ready_pipe[1]);
+    routing_ready_pipe[1] = -1;
     ::close(routing_stop_pipe[0]);
+    routing_stop_pipe[0] = -1;
 
     std::byte routing_ready{};
     if (!read_byte_timeout(routing_ready_pipe[0], routing_ready, 5000)) {
         std::fprintf(stderr, "routing manager ready timeout\n");
-        (void)::kill(routing_pid, SIGKILL);
-        (void)::kill(server_pid, SIGKILL);
+        cleanup_failure();
         return 1;
     }
     ::close(routing_ready_pipe[0]);
+    routing_ready_pipe[0] = -1;
     if (!wait_for_socket_path("/tmp/vsomeip-0", 2000)) {
         std::fprintf(stderr, "routing manager socket timeout\n");
-        (void)::kill(routing_pid, SIGKILL);
-        (void)::kill(server_pid, SIGKILL);
+        cleanup_failure();
         return 1;
     }
     debug_dump_sockets("custom-server: after routingmanagerd");
 
-    const pid_t client_a_pid = ::fork();
+    client_a_pid = ::fork();
     if (client_a_pid == 0) {
         ::close(go_pipe[1]);
         ::close(done_pipe[0]);
@@ -3004,9 +3148,11 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         std::_Exit(rc);
     }
     ::close(go_pipe[0]);
+    go_pipe[0] = -1;
     ::close(sub_a_pipe[1]);
+    sub_a_pipe[1] = -1;
 
-    const pid_t client_b_pid = ::fork();
+    client_b_pid = ::fork();
     if (client_b_pid == 0) {
         ::close(done_pipe[0]);
         ::close(go_pipe[1]);
@@ -3033,9 +3179,10 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         std::_Exit(rc);
     }
     ::close(done_pipe[1]);
+    done_pipe[1] = -1;
     ::close(sub_b_pipe[1]);
+    sub_b_pipe[1] = -1;
 
-    pid_t client_c_pid = -1;
     if (extra_client) {
         client_c_pid = ::fork();
         if (client_c_pid == 0) {
@@ -3053,41 +3200,34 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
             std::_Exit(rc);
         }
         ::close(done_c_pipe[1]);
+        done_c_pipe[1] = -1;
         ::close(sub_c_pipe[1]);
+        sub_c_pipe[1] = -1;
     }
 
     std::byte sub_ready{};
     if (!read_byte_timeout(sub_a_pipe[0], sub_ready, 10000)) {
         std::fprintf(stderr, "client_a subscribe timeout\n");
-        (void)::kill(client_a_pid, SIGKILL);
-        (void)::kill(client_b_pid, SIGKILL);
-        (void)::kill(routing_pid, SIGKILL);
-        (void)::kill(server_pid, SIGKILL);
+        cleanup_failure();
         return 1;
     }
     ::close(sub_a_pipe[0]);
+    sub_a_pipe[0] = -1;
     if (!read_byte_timeout(sub_b_pipe[0], sub_ready, 10000)) {
         std::fprintf(stderr, "client_b subscribe timeout\n");
-        (void)::kill(client_a_pid, SIGKILL);
-        (void)::kill(client_b_pid, SIGKILL);
-        (void)::kill(routing_pid, SIGKILL);
-        (void)::kill(server_pid, SIGKILL);
+        cleanup_failure();
         return 1;
     }
     ::close(sub_b_pipe[0]);
+    sub_b_pipe[0] = -1;
     if (extra_client) {
         if (!read_byte_timeout(sub_c_pipe[0], sub_ready, 10000)) {
             std::fprintf(stderr, "client_c subscribe timeout\n");
-            (void)::kill(client_a_pid, SIGKILL);
-            (void)::kill(client_b_pid, SIGKILL);
-            if (client_c_pid > 0) {
-                (void)::kill(client_c_pid, SIGKILL);
-            }
-            (void)::kill(routing_pid, SIGKILL);
-            (void)::kill(server_pid, SIGKILL);
+            cleanup_failure();
             return 1;
         }
         ::close(sub_c_pipe[0]);
+        sub_c_pipe[0] = -1;
     }
 
     (void)write_byte(go_pipe[1], std::byte{0x01});
@@ -3095,89 +3235,74 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     std::byte done{};
     if (!read_byte_timeout(done_pipe[0], done, 20000)) {
         std::fprintf(stderr, "client_b did not finish in time\n");
-        (void)::kill(client_a_pid, SIGKILL);
-        (void)::kill(routing_pid, SIGKILL);
-        (void)::kill(server_pid, SIGKILL);
-        if (client_c_pid > 0) {
-            (void)::kill(client_c_pid, SIGKILL);
-        }
-        if (server_stop_pipe[1] >= 0) {
-            (void)write_byte(server_stop_pipe[1], std::byte{0x01});
-            ::close(server_stop_pipe[1]);
-        }
+        cleanup_failure();
         return 1;
     }
     ::close(done_pipe[0]);
+    done_pipe[0] = -1;
     if (extra_client) {
         if (!read_byte_timeout(done_c_pipe[0], done, 20000)) {
             std::fprintf(stderr, "client_c did not finish in time\n");
-            (void)::kill(client_a_pid, SIGKILL);
-            (void)::kill(routing_pid, SIGKILL);
-            (void)::kill(server_pid, SIGKILL);
-            if (client_c_pid > 0) {
-                (void)::kill(client_c_pid, SIGKILL);
-            }
-            if (server_stop_pipe[1] >= 0) {
-                (void)write_byte(server_stop_pipe[1], std::byte{0x01});
-                ::close(server_stop_pipe[1]);
-            }
+            cleanup_failure();
             return 1;
         }
         ::close(done_c_pipe[0]);
+        done_c_pipe[0] = -1;
     }
 
     (void)write_byte(go_pipe[1], std::byte{0x02});
     ::close(go_pipe[1]);
+    go_pipe[1] = -1;
 
     int status = 0;
     (void)::waitpid(client_b_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         std::fprintf(stderr, "client_b failed\n");
-        if (server_stop_pipe[1] >= 0) {
-            (void)write_byte(server_stop_pipe[1], std::byte{0x01});
-            ::close(server_stop_pipe[1]);
-        }
+        cleanup_failure();
         return 1;
     }
+    client_b_pid = -1;
     if (extra_client) {
         (void)::waitpid(client_c_pid, &status, 0);
         if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
             std::fprintf(stderr, "client_c failed\n");
-            if (server_stop_pipe[1] >= 0) {
-                (void)write_byte(server_stop_pipe[1], std::byte{0x01});
-                ::close(server_stop_pipe[1]);
-            }
+            cleanup_failure();
             return 1;
         }
+        client_c_pid = -1;
     }
     (void)::waitpid(client_a_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         std::fprintf(stderr, "client_a failed\n");
-        if (server_stop_pipe[1] >= 0) {
-            (void)write_byte(server_stop_pipe[1], std::byte{0x01});
-            ::close(server_stop_pipe[1]);
-        }
+        cleanup_failure();
         return 1;
     }
+    client_a_pid = -1;
     if (server_stop_pipe[1] >= 0) {
         (void)write_byte(server_stop_pipe[1], std::byte{0x01});
         ::close(server_stop_pipe[1]);
+        server_stop_pipe[1] = -1;
     }
     (void)::waitpid(server_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         std::fprintf(stderr, "custom server failed\n");
+        cleanup_failure();
         return 1;
     }
+    server_pid = -1;
 
     if (routing_stop_pipe[1] >= 0) {
         (void)write_byte(routing_stop_pipe[1], std::byte{0x01});
         ::close(routing_stop_pipe[1]);
+        routing_stop_pipe[1] = -1;
     }
     (void)::waitpid(routing_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         std::fprintf(stderr, "routing manager failed\n");
+        cleanup_failure();
         return 1;
     }
+    routing_pid = -1;
 
     return 0;
 }
@@ -3320,7 +3445,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     const char *client_ip_a = kCustomIp;
     const char *client_ip_b = kCustomIpB;
     const char *client_ip_c = kCustomIpC;
-    const std::size_t min_events_b = reliable ? kEventCount : 0u;
+    const std::size_t min_events_b = kEventCount;
     client_b_pid = ::fork();
     if (client_b_pid == 0) {
         ::close(done_pipe[0]);

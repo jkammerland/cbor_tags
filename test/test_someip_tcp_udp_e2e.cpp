@@ -365,7 +365,8 @@ static std::vector<std::byte> build_sd_offer_service(bool reliable, std::uint16_
     return *msg;
 }
 
-static std::vector<std::byte> build_sd_subscribe_eventgroup(bool reliable, std::uint16_t port) {
+static std::vector<std::byte>
+build_sd_subscribe_eventgroup(bool reliable, std::uint16_t port, std::uint16_t client_id, std::uint16_t session_id) {
     someip::sd::eventgroup_entry_data e{};
     e.type                = someip::sd::entry_type::subscribe_eventgroup;
     e.service_id          = 0x1234;
@@ -379,6 +380,8 @@ static std::vector<std::byte> build_sd_subscribe_eventgroup(bool reliable, std::
     someip::sd::packet_data pd{};
     pd.hdr.flags      = 0x00;
     pd.hdr.reserved24 = 0;
+    pd.client_id      = client_id;
+    pd.session_id     = session_id;
     pd.entries.push_back(someip::sd::entry_data{e});
 
     auto msg = someip::sd::encode_message(pd);
@@ -388,7 +391,7 @@ static std::vector<std::byte> build_sd_subscribe_eventgroup(bool reliable, std::
     return *msg;
 }
 
-static std::vector<std::byte> build_sd_subscribe_ack() {
+static std::vector<std::byte> build_sd_subscribe_ack(std::uint16_t client_id, std::uint16_t session_id) {
     someip::sd::eventgroup_entry_data e{};
     e.type                = someip::sd::entry_type::subscribe_eventgroup_ack;
     e.service_id          = 0x1234;
@@ -401,6 +404,8 @@ static std::vector<std::byte> build_sd_subscribe_ack() {
     someip::sd::packet_data pd{};
     pd.hdr.flags      = 0x00;
     pd.hdr.reserved24 = 0;
+    pd.client_id      = client_id;
+    pd.session_id     = session_id;
     pd.entries.push_back(someip::sd::entry_data{e});
 
     auto msg = someip::sd::encode_message(pd);
@@ -569,7 +574,8 @@ static int run_server(bool reliable, int ready_fd) {
                         } else if (std::holds_alternative<someip::sd::eventgroup_entry>(entry)) {
                             const auto &eg = std::get<someip::sd::eventgroup_entry>(entry);
                             if (eg.c.type == someip::sd::entry_type::subscribe_eventgroup) {
-                                auto ack = build_sd_subscribe_ack();
+                                auto ack =
+                                    build_sd_subscribe_ack(sdmsg->header.req.client_id, sdmsg->header.req.session_id);
                                 if (!ack.empty()) {
                                     (void)send_udp_datagram(sd_sock.fd(), ack, sender);
                                 }
@@ -878,35 +884,110 @@ static bool wait_for_sd_offer(int sd_fd, std::uint16_t &service_port, int timeou
     return false;
 }
 
-static bool wait_for_sd_ack(int sd_fd, int timeout_ms) {
-    std::vector<std::byte> frame{};
-    sockaddr_in sender{};
-    if (!recv_udp_datagram(sd_fd, frame, sender, timeout_ms)) {
-        return false;
-    }
-    auto ack = someip::sd::decode_message(std::span<const std::byte>(frame.data(), frame.size()));
-    return ack.has_value();
+struct sd_ack_expectation {
+    std::uint16_t client_id{};
+    std::uint16_t session_id{};
+    std::uint16_t service_id{};
+    std::uint16_t instance_id{};
+    std::uint16_t eventgroup_id{};
+    sockaddr_in   sender{};
+    bool          require_sender{false};
+};
+
+struct response_expectation {
+    std::uint16_t service_id{};
+    std::uint16_t method_id{};
+    std::uint16_t client_id{};
+    std::uint16_t session_id{};
+    std::uint8_t  expected_type{};
+    std::uint8_t  expected_rc{};
+};
+
+static bool response_matches(const someip::wire::parsed_frame &parsed, const response_expectation &expected) {
+    return parsed.hdr.msg.service_id == expected.service_id && parsed.hdr.msg.method_id == expected.method_id &&
+           parsed.hdr.req.client_id == expected.client_id && parsed.hdr.req.session_id == expected.session_id &&
+           parsed.hdr.msg_type == expected.expected_type && parsed.hdr.return_code == expected.expected_rc;
 }
 
-static bool wait_for_response(int fd, bool reliable, std::uint16_t method_id, std::uint8_t expected_type,
-                              std::uint8_t expected_rc, const someip::ser::config &cfg,
-                              bool expect_payload = false) {
-    std::vector<std::byte> frame{};
-    if (reliable) {
-        frame = recv_someip_frame(fd, 5000);
-        if (frame.empty()) return false;
-    } else {
-        sockaddr_in sender{};
-        if (!recv_udp_datagram(fd, frame, sender, 5000)) return false;
-    }
-    auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-    if (!parsed) return false;
-
-    if (parsed->hdr.msg.method_id != method_id || parsed->hdr.msg_type != expected_type ||
-        parsed->hdr.return_code != expected_rc) {
+static bool sd_ack_matches(const someip::sd::decoded_message &ack, const sd_ack_expectation &expected) {
+    if (ack.header.req.client_id != expected.client_id || ack.header.req.session_id != expected.session_id) {
         return false;
     }
-    if (expect_payload) {
+    for (const auto &entry : ack.sd_payload.entries) {
+        if (!std::holds_alternative<someip::sd::eventgroup_entry>(entry)) {
+            continue;
+        }
+        const auto &eg = std::get<someip::sd::eventgroup_entry>(entry);
+        if (eg.c.type != someip::sd::entry_type::subscribe_eventgroup_ack) {
+            continue;
+        }
+        if (eg.c.service_id != expected.service_id || eg.c.instance_id != expected.instance_id ||
+            eg.eventgroup_id != expected.eventgroup_id) {
+            continue;
+        }
+        if (eg.c.ttl == 0) {
+            return false;
+        }
+        auto runs = someip::sd::resolve_option_runs(ack.sd_payload, eg.c);
+        if (!runs) {
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool wait_for_sd_ack(int sd_fd, int timeout_ms, const sd_ack_expectation &expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::vector<std::byte> frame{};
+        sockaddr_in sender{};
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (!recv_udp_datagram(sd_fd, frame, sender, static_cast<int>(remaining))) {
+            return false;
+        }
+        if (expected.require_sender && !same_endpoint(sender, expected.sender)) {
+            continue;
+        }
+        auto ack = someip::sd::decode_message(std::span<const std::byte>(frame.data(), frame.size()));
+        if (!ack) {
+            continue;
+        }
+        if (sd_ack_matches(*ack, expected)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool wait_for_response(int fd, bool reliable, const response_expectation &expected, const someip::ser::config &cfg,
+                              bool expect_payload = false) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+
+        std::vector<std::byte> frame{};
+        if (reliable) {
+            frame = recv_someip_frame(fd, static_cast<int>(remaining));
+            if (frame.empty()) return false;
+        } else {
+            sockaddr_in sender{};
+            if (!recv_udp_datagram(fd, frame, sender, static_cast<int>(remaining))) return false;
+        }
+
+        auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
+        if (!parsed) return false;
+
+        if (!response_matches(*parsed, expected)) {
+            continue;
+        }
+
+        if (!expect_payload) {
+            return true;
+        }
+
         MethodResp resp{};
         const auto payload_base = parsed->tp ? 20u : 16u;
         if (!someip::ser::decode(parsed->payload, cfg, resp, payload_base)) {
@@ -914,7 +995,7 @@ static bool wait_for_response(int fd, bool reliable, std::uint16_t method_id, st
         }
         return resp.y == 42u;
     }
-    return true;
+    return false;
 }
 
 static bool wait_for_events(int fd, bool reliable, std::size_t count, const someip::ser::config &cfg) {
@@ -1001,25 +1082,46 @@ static int run_client(bool reliable, const ready_ports &ports) {
         return 1;
     }
 
-    auto sub_a = build_sd_subscribe_eventgroup(reliable, port_a);
+    constexpr std::uint16_t subscribe_client_a = 0x4001;
+    constexpr std::uint16_t subscribe_client_b = 0x4002;
+    constexpr std::uint16_t subscribe_session_a = 0x0101;
+    constexpr std::uint16_t subscribe_session_b = 0x0102;
+
+    auto sub_a = build_sd_subscribe_eventgroup(reliable, port_a, subscribe_client_a, subscribe_session_a);
     if (sub_a.empty()) {
         return 1;
     }
     if (!send_udp_datagram(sd_sock.fd(), sub_a, sd_addr)) {
         return 1;
     }
-    if (!wait_for_sd_ack(sd_sock.fd(), 2000)) {
+    sd_ack_expectation ack_a{};
+    ack_a.client_id = subscribe_client_a;
+    ack_a.session_id = subscribe_session_a;
+    ack_a.service_id = writable_field.service_id;
+    ack_a.instance_id = 0x0001;
+    ack_a.eventgroup_id = writable_field.eventgroup_id;
+    ack_a.sender = sd_addr;
+    ack_a.require_sender = true;
+    if (!wait_for_sd_ack(sd_sock.fd(), 2000, ack_a)) {
         return 1;
     }
 
-    auto sub_b = build_sd_subscribe_eventgroup(reliable, port_b);
+    auto sub_b = build_sd_subscribe_eventgroup(reliable, port_b, subscribe_client_b, subscribe_session_b);
     if (sub_b.empty()) {
         return 1;
     }
     if (!send_udp_datagram(sd_sock.fd(), sub_b, sd_addr)) {
         return 1;
     }
-    if (!wait_for_sd_ack(sd_sock.fd(), 2000)) {
+    sd_ack_expectation ack_b{};
+    ack_b.client_id = subscribe_client_b;
+    ack_b.session_id = subscribe_session_b;
+    ack_b.service_id = writable_field.service_id;
+    ack_b.instance_id = 0x0001;
+    ack_b.eventgroup_id = writable_field.eventgroup_id;
+    ack_b.sender = sd_addr;
+    ack_b.require_sender = true;
+    if (!wait_for_sd_ack(sd_sock.fd(), 2000, ack_b)) {
         return 1;
     }
 
@@ -1044,8 +1146,14 @@ static int run_client(bool reliable, const ready_ports &ports) {
     if (set_frame.empty() || !send_service(client_a, set_frame)) {
         return 1;
     }
-    if (!wait_for_response(client_a.fd(), reliable, writable_field.setter_method_id,
-                           someip::wire::message_type::response, someip::wire::return_code::E_OK, cfg)) {
+    response_expectation set_response{};
+    set_response.service_id = set_hdr.msg.service_id;
+    set_response.method_id = set_hdr.msg.method_id;
+    set_response.client_id = set_hdr.req.client_id;
+    set_response.session_id = set_hdr.req.session_id;
+    set_response.expected_type = someip::wire::message_type::response;
+    set_response.expected_rc = someip::wire::return_code::E_OK;
+    if (!wait_for_response(client_a.fd(), reliable, set_response, cfg)) {
         return 1;
     }
 
@@ -1070,8 +1178,14 @@ static int run_client(bool reliable, const ready_ports &ports) {
     if (ro_frame.empty() || !send_service(client_b, ro_frame)) {
         return 1;
     }
-    if (!wait_for_response(client_b.fd(), reliable, readonly_field.setter_method_id,
-                           someip::wire::message_type::error, someip::wire::return_code::E_NOT_OK, cfg)) {
+    response_expectation readonly_response{};
+    readonly_response.service_id = ro_hdr.msg.service_id;
+    readonly_response.method_id = ro_hdr.msg.method_id;
+    readonly_response.client_id = ro_hdr.req.client_id;
+    readonly_response.session_id = ro_hdr.req.session_id;
+    readonly_response.expected_type = someip::wire::message_type::error;
+    readonly_response.expected_rc = someip::wire::return_code::E_NOT_OK;
+    if (!wait_for_response(client_b.fd(), reliable, readonly_response, cfg)) {
         return 1;
     }
 
@@ -1089,8 +1203,14 @@ static int run_client(bool reliable, const ready_ports &ports) {
     if (m_frame.empty() || !send_service(client_a, m_frame)) {
         return 1;
     }
-    if (!wait_for_response(client_a.fd(), reliable, m_hdr.msg.method_id,
-                           someip::wire::message_type::response, someip::wire::return_code::E_OK, cfg, true)) {
+    response_expectation method_response{};
+    method_response.service_id = m_hdr.msg.service_id;
+    method_response.method_id = m_hdr.msg.method_id;
+    method_response.client_id = m_hdr.req.client_id;
+    method_response.session_id = m_hdr.req.session_id;
+    method_response.expected_type = someip::wire::message_type::response;
+    method_response.expected_rc = someip::wire::return_code::E_OK;
+    if (!wait_for_response(client_a.fd(), reliable, method_response, cfg, true)) {
         return 1;
     }
 
@@ -1193,6 +1313,89 @@ TEST_CASE("someip: udp e2e multi-client subscribe + setter + notify") {
     REQUIRE(WIFEXITED(exit_status));
     REQUIRE(WEXITSTATUS(exit_status) == 0);
     guard.release();
+}
+
+TEST_CASE("someip: response matcher validates service and request ids") {
+    const someip::ser::config cfg{someip::wire::endian::big};
+
+    someip::wire::header h{};
+    h.msg.service_id = 0x1234;
+    h.msg.method_id = 0x0001;
+    h.req.client_id = 0x0001;
+    h.req.session_id = 0x0042;
+    h.protocol_version = 1;
+    h.interface_version = 1;
+    h.msg_type = someip::wire::message_type::response;
+    h.return_code = someip::wire::return_code::E_OK;
+
+    MethodResp payload{.y = 42};
+    const auto frame = build_someip_message(cfg, h, payload);
+    REQUIRE_FALSE(frame.empty());
+
+    auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
+    REQUIRE(parsed.has_value());
+
+    response_expectation expected{};
+    expected.service_id = h.msg.service_id;
+    expected.method_id = h.msg.method_id;
+    expected.client_id = h.req.client_id;
+    expected.session_id = h.req.session_id;
+    expected.expected_type = h.msg_type;
+    expected.expected_rc = h.return_code;
+
+    CHECK(response_matches(*parsed, expected));
+
+    expected.service_id = static_cast<std::uint16_t>(h.msg.service_id + 1);
+    CHECK_FALSE(response_matches(*parsed, expected));
+    expected.service_id = h.msg.service_id;
+
+    expected.client_id = static_cast<std::uint16_t>(h.req.client_id + 1);
+    CHECK_FALSE(response_matches(*parsed, expected));
+    expected.client_id = h.req.client_id;
+
+    expected.session_id = static_cast<std::uint16_t>(h.req.session_id + 1);
+    CHECK_FALSE(response_matches(*parsed, expected));
+}
+
+TEST_CASE("someip: sd ack matcher validates request correlation and ttl") {
+    auto ack_frame = build_sd_subscribe_ack(0x4001, 0x0101);
+    REQUIRE_FALSE(ack_frame.empty());
+
+    auto ack = someip::sd::decode_message(std::span<const std::byte>(ack_frame.data(), ack_frame.size()));
+    REQUIRE(ack.has_value());
+
+    sd_ack_expectation expected{};
+    expected.client_id = 0x4001;
+    expected.session_id = 0x0101;
+    expected.service_id = writable_field.service_id;
+    expected.instance_id = 0x0001;
+    expected.eventgroup_id = writable_field.eventgroup_id;
+
+    CHECK(sd_ack_matches(*ack, expected));
+
+    expected.session_id = 0x0102;
+    CHECK_FALSE(sd_ack_matches(*ack, expected));
+    expected.session_id = 0x0101;
+
+    someip::sd::eventgroup_entry_data e{};
+    e.type = someip::sd::entry_type::subscribe_eventgroup_ack;
+    e.service_id = writable_field.service_id;
+    e.instance_id = 0x0001;
+    e.major_version = 1;
+    e.ttl = 0;
+    e.reserved12_counter4 = 0;
+    e.eventgroup_id = writable_field.eventgroup_id;
+
+    someip::sd::packet_data pd{};
+    pd.client_id = expected.client_id;
+    pd.session_id = expected.session_id;
+    pd.entries.push_back(someip::sd::entry_data{e});
+    auto ttl0_frame = someip::sd::encode_message(pd);
+    REQUIRE(ttl0_frame.has_value());
+
+    auto ttl0_ack = someip::sd::decode_message(std::span<const std::byte>(ttl0_frame->data(), ttl0_frame->size()));
+    REQUIRE(ttl0_ack.has_value());
+    CHECK_FALSE(sd_ack_matches(*ttl0_ack, expected));
 }
 
 #endif
