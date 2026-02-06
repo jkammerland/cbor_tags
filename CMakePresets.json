@@ -39,6 +39,7 @@
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CBOR_TAGS_BUILD_TESTS": "ON",
         "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
         "CMAKE_C_COMPILER_LAUNCHER": "ccache",
         "CMAKE_PROJECT_cbor_tags_INCLUDE": "cmake/cgen_project_init.cmake"
@@ -267,8 +268,11 @@
       },
       "cacheVariables": {
         "CGEN_REQUIRE_VALGRIND": "ON",
+        "CGEN_SANITIZERS": "",
         "CGEN_VALGRIND_LABEL_EXCLUDE_REGEX": "cmake|package|codegen",
-        "MEMORYCHECK_COMMAND_OPTIONS": "--error-exitcode=1 --leak-check=full --show-leak-kinds=all"
+        "CMAKE_CXX_FLAGS_DEBUG": "-g -O1",
+        "CMAKE_C_FLAGS_DEBUG": "-g -O1",
+        "MEMORYCHECK_COMMAND_OPTIONS": "--error-exitcode=1 --leak-check=full --show-leak-kinds=definite,possible --errors-for-leak-kinds=definite"
       }
     },
     {

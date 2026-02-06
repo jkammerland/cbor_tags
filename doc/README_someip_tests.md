@@ -210,5 +210,11 @@ Expected vSomeIP warnings (non‑fatal):
 - multicast join errors for SD multicast on `lo`
 - `BLOCKING CALL` warnings
 - `accept_cbk` warnings
-
 These warnings do not indicate failure if the test completes successfully.
+
+If you see `custom server: tcp client error before requests` or `custom server: no tcp clients connected`, the
+interop test is expected to fail; those indicate a broken TCP flow rather than an expected vSomeIP warning.
+
+If vSomeIP logs `TCP Client: Could not bind to device "lo"`, check whether your local config sets a `device`
+field. The configs in this repository do not set `device`; this warning usually comes from local overrides or
+custom configs. Remove `device` or run with sufficient privileges to bind to a device.

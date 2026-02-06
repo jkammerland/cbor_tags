@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <variant>
@@ -157,9 +158,54 @@ struct packet_data {
 [[nodiscard]] constexpr std::uint8_t run1_count(std::uint8_t numopt1_numopt2) noexcept { return static_cast<std::uint8_t>(numopt1_numopt2 >> 4); }
 [[nodiscard]] constexpr std::uint8_t run2_count(std::uint8_t numopt1_numopt2) noexcept { return static_cast<std::uint8_t>(numopt1_numopt2 & 0x0F); }
 
+[[nodiscard]] inline expected<std::uint32_t> add_u32(std::uint32_t left, std::uint32_t right) noexcept {
+    if (right > (std::numeric_limits<std::uint32_t>::max() - left)) {
+        return unexpected<status_code>(status_code::invalid_length);
+    }
+    return static_cast<std::uint32_t>(left + right);
+}
+
+[[nodiscard]] inline expected<std::uint32_t> entries_wire_len(std::size_t entries_count) noexcept {
+    if (entries_count > (std::numeric_limits<std::uint32_t>::max() / 16u)) {
+        return unexpected<status_code>(status_code::invalid_length);
+    }
+    return static_cast<std::uint32_t>(entries_count * 16u);
+}
+
+[[nodiscard]] inline expected<std::uint16_t> option_len_field(const option &o) noexcept;
+
+[[nodiscard]] inline expected<std::uint32_t> options_wire_len(const std::vector<option> &options) noexcept {
+    std::uint32_t options_len = 0;
+    for (const auto &o : options) {
+        auto len_field = option_len_field(o);
+        if (!len_field) return unexpected<status_code>(len_field.error());
+        auto option_total = add_u32(3u, static_cast<std::uint32_t>(*len_field));
+        if (!option_total) return unexpected<status_code>(option_total.error());
+        auto updated_len = add_u32(options_len, *option_total);
+        if (!updated_len) return unexpected<status_code>(updated_len.error());
+        options_len = *updated_len;
+    }
+    return options_len;
+}
+
 [[nodiscard]] inline expected<payload> build_payload(const packet_data &pd) noexcept {
     payload out{};
     out.hdr = pd.hdr;
+    out.entries.reserve(pd.entries.size());
+
+    std::size_t total_options = 0;
+    for (const auto &e : pd.entries) {
+        const auto add = std::visit(
+            [](const auto &d) -> std::size_t {
+                return d.run1.size() + d.run2.size();
+            },
+            e);
+        if (add > 0xFFu || total_options > (0xFFu - add)) {
+            return unexpected<status_code>(status_code::invalid_length);
+        }
+        total_options += add;
+    }
+    out.options.reserve(total_options);
 
     for (const auto &e : pd.entries) {
         if (std::holds_alternative<service_entry_data>(e)) {
@@ -168,7 +214,8 @@ struct packet_data {
             if (d.run1.size() > 0x0Fu || d.run2.size() > 0x0Fu) {
                 return unexpected<status_code>(status_code::invalid_length);
             }
-            if (out.options.size() > 0xFFu) {
+            const auto total_opts = out.options.size() + d.run1.size() + d.run2.size();
+            if (total_opts > 0xFFu) {
                 return unexpected<status_code>(status_code::invalid_length);
             }
 
@@ -202,7 +249,8 @@ struct packet_data {
             if (d.run1.size() > 0x0Fu || d.run2.size() > 0x0Fu) {
                 return unexpected<status_code>(status_code::invalid_length);
             }
-            if (out.options.size() > 0xFFu) {
+            const auto total_opts = out.options.size() + d.run1.size() + d.run2.size();
+            if (total_opts > 0xFFu) {
                 return unexpected<status_code>(status_code::invalid_length);
             }
 
@@ -389,26 +437,20 @@ expected<void> encode_option(wire::writer<Out> &out, const option &o) noexcept {
 }
 
 template <class Out>
-expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept {
+expected<void> encode_payload(wire::writer<Out> &out, const payload &p, std::uint32_t options_len) noexcept {
     auto st = wire::write_uint<wire::endian::big>(out, p.hdr.flags);
     if (!st) return st;
     st = wire::write_u24_be(out, p.hdr.reserved24 & 0xFFFFFFu);
     if (!st) return st;
 
-    const auto entries_len = static_cast<std::uint32_t>(p.entries.size() * 16u);
-    st = wire::write_uint<wire::endian::big>(out, entries_len);
+    auto entries_len = entries_wire_len(p.entries.size());
+    if (!entries_len) return unexpected<status_code>(entries_len.error());
+    st = wire::write_uint<wire::endian::big>(out, *entries_len);
     if (!st) return st;
 
     for (const auto &e : p.entries) {
         st = std::visit([&](const auto &ent) { return encode_entry(out, ent); }, e);
         if (!st) return st;
-    }
-
-    std::uint32_t options_len = 0;
-    for (const auto &o : p.options) {
-        auto len_field = option_len_field(o);
-        if (!len_field) return unexpected<status_code>(len_field.error());
-        options_len += static_cast<std::uint32_t>(2u + 1u + *len_field);
     }
 
     st = wire::write_uint<wire::endian::big>(out, options_len);
@@ -421,21 +463,30 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
     return {};
 }
 
+template <class Out>
+expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept {
+    auto options_len = options_wire_len(p.options);
+    if (!options_len) return unexpected<status_code>(options_len.error());
+    return encode_payload(out, p, *options_len);
+}
+
 [[nodiscard]] inline expected<std::vector<std::byte>> encode_message(const packet_data &pd) noexcept {
     auto built = build_payload(pd);
     if (!built) {
         return unexpected<status_code>(built.error());
     }
 
-    const auto entries_len = static_cast<std::uint32_t>(built->entries.size() * 16u);
-    std::uint32_t options_len = 0;
-    for (const auto &o : built->options) {
-        auto len_field = option_len_field(o);
-        if (!len_field) return unexpected<status_code>(len_field.error());
-        options_len += static_cast<std::uint32_t>(2u + 1u + *len_field);
-    }
+    auto entries_len = entries_wire_len(built->entries.size());
+    if (!entries_len) return unexpected<status_code>(entries_len.error());
+    auto options_len = options_wire_len(built->options);
+    if (!options_len) return unexpected<status_code>(options_len.error());
 
-    const auto payload_len = static_cast<std::uint32_t>(1u + 3u + 4u + entries_len + 4u + options_len);
+    auto payload_len = add_u32(8u, *entries_len);
+    if (!payload_len) return unexpected<status_code>(payload_len.error());
+    payload_len = add_u32(*payload_len, 4u);
+    if (!payload_len) return unexpected<status_code>(payload_len.error());
+    payload_len = add_u32(*payload_len, *options_len);
+    if (!payload_len) return unexpected<status_code>(payload_len.error());
 
     wire::header h{};
     h.msg.service_id       = kServiceId;
@@ -446,19 +497,16 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
     h.interface_version    = 1;
     h.msg_type             = wire::message_type::notification;
     h.return_code          = 0;
-    h.length               = static_cast<std::uint32_t>(8u + payload_len);
+    auto total_length = add_u32(8u, *payload_len);
+    if (!total_length) return unexpected<status_code>(total_length.error());
+    h.length               = *total_length;
 
     std::vector<std::byte> out{};
     wire::writer<std::vector<std::byte>> w{out};
     auto st = wire::encode_header(w, h);
     if (!st) return unexpected<status_code>(st.error());
 
-    payload p{};
-    p.hdr     = built->hdr;
-    p.entries = built->entries;
-    p.options = built->options;
-
-    st = encode_payload(w, p);
+    st = encode_payload(w, *built, *options_len);
     if (!st) return unexpected<status_code>(st.error());
 
     return out;
@@ -497,8 +545,13 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
     c.major_version  = *maj;
     c.ttl            = *ttl;
 
+    const bool is_service = (c.type == entry_type::find_service) || (c.type == entry_type::offer_service);
     const bool is_eventgroup = (c.type == entry_type::subscribe_eventgroup) || (c.type == entry_type::subscribe_eventgroup_ack);
-    if (!is_eventgroup) {
+    if (!is_service && !is_eventgroup) {
+        return unexpected<status_code>(status_code::sd_invalid_header);
+    }
+
+    if (is_service) {
         auto minor = wire::read_uint<wire::endian::big, std::uint32_t>(in);
         if (!minor) return unexpected<status_code>(minor.error());
         service_entry se{};
@@ -621,6 +674,7 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
     }
     auto entries_bytes = in.read_bytes(*entries_len);
     if (!entries_bytes) return unexpected<status_code>(entries_bytes.error());
+    p.entries.reserve(static_cast<std::size_t>(*entries_len / 16u));
 
     for (std::size_t off = 0; off < entries_bytes->size(); off += 16u) {
         auto e = decode_entry(entries_bytes->subspan(off, 16u));
@@ -633,6 +687,9 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
 
     auto options_bytes = in.read_bytes(*options_len);
     if (!options_bytes) return unexpected<status_code>(options_bytes.error());
+    if (*options_len >= 3u) {
+        p.options.reserve(static_cast<std::size_t>(*options_len / 3u));
+    }
 
     wire::reader opt_reader{*options_bytes};
     while (!opt_reader.empty()) {
@@ -659,11 +716,29 @@ struct option_runs_view {
     const auto c1 = run1_count(e.numopt1_numopt2);
     const auto c2 = run2_count(e.numopt1_numopt2);
 
+    if (c1 == 0 && e.index1 != 0) {
+        return unexpected<status_code>(status_code::sd_invalid_lengths);
+    }
+    if (c2 == 0 && e.index2 != 0) {
+        return unexpected<status_code>(status_code::sd_invalid_lengths);
+    }
+
     if (c1 > 0 && (std::size_t(e.index1) + c1) > p.options.size()) {
         return unexpected<status_code>(status_code::sd_invalid_lengths);
     }
     if (c2 > 0 && (std::size_t(e.index2) + c2) > p.options.size()) {
         return unexpected<status_code>(status_code::sd_invalid_lengths);
+    }
+
+    if (c1 > 0 && c2 > 0) {
+        const auto run1_start = std::size_t(e.index1);
+        const auto run1_end   = run1_start + c1;
+        const auto run2_start = std::size_t(e.index2);
+        const auto run2_end   = run2_start + c2;
+        const bool overlaps   = (run1_start < run2_end) && (run2_start < run1_end);
+        if (overlaps) {
+            return unexpected<status_code>(status_code::sd_invalid_lengths);
+        }
     }
 
     option_runs_view v{};
