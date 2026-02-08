@@ -665,6 +665,12 @@ void local_uds_server_endpoint_impl::connection::receive_cbk(boost::system::erro
 
                 if (its_server->is_routing_endpoint_ && recv_buffer_[its_start] == byte_t(protocol::id_e::ASSIGN_CLIENT_ID)) {
                     client_t its_client = its_server->assign_client(&recv_buffer_[its_start], uint32_t(its_end - its_start));
+                    if (its_client == VSOMEIP_CLIENT_UNSET) {
+                        VSOMEIP_WARNING << "Dropped malformed ASSIGN_CLIENT frame from local endpoint "
+                                        << get_path_remote();
+                        is_error = true;
+                        break;
+                    }
 
                     its_server->add_connection(its_client, shared_from_this());
                     its_host->add_known_client(its_client, get_bound_client_host());

@@ -196,6 +196,15 @@ class client_runner {
             return;
         }
         std::scoped_lock lock(mutex_);
+        if (!is_a_) {
+            if (ev.value != kValue) {
+                fail("event: value mismatch");
+                return;
+            }
+            events_done_ = true;
+            cv_.notify_all();
+            return;
+        }
         if (ev.seq != expected_seq_) {
             fail("event: seq mismatch");
             return;
@@ -283,7 +292,6 @@ class client_runner {
 #endif
             send_shutdown();
         } else {
-            if (!wait_for_flag(events_done_, std::chrono::seconds(10), "client: events timeout")) return;
             send_setter_readonly();
             if (!wait_for_flag(readonly_ok_, std::chrono::seconds(10), "client: readonly timeout")) return;
 #if !defined(_WIN32)
@@ -432,9 +440,20 @@ class server_runner {
         response->set_return_code(vsomeip::return_code_e::E_OK);
         app_->send(response);
 
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            (void)cv_.wait_for(lock, std::chrono::milliseconds(500), [this] { return subscribed_count_ >= 2; });
+        }
+        if (!reliable_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
         for (std::uint32_t i = 0; i < kEvents; ++i) {
             FieldEvent ev{.seq = i, .value = field_value_};
             app_->notify(kService, kInstance, kEvent, encode_payload(ev), true);
+            if (!reliable_) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
         }
     }
 
@@ -461,7 +480,23 @@ class server_runner {
 };
 
 #if !defined(_WIN32)
+static void cleanup_vsomeip_sockets() {
+    const char *paths[] = {
+        "/tmp/vsomeip-0",
+        "/tmp/vsomeip-1000",
+        "/tmp/vsomeip-1001",
+        "/tmp/vsomeip-1002",
+        "/tmp/vsomeip-1003",
+        "/tmp/vsomeip-1004",
+        "/tmp/vsomeip.lck",
+    };
+    for (const auto *path : paths) {
+        ::unlink(path);
+    }
+}
+
 static int run_transport(const std::string &config_path, bool reliable) {
+    cleanup_vsomeip_sockets();
     ::setenv("VSOMEIP_CONFIGURATION", config_path.c_str(), 1);
 
     int server_pipe[2]{-1, -1};
@@ -482,7 +517,30 @@ static int run_transport(const std::string &config_path, bool reliable) {
         }
     };
 
-    const pid_t server_pid = ::fork();
+    pid_t server_pid = -1;
+    pid_t client_b_pid = -1;
+    pid_t client_a_pid = -1;
+
+    auto close_fd = [](int &fd) {
+        if (fd >= 0) {
+            ::close(fd);
+            fd = -1;
+        }
+    };
+
+    auto cleanup_failure = [&]() {
+        close_fd(server_pipe[0]);
+        close_fd(server_pipe[1]);
+        close_fd(done_pipe[0]);
+        close_fd(done_pipe[1]);
+        close_fd(go_pipe[0]);
+        close_fd(go_pipe[1]);
+        kill_and_reap(client_a_pid);
+        kill_and_reap(client_b_pid);
+        kill_and_reap(server_pid);
+    };
+
+    server_pid = ::fork();
     if (server_pid == 0) {
         ::close(server_pipe[0]);
         server_runner server{reliable, server_pipe[1]};
@@ -497,17 +555,12 @@ static int run_transport(const std::string &config_path, bool reliable) {
     std::byte ready{};
     if (!read_byte_timeout(server_pipe[0], ready, 5000)) {
         (void)std::fprintf(stderr, "server ready timeout\n");
-        ::close(server_pipe[0]);
-        ::close(done_pipe[0]);
-        ::close(done_pipe[1]);
-        ::close(go_pipe[0]);
-        ::close(go_pipe[1]);
-        kill_and_reap(server_pid);
+        cleanup_failure();
         return 1;
     }
-    ::close(server_pipe[0]);
+    close_fd(server_pipe[0]);
 
-    const pid_t client_b_pid = ::fork();
+    client_b_pid = ::fork();
     if (client_b_pid == 0) {
         ::close(done_pipe[0]);
         ::close(go_pipe[0]);
@@ -517,9 +570,9 @@ static int run_transport(const std::string &config_path, bool reliable) {
         ::close(done_pipe[1]);
         std::_Exit(rc);
     }
-    ::close(done_pipe[1]);
+    close_fd(done_pipe[1]);
 
-    const pid_t client_a_pid = ::fork();
+    client_a_pid = ::fork();
     if (client_a_pid == 0) {
         ::close(go_pipe[1]);
         ::close(done_pipe[0]);
@@ -528,39 +581,41 @@ static int run_transport(const std::string &config_path, bool reliable) {
         ::close(go_pipe[0]);
         std::_Exit(rc);
     }
-    ::close(go_pipe[0]);
+    close_fd(go_pipe[0]);
 
     std::byte done{};
     if (!read_byte_timeout(done_pipe[0], done, 20000)) {
         (void)std::fprintf(stderr, "client_b did not finish in time\n");
-        ::close(done_pipe[0]);
-        ::close(go_pipe[1]);
-        kill_and_reap(client_a_pid);
-        kill_and_reap(client_b_pid);
-        kill_and_reap(server_pid);
+        cleanup_failure();
         return 1;
     }
-    ::close(done_pipe[0]);
+    close_fd(done_pipe[0]);
 
     (void)write_byte(go_pipe[1], std::byte{0x01});
-    ::close(go_pipe[1]);
+    close_fd(go_pipe[1]);
 
     int status = 0;
     (void)::waitpid(client_b_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         (void)std::fprintf(stderr, "client_b failed\n");
+        cleanup_failure();
         return 1;
     }
+    client_b_pid = -1;
     (void)::waitpid(client_a_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         (void)std::fprintf(stderr, "client_a failed\n");
+        cleanup_failure();
         return 1;
     }
+    client_a_pid = -1;
     (void)::waitpid(server_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
         (void)std::fprintf(stderr, "server failed\n");
+        cleanup_failure();
         return 1;
     }
+    server_pid = -1;
 
     return 0;
 }

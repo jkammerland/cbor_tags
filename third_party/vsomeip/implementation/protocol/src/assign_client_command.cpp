@@ -3,6 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+#include <cstddef>
 #include <limits>
 
 #include <vsomeip/internal/logger.hpp>
@@ -51,9 +52,20 @@ void assign_client_command::deserialize(const std::vector<byte_t>& _buffer, erro
     if (_error != error_e::ERROR_OK)
         return;
 
-    // name?
-    if (size_ > 0)
-        name_.assign(&_buffer[COMMAND_POSITION_PAYLOAD], &_buffer[_buffer.size()]);
+    const auto payload_size = static_cast<std::size_t>(size_);
+    const auto payload_end = COMMAND_POSITION_PAYLOAD + payload_size;
+    if (payload_end < COMMAND_POSITION_PAYLOAD || payload_end > _buffer.size()) {
+        _error = error_e::ERROR_NOT_ENOUGH_BYTES;
+        return;
+    }
+
+    if (payload_size == 0U) {
+        name_.clear();
+        return;
+    }
+
+    name_.assign(_buffer.begin() + static_cast<std::ptrdiff_t>(COMMAND_POSITION_PAYLOAD),
+                 _buffer.begin() + static_cast<std::ptrdiff_t>(payload_end));
 }
 
 std::string assign_client_command::get_name() const {
