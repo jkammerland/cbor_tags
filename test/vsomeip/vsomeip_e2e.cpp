@@ -4,6 +4,7 @@
 #include "someip/ser/decode.h"
 #include "someip/ser/encode.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -201,8 +202,19 @@ class client_runner {
                 fail("event: value mismatch");
                 return;
             }
-            events_done_ = true;
-            cv_.notify_all();
+            if (ev.seq >= kEvents) {
+                fail("event: seq out of range");
+                return;
+            }
+            const auto seq = static_cast<std::size_t>(ev.seq);
+            if (!received_event_seq_[seq]) {
+                received_event_seq_[seq] = true;
+                received_events_++;
+            }
+            if (received_events_ >= kEvents) {
+                events_done_ = true;
+                cv_.notify_all();
+            }
             return;
         }
         if (ev.seq != expected_seq_) {
@@ -292,6 +304,7 @@ class client_runner {
 #endif
             send_shutdown();
         } else {
+            if (!wait_for_flag(events_done_, std::chrono::seconds(10), "client: events timeout")) return;
             send_setter_readonly();
             if (!wait_for_flag(readonly_ok_, std::chrono::seconds(10), "client: readonly timeout")) return;
 #if !defined(_WIN32)
@@ -366,6 +379,8 @@ class client_runner {
     bool readonly_ok_{false};
     bool method_ok_{false};
     bool events_done_{false};
+    std::array<bool, kEvents> received_event_seq_{};
+    std::size_t received_events_{0};
     std::size_t expected_seq_{0};
     bool failed_{false};
     std::string error_{};
