@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <variant>
 #include <vector>
@@ -66,6 +67,15 @@ void SomeIpFrameSizeFromPrefixMatchesLengthField(const std::array<std::uint8_t, 
         ASSERT_FALSE(total.has_value());
         EXPECT_EQ(total.error(), someip::status_code::invalid_length);
         return;
+    }
+
+    if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+        const auto max_length = std::numeric_limits<std::size_t>::max() - std::size_t{8u};
+        if (std::size_t{length} > max_length) {
+            ASSERT_FALSE(total.has_value());
+            EXPECT_EQ(total.error(), someip::status_code::invalid_length);
+            return;
+        }
     }
 
     ASSERT_TRUE(total.has_value());
