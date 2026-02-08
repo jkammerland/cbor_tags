@@ -57,17 +57,31 @@ option(CBOR_TAGS_BUILD_FUZZTESTS "Build FuzzTest-based SOME/IP fuzz tests" OFF)
 if(CBOR_TAGS_BUILD_FUZZTESTS)
   include(FetchContent)
 
+  set(_fuzztest_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Limit noisy upstream diagnostics from fetched FuzzTest sources to keep project builds warning-clean.
+    string(APPEND CMAKE_CXX_FLAGS
+      " -Wno-non-template-friend -Wno-attributes -Wno-return-type"
+      " -Wno-deprecated-declarations -Wno-unused-parameter")
+  endif()
+
   FetchContent_Declare(
     fuzztest
     GIT_REPOSITORY https://github.com/google/fuzztest.git
-    GIT_TAG 2025-08-05
+    # Includes GCC 15 fix in fuzztest/internal/subprocess.h (optional default argument construction).
+    GIT_TAG 54dfec04d5c9ad1f22b08002ab6a5e2d0de77671
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(fuzztest)
+  set(CMAKE_CXX_FLAGS "${_fuzztest_saved_cxx_flags}")
+  unset(_fuzztest_saved_cxx_flags)
 
   add_executable(someip_fuzztest
     ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzztest_someip.cpp
   )
   target_link_libraries(someip_fuzztest PRIVATE cbor::tags)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(someip_fuzztest PRIVATE -Wno-non-template-friend)
+  endif()
   link_fuzztest(someip_fuzztest)
   cbor_tags_enable_asan_for_target(someip_fuzztest)
   add_test(NAME someip_fuzztest COMMAND someip_fuzztest)
@@ -79,12 +93,29 @@ if (CBOR_TAGS_ENABLE_VSOMEIP_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../th
   set(_vsomeip_exe_flags "${CMAKE_EXE_LINKER_FLAGS}")
   set(_vsomeip_shared_flags "${CMAKE_SHARED_LINKER_FLAGS}")
   set(_vsomeip_module_flags "${CMAKE_MODULE_LINKER_FLAGS}")
+  # vSomeIP enforces _FORTIFY_SOURCE with -Werror; Debug (-O0) triggers a hard error on modern glibc.
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(DEFINED _FORTIFY_SOURCE)
+      set(_vsomeip_saved_fortify_source "${_FORTIFY_SOURCE}")
+      set(_vsomeip_restore_fortify_source TRUE)
+    endif()
+    set(_FORTIFY_SOURCE 0)
+  endif()
   foreach(_vsomeip_flag_var IN ITEMS CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
     if("${${_vsomeip_flag_var}}" MATCHES "-fuse-ld=mold")
       string(REPLACE "-fuse-ld=mold" "-fuse-ld=bfd" ${_vsomeip_flag_var} "${${_vsomeip_flag_var}}")
     endif()
   endforeach()
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/vsomeip ${CMAKE_BINARY_DIR}/vsomeip EXCLUDE_FROM_ALL)
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(_vsomeip_restore_fortify_source)
+      set(_FORTIFY_SOURCE "${_vsomeip_saved_fortify_source}")
+    else()
+      unset(_FORTIFY_SOURCE)
+    endif()
+    unset(_vsomeip_saved_fortify_source)
+    unset(_vsomeip_restore_fortify_source)
+  endif()
   set(CMAKE_EXE_LINKER_FLAGS "${_vsomeip_exe_flags}")
   set(CMAKE_SHARED_LINKER_FLAGS "${_vsomeip_shared_flags}")
   set(CMAKE_MODULE_LINKER_FLAGS "${_vsomeip_module_flags}")

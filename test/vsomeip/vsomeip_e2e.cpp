@@ -22,7 +22,7 @@
 
 #if !defined(_WIN32)
 #include <poll.h>
-#include <signal.h>
+#include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -104,6 +104,7 @@ static bool read_byte_timeout(int fd, std::byte &out, int timeout_ms) {
     pfd.events = POLLIN;
     int rc = ::poll(&pfd, 1, timeout_ms);
     if (rc <= 0) return false;
+    // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection): this helper intentionally performs a bounded blocking read.
     const auto n = ::read(fd, &out, 1);
     return n == 1;
 }
@@ -116,13 +117,14 @@ static bool write_byte(int fd, std::byte val) {
 
 class client_runner {
   public:
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): call sites use named pipe endpoints with stable ordering.
     client_runner(std::string name, bool reliable, bool is_a, int go_fd, int done_fd)
         : name_(std::move(name)), reliable_(reliable), is_a_(is_a), go_fd_(go_fd), done_fd_(done_fd) {}
 
     int run() {
         app_ = vsomeip::runtime::get()->create_application(name_);
         if (!app_->init()) {
-            std::fprintf(stderr, "%s: init failed\n", name_.c_str());
+            (void)std::fprintf(stderr, "%s: init failed\n", name_.c_str());
             return 1;
         }
 
@@ -148,7 +150,7 @@ class client_runner {
 
   private:
     void fail(const char *msg) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_);
         if (!failed_) {
             failed_ = true;
             error_  = msg;
@@ -161,7 +163,7 @@ class client_runner {
 
     void on_state(vsomeip::state_type_e s) {
         if (s == vsomeip::state_type_e::ST_REGISTERED) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             registered_ = true;
             cv_.notify_all();
         }
@@ -169,7 +171,7 @@ class client_runner {
 
     void on_availability(bool avail) {
         if (avail) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             available_ = true;
             cv_.notify_all();
         }
@@ -177,7 +179,7 @@ class client_runner {
 
     void on_subscription_status(std::uint16_t status) {
         if (status == 0x00u) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             subscribed_ = true;
             cv_.notify_all();
         }
@@ -193,7 +195,7 @@ class client_runner {
             fail("event: decode failed");
             return;
         }
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_);
         if (ev.seq != expected_seq_) {
             fail("event: seq mismatch");
             return;
@@ -213,7 +215,7 @@ class client_runner {
         const auto method = msg->get_method();
         const auto type   = msg->get_message_type();
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_);
         if (method == kSetterW) {
             if (type != vsomeip::message_type_e::MT_RESPONSE ||
                 msg->get_return_code() != vsomeip::return_code_e::E_OK) {
@@ -368,19 +370,20 @@ class server_runner {
     int run() {
         app_ = vsomeip::runtime::get()->create_application("server");
         if (!app_->init()) {
-            std::fprintf(stderr, "server: init failed\n");
+            (void)std::fprintf(stderr, "server: init failed\n");
             return 1;
         }
         app_->register_state_handler([this](vsomeip::state_type_e s) { on_state(s); });
-        app_->register_subscription_handler(kService, kInstance, kEventGrp,
-                                             [this](vsomeip::client_t, vsomeip::uid_t, vsomeip::gid_t, bool subscribed) {
+        app_->register_subscription_handler(
+            kService, kInstance, kEventGrp,
+            [this](vsomeip::client_t, const vsomeip_sec_client_t *, const std::string &, bool subscribed) {
                                                  if (subscribed) {
-                                                     std::lock_guard<std::mutex> lock(mutex_);
+                                                     std::scoped_lock lock(mutex_);
                                                      subscribed_count_++;
                                                      cv_.notify_all();
                                                  }
                                                  return true;
-                                             });
+            });
         app_->register_message_handler(kService, kInstance, kMethod, [this](const std::shared_ptr<vsomeip::message> &m) { on_method(m); });
         app_->register_message_handler(kService, kInstance, kSetterW, [this](const std::shared_ptr<vsomeip::message> &m) { on_setter_w(m); });
         app_->register_message_handler(kService, kInstance, kSetterRO, [this](const std::shared_ptr<vsomeip::message> &m) { on_setter_ro(m); });
@@ -408,7 +411,7 @@ class server_runner {
     void on_method(const std::shared_ptr<vsomeip::message> &msg) {
         MethodReq req{};
         if (!decode_payload(msg->get_payload(), req)) {
-            std::fprintf(stderr, "server: method decode failed\n");
+            (void)std::fprintf(stderr, "server: method decode failed\n");
             return;
         }
         MethodResp resp{.y = req.x + 1};
@@ -420,7 +423,7 @@ class server_runner {
     void on_setter_w(const std::shared_ptr<vsomeip::message> &msg) {
         FieldValue req{};
         if (!decode_payload(msg->get_payload(), req)) {
-            std::fprintf(stderr, "server: setter decode failed\n");
+            (void)std::fprintf(stderr, "server: setter decode failed\n");
             return;
         }
         field_value_ = req.value;
@@ -465,9 +468,19 @@ static int run_transport(const std::string &config_path, bool reliable) {
     int done_pipe[2]{-1, -1};
     int go_pipe[2]{-1, -1};
     if (::pipe(server_pipe) != 0 || ::pipe(done_pipe) != 0 || ::pipe(go_pipe) != 0) {
-        std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
+        (void)std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
         return 1;
     }
+
+    auto kill_and_reap = [](pid_t pid) {
+        if (pid <= 0) {
+            return;
+        }
+        (void)::kill(pid, SIGKILL);
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+    };
 
     const pid_t server_pid = ::fork();
     if (server_pid == 0) {
@@ -483,7 +496,13 @@ static int run_transport(const std::string &config_path, bool reliable) {
 
     std::byte ready{};
     if (!read_byte_timeout(server_pipe[0], ready, 5000)) {
-        std::fprintf(stderr, "server ready timeout\n");
+        (void)std::fprintf(stderr, "server ready timeout\n");
+        ::close(server_pipe[0]);
+        ::close(done_pipe[0]);
+        ::close(done_pipe[1]);
+        ::close(go_pipe[0]);
+        ::close(go_pipe[1]);
+        kill_and_reap(server_pid);
         return 1;
     }
     ::close(server_pipe[0]);
@@ -513,9 +532,12 @@ static int run_transport(const std::string &config_path, bool reliable) {
 
     std::byte done{};
     if (!read_byte_timeout(done_pipe[0], done, 20000)) {
-        std::fprintf(stderr, "client_b did not finish in time\n");
-        (void)::kill(client_a_pid, SIGKILL);
-        (void)::kill(server_pid, SIGKILL);
+        (void)std::fprintf(stderr, "client_b did not finish in time\n");
+        ::close(done_pipe[0]);
+        ::close(go_pipe[1]);
+        kill_and_reap(client_a_pid);
+        kill_and_reap(client_b_pid);
+        kill_and_reap(server_pid);
         return 1;
     }
     ::close(done_pipe[0]);
@@ -526,17 +548,17 @@ static int run_transport(const std::string &config_path, bool reliable) {
     int status = 0;
     (void)::waitpid(client_b_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "client_b failed\n");
+        (void)std::fprintf(stderr, "client_b failed\n");
         return 1;
     }
     (void)::waitpid(client_a_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "client_a failed\n");
+        (void)std::fprintf(stderr, "client_a failed\n");
         return 1;
     }
     (void)::waitpid(server_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "server failed\n");
+        (void)std::fprintf(stderr, "server failed\n");
         return 1;
     }
 

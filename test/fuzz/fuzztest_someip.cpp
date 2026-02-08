@@ -55,6 +55,7 @@ void SomeIpTryParseFramePreservesInvariants(const std::vector<std::uint8_t> &raw
     EXPECT_EQ(parsed->payload.size(), static_cast<std::size_t>(parsed->hdr.length - 8u - tp_bytes));
 }
 
+// NOLINTNEXTLINE(cert-err58-cpp): FuzzTest registers tests via static initialization.
 FUZZ_TEST(SomeIpWireFuzz, SomeIpTryParseFramePreservesInvariants)
     .WithDomains(fuzztest::Arbitrary<std::vector<std::uint8_t>>().WithMaxSize(kMaxFrameBytes));
 
@@ -82,6 +83,7 @@ void SomeIpFrameSizeFromPrefixMatchesLengthField(const std::array<std::uint8_t, 
     EXPECT_EQ(*total, static_cast<std::size_t>(length) + 8u);
 }
 
+// NOLINTNEXTLINE(cert-err58-cpp): FuzzTest registers tests via static initialization.
 FUZZ_TEST(SomeIpWireFuzz, SomeIpFrameSizeFromPrefixMatchesLengthField);
 
 void SomeIpSdDecodeArbitraryFrameNoCrash(const std::vector<std::uint8_t> &raw_frame) {
@@ -103,9 +105,11 @@ void SomeIpSdDecodeArbitraryFrameNoCrash(const std::vector<std::uint8_t> &raw_fr
     }
 }
 
+// NOLINTNEXTLINE(cert-err58-cpp): FuzzTest registers tests via static initialization.
 FUZZ_TEST(SomeIpSdFuzz, SomeIpSdDecodeArbitraryFrameNoCrash)
     .WithDomains(fuzztest::Arbitrary<std::vector<std::uint8_t>>().WithMaxSize(kMaxFrameBytes));
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): Flat scalar domain list is intentional for fuzzing.
 void SomeIpSdEncodeDecodeRoundTripSingleServiceEntry(std::uint16_t                    client_id,
                                                      std::uint16_t                    session_id,
                                                      std::uint16_t                    service_id,
@@ -134,9 +138,9 @@ void SomeIpSdEncodeDecodeRoundTripSingleServiceEntry(std::uint16_t              
     someip::sd::configuration_option option{};
     option.discardable = discardable;
     option.bytes = to_bytes(config_payload_raw);
-    entry.run1.push_back(someip::sd::option{option});
+    entry.run1.emplace_back(option);
 
-    pd.entries.push_back(someip::sd::entry_data{entry});
+    pd.entries.emplace_back(entry);
 
     const auto encoded = someip::sd::encode_message(pd);
     ASSERT_TRUE(encoded.has_value());
@@ -168,7 +172,9 @@ void SomeIpSdEncodeDecodeRoundTripSingleServiceEntry(std::uint16_t              
     EXPECT_EQ(decoded_option->discardable, discardable);
     EXPECT_EQ(decoded_option->bytes, option.bytes);
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
+// NOLINTNEXTLINE(cert-err58-cpp): FuzzTest registers tests via static initialization.
 FUZZ_TEST(SomeIpSdFuzz, SomeIpSdEncodeDecodeRoundTripSingleServiceEntry)
     .WithDomains(fuzztest::Arbitrary<std::uint16_t>(), fuzztest::Arbitrary<std::uint16_t>(),
                  fuzztest::Arbitrary<std::uint16_t>(), fuzztest::Arbitrary<std::uint16_t>(),

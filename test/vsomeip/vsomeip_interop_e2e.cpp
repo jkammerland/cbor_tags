@@ -33,7 +33,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
-#include <signal.h>
+#include <csignal>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -55,7 +55,7 @@ constexpr std::uint16_t kSdTestPort  = 30590;
 constexpr std::uint16_t kServicePort = 30509;
 constexpr std::size_t   kEventCount  = 10;
 constexpr std::size_t   kEventBurst  = 16;
-constexpr std::size_t   kMaxFrameSize = 1024u * 1024u;
+constexpr std::size_t   kMaxFrameSize = std::size_t{1024u} * std::size_t{1024u};
 constexpr std::uint32_t kValue       = 0xBEEF;
 constexpr std::uint8_t  kSdMajorVersion = 0x00;
 constexpr std::uint8_t  kInterfaceVersion = 0x00;
@@ -118,6 +118,7 @@ struct unique_fd {
     }
 };
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): helper is used with explicit argument ordering at call sites.
 static int poll_one(int fd, short events, int timeout_ms) {
     if (timeout_ms < 0) {
         timeout_ms = 0;
@@ -134,6 +135,7 @@ static int poll_one(int fd, short events, int timeout_ms) {
     }
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): helper is used with explicit argument ordering at call sites.
 static bool write_all(int fd, const std::byte *data, std::size_t len, int timeout_ms) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     std::size_t written = 0;
@@ -160,6 +162,7 @@ static bool write_all(int fd, const std::byte *data, std::size_t len, int timeou
     return true;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): helper is used with explicit argument ordering at call sites.
 static bool read_exact(int fd, std::byte *data, std::size_t len, int timeout_ms) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     std::size_t readn   = 0;
@@ -216,6 +219,9 @@ static bool send_frame(int fd, const std::vector<std::byte> &frame, int timeout_
 }
 
 static bool recv_udp_datagram(int fd, std::vector<std::byte> &frame, sockaddr_in &from, int timeout_ms) {
+    if (fd < 0) {
+        return false;
+    }
     const int ready = poll_one(fd, POLLIN, timeout_ms);
     if (ready <= 0) {
         return false;
@@ -232,7 +238,7 @@ static bool recv_udp_datagram(int fd, std::vector<std::byte> &frame, sockaddr_in
 
 static bool send_udp_datagram(int fd, const std::vector<std::byte> &frame, const sockaddr_in &to) {
     const ssize_t rc = ::sendto(fd, frame.data(), frame.size(), 0, reinterpret_cast<const sockaddr *>(&to), sizeof(to));
-    return rc == static_cast<ssize_t>(frame.size());
+    return rc >= 0 && static_cast<std::size_t>(rc) == frame.size();
 }
 
 static bool send_udp_datagram_from(int fd, const std::vector<std::byte> &frame, const sockaddr_in &to, const char *source_ip) {
@@ -255,6 +261,7 @@ static bool is_multicast_ip(const char *ip) {
     return IN_MULTICAST(ntohl(addr.s_addr));
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): helper is used with explicit argument ordering at call sites.
 static unique_fd open_udp_socket(std::uint16_t port,
                                  bool join_multicast,
                                  const char *bind_ip,
@@ -317,6 +324,7 @@ static unique_fd open_udp_socket(std::uint16_t port,
     }
     return sock;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 static unique_fd open_tcp_listener(const char *bind_ip, std::uint16_t port) {
     unique_fd sock{::socket(AF_INET, SOCK_STREAM, 0)};
@@ -365,6 +373,7 @@ static unique_fd connect_tcp_with_retry(const sockaddr_in &addr, int timeout_ms,
     }
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): helper is used with explicit argument ordering at call sites.
 static unique_fd connect_tcp_with_retry(const char *target_ip, std::uint16_t port, int timeout_ms, const char *bind_ip = nullptr) {
     sockaddr_in addr = make_addr(target_ip, port);
     return connect_tcp_with_retry(addr, timeout_ms, bind_ip);
@@ -415,6 +424,7 @@ static someip::sd::ipv4_sd_endpoint_option make_ipv4_sd_endpoint(const char *ip,
     return opt;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): helper intentionally accepts client/session as two scalars.
 static std::vector<std::byte> build_sd_find_service(std::uint16_t client_id = 0, std::uint16_t session_id = 0) {
     someip::sd::packet_data pd{};
     pd.client_id = client_id;
@@ -427,7 +437,7 @@ static std::vector<std::byte> build_sd_find_service(std::uint16_t client_id = 0,
     se.major_version = 0xFF;
     se.ttl           = 3;
     se.minor_version = 0xFFFFFFFFu;
-    pd.entries.push_back(se);
+    pd.entries.emplace_back(se);
     auto msg = someip::sd::encode_message(pd);
     if (!msg) {
         return {};
@@ -435,6 +445,7 @@ static std::vector<std::byte> build_sd_find_service(std::uint16_t client_id = 0,
     return *msg;
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): helper intentionally accepts client/session as scalar pairs.
 static std::vector<std::byte> build_sd_offer_service(const char *ip, bool reliable, bool unicast_flag,
                                                      std::uint16_t client_id = 0, std::uint16_t session_id = 0) {
     someip::sd::packet_data pd{};
@@ -450,18 +461,20 @@ static std::vector<std::byte> build_sd_offer_service(const char *ip, bool reliab
     se.major_version = kSdMajorVersion;
     se.ttl           = 3;
     se.minor_version = 0;
-    se.run1.push_back(make_ipv4_endpoint(ip, reliable, kServicePort));
+    se.run1.emplace_back(make_ipv4_endpoint(ip, reliable, kServicePort));
     if (unicast_flag) {
-        se.run1.push_back(make_ipv4_sd_endpoint(ip, kSdPort));
+        se.run1.emplace_back(make_ipv4_sd_endpoint(ip, kSdPort));
     }
-    pd.entries.push_back(se);
+    pd.entries.emplace_back(se);
     auto msg = someip::sd::encode_message(pd);
     if (!msg) {
         return {};
     }
     return *msg;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): helper intentionally accepts port/client/session as scalars.
 static std::vector<std::byte> build_sd_subscribe(const char *ip,
                                                  bool reliable,
                                                  std::uint16_t port,
@@ -479,15 +492,17 @@ static std::vector<std::byte> build_sd_subscribe(const char *ip,
     eg.ttl           = 5;
     eg.eventgroup_id = kEventgroup;
     eg.reserved12_counter4 = 0;
-    eg.run1.push_back(make_ipv4_endpoint(ip, reliable, port));
-    pd.entries.push_back(eg);
+    eg.run1.emplace_back(make_ipv4_endpoint(ip, reliable, port));
+    pd.entries.emplace_back(eg);
     auto msg = someip::sd::encode_message(pd);
     if (!msg) {
         return {};
     }
     return *msg;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): helper intentionally accepts client/session as scalar pairs.
 static std::vector<std::byte> build_sd_subscribe_ack(std::uint16_t counter_field,
                                                      bool unicast_flag,
                                                      std::uint16_t client_id = 0,
@@ -506,13 +521,14 @@ static std::vector<std::byte> build_sd_subscribe_ack(std::uint16_t counter_field
     eg.ttl           = 5;
     eg.eventgroup_id = kEventgroup;
     eg.reserved12_counter4 = counter_field;
-    pd.entries.push_back(eg);
+    pd.entries.emplace_back(eg);
     auto msg = someip::sd::encode_message(pd);
     if (!msg) {
         return {};
     }
     return *msg;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 static bool same_endpoint(const sockaddr_in &left, const sockaddr_in &right) {
     return left.sin_addr.s_addr == right.sin_addr.s_addr && left.sin_port == right.sin_port;
@@ -591,8 +607,8 @@ static void debug_dump_sockets(const char *label) {
     if (std::getenv("SOMEIP_TEST_DEBUG") == nullptr) {
         return;
     }
-    std::fprintf(stderr, "%s\n", label);
-    (void)std::system("ss -u -a -p | rg 30490 || true");
+    (void)std::fprintf(stderr, "%s\n", label);
+    (void)std::system("ss -u -a -p | rg 30490 || true"); // NOLINT(cert-env33-c)
 }
 
 static int read_env_int(const char *name, int default_value) {
@@ -625,6 +641,7 @@ struct sd_sockets {
     unique_fd multicast{};
 };
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): helper is used with explicit bind/interface/group arguments.
 static sd_sockets open_sd_sockets(const char *bind_ip, const char *mcast_if_ip, const char *multicast_ip) {
     sd_sockets out{};
     out.unicast = open_udp_socket(kSdPort, false, bind_ip, nullptr, nullptr, false);
@@ -639,6 +656,7 @@ static sd_sockets open_sd_sockets(const char *bind_ip, const char *mcast_if_ip, 
     return out;
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): helper is used with explicit fd/ip argument ordering.
 static int run_custom_server(bool reliable,
                              int ready_fd,
                              int stop_fd,
@@ -649,7 +667,7 @@ static int run_custom_server(bool reliable,
     const char *sd_iface = server_ip;
     auto sd = open_sd_sockets(server_ip, sd_iface, sd_multicast);
     if (!sd.unicast.valid()) {
-        std::fprintf(stderr, "custom server: sd socket failed\n");
+        (void)std::fprintf(stderr, "custom server: sd socket failed\n");
         return 1;
     }
 
@@ -658,13 +676,13 @@ static int run_custom_server(bool reliable,
     if (reliable) {
         listen_sock = open_tcp_listener(server_ip, kServicePort);
         if (!listen_sock.valid()) {
-            std::fprintf(stderr, "custom server: tcp listen failed\n");
+            (void)std::fprintf(stderr, "custom server: tcp listen failed\n");
             return 1;
         }
     } else {
         service_udp = open_udp_socket(kServicePort, false, server_ip, nullptr, nullptr, true);
         if (!service_udp.valid()) {
-            std::fprintf(stderr, "custom server: udp service socket failed\n");
+            (void)std::fprintf(stderr, "custom server: udp service socket failed\n");
             return 1;
         }
     }
@@ -783,13 +801,13 @@ static int run_custom_server(bool reliable,
                 if (debug) {
                     char addr[INET_ADDRSTRLEN]{};
                     ::inet_ntop(AF_INET, &sender.sin_addr, addr, sizeof(addr));
-                    std::fprintf(stderr, "custom server: SD datagram from %s:%u len=%zu\n",
+                    (void)std::fprintf(stderr, "custom server: SD datagram from %s:%u len=%zu\n",
                                  addr, ntohs(sender.sin_port), sd_frame.size());
                 }
                 auto sdmsg = someip::sd::decode_message(std::span<const std::byte>(sd_frame.data(), sd_frame.size()));
                 if (!sdmsg) {
                     if (debug) {
-                        std::fprintf(stderr, "custom server: SD decode failed (code=%d, size=%zu)\n",
+                        (void)std::fprintf(stderr, "custom server: SD decode failed (code=%d, size=%zu)\n",
                                      static_cast<int>(sdmsg.error()), sd_frame.size());
                     }
                     continue;
@@ -799,7 +817,7 @@ static int run_custom_server(bool reliable,
                         if (std::holds_alternative<someip::sd::service_entry>(entry)) {
                             const auto &se = std::get<someip::sd::service_entry>(entry);
                             if (debug) {
-                                std::fprintf(stderr, "custom server: SD service entry type=0x%02X svc=0x%04X inst=0x%04X ttl=%u\n",
+                                (void)std::fprintf(stderr, "custom server: SD service entry type=0x%02X svc=0x%04X inst=0x%04X ttl=%u\n",
                                              se.c.type, se.c.service_id, se.c.instance_id, se.c.ttl);
                             }
                             if (se.c.type == someip::sd::entry_type::find_service) {
@@ -811,7 +829,7 @@ static int run_custom_server(bool reliable,
                         } else if (std::holds_alternative<someip::sd::eventgroup_entry>(entry)) {
                             const auto &eg = std::get<someip::sd::eventgroup_entry>(entry);
                             if (debug) {
-                                std::fprintf(stderr,
+                                (void)std::fprintf(stderr,
                                              "custom server: SD eventgroup entry type=0x%02X svc=0x%04X inst=0x%04X eg=0x%04X ttl=%u\n",
                                              eg.c.type, eg.c.service_id, eg.c.instance_id, eg.eventgroup_id, eg.c.ttl);
                             }
@@ -835,7 +853,7 @@ static int run_custom_server(bool reliable,
                                             if (debug) {
                                                 char ipbuf[INET_ADDRSTRLEN]{};
                                                 ::inet_ntop(AF_INET, &addr.sin_addr, ipbuf, sizeof(ipbuf));
-                                                std::fprintf(stderr, "custom server: SD endpoint opt proto=%u addr=%s:%u\n",
+                                                (void)std::fprintf(stderr, "custom server: SD endpoint opt proto=%u addr=%s:%u\n",
                                                              static_cast<unsigned>(ipv4->l4_proto), ipbuf, ntohs(addr.sin_port));
                                             }
                                         }
@@ -871,7 +889,7 @@ static int run_custom_server(bool reliable,
                                     }
                                 }
                                 if (debug && !reliable) {
-                                    std::fprintf(stderr, "custom server: udp_targets=%zu matched=%s\n",
+                                    (void)std::fprintf(stderr, "custom server: udp_targets=%zu matched=%s\n",
                                                  udp_targets.size(), matched ? "true" : "false");
                                 }
                                 if (reliable && !matched) {
@@ -920,7 +938,7 @@ static int run_custom_server(bool reliable,
                 auto &client = tcp_clients[client_index];
                 if ((poll_fds[index].revents & POLLERR) != 0) {
                     if (!had_reliable_request) {
-                        std::fprintf(stderr, "custom server: tcp client error (POLLERR before requests)\n");
+                        (void)std::fprintf(stderr, "custom server: tcp client error (POLLERR before requests)\n");
                         tcp_client_error = true;
                         error = true;
                         shutdown = true;
@@ -929,7 +947,7 @@ static int run_custom_server(bool reliable,
                         break;
                     }
                     if (debug) {
-                        std::fprintf(stderr, "custom server: tcp client error (POLLERR after requests)\n");
+                        (void)std::fprintf(stderr, "custom server: tcp client error (POLLERR after requests)\n");
                     }
                     client.fd.reset();
                     client.subscribed = false;
@@ -937,7 +955,7 @@ static int run_custom_server(bool reliable,
                 }
                 if ((poll_fds[index].revents & POLLHUP) != 0) {
                     if (debug) {
-                        std::fprintf(stderr, "custom server: tcp client hangup\n");
+                        (void)std::fprintf(stderr, "custom server: tcp client hangup\n");
                     }
                     client.fd.reset();
                     client.subscribed = false;
@@ -949,13 +967,13 @@ static int run_custom_server(bool reliable,
                 auto frame = recv_someip_frame(client.fd.fd(), 5000);
                 if (frame.empty()) {
                     if (debug) {
-                        std::fprintf(stderr, "custom server: tcp recv timeout\n");
+                        (void)std::fprintf(stderr, "custom server: tcp recv timeout\n");
                     }
                     continue;
                 }
                 auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
                 if (!parsed) {
-                    std::fprintf(stderr, "custom server: parse failed\n");
+                    (void)std::fprintf(stderr, "custom server: parse failed\n");
                     error = true;
                     shutdown = true;
                     break;
@@ -971,7 +989,7 @@ static int run_custom_server(bool reliable,
                 if (parsed->hdr.msg.service_id == kServiceId && parsed->hdr.msg.method_id == kSetterW) {
                     FieldValue req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
-                        std::fprintf(stderr, "custom server: setter decode failed\n");
+                        (void)std::fprintf(stderr, "custom server: setter decode failed\n");
                         error = true;
                         shutdown = true;
                         break;
@@ -1031,7 +1049,7 @@ static int run_custom_server(bool reliable,
                 if (parsed->hdr.msg.service_id == kServiceId && parsed->hdr.msg.method_id == kMethodId) {
                     MethodReq req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
-                        std::fprintf(stderr, "custom server: method decode failed\n");
+                        (void)std::fprintf(stderr, "custom server: method decode failed\n");
                         error = true;
                         shutdown = true;
                         break;
@@ -1066,19 +1084,19 @@ static int run_custom_server(bool reliable,
                 if (debug) {
                     char addr[INET_ADDRSTRLEN]{};
                     ::inet_ntop(AF_INET, &sender.sin_addr, addr, sizeof(addr));
-                    std::fprintf(stderr, "custom server: UDP datagram from %s:%u len=%zu\n",
+                    (void)std::fprintf(stderr, "custom server: UDP datagram from %s:%u len=%zu\n",
                                  addr, ntohs(sender.sin_port), frame.size());
                 }
                 add_unique(udp_known_senders, sender);
                 auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
                 if (!parsed) {
-                    std::fprintf(stderr, "custom server: udp parse failed\n");
+                    (void)std::fprintf(stderr, "custom server: udp parse failed\n");
                     error = true;
                     shutdown = true;
                     continue;
                 }
                 if (debug) {
-                    std::fprintf(stderr, "custom server: UDP msg method=0x%04X type=0x%02X\n",
+                    (void)std::fprintf(stderr, "custom server: UDP msg method=0x%04X type=0x%02X\n",
                                  parsed->hdr.msg.method_id, parsed->hdr.msg_type);
                 }
 
@@ -1092,7 +1110,7 @@ static int run_custom_server(bool reliable,
                 if (parsed->hdr.msg.service_id == kServiceId && parsed->hdr.msg.method_id == kSetterW) {
                     FieldValue req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
-                        std::fprintf(stderr, "custom server: udp setter decode failed\n");
+                        (void)std::fprintf(stderr, "custom server: udp setter decode failed\n");
                         error = true;
                         shutdown = true;
                         continue;
@@ -1124,7 +1142,7 @@ static int run_custom_server(bool reliable,
                         if (debug) {
                             char addr[INET_ADDRSTRLEN]{};
                             ::inet_ntop(AF_INET, &subscriber.sin_addr, addr, sizeof(addr));
-                            std::fprintf(stderr, "custom server: send events to %s:%u\n",
+                            (void)std::fprintf(stderr, "custom server: send events to %s:%u\n",
                                          addr, ntohs(subscriber.sin_port));
                         }
                         for (std::uint32_t seq_index = 0; seq_index < kEventCount; ++seq_index) {
@@ -1177,7 +1195,7 @@ static int run_custom_server(bool reliable,
                     }
                     MethodReq req{};
                     if (!someip::ser::decode(parsed->payload, kCfg, req, payload_base)) {
-                        std::fprintf(stderr, "custom server: udp method decode failed\n");
+                        (void)std::fprintf(stderr, "custom server: udp method decode failed\n");
                         error = true;
                         shutdown = true;
                         continue;
@@ -1206,23 +1224,25 @@ static int run_custom_server(bool reliable,
     }
     if (reliable) {
         if (tcp_client_error) {
-            std::fprintf(stderr, "custom server: tcp client error before requests\n");
+            (void)std::fprintf(stderr, "custom server: tcp client error before requests\n");
             return 1;
         }
         if (!had_tcp_client) {
-            std::fprintf(stderr, "custom server: no tcp clients connected\n");
+            (void)std::fprintf(stderr, "custom server: no tcp clients connected\n");
             return 1;
         }
         if (!had_reliable_request) {
-            std::fprintf(stderr, "custom server: no tcp requests received\n");
+            (void)std::fprintf(stderr, "custom server: no tcp requests received\n");
             return 1;
         }
     }
     return 0;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 class vsomeip_client_runner {
   public:
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters): constructor mirrors test topology inputs and fd channels.
     vsomeip_client_runner(std::string name,
                           bool reliable,
                           bool is_a,
@@ -1240,12 +1260,13 @@ class vsomeip_client_runner {
           ready_fd_(ready_fd),
           subscribed_fd_(subscribed_fd),
           debug_(std::getenv("SOMEIP_TEST_DEBUG") != nullptr) {}
+    // NOLINTEND(bugprone-easily-swappable-parameters)
 
     int run() {
         ::setenv("VSOMEIP_APPLICATION_NAME", name_.c_str(), 1);
         app_ = vsomeip::runtime::get()->create_application(name_);
         if (!app_->init()) {
-            std::fprintf(stderr, "%s: init failed\n", name_.c_str());
+            (void)std::fprintf(stderr, "%s: init failed\n", name_.c_str());
             return 1;
         }
 
@@ -1277,7 +1298,7 @@ class vsomeip_client_runner {
     void fail(const char *msg) {
         bool first = false;
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             if (!failed_) {
                 failed_ = true;
                 error_  = msg;
@@ -1285,7 +1306,7 @@ class vsomeip_client_runner {
             }
         }
         if (first) {
-            std::fprintf(stderr, "%s: %s\n", name_.c_str(), msg);
+            (void)std::fprintf(stderr, "%s: %s\n", name_.c_str(), msg);
         }
         cv_.notify_all();
         if (app_) {
@@ -1295,7 +1316,7 @@ class vsomeip_client_runner {
 
     void on_state(vsomeip::state_type_e s) {
         if (s == vsomeip::state_type_e::ST_REGISTERED) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             registered_ = true;
             cv_.notify_all();
             if (ready_fd_ >= 0) {
@@ -1308,24 +1329,24 @@ class vsomeip_client_runner {
 
     void on_availability(bool avail) {
         if (avail) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             available_ = true;
             cv_.notify_all();
         }
         if (debug_) {
-            std::fprintf(stderr, "%s: availability %s\n", name_.c_str(), avail ? "true" : "false");
+            (void)std::fprintf(stderr, "%s: availability %s\n", name_.c_str(), avail ? "true" : "false");
         }
     }
 
     void on_subscription_status(std::uint16_t status) {
         if (status == 0x00u) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             subscribed_ = true;
             notify_subscribed();
             cv_.notify_all();
         }
         if (debug_) {
-            std::fprintf(stderr, "%s: subscription status 0x%02X\n", name_.c_str(), status);
+            (void)std::fprintf(stderr, "%s: subscription status 0x%02X\n", name_.c_str(), status);
         }
     }
 
@@ -1340,11 +1361,11 @@ class vsomeip_client_runner {
             return;
         }
         if (debug_) {
-            std::fprintf(stderr, "%s: event seq=%u value=0x%X\n", name_.c_str(), ev.seq, ev.value);
+            (void)std::fprintf(stderr, "%s: event seq=%u value=0x%X\n", name_.c_str(), ev.seq, ev.value);
         }
         const char *fail_msg = nullptr;
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             if (ev.seq != expected_seq_) {
                 fail_msg = "event: seq mismatch";
             } else if (ev.value != kValue) {
@@ -1376,7 +1397,7 @@ class vsomeip_client_runner {
 
         const char *fail_msg = nullptr;
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             if (method == kSetterW) {
                 if (type != vsomeip::message_type_e::MT_RESPONSE ||
                     msg->get_return_code() != vsomeip::return_code_e::E_OK) {
@@ -1484,7 +1505,7 @@ class vsomeip_client_runner {
             if (!wait_for_flag(events_done_, std::chrono::seconds(10), "client: events timeout")) return;
             if (done_fd_ >= 0) {
                 if (debug_) {
-                    std::fprintf(stderr, "%s: sending done signal\n", name_.c_str());
+                    (void)std::fprintf(stderr, "%s: sending done signal\n", name_.c_str());
                 }
                 (void)write_byte(done_fd_, std::byte{0x01});
             }
@@ -1619,27 +1640,28 @@ class vsomeip_server_runner {
         debug_ = std::getenv("SOMEIP_TEST_DEBUG") != nullptr;
         if (debug_) {
             const char *cfg = std::getenv("VSOMEIP_CONFIGURATION");
-            std::fprintf(stderr, "vsomeip server: VSOMEIP_CONFIGURATION=%s\n", cfg ? cfg : "(null)");
+            (void)std::fprintf(stderr, "vsomeip server: VSOMEIP_CONFIGURATION=%s\n", cfg ? cfg : "(null)");
         }
         app_ = vsomeip::runtime::get()->create_application("server");
         if (!app_->init()) {
-            std::fprintf(stderr, "vsomeip server: init failed\n");
+            (void)std::fprintf(stderr, "vsomeip server: init failed\n");
             return 1;
         }
         start_sd_listener();
         app_->register_state_handler([this](vsomeip::state_type_e s) { on_state(s); });
-        app_->register_subscription_handler(kServiceId, kInstanceId, kEventgroup,
-                                             [this](vsomeip::client_t, vsomeip::uid_t, vsomeip::gid_t, bool subscribed) {
+        app_->register_subscription_handler(
+            kServiceId, kInstanceId, kEventgroup,
+            [this](vsomeip::client_t, const vsomeip_sec_client_t *, const std::string &, bool subscribed) {
                                                  if (subscribed) {
-                                                    std::lock_guard<std::mutex> lock(mutex_);
+                                                    std::scoped_lock lock(mutex_);
                                                     subscribed_count_++;
                                                     cv_.notify_all();
                                                     if (debug_) {
-                                                        std::fprintf(stderr, "vsomeip server: subscribed_count=%zu\n", subscribed_count_);
+                                                        (void)std::fprintf(stderr, "vsomeip server: subscribed_count=%zu\n", subscribed_count_);
                                                     }
                                                  }
                                                  return true;
-                                             });
+            });
         app_->register_message_handler(kServiceId, kInstanceId, kMethodId,
                                        [this](const std::shared_ptr<vsomeip::message> &m) { on_method(m); });
         app_->register_message_handler(kServiceId, kInstanceId, kSetterW,
@@ -1672,7 +1694,7 @@ class vsomeip_server_runner {
     void on_method(const std::shared_ptr<vsomeip::message> &msg) {
         MethodReq req{};
         if (!decode_payload(msg->get_payload(), req)) {
-            std::fprintf(stderr, "vsomeip server: method decode failed\n");
+            (void)std::fprintf(stderr, "vsomeip server: method decode failed\n");
             return;
         }
         MethodResp resp{.y = req.x + 1};
@@ -1684,7 +1706,7 @@ class vsomeip_server_runner {
     void on_setter_w(const std::shared_ptr<vsomeip::message> &msg) {
         FieldValue req{};
         if (!decode_payload(msg->get_payload(), req)) {
-            std::fprintf(stderr, "vsomeip server: setter decode failed\n");
+            (void)std::fprintf(stderr, "vsomeip server: setter decode failed\n");
             return;
         }
         field_value_ = req.value;
@@ -1695,7 +1717,7 @@ class vsomeip_server_runner {
 
         const bool have_subscribers = wait_for_subscribers(2, std::chrono::milliseconds(1500));
         if (!have_subscribers && debug_) {
-            std::fprintf(stderr, "vsomeip server: subscribers=%zu before notify\n", subscribed_count_);
+            (void)std::fprintf(stderr, "vsomeip server: subscribers=%zu before notify\n", subscribed_count_);
         }
         const std::size_t rounds = reliable_ ? 1u : 8u;
         const std::uint32_t burst = reliable_ ? static_cast<std::uint32_t>(kEventCount)
@@ -1744,13 +1766,13 @@ class vsomeip_server_runner {
         sd_sock_ = open_udp_socket(kSdTestPort, false, nullptr, nullptr, nullptr, true);
         if (!sd_sock_.valid()) {
             if (debug_) {
-                std::fprintf(stderr, "vsomeip server: sd listener socket failed\n");
+                (void)std::fprintf(stderr, "vsomeip server: sd listener socket failed\n");
             }
             return;
         }
         notify_sock_.reset(::socket(AF_INET, SOCK_DGRAM, 0));
         if (!notify_sock_.valid() && debug_) {
-            std::fprintf(stderr, "vsomeip server: notify socket failed\n");
+            (void)std::fprintf(stderr, "vsomeip server: notify socket failed\n");
         }
         sd_stop_.store(false);
         sd_thread_ = std::thread([this] { sd_listener_loop(); });
@@ -1758,11 +1780,13 @@ class vsomeip_server_runner {
 
     void stop_sd_listener() {
         sd_stop_.store(true);
-        if (sd_sock_.valid()) {
-            sd_sock_.reset();
-        }
         if (sd_thread_.joinable()) {
             sd_thread_.join();
+        }
+        sd_sock_.reset();
+        {
+            std::scoped_lock lock(notify_sock_mutex_);
+            notify_sock_.reset();
         }
     }
 
@@ -1817,7 +1841,7 @@ class vsomeip_server_runner {
     }
 
     void record_subscriber(const sockaddr_in &addr) {
-        std::lock_guard<std::mutex> lock(sub_mutex_);
+        std::scoped_lock lock(sub_mutex_);
         for (const auto &existing : sd_subscribers_) {
             if (same_endpoint(existing, addr)) {
                 return;
@@ -1827,17 +1851,20 @@ class vsomeip_server_runner {
         if (debug_) {
             char addrbuf[INET_ADDRSTRLEN]{};
             ::inet_ntop(AF_INET, &addr.sin_addr, addrbuf, sizeof(addrbuf));
-            std::fprintf(stderr, "vsomeip server: sd subscriber %s:%u\n", addrbuf, ntohs(addr.sin_port));
+            (void)std::fprintf(stderr, "vsomeip server: sd subscriber %s:%u\n", addrbuf, ntohs(addr.sin_port));
         }
     }
 
     void send_raw_notifications(std::size_t rounds) {
+        std::scoped_lock notify_lock(notify_sock_mutex_);
         if (!notify_sock_.valid()) {
             return;
         }
+        const int notify_fd = notify_sock_.fd();
+
         std::vector<sockaddr_in> subscribers{};
         {
-            std::lock_guard<std::mutex> lock(sub_mutex_);
+            std::scoped_lock lock(sub_mutex_);
             subscribers = sd_subscribers_;
         }
         if (subscribers.empty()) {
@@ -1860,7 +1887,7 @@ class vsomeip_server_runner {
                     continue;
                 }
                 for (const auto &addr : subscribers) {
-                    (void)send_udp_datagram(notify_sock_.fd(), frame, addr);
+                    (void)send_udp_datagram(notify_fd, frame, addr);
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(8));
             }
@@ -1915,11 +1942,13 @@ class vsomeip_server_runner {
     std::thread sd_thread_{};
     std::atomic<bool> sd_stop_{false};
     std::mutex sub_mutex_{};
+    std::mutex notify_sock_mutex_{};
     std::vector<sockaddr_in> sd_subscribers_{};
 };
 
 class vsomeip_routing_runner {
   public:
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): constructor takes fixed ready/stop pipe fds.
     vsomeip_routing_runner(int ready_fd, int stop_fd) : ready_fd_(ready_fd), stop_fd_(stop_fd) {}
 
     int run() {
@@ -1927,11 +1956,11 @@ class vsomeip_routing_runner {
         const bool debug = std::getenv("SOMEIP_TEST_DEBUG") != nullptr;
         if (debug) {
             const char *cfg = std::getenv("VSOMEIP_CONFIGURATION");
-            std::fprintf(stderr, "routingmanagerd: VSOMEIP_CONFIGURATION=%s\n", cfg ? cfg : "(null)");
+            (void)std::fprintf(stderr, "routingmanagerd: VSOMEIP_CONFIGURATION=%s\n", cfg ? cfg : "(null)");
         }
         app_ = vsomeip::runtime::get()->create_application("routingmanagerd");
         if (!app_->init()) {
-            std::fprintf(stderr, "routingmanagerd: init failed\n");
+            (void)std::fprintf(stderr, "routingmanagerd: init failed\n");
             return 1;
         }
         app_->register_state_handler([this](vsomeip::state_type_e s) {
@@ -1969,6 +1998,7 @@ class vsomeip_routing_runner {
 
 class custom_client_runner {
   public:
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters): constructor mirrors integration-test wiring inputs.
     custom_client_runner(bool reliable,
                          bool is_a,
                          int go_fd,
@@ -1999,27 +2029,28 @@ class custom_client_runner {
                                                      : (is_a ? 0x3001 : 0x3002)),
           sd_session_id_(1),
           debug_(std::getenv("SOMEIP_TEST_DEBUG") != nullptr) {}
+    // NOLINTEND(bugprone-easily-swappable-parameters)
 
     int run() {
         sd_ = open_sd_sockets(client_ip_, sd_iface_ip_, sd_multicast_ip_);
         if (!sd_.unicast.valid()) {
-            std::fprintf(stderr, "custom client: sd socket failed\n");
+            (void)std::fprintf(stderr, "custom client: sd socket failed\n");
             return 1;
         }
         if (!sd_.multicast.valid() && debug_) {
-            std::fprintf(stderr, "custom client: sd multicast socket unavailable, using unicast only\n");
+            (void)std::fprintf(stderr, "custom client: sd multicast socket unavailable, using unicast only\n");
         }
         if (server_ip_ != nullptr && std::strcmp(server_ip_, kVsomeipIp) == 0) {
             sd_client_id_ = 0;
             sd_session_id_ = 0;
         }
         if (!send_sd_find()) {
-            std::fprintf(stderr, "custom client: sd find failed\n");
+            (void)std::fprintf(stderr, "custom client: sd find failed\n");
             return 1;
         }
 
         if (!wait_for_offer()) {
-            std::fprintf(stderr, "custom client: offer timeout\n");
+            (void)std::fprintf(stderr, "custom client: offer timeout\n");
             return 1;
         }
 
@@ -2030,45 +2061,45 @@ class custom_client_runner {
                 tcp_sock_ = connect_tcp_with_retry(server_ip_, kServicePort, 5000, client_ip_);
             }
             if (!tcp_sock_.valid()) {
-                std::fprintf(stderr, "custom client: tcp connect failed\n");
+                (void)std::fprintf(stderr, "custom client: tcp connect failed\n");
                 return 1;
             }
             local_port_ = local_port_for_fd(tcp_sock_.fd());
             if (local_port_ == 0) {
-                std::fprintf(stderr, "custom client: tcp local port failed\n");
+                (void)std::fprintf(stderr, "custom client: tcp local port failed\n");
                 return 1;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: tcp local port=%u\n", local_port_);
+                (void)std::fprintf(stderr, "custom client: tcp local port=%u\n", local_port_);
             }
             if (use_event_tcp_) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event bind ip=%s\n", event_ip_);
+                    (void)std::fprintf(stderr, "custom client: event bind ip=%s\n", event_ip_);
                 }
                 event_listener_ = open_tcp_listener(event_ip_, 0);
                 if (!event_listener_.valid()) {
-                    std::fprintf(stderr, "custom client: event listener failed\n");
+                    (void)std::fprintf(stderr, "custom client: event listener failed\n");
                     return 1;
                 }
                 event_port_ = local_port_for_fd(event_listener_.fd());
                 if (event_port_ == 0) {
-                    std::fprintf(stderr, "custom client: event listener port failed\n");
+                    (void)std::fprintf(stderr, "custom client: event listener port failed\n");
                     return 1;
                 }
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event port=%u\n", event_port_);
+                    (void)std::fprintf(stderr, "custom client: event port=%u\n", event_port_);
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         } else {
             udp_sock_ = open_udp_socket(0, false, client_ip_, nullptr, nullptr, true);
             if (!udp_sock_.valid()) {
-                std::fprintf(stderr, "custom client: udp socket failed\n");
+                (void)std::fprintf(stderr, "custom client: udp socket failed\n");
                 return 1;
             }
             local_port_ = local_port_for_fd(udp_sock_.fd());
             if (local_port_ == 0) {
-                std::fprintf(stderr, "custom client: udp local port failed\n");
+                (void)std::fprintf(stderr, "custom client: udp local port failed\n");
                 return 1;
             }
             if (!have_service_addr_) {
@@ -2077,35 +2108,33 @@ class custom_client_runner {
             }
             event_udp_sock_ = open_udp_socket(0, false, event_ip_, nullptr, nullptr, true);
             if (!event_udp_sock_.valid()) {
-                std::fprintf(stderr, "custom client: udp event socket failed\n");
+                (void)std::fprintf(stderr, "custom client: udp event socket failed\n");
                 return 1;
             }
             event_port_ = local_port_for_fd(event_udp_sock_.fd());
             if (event_port_ == 0) {
-                std::fprintf(stderr, "custom client: udp event port failed\n");
+                (void)std::fprintf(stderr, "custom client: udp event port failed\n");
                 return 1;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: udp event port=%u\n", event_port_);
+                (void)std::fprintf(stderr, "custom client: udp event port=%u\n", event_port_);
             }
         }
-        if (reliable_ && !use_event_tcp_) {
-            event_port_ = local_port_;
-        } else if (!reliable_ && !event_udp_sock_.valid()) {
+        if ((reliable_ && !use_event_tcp_) || (!reliable_ && !event_udp_sock_.valid())) {
             event_port_ = local_port_;
         }
 
         if (!send_sd_subscribe()) {
-            std::fprintf(stderr, "custom client: subscribe send failed\n");
+            (void)std::fprintf(stderr, "custom client: subscribe send failed\n");
             return 1;
         }
 
         if (!wait_for_subscribe_ack()) {
-            std::fprintf(stderr, "custom client: subscribe ack timeout\n");
+            (void)std::fprintf(stderr, "custom client: subscribe ack timeout\n");
             return 1;
         }
         if (debug_) {
-            std::fprintf(stderr, "custom client: subscribe acked, waiting for subscription to settle\n");
+            (void)std::fprintf(stderr, "custom client: subscribe acked, waiting for subscription to settle\n");
         }
         if (reliable_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -2120,53 +2149,53 @@ class custom_client_runner {
             if (start_fd_ >= 0) {
                 std::byte sig{};
                 if (!read_byte_timeout(start_fd_, sig, 10000)) {
-                    std::fprintf(stderr, "custom client: start signal timeout\n");
+                    (void)std::fprintf(stderr, "custom client: start signal timeout\n");
                     return 1;
                 }
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: start setter_writable\n");
+                (void)std::fprintf(stderr, "custom client: start setter_writable\n");
             }
             if (!send_setter_writable()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: setter_writable send failed\n");
+                    (void)std::fprintf(stderr, "custom client: setter_writable send failed\n");
                 }
                 return 1;
             }
             if (!wait_for_setter_ok()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: setter_writable timeout\n");
+                    (void)std::fprintf(stderr, "custom client: setter_writable timeout\n");
                 }
                 return 1;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: start wait events\n");
+                (void)std::fprintf(stderr, "custom client: start wait events\n");
             }
             if (!wait_for_events()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: events wait failed\n");
+                    (void)std::fprintf(stderr, "custom client: events wait failed\n");
                 }
                 return 1;
             }
             if (go_fd_ >= 0) {
                 std::byte sig{};
                 if (!read_byte_timeout(go_fd_, sig, 10000)) {
-                    std::fprintf(stderr, "custom client: go timeout\n");
+                    (void)std::fprintf(stderr, "custom client: go timeout\n");
                     return 1;
                 }
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: start method\n");
+                (void)std::fprintf(stderr, "custom client: start method\n");
             }
             int method_attempts = reliable_ ? 1 : 3;
             bool method_ok = false;
             for (int attempt = 0; attempt < method_attempts; ++attempt) {
                 if (attempt > 0 && debug_) {
-                    std::fprintf(stderr, "custom client: retry method attempt=%d\n", attempt + 1);
+                    (void)std::fprintf(stderr, "custom client: retry method attempt=%d\n", attempt + 1);
                 }
                 if (!send_method()) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: method send failed\n");
+                        (void)std::fprintf(stderr, "custom client: method send failed\n");
                     }
                     continue;
                 }
@@ -2177,42 +2206,42 @@ class custom_client_runner {
             }
             if (!method_ok) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: method wait failed\n");
+                    (void)std::fprintf(stderr, "custom client: method wait failed\n");
                 }
                 return 1;
             }
             (void)send_shutdown();
         } else {
             if (debug_) {
-                std::fprintf(stderr, "custom client: wait events (B)\n");
+                (void)std::fprintf(stderr, "custom client: wait events (B)\n");
             }
             if (!wait_for_events()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: events wait failed (B)\n");
+                    (void)std::fprintf(stderr, "custom client: events wait failed (B)\n");
                 }
                 return 1;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: send setter_ro\n");
+                (void)std::fprintf(stderr, "custom client: send setter_ro\n");
             }
             if (!send_setter_readonly()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: setter_ro send failed\n");
+                    (void)std::fprintf(stderr, "custom client: setter_ro send failed\n");
                 }
                 return 1;
             }
             if (!wait_for_readonly_err()) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: setter_ro wait failed\n");
+                    (void)std::fprintf(stderr, "custom client: setter_ro wait failed\n");
                 }
                 return 1;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: setter_ro ok\n");
+                (void)std::fprintf(stderr, "custom client: setter_ro ok\n");
             }
             if (done_fd_ >= 0) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: done notify\n");
+                    (void)std::fprintf(stderr, "custom client: done notify\n");
                 }
                 (void)write_byte(done_fd_, std::byte{0x01});
             }
@@ -2228,7 +2257,7 @@ class custom_client_runner {
         if (is_multicast_ip(sd_multicast_ip_) && sd_.multicast.valid()) {
             if (!send_udp_datagram(sd_.multicast.fd(), frame, to)) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: sd find multicast send failed: %s\n", std::strerror(errno));
+                    (void)std::fprintf(stderr, "custom client: sd find multicast send failed: %s\n", std::strerror(errno));
                 }
                 return false;
             }
@@ -2236,14 +2265,14 @@ class custom_client_runner {
         auto unicast = make_addr(server_ip_, kSdPort);
         if (!send_udp_datagram(sd_.unicast.fd(), frame, unicast)) {
             if (debug_) {
-                std::fprintf(stderr, "custom client: sd find unicast send failed: %s\n", std::strerror(errno));
+                (void)std::fprintf(stderr, "custom client: sd find unicast send failed: %s\n", std::strerror(errno));
             }
             return false;
         }
         if (debug_) {
             char addrbuf[INET_ADDRSTRLEN]{};
             ::inet_ntop(AF_INET, &unicast.sin_addr, addrbuf, sizeof(addrbuf));
-            std::fprintf(stderr, "custom client: sd find to %s:%u\n", addrbuf, ntohs(unicast.sin_port));
+            (void)std::fprintf(stderr, "custom client: sd find to %s:%u\n", addrbuf, ntohs(unicast.sin_port));
         }
         return true;
     }
@@ -2259,11 +2288,11 @@ class custom_client_runner {
             to = make_addr(server_ip_, kSdPort);
         }
         if (debug_) {
-            std::fprintf(stderr, "custom client: sd subscribe event_ip=%s port=%u\n", subscribe_ip, event_port_);
+            (void)std::fprintf(stderr, "custom client: sd subscribe event_ip=%s port=%u\n", subscribe_ip, event_port_);
         }
         if (!send_udp_datagram(sd_.unicast.fd(), frame, to)) {
             if (debug_) {
-                std::fprintf(stderr, "custom client: sd subscribe send failed: %s\n", std::strerror(errno));
+                (void)std::fprintf(stderr, "custom client: sd subscribe send failed: %s\n", std::strerror(errno));
             }
             return false;
         }
@@ -2271,12 +2300,12 @@ class custom_client_runner {
             auto test_to = make_addr(server_ip_, kSdTestPort);
             if (!send_udp_datagram(sd_.unicast.fd(), frame, test_to)) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: sd subscribe test-port send failed: %s\n", std::strerror(errno));
+                    (void)std::fprintf(stderr, "custom client: sd subscribe test-port send failed: %s\n", std::strerror(errno));
                 }
                 return false;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: sd subscribe copy to test port=%u\n", kSdTestPort);
+                (void)std::fprintf(stderr, "custom client: sd subscribe copy to test port=%u\n", kSdTestPort);
             }
         }
         return true;
@@ -2295,12 +2324,12 @@ class custom_client_runner {
             if (debug_) {
                 char addr[INET_ADDRSTRLEN]{};
                 ::inet_ntop(AF_INET, &sender.sin_addr, addr, sizeof(addr));
-                std::fprintf(stderr, "custom client: SD datagram from %s:%u len=%zu\n", addr, ntohs(sender.sin_port), frame.size());
+                (void)std::fprintf(stderr, "custom client: SD datagram from %s:%u len=%zu\n", addr, ntohs(sender.sin_port), frame.size());
             }
             auto offer = someip::sd::decode_message(std::span<const std::byte>(frame.data(), frame.size()));
             if (!offer) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: SD decode failed (code=%d)\n", static_cast<int>(offer.error()));
+                    (void)std::fprintf(stderr, "custom client: SD decode failed (code=%d)\n", static_cast<int>(offer.error()));
                 }
                 continue;
             }
@@ -2310,7 +2339,7 @@ class custom_client_runner {
                 }
                 const auto &se = std::get<someip::sd::service_entry>(entry);
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: SD service entry type=0x%02X svc=0x%04X inst=0x%04X\n",
+                    (void)std::fprintf(stderr, "custom client: SD service entry type=0x%02X svc=0x%04X inst=0x%04X\n",
                                  se.c.type, se.c.service_id, se.c.instance_id);
                 }
                 if (se.c.type != someip::sd::entry_type::offer_service) {
@@ -2398,26 +2427,26 @@ class custom_client_runner {
             if (debug_) {
                 char addr[INET_ADDRSTRLEN]{};
                 ::inet_ntop(AF_INET, &sender.sin_addr, addr, sizeof(addr));
-                std::fprintf(stderr, "custom client: SD ack datagram from %s:%u len=%zu\n",
+                (void)std::fprintf(stderr, "custom client: SD ack datagram from %s:%u len=%zu\n",
                              addr, ntohs(sender.sin_port), frame.size());
             }
             auto ack = someip::sd::decode_message(std::span<const std::byte>(frame.data(), frame.size()));
             if (!ack) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: SD ack decode failed (code=%d)\n", static_cast<int>(ack.error()));
+                    (void)std::fprintf(stderr, "custom client: SD ack decode failed (code=%d)\n", static_cast<int>(ack.error()));
                 }
                 continue;
             }
             for (const auto &entry : ack->sd_payload.entries) {
                 if (!std::holds_alternative<someip::sd::eventgroup_entry>(entry)) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: SD ack non-eventgroup entry\n");
+                        (void)std::fprintf(stderr, "custom client: SD ack non-eventgroup entry\n");
                     }
                     continue;
                 }
                 const auto &eg = std::get<someip::sd::eventgroup_entry>(entry);
                 if (debug_) {
-                    std::fprintf(stderr,
+                    (void)std::fprintf(stderr,
                                  "custom client: SD ack entry type=0x%02X svc=0x%04X inst=0x%04X eg=0x%04X ttl=0x%06X\n",
                                  eg.c.type, eg.c.service_id, eg.c.instance_id, eg.eventgroup_id, eg.c.ttl);
                 }
@@ -2429,7 +2458,7 @@ class custom_client_runner {
                 }
                 if ((eg.c.ttl & 0xFFFFFFu) == 0u) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: SD subscribe NACK\n");
+                        (void)std::fprintf(stderr, "custom client: SD subscribe NACK\n");
                     }
                     return false;
                 }
@@ -2532,7 +2561,7 @@ class custom_client_runner {
                 return true;
             }
             if (debug_) {
-                std::fprintf(stderr,
+                (void)std::fprintf(stderr,
                              "custom client: setter_ok mismatch type=0x%02X rc=0x%02X method=0x%04X\n",
                              static_cast<int>(parsed.hdr.msg_type), static_cast<int>(parsed.hdr.return_code),
                              parsed.hdr.msg.method_id);
@@ -2540,7 +2569,7 @@ class custom_client_runner {
             continue;
         }
         if (debug_) {
-            std::fprintf(stderr, "custom client: setter_ok timeout\n");
+            (void)std::fprintf(stderr, "custom client: setter_ok timeout\n");
         }
         return false;
     }
@@ -2565,7 +2594,7 @@ class custom_client_runner {
                 return true;
             }
             if (debug_) {
-                std::fprintf(stderr,
+                (void)std::fprintf(stderr,
                              "custom client: setter_ro mismatch type=0x%02X rc=0x%02X method=0x%04X\n",
                              static_cast<int>(parsed.hdr.msg_type), static_cast<int>(parsed.hdr.return_code),
                              parsed.hdr.msg.method_id);
@@ -2573,7 +2602,7 @@ class custom_client_runner {
             continue;
         }
         if (debug_) {
-            std::fprintf(stderr, "custom client: setter_ro timeout\n");
+            (void)std::fprintf(stderr, "custom client: setter_ro timeout\n");
         }
         return false;
     }
@@ -2595,7 +2624,7 @@ class custom_client_runner {
                 parsed.hdr.return_code != someip::wire::return_code::E_OK ||
                 parsed.hdr.msg.method_id != kMethodId) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: method response mismatch type=0x%02X rc=0x%02X method=0x%04X\n",
+                    (void)std::fprintf(stderr, "custom client: method response mismatch type=0x%02X rc=0x%02X method=0x%04X\n",
                                  static_cast<int>(parsed.hdr.msg_type), static_cast<int>(parsed.hdr.return_code),
                                  parsed.hdr.msg.method_id);
                 }
@@ -2609,7 +2638,7 @@ class custom_client_runner {
             return resp.y == 42u;
         }
         if (debug_) {
-            std::fprintf(stderr, "custom client: method timeout\n");
+            (void)std::fprintf(stderr, "custom client: method timeout\n");
         }
         return false;
     }
@@ -2624,7 +2653,7 @@ class custom_client_runner {
             while (seen_count < target) {
                 if (std::chrono::steady_clock::now() >= deadline) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: event deadline reached seen=%zu\n", seen_count);
+                        (void)std::fprintf(stderr, "custom client: event deadline reached seen=%zu\n", seen_count);
                     }
                     return false;
                 }
@@ -2642,7 +2671,7 @@ class custom_client_runner {
                             .count();
                     if (!recv_udp_event_message(storage, parsed, static_cast<int>(remaining))) {
                         if (debug_) {
-                            std::fprintf(stderr, "custom client: udp event recv timeout\n");
+                            (void)std::fprintf(stderr, "custom client: udp event recv timeout\n");
                         }
                         continue;
                     }
@@ -2653,7 +2682,7 @@ class custom_client_runner {
                     const auto payload_base = parsed.tp ? 20u : 16u;
                     if (!someip::ser::decode(parsed.payload, kCfg, ev, payload_base)) {
                         if (debug_) {
-                            std::fprintf(stderr, "custom client: event decode failed\n");
+                            (void)std::fprintf(stderr, "custom client: event decode failed\n");
                         }
                         return false;
                     }
@@ -2665,7 +2694,7 @@ class custom_client_runner {
                 }
                 if (ev.value != kValue) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: event value mismatch seq=%u value=0x%X\n", ev.seq, ev.value);
+                        (void)std::fprintf(stderr, "custom client: event value mismatch seq=%u value=0x%X\n", ev.seq, ev.value);
                     }
                     return false;
                 }
@@ -2675,7 +2704,7 @@ class custom_client_runner {
                     seen_count++;
                 }
             } else if (debug_) {
-                std::fprintf(stderr, "custom client: event seq out of range %u\n", ev.seq);
+                (void)std::fprintf(stderr, "custom client: event seq out of range %u\n", ev.seq);
             }
             }
             return true;
@@ -2685,7 +2714,7 @@ class custom_client_runner {
         while (expected_seq < kEventCount) {
             if (std::chrono::steady_clock::now() >= deadline) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event deadline reached seq=%zu\n", expected_seq);
+                    (void)std::fprintf(stderr, "custom client: event deadline reached seq=%zu\n", expected_seq);
                 }
                 return false;
             }
@@ -2706,19 +2735,19 @@ class custom_client_runner {
                 pending_events_.pop_front();
                 if (ev.value != kValue) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: pending event mismatch seq=%u value=0x%X\n", ev.seq, ev.value);
+                        (void)std::fprintf(stderr, "custom client: pending event mismatch seq=%u value=0x%X\n", ev.seq, ev.value);
                     }
                     return false;
                 }
                 if (ev.seq >= kEventCount) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: pending event out of range %u\n", ev.seq);
+                        (void)std::fprintf(stderr, "custom client: pending event out of range %u\n", ev.seq);
                     }
                     continue;
                 }
                 if (ev.seq != expected_seq) {
                     if (debug_) {
-                        std::fprintf(stderr, "custom client: pending event seq mismatch expected=%zu got=%u\n", expected_seq, ev.seq);
+                        (void)std::fprintf(stderr, "custom client: pending event seq mismatch expected=%zu got=%u\n", expected_seq, ev.seq);
                     }
                     return false;
                 }
@@ -2731,14 +2760,14 @@ class custom_client_runner {
                 std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
             if (!recv_event_message(storage, parsed, static_cast<int>(remaining))) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event recv timeout\n");
+                    (void)std::fprintf(stderr, "custom client: event recv timeout\n");
                 }
                 return false;
             }
             if (parsed.hdr.msg_type != someip::wire::message_type::notification ||
                 parsed.hdr.msg.method_id != kEventId) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event type mismatch type=0x%02X method=0x%04X\n",
+                    (void)std::fprintf(stderr, "custom client: event type mismatch type=0x%02X method=0x%04X\n",
                                  static_cast<int>(parsed.hdr.msg_type), parsed.hdr.msg.method_id);
                 }
                 return false;
@@ -2747,25 +2776,25 @@ class custom_client_runner {
             const auto payload_base = parsed.tp ? 20u : 16u;
             if (!someip::ser::decode(parsed.payload, kCfg, ev, payload_base)) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event decode failed\n");
+                    (void)std::fprintf(stderr, "custom client: event decode failed\n");
                 }
                 return false;
             }
             if (ev.value != kValue) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event mismatch seq=%u value=0x%X\n", ev.seq, ev.value);
+                    (void)std::fprintf(stderr, "custom client: event mismatch seq=%u value=0x%X\n", ev.seq, ev.value);
                 }
                 return false;
             }
             if (ev.seq >= kEventCount) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event seq out of range %u\n", ev.seq);
+                    (void)std::fprintf(stderr, "custom client: event seq out of range %u\n", ev.seq);
                 }
                 continue;
             }
             if (ev.seq != expected_seq) {
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: event seq mismatch expected=%zu got=%u\n", expected_seq, ev.seq);
+                    (void)std::fprintf(stderr, "custom client: event seq mismatch expected=%zu got=%u\n", expected_seq, ev.seq);
                 }
                 return false;
             }
@@ -2834,16 +2863,16 @@ class custom_client_runner {
                 char addrbuf[INET_ADDRSTRLEN]{};
                 ::inet_ntop(AF_INET, &sender.sin_addr, addrbuf, sizeof(addrbuf));
                 if (debug_) {
-                    std::fprintf(stderr, "custom client: udp event from %s:%u\n", addrbuf, ntohs(sender.sin_port));
+                    (void)std::fprintf(stderr, "custom client: udp event from %s:%u\n", addrbuf, ntohs(sender.sin_port));
                 }
                 out = *parsed;
                 if (saw_other && debug_) {
-                    std::fprintf(stderr, "custom client: udp event after non-event\n");
+                    (void)std::fprintf(stderr, "custom client: udp event after non-event\n");
                 }
                 return true;
             }
             if (debug_) {
-                std::fprintf(stderr, "custom client: udp non-event type=0x%02X method=0x%04X\n",
+                (void)std::fprintf(stderr, "custom client: udp non-event type=0x%02X method=0x%04X\n",
                              static_cast<int>(parsed->hdr.msg_type), parsed->hdr.msg.method_id);
             }
             stash_event_if_needed(*parsed);
@@ -2980,7 +3009,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
         pipes_ok = pipes_ok && (::pipe(sub_c_pipe) == 0) && (::pipe(done_c_pipe) == 0);
     }
     if (!pipes_ok) {
-        std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
+        (void)std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
         return 1;
     }
 
@@ -3063,7 +3092,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
 
     std::byte ready{};
     if (!read_byte_timeout(server_pipe[0], ready, 5000)) {
-        std::fprintf(stderr, "custom server ready timeout\n");
+        (void)std::fprintf(stderr, "custom server ready timeout\n");
         cleanup_failure();
         return 1;
     }
@@ -3107,14 +3136,14 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
 
     std::byte routing_ready{};
     if (!read_byte_timeout(routing_ready_pipe[0], routing_ready, 5000)) {
-        std::fprintf(stderr, "routing manager ready timeout\n");
+        (void)std::fprintf(stderr, "routing manager ready timeout\n");
         cleanup_failure();
         return 1;
     }
     ::close(routing_ready_pipe[0]);
     routing_ready_pipe[0] = -1;
     if (!wait_for_socket_path("/tmp/vsomeip-0", 2000)) {
-        std::fprintf(stderr, "routing manager socket timeout\n");
+        (void)std::fprintf(stderr, "routing manager socket timeout\n");
         cleanup_failure();
         return 1;
     }
@@ -3207,14 +3236,14 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
 
     std::byte sub_ready{};
     if (!read_byte_timeout(sub_a_pipe[0], sub_ready, 10000)) {
-        std::fprintf(stderr, "client_a subscribe timeout\n");
+        (void)std::fprintf(stderr, "client_a subscribe timeout\n");
         cleanup_failure();
         return 1;
     }
     ::close(sub_a_pipe[0]);
     sub_a_pipe[0] = -1;
     if (!read_byte_timeout(sub_b_pipe[0], sub_ready, 10000)) {
-        std::fprintf(stderr, "client_b subscribe timeout\n");
+        (void)std::fprintf(stderr, "client_b subscribe timeout\n");
         cleanup_failure();
         return 1;
     }
@@ -3222,7 +3251,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     sub_b_pipe[0] = -1;
     if (extra_client) {
         if (!read_byte_timeout(sub_c_pipe[0], sub_ready, 10000)) {
-            std::fprintf(stderr, "client_c subscribe timeout\n");
+            (void)std::fprintf(stderr, "client_c subscribe timeout\n");
             cleanup_failure();
             return 1;
         }
@@ -3234,7 +3263,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
 
     std::byte done{};
     if (!read_byte_timeout(done_pipe[0], done, 20000)) {
-        std::fprintf(stderr, "client_b did not finish in time\n");
+        (void)std::fprintf(stderr, "client_b did not finish in time\n");
         cleanup_failure();
         return 1;
     }
@@ -3242,7 +3271,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     done_pipe[0] = -1;
     if (extra_client) {
         if (!read_byte_timeout(done_c_pipe[0], done, 20000)) {
-            std::fprintf(stderr, "client_c did not finish in time\n");
+            (void)std::fprintf(stderr, "client_c did not finish in time\n");
             cleanup_failure();
             return 1;
         }
@@ -3257,7 +3286,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     int status = 0;
     (void)::waitpid(client_b_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "client_b failed\n");
+        (void)std::fprintf(stderr, "client_b failed\n");
         cleanup_failure();
         return 1;
     }
@@ -3265,7 +3294,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     if (extra_client) {
         (void)::waitpid(client_c_pid, &status, 0);
         if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-            std::fprintf(stderr, "client_c failed\n");
+            (void)std::fprintf(stderr, "client_c failed\n");
             cleanup_failure();
             return 1;
         }
@@ -3273,7 +3302,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     }
     (void)::waitpid(client_a_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "client_a failed\n");
+        (void)std::fprintf(stderr, "client_a failed\n");
         cleanup_failure();
         return 1;
     }
@@ -3285,7 +3314,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     }
     (void)::waitpid(server_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "custom server failed\n");
+        (void)std::fprintf(stderr, "custom server failed\n");
         cleanup_failure();
         return 1;
     }
@@ -3298,7 +3327,7 @@ static int run_custom_server_with_vsomeip_clients(const std::string &config_path
     }
     (void)::waitpid(routing_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "routing manager failed\n");
+        (void)std::fprintf(stderr, "routing manager failed\n");
         cleanup_failure();
         return 1;
     }
@@ -3329,7 +3358,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
         pipes_ok = pipes_ok && (::pipe(done_c_pipe) == 0);
     }
     if (!pipes_ok) {
-        std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
+        (void)std::fprintf(stderr, "pipe failed: %s\n", std::strerror(errno));
         return 1;
     }
 
@@ -3392,13 +3421,13 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
 
     std::byte routing_ready{};
     if (!read_byte_timeout(routing_ready_pipe[0], routing_ready, 5000)) {
-        std::fprintf(stderr, "routing manager ready timeout\n");
+        (void)std::fprintf(stderr, "routing manager ready timeout\n");
         cleanup_failure();
         return 1;
     }
     ::close(routing_ready_pipe[0]);
     if (!wait_for_socket_path("/tmp/vsomeip-0", 2000)) {
-        std::fprintf(stderr, "routing manager socket timeout\n");
+        (void)std::fprintf(stderr, "routing manager socket timeout\n");
         cleanup_failure();
         return 1;
     }
@@ -3436,7 +3465,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
 
     std::byte ready{};
     if (!read_byte_timeout(server_pipe[0], ready, 5000)) {
-        std::fprintf(stderr, "vsomeip server ready timeout\n");
+        (void)std::fprintf(stderr, "vsomeip server ready timeout\n");
         cleanup_failure();
         return 1;
     }
@@ -3519,7 +3548,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     std::byte ready_sig{};
     for (int idx = 0; idx < expected_ready; ++idx) {
         if (!read_byte_timeout(ready_pipe[0], ready_sig, 10000)) {
-            std::fprintf(stderr, "custom client ready timeout\n");
+            (void)std::fprintf(stderr, "custom client ready timeout\n");
             cleanup_failure();
             return 1;
         }
@@ -3533,14 +3562,14 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
 
     std::byte done{};
     if (!read_byte_timeout(done_pipe[0], done, 35000)) {
-        std::fprintf(stderr, "custom client_b did not finish in time\n");
+        (void)std::fprintf(stderr, "custom client_b did not finish in time\n");
         cleanup_failure();
         return 1;
     }
     ::close(done_pipe[0]);
     if (extra_client) {
         if (!read_byte_timeout(done_c_pipe[0], done, 35000)) {
-            std::fprintf(stderr, "custom client_c did not finish in time\n");
+            (void)std::fprintf(stderr, "custom client_c did not finish in time\n");
             cleanup_failure();
             return 1;
         }
@@ -3552,11 +3581,11 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
 
     auto report_status = [](const char *label, int status) {
         if (WIFSIGNALED(status)) {
-            std::fprintf(stderr, "%s failed (signal %d)\n", label, WTERMSIG(status));
+            (void)std::fprintf(stderr, "%s failed (signal %d)\n", label, WTERMSIG(status));
         } else if (WIFEXITED(status)) {
-            std::fprintf(stderr, "%s failed (exit %d)\n", label, WEXITSTATUS(status));
+            (void)std::fprintf(stderr, "%s failed (exit %d)\n", label, WEXITSTATUS(status));
         } else {
-            std::fprintf(stderr, "%s failed (status 0x%X)\n", label, status);
+            (void)std::fprintf(stderr, "%s failed (status 0x%X)\n", label, status);
         }
     };
 
@@ -3583,7 +3612,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     }
     (void)::waitpid(server_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "vsomeip server failed\n");
+        (void)std::fprintf(stderr, "vsomeip server failed\n");
         cleanup_failure();
         return 1;
     }
@@ -3594,7 +3623,7 @@ static int run_vsomeip_server_with_custom_clients(const std::string &config_path
     }
     (void)::waitpid(routing_pid, &status, 0);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        std::fprintf(stderr, "routing manager failed\n");
+        (void)std::fprintf(stderr, "routing manager failed\n");
         return 1;
     }
 
@@ -3612,34 +3641,39 @@ int main(int argc, char **argv) {
     std::printf("vsomeip interop tests skipped on Windows\n");
     return 0;
 #else
-    ::signal(SIGPIPE, SIG_IGN);
-    cleanup_vsomeip_sockets();
-    std::string mode = "custom-server";
-    std::string transport = "tcp";
-    if (argc >= 2) {
-        mode = argv[1];
-    }
-    if (argc >= 3) {
-        transport = argv[2];
-    }
+    try {
+        (void)::signal(SIGPIPE, SIG_IGN);
+        cleanup_vsomeip_sockets();
+        std::string mode = "custom-server";
+        std::string transport = "tcp";
+        if (argc >= 2) {
+            mode = argv[1];
+        }
+        if (argc >= 3) {
+            transport = argv[2];
+        }
 
-    const std::string config_dir = VSOMEIP_TEST_CONFIG_DIR;
-    const auto tcp_server_cfg = config_dir + "/vsomeip_tcp_server.json";
-    const auto udp_server_cfg = config_dir + "/vsomeip_udp_server.json";
-    const auto tcp_client_cfg = config_dir + "/vsomeip_tcp_client.json";
-    const auto udp_client_cfg = config_dir + "/vsomeip_udp_client.json";
+        const std::string config_dir = VSOMEIP_TEST_CONFIG_DIR;
+        const auto tcp_server_cfg = config_dir + "/vsomeip_tcp_server.json";
+        const auto udp_server_cfg = config_dir + "/vsomeip_udp_server.json";
+        const auto tcp_client_cfg = config_dir + "/vsomeip_tcp_client.json";
+        const auto udp_client_cfg = config_dir + "/vsomeip_udp_client.json";
 
-    const bool reliable = (transport == "tcp");
-    if (mode == "custom-server") {
-        const auto cfg = reliable ? tcp_client_cfg : udp_client_cfg;
-        return run_custom_server_with_vsomeip_clients(cfg, reliable);
-    }
-    if (mode == "vsomeip-server") {
-        const auto cfg = reliable ? tcp_server_cfg : udp_server_cfg;
-        return run_vsomeip_server_with_custom_clients(cfg, reliable);
-    }
+        const bool reliable = (transport == "tcp");
+        if (mode == "custom-server") {
+            const auto cfg = reliable ? tcp_client_cfg : udp_client_cfg;
+            return run_custom_server_with_vsomeip_clients(cfg, reliable);
+        }
+        if (mode == "vsomeip-server") {
+            const auto cfg = reliable ? tcp_server_cfg : udp_server_cfg;
+            return run_vsomeip_server_with_custom_clients(cfg, reliable);
+        }
 
-    std::fprintf(stderr, "unknown mode: %s\n", mode.c_str());
-    return 2;
+        (void)std::fprintf(stderr, "unknown mode: %s\n", mode.c_str());
+        return 2;
+    } catch (...) {
+        (void)std::fprintf(stderr, "vsomeip interop: unhandled exception\n");
+        return 1;
+    }
 #endif
 }
