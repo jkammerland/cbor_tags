@@ -21,6 +21,8 @@
     "cmake --build --preset=debug",
     "ctest --preset=debug",
     "cmake --workflow --preset=debug",
+    "ctest --preset=alsan",
+    "cmake --workflow --preset=alsan",
     "cmake --workflow --preset=valgrind"
   ],
   "cmakeMinimumRequired": {

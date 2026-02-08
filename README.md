@@ -813,11 +813,47 @@ For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
 
 ## Testing Performance and Benchmarks
 
-Tests can be built after configuring with `-DCBOR_TAGS_BUILD_TESTS=ON`, which will create a target called `tests`. This is what the CI currently runs for all supported compilers/platforms.
+Tests are built when `CBOR_TAGS_BUILD_TESTS=ON` (enabled by default in this repository's presets). The primary unit-test executable is `tests`, and additional optional SOME/IP tests are also registered with CTest when enabled.
 
 Numbers with comparisons are coming soon. The current benchmarks can be run by configuring with `-DCBOR_TAGS_BUILD_BENCHMARKS=ON`. It creates two targets, `bench_encoder` and `bench_decoder`.
 
-These can all be collectively run with `make/ninja test`, ctest will only run `tests`.
+### Running Tests
+
+Run configure + build + test in one step (default debug configuration):
+
+```bash
+cmake --workflow --preset=debug
+```
+
+Equivalent split commands:
+
+```bash
+cmake --preset=debug
+cmake --build --preset=debug
+ctest --preset=debug
+```
+
+### Running ASan + LSan for all tests
+
+Use the dedicated sanitizer preset/workflow:
+
+```bash
+cmake --workflow --preset=alsan
+```
+
+Equivalent split commands:
+
+```bash
+cmake --preset=alsan
+cmake --build --preset=alsan
+ctest --preset=alsan
+```
+
+List which tests are registered for a preset:
+
+```bash
+ctest --preset=alsan -N
+```
 
 ### Test Logging
 
