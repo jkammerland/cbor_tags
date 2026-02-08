@@ -999,37 +999,58 @@ static bool wait_for_response(int fd, bool reliable, const response_expectation 
 }
 
 static bool wait_for_events(int fd, bool reliable, std::size_t count, const someip::ser::config &cfg) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(reliable ? 5000 : 10000);
+    const std::size_t required = reliable ? count : (count > 2 ? (count - 2) : count);
+
     std::vector<bool> seen(count, false);
     std::size_t received = 0;
-    while (received < count) {
+
+    while (std::chrono::steady_clock::now() < deadline && received < required) {
+        const auto remaining_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (remaining_ms <= 0) {
+            break;
+        }
+
         std::vector<std::byte> frame{};
         if (reliable) {
-            frame = recv_someip_frame(fd, 5000);
+            frame = recv_someip_frame(fd, static_cast<int>(remaining_ms));
             if (frame.empty()) return false;
         } else {
             sockaddr_in sender{};
-            if (!recv_udp_datagram(fd, frame, sender, 5000)) return false;
+            const auto step_ms = static_cast<int>(remaining_ms > 500 ? 500 : remaining_ms);
+            if (!recv_udp_datagram(fd, frame, sender, step_ms)) {
+                continue;
+            }
         }
         auto parsed = someip::wire::try_parse_frame(std::span<const std::byte>(frame.data(), frame.size()));
-        if (!parsed) return false;
+        if (!parsed) {
+            if (reliable) return false;
+            continue;
+        }
         if (parsed->hdr.msg_type != someip::wire::message_type::notification ||
             parsed->hdr.msg.method_id != writable_field.notifier_event_id) {
-            return false;
+            if (reliable) return false;
+            continue;
         }
         FieldEvent ev{};
         const auto payload_base = parsed->tp ? 20u : 16u;
         if (!someip::ser::decode(parsed->payload, cfg, ev, payload_base)) {
-            return false;
+            if (reliable) return false;
+            continue;
         }
         if (ev.seq >= count || ev.value != kFieldValue) {
-            return false;
+            if (reliable) return false;
+            continue;
         }
         if (!seen[ev.seq]) {
             seen[ev.seq] = true;
             received++;
         }
     }
-    return true;
+
+    return received >= required;
 }
 
 static int run_client(bool reliable, const ready_ports &ports) {

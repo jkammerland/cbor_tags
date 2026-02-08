@@ -1,0 +1,45 @@
+{
+    "unicast": "@TEST_IP_SLAVE@",
+    "logging": {
+        "level": "debug",
+        "console": "true",
+        "file": {
+            "enable": "false",
+            "path": "/tmp/vsomeip.log"
+        },
+        "dlt": "true"
+    },
+    "tracing" :
+    {
+        "enable" : "true"
+    },
+    "applications": [
+        {
+            "name" : "first-client-sample",
+            "id" : "0xbbbb"
+        },
+        {
+            "name" : "second-client-sample",
+            "id" : "0xcccc"
+        }
+    ],
+    "clients": [
+        {
+            "service": "0x1111",
+            "instance": "0x0001",
+            "unreliable": [ 30506 ]
+        },
+        {
+            "service": "0x1112",
+            "instance": "0x0001",
+            "unreliable": [ 30507 ]
+        }
+    ],
+    "routing" : "routingmanagerd",
+    "service-discovery": {
+        "enable": "true",
+        "multicast": "224.0.0.1",
+        "port": "30490",
+        "protocol": "udp"
+    }
+}

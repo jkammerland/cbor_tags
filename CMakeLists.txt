@@ -102,6 +102,15 @@ endif()
 # add tests
 if(CBOR_TAGS_BUILD_TESTS)
   add_subdirectory(test)
+
+  if(CGEN_REQUIRE_VALGRIND)
+    add_custom_target(
+      valgrind
+      COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} -D ExperimentalMemCheck
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+      USES_TERMINAL
+      COMMENT "Run CTest MemCheck for this project")
+  endif()
 endif()
 
 # add benchmarks

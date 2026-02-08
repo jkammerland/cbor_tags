@@ -1,0 +1,31 @@
+{
+   "unicast" : "127.0.0.1",
+   "netmask" : "255.255.255.0",
+   "logging" :
+   {
+      "level" : "trace",
+      "console" : "true"
+   },
+   "tracing" :
+   {
+      "enable" : "true"
+   },
+   "applications" :
+   [
+      {
+         "name" : "local_payload_test_client",
+         "id" : "0x1343"
+      }
+   ],
+   "services" :
+   [
+   ],
+   "routing" : "local_payload_test_service",
+   "service-discovery" :
+   {
+      "enable" : "false",
+      "multicast" : "224.0.0.1",
+      "port" : "30491",
+      "protocol" : "udp"
+   }
+}

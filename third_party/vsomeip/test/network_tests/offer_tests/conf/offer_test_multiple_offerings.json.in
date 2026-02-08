@@ -1,0 +1,25 @@
+{
+    "logging": {
+        "level": "trace",
+        "console": "true"
+    },
+    "tracing" :
+    {
+        "enable" : "true"
+    },
+    "applications": [
+        {
+            "name": "daemon",
+            "id": "0x0001"
+        },
+        {
+            "name": "service",
+            "id": "0x0002"
+        },
+        {
+            "name": "client",
+            "id": "0x0004"
+        }
+    ],
+    "routing": "daemon"
+}

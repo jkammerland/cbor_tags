@@ -1,5 +1,6 @@
 #pragma once
 
+#include "someip/wire/return_code.h"
 #include "someip/wire/someip.h"
 
 #include <cstdint>
@@ -17,16 +18,62 @@ struct field_descriptor {
     bool          notifies{false};
 };
 
+[[nodiscard]] constexpr bool can_make_get_request(const field_descriptor &f) noexcept {
+    return f.readable && f.service_id != 0u && f.getter_method_id != 0u;
+}
+
+[[nodiscard]] constexpr bool can_make_set_request(const field_descriptor &f) noexcept {
+    return f.writable && f.service_id != 0u && f.setter_method_id != 0u;
+}
+
+[[nodiscard]] constexpr bool can_make_notify(const field_descriptor &f) noexcept {
+    return f.notifies && f.service_id != 0u && f.notifier_event_id != 0u;
+}
+
+inline expected<wire::header> try_make_get_request_header(const field_descriptor &f, wire::request_id req,
+                                                          std::uint8_t interface_version,
+                                                          std::uint8_t protocol_version = 1) noexcept {
+    if (!can_make_get_request(f)) {
+        return unexpected<status_code>(status_code::error);
+    }
+    wire::header h{};
+    h.msg.service_id    = f.service_id;
+    h.msg.method_id     = f.getter_method_id;
+    h.req               = req;
+    h.protocol_version  = protocol_version;
+    h.interface_version = interface_version;
+    h.msg_type          = wire::message_type::request;
+    h.return_code       = wire::return_code::E_OK;
+    return h;
+}
+
 inline wire::header make_get_request_header(const field_descriptor &f, wire::request_id req,
                                             std::uint8_t interface_version, std::uint8_t protocol_version = 1) noexcept {
     wire::header h{};
     h.msg.service_id    = f.service_id;
     h.msg.method_id     = f.getter_method_id;
-    h.req              = req;
-    h.protocol_version = protocol_version;
+    h.req               = req;
+    h.protocol_version  = protocol_version;
     h.interface_version = interface_version;
     h.msg_type          = wire::message_type::request;
-    h.return_code       = 0;
+    h.return_code       = wire::return_code::E_OK;
+    return h;
+}
+
+inline expected<wire::header> try_make_set_request_header(const field_descriptor &f, wire::request_id req,
+                                                          std::uint8_t interface_version,
+                                                          std::uint8_t protocol_version = 1) noexcept {
+    if (!can_make_set_request(f)) {
+        return unexpected<status_code>(status_code::error);
+    }
+    wire::header h{};
+    h.msg.service_id    = f.service_id;
+    h.msg.method_id     = f.setter_method_id;
+    h.req               = req;
+    h.protocol_version  = protocol_version;
+    h.interface_version = interface_version;
+    h.msg_type          = wire::message_type::request;
+    h.return_code       = wire::return_code::E_OK;
     return h;
 }
 
@@ -35,11 +82,28 @@ inline wire::header make_set_request_header(const field_descriptor &f, wire::req
     wire::header h{};
     h.msg.service_id    = f.service_id;
     h.msg.method_id     = f.setter_method_id;
-    h.req              = req;
-    h.protocol_version = protocol_version;
+    h.req               = req;
+    h.protocol_version  = protocol_version;
     h.interface_version = interface_version;
     h.msg_type          = wire::message_type::request;
-    h.return_code       = 0;
+    h.return_code       = wire::return_code::E_OK;
+    return h;
+}
+
+inline expected<wire::header> try_make_notify_header(const field_descriptor &f, std::uint8_t interface_version,
+                                                     std::uint8_t protocol_version = 1) noexcept {
+    if (!can_make_notify(f)) {
+        return unexpected<status_code>(status_code::error);
+    }
+    wire::header h{};
+    h.msg.service_id    = f.service_id;
+    h.msg.method_id     = f.notifier_event_id;
+    h.req.client_id     = 0;
+    h.req.session_id    = 0;
+    h.protocol_version  = protocol_version;
+    h.interface_version = interface_version;
+    h.msg_type          = wire::message_type::notification;
+    h.return_code       = wire::return_code::E_OK;
     return h;
 }
 
@@ -53,7 +117,7 @@ inline wire::header make_notify_header(const field_descriptor &f, std::uint8_t i
     h.protocol_version  = protocol_version;
     h.interface_version = interface_version;
     h.msg_type          = wire::message_type::notification;
-    h.return_code       = 0;
+    h.return_code       = wire::return_code::E_OK;
     return h;
 }
 

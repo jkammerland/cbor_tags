@@ -1,0 +1,2 @@
+# This file contains a list of test identifiers that are known to be flaky or non-critical.
+# Tests listed here are allowed to fail without causing the overall test job to fail.

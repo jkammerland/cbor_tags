@@ -90,3 +90,22 @@ TEST_CASE("someip-sd: encode OfferService + IPv4 endpoint option and decode back
     CHECK(opt2.l4_proto == 0x11);
     CHECK(opt2.port == 0x1234);
 }
+
+TEST_CASE("someip-sd: ttl above 24 bits is rejected") {
+    someip::sd::service_entry_data e{};
+    e.type          = someip::sd::entry_type::offer_service;
+    e.service_id    = 0x1234;
+    e.instance_id   = 0x0001;
+    e.major_version = 0x01;
+    e.ttl           = 0x01000000u; // one bit above 24-bit maximum
+    e.minor_version = 0x00000001;
+
+    someip::sd::packet_data pd{};
+    pd.hdr.flags      = 0x00;
+    pd.hdr.reserved24 = 0x000000;
+    pd.entries.push_back(someip::sd::entry_data{e});
+
+    auto msg = someip::sd::encode_message(pd);
+    REQUIRE_FALSE(msg.has_value());
+    CHECK(msg.error() == someip::status_code::invalid_length);
+}

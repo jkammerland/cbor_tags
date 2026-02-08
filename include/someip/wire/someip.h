@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -134,7 +135,13 @@ inline expected<std::size_t> frame_size_from_prefix(std::span<const std::byte> p
     if (*length < 8) {
         return unexpected<status_code>(status_code::invalid_length);
     }
-    return static_cast<std::size_t>(8u + *length);
+
+    const auto total = std::uint64_t{8u} + std::uint64_t{*length};
+    if (total > std::uint64_t{std::numeric_limits<std::size_t>::max()}) {
+        return unexpected<status_code>(status_code::invalid_length);
+    }
+
+    return static_cast<std::size_t>(total);
 }
 
 struct parsed_frame {
@@ -155,6 +162,9 @@ inline expected<parsed_frame> try_parse_frame(std::span<const std::byte> bytes) 
     if (bytes.size() < *total) {
         return unexpected<status_code>(status_code::incomplete_frame);
     }
+    if (bytes.size() < 16u) {
+        return unexpected<status_code>(status_code::incomplete_frame);
+    }
 
     auto hdr = decode_header(bytes.subspan(0, 16));
     if (!hdr) {
@@ -170,7 +180,7 @@ inline expected<parsed_frame> try_parse_frame(std::span<const std::byte> bytes) 
 
     const std::size_t payload_size  = static_cast<std::size_t>(hdr->length - 8u - tp_bytes);
     const std::size_t payload_start = tp ? 20u : 16u;
-    if (payload_start + payload_size > *total) {
+    if (payload_start > *total || payload_size > (*total - payload_start)) {
         return unexpected<status_code>(status_code::invalid_length);
     }
 
@@ -192,4 +202,3 @@ inline expected<parsed_frame> try_parse_frame(std::span<const std::byte> bytes) 
 }
 
 } // namespace someip::wire
-

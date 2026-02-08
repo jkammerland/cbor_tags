@@ -1,0 +1,36 @@
+#!/bin/bash
+# Copyright (C) 2015-2025 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+FAIL=0
+
+if [ $# -lt 1 ]
+then
+    echo "Please pass a operation and communication mode to this script."
+    echo "For example: $0 UDP"
+    echo "Valid communication modes include [UDP, TCP]"
+    exit 1
+fi
+COMMUNICATIONMODE=$1
+
+if [ "$COMMUNICATIONMODE" = "TCP" ]; then
+    export VSOMEIP_CONFIGURATION=event_test_slave_tcp.json
+elif [ "$COMMUNICATIONMODE" = "UDP" ]; then
+    export VSOMEIP_CONFIGURATION=event_test_slave_udp.json
+fi
+
+export VSOMEIP_APPLICATION_NAME="service-routingmanagerd"
+../../../examples/routingmanagerd/routingmanagerd &
+PID_VSOMEIPD=$!
+
+export VSOMEIP_APPLICATION_NAME="service-sample"
+./event_test_service $COMMUNICATIONMODE || FAIL=$(($FAIL+1))
+
+# kill the services
+kill $PID_VSOMEIPD
+wait $PID_VSOMEIPD
+
+# Check if everything went well
+exit $FAIL

@@ -1,0 +1,181 @@
+libvsomeip_srcs = [
+   "implementation/endpoints/**/*.cpp",
+   "implementation/logger/**/*.cpp",
+   "implementation/tracing/**/*.cpp",
+   "implementation/message/**/*.cpp",
+   "implementation/routing/**/*.cpp",
+   "implementation/runtime/**/*.cpp",
+   "implementation/utility/**/*.cpp",
+   "implementation/plugin/**/*.cpp",
+   "implementation/protocol/**/*.cpp",
+   "implementation/security/**/*.cpp",
+]
+
+libvsomeip_cfg_srcs = [
+    "implementation/configuration/src/*.cpp",
+]
+
+libvsomeip_e2e_srcs = [
+    "implementation/e2e_protection/src/*.cpp",
+]
+
+libvsomeip_sd_srcs = [
+    "implementation/service_discovery/src/*.cpp",
+]
+
+cc_defaults {
+    name: "vsomeip_defaults",
+    cpp_std: "c++17",
+
+    cppflags: [
+        "-fexceptions",
+        "-Wno-non-virtual-dtor",
+        "-Wno-unused-const-variable",
+        "-Wno-unused-parameter",
+        "-Wno-unused-private-field",
+        "-Wno-unused-lambda-capture",
+        "-Wno-unused-variable",
+        "-Wno-unused-local-typedef",
+        "-Wno-sign-compare",
+        "-Wno-format",
+        "-Wno-header-guard",
+        "-Wno-overloaded-virtual",
+        "-Wno-implicit-fallthrough",
+        "-Wno-error",
+        "-Wno-shorten-64-to-32",
+        "-D_GTHREAD_USE_MUTEX_INIT_FUNC",
+        "-D_GTHREAD_USE_RECURSIVE_MUTEX_INIT_FUNC",
+    ]
+}
+
+cc_defaults {
+    name: "vsomeip_lib_defaults",
+
+    cflags: [
+        "-DVSOMEIP_BOOST_VERSION=107100",
+        "-DVSOMEIP_INTERNAL_SUPPRESS_DEPRECATED",
+    ],
+
+    local_include_dirs: [
+        "interface"
+    ]
+}
+
+cc_library_shared {
+    name: "libvsomeip3",
+    vendor: true,
+
+    srcs: libvsomeip_srcs,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
+    cflags: [
+        "-DWITHOUT_SYSTEMD",
+        "-DVSOMEIP_VERSION=\"3.6.1\"",
+        "-DVSOMEIP_BASE_PATH=\"/vendor/run/someip/\"",
+    ],
+
+    ldflags: [
+        "-Wl,-wrap,socket",
+        "-Wl,-wrap,accept",
+        "-Wl,-wrap,open",
+        "-Wl,-wrap,close",
+        "-Wl,-wrap,recvfrom",
+        "-Wl,-wrap,recvmsg",
+        "-Wl,-wrap,sendto",
+        "-Wl,-wrap,sendmsg",
+        "-Wl,-wrap,epoll_wait"
+    ],
+
+    rtti: true,
+
+    export_include_dirs: [
+        "interface"
+    ],
+
+    shared_libs: [
+        "libboost_system",
+        "libboost_thread",
+        "libboost_filesystem",
+        "liblog",
+        "libutils"
+    ]
+}
+
+cc_library_shared {
+    name: "libvsomeip_cfg",
+    vendor: true,
+
+    srcs: libvsomeip_cfg_srcs,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
+    rtti: true,
+
+    shared_libs: [
+        "libvsomeip3",
+        "libboost_system",
+        "libboost_filesystem"
+    ]
+}
+
+cc_library_shared {
+    name: "libvsomeip_e2e",
+    vendor: true,
+
+    srcs: libvsomeip_e2e_srcs,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
+    rtti: true,
+
+    shared_libs: [
+       "libvsomeip3"
+    ]
+}
+
+cc_library_shared {
+    name: "libvsomeip_sd",
+    vendor: true,
+
+    srcs: libvsomeip_sd_srcs,
+
+    defaults: [
+        "vsomeip_defaults",
+        "vsomeip_lib_defaults"
+    ],
+
+    rtti: true,
+
+    shared_libs: [
+        "libvsomeip3",
+        "libboost_system"
+    ]
+}
+
+// libvsomeip (without "3" suffix) is a compatibility lib, that was historically only turned on with VSOMEIP_COMPAT_NAME
+// unfortunately, the Android built by _by default_ - and so there are many Android HALs that link against the wrong lib
+// therefore deploy a dummy that links to libvsomeip3
+cc_library_shared {
+    name: "libvsomeip",
+    vendor: true,
+    nocrt: true,
+    no_libcrt: true,
+    system_shared_libs: [],
+    shared_libs: ["libvsomeip3"],
+    export_shared_lib_headers: ["libvsomeip3"],
+    // disable stripping, otherwise `strip` fails due to an empty lib
+    // see https://android.googlesource.com/platform/art/+/refs/heads/main/tools/create_minidebuginfo/create_minidebuginfo.cc#60
+    strip: {
+        none:true,
+    }
+}

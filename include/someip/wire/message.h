@@ -6,6 +6,7 @@
 #include "someip/wire/tp.h"
 
 #include <cstddef>
+#include <limits>
 #include <optional>
 
 namespace someip::wire {
@@ -19,6 +20,10 @@ expected<void> encode_message(Out &out, const header &h_in, const ser::config &c
     auto payload_size = ser::measure(cfg, payload, payload_base_off);
     if (!payload_size) {
         return unexpected<status_code>(payload_size.error());
+    }
+
+    if (*payload_size > (std::numeric_limits<std::uint32_t>::max() - 8u - tp_bytes)) {
+        return unexpected<status_code>(status_code::invalid_length);
     }
 
     header h = h_in;
@@ -37,4 +42,3 @@ expected<void> encode_message(Out &out, const header &h_in, const ser::config &c
 }
 
 } // namespace someip::wire
-

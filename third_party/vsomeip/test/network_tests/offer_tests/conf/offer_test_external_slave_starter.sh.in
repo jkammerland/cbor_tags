@@ -1,0 +1,30 @@
+#!/bin/bash
+# Copyright (C) 2015-2025 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+FAIL=0
+# Rejecting offer for which there is already a remote offer:
+# * start daemon
+# * start application which offers service
+# * start daemon remotely
+# * start same application which offers the same service again remotely
+#   -> should be rejected as there is already a service instance
+#   running in the network
+
+export VSOMEIP_CONFIGURATION=offer_test_external_slave.json
+export VSOMEIP_APPLICATION_NAME="service-external-routingmanager"
+# start daemon
+../../../examples/routingmanagerd/routingmanagerd &
+PID_VSOMEIPD=$!
+
+# Start the services
+export VSOMEIP_APPLICATION_NAME="service-external-sample"
+./offer_test_service_external 2 || FAIL=$(($FAIL+1))
+
+# kill the services
+kill $PID_VSOMEIPD
+wait $PID_VSOMEIPD
+
+exit $FAIL

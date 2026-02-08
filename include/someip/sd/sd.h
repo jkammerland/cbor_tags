@@ -19,6 +19,8 @@ namespace someip::sd {
 
 constexpr std::uint16_t kServiceId = 0xFFFF;
 constexpr std::uint16_t kMethodId  = 0x8100;
+constexpr std::size_t   kDecodeMaxEntries = 65536u;
+constexpr std::size_t   kDecodeMaxOptions = 65536u;
 
 namespace entry_type {
 static constexpr std::uint8_t find_service  = 0x00;
@@ -218,6 +220,9 @@ struct packet_data {
             if (total_opts > 0xFFu) {
                 return unexpected<status_code>(status_code::invalid_length);
             }
+            if (d.ttl > 0xFFFFFFu) {
+                return unexpected<status_code>(status_code::invalid_length);
+            }
 
             service_entry se{};
             se.c.type           = d.type;
@@ -253,6 +258,9 @@ struct packet_data {
             if (total_opts > 0xFFu) {
                 return unexpected<status_code>(status_code::invalid_length);
             }
+            if (d.ttl > 0xFFFFFFu) {
+                return unexpected<status_code>(status_code::invalid_length);
+            }
 
             eventgroup_entry eg{};
             eg.c.type              = d.type;
@@ -286,6 +294,10 @@ struct packet_data {
 
 template <class Out>
 expected<void> encode_entry(wire::writer<Out> &out, const service_entry &e) noexcept {
+    if (e.c.ttl > 0xFFFFFFu) {
+        return unexpected<status_code>(status_code::invalid_length);
+    }
+
     auto st = wire::write_uint<wire::endian::big>(out, e.c.type);
     if (!st) return st;
     st = wire::write_uint<wire::endian::big>(out, e.c.index1);
@@ -300,7 +312,7 @@ expected<void> encode_entry(wire::writer<Out> &out, const service_entry &e) noex
     if (!st) return st;
     st = wire::write_uint<wire::endian::big>(out, e.c.major_version);
     if (!st) return st;
-    st = wire::write_u24_be(out, e.c.ttl & 0xFFFFFFu);
+    st = wire::write_u24_be(out, e.c.ttl);
     if (!st) return st;
     st = wire::write_uint<wire::endian::big>(out, e.minor_version);
     if (!st) return st;
@@ -309,6 +321,10 @@ expected<void> encode_entry(wire::writer<Out> &out, const service_entry &e) noex
 
 template <class Out>
 expected<void> encode_entry(wire::writer<Out> &out, const eventgroup_entry &e) noexcept {
+    if (e.c.ttl > 0xFFFFFFu) {
+        return unexpected<status_code>(status_code::invalid_length);
+    }
+
     auto st = wire::write_uint<wire::endian::big>(out, e.c.type);
     if (!st) return st;
     st = wire::write_uint<wire::endian::big>(out, e.c.index1);
@@ -323,7 +339,7 @@ expected<void> encode_entry(wire::writer<Out> &out, const eventgroup_entry &e) n
     if (!st) return st;
     st = wire::write_uint<wire::endian::big>(out, e.c.major_version);
     if (!st) return st;
-    st = wire::write_u24_be(out, e.c.ttl & 0xFFFFFFu);
+    st = wire::write_u24_be(out, e.c.ttl);
     if (!st) return st;
     st = wire::write_uint<wire::endian::big>(out, e.reserved12_counter4);
     if (!st) return st;
@@ -672,9 +688,13 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
     if ((*entries_len % 16u) != 0u) {
         return unexpected<status_code>(status_code::sd_invalid_lengths);
     }
+    const auto entry_count = static_cast<std::size_t>(*entries_len / 16u);
+    if (entry_count > kDecodeMaxEntries) {
+        return unexpected<status_code>(status_code::invalid_length);
+    }
     auto entries_bytes = in.read_bytes(*entries_len);
     if (!entries_bytes) return unexpected<status_code>(entries_bytes.error());
-    p.entries.reserve(static_cast<std::size_t>(*entries_len / 16u));
+    p.entries.reserve(entry_count);
 
     for (std::size_t off = 0; off < entries_bytes->size(); off += 16u) {
         auto e = decode_entry(entries_bytes->subspan(off, 16u));
@@ -684,6 +704,12 @@ expected<void> encode_payload(wire::writer<Out> &out, const payload &p) noexcept
 
     auto options_len = wire::read_uint<wire::endian::big, std::uint32_t>(in);
     if (!options_len) return unexpected<status_code>(options_len.error());
+    if (*options_len > 0u) {
+        const auto max_possible_options = static_cast<std::size_t>(*options_len / 3u);
+        if (max_possible_options > kDecodeMaxOptions) {
+            return unexpected<status_code>(status_code::invalid_length);
+        }
+    }
 
     auto options_bytes = in.read_bytes(*options_len);
     if (!options_bytes) return unexpected<status_code>(options_bytes.error());

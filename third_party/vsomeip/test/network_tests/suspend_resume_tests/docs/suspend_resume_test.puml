@@ -1,0 +1,39 @@
+@startuml
+participant Client
+participant Router
+participant Server
+participant VM
+Client -> Router : Find service
+Server -> Router : Offer service
+Server -> Router : Offer event
+Router -> Client : Service available
+Client -> Router : Subscribe to event
+Router -> Server : Subscribe
+Server -> Router : Subscribe ack
+Router -> Client  : Subscribe ack
+loop 6 times
+Client -> Router : Suspend request
+Router -> Server : Suspend request
+Server -> Router : Send SIGUSR#1
+
+note right
+    At first run, it isn't sent
+end note
+
+Router -> Client : Subscribe nack
+Router -> Client : Service unavailable
+Server -> VM : Network interface down
+
+note right
+    Sequence order and delays vary each time
+end note
+
+Server -> Server : Wait 3 seconds
+Server -> VM : Network interface up
+Server -> Router : Send SIGUSR#2
+Router -> Client : Service available
+Router -> Client  : Subscribe ack
+end
+Client -> Router : Stop request
+Router -> Server : Stop request
+@enduml

@@ -196,6 +196,19 @@ client_b:
   signal "done"
 ```
 
+### vSomeIP IDs used by `test/vsomeip/vsomeip_e2e.cpp`
+
+```
+service_id        = 0x1234
+instance_id       = 0x0001
+method_id         = 0x0001
+setter_writable   = 0x0101
+setter_readonly   = 0x0201
+shutdown_method   = 0x00FF
+notifier_event_id = 0x8001
+eventgroup_id     = 0x0001
+```
+
 ### vSomeIP interop (optional)
 
 `test/vsomeip/vsomeip_interop_e2e.cpp` exercises interop in two modes:
@@ -218,3 +231,42 @@ interop test is expected to fail; those indicate a broken TCP flow rather than a
 If vSomeIP logs `TCP Client: Could not bind to device "lo"`, check whether your local config sets a `device`
 field. The configs in this repository do not set `device`; this warning usually comes from local overrides or
 custom configs. Remove `device` or run with sufficient privileges to bind to a device.
+
+## FuzzTest SOME/IP property fuzzing (optional)
+
+FuzzTest-based SOME/IP tests live in `test/fuzz/fuzztest_someip.cpp` and are built only when
+`CBOR_TAGS_BUILD_FUZZTESTS=ON`.
+
+Configure and run in regular unit-test mode:
+
+```bash
+cmake --preset=debug -DCBOR_TAGS_BUILD_FUZZTESTS=ON
+cmake --build --preset=debug --target someip_fuzztest
+ctest --preset=debug -R someip_fuzztest --output-on-failure
+```
+
+Run the same fuzz properties under ASan+LSan:
+
+```bash
+cmake --preset=alsan -DCBOR_TAGS_BUILD_FUZZTESTS=ON
+cmake --build --preset=alsan --target someip_fuzztest
+ctest --preset=alsan -R someip_fuzztest --output-on-failure
+```
+
+Run under TSan (manual configure):
+
+```bash
+cmake -S . -B build-tsan-fuzz \
+  -DCBOR_TAGS_BUILD_TESTS=ON \
+  -DCBOR_TAGS_BUILD_FUZZTESTS=ON \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_C_FLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=thread" \
+  -DCMAKE_CXX_FLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=thread" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+  -DCMAKE_MODULE_LINKER_FLAGS="-fsanitize=thread" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread"
+cmake --build build-tsan-fuzz --target someip_fuzztest
+ctest --test-dir build-tsan-fuzz -R someip_fuzztest --output-on-failure
+```
