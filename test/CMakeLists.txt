@@ -15,6 +15,7 @@ add_executable(tests)
 # add target_sources, all .cpp files in this directory
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 list(FILTER TEST_SOURCES EXCLUDE REGEX "/vsomeip/")
+list(FILTER TEST_SOURCES EXCLUDE REGEX "/fuzz/")
 target_sources(tests PRIVATE ${TEST_SOURCES})
 
 # add test include directories
@@ -42,6 +43,26 @@ endif()
 
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
+
+# FuzzTest-based SOME/IP fuzz/property tests (optional)
+option(CBOR_TAGS_BUILD_FUZZTESTS "Build FuzzTest-based SOME/IP fuzz tests" OFF)
+if(CBOR_TAGS_BUILD_FUZZTESTS)
+  include(FetchContent)
+
+  FetchContent_Declare(
+    fuzztest
+    GIT_REPOSITORY https://github.com/google/fuzztest.git
+    GIT_TAG 2025-08-05
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(fuzztest)
+
+  add_executable(someip_fuzztest
+    ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzztest_someip.cpp
+  )
+  target_link_libraries(someip_fuzztest PRIVATE cbor::tags)
+  link_fuzztest(someip_fuzztest)
+  add_test(NAME someip_fuzztest COMMAND someip_fuzztest)
+endif()
 
 # vSomeIP E2E tests (optional)
 option(CBOR_TAGS_ENABLE_VSOMEIP_TESTS "Build vSomeIP E2E tests" ON)
