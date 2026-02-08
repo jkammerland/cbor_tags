@@ -34,7 +34,7 @@ function(cbor_tags_enable_asan_for_target target_name)
   if(NOT CBOR_TAGS_ENABLE_ASAN)
     return()
   endif()
-  if((UNIX OR APPLE) AND NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+  if(UNIX OR APPLE)
     target_compile_options(${target_name} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(${target_name} PRIVATE -fsanitize=address)
   elseif(WIN32)
@@ -96,12 +96,14 @@ if (CBOR_TAGS_ENABLE_VSOMEIP_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../th
     ${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/vsomeip_e2e.cpp
   )
   target_compile_definitions(vsomeip_tests PRIVATE VSOMEIP_TEST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/conf")
+  cbor_tags_enable_asan_for_target(vsomeip_tests)
   target_link_libraries(vsomeip_tests PRIVATE cbor::tags vsomeip3 vsomeip3-sd vsomeip3-cfg pthread)
   set_target_properties(vsomeip_tests PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/vsomeip")
   add_executable(vsomeip_interop_tests
     ${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/vsomeip_interop_e2e.cpp
   )
   target_compile_definitions(vsomeip_interop_tests PRIVATE VSOMEIP_TEST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vsomeip/conf")
+  cbor_tags_enable_asan_for_target(vsomeip_interop_tests)
   target_link_libraries(vsomeip_interop_tests PRIVATE cbor::tags vsomeip3 vsomeip3-sd vsomeip3-cfg pthread)
   set_target_properties(vsomeip_interop_tests PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/vsomeip")
   add_test(NAME vsomeip_tests_tcp COMMAND vsomeip_tests tcp)
