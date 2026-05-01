@@ -71,7 +71,6 @@ struct integer;
 struct simple;
 
 template <typename T> struct as_indefinite;
-template <typename T> struct as_maybe_indefinite;
 
 struct as_text_any {
     std::uint64_t size;
@@ -178,10 +177,6 @@ struct indefinite_value_type {
 };
 
 template <typename T> struct indefinite_value_type<as_indefinite<T>> {
-    using type = T;
-};
-
-template <typename T> struct indefinite_value_type<as_maybe_indefinite<T>> {
     using type = T;
 };
 

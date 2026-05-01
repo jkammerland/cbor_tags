@@ -119,6 +119,47 @@ TEST_CASE("decoder should allow retry after incomplete byte-string view") {
     CHECK_EQ(decoded[1], std::byte{0x02});
 }
 
+TEST_CASE("decoder should allow retry after incomplete indefinite array") {
+    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x01}, std::byte{0x02}};
+
+    auto dec = make_decoder(buffer);
+
+    std::vector<int> decoded{99};
+    auto             result = dec(decoded);
+
+    CHECK_FALSE_MESSAGE(result, "Truncated indefinite array should return incomplete.");
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded[0], 99);
+
+    buffer.push_back(std::byte{0xFF});
+    auto retry = dec(decoded);
+
+    CHECK_MESSAGE(retry, "Decoder should allow retry after incomplete indefinite array.");
+    CHECK_EQ(decoded, std::vector<int>{1, 2});
+}
+
+TEST_CASE("decoder should allow retry after incomplete indefinite bstr") {
+    std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}};
+
+    auto dec = make_decoder(buffer);
+
+    std::vector<std::byte> decoded{std::byte{0xCC}};
+    auto                   result = dec(decoded);
+
+    CHECK_FALSE_MESSAGE(result, "Truncated indefinite bstr should return incomplete.");
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded[0], std::byte{0xCC});
+
+    buffer.push_back(std::byte{0xFF});
+    auto retry = dec(decoded);
+
+    CHECK_MESSAGE(retry, "Decoder should allow retry after incomplete indefinite bstr.");
+    REQUIRE_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded[0], std::byte{0xAA});
+}
+
 TEST_CASE("decoder should validate as_text_any length against available bytes") {
     // tstr(5): 0x65, but only 3 bytes payload -> truncated
     std::vector<std::byte> buffer{std::byte{0x65}, std::byte{0x61}, std::byte{0x62}, std::byte{0x63}};

@@ -264,26 +264,6 @@ template <typename T> struct as_indefinite {
 
 template <typename T> as_indefinite(T &) -> as_indefinite<T>;
 
-template <typename T> struct as_maybe_indefinite {
-    T value_;
-    constexpr as_maybe_indefinite() = default;
-    constexpr explicit as_maybe_indefinite(T value) : value_(std::move(value)) {}
-    constexpr T       &get() noexcept { return value_; }
-    constexpr const T &get() const noexcept { return value_; }
-};
-
-template <typename T> struct as_maybe_indefinite<T &> {
-    T *value_;
-    constexpr explicit as_maybe_indefinite(T &value) : value_(std::addressof(value)) {}
-    constexpr T &get() const noexcept { return *value_; }
-};
-
-template <typename T> using as_maybe_indefinite_ref   = as_maybe_indefinite<T &>;
-template <typename T> using as_maybe_indefinite_value = as_maybe_indefinite<T>;
-
-template <typename T> as_maybe_indefinite(T &) -> as_maybe_indefinite<T &>;
-template <typename T> as_maybe_indefinite(T &&) -> as_maybe_indefinite<std::remove_cvref_t<T>>;
-
 // Compile-time function to get CBOR major type
 template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {
     if constexpr (IsUnsigned<T>) {

@@ -18,9 +18,6 @@ using namespace cbor::tags;
 static_assert(IsArray<as_indefinite<std::vector<int>>>);
 static_assert(IsMap<as_indefinite<std::map<int, int>>>);
 static_assert(IsTextString<as_indefinite<std::string>>);
-static_assert(IsArray<as_maybe_indefinite<std::vector<int>>>);
-static_assert(IsMap<as_maybe_indefinite<std::map<int, int>>>);
-static_assert(IsTextString<as_maybe_indefinite<std::string>>);
 static_assert(IsMap<const std::map<int, int>>);
 static_assert(!IsArray<const std::map<int, int>>);
 
@@ -85,41 +82,13 @@ TEST_CASE("decode indefinite bstr into vector") {
     auto dec = make_decoder(buffer);
 
     std::vector<std::byte> decoded;
-    auto                   result = dec(as_indefinite{decoded});
+    auto                   result = dec(decoded);
 
-    CHECK_MESSAGE(result, "Decoding an indefinite byte string should succeed.");
+    CHECK_MESSAGE(result, "Decoding an indefinite byte string into a normal vector should succeed.");
     CHECK_EQ(decoded.size(), 3);
     CHECK_EQ(decoded[0], std::byte{0x01});
     CHECK_EQ(decoded[1], std::byte{0x02});
     CHECK_EQ(decoded[2], std::byte{0x03});
-}
-
-TEST_CASE("decode maybe indefinite bstr (definite)") {
-    std::vector<std::byte> buffer{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
-
-    auto dec = make_decoder(buffer);
-
-    std::vector<std::byte> decoded;
-    auto                   result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Definite bstr should decode via maybe indefinite.");
-    CHECK_EQ(decoded.size(), 3);
-    CHECK_EQ(decoded[0], std::byte{0x01});
-    CHECK_EQ(decoded[1], std::byte{0x02});
-    CHECK_EQ(decoded[2], std::byte{0x03});
-}
-
-TEST_CASE("decode maybe indefinite bstr (indefinite)") {
-    std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}, std::byte{0xFF}};
-
-    auto dec = make_decoder(buffer);
-
-    std::vector<std::byte> decoded;
-    auto                   result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Indefinite bstr should decode via maybe indefinite.");
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0xAA});
 }
 
 TEST_CASE("decode indefinite bstr with wrong chunk type") {
@@ -128,9 +97,9 @@ TEST_CASE("decode indefinite bstr with wrong chunk type") {
     auto dec = make_decoder(buffer);
 
     std::vector<std::byte> decoded;
-    auto                   result = dec(as_indefinite{decoded});
+    auto                   result = dec(decoded);
 
-    CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite bstr.");
+    CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite bstr into a normal vector.");
     CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
 }
 
@@ -141,35 +110,10 @@ TEST_CASE("decode indefinite tstr into string") {
     auto dec = make_decoder(buffer);
 
     std::string decoded;
-    auto        result = dec(as_indefinite{decoded});
+    auto        result = dec(decoded);
 
-    CHECK_MESSAGE(result, "Decoding an indefinite text string should succeed.");
+    CHECK_MESSAGE(result, "Decoding an indefinite text string into a normal string should succeed.");
     CHECK_EQ(decoded, "abc");
-}
-
-TEST_CASE("decode maybe indefinite tstr (definite)") {
-    std::vector<std::byte> buffer{std::byte{0x62}, std::byte{'h'}, std::byte{'i'}};
-
-    auto dec = make_decoder(buffer);
-
-    std::string decoded;
-    auto        result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Definite tstr should decode via maybe indefinite.");
-    CHECK_EQ(decoded, "hi");
-}
-
-TEST_CASE("decode maybe indefinite tstr (indefinite)") {
-    std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x61}, std::byte{'h'}, std::byte{0x61}, std::byte{'i'},
-                                  std::byte{0xFF}};
-
-    auto dec = make_decoder(buffer);
-
-    std::string decoded;
-    auto        result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Indefinite tstr should decode via maybe indefinite.");
-    CHECK_EQ(decoded, "hi");
 }
 
 TEST_CASE("decode indefinite tstr with wrong chunk type") {
@@ -178,9 +122,9 @@ TEST_CASE("decode indefinite tstr with wrong chunk type") {
     auto dec = make_decoder(buffer);
 
     std::string decoded;
-    auto        result = dec(as_indefinite{decoded});
+    auto        result = dec(decoded);
 
-    CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite tstr.");
+    CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite tstr into a normal string.");
     CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
 }
 
@@ -190,41 +134,13 @@ TEST_CASE("decode indefinite array into vector") {
     auto dec = make_decoder(buffer);
 
     std::vector<int> decoded;
-    auto             result = dec(as_indefinite{decoded});
+    auto             result = dec(decoded);
 
-    CHECK_MESSAGE(result, "Decoding an indefinite array should succeed.");
+    CHECK_MESSAGE(result, "Decoding an indefinite array into a normal vector should succeed.");
     CHECK_EQ(decoded.size(), 3);
     CHECK_EQ(decoded[0], 1);
     CHECK_EQ(decoded[1], 2);
     CHECK_EQ(decoded[2], 3);
-}
-
-TEST_CASE("decode maybe indefinite array (definite)") {
-    std::vector<std::byte> buffer{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
-
-    auto dec = make_decoder(buffer);
-
-    std::vector<int> decoded;
-    auto             result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Definite array should decode via maybe indefinite.");
-    CHECK_EQ(decoded.size(), 2);
-    CHECK_EQ(decoded[0], 1);
-    CHECK_EQ(decoded[1], 2);
-}
-
-TEST_CASE("decode maybe indefinite array (indefinite)") {
-    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}};
-
-    auto dec = make_decoder(buffer);
-
-    std::vector<int> decoded;
-    auto             result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Indefinite array should decode via maybe indefinite.");
-    CHECK_EQ(decoded.size(), 2);
-    CHECK_EQ(decoded[0], 1);
-    CHECK_EQ(decoded[1], 2);
 }
 
 TEST_CASE("decode indefinite array without break returns incomplete") {
@@ -232,14 +148,13 @@ TEST_CASE("decode indefinite array without break returns incomplete") {
 
     auto dec = make_decoder(buffer);
 
-    std::vector<int> decoded;
-    auto             result = dec(as_indefinite{decoded});
+    std::vector<int> decoded{99};
+    auto             result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 2);
-    CHECK_EQ(decoded[0], 1);
-    CHECK_EQ(decoded[1], 2);
+    CHECK_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded[0], 99);
 }
 
 TEST_CASE("decode indefinite map into map") {
@@ -249,38 +164,12 @@ TEST_CASE("decode indefinite map into map") {
     auto dec = make_decoder(buffer);
 
     std::map<int, int> decoded;
-    auto               result = dec(as_indefinite{decoded});
+    auto               result = dec(decoded);
 
-    CHECK_MESSAGE(result, "Decoding an indefinite map should succeed.");
+    CHECK_MESSAGE(result, "Decoding an indefinite map into a normal map should succeed.");
     CHECK_EQ(decoded.size(), 2);
     CHECK_EQ(decoded[1], 2);
     CHECK_EQ(decoded[3], 4);
-}
-
-TEST_CASE("decode maybe indefinite map (definite)") {
-    std::vector<std::byte> buffer{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
-
-    auto dec = make_decoder(buffer);
-
-    std::map<int, int> decoded;
-    auto               result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Definite map should decode via maybe indefinite.");
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[1], 2);
-}
-
-TEST_CASE("decode maybe indefinite map (indefinite)") {
-    std::vector<std::byte> buffer{std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}};
-
-    auto dec = make_decoder(buffer);
-
-    std::map<int, int> decoded;
-    auto               result = dec(as_maybe_indefinite{decoded});
-
-    CHECK_MESSAGE(result, "Indefinite map should decode via maybe indefinite.");
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[1], 2);
 }
 
 TEST_CASE("decode indefinite map without break returns incomplete") {
@@ -288,13 +177,13 @@ TEST_CASE("decode indefinite map without break returns incomplete") {
 
     auto dec = make_decoder(buffer);
 
-    std::map<int, int> decoded;
-    auto               result = dec(as_indefinite{decoded});
+    std::map<int, int> decoded{{9, 9}};
+    auto               result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
     CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[1], 2);
+    CHECK_EQ(decoded[9], 9);
 }
 
 TEST_CASE("decode indefinite bstr without break returns incomplete") {
@@ -302,13 +191,13 @@ TEST_CASE("decode indefinite bstr without break returns incomplete") {
 
     auto dec = make_decoder(buffer);
 
-    std::vector<std::byte> decoded;
-    auto                   result = dec(as_indefinite{decoded});
+    std::vector<std::byte> decoded{std::byte{0x01}};
+    auto                   result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
     CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0xAA});
+    CHECK_EQ(decoded[0], std::byte{0x01});
 }
 
 TEST_CASE("decode indefinite bstr with indefinite chunk returns no match") {
@@ -317,7 +206,7 @@ TEST_CASE("decode indefinite bstr with indefinite chunk returns no match") {
     auto dec = make_decoder(buffer);
 
     std::vector<std::byte> decoded;
-    auto                   result = dec(as_indefinite{decoded});
+    auto                   result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Nested indefinite bstr chunks are not allowed.");
     CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
@@ -328,36 +217,13 @@ TEST_CASE("decode indefinite bstr with truncated chunk returns incomplete") {
 
     auto dec = make_decoder(buffer);
 
-    std::vector<std::byte> decoded;
-    auto                   result = dec(as_indefinite{decoded});
+    std::vector<std::byte> decoded{std::byte{0xFF}};
+    auto                   result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Truncated chunk payload should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK(decoded.empty());
-}
-
-TEST_CASE("encode maybe indefinite always definite") {
-    std::vector<std::byte> buffer;
-    auto                   enc = make_encoder(buffer);
-
-    std::vector<std::byte> bytes{std::byte{0x01}, std::byte{0x02}};
-    REQUIRE(enc(as_maybe_indefinite{bytes}));
-    CHECK_EQ(to_hex(buffer).substr(0, 2), "42");
-
-    buffer.clear();
-    std::string text = "hi";
-    REQUIRE(enc(as_maybe_indefinite{text}));
-    CHECK_EQ(to_hex(buffer).substr(0, 2), "62");
-
-    buffer.clear();
-    std::vector<int> array{1, 2};
-    REQUIRE(enc(as_maybe_indefinite{array}));
-    CHECK_EQ(to_hex(buffer).substr(0, 2), "82");
-
-    buffer.clear();
-    std::map<int, int> map{{1, 2}};
-    REQUIRE(enc(as_maybe_indefinite{map}));
-    CHECK_EQ(to_hex(buffer).substr(0, 2), "a1");
+    CHECK_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded[0], std::byte{0xFF});
 }
 
 TEST_CASE("roundtrip indefinite tagged class direct") {
@@ -457,7 +323,7 @@ TEST_CASE("roundtrip variant with tstr over tagged class") {
     CHECK_EQ(std::get<std::string>(v), "hello");
 }
 
-TEST_CASE("variant decodes maybe-indefinite array from indefinite input") {
+TEST_CASE("variant decodes indefinite array into normal vector") {
     std::vector<int> input{1, 2, 3};
 
     std::vector<std::byte> buffer;
@@ -466,13 +332,12 @@ TEST_CASE("variant decodes maybe-indefinite array from indefinite input") {
 
     auto dec = make_decoder(buffer);
 
-    using maybe_array = as_maybe_indefinite<std::vector<int>>;
-    std::variant<int, maybe_array> value;
-    auto                           result = dec(value);
+    std::variant<int, std::vector<int>> value;
+    auto                                result = dec(value);
 
-    CHECK_MESSAGE(result, "Variant should decode indefinite array into as_maybe_indefinite.");
-    CHECK(std::holds_alternative<maybe_array>(value));
-    CHECK_EQ(std::get<maybe_array>(value).get(), input);
+    CHECK_MESSAGE(result, "Variant should decode indefinite array into a normal vector.");
+    CHECK(std::holds_alternative<std::vector<int>>(value));
+    CHECK_EQ(std::get<std::vector<int>>(value), input);
 }
 
 TEST_CASE("roundtrip nested indefinite structures") {
