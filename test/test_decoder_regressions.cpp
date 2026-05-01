@@ -120,6 +120,25 @@ TEST_CASE("decoder should accept empty text strings") {
     CHECK(decoded.empty());
 }
 
+TEST_CASE("decoder should preserve text bytes without utf8 validation") {
+    // tstr(2): 0xC3 0x28 is an invalid UTF-8 sequence.
+    std::vector<std::byte> buffer{std::byte{0x62}, std::byte{0xC3}, std::byte{0x28}, std::byte{0x01}};
+
+    auto dec = make_decoder(buffer);
+
+    std::string  decoded;
+    std::uint8_t next_value{};
+    auto         result = dec(decoded, next_value);
+
+    std::string expected;
+    expected.push_back(static_cast<char>(0xC3));
+    expected.push_back(static_cast<char>(0x28));
+
+    CHECK_MESSAGE(result, "Core text decode preserves bytes and does not validate UTF-8.");
+    CHECK_EQ(decoded, expected);
+    CHECK_EQ(next_value, 1);
+}
+
 TEST_CASE("decoder should reject undersized byte strings for fixed arrays") {
     std::vector<std::byte> buffer{std::byte{0x41}, std::byte{0x01}}; // length 1, value 0x01
 

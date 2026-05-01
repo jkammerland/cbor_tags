@@ -18,6 +18,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 # Index
 
 - [🎯 Key Features](#-key-features)
+- [Decode Policy Notes](#decode-policy-notes)
 - [🔧 Quick Start](#-quick-start)
   - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
   - [Tagged Struct Example](#tagged-struct-example)
@@ -52,6 +53,11 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
 - CDDL support for schema and custom data definitions.
+
+## Decode Policy Notes
+
+- Core text string decode preserves the encoded bytes and does not validate UTF-8. `status_code::invalid_utf8_sequence` is reserved for a future validation path and is not emitted by default decode.
+- Enum decode validates that the CBOR integer is representable by the enum underlying type. It does not reject unnamed but representable enumerator values; applications that treat an enum as a closed set should validate that policy after decode or in a custom decode overload.
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
