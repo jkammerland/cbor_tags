@@ -1,0 +1,76 @@
+# User Story: Close Remaining Review Debt In Decoder, Ranges, And Docs
+
+## Story
+
+As a maintainer of `cbor_tags`,
+I want to resolve the remaining high-value issues identified in the review pass,
+so that decoding is safer, non-contiguous buffer behavior is well-defined, and the public API/docs no longer advertise unsupported or misleading behavior.
+
+## Problem Summary
+
+The recent review pass found several issues that are still open in the current tree:
+
+- Numeric decode still lacks range validation for signed integers and enums.
+- Non-contiguous decoding still relies on `seek(-1)` and random-access assumptions that are unsafe for forward-only iterators.
+- View-based decode APIs still expose buffer-backed lifetime hazards without clear documentation.
+- UTF-8 validation is still not implemented even though `invalid_utf8_sequence` exists in the public status enum.
+- Public range-view placeholder types are still exposed even though they are not implemented.
+- Docs still point at missing headers or unfinished pages.
+
+Some previously reported items are already fixed and are intentionally out of scope for this story:
+
+- Empty `std::basic_string_view<std::byte>` decode underflow / reader advance bug.
+- `as_text_any` / `as_bstr_any` truncation handling.
+- Fixed-size output buffer overflow on encode.
+- Fixed-size array/span decode length mismatch overflow.
+
+## In Scope
+
+- Decoder correctness and safety fixes for remaining open review findings.
+- Public API cleanup where unsupported types are currently exposed.
+- Documentation updates needed to match actual supported behavior.
+- Regression tests for each bug fixed by this story.
+
+## Out Of Scope
+
+- New streaming/coroutine APIs.
+- Performance-only refactors.
+- Broader redesign of tags, variants, or reflection.
+
+## Acceptance Criteria
+
+1. Signed integer decode fails cleanly on overflow or out-of-range negative values instead of silently truncating or wrapping.
+2. Enum decode rejects values that cannot be represented safely by the underlying type, and behavior for invalid enumerator values is documented.
+3. Non-contiguous decode no longer depends on `seek(-1)` for forward-only iterators, or the buffer concept is tightened so such buffers are rejected at compile time.
+4. Any required non-contiguous random-access helper is implemented, or code paths that depend on it are removed/guarded.
+5. Text-string decode either validates UTF-8 and returns `status_code::invalid_utf8_sequence`, or the public API/docs clearly state that UTF-8 is not validated.
+6. Public placeholder range-view types that are not implemented are removed from the advertised public variant surface, or they are fully implemented and covered by tests.
+7. Documentation explains lifetime requirements for `std::string_view`, `std::span<const std::byte>`, `bstr_view`, and `tstr_view` decode results.
+8. `doc/cddl_handling.md` no longer references a missing `cbor_tags/cbor_cddl.h` header.
+9. `doc/range_handling.md` is no longer an empty TODO and describes currently supported range behavior and limitations.
+10. New tests cover:
+   - signed overflow / out-of-range negative decode
+   - enum decode edge cases
+   - non-contiguous forward-iterator or rewind behavior
+   - UTF-8 validation behavior
+   - range-view/public API cleanup expectations
+
+## Suggested Technical Notes
+
+- Likely touch points:
+  - `include/cbor_tags/cbor_decoder.h`
+  - `include/cbor_tags/cbor_detail.h`
+  - `include/cbor_tags/cbor.h`
+  - `include/cbor_tags/extensions/cbor_visualization.h`
+  - `doc/cddl_handling.md`
+  - `doc/range_handling.md`
+  - targeted tests under `test/`
+- Review source:
+  - This story summarizes the local review notes generated during the review pass. Those notes are not required repo artifacts.
+
+## Definition Of Done
+
+- All acceptance criteria are met.
+- `ctest` passes.
+- New tests fail before the fix and pass after it.
+- User-facing docs match actual behavior in the codebase.
