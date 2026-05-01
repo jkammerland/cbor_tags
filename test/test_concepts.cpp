@@ -455,6 +455,13 @@ TEST_CASE("Contiguous range concept") {
     CHECK(!cbor::tags::IsContiguous<std::deque<std::byte>>);
 }
 
+TEST_CASE("Non-contiguous variant ranges expose implemented alternatives") {
+    using non_contiguous_variant = variant_t<std::list<std::byte>>;
+    using contiguous_variant     = variant_t<std::vector<std::byte>>;
+    static_assert(std::variant_size_v<non_contiguous_variant> == 9);
+    static_assert(std::variant_size_v<contiguous_variant> == 12);
+}
+
 struct AllCborMajorsExample {
     bool is_contiguous;
 
