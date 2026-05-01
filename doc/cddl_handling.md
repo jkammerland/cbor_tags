@@ -1,4 +1,4 @@
-# CBOR CDDL Schema Generator & Annotator
+# CBOR CDDL Schema Generator And Visualization
 
 A C++ header-only library for generating CDDL schemas from C++ types and annotating CBOR data with diagnostic information.
 
@@ -12,7 +12,14 @@ A C++ header-only library for generating CDDL schemas from C++ types and annotat
 ## Quick Start
 
 ```cpp
-#include "cbor_tags/cbor_cddl.h"
+#include "cbor_tags/extensions/cbor_visualization.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <variant>
+#include <vector>
 
 struct MyStruct {
     int32_t id;
@@ -23,7 +30,7 @@ struct MyStruct {
 // Generate CDDL schema
 fmt::memory_buffer buffer;
 cbor::tags::cddl_schema_to<MyStruct>(buffer);
-// Output: 
+// Output:
 // MyStruct = (
 //   int,
 //   tstr,
@@ -49,12 +56,20 @@ cbor::tags::cddl_schema_to<Person>(schema, {.row_options = {.format_by_rows = fa
 ### CBOR Annotation
 
 ```cpp
-std::vector<byte> cbor_data = /* ... */;
+std::vector<std::byte> cbor_data = /* ... */;
 fmt::memory_buffer annotation;
-buffer_annotate(cbor_data, annotation, {
+cbor::tags::buffer_annotate(cbor_data, annotation, {
     .current_indent = 2,
     .max_depth = 16
 });
+```
+
+`buffer_annotate` emits an annotated hex view. `buffer_diagnostic` emits a
+diagnostic-notation-like value stream:
+
+```cpp
+fmt::memory_buffer diagnostic;
+cbor::tags::buffer_diagnostic(cbor_data, diagnostic);
 ```
 
 ### Custom Tags
@@ -82,9 +97,20 @@ Generates CDDL schema for the given type into output buffer
 Creates annotated hex view of CBOR data
 
 **Options**:
-- `indent_level`: Base indentation level
+- `current_indent`: Base indentation level
 - `max_depth`: Wrap lines after N bytes
-- `diagnostic_data`: (Future) Generate full diagnostic notation
+- `diagnostic_data`: Unsupported; setting it throws `std::runtime_error`
+
+### `buffer_diagnostic(cbor_buffer, output, options)`
+Creates diagnostic-notation-like output for the supported CBOR subset.
+
+**Options**:
+- `row_options.format_by_rows`: Format arrays and maps across multiple lines
+- `row_options.override_array_by_columns`: Keep arrays inline when formatting by rows
+- `check_tstr_utf8`: Unsupported; setting it throws `std::runtime_error`
+
+Text strings are rendered from the bytes in the buffer. UTF-8 validation is not
+implemented in this visualization layer.
 
 ## Dependencies
 
