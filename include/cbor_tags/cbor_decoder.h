@@ -38,6 +38,18 @@ namespace cbor::tags {
 namespace detail {
 template <typename Buffer, bool IsContig> struct read_checkpoint;
 
+template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
+    return value <= static_cast<std::uint64_t>(std::numeric_limits<T>::max());
+}
+
+template <typename T> constexpr bool negative_argument_fits(std::uint64_t value) {
+    static_assert(std::is_signed_v<T>);
+    constexpr auto min_value = std::numeric_limits<T>::min();
+    constexpr auto max_cbor_argument =
+        static_cast<std::uint64_t>(-(min_value + T{1}));
+    return value <= max_cbor_argument;
+}
+
 template <typename Buffer> struct read_checkpoint<Buffer, true> {
     using size_type = typename Buffer::size_type;
 
@@ -116,11 +128,34 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <IsSigned T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+    constexpr status_code decode(integer &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
-            value = decode_unsigned(additionalInfo);
+            value = integer(decode_unsigned(additionalInfo));
         } else if (major == major_type::NegativeInteger) {
-            value = decode_integer(additionalInfo);
+            const auto decoded = decode_unsigned(additionalInfo);
+            value = integer(negative(decoded + 1));
+        } else {
+            return status_code::no_match_for_int_on_buffer;
+        }
+
+        return status_code::success;
+    }
+
+    template <IsSigned T>
+        requires(!std::is_same_v<T, integer>)
+    constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+        if (major == major_type::UnsignedInteger) {
+            const auto decoded = decode_unsigned(additionalInfo);
+            if (!detail::unsigned_value_fits<T>(decoded)) {
+                return status_code::no_match_for_int_on_buffer;
+            }
+            value = static_cast<T>(decoded);
+        } else if (major == major_type::NegativeInteger) {
+            const auto decoded = decode_unsigned(additionalInfo);
+            if (!detail::negative_argument_fits<T>(decoded)) {
+                return status_code::no_match_for_int_on_buffer;
+            }
+            value = static_cast<T>(T{-1} - static_cast<T>(decoded));
         } else {
             return status_code::no_match_for_int_on_buffer;
         }
@@ -159,7 +194,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::UnsignedInteger) {
             return status_code::no_match_for_uint_on_buffer;
         }
-        value = decode_unsigned(additionalInfo);
+        const auto decoded = decode_unsigned(additionalInfo);
+        if (!detail::unsigned_value_fits<T>(decoded)) {
+            return status_code::no_match_for_uint_on_buffer;
+        }
+        value = static_cast<T>(decoded);
 
         return status_code::success;
     }
@@ -168,7 +207,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::NegativeInteger) {
             return status_code::no_match_for_nint_on_buffer;
         }
-        value = negative(decode_unsigned(additionalInfo) + 1);
+        const auto decoded = decode_unsigned(additionalInfo);
+        value = negative(decoded + 1);
 
         return status_code::success;
     }

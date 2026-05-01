@@ -1,6 +1,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <cbor_tags/cbor_decoder.h>
@@ -11,6 +12,89 @@
 
 using namespace cbor::tags;
 using namespace std::string_view_literals;
+
+TEST_CASE("decoder should reject unsigned integer overflow") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
+
+    auto dec = make_decoder(buffer);
+
+    std::uint32_t decoded{};
+    auto          result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
+}
+
+TEST_CASE("decoder should reject signed integer overflow") {
+    std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0x80}}; // uint(128)
+
+    auto dec = make_decoder(buffer);
+
+    std::int8_t decoded{};
+    auto        result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+}
+
+TEST_CASE("decoder should reject signed negative underflow") {
+    std::vector<std::byte> buffer{std::byte{0x38}, std::byte{0x80}}; // -129
+
+    auto dec = make_decoder(buffer);
+
+    std::int8_t decoded{};
+    auto        result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+}
+
+TEST_CASE("decoder should accept integer decode boundaries") {
+    {
+        std::vector<std::byte> buffer{std::byte{0x38}, std::byte{0x7F}}; // -128
+        auto                   dec = make_decoder(buffer);
+        std::int8_t            decoded{};
+        auto                   result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded, std::numeric_limits<std::int8_t>::min());
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0x7F}}; // uint(127)
+        auto                   dec = make_decoder(buffer);
+        std::int8_t            decoded{};
+        auto                   result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded, std::numeric_limits<std::int8_t>::max());
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0xFF}}; // uint(255)
+        auto                   dec = make_decoder(buffer);
+        std::uint8_t           decoded{};
+        auto                   result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded, std::numeric_limits<std::uint8_t>::max());
+    }
+}
+
+TEST_CASE("decoder should preserve cbor integer sign") {
+    std::vector<std::byte> buffer{std::byte{0x20}}; // -1
+
+    auto dec = make_decoder(buffer);
+
+    integer decoded{0};
+    auto    result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK(decoded.is_negative);
+    CHECK_EQ(decoded.value, 1);
+}
 
 TEST_CASE("decoder should accept empty byte strings") {
     std::vector<std::byte> buffer{std::byte{0x40}}; // 0-length bstr
