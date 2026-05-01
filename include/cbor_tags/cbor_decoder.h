@@ -165,24 +165,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsEnum U> constexpr status_code decode(U &value, major_type major, std::byte additionalInfo) {
         using underlying_type = std::underlying_type_t<U>;
-        if constexpr (IsSigned<underlying_type>) {
-            if (major > major_type::NegativeInteger) {
-
-                return status_code::no_match_for_enum_on_buffer;
-            }
-        } else if constexpr (IsUnsigned<underlying_type>) {
-            if (major != major_type::UnsignedInteger) {
-                return status_code::no_match_for_enum_on_buffer;
-            }
-        } else {
-
-            return status_code::no_match_for_enum_on_buffer;
-        }
-
         underlying_type result;
         auto            status = this->decode(result, major, additionalInfo);
+        if (status != status_code::success) {
+            return status_code::no_match_for_enum_on_buffer;
+        }
         value                  = static_cast<U>(result);
-        return status;
+        return status_code::success;
     }
 
     template <IsEnum U> constexpr status_code decode(U &value) {
