@@ -19,6 +19,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <forward_list>
 #include <iterator>
 #include <limits>
 #include <list>
@@ -444,6 +445,7 @@ TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, unsi
     CHECK(cbor::tags::ValidCborBuffer<std::vector<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::list<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::deque<T>>);
+    CHECK(!cbor::tags::ValidCborBuffer<std::forward_list<T>>);
 }
 
 TEST_CASE("Contiguous range concept") {

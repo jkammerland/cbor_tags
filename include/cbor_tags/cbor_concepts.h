@@ -34,7 +34,7 @@ concept ValidCborBuffer = requires(T) {
     std::is_convertible_v<typename T::value_type, std::byte>;
     std::is_convertible_v<typename T::size_type, std::size_t>;
     requires std::input_or_output_iterator<typename T::iterator>;
-};
+} && (std::ranges::contiguous_range<T> || std::ranges::bidirectional_range<T>);
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {
