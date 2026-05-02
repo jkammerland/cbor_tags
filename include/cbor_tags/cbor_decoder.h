@@ -36,8 +36,6 @@
 namespace cbor::tags {
 
 namespace detail {
-template <typename Buffer, bool IsContig> struct read_checkpoint;
-
 template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
     return value <= static_cast<std::uint64_t>(std::numeric_limits<T>::max());
 }
@@ -49,32 +47,6 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
         static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
 }
-
-template <typename Buffer> struct read_checkpoint<Buffer, true> {
-    using size_type = typename Buffer::size_type;
-
-    detail::reader<Buffer> &reader_;
-    size_type               position_;
-
-    constexpr explicit read_checkpoint(detail::reader<Buffer> &reader) : reader_(reader), position_(reader.position_) {}
-    constexpr void restore() { reader_.position_ = position_; }
-};
-
-template <typename Buffer> struct read_checkpoint<Buffer, false> {
-    using size_type = typename Buffer::size_type;
-    using iterator  = typename detail::reader<Buffer>::iterator;
-
-    detail::reader<Buffer> &reader_;
-    iterator                position_;
-    size_type               offset_;
-
-    constexpr explicit read_checkpoint(detail::reader<Buffer> &reader)
-        : reader_(reader), position_(reader.position_), offset_(reader.current_offset_) {}
-    constexpr void restore() {
-        reader_.position_       = position_;
-        reader_.current_offset_ = offset_;
-    }
-};
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -110,9 +82,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            if constexpr (!IsContiguous<InputBuffer>) {
-                reader_.sync(data_);
-            }
             status_collector<self_t> collect_status{*this};
 
             auto success = (collect_status(std::forward<T>(args)) && ...);
@@ -897,21 +866,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T> constexpr status_code decode(T &value) {
-        detail::read_checkpoint<InputBuffer, IsContiguous<InputBuffer>> checkpoint{reader_};
         if (reader_.empty(data_)) {
             return status_code::incomplete;
         }
-        try {
-            const auto [majorType, additionalInfo] = read_initial_byte();
-            auto status                            = decode(value, majorType, additionalInfo);
-            if (status == status_code::incomplete) {
-                checkpoint.restore();
-            }
-            return status;
-        } catch (const parse_incomplete_exception &) {
-            checkpoint.restore();
-            throw;
-        }
+        const auto [majorType, additionalInfo] = read_initial_byte();
+        return decode(value, majorType, additionalInfo);
     }
 
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
@@ -1304,26 +1263,13 @@ template <typename T> struct cbor_indefinite_decoder {
     }
 
     template <typename U> constexpr status_code decode(as_indefinite<U> value) {
-        auto                                                                             &dec = detail::underlying<T>(this);
-        if constexpr (!IsContiguous<typename T::input_buffer_type>) {
-            dec.reader_.sync(dec.data_);
-        }
-        detail::read_checkpoint<typename T::input_buffer_type, IsContiguous<typename T::input_buffer_type>> checkpoint{dec.reader_};
+        auto &dec = detail::underlying<T>(this);
         if (dec.reader_.empty(dec.data_)) {
             return status_code::incomplete;
         }
 
-        try {
-            const auto [major, additionalInfo] = dec.read_initial_byte();
-            auto status                        = decode_indefinite_with_major(value, major, additionalInfo);
-            if (status == status_code::incomplete) {
-                checkpoint.restore();
-            }
-            return status;
-        } catch (const parse_incomplete_exception &) {
-            checkpoint.restore();
-            throw;
-        }
+        const auto [major, additionalInfo] = dec.read_initial_byte();
+        return decode_indefinite_with_major(value, major, additionalInfo);
     }
 
     template <typename U> constexpr status_code decode(as_indefinite<U> value, major_type major, byte additionalInfo) {

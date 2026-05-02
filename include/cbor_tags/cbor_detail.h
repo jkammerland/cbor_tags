@@ -126,10 +126,6 @@ template <typename T> struct reader<T, false> {
     size_type current_offset_{0};
     constexpr reader(const T &container) : position_(container.cbegin()) {}
 
-    constexpr void sync(const T &container) {
-        position_ = std::next(container.cbegin(), static_cast<std::ptrdiff_t>(current_offset_));
-    }
-
     // Does not have random access so need to use iterator
     constexpr bool empty(const T &container) const noexcept { return position_ == container.cend(); }
     constexpr bool empty(const T &container, size_type offset) const noexcept { return (current_offset_ + offset) >= container.size(); }

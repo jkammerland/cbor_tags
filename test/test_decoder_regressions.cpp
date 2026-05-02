@@ -1,13 +1,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
-#include <iterator>
 #include <limits>
 #include <map>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <doctest/doctest.h>
@@ -21,90 +18,10 @@ namespace {
 consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument) {
     return argument != std::numeric_limits<std::uint64_t>::max();
 }
-
-class invalidating_byte_buffer {
-public:
-    using value_type = std::byte;
-    using size_type  = std::vector<std::byte>::size_type;
-
-    class const_iterator {
-    public:
-        using iterator_concept  = std::bidirectional_iterator_tag;
-        using iterator_category = std::bidirectional_iterator_tag;
-        using value_type        = std::byte;
-        using difference_type   = std::ptrdiff_t;
-        using reference         = const std::byte &;
-
-        const_iterator() = default;
-        const_iterator(const invalidating_byte_buffer *owner, size_type index, std::size_t generation)
-            : owner_(owner), index_(index), generation_(generation) {}
-
-        reference operator*() const noexcept {
-            if (generation_ != owner_->generation_ || index_ >= owner_->data_.size()) {
-                return owner_->poison_;
-            }
-            return owner_->data_[index_];
-        }
-
-        const_iterator &operator++() noexcept {
-            ++index_;
-            return *this;
-        }
-
-        const_iterator operator++(int) noexcept {
-            auto copy = *this;
-            ++(*this);
-            return copy;
-        }
-
-        const_iterator &operator--() noexcept {
-            --index_;
-            return *this;
-        }
-
-        const_iterator operator--(int) noexcept {
-            auto copy = *this;
-            --(*this);
-            return copy;
-        }
-
-        friend bool operator==(const const_iterator &lhs, const const_iterator &rhs) noexcept {
-            return lhs.owner_ == rhs.owner_ && lhs.index_ == rhs.index_;
-        }
-
-    private:
-        const invalidating_byte_buffer *owner_{};
-        size_type                       index_{};
-        std::size_t                     generation_{};
-    };
-
-    using iterator = const_iterator;
-
-    invalidating_byte_buffer(std::initializer_list<std::byte> bytes) : data_(bytes) {}
-
-    size_type size() const noexcept { return data_.size(); }
-
-    void push_back(std::byte value) {
-        data_.push_back(value);
-        ++generation_;
-    }
-
-    const_iterator begin() const noexcept { return cbegin(); }
-    const_iterator end() const noexcept { return cend(); }
-    const_iterator cbegin() const noexcept { return {this, 0, generation_}; }
-    const_iterator cend() const noexcept { return {this, data_.size(), generation_}; }
-
-private:
-    std::vector<std::byte> data_;
-    std::byte              poison_{0xFF};
-    std::size_t            generation_{};
-};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
 static_assert(!negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max()));
-static_assert(ValidCborBuffer<invalidating_byte_buffer>);
-static_assert(!IsContiguous<invalidating_byte_buffer>);
 
 TEST_CASE("decoder should reject unsigned integer overflow") {
     std::vector<std::byte> buffer;
@@ -342,7 +259,7 @@ TEST_CASE("decoder should accept empty byte strings for basic_string_view at end
     CHECK(decoded.empty());
 }
 
-TEST_CASE("decoder should allow retry after incomplete byte-string view") {
+TEST_CASE("decoder should report incomplete byte-string view without retry contract") {
     // bstr(2): 0x42, but only 1 byte payload initially
     std::vector<std::byte> buffer{std::byte{0x42}, std::byte{0x01}};
 
@@ -353,17 +270,9 @@ TEST_CASE("decoder should allow retry after incomplete byte-string view") {
 
     CHECK_FALSE_MESSAGE(result, "Truncated byte-string view should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-
-    buffer.push_back(std::byte{0x02});
-    auto retry = dec(decoded);
-
-    CHECK_MESSAGE(retry, "Decoder should allow retry after incomplete and consume the full payload.");
-    CHECK_EQ(decoded.size(), 2);
-    CHECK_EQ(decoded[0], std::byte{0x01});
-    CHECK_EQ(decoded[1], std::byte{0x02});
 }
 
-TEST_CASE("decoder should allow retry after incomplete indefinite array") {
+TEST_CASE("decoder should report incomplete indefinite array without retry contract") {
     std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x01}, std::byte{0x02}};
 
     auto dec = make_decoder(buffer);
@@ -375,15 +284,9 @@ TEST_CASE("decoder should allow retry after incomplete indefinite array") {
     CHECK_EQ(result.error(), status_code::incomplete);
     CHECK_EQ(decoded.size(), 1);
     CHECK_EQ(decoded[0], 99);
-
-    buffer.push_back(std::byte{0xFF});
-    auto retry = dec(decoded);
-
-    CHECK_MESSAGE(retry, "Decoder should allow retry after incomplete indefinite array.");
-    CHECK_EQ(decoded, std::vector<int>{1, 2});
 }
 
-TEST_CASE("decoder should allow retry after incomplete indefinite bstr") {
+TEST_CASE("decoder should report incomplete indefinite bstr without retry contract") {
     std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}};
 
     auto dec = make_decoder(buffer);
@@ -395,72 +298,53 @@ TEST_CASE("decoder should allow retry after incomplete indefinite bstr") {
     CHECK_EQ(result.error(), status_code::incomplete);
     CHECK_EQ(decoded.size(), 1);
     CHECK_EQ(decoded[0], std::byte{0xCC});
-
-    buffer.push_back(std::byte{0xFF});
-    auto retry = dec(decoded);
-
-    CHECK_MESSAGE(retry, "Decoder should allow retry after incomplete indefinite bstr.");
-    REQUIRE_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0xAA});
 }
 
-TEST_CASE("decoder should retry non-contiguous definite byte string after buffer growth") {
-    invalidating_byte_buffer buffer{std::byte{0x42}, std::byte{0x01}};
+TEST_CASE("decoder should decode complete definite values in one shot") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(std::vector<int>{1, 2, 3}, std::map<int, int>{{1, 2}}, std::string{"ok"}));
 
     auto dec = make_decoder(buffer);
 
-    std::vector<std::byte> decoded{std::byte{0xCC}};
-    auto                   result = dec(decoded);
+    std::vector<int>  values;
+    std::map<int, int> mapping;
+    std::string       label;
+    auto              result = dec(values, mapping, label);
 
-    CHECK_FALSE_MESSAGE(result, "Truncated non-contiguous bstr should return incomplete.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded, std::vector<std::byte>{std::byte{0xCC}});
-
-    buffer.push_back(std::byte{0x02});
-    auto retry = dec(decoded);
-
-    REQUIRE_MESSAGE(retry, "Retry should rebuild the non-contiguous cursor after buffer growth.");
-    CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}}));
+    REQUIRE_MESSAGE(result, "Complete definite values should decode through the one-shot path.");
+    CHECK_EQ(values, std::vector<int>{1, 2, 3});
+    CHECK_EQ(mapping, (std::map<int, int>{{1, 2}}));
+    CHECK_EQ(label, "ok");
 }
 
-TEST_CASE("decoder should retry non-contiguous map after value arrives") {
-    invalidating_byte_buffer buffer{std::byte{0xA1}, std::byte{0x01}};
+TEST_CASE("decoder should decode complete non-contiguous definite and indefinite values in one shot") {
+    std::deque<std::byte> buffer{
+        std::byte{0x82}, std::byte{0x01}, std::byte{0x02},             // array [1, 2]
+        std::byte{0xA1}, std::byte{0x01}, std::byte{0x02},             // map {1: 2}
+        std::byte{0x9F}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite array [3, 4]
+        std::byte{0xBF}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite map {3: 4}
+        std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}, std::byte{0xFF}, // indefinite bstr h'AA'
+        std::byte{0x7F}, std::byte{0x61}, std::byte{'x'}, std::byte{0xFF},  // indefinite tstr "x"
+    };
 
     auto dec = make_decoder(buffer);
 
-    std::map<int, int> decoded;
-    auto               result = dec(decoded);
+    std::vector<int>       definite_values;
+    std::map<int, int>     definite_mapping;
+    std::vector<int>       indefinite_values;
+    std::map<int, int>     indefinite_mapping;
+    std::vector<std::byte> bytes;
+    std::string            text;
+    auto                   result = dec(definite_values, definite_mapping, indefinite_values, indefinite_mapping, bytes, text);
 
-    CHECK_FALSE_MESSAGE(result, "Truncated non-contiguous map should return incomplete.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK(decoded.empty());
-
-    buffer.push_back(std::byte{0x02});
-    auto retry = dec(decoded);
-
-    REQUIRE_MESSAGE(retry, "Retry should restart before the partially consumed map key.");
-    CHECK_EQ(decoded, (std::map<int, int>{{1, 2}}));
-}
-
-TEST_CASE("decoder should retry non-contiguous variant after incomplete payload") {
-    invalidating_byte_buffer buffer{std::byte{0x82}, std::byte{0x01}};
-
-    auto dec = make_decoder(buffer);
-
-    std::variant<std::vector<int>, std::string> decoded{std::string{"old"}};
-    auto                                        result = dec(decoded);
-
-    CHECK_FALSE_MESSAGE(result, "Truncated variant payload should return incomplete.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-    REQUIRE(std::holds_alternative<std::string>(decoded));
-    CHECK_EQ(std::get<std::string>(decoded), "old");
-
-    buffer.push_back(std::byte{0x02});
-    auto retry = dec(decoded);
-
-    REQUIRE_MESSAGE(retry, "Retry should rebuild the cursor before variant dispatch.");
-    REQUIRE(std::holds_alternative<std::vector<int>>(decoded));
-    CHECK_EQ(std::get<std::vector<int>>(decoded), (std::vector<int>{1, 2}));
+    REQUIRE_MESSAGE(result, "Complete non-contiguous definite and indefinite values should decode in one shot.");
+    CHECK_EQ(definite_values, std::vector<int>{1, 2});
+    CHECK_EQ(definite_mapping, (std::map<int, int>{{1, 2}}));
+    CHECK_EQ(indefinite_values, std::vector<int>{3, 4});
+    CHECK_EQ(indefinite_mapping, (std::map<int, int>{{3, 4}}));
+    CHECK_EQ(bytes, std::vector<std::byte>{std::byte{0xAA}});
+    CHECK_EQ(text, "x");
 }
 
 TEST_CASE("decoder should validate as_text_any length against available bytes") {
