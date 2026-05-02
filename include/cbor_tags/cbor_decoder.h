@@ -47,6 +47,37 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
         static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
 }
+
+template <typename T>
+concept OrderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
+    typename T::key_compare;
+    target.key_comp();
+    target.get_allocator();
+    T{target.key_comp(), target.get_allocator()};
+    requires std::is_move_assignable_v<typename T::key_compare>;
+};
+
+template <typename T>
+concept UnorderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
+    typename T::hasher;
+    typename T::key_equal;
+    target.hash_function();
+    target.key_eq();
+    target.get_allocator();
+    T{typename T::size_type{}, target.hash_function(), target.key_eq(), target.get_allocator()};
+    requires std::is_move_assignable_v<typename T::hasher>;
+    requires std::is_move_assignable_v<typename T::key_equal>;
+};
+
+template <typename T>
+concept AllocatorStagedDecodeTarget = (!IsMap<T>) && requires(const T &target) {
+    target.get_allocator();
+    T{target.get_allocator()};
+    requires std::is_move_assignable_v<T>;
+};
+
+template <typename T>
+concept DefaultStagedDecodeTarget = (!IsMap<T>) && std::is_default_constructible_v<T> && std::is_move_assignable_v<T>;
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -72,12 +103,39 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     template <typename T, typename F> constexpr status_code decode_into_temp(T &out, F &&fn) {
-        T    temp{};
-        auto status = fn(temp);
-        if (status == status_code::success) {
-            out = std::move(temp);
+        if constexpr (detail::OrderedMapStagedDecodeTarget<T>) {
+            T    temp(out.key_comp(), out.get_allocator());
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else if constexpr (detail::UnorderedMapStagedDecodeTarget<T>) {
+            T    temp(typename T::size_type{}, out.hash_function(), out.key_eq(), out.get_allocator());
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else if constexpr (detail::AllocatorStagedDecodeTarget<T>) {
+            T    temp(out.get_allocator());
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else if constexpr (detail::DefaultStagedDecodeTarget<T>) {
+            T    temp{};
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else {
+            (void)out;
+            (void)fn;
+            return status_code::error;
         }
-        return status;
     }
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {

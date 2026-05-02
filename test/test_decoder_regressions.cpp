@@ -3,8 +3,10 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <doctest/doctest.h>
@@ -18,10 +20,57 @@ namespace {
 consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument) {
     return argument != std::numeric_limits<std::uint64_t>::max();
 }
+
+struct NonDefaultComparator {
+    int tag;
+
+    explicit constexpr NonDefaultComparator(int tag_) : tag(tag_) {}
+    NonDefaultComparator() = delete;
+
+    constexpr bool operator()(int lhs, int rhs) const { return lhs < rhs; }
+};
+
+struct NonAssignableComparator {
+    int tag;
+
+    explicit constexpr NonAssignableComparator(int tag_) : tag(tag_) {}
+    NonAssignableComparator() = delete;
+    constexpr NonAssignableComparator(const NonAssignableComparator &) = default;
+    constexpr NonAssignableComparator(NonAssignableComparator &&) = default;
+    constexpr NonAssignableComparator &operator=(const NonAssignableComparator &) = delete;
+    constexpr NonAssignableComparator &operator=(NonAssignableComparator &&) = delete;
+
+    constexpr bool operator()(int lhs, int rhs) const { return lhs < rhs; }
+};
+
+template <typename T> struct NonDefaultAllocator {
+    using value_type = T;
+
+    int tag;
+
+    explicit constexpr NonDefaultAllocator(int tag_) noexcept : tag(tag_) {}
+    NonDefaultAllocator() = delete;
+
+    template <typename U>
+    constexpr NonDefaultAllocator(const NonDefaultAllocator<U> &other) noexcept : tag(other.tag) {}
+
+    [[nodiscard]] constexpr T *allocate(std::size_t count) { return std::allocator<T>{}.allocate(count); }
+
+    constexpr void deallocate(T *ptr, std::size_t count) noexcept { std::allocator<T>{}.deallocate(ptr, count); }
+
+    template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept {
+        return tag == other.tag;
+    }
+};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
 static_assert(!negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max()));
+static_assert(!std::is_default_constructible_v<NonDefaultComparator>);
+static_assert(std::is_move_assignable_v<NonDefaultComparator>);
+static_assert(!std::is_default_constructible_v<NonAssignableComparator>);
+static_assert(!std::is_move_assignable_v<NonAssignableComparator>);
+static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
 
 TEST_CASE("decoder should reject unsigned integer overflow") {
     std::vector<std::byte> buffer;
@@ -345,6 +394,61 @@ TEST_CASE("decoder should decode complete non-contiguous definite and indefinite
     CHECK_EQ(indefinite_mapping, (std::map<int, int>{{3, 4}}));
     CHECK_EQ(bytes, std::vector<std::byte>{std::byte{0xAA}});
     CHECK_EQ(text, "x");
+}
+
+TEST_CASE("decoder should decode definite containers without requiring default-staged targets") {
+    using NonDefaultMap    = std::map<int, int, NonDefaultComparator>;
+    using NonAssignableMap = std::map<int, int, NonAssignableComparator>;
+    using NonDefaultVector = std::vector<int, NonDefaultAllocator<int>>;
+
+    std::vector<std::byte> buffer{
+        std::byte{0xA2}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, // map {1: 2, 3: 4}
+        std::byte{0xA1}, std::byte{0x05}, std::byte{0x06},                                  // map {5: 6}
+        std::byte{0x82}, std::byte{0x07}, std::byte{0x08},                                  // array [7, 8]
+    };
+
+    auto dec = make_decoder(buffer);
+
+    NonDefaultMap    non_default_map{NonDefaultComparator{1}};
+    NonAssignableMap non_assignable_map{NonAssignableComparator{2}};
+    NonDefaultVector non_default_vector{NonDefaultAllocator<int>{3}};
+    auto             result = dec(non_default_map, non_assignable_map, non_default_vector);
+
+    REQUIRE_MESSAGE(result, "Definite decode must not instantiate indefinite staging requirements.");
+    CHECK_EQ(non_default_map.size(), 2);
+    CHECK_EQ(non_default_map[1], 2);
+    CHECK_EQ(non_default_map[3], 4);
+    CHECK_EQ(non_assignable_map.size(), 1);
+    CHECK_EQ(non_assignable_map[5], 6);
+    CHECK_EQ(non_default_vector.size(), 2);
+    CHECK_EQ(non_default_vector[0], 7);
+    CHECK_EQ(non_default_vector[1], 8);
+    CHECK_EQ(non_default_vector.get_allocator().tag, 3);
+}
+
+TEST_CASE("decoder should stage indefinite containers with target allocator and comparator") {
+    using NonDefaultMap    = std::map<int, int, NonDefaultComparator>;
+    using NonDefaultVector = std::vector<int, NonDefaultAllocator<int>>;
+
+    std::vector<std::byte> buffer{
+        std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}, // indefinite map {1: 2}
+        std::byte{0x9F}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite array [3, 4]
+    };
+
+    auto dec = make_decoder(buffer);
+
+    NonDefaultMap    decoded_map{NonDefaultComparator{4}};
+    NonDefaultVector decoded_vector{NonDefaultAllocator<int>{5}};
+    auto             result = dec(decoded_map, decoded_vector);
+
+    REQUIRE_MESSAGE(result, "Indefinite staging should preserve target construction state when available.");
+    CHECK_EQ(decoded_map.size(), 1);
+    CHECK_EQ(decoded_map[1], 2);
+    CHECK_EQ(decoded_map.key_comp().tag, 4);
+    CHECK_EQ(decoded_vector.size(), 2);
+    CHECK_EQ(decoded_vector[0], 3);
+    CHECK_EQ(decoded_vector[1], 4);
+    CHECK_EQ(decoded_vector.get_allocator().tag, 5);
 }
 
 TEST_CASE("decoder should validate as_text_any length against available bytes") {
