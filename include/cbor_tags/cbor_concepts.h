@@ -30,11 +30,21 @@ concept IsOptions = requires(T) {
 };
 
 template <typename T>
-concept ValidCborBuffer = requires(T) {
-    std::is_convertible_v<typename T::value_type, std::byte>;
-    std::is_convertible_v<typename T::size_type, std::size_t>;
-    requires std::input_or_output_iterator<typename T::iterator>;
-} && (std::ranges::contiguous_range<T> || std::ranges::bidirectional_range<T>);
+concept IsCborBufferByte =
+    std::same_as<std::remove_cvref_t<T>, std::byte> ||
+    (std::integral<std::remove_cvref_t<T>> && sizeof(std::remove_cvref_t<T>) == 1 &&
+     !std::same_as<std::remove_cvref_t<T>, bool>);
+
+template <typename T>
+concept ValidCborBuffer =
+    requires {
+        typename std::remove_cvref_t<T>::value_type;
+        typename std::remove_cvref_t<T>::size_type;
+        typename std::remove_cvref_t<T>::iterator;
+    } && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
+    std::convertible_to<typename std::remove_cvref_t<T>::size_type, std::size_t> &&
+    std::input_or_output_iterator<typename std::remove_cvref_t<T>::iterator> &&
+    (std::ranges::contiguous_range<std::remove_cvref_t<T>> || std::ranges::bidirectional_range<std::remove_cvref_t<T>>);
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {

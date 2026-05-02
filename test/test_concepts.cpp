@@ -440,13 +440,22 @@ TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, 
     // CHECK(!wrapper(static_cast<T>(3), var1{}));
 }
 
-TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, unsigned char) {
+TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, signed char, unsigned char) {
     CBOR_TAGS_TEST_LOG("Testing concept with T: {}\n", nameof::nameof_type<T>());
     CHECK(cbor::tags::ValidCborBuffer<std::array<T, 5>>);
     CHECK(cbor::tags::ValidCborBuffer<std::vector<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::list<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::deque<T>>);
     CHECK(!cbor::tags::ValidCborBuffer<std::forward_list<T>>);
+}
+
+TEST_CASE("CBOR buffer concept rejects non-byte storage") {
+    static_assert(!cbor::tags::ValidCborBuffer<std::vector<int>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::array<std::uint16_t, 5>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::deque<float>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::list<double>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::vector<bool>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::array<bool, 5>>);
 }
 
 TEST_CASE("Contiguous range concept") {
