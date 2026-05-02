@@ -20,6 +20,15 @@
 
 using namespace cbor::tags;
 
+namespace {
+consteval bool negative_wrapper_value_is_representable(std::uint64_t value) {
+    return value != 0;
+}
+} // namespace
+
+static_assert(negative_wrapper_value_is_representable(1));
+static_assert(!negative_wrapper_value_is_representable(0));
+
 TEST_CASE_TEMPLATE("CBOR Encoder", T, std::vector<std::byte>, std::deque<std::byte>, std::array<std::byte, 1024>) {
     auto data = T{};
     auto enc  = make_encoder(data);
@@ -52,6 +61,16 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
         CHECK_EQ(to_hex(std::span(data.data(), sv.size() + 1)), "6c48656c6c6f20776f726c6421");
         CHECK_EQ(std::string_view(reinterpret_cast<const char *>(data.data() + 1), 12), sv);
     }
+}
+
+TEST_CASE("CBOR Encoder documents zero negative wrapper edge behavior") {
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+
+    auto result = enc(negative{0});
+
+    REQUIRE(result);
+    CHECK_EQ(to_hex(data), "3bffffffffffffffff");
 }
 
 TEST_CASE("CBOR Encoder on deque") {

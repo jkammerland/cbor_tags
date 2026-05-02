@@ -13,6 +13,15 @@
 using namespace cbor::tags;
 using namespace std::string_view_literals;
 
+namespace {
+consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument) {
+    return argument != std::numeric_limits<std::uint64_t>::max();
+}
+} // namespace
+
+static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
+static_assert(!negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max()));
+
 TEST_CASE("decoder should reject unsigned integer overflow") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -94,6 +103,54 @@ TEST_CASE("decoder should preserve cbor integer sign") {
     REQUIRE(result);
     CHECK(decoded.is_negative);
     CHECK_EQ(decoded.value, 1);
+}
+
+TEST_CASE("decoder should document max negative wrapper edge behavior") {
+    std::vector<std::byte> buffer{std::byte{0x3B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
+                                  std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+
+    {
+        auto    dec = make_decoder(buffer);
+        integer decoded{0};
+        auto    result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK(decoded.is_negative);
+        CHECK_EQ(decoded.value, 0);
+    }
+
+    {
+        auto     dec = make_decoder(buffer);
+        negative decoded{1};
+        auto     result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.value, 0);
+    }
+}
+
+TEST_CASE("decoder should accept largest representable negative wrapper value") {
+    std::vector<std::byte> buffer{std::byte{0x3B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
+                                  std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFE}};
+
+    {
+        auto    dec = make_decoder(buffer);
+        integer decoded{0};
+        auto    result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK(decoded.is_negative);
+        CHECK_EQ(decoded.value, std::numeric_limits<std::uint64_t>::max());
+    }
+
+    {
+        auto     dec = make_decoder(buffer);
+        negative decoded{1};
+        auto     result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.value, std::numeric_limits<std::uint64_t>::max());
+    }
 }
 
 TEST_CASE("decoder should accept empty byte strings") {

@@ -58,7 +58,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 
 - Core text string decode preserves the encoded bytes and does not validate UTF-8. `status_code::invalid_utf8_sequence` is reserved for a future validation path and is not emitted by default decode.
 - Enum decode validates that the CBOR integer is representable by the enum underlying type. It does not reject unnamed but representable enumerator values; applications that treat an enum as a closed set should validate that policy after decode or in a custom decode overload.
-- `negative` and negative `integer` store the CBOR negative argument plus one in a `std::uint64_t` magnitude. The CBOR edge value with major type 1 and argument `UINT64_MAX` is outside that exact wrapper range and is not checked by default decode.
+- `negative` and negative `integer` store the CBOR negative argument plus one in a `std::uint64_t` magnitude. The CBOR edge value with major type 1 and argument `UINT64_MAX` is outside that exact wrapper range. Default encode/decode intentionally does not add runtime checks for this edge: decoding it wraps the stored magnitude to `0`, and encoding `negative{0}` emits it. Use compile-time validation when the value is known statically.
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
