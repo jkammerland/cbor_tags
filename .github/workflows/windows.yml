@@ -44,12 +44,13 @@ jobs:
             }
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Setup CMake
       uses: lukka/get-cmake@latest
       with:
         cmakeVersion: '3.31.5'
+        useCloudCache: false
 
     - name: Install LLVM and Clang (Windows Clang-CL)
       if: matrix.config.cc == 'clang-cl'
