@@ -1,4 +1,4 @@
-name: Windows Tests (MSVC-latest, Clang-CL 15+)
+name: Windows Tests (MSVC, Clang-CL)
 
 on:
   push:
@@ -16,31 +16,11 @@ jobs:
         config:
           - {
               name: "Windows MSVC",
-              cc: "cl",
-              cxx: "cl",
-              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
-            }
-          # Windows Clang-CL configs
-          - {
-              name: "Windows Clang-CL 15",
-              cc: "clang-cl",
-              cxx: "clang-cl",
-              clang_version: "15",
-              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+              toolset: ""
             }
           - {
-              name: "Windows Clang-CL 16",
-              cc: "clang-cl",
-              cxx: "clang-cl",
-              clang_version: "16",
-              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
-            }
-          - {
-              name: "Windows Clang-CL 17",
-              cc: "clang-cl",
-              cxx: "clang-cl",
-              clang_version: "17",
-              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+              name: "Windows Clang-CL",
+              toolset: "ClangCL"
             }
 
     steps:
@@ -52,40 +32,19 @@ jobs:
         cmakeVersion: '3.31.5'
         useCloudCache: false
 
-    - name: Install LLVM and Clang (Windows Clang-CL)
-      if: matrix.config.cc == 'clang-cl'
+    - name: Configure CMake (Windows)
       shell: pwsh
       run: |
-        $versions = @{
-          "15" = "15.0.7"
-          "16" = "16.0.6"
-          "17" = "17.0.6"
-        }
-        $version = $versions["${{ matrix.config.clang_version }}"]
-        if (-not $version) {
-          throw "Unsupported LLVM major version: ${{ matrix.config.clang_version }}"
-        }
-
-        $prefix = Join-Path $env:RUNNER_TEMP "llvm-$version"
-        $installer = Join-Path $env:RUNNER_TEMP "LLVM-$version-win64.exe"
-        $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-
-        Invoke-WebRequest -Uri $url -OutFile $installer
-        Start-Process -FilePath $installer -ArgumentList @("/S", "/D=$prefix") -Wait
-
-        "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-        "LLVM_DIR=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-    - name: Configure CMake (Windows)
-      shell: cmd
-      run: |
-        if "${{ matrix.config.cc }}" == "clang-cl" (
-          call "${{ matrix.config.environment_script }}"
-          set "PATH=%LLVM_DIR%\bin;%PATH%"
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON -DCMAKE_C_COMPILER=%LLVM_DIR%\bin\clang-cl.exe -DCMAKE_CXX_COMPILER=%LLVM_DIR%\bin\clang-cl.exe
-        ) else (
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON
+        $arguments = @(
+          "-B", "build",
+          "-G", "Visual Studio 17 2022",
+          "-A", "x64",
+          "-DCBOR_TAGS_BUILD_TESTS=ON"
         )
+        if ("${{ matrix.config.toolset }}" -ne "") {
+          $arguments += @("-T", "${{ matrix.config.toolset }}")
+        }
+        cmake @arguments
 
     - name: Build
       shell: bash
