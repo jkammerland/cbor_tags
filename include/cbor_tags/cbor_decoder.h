@@ -110,6 +110,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
+            if constexpr (!IsContiguous<InputBuffer>) {
+                reader_.sync(data_);
+            }
             status_collector<self_t> collect_status{*this};
 
             auto success = (collect_status(std::forward<T>(args)) && ...);
@@ -1302,6 +1305,9 @@ template <typename T> struct cbor_indefinite_decoder {
 
     template <typename U> constexpr status_code decode(as_indefinite<U> value) {
         auto                                                                             &dec = detail::underlying<T>(this);
+        if constexpr (!IsContiguous<typename T::input_buffer_type>) {
+            dec.reader_.sync(dec.data_);
+        }
         detail::read_checkpoint<typename T::input_buffer_type, IsContiguous<typename T::input_buffer_type>> checkpoint{dec.reader_};
         if (dec.reader_.empty(dec.data_)) {
             return status_code::incomplete;

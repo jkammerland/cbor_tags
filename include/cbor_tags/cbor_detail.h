@@ -3,8 +3,10 @@
 #include "cbor_tags/cbor_concepts.h"
 
 #include <concepts>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <ranges>
 #include <stdexcept>
 #include <type_traits>
@@ -123,6 +125,10 @@ template <typename T> struct reader<T, false> {
     iterator  position_;
     size_type current_offset_{0};
     constexpr reader(const T &container) : position_(container.cbegin()) {}
+
+    constexpr void sync(const T &container) {
+        position_ = std::next(container.cbegin(), static_cast<std::ptrdiff_t>(current_offset_));
+    }
 
     // Does not have random access so need to use iterator
     constexpr bool empty(const T &container) const noexcept { return position_ == container.cend(); }
