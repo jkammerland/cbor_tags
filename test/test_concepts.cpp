@@ -45,7 +45,8 @@ TEST_CASE("Test IsUnsigned concept") {
 }
 
 TEST_CASE("Test IsSigned concept") {
-    static_assert(IsSigned<char>);
+    static_assert(IsSigned<char> == std::is_signed_v<char>);
+    static_assert(IsSigned<signed char>);
     static_assert(IsSigned<int>);
     static_assert(IsSigned<std::int8_t>);
     static_assert(IsSigned<std::int16_t>);

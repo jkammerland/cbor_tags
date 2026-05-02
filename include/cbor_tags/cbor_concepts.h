@@ -187,12 +187,14 @@ template <typename T>
 concept IsIndefiniteWrapper = !std::is_same_v<typename indefinite_value_type<std::remove_cvref_t<T>>::type, void>;
 
 template <typename T>
+concept IsTextChar = std::is_integral_v<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1 &&
+                     (std::same_as<std::remove_cv_t<T>, char> || std::is_signed_v<std::remove_cv_t<T>>);
+
+template <typename T>
 concept IsTextStringBase =
     IsTextHeader<std::remove_cvref_t<T>> || IsConstTextView<std::remove_cvref_t<T>> ||
     requires(std::remove_cvref_t<T> t) {
-        requires std::is_signed_v<typename std::remove_cvref_t<T>::value_type>;
-        requires std::is_integral_v<typename std::remove_cvref_t<T>::value_type>;
-        requires sizeof(typename std::remove_cvref_t<T>::value_type) == 1;
+        requires IsTextChar<typename std::remove_cvref_t<T>::value_type>;
         { t.substr(0, 1) };
     };
 
