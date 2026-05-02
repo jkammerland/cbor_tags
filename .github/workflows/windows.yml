@@ -44,27 +44,45 @@ jobs:
             }
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6.0.2
 
     - name: Setup CMake
-      uses: lukka/get-cmake@latest
+      uses: lukka/get-cmake@v4.3.2
       with:
         cmakeVersion: '3.31.5'
         useCloudCache: false
 
     - name: Install LLVM and Clang (Windows Clang-CL)
       if: matrix.config.cc == 'clang-cl'
-      uses: KyleMayes/install-llvm-action@v1
-      with:
-        version: ${{ matrix.config.clang_version }}
-        directory: ${{ runner.temp }}/llvm
+      shell: pwsh
+      run: |
+        $versions = @{
+          "15" = "15.0.7"
+          "16" = "16.0.6"
+          "17" = "17.0.6"
+        }
+        $version = $versions["${{ matrix.config.clang_version }}"]
+        if (-not $version) {
+          throw "Unsupported LLVM major version: ${{ matrix.config.clang_version }}"
+        }
+
+        $prefix = Join-Path $env:RUNNER_TEMP "llvm-$version"
+        $installer = Join-Path $env:RUNNER_TEMP "LLVM-$version-win64.exe"
+        $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
+
+        Invoke-WebRequest -Uri $url -OutFile $installer
+        Start-Process -FilePath $installer -ArgumentList @("/S", "/D=$prefix") -Wait
+
+        "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        "LLVM_DIR=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append
 
     - name: Configure CMake (Windows)
       shell: cmd
       run: |
         if "${{ matrix.config.cc }}" == "clang-cl" (
           call "${{ matrix.config.environment_script }}"
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL -DCBOR_TAGS_BUILD_TESTS=ON
+          set "PATH=%LLVM_DIR%\bin;%PATH%"
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON -DCMAKE_C_COMPILER=%LLVM_DIR%\bin\clang-cl.exe -DCMAKE_CXX_COMPILER=%LLVM_DIR%\bin\clang-cl.exe
         ) else (
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON
         )

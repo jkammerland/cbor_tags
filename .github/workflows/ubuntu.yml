@@ -78,10 +78,10 @@ jobs:
             }
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6.0.2
 
     - name: Setup CMake
-      uses: lukka/get-cmake@latest
+      uses: lukka/get-cmake@v4.3.2
       with:
         cmakeVersion: '3.31.5'
 
@@ -124,7 +124,7 @@ jobs:
         gcc: [15, 16]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6.0.2
 
     - name: Build and test in Ubuntu 26.04 container
       shell: bash
