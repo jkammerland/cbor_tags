@@ -41,10 +41,10 @@ way:
 - CDDL docs now point at `cbor_tags/extensions/cbor_visualization.h`.
 - Core text decode is documented as byte-preserving and not UTF-8-validating.
 
-Retry-after-incomplete semantics are not a finished design and are intentionally
-not treated as completed by this story. Remaining retry behavior, including
-rollback of partially decoded owning containers and iterator stability across
-caller mutation, should be handled by a separate design story.
+Retry-after-incomplete semantics are not part of the primary decoder contract.
+They are intentionally moved to `doc/user_story_resumable_codec.md`, where a
+separate resumable decode/encode entry point can own checkpoint state, rollback
+policy, and iterator invalidation behavior.
 
 ## In Scope
 
@@ -55,8 +55,8 @@ caller mutation, should be handled by a separate design story.
 
 ## Out Of Scope
 
-- New streaming/coroutine APIs.
-- Full retry-after-incomplete semantics.
+- New resumable streaming/coroutine APIs.
+- Retry-after-incomplete semantics for the primary decoder path.
 - Performance-only refactors.
 - Broader redesign of tags, variants, or reflection.
 
@@ -103,6 +103,6 @@ claim that broader retry-after-incomplete semantics are complete.
 
 ## Follow-Up Candidates
 
-- Define retry-after-incomplete semantics explicitly before adding more retry behavior.
+- Implement `doc/user_story_resumable_codec.md` before adding retry/resume behavior.
 - Decide whether diagnostic visualization should support bidirectional non-contiguous buffers or be constrained to contiguous/random-access buffers.
 - Align enum status text with the representability-based enum policy.
