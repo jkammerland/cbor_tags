@@ -1,8 +1,8 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
+[![macOS CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
+[![Ubuntu CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
+[![Windows CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
 
 This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. Some good examples of different binary formats can be found here [rfc8949-name-conciseness-on-the-wire](https://www.rfc-editor.org/rfc/rfc8949.html#name-conciseness-on-the-wire). Also obligatory [xkcd/927](https://xkcd.com/927/). 
 
@@ -718,7 +718,7 @@ See the docs for more info.
 - tl::expected (required, if not using c++23 std::expected)
 - fmt (optional, but required for cddl)
 - nameof (optional, but required for cddl)
-- C++20 compatible compiler, tested with (GCC 12+, Clang 15+, Clang-CL 15+, MSVC-latest, AppleClang 15+).
+- C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Clang-CL 15-17, MSVC-latest, and AppleClang 16/26.
 - CMake 3.20+.
 
 ## 📦 Installation
