@@ -8,7 +8,11 @@ so that decoding is safer, non-contiguous buffer behavior is well-defined, and t
 
 ## Problem Summary
 
-The recent review pass found several issues that are still open in the current tree:
+This story was created from the review pass before the follow-up branch was
+implemented. It records the intended scope and acceptance criteria for that
+work, not a live list of issues that are still open at HEAD.
+
+At the time the story was written, the review pass found these issues:
 
 - Numeric decode still lacks range validation for signed integers and enums.
 - Non-contiguous decoding still relies on `seek(-1)` and random-access assumptions that are unsafe for forward-only iterators.
@@ -24,6 +28,24 @@ Some previously reported items are already fixed and are intentionally out of sc
 - Fixed-size output buffer overflow on encode.
 - Fixed-size array/span decode length mismatch overflow.
 
+## Current Branch Status
+
+The current branch addresses the original review debt in the intended low-churn
+way:
+
+- Signed and unsigned integer decodes reject values that cannot fit the target type.
+- Enum decode validates representability through the enum underlying type; unnamed but representable values remain accepted by policy.
+- Forward-only non-contiguous CBOR buffers are rejected by the buffer concept.
+- Non-contiguous array/map/tag range-view placeholders were removed from the public variant surface.
+- Range/view lifetime requirements and limitations are documented.
+- CDDL docs now point at `cbor_tags/extensions/cbor_visualization.h`.
+- Core text decode is documented as byte-preserving and not UTF-8-validating.
+
+Retry-after-incomplete semantics are not a finished design and are intentionally
+not treated as completed by this story. Remaining retry behavior, including
+rollback of partially decoded owning containers and iterator stability across
+caller mutation, should be handled by a separate design story.
+
 ## In Scope
 
 - Decoder correctness and safety fixes for remaining open review findings.
@@ -34,10 +56,11 @@ Some previously reported items are already fixed and are intentionally out of sc
 ## Out Of Scope
 
 - New streaming/coroutine APIs.
+- Full retry-after-incomplete semantics.
 - Performance-only refactors.
 - Broader redesign of tags, variants, or reflection.
 
-## Acceptance Criteria
+## Original Acceptance Criteria
 
 1. Signed integer decode fails cleanly on overflow or out-of-range negative values instead of silently truncating or wrapping.
 2. Enum decode rejects values that cannot be represented safely by the underlying type, and behavior for invalid enumerator values is documented.
@@ -68,9 +91,18 @@ Some previously reported items are already fixed and are intentionally out of sc
 - Review source:
   - This story summarizes the local review notes generated during the review pass. Those notes are not required repo artifacts.
 
-## Definition Of Done
+## Original Definition Of Done
+
+This was the completion target for the original review-debt story. It does not
+claim that broader retry-after-incomplete semantics are complete.
 
 - All acceptance criteria are met.
 - `ctest` passes.
 - New tests fail before the fix and pass after it.
 - User-facing docs match actual behavior in the codebase.
+
+## Follow-Up Candidates
+
+- Define retry-after-incomplete semantics explicitly before adding more retry behavior.
+- Decide whether diagnostic visualization should support bidirectional non-contiguous buffers or be constrained to contiguous/random-access buffers.
+- Align enum status text with the representability-based enum policy.
