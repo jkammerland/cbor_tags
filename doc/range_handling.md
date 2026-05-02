@@ -1,7 +1,10 @@
 # Range And View Handling
 
-`cbor_tags` accepts byte buffers whose `value_type` is convertible to `std::byte`
-and whose `size_type` is convertible to `std::size_t`.
+`cbor_tags` accepts byte buffers whose `value_type` is `std::byte` or a
+non-`bool` one-byte integral type, and whose `size_type` is convertible to
+`std::size_t`. Common accepted byte storage types include `std::byte`, `char`,
+`signed char`, `unsigned char`, `std::uint8_t`, and `std::int8_t` when those
+integer aliases are one byte on the target.
 
 Supported CBOR input/output buffers are:
 

@@ -377,7 +377,12 @@
     {
       "name": "build-base",
       "hidden": true,
-      "jobs": 0
+      "jobs": 0,
+      "environment": {
+        "CCACHE_DIR": "${sourceDir}/build/.ccache",
+        "CCACHE_BASEDIR": "${sourceDir}",
+        "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache/tmp"
+      }
     },
     {
       "name": "debug",
@@ -437,28 +442,28 @@
       },
       "jobs": 0
     },
-  {
-    "name": "tidy",
-    "inherits": "build-base",
-    "configurePreset": "tidy",
-    "displayName": "Clang-Tidy Build",
-    "description": "Build with clang-tidy static analysis checks",
-    "targets": [
-      "tidy"
-    ],
-    "jobs": 0
-  },
-  {
-    "name": "tidy-fix",
-    "inherits": "build-base",
-    "configurePreset": "tidy-fix",
-    "displayName": "Clang-Tidy Fix Build",
-    "description": "Build with clang-tidy auto-fixing enabled",
-    "targets": [
-      "tidy-fix"
-    ],
-    "jobs": 0
-  },
+    {
+      "name": "tidy",
+      "inherits": "build-base",
+      "configurePreset": "tidy",
+      "displayName": "Clang-Tidy Build",
+      "description": "Build with clang-tidy static analysis checks",
+      "targets": [
+        "tidy"
+      ],
+      "jobs": 0
+    },
+    {
+      "name": "tidy-fix",
+      "inherits": "build-base",
+      "configurePreset": "tidy-fix",
+      "displayName": "Clang-Tidy Fix Build",
+      "description": "Build with clang-tidy auto-fixing enabled",
+      "targets": [
+        "tidy-fix"
+      ],
+      "jobs": 0
+    },
     {
       "name": "profile",
       "inherits": "build-base",
@@ -616,6 +621,11 @@
       "output": {
         "outputOnFailure": true,
         "verbosity": "default"
+      },
+      "environment": {
+        "CCACHE_DIR": "${sourceDir}/build/.ccache",
+        "CCACHE_BASEDIR": "${sourceDir}",
+        "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache/tmp"
       }
     },
     {
@@ -669,20 +679,6 @@
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       }
-    },
-    {
-      "name": "tidy",
-      "inherits": "test-base",
-      "configurePreset": "tidy",
-      "displayName": "Clang-Tidy Tests",
-      "description": "Run all tests with clang-tidy checks"
-    },
-    {
-      "name": "tidy-fix",
-      "inherits": "test-base",
-      "configurePreset": "tidy-fix",
-      "displayName": "Clang-Tidy Fix Tests",
-      "description": "Run all tests with clang-tidy auto-fixing"
     },
     {
       "name": "profile",
