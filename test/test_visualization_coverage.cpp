@@ -4,10 +4,13 @@
 
 #include <cstddef>
 #include <doctest/doctest.h>
+#include <functional>
 #include <map>
+#include <nameof.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 using namespace cbor::tags;
@@ -61,6 +64,35 @@ TEST_CASE("cddl helpers generate prelude and schemas") {
     CHECK(inline_schema.find("VisualizationInner = (int, tstr)") != std::string::npos);
 }
 
+TEST_CASE("cddl helpers cover tuple and tagged tuple schemas") {
+    std::string tuple_schema;
+    cddl_schema_to<std::tuple<int, std::string>>(tuple_schema, {.row_options = {.format_by_rows = false}});
+    CHECK(tuple_schema.find("int") != std::string::npos);
+    CHECK(tuple_schema.find("tstr") != std::string::npos);
+
+    std::string tagged_tuple_schema;
+    cddl_schema_to<std::tuple<static_tag<7>, int, std::string>>(tagged_tuple_schema, {.row_options = {.format_by_rows = false}});
+    CHECK(tagged_tuple_schema.find("#6.7") != std::string::npos);
+    CHECK(tagged_tuple_schema.find("int") != std::string::npos);
+    CHECK(tagged_tuple_schema.find("tstr") != std::string::npos);
+}
+
+TEST_CASE("cddl context handles duplicate registration, copy, and clear") {
+    detail::CDDLContext context;
+    context.register_type<VisualizationInner>({}, std::ref(context));
+    context.register_type<VisualizationInner>({}, std::ref(context));
+    context.register_type<int>({}, std::ref(context));
+
+    CHECK(context.contains(nameof::nameof_type<VisualizationInner>()));
+    CHECK_EQ(context.definitions.size(), 1);
+
+    detail::CDDLContext copied{context};
+    CHECK(copied.contains(nameof::nameof_type<VisualizationInner>()));
+
+    context.clear();
+    CHECK(context.definitions.empty());
+}
+
 TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and tags") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -75,7 +107,7 @@ TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and
     CHECK(annotation.find("d8") != std::string::npos);
     CHECK(annotation.find("2a") != std::string::npos);
 
-    std::string empty_annotation{"unchanged"};
+    std::string            empty_annotation{"unchanged"};
     std::vector<std::byte> empty;
     buffer_annotate(empty, empty_annotation);
     CHECK_EQ(empty_annotation, "unchanged");
@@ -86,8 +118,9 @@ TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and
 TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools, null, and simple values") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
-    REQUIRE(enc(wrap_as_array{std::map<int, std::string>{{1, "one"}}, make_tag_pair(static_tag<42>{}, std::vector<std::byte>{std::byte{0xAB}}),
-                              float16_t{static_cast<std::uint16_t>(0x3C00)}, float{1.0F}, double{2.0}, true, nullptr, simple{16}}));
+    REQUIRE(
+        enc(wrap_as_array{std::map<int, std::string>{{1, "one"}}, make_tag_pair(static_tag<42>{}, std::vector<std::byte>{std::byte{0xAB}}),
+                          float16_t{static_cast<std::uint16_t>(0x3C00)}, float{1.0F}, double{2.0}, true, nullptr, simple{16}}));
 
     std::string diagnostic;
     buffer_diagnostic(buffer, diagnostic, {.row_options = {.format_by_rows = false}});
@@ -102,4 +135,16 @@ TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools,
     std::string  simple_diagnostic;
     make_diagnostic_visitor(simple_diagnostic, dummy, {})(simple{16});
     CHECK_EQ(simple_diagnostic, "simple");
+}
+
+TEST_CASE("buffer diagnostic rejects requested utf8 validation") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(std::string{"hi"}));
+
+    DiagnosticOptions options;
+    options.check_tstr_utf8 = true;
+
+    std::string diagnostic;
+    CHECK_THROWS_AS(buffer_diagnostic(buffer, diagnostic, options), std::runtime_error);
 }
