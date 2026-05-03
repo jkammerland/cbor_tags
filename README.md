@@ -1,4 +1,4 @@
-# A C++20 CBOR Library with Optional C++26 Reflection
+# A C++20 CBOR Library with Automatic Reflection
 
 [![macOS CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
 [![Ubuntu CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
@@ -583,26 +583,9 @@ struct DynamicTagged {
 ```
 
 ## 🔄 Automatic Reflection
-The public API is the same in both modes: aggregate encoding and decoding use `to_tuple(...)`, and the normal encoder/decoder call operators use it automatically. You usually do not need to call `to_tuple(...)` yourself unless you are integrating with another generic API.
+Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
-### C++26 `std::meta` path
-
-When consuming code is compiled with a compiler that defines `__cpp_impl_reflection >= 202506L`, `cbor_tags` includes `<meta>` and enumerates aggregate members directly with `std::meta`. This path does not use the generated structured-binding ranges, so `CBOR_TAGS_REFLECTION_RANGES` does not limit aggregate member counts in C++26 reflection mode.
-
-Current CI covers this path with GCC 16 in Fedora 44. With GCC's implementation, compile the consuming target with `-std=gnu++26 -freflection`:
-
-```cmake
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(my_target PRIVATE -std=gnu++26 -freflection)
-endif()
-target_link_libraries(my_target PRIVATE cbor::tags)
-```
-
-`CBOR_TAGS_USE_STD_REFLECTION=ON` is a project test option. It verifies GCC reflection support and builds the dedicated smoke test in this repository; it does not add C++26 reflection flags to downstream targets by itself.
-
-### C++20 fallback
-
-For C++20 and compilers without static reflection, the library includes `cbor_reflection_impl.h`, a generated structured-binding implementation:
+The API is the same in both modes:
 
 ```cpp
 struct A42 {
@@ -619,9 +602,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. In fallback mode, the supported aggregate sizes are configured with the CMake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to `"1:24"`. That means each reflected aggregate can have up to 24 members by default, with any amount of nesting as long as each nested aggregate is within the configured range.
-
-The range format is one or more space-separated `start:end` ranges, for example `"1:24 30:50 1000:1000"`. If you need custom ranges, configure with `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` so CMake regenerates `include/cbor_tags/cbor_reflection_impl.h`. The `reflection_module_generator` tool can also be run separately when not using CMake.
+This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. For generated C++20 reflection, `CBOR_TAGS_REFLECTION_RANGES` controls the generated aggregate sizes and defaults to `"1:24"`. Use `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` if you need larger or custom ranges.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -740,8 +721,8 @@ See the docs for more info.
 - tl::expected (required, if not using C++23 `std::expected`)
 - fmt (optional, but required for CDDL)
 - nameof (optional, but required for CDDL)
-- Baseline: C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
-- Optional C++26 static reflection path: currently tested with GCC 16 using `-std=gnu++26 -freflection`. Compilers that do not define `__cpp_impl_reflection >= 202506L` use the generated C++20 fallback.
+- C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
+- Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
 - CMake 3.20+.
 
 ## 📦 Installation
@@ -751,14 +732,13 @@ Standard CMake:
 ```cmake
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CBOR_TAGS_GIT_TAG "master") # or a release tag/commit that contains the features you need
 
 include(FetchContent)
 
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG ${CBOR_TAGS_GIT_TAG}
+  GIT_TAG master # or a release tag/commit that contains the features you need
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -781,18 +761,6 @@ make install
 
 ```cmake
 find_package(cbor_tags REQUIRED)
-target_link_libraries(your_target PRIVATE cbor::tags)
-```
-
-For the optional GCC C++26 reflection path, add the reflection flags to the consuming target:
-
-```cmake
-find_package(cbor_tags REQUIRED)
-
-add_executable(your_target main.cpp)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(your_target PRIVATE -std=gnu++26 -freflection)
-endif()
 target_link_libraries(your_target PRIVATE cbor::tags)
 ```
 
