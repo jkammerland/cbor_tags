@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 project(cbor_tags VERSION 0.11.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_STANDARD 20)
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add option for debug mode
@@ -40,6 +42,39 @@ target_sources(
             "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
 add_library(cbor::tags ALIAS ${PROJECT_NAME})
 
+option(CBOR_TAGS_USE_STD_REFLECTION "Build a GCC C++26 std::meta reflection smoke target" OFF)
+if(CBOR_TAGS_USE_STD_REFLECTION)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    include(CheckCXXSourceCompiles)
+    set(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+    set(_CBOR_TAGS_CMAKE_CXX_STANDARD "${CMAKE_CXX_STANDARD}")
+    set(CMAKE_CXX_STANDARD 26)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -freflection")
+    check_cxx_source_compiles(
+      [=[
+#include <meta>
+#ifndef __cpp_impl_reflection
+#error "__cpp_impl_reflection is not defined"
+#endif
+struct S { int a; };
+static_assert(__cpp_impl_reflection >= 202506L);
+static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
+int main() { return 0; }
+]=]
+      CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
+    set(CMAKE_REQUIRED_FLAGS "${_CBOR_TAGS_CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_CXX_STANDARD "${_CBOR_TAGS_CMAKE_CXX_STANDARD}")
+    unset(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS)
+    unset(_CBOR_TAGS_CMAKE_CXX_STANDARD)
+
+    if(NOT CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
+      message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION requires GCC with C++26 reflection support (-std=gnu++26 -freflection).")
+    endif()
+  else()
+    message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION currently supports GCC's C++26 reflection implementation only.")
+  endif()
+endif()
+
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
 if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
@@ -71,6 +106,12 @@ endif()
 # Link dependencies
 target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
 
+if(CBOR_TAGS_USE_STD_REFLECTION)
+  add_executable(cbor_tags_std_reflection_smoke tools/std_reflection_smoke.cpp)
+  target_link_libraries(cbor_tags_std_reflection_smoke PRIVATE cbor::tags)
+  target_compile_options(cbor_tags_std_reflection_smoke PRIVATE -std=gnu++26 -freflection)
+endif()
+
 # Make ${PROJECT_NAME} depend on the generated header add tools - reflection module generator - makes cbor_reflection_impl.h
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 if(CBOR_TAGS_BUILD_TOOLS)
@@ -92,6 +133,9 @@ if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
   enable_testing()
   add_library(test_util INTERFACE)
   target_include_directories(test_util INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test_util)
+  if(CBOR_TAGS_USE_STD_REFLECTION)
+    add_test(NAME std_reflection_smoke COMMAND cbor_tags_std_reflection_smoke)
+  endif()
 endif()
 
 option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)

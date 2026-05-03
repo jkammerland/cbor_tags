@@ -583,7 +583,9 @@ struct DynamicTagged {
 ```
 
 ## 🔄 Automatic Reflection
- Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
+When C++26 static reflection is enabled, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. With GCC 16 this requires compiling consuming code with `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the dedicated reflection smoke test.
+
+For C++20 and compilers without static reflection, the library falls back to a generated structured-binding implementation:
 
 ```cpp
 struct A42 {
@@ -600,7 +602,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:24". This means a struct can at maximum have 24 members, but it can handle any number of nested structs, as long as they are within the max member requirement too. The format can take multiple space separated ranges, e.g. "1:24 30:50 1000:1000", just make sure it matches your usage. Any changes to this option will trigger a regeneration the header automatically, for cmake targets that depend on cbor_tags. The tool can be run separately if not using cmake in your build process.
+This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. In fallback mode, the supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:24". This means a struct can at maximum have 24 members, but it can handle any number of nested structs, as long as they are within the max member requirement too. The format can take multiple space separated ranges, e.g. "1:24 30:50 1000:1000", just make sure it matches your usage. Any changes to this option will trigger a regeneration the header automatically, for cmake targets that depend on cbor_tags. The tool can be run separately if not using cmake in your build process.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
