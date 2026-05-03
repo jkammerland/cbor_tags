@@ -130,6 +130,7 @@ implemented in this visualization layer.
 ## Documentation
 
 For advanced usage and implementation details, see the header files and test cases. Reference the [CBOR RFC](https://tools.ietf.org/html/rfc8949) and [CDDL spec](https://tools.ietf.org/html/rfc8610) for schema conventions.
+For feature-by-feature standards coverage, see [CDDL Standard Coverage](cddl_standard_coverage.md).
 
 ---
 
