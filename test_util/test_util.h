@@ -74,14 +74,14 @@ inline bool logs_always_enabled() {
 } // namespace cbor::tags::test::detail
 
 #ifndef CBOR_TAGS_TEST_LOG
-#define CBOR_TAGS_TEST_LOG(...)                                                                                           \
-    do {                                                                                                                   \
-        auto _cbor_tags_formatted_message = fmt::format(__VA_ARGS__);                                                      \
-        if (cbor::tags::test::detail::logs_always_enabled()) {                                                             \
-            MESSAGE(_cbor_tags_formatted_message);                                                                         \
-        } else {                                                                                                           \
-            INFO(_cbor_tags_formatted_message);                                                                            \
-        }                                                                                                                  \
+#define CBOR_TAGS_TEST_LOG(...)                                                                                                            \
+    do {                                                                                                                                   \
+        auto _cbor_tags_formatted_message = fmt::format(__VA_ARGS__);                                                                      \
+        if (cbor::tags::test::detail::logs_always_enabled()) {                                                                             \
+            MESSAGE(_cbor_tags_formatted_message);                                                                                         \
+        } else {                                                                                                                           \
+            INFO(_cbor_tags_formatted_message);                                                                                            \
+        }                                                                                                                                  \
     } while (false)
 #endif
 
