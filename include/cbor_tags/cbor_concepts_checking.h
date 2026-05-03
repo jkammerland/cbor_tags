@@ -56,7 +56,9 @@ template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteTy
         // fmt::print("Type: {}, major: {}\n", nameof::nameof_short_type<Type>(), static_cast<int>(m));
 
         // Special case for signed types which can be either positive or negative
-        if constexpr (IsEnum<U>) {
+        if constexpr (IsOptional<U>) {
+            return m == static_cast<ByteType>(major_type::Simple) || is_valid_major<ByteType, typename U::value_type>(m);
+        } else if constexpr (IsEnum<U>) {
             using enum_type = std::underlying_type_t<Type>;
             return is_valid_major<ByteType, enum_type>(m);
         } else if constexpr (IsSigned<Type>) {
@@ -133,8 +135,11 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
         counts_fn_inner(result, tags, simples);
 
         /* FINILIZE THE TAG AND SIMPLE BINS */
-        if (tags.size() > 0 || result[MajorIndex::AnyTagHeader] > 0) {
-            result[MajorIndex::Tag]++; // If any tag has been duplicated, this will be > 1, i.e invalid
+        if (tags.size() > 0) {
+            result[MajorIndex::Tag]++;
+        }
+        if (result[MajorIndex::AnyTagHeader] > 0) {
+            result[MajorIndex::Tag]++;
         }
         if (simples.size() > 0) {
             result[MajorIndex::SimpleAny]    = 1;

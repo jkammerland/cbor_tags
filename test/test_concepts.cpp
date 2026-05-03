@@ -703,8 +703,7 @@ TEST_CASE_TEMPLATE(
                  std::array<int, 5>, std::map<int, std::string>>,
     std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string, std::span<const std::byte>, B2, A2,
                  std::vector<int>, std::map<int, std::string>>,
-    std::variant<int, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, double, float, std::nullptr_t, simple, bool>,
-    std::variant<as_tag_any, static_tag<1>>) {
+    std::variant<int, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, double, float, std::nullptr_t, simple, bool>) {
 
     // Use lambdas to wrap concepts
 
@@ -724,7 +723,7 @@ TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, neg
                    std::variant<std::map<int, std::string>, std::unordered_map<int, double>>, std::variant<double, float, double>,
                    std::variant<float, double, float>, std::variant<bool, std::nullptr_t, bool>, std::variant<simple, int, simple>,
                    std::variant<std::nullptr_t, bool, std::nullptr_t>, std::variant<static_tag<1>, static_tag<2>, static_tag<1>>,
-                   std::variant<static_tag<2>, E1, B2>,
+                   std::variant<as_tag_any, static_tag<1>>, std::variant<static_tag<2>, E1, B2>,
                    std::variant<float16_t, float, double, bool, std::nullptr_t, simple, int, std::string_view, std::span<const std::byte>,
                                 B2, A2, std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>,
                    std::variant<as_array_any, std::vector<int>>, std::variant<as_map_any, std::map<int, int>>,

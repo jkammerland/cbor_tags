@@ -158,7 +158,14 @@ TEST_CASE("security regression: cddl root name is reserved before nested definit
 
     const auto first_rule = schema.find("SecurityRootItem =");
     REQUIRE(first_rule != std::string::npos);
-    CHECK_EQ(schema.find("SecurityRootItem =", first_rule + 1), std::string::npos);
+
+    std::size_t exact_root_rules = 0;
+    for (std::size_t pos = schema.find("SecurityRootItem ="); pos != std::string::npos; pos = schema.find("SecurityRootItem =", pos + 1)) {
+        if (pos == 0 || schema[pos - 1] == '\n') {
+            ++exact_root_rules;
+        }
+    }
+    CHECK_EQ(exact_root_rules, 1);
 }
 
 #ifdef CBOR_TAGS_ENABLE_HANGING_SECURITY_REGRESSIONS

@@ -314,7 +314,10 @@ template <IsSimple T> constexpr bool compare_simple_value(std::byte value) {
     } else if constexpr (IsNull<T>) {
         return value == static_cast<std::byte>(SimpleType::Null);
     } else if constexpr (std::is_same_v<T, simple>) {
-        return value == static_cast<std::byte>(SimpleType::Simple);
+        const auto additional_info = std::to_integer<std::uint8_t>(value);
+        return additional_info < static_cast<std::uint8_t>(SimpleType::Bool_False) ||
+               additional_info == static_cast<std::uint8_t>(SimpleType::Undefined) ||
+               additional_info == static_cast<std::uint8_t>(SimpleType::Simple);
     } else if constexpr (IsFloat16<T>) {
         return value == static_cast<std::byte>(SimpleType::Float16);
     } else if constexpr (IsFloat32<T>) {

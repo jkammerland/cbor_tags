@@ -147,7 +147,7 @@ struct CDDLContext {
 };
 
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
-                                       double, bool, std::nullptr_t>;
+                                       double, bool, std::nullptr_t, simple>;
 
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
     std::string indent(options.current_indent * 2, ' ');
@@ -643,8 +643,14 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
         fmt::format_to(std::back_inserter(output_buffer), "{} = {}", detail::root_rule_name<value_type>(options),
                        detail::tag_marker_root_expr<value_type>(cddl_context, options));
     } else {
-        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", detail::root_rule_name<value_type>(options),
-                       detail::cddl_type_expr<value_type>(cddl_context, options));
+        const auto root_name = detail::root_rule_name<value_type>(options);
+        if constexpr (!IsReferenceWrapper<Context>) {
+            const auto root_key = fmt::format("__cddl_root:{}", root_name);
+            if (!cddl_context.contains_name(root_name)) {
+                (void)cddl_context.reserve(root_key, root_name);
+            }
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, detail::cddl_type_expr<value_type>(cddl_context, options));
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
@@ -802,6 +808,33 @@ template <typename OutputBuffer> constexpr void cddl_prelude_to(OutputBuffer &bu
                                                "undefined = #7.23\n");
 }
 
+template <typename OutputBuffer> void append_diagnostic_separator(OutputBuffer &output_buffer, bool format_by_rows) {
+    fmt::format_to(std::back_inserter(output_buffer), "{}", format_by_rows ? ",\n" : ", ");
+}
+
+template <typename OutputBuffer, typename Iterator>
+void append_escaped_diagnostic_text(OutputBuffer &output_buffer, Iterator begin, Iterator end) {
+    fmt::format_to(std::back_inserter(output_buffer), "\"");
+    for (; begin != end; ++begin) {
+        const auto value = static_cast<unsigned char>(*begin);
+        switch (value) {
+        case '"': fmt::format_to(std::back_inserter(output_buffer), "\\\""); break;
+        case '\\': fmt::format_to(std::back_inserter(output_buffer), "\\\\"); break;
+        case '\n': fmt::format_to(std::back_inserter(output_buffer), "\\n"); break;
+        case '\r': fmt::format_to(std::back_inserter(output_buffer), "\\r"); break;
+        case '\t': fmt::format_to(std::back_inserter(output_buffer), "\\t"); break;
+        default:
+            if (value < 0x20) {
+                fmt::format_to(std::back_inserter(output_buffer), "\\x{:02x}", value);
+            } else {
+                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<char>(value));
+            }
+            break;
+        }
+    }
+    fmt::format_to(std::back_inserter(output_buffer), "\"");
+}
+
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor;
 
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
@@ -810,47 +843,63 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     DiagnosticOptions options;
 
     template <IsMapHeader T> constexpr void operator()(const T &arg) {
-        auto base_offset =
-            std::string(options.row_options.offset * options.row_options.current_indent * options.row_options.format_by_rows, ' ');
+        const auto format_by_rows = options.row_options.format_by_rows;
+        auto       base_offset    = std::string(options.row_options.offset * options.row_options.current_indent * format_by_rows, ' ');
         fmt::format_to(std::back_inserter(output_buffer), "{{{}", options.row_options.format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
+        bool emitted = false;
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant key;
             detail::catch_all_variant value;
             if (!dec(key)) {
-                break;
+                throw std::runtime_error("Malformed CBOR diagnostic map key");
             }
-            fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+            if (emitted) {
+                append_diagnostic_separator(output_buffer, format_by_rows);
+            }
+            if (format_by_rows) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+            }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, key);
             fmt::format_to(std::back_inserter(output_buffer), ": ");
             if (!dec(value)) {
-                break;
+                throw std::runtime_error("Malformed CBOR diagnostic map value");
             }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, value);
-            fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
+            emitted = true;
         }
         options.row_options.current_indent--;
-        output_buffer.resize(output_buffer.size() - 2);
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}}}", options.row_options.format_by_rows ? "\n" : "", base_offset);
+        if (format_by_rows && emitted) {
+            fmt::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "}}");
     }
 
     template <IsArrayHeader T> constexpr void operator()(const T &arg) {
-        bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
-        auto base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
+        const bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
+        auto       base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
         fmt::format_to(std::back_inserter(output_buffer), "[{}", format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
+        bool emitted = false;
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant values;
             if (!dec(values)) {
-                break;
+                throw std::runtime_error(fmt::format("Malformed CBOR diagnostic array item {}", i));
             }
-            fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+            if (emitted) {
+                append_diagnostic_separator(output_buffer, format_by_rows);
+            }
+            if (format_by_rows) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+            }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, values);
-            fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
+            emitted = true;
         }
         options.row_options.current_indent--;
-        output_buffer.resize(output_buffer.size() - 2);
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}]", base_offset, format_by_rows ? "\n" : "");
+        if (format_by_rows && emitted) {
+            fmt::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "]");
     }
 
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
@@ -861,7 +910,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if (options.check_tstr_utf8) {
             throw std::runtime_error("UTF-8 check not implemented");
         }
-        fmt::format_to(std::back_inserter(output_buffer), "\"{}\"", fmt::join(char_view, ""));
+        append_escaped_diagnostic_text(output_buffer, std::ranges::begin(char_view), std::ranges::end(char_view));
     }
 
     template <IsBinaryHeader T> constexpr void operator()(const T &arg) {
@@ -882,7 +931,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             detail::catch_all_variant value;
             fmt::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
             if (!dec(value)) {
-                return;
+                throw std::runtime_error("Malformed CBOR diagnostic tag payload");
             }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, value);
             fmt::format_to(std::back_inserter(output_buffer), ")");
@@ -918,14 +967,23 @@ constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_
 
     fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
 
-    while (dec(values)) {
+    bool emitted = false;
+    while (!dec.reader_.empty(dec.data_)) {
+        auto result = dec(values);
+        if (!result) {
+            throw std::runtime_error("Malformed CBOR diagnostic top-level item");
+        }
+        if (emitted) {
+            append_diagnostic_separator(output_buffer, options.row_options.format_by_rows);
+        }
         std::visit(make_diagnostic_visitor(output_buffer, dec, options), values);
-        fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
+        emitted = true;
     }
 
-    // Remove last comma
-    output_buffer.resize(output_buffer.size() - 2);
-    fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "\n]" : "]");
+    if (options.row_options.format_by_rows && emitted) {
+        fmt::format_to(std::back_inserter(output_buffer), "\n");
+    }
+    fmt::format_to(std::back_inserter(output_buffer), "]");
 }
 
 } // namespace cbor::tags

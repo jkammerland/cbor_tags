@@ -814,7 +814,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
         // alternatives. If we are here, then we have already checked that this is the right tag.
         if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
-            this->decode(detail::get_major_6_tag_from_class(value));
+            auto tag_status = this->decode(detail::get_major_6_tag_from_class(value));
+            if (tag_status != status_code::success) {
+                return tag_status;
+            }
         }
 
         if constexpr (has_transcode) {
