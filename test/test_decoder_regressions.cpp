@@ -1,16 +1,17 @@
 #include <array>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <doctest/doctest.h>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
-#include <doctest/doctest.h>
-#include <deque>
 #include <vector>
 
 using namespace cbor::tags;
@@ -34,11 +35,11 @@ struct NonAssignableComparator {
     int tag;
 
     explicit constexpr NonAssignableComparator(int tag_) : tag(tag_) {}
-    NonAssignableComparator() = delete;
-    constexpr NonAssignableComparator(const NonAssignableComparator &) = default;
-    constexpr NonAssignableComparator(NonAssignableComparator &&) = default;
+    NonAssignableComparator()                                                     = delete;
+    constexpr NonAssignableComparator(const NonAssignableComparator &)            = default;
+    constexpr NonAssignableComparator(NonAssignableComparator &&)                 = default;
     constexpr NonAssignableComparator &operator=(const NonAssignableComparator &) = delete;
-    constexpr NonAssignableComparator &operator=(NonAssignableComparator &&) = delete;
+    constexpr NonAssignableComparator &operator=(NonAssignableComparator &&)      = delete;
 
     constexpr bool operator()(int lhs, int rhs) const { return lhs < rhs; }
 };
@@ -51,16 +52,13 @@ template <typename T> struct NonDefaultAllocator {
     explicit constexpr NonDefaultAllocator(int tag_) noexcept : tag(tag_) {}
     NonDefaultAllocator() = delete;
 
-    template <typename U>
-    constexpr NonDefaultAllocator(const NonDefaultAllocator<U> &other) noexcept : tag(other.tag) {}
+    template <typename U> constexpr NonDefaultAllocator(const NonDefaultAllocator<U> &other) noexcept : tag(other.tag) {}
 
     [[nodiscard]] constexpr T *allocate(std::size_t count) { return std::allocator<T>{}.allocate(count); }
 
     constexpr void deallocate(T *ptr, std::size_t count) noexcept { std::allocator<T>{}.deallocate(ptr, count); }
 
-    template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept {
-        return tag == other.tag;
-    }
+    template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept { return tag == other.tag; }
 };
 } // namespace
 
@@ -71,6 +69,30 @@ static_assert(std::is_move_assignable_v<NonDefaultComparator>);
 static_assert(!std::is_default_constructible_v<NonAssignableComparator>);
 static_assert(!std::is_move_assignable_v<NonAssignableComparator>);
 static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
+
+TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
+    const auto cancelled = integer{2, true} + integer{2};
+    CHECK_FALSE(cancelled.is_negative);
+    CHECK_EQ(cancelled.value, 0);
+
+    const auto positive_plus_larger_negative = positive{1} + negative{3};
+    CHECK(positive_plus_larger_negative.is_negative);
+    CHECK_EQ(positive_plus_larger_negative.value, 2);
+
+    const auto integer_plus_larger_negative = integer{1} + negative{3};
+    CHECK(integer_plus_larger_negative.is_negative);
+    CHECK_EQ(integer_plus_larger_negative.value, 2);
+}
+
+TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
+    CHECK(std::isinf(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7C00)})));
+    CHECK(std::isnan(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7E00)})));
+    CHECK_EQ(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x0001)}), std::ldexp(1.0F, -24));
+    CHECK(std::signbit(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x8000)})));
+
+    float16_t underflow{std::numeric_limits<float>::denorm_min()};
+    CHECK_EQ(underflow.value, 0);
+}
 
 TEST_CASE("decoder should reject unsigned integer overflow") {
     std::vector<std::byte> buffer;
@@ -203,6 +225,131 @@ TEST_CASE("decoder should accept largest representable negative wrapper value") 
     }
 }
 
+TEST_CASE("decoder should reject truncated integer payloads") {
+    struct Case {
+        std::vector<std::byte> bytes;
+    };
+
+    const Case cases[] = {
+        {{std::byte{0x18}}},
+        {{std::byte{0x19}, std::byte{0x00}}},
+        {{std::byte{0x1A}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}}},
+        {{std::byte{0x1B}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+          std::byte{0x00}}},
+    };
+
+    for (const auto &test_case : cases) {
+        auto          dec = make_decoder(test_case.bytes);
+        std::uint64_t decoded{};
+        auto          result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+}
+
+TEST_CASE("decoder should reject truncated float payloads") {
+    {
+        std::vector<std::byte> buffer{std::byte{0xF9}, std::byte{0x3C}};
+        auto                   dec = make_decoder(buffer);
+        float16_t              decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0xFA}, std::byte{0x3F}, std::byte{0x80}, std::byte{0x00}};
+        auto                   dec = make_decoder(buffer);
+        float                  decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0xFB}, std::byte{0x3F}, std::byte{0xF0}, std::byte{0x00},
+                                      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+        auto                   dec = make_decoder(buffer);
+        double                 decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+}
+
+TEST_CASE("decoder should map invalid additional information to error") {
+    {
+        std::vector<std::byte> buffer{std::byte{0x1C}};
+        auto                   dec = make_decoder(buffer);
+        std::uint64_t          decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x5C}};
+        auto                   dec = make_decoder(buffer);
+        std::vector<std::byte> decoded;
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+}
+
+TEST_CASE("decoder should reject wrong chunk types inside indefinite strings") {
+    {
+        std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x61}, std::byte{'x'}, std::byte{0xFF}};
+        auto                   dec = make_decoder(buffer);
+        std::vector<std::byte> decoded;
+        auto                   result = dec(as_indefinite{decoded});
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x41}, std::byte{0x01}, std::byte{0xFF}};
+        auto                   dec = make_decoder(buffer);
+        std::string            decoded;
+        auto                   result = dec(as_indefinite{decoded});
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+    }
+}
+
+TEST_CASE("decoder should propagate incomplete from nested indefinite arrays") {
+    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x9F}, std::byte{0x01}, std::byte{0xFF}};
+
+    auto                          dec = make_decoder(buffer);
+    std::vector<std::vector<int>> decoded;
+    auto                          result = dec(as_indefinite{decoded});
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+}
+
+TEST_CASE("decoder should propagate incomplete from variant alternatives") {
+    std::vector<std::byte> buffer{std::byte{0x62}, std::byte{'a'}};
+
+    auto                                     dec = make_decoder(buffer);
+    std::variant<std::uint64_t, as_text_any> decoded;
+    auto                                     result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+}
+
+TEST_CASE("decoder should decode extended simple values") {
+    std::vector<std::byte> buffer{std::byte{0xF8}, std::byte{0x10}};
+
+    auto   dec = make_decoder(buffer);
+    simple decoded{};
+    auto   result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.value, 0x10);
+}
+
 TEST_CASE("decoder should accept empty byte strings") {
     std::vector<std::byte> buffer{std::byte{0x40}}; // 0-length bstr
 
@@ -221,7 +368,7 @@ TEST_CASE("decoder should accept empty text strings") {
     auto dec = make_decoder(buffer);
 
     std::string decoded;
-    auto              result = dec(decoded);
+    auto        result = dec(decoded);
 
     CHECK_MESSAGE(result, "Decoding an empty text string should succeed.");
     CHECK(decoded.empty());
@@ -331,8 +478,6 @@ TEST_CASE("decoder should report incomplete indefinite array without retry contr
 
     CHECK_FALSE_MESSAGE(result, "Truncated indefinite array should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], 99);
 }
 
 TEST_CASE("decoder should report incomplete indefinite bstr without retry contract") {
@@ -345,8 +490,6 @@ TEST_CASE("decoder should report incomplete indefinite bstr without retry contra
 
     CHECK_FALSE_MESSAGE(result, "Truncated indefinite bstr should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0xCC});
 }
 
 TEST_CASE("decoder should decode complete definite values in one shot") {
@@ -356,10 +499,10 @@ TEST_CASE("decoder should decode complete definite values in one shot") {
 
     auto dec = make_decoder(buffer);
 
-    std::vector<int>  values;
+    std::vector<int>   values;
     std::map<int, int> mapping;
-    std::string       label;
-    auto              result = dec(values, mapping, label);
+    std::string        label;
+    auto               result = dec(values, mapping, label);
 
     REQUIRE_MESSAGE(result, "Complete definite values should decode through the one-shot path.");
     CHECK_EQ(values, std::vector<int>{1, 2, 3});
@@ -369,12 +512,12 @@ TEST_CASE("decoder should decode complete definite values in one shot") {
 
 TEST_CASE("decoder should decode complete non-contiguous definite and indefinite values in one shot") {
     std::deque<std::byte> buffer{
-        std::byte{0x82}, std::byte{0x01}, std::byte{0x02},             // array [1, 2]
-        std::byte{0xA1}, std::byte{0x01}, std::byte{0x02},             // map {1: 2}
+        std::byte{0x82}, std::byte{0x01}, std::byte{0x02},                  // array [1, 2]
+        std::byte{0xA1}, std::byte{0x01}, std::byte{0x02},                  // map {1: 2}
         std::byte{0x9F}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite array [3, 4]
         std::byte{0xBF}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite map {3: 4}
         std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}, std::byte{0xFF}, // indefinite bstr h'AA'
-        std::byte{0x7F}, std::byte{0x61}, std::byte{'x'}, std::byte{0xFF},  // indefinite tstr "x"
+        std::byte{0x7F}, std::byte{0x61}, std::byte{'x'},  std::byte{0xFF}, // indefinite tstr "x"
     };
 
     auto dec = make_decoder(buffer);
@@ -396,15 +539,15 @@ TEST_CASE("decoder should decode complete non-contiguous definite and indefinite
     CHECK_EQ(text, "x");
 }
 
-TEST_CASE("decoder should decode definite containers without requiring default-staged targets") {
+TEST_CASE("decoder should decode definite containers without requiring indefinite temporary targets") {
     using NonDefaultMap    = std::map<int, int, NonDefaultComparator>;
     using NonAssignableMap = std::map<int, int, NonAssignableComparator>;
     using NonDefaultVector = std::vector<int, NonDefaultAllocator<int>>;
 
     std::vector<std::byte> buffer{
         std::byte{0xA2}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, // map {1: 2, 3: 4}
-        std::byte{0xA1}, std::byte{0x05}, std::byte{0x06},                                  // map {5: 6}
-        std::byte{0x82}, std::byte{0x07}, std::byte{0x08},                                  // array [7, 8]
+        std::byte{0xA1}, std::byte{0x05}, std::byte{0x06},                                   // map {5: 6}
+        std::byte{0x82}, std::byte{0x07}, std::byte{0x08},                                   // array [7, 8]
     };
 
     auto dec = make_decoder(buffer);
@@ -414,7 +557,7 @@ TEST_CASE("decoder should decode definite containers without requiring default-s
     NonDefaultVector non_default_vector{NonDefaultAllocator<int>{3}};
     auto             result = dec(non_default_map, non_assignable_map, non_default_vector);
 
-    REQUIRE_MESSAGE(result, "Definite decode must not instantiate indefinite staging requirements.");
+    REQUIRE_MESSAGE(result, "Definite decode must not instantiate indefinite temporary requirements.");
     CHECK_EQ(non_default_map.size(), 2);
     CHECK_EQ(non_default_map[1], 2);
     CHECK_EQ(non_default_map[3], 4);
@@ -426,28 +569,33 @@ TEST_CASE("decoder should decode definite containers without requiring default-s
     CHECK_EQ(non_default_vector.get_allocator().tag, 3);
 }
 
-TEST_CASE("decoder should stage indefinite containers with target allocator and comparator") {
+TEST_CASE("decoder should decode indefinite containers without staging through assignable temporaries") {
     using NonDefaultMap    = std::map<int, int, NonDefaultComparator>;
+    using NonAssignableMap = std::map<int, int, NonAssignableComparator>;
     using NonDefaultVector = std::vector<int, NonDefaultAllocator<int>>;
 
     std::vector<std::byte> buffer{
         std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}, // indefinite map {1: 2}
-        std::byte{0x9F}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite array [3, 4]
+        std::byte{0xBF}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite map {3: 4}
+        std::byte{0x9F}, std::byte{0x05}, std::byte{0x06}, std::byte{0xFF}, // indefinite array [5, 6]
     };
 
     auto dec = make_decoder(buffer);
 
     NonDefaultMap    decoded_map{NonDefaultComparator{4}};
+    NonAssignableMap decoded_non_assignable_map{NonAssignableComparator{5}};
     NonDefaultVector decoded_vector{NonDefaultAllocator<int>{5}};
-    auto             result = dec(decoded_map, decoded_vector);
+    auto             result = dec(decoded_map, decoded_non_assignable_map, decoded_vector);
 
-    REQUIRE_MESSAGE(result, "Indefinite staging should preserve target construction state when available.");
+    REQUIRE_MESSAGE(result, "Indefinite decode should not require assigning a staged container back to the target.");
     CHECK_EQ(decoded_map.size(), 1);
     CHECK_EQ(decoded_map[1], 2);
     CHECK_EQ(decoded_map.key_comp().tag, 4);
+    CHECK_EQ(decoded_non_assignable_map.size(), 1);
+    CHECK_EQ(decoded_non_assignable_map[3], 4);
     CHECK_EQ(decoded_vector.size(), 2);
-    CHECK_EQ(decoded_vector[0], 3);
-    CHECK_EQ(decoded_vector[1], 4);
+    CHECK_EQ(decoded_vector[0], 5);
+    CHECK_EQ(decoded_vector[1], 6);
     CHECK_EQ(decoded_vector.get_allocator().tag, 5);
 }
 
@@ -470,7 +618,7 @@ TEST_CASE("decoder should not walk past end for as_text_any on non-contiguous tr
 
     auto dec = make_decoder(buffer);
 
-    as_text_any header{};
+    as_text_any  header{};
     std::uint8_t next_value{};
     auto         result = dec(header, next_value);
 
@@ -498,8 +646,8 @@ TEST_CASE("decoder should not advance non-contiguous iterators past end for as_b
 TEST_CASE("decoder non-contiguous bstr_view should update offset for subsequent bounds checks") {
     // bstr(5): 0x45 01 02 03 04 05, then bstr(3): 0x43 AA (truncated payload)
     // Regression: if non-contiguous bstr decode doesn't keep current_offset_ in sync, the next header can skip past end (ASAN/crash).
-    std::deque<std::byte> buffer{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05},
-                                 std::byte{0x43}, std::byte{0xAA}};
+    std::deque<std::byte> buffer{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                 std::byte{0x04}, std::byte{0x05}, std::byte{0x43}, std::byte{0xAA}};
 
     auto dec = make_decoder(buffer);
 

@@ -3,6 +3,7 @@
 libs/*
 bin/*
 build/*
+coverage-report/
 .cache/*
 .ccache/*
 cmake-build-*/

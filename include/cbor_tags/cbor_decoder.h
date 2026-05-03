@@ -23,10 +23,10 @@
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
 
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
-#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -42,42 +42,11 @@ template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
 
 template <typename T> constexpr bool negative_argument_fits(std::uint64_t value) {
     static_assert(std::is_signed_v<T>);
-    constexpr auto min_value = std::numeric_limits<T>::min();
-    constexpr auto max_cbor_argument =
-        static_cast<std::uint64_t>(-(min_value + T{1}));
+    constexpr auto min_value         = std::numeric_limits<T>::min();
+    constexpr auto max_cbor_argument = static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
 }
 
-template <typename T>
-concept OrderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
-    typename T::key_compare;
-    target.key_comp();
-    target.get_allocator();
-    T{target.key_comp(), target.get_allocator()};
-    requires std::is_move_assignable_v<typename T::key_compare>;
-};
-
-template <typename T>
-concept UnorderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
-    typename T::hasher;
-    typename T::key_equal;
-    target.hash_function();
-    target.key_eq();
-    target.get_allocator();
-    T{typename T::size_type{}, target.hash_function(), target.key_eq(), target.get_allocator()};
-    requires std::is_move_assignable_v<typename T::hasher>;
-    requires std::is_move_assignable_v<typename T::key_equal>;
-};
-
-template <typename T>
-concept AllocatorStagedDecodeTarget = (!IsMap<T>) && requires(const T &target) {
-    target.get_allocator();
-    T{target.get_allocator()};
-    requires std::is_move_assignable_v<T>;
-};
-
-template <typename T>
-concept DefaultStagedDecodeTarget = (!IsMap<T>) && std::is_default_constructible_v<T> && std::is_move_assignable_v<T>;
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -101,42 +70,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
-
-    template <typename T, typename F> constexpr status_code decode_into_temp(T &out, F &&fn) {
-        if constexpr (detail::OrderedMapStagedDecodeTarget<T>) {
-            T    temp(out.key_comp(), out.get_allocator());
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else if constexpr (detail::UnorderedMapStagedDecodeTarget<T>) {
-            T    temp(typename T::size_type{}, out.hash_function(), out.key_eq(), out.get_allocator());
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else if constexpr (detail::AllocatorStagedDecodeTarget<T>) {
-            T    temp(out.get_allocator());
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else if constexpr (detail::DefaultStagedDecodeTarget<T>) {
-            T    temp{};
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else {
-            (void)out;
-            (void)fn;
-            return status_code::error;
-        }
-    }
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
@@ -163,7 +96,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             value = integer(decode_unsigned(additionalInfo));
         } else if (major == major_type::NegativeInteger) {
             const auto decoded = decode_unsigned(additionalInfo);
-            value = integer(negative(decoded + 1));
+            value              = integer(negative(decoded + 1));
         } else {
             return status_code::no_match_for_int_on_buffer;
         }
@@ -200,7 +133,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (status != status_code::success) {
             return status_code::no_match_for_enum_on_buffer;
         }
-        value                  = static_cast<U>(result);
+        value = static_cast<U>(result);
         return status_code::success;
     }
 
@@ -227,7 +160,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_nint_on_buffer;
         }
         const auto decoded = decode_unsigned(additionalInfo);
-        value = negative(decoded + 1);
+        value              = negative(decoded + 1);
 
         return status_code::success;
     }
@@ -246,12 +179,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
             } else {
-                return decode_into_temp(t, [this](T &temp) { return decode_indef_bstr(temp); });
+                return decode_indef_bstr(t);
             }
         }
 
         // Decode to intermediate form
-        auto bstring = decode_bstring(additionalInfo);
+        auto       bstring      = decode_bstring(additionalInfo);
         const auto bstring_size = static_cast<std::size_t>(std::ranges::distance(bstring.begin(), bstring.end()));
 
         // Now handle the target assignment based on contiguity constraints
@@ -302,7 +235,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
             } else {
-                return decode_into_temp(t, [this](T &temp) { return decode_indef_tstr(temp); });
+                return decode_indef_tstr(t);
             }
         }
 
@@ -327,9 +260,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
             } else if constexpr (IsMap<T>) {
-                return decode_into_temp(value, [this](T &temp) { return decode_indef_map(temp); });
+                return decode_indef_map(value);
             } else {
-                return decode_into_temp(value, [this](T &temp) { return decode_indef_array(temp); });
+                return decode_indef_array(value);
             }
         }
 
@@ -606,7 +539,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tstr_on_buffer;
         }
         if (additionalInfo == static_cast<byte>(31)) {
-            return decode_into_temp(value, [this](std::string &temp) { return decode_indef_tstr(temp); });
+            return decode_indef_tstr(value);
         }
         auto text = decode_text(additionalInfo);
         value     = std::string(text);
@@ -948,7 +881,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto *begin = std::ranges::data(data_) + reader_.position_;
+            auto *begin  = std::ranges::data(data_) + reader_.position_;
             auto  result = std::span<const byte>(reinterpret_cast<const byte *>(begin), span_length);
             reader_.position_ += span_length;
             return result;
@@ -958,7 +891,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             for (size_type i = 0; i < span_length; ++i) {
                 ++it;
             }
-            auto result = subrange(start, it);
+            auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
             return bstr_view_t{.range = result};
@@ -970,7 +903,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto *begin = std::ranges::data(data_) + reader_.position_;
+            auto *begin  = std::ranges::data(data_) + reader_.position_;
             auto  result = std::string_view(reinterpret_cast<const char *>(begin), span_length);
             reader_.position_ += span_length;
             return result;
@@ -980,7 +913,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             for (size_type i = 0; i < span_length; ++i) {
                 ++it;
             }
-            auto result = subrange(start, it);
+            auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
             return tstr_view_t{.range = result};
@@ -990,7 +923,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_bstr(T &out) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -1026,7 +959,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_tstr(T &out) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -1062,7 +995,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_array(T &value) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -1094,7 +1027,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_map(T &value) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -1290,7 +1223,7 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
-                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_bstr(temp); });
+                return dec.decode_indef_bstr(value.value_);
             }
         } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
             if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
@@ -1299,13 +1232,13 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
-                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_tstr(temp); });
+                return dec.decode_indef_tstr(value.value_);
             }
         } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
             if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_map_on_buffer;
             }
-            return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_map(temp); });
+            return dec.decode_indef_map(value.value_);
         } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
             if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_array_on_buffer;
@@ -1313,7 +1246,7 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
-                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_array(temp); });
+                return dec.decode_indef_array(value.value_);
             }
         } else {
             return status_code::error;

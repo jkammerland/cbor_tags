@@ -115,7 +115,7 @@ template <typename Buffer> PreEncodedData<Buffer> prepare_test_data(rng::small_g
     // Prepare tag data
     {
         A    original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
-        auto enc    = make_encoder(data.tag_data);
+        auto enc = make_encoder(data.tag_data);
         CHECK(enc(original));
     }
 
@@ -542,7 +542,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
 
     bench.run("Decoding a nullptr", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(std::nullptr_t{});
 
         auto           dec = make_decoder(data);

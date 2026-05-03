@@ -258,7 +258,6 @@ template <typename T> struct cbor_indefinite_encoder {
             throw std::runtime_error("Invalid type for indefinite encoding");
         }
     }
-
 };
 
 template <typename T> struct cbor_variant_encoder {

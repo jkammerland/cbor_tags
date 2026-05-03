@@ -58,7 +58,9 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::contiguous_view_on_non_contiguous_data: return "Attempt to create a contiguous view on non-contiguous data";
     case status_code::invalid_utf8_sequence: return "Invalid UTF-8 sequence in text string";
     case status_code::begin_no_match_decoding: return "Unexpected error at start of CBOR decoding: invalid initial byte";
-    case status_code::no_match_for_tag: return "Unexpected CBOR tag: no matching decoder found, incase of dynamic tags, they must be correctly assigned before decoding(or encoding)";
+    case status_code::no_match_for_tag:
+        return "Unexpected CBOR tag: no matching decoder found, incase of dynamic tags, they must be correctly assigned before decoding(or "
+               "encoding)";
     case status_code::no_match_for_tag_simple_on_buffer: return "Unexpected CBOR simple value tag: no matching decoder found";
     case status_code::no_match_for_uint_on_buffer: return "Unexpected value for CBOR major type 0: unsigned integer decode failed";
     case status_code::no_match_for_nint_on_buffer: return "Unexpected value for CBOR major type 1: negative integer decode failed";

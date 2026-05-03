@@ -3,6 +3,7 @@
 [![macOS CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
 [![Ubuntu CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
 [![Windows CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
+[![Quality CI](https://github.com/jkammerland/cbor_tags/actions/workflows/quality.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/quality.yml)
 
 This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. Some good examples of different binary formats can be found here [rfc8949-name-conciseness-on-the-wire](https://www.rfc-editor.org/rfc/rfc8949.html#name-conciseness-on-the-wire). Also obligatory [xkcd/927](https://xkcd.com/927/). 
 
@@ -734,7 +735,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.10.0 # or specify a particular commit/tag
+  GIT_TAG v0.11.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

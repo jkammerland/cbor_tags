@@ -76,7 +76,7 @@ TEST_CASE("CBOR Encoder") {
         CHECK_EQ(values[9], 4294967296);
 
         int  first, second, third;
-        auto dec2 = make_decoder(data);
+        auto dec2   = make_decoder(data);
         std::ignore = dec2(as_array{10}, first, second, third);
         CHECK_EQ(first, 0);
         CHECK_EQ(second, 1);
@@ -149,7 +149,8 @@ TEST_CASE("CBOR Encoder") {
         auto                   enc = make_encoder(data);
         auto                   dec = make_decoder(data);
 
-        CHECK(enc(as_array{4}, std::vector<int>{1, 2, 3}, std::array<int, 3>{4, 5, 6}, std::deque<int>{7, 8, 9}, std::list<int>{10, 11, 12}));
+        CHECK(
+            enc(as_array{4}, std::vector<int>{1, 2, 3}, std::array<int, 3>{4, 5, 6}, std::deque<int>{7, 8, 9}, std::list<int>{10, 11, 12}));
 
         REQUIRE_EQ(to_hex(data), "84830102038304050683070809830a0b0c");
 

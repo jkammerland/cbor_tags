@@ -54,13 +54,13 @@ int main() {
     assert(dec(decoded));
     assert(decoded == "hi");
 
-    auto variant_data = std::vector<std::byte>{};
-    auto variant_enc  = make_encoder(variant_data);
+    auto                                        variant_data = std::vector<std::byte>{};
+    auto                                        variant_enc  = make_encoder(variant_data);
     std::variant<std::string, std::vector<int>> value{std::string{"ok"}};
     assert(variant_enc(value));
 
-    auto                                      variant_decoded = decltype(value){};
-    auto                                      variant_dec     = make_decoder(variant_data);
+    auto variant_decoded = decltype(value){};
+    auto variant_dec     = make_decoder(variant_data);
     assert(variant_dec(variant_decoded));
     assert(std::holds_alternative<std::string>(variant_decoded));
     assert(std::get<std::string>(variant_decoded) == "ok");

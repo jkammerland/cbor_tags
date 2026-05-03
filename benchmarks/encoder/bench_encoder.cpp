@@ -30,7 +30,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Encoding a uint", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(gen());
         ankerl::nanobench::doNotOptimizeAway(data);
     });
@@ -44,7 +44,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Encoding a int", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(static_cast<int64_t>(gen()));
         ankerl::nanobench::doNotOptimizeAway(data);
     });
@@ -100,9 +100,9 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Encoding a array", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(std::array<int16_t, 4>{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
-                                   static_cast<short>(gen())});
+                                                 static_cast<short>(gen())});
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
@@ -117,9 +117,9 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Encode a map", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(std::map<int16_t, int32_t>{{static_cast<short>(gen()), static_cast<int>(gen())},
-                                       {static_cast<short>(gen()), static_cast<int>(gen())}});
+                                                     {static_cast<short>(gen()), static_cast<int>(gen())}});
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
@@ -138,7 +138,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Encode a tag", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(A{.cbor_tag = {}, .value = static_cast<int64_t>(gen())});
         ankerl::nanobench::doNotOptimizeAway(data);
     });
@@ -166,21 +166,21 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Encode a float16", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(static_cast<float16_t>(static_cast<float>(gen())));
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
     bench.run("Encode a float32", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(static_cast<float>(gen()));
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
     bench.run("Encode a float64", [&gen]() {
         Buffer data;
-        auto   enc = make_encoder(data);
+        auto   enc  = make_encoder(data);
         std::ignore = enc(static_cast<double>(gen()));
         ankerl::nanobench::doNotOptimizeAway(data);
     });
