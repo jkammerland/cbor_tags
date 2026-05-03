@@ -74,6 +74,16 @@ TEST_CASE("cddl helpers cover tuple and tagged tuple schemas") {
     CHECK_EQ(tagged_tuple_schema, "root = #6.7([int, tstr])");
 }
 
+TEST_CASE("tagged tuple schema matches encoded tuple shape") {
+    using tagged_tuple = std::tuple<static_tag<7>, int, std::string>;
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(tagged_tuple{static_tag<7>{}, 1, "x"}));
+
+    CHECK_EQ(buffer, std::vector<std::byte>{std::byte{0xC7}, std::byte{0x82}, std::byte{0x01}, std::byte{0x61}, std::byte{0x78}});
+}
+
 TEST_CASE("cddl context handles duplicate registration, copy, and clear") {
     detail::CDDLContext context;
     context.register_type<VisualizationInner>({}, std::ref(context));
