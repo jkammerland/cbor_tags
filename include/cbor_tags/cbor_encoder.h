@@ -120,8 +120,8 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <IsTaggedTuple T> constexpr void encode(const T &value) {
         /* Tag being first already garanteed by the concept */
-        encode_major_and_size(value.first, static_cast<byte_type>(0xC0));
-        encode(value.second);
+        encode(std::get<0>(value));
+        aggregate_encode(detail::tuple_tail(value));
     }
 
     template <typename T>
