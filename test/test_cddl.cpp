@@ -235,6 +235,12 @@ TEST_CASE("CDDL supports root expressions for anonymous schema roots") {
     static_assert(detail::is_empty_cddl_aggregate_v<CDDLEmpty>);
 }
 
+TEST_CASE("CDDL supports catch-all header roots") {
+    CHECK_EQ(cddl_schema_inline<as_array_any>(), "root = [* any]");
+    CHECK_EQ(cddl_schema_inline<as_map_any>(), "root = {* any => any}");
+    CHECK_EQ(cddl_schema_inline<as_tag_any>(), "root = #6(any)");
+}
+
 TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
     fmt::memory_buffer inline_buffer;
     cddl_schema_to<CDDLContainers>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});

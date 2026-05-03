@@ -168,6 +168,45 @@ TEST_CASE("security regression: optional simple does not hide bool variant alter
     CHECK_FALSE(std::get<bool>(decoded));
 }
 
+TEST_CASE("security regression: nested optional variant accepts simple alternatives") {
+    using nested_optional_variant = std::variant<std::optional<std::variant<bool, int>>, std::string>;
+
+    std::vector<std::byte>  buffer{std::byte{0xF4}}; // false, #7.20
+    auto                    dec = make_decoder(buffer);
+    nested_optional_variant decoded{std::string{}};
+
+    auto result = dec(decoded);
+
+    REQUIRE(result);
+    REQUIRE(std::holds_alternative<std::optional<std::variant<bool, int>>>(decoded));
+    const auto &optional_value = std::get<std::optional<std::variant<bool, int>>>(decoded);
+    REQUIRE(optional_value.has_value());
+    REQUIRE(std::holds_alternative<bool>(*optional_value));
+    CHECK_FALSE(std::get<bool>(*optional_value));
+}
+
+TEST_CASE("security regression: catch-all simple variant accepts bool simple values") {
+    using simple_variant = std::variant<simple, int>;
+
+    std::vector<std::byte> buffer{std::byte{0xF4}}; // false, #7.20
+    auto                   dec = make_decoder(buffer);
+    simple_variant         decoded{int{}};
+
+    auto result = dec(decoded);
+
+    REQUIRE(result);
+    REQUIRE(std::holds_alternative<simple>(decoded));
+    CHECK_EQ(std::get<simple>(decoded).value, static_cast<simple::value_type>(SimpleType::Bool_False));
+}
+
+TEST_CASE("security regression: dynamic tagged tuples are rejected in variants") {
+    using dynamic_tagged_tuple = std::tuple<dynamic_tag<std::uint64_t>, int>;
+    using tag_variant          = std::variant<dynamic_tagged_tuple, std::string>;
+
+    CHECK_FALSE(valid_concept_mapping_v<tag_variant>);
+    CHECK_EQ(valid_concept_mapping_array_v<tag_variant>[detail::MajorIndex::DynamicTag], 1);
+}
+
 TEST_CASE("security regression: diagnostic handles empty input and empty containers in compact mode") {
     DiagnosticOptions compact{.row_options = {.format_by_rows = false}};
 
