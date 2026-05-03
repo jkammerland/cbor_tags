@@ -1,6 +1,7 @@
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -68,6 +69,30 @@ static_assert(std::is_move_assignable_v<NonDefaultComparator>);
 static_assert(!std::is_default_constructible_v<NonAssignableComparator>);
 static_assert(!std::is_move_assignable_v<NonAssignableComparator>);
 static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
+
+TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
+    const auto cancelled = integer{2, true} + integer{2};
+    CHECK_FALSE(cancelled.is_negative);
+    CHECK_EQ(cancelled.value, 0);
+
+    const auto positive_plus_larger_negative = positive{1} + negative{3};
+    CHECK(positive_plus_larger_negative.is_negative);
+    CHECK_EQ(positive_plus_larger_negative.value, 2);
+
+    const auto integer_plus_larger_negative = integer{1} + negative{3};
+    CHECK(integer_plus_larger_negative.is_negative);
+    CHECK_EQ(integer_plus_larger_negative.value, 2);
+}
+
+TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
+    CHECK(std::isinf(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7C00)})));
+    CHECK(std::isnan(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7E00)})));
+    CHECK_EQ(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x0001)}), std::ldexp(1.0F, -24));
+    CHECK(std::signbit(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x8000)})));
+
+    float16_t underflow{std::numeric_limits<float>::denorm_min()};
+    CHECK_EQ(underflow.value, 0);
+}
 
 TEST_CASE("decoder should reject unsigned integer overflow") {
     std::vector<std::byte> buffer;
