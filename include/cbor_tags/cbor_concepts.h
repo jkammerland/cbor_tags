@@ -32,8 +32,7 @@ concept IsOptions = requires(T) {
 template <typename T>
 concept IsCborBufferByte =
     std::same_as<std::remove_cvref_t<T>, std::byte> ||
-    (std::integral<std::remove_cvref_t<T>> && sizeof(std::remove_cvref_t<T>) == 1 &&
-     !std::same_as<std::remove_cvref_t<T>, bool>);
+    (std::integral<std::remove_cvref_t<T>> && sizeof(std::remove_cvref_t<T>) == 1 && !std::same_as<std::remove_cvref_t<T>, bool>);
 
 template <typename T>
 concept ValidCborBuffer =
@@ -181,8 +180,7 @@ concept IsConstBinaryView = IsConstView<T> && std::is_same_v<typename T::value_t
 template <typename T>
 concept IsConstTextView = IsConstView<T> && std::is_same_v<typename T::value_type, char>;
 
-template <typename T>
-struct indefinite_value_type {
+template <typename T> struct indefinite_value_type {
     using type = void;
 };
 
@@ -190,8 +188,7 @@ template <typename T> struct indefinite_value_type<as_indefinite<T>> {
     using type = T;
 };
 
-template <typename T>
-using indefinite_value_t = std::remove_cvref_t<typename indefinite_value_type<std::remove_cvref_t<T>>::type>;
+template <typename T> using indefinite_value_t = std::remove_cvref_t<typename indefinite_value_type<std::remove_cvref_t<T>>::type>;
 
 template <typename T>
 concept IsIndefiniteWrapper = !std::is_same_v<typename indefinite_value_type<std::remove_cvref_t<T>>::type, void>;
@@ -202,51 +199,45 @@ concept IsTextChar = std::is_integral_v<std::remove_cv_t<T>> && sizeof(std::remo
 
 template <typename T>
 concept IsTextStringBase =
-    IsTextHeader<std::remove_cvref_t<T>> || IsConstTextView<std::remove_cvref_t<T>> ||
-    requires(std::remove_cvref_t<T> t) {
+    IsTextHeader<std::remove_cvref_t<T>> || IsConstTextView<std::remove_cvref_t<T>> || requires(std::remove_cvref_t<T> t) {
         requires IsTextChar<typename std::remove_cvref_t<T>::value_type>;
         { t.substr(0, 1) };
     };
 
 template <typename T>
-concept IsBinaryStringBase =
-    IsBinaryHeader<std::remove_cvref_t<T>> ||
-    std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<std::remove_cvref_t<T>>>, std::byte> ||
-    IsConstBinaryView<std::remove_cvref_t<T>>;
+concept IsBinaryStringBase = IsBinaryHeader<std::remove_cvref_t<T>> ||
+                             std::is_same_v<std::remove_cvref_t<std::ranges::range_value_t<std::remove_cvref_t<T>>>, std::byte> ||
+                             IsConstBinaryView<std::remove_cvref_t<T>>;
 
 template <typename T>
 concept IsStringBase = IsTextStringBase<T> || IsBinaryStringBase<T>;
 
 template <typename T>
 concept IsRangeOfCborValuesBase =
-    std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> &&
-    (!IsStringBase<std::remove_cvref_t<T>>);
+    std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> && (!IsStringBase<std::remove_cvref_t<T>>);
 
 template <typename T>
 concept IsFixedArray = requires {
     typename T::value_type;
     typename T::size_type;
-} && (std::is_same_v<T, std::span<typename T::value_type>> ||
-      (requires { typename std::tuple_size<T>::type; } &&
-       std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>>));
+} && (std::is_same_v<T, std::span<typename T::value_type>> || (requires {
+                           typename std::tuple_size<T>::type;
+                       } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>>));
 
 template <typename T>
 concept IsMapBase =
-    IsMapHeader<std::remove_cvref_t<T>> || (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> &&
-                                            requires(std::remove_cvref_t<T> t) {
-                                                typename std::remove_cvref_t<T>::key_type;
-                                                typename std::remove_cvref_t<T>::mapped_type;
-                                                typename std::remove_cvref_t<T>::value_type;
-                                                requires std::same_as<typename std::remove_cvref_t<T>::value_type,
-                                                                      std::pair<const typename std::remove_cvref_t<T>::key_type,
-                                                                                typename std::remove_cvref_t<T>::mapped_type>>;
-                                                { t.find(std::declval<typename std::remove_cvref_t<T>::key_type>()) } ->
-                                                    std::same_as<typename std::remove_cvref_t<T>::iterator>;
-                                            });
+    IsMapHeader<std::remove_cvref_t<T>> || (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> t) {
+        typename std::remove_cvref_t<T>::key_type;
+        typename std::remove_cvref_t<T>::mapped_type;
+        typename std::remove_cvref_t<T>::value_type;
+        requires std::same_as<typename std::remove_cvref_t<T>::value_type,
+                              std::pair<const typename std::remove_cvref_t<T>::key_type, typename std::remove_cvref_t<T>::mapped_type>>;
+        { t.find(std::declval<typename std::remove_cvref_t<T>::key_type>()) } -> std::same_as<typename std::remove_cvref_t<T>::iterator>;
+    });
 
 template <typename T>
-concept IsArrayBase = IsArrayHeader<std::remove_cvref_t<T>> ||
-                      (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> && !IsMapBase<std::remove_cvref_t<T>>);
+concept IsArrayBase =
+    IsArrayHeader<std::remove_cvref_t<T>> || (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> && !IsMapBase<std::remove_cvref_t<T>>);
 
 template <typename T>
 concept IsIndefiniteTextString = IsIndefiniteWrapper<T> && IsTextStringBase<indefinite_value_t<T>>;

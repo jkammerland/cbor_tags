@@ -23,10 +23,10 @@
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
 
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
-#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -42,9 +42,8 @@ template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
 
 template <typename T> constexpr bool negative_argument_fits(std::uint64_t value) {
     static_assert(std::is_signed_v<T>);
-    constexpr auto min_value = std::numeric_limits<T>::min();
-    constexpr auto max_cbor_argument =
-        static_cast<std::uint64_t>(-(min_value + T{1}));
+    constexpr auto min_value         = std::numeric_limits<T>::min();
+    constexpr auto max_cbor_argument = static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
 }
 
@@ -97,7 +96,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             value = integer(decode_unsigned(additionalInfo));
         } else if (major == major_type::NegativeInteger) {
             const auto decoded = decode_unsigned(additionalInfo);
-            value = integer(negative(decoded + 1));
+            value              = integer(negative(decoded + 1));
         } else {
             return status_code::no_match_for_int_on_buffer;
         }
@@ -134,7 +133,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (status != status_code::success) {
             return status_code::no_match_for_enum_on_buffer;
         }
-        value                  = static_cast<U>(result);
+        value = static_cast<U>(result);
         return status_code::success;
     }
 
@@ -161,7 +160,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_nint_on_buffer;
         }
         const auto decoded = decode_unsigned(additionalInfo);
-        value = negative(decoded + 1);
+        value              = negative(decoded + 1);
 
         return status_code::success;
     }
@@ -185,7 +184,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         // Decode to intermediate form
-        auto bstring = decode_bstring(additionalInfo);
+        auto       bstring      = decode_bstring(additionalInfo);
         const auto bstring_size = static_cast<std::size_t>(std::ranges::distance(bstring.begin(), bstring.end()));
 
         // Now handle the target assignment based on contiguity constraints
@@ -882,7 +881,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto *begin = std::ranges::data(data_) + reader_.position_;
+            auto *begin  = std::ranges::data(data_) + reader_.position_;
             auto  result = std::span<const byte>(reinterpret_cast<const byte *>(begin), span_length);
             reader_.position_ += span_length;
             return result;
@@ -892,7 +891,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             for (size_type i = 0; i < span_length; ++i) {
                 ++it;
             }
-            auto result = subrange(start, it);
+            auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
             return bstr_view_t{.range = result};
@@ -904,7 +903,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
-            auto *begin = std::ranges::data(data_) + reader_.position_;
+            auto *begin  = std::ranges::data(data_) + reader_.position_;
             auto  result = std::string_view(reinterpret_cast<const char *>(begin), span_length);
             reader_.position_ += span_length;
             return result;
@@ -914,7 +913,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             for (size_type i = 0; i < span_length; ++i) {
                 ++it;
             }
-            auto result = subrange(start, it);
+            auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
             return tstr_view_t{.range = result};
@@ -924,7 +923,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_bstr(T &out) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -960,7 +959,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_tstr(T &out) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -996,7 +995,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_array(T &value) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;
@@ -1028,7 +1027,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T> constexpr status_code decode_indef_map(T &value) {
         detail::appender<T> appender_;
         while (true) {
-            const auto                start_position = reader_.position_;
+            const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
             if constexpr (!IsContiguous<InputBuffer>) {
                 start_offset = reader_.current_offset_;

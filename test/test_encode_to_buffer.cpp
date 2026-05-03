@@ -21,9 +21,7 @@
 using namespace cbor::tags;
 
 namespace {
-consteval bool negative_wrapper_value_is_representable(std::uint64_t value) {
-    return value != 0;
-}
+consteval bool negative_wrapper_value_is_representable(std::uint64_t value) { return value != 0; }
 } // namespace
 
 static_assert(negative_wrapper_value_is_representable(1));

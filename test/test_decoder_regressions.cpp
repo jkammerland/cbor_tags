@@ -1,16 +1,16 @@
 #include <array>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <doctest/doctest.h>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
-#include <doctest/doctest.h>
-#include <deque>
 #include <vector>
 
 using namespace cbor::tags;
@@ -34,11 +34,11 @@ struct NonAssignableComparator {
     int tag;
 
     explicit constexpr NonAssignableComparator(int tag_) : tag(tag_) {}
-    NonAssignableComparator() = delete;
-    constexpr NonAssignableComparator(const NonAssignableComparator &) = default;
-    constexpr NonAssignableComparator(NonAssignableComparator &&) = default;
+    NonAssignableComparator()                                                     = delete;
+    constexpr NonAssignableComparator(const NonAssignableComparator &)            = default;
+    constexpr NonAssignableComparator(NonAssignableComparator &&)                 = default;
     constexpr NonAssignableComparator &operator=(const NonAssignableComparator &) = delete;
-    constexpr NonAssignableComparator &operator=(NonAssignableComparator &&) = delete;
+    constexpr NonAssignableComparator &operator=(NonAssignableComparator &&)      = delete;
 
     constexpr bool operator()(int lhs, int rhs) const { return lhs < rhs; }
 };
@@ -51,16 +51,13 @@ template <typename T> struct NonDefaultAllocator {
     explicit constexpr NonDefaultAllocator(int tag_) noexcept : tag(tag_) {}
     NonDefaultAllocator() = delete;
 
-    template <typename U>
-    constexpr NonDefaultAllocator(const NonDefaultAllocator<U> &other) noexcept : tag(other.tag) {}
+    template <typename U> constexpr NonDefaultAllocator(const NonDefaultAllocator<U> &other) noexcept : tag(other.tag) {}
 
     [[nodiscard]] constexpr T *allocate(std::size_t count) { return std::allocator<T>{}.allocate(count); }
 
     constexpr void deallocate(T *ptr, std::size_t count) noexcept { std::allocator<T>{}.deallocate(ptr, count); }
 
-    template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept {
-        return tag == other.tag;
-    }
+    template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept { return tag == other.tag; }
 };
 } // namespace
 
@@ -221,7 +218,7 @@ TEST_CASE("decoder should accept empty text strings") {
     auto dec = make_decoder(buffer);
 
     std::string decoded;
-    auto              result = dec(decoded);
+    auto        result = dec(decoded);
 
     CHECK_MESSAGE(result, "Decoding an empty text string should succeed.");
     CHECK(decoded.empty());
@@ -352,10 +349,10 @@ TEST_CASE("decoder should decode complete definite values in one shot") {
 
     auto dec = make_decoder(buffer);
 
-    std::vector<int>  values;
+    std::vector<int>   values;
     std::map<int, int> mapping;
-    std::string       label;
-    auto              result = dec(values, mapping, label);
+    std::string        label;
+    auto               result = dec(values, mapping, label);
 
     REQUIRE_MESSAGE(result, "Complete definite values should decode through the one-shot path.");
     CHECK_EQ(values, std::vector<int>{1, 2, 3});
@@ -365,12 +362,12 @@ TEST_CASE("decoder should decode complete definite values in one shot") {
 
 TEST_CASE("decoder should decode complete non-contiguous definite and indefinite values in one shot") {
     std::deque<std::byte> buffer{
-        std::byte{0x82}, std::byte{0x01}, std::byte{0x02},             // array [1, 2]
-        std::byte{0xA1}, std::byte{0x01}, std::byte{0x02},             // map {1: 2}
+        std::byte{0x82}, std::byte{0x01}, std::byte{0x02},                  // array [1, 2]
+        std::byte{0xA1}, std::byte{0x01}, std::byte{0x02},                  // map {1: 2}
         std::byte{0x9F}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite array [3, 4]
         std::byte{0xBF}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite map {3: 4}
         std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}, std::byte{0xFF}, // indefinite bstr h'AA'
-        std::byte{0x7F}, std::byte{0x61}, std::byte{'x'}, std::byte{0xFF},  // indefinite tstr "x"
+        std::byte{0x7F}, std::byte{0x61}, std::byte{'x'},  std::byte{0xFF}, // indefinite tstr "x"
     };
 
     auto dec = make_decoder(buffer);
@@ -399,8 +396,8 @@ TEST_CASE("decoder should decode definite containers without requiring indefinit
 
     std::vector<std::byte> buffer{
         std::byte{0xA2}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, // map {1: 2, 3: 4}
-        std::byte{0xA1}, std::byte{0x05}, std::byte{0x06},                                  // map {5: 6}
-        std::byte{0x82}, std::byte{0x07}, std::byte{0x08},                                  // array [7, 8]
+        std::byte{0xA1}, std::byte{0x05}, std::byte{0x06},                                   // map {5: 6}
+        std::byte{0x82}, std::byte{0x07}, std::byte{0x08},                                   // array [7, 8]
     };
 
     auto dec = make_decoder(buffer);
@@ -471,7 +468,7 @@ TEST_CASE("decoder should not walk past end for as_text_any on non-contiguous tr
 
     auto dec = make_decoder(buffer);
 
-    as_text_any header{};
+    as_text_any  header{};
     std::uint8_t next_value{};
     auto         result = dec(header, next_value);
 
@@ -499,8 +496,8 @@ TEST_CASE("decoder should not advance non-contiguous iterators past end for as_b
 TEST_CASE("decoder non-contiguous bstr_view should update offset for subsequent bounds checks") {
     // bstr(5): 0x45 01 02 03 04 05, then bstr(3): 0x43 AA (truncated payload)
     // Regression: if non-contiguous bstr decode doesn't keep current_offset_ in sync, the next header can skip past end (ASAN/crash).
-    std::deque<std::byte> buffer{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05},
-                                 std::byte{0x43}, std::byte{0xAA}};
+    std::deque<std::byte> buffer{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                 std::byte{0x04}, std::byte{0x05}, std::byte{0x43}, std::byte{0xAA}};
 
     auto dec = make_decoder(buffer);
 

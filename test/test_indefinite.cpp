@@ -1,17 +1,17 @@
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <map>
-#include <string>
-#include <variant>
-#include <vector>
+#include "test_util.h"
 
+#include <array>
 #include <cbor_tags/cbor_concepts.h>
 #include <cbor_tags/cbor_concepts_checking.h>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cstddef>
+#include <cstdint>
 #include <doctest/doctest.h>
-#include "test_util.h"
+#include <map>
+#include <string>
+#include <variant>
+#include <vector>
 
 using namespace cbor::tags;
 
@@ -24,7 +24,7 @@ static_assert(!IsArray<const std::map<int, int>>);
 struct IndefTagged {
     std::vector<int>           values;
     std::map<int, std::string> labels;
-    bool operator==(const IndefTagged &) const = default;
+    bool                       operator==(const IndefTagged &) const = default;
 
   private:
     friend cbor::tags::Access;
@@ -47,10 +47,10 @@ static_assert(is_valid_major<major_type, IndefTagged>(major_type::Tag));
 static_assert(valid_concept_mapping_v<std::variant<int, IndefTagged, std::string>>);
 
 struct IndefNested {
-    int                    id{};
-    std::vector<int>       values;
+    int                        id{};
+    std::vector<int>           values;
     std::map<int, IndefTagged> tagged;
-    bool operator==(const IndefNested &) const = default;
+    bool                       operator==(const IndefNested &) const = default;
 
   private:
     friend cbor::tags::Access;
@@ -59,11 +59,11 @@ struct IndefNested {
 };
 
 struct IndefEmbedded {
-    int                              id{};
-    std::variant<int, IndefTagged>   payload;
-    std::vector<std::byte>           blob;
-    std::string                      label;
-    bool operator==(const IndefEmbedded &) const = default;
+    int                            id{};
+    std::variant<int, IndefTagged> payload;
+    std::vector<std::byte>         blob;
+    std::string                    label;
+    bool                           operator==(const IndefEmbedded &) const = default;
 
   private:
     friend cbor::tags::Access;
@@ -76,8 +76,8 @@ struct IndefEmbedded {
 };
 
 TEST_CASE("decode indefinite bstr into vector") {
-    std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x42}, std::byte{0x01}, std::byte{0x02}, std::byte{0x41},
-                                  std::byte{0x03}, std::byte{0xFF}};
+    std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x42}, std::byte{0x01}, std::byte{0x02},
+                                  std::byte{0x41}, std::byte{0x03}, std::byte{0xFF}};
 
     auto dec = make_decoder(buffer);
 
@@ -104,8 +104,8 @@ TEST_CASE("decode indefinite bstr with wrong chunk type") {
 }
 
 TEST_CASE("decode indefinite tstr into string") {
-    std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x62}, std::byte{0x61}, std::byte{0x62}, std::byte{0x61},
-                                  std::byte{0x63}, std::byte{0xFF}};
+    std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x62}, std::byte{0x61}, std::byte{0x62},
+                                  std::byte{0x61}, std::byte{0x63}, std::byte{0xFF}};
 
     auto dec = make_decoder(buffer);
 
@@ -156,8 +156,7 @@ TEST_CASE("decode indefinite array without break returns incomplete") {
 }
 
 TEST_CASE("decode indefinite map into map") {
-    std::vector<std::byte> buffer{std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
-                                  std::byte{0xFF}};
+    std::vector<std::byte> buffer{std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}};
 
     auto dec = make_decoder(buffer);
 
@@ -292,9 +291,9 @@ TEST_CASE("roundtrip indefinite tagged class in variant") {
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(input));
 
-    auto                                 dec = make_decoder(buffer);
+    auto                                        dec = make_decoder(buffer);
     std::variant<int, IndefTagged, std::string> v;
-    auto                                 result = dec(v);
+    auto                                        result = dec(v);
 
     CHECK_MESSAGE(result, "Decoding tagged class via variant should succeed.");
     CHECK(std::holds_alternative<IndefTagged>(v));
@@ -306,9 +305,9 @@ TEST_CASE("roundtrip variant with tstr over tagged class") {
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(std::string{"hello"}));
 
-    auto                                 dec = make_decoder(buffer);
+    auto                                        dec = make_decoder(buffer);
     std::variant<int, IndefTagged, std::string> v;
-    auto                                 result = dec(v);
+    auto                                        result = dec(v);
 
     CHECK_MESSAGE(result, "Variant should select string when tstr is present.");
     CHECK(std::holds_alternative<std::string>(v));
@@ -333,7 +332,7 @@ TEST_CASE("variant decodes indefinite array into normal vector") {
 }
 
 TEST_CASE("roundtrip nested indefinite structures") {
-    IndefNested input{.id = 7,
+    IndefNested input{.id     = 7,
                       .values = {10, 20},
                       .tagged = {{1, IndefTagged{.values = {1, 2}, .labels = {{1, "a"}}}},
                                  {2, IndefTagged{.values = {3, 4}, .labels = {{2, "b"}, {3, "c"}}}}}};
@@ -342,27 +341,27 @@ TEST_CASE("roundtrip nested indefinite structures") {
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(input));
 
-    auto       dec = make_decoder(buffer);
+    auto        dec = make_decoder(buffer);
     IndefNested decoded;
-    auto       result = dec(decoded);
+    auto        result = dec(decoded);
 
     CHECK_MESSAGE(result, "Nested indefinite structures should roundtrip.");
     CHECK_EQ(decoded, input);
 }
 
 TEST_CASE("roundtrip embedded indefinite fields in structs") {
-    IndefEmbedded input{.id = 42,
+    IndefEmbedded input{.id      = 42,
                         .payload = IndefTagged{.values = {9}, .labels = {{1, "nine"}}},
-                        .blob = {std::byte{0xAA}, std::byte{0xBB}},
-                        .label = "ok"};
+                        .blob    = {std::byte{0xAA}, std::byte{0xBB}},
+                        .label   = "ok"};
 
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(input));
 
-    auto         dec = make_decoder(buffer);
+    auto          dec = make_decoder(buffer);
     IndefEmbedded decoded;
-    auto         result = dec(decoded);
+    auto          result = dec(decoded);
 
     CHECK_MESSAGE(result, "Embedded indefinite fields should roundtrip.");
     CHECK_EQ(decoded, input);
