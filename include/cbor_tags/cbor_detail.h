@@ -9,7 +9,15 @@
 #include <iterator>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <type_traits>
+
+#if defined(__cpp_impl_reflection) && __cpp_impl_reflection >= 202506L
+#include <meta>
+#define CBOR_TAGS_HAS_STD_REFLECTION 1
+#else
+#define CBOR_TAGS_HAS_STD_REFLECTION 0
+#endif
 
 namespace cbor::tags::detail {
 
@@ -153,6 +161,21 @@ template <typename Tuple> constexpr auto tuple_tail(Tuple &&tuple) {
                       std::forward<Tuple>(tuple));
 }
 
+#if CBOR_TAGS_HAS_STD_REFLECTION
+
+template <typename T>
+    requires IsAggregate<T> || IsTuple<T>
+constexpr auto aggregate_binding_count = [] consteval {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (IsTuple<type>) {
+        return std::tuple_size_v<type>;
+    } else {
+        return std::meta::nonstatic_data_members_of(^^type, std::meta::access_context::current()).size();
+    }
+}();
+
+#else
+
 template <typename T, typename... TArgs>
     requires IsAggregate<T> || IsTuple<T>
 constexpr std::size_t num_bindings_impl() {
@@ -163,11 +186,11 @@ constexpr std::size_t num_bindings_impl() {
     }
 }
 
-// template <IsTuple T> constexpr std::size_t num_bindings_impl() { return std::tuple_size_v<T>; }
-
 template <typename T>
     requires IsAggregate<T> || IsTuple<T>
 constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
+
+#endif
 
 template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr) { return static_cast<T &>(*this_ptr); }
 

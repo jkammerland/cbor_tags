@@ -151,3 +151,31 @@ jobs:
             cmake --build /tmp/build --parallel
             ctest --test-dir /tmp/build -C Release --output-on-failure
           '
+
+  gcc-std-reflection:
+    name: Fedora 44 GCC C++26 reflection tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Build and test GCC std reflection in Fedora 44
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "${{ github.workspace }}:/work:ro,z" \
+          -w /work \
+          registry.fedoraproject.org/fedora:44 \
+          bash -euxo pipefail -c '
+            dnf -y install \
+              cmake \
+              gcc-c++ \
+              git \
+              ninja-build
+            cmake -S /work -B /tmp/build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCBOR_TAGS_BUILD_TESTS=ON \
+              -DCBOR_TAGS_USE_STD_REFLECTION=ON
+            cmake --build /tmp/build --parallel
+            ctest --test-dir /tmp/build -C Release --output-on-failure
+          '

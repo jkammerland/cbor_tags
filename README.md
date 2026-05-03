@@ -583,7 +583,9 @@ struct DynamicTagged {
 ```
 
 ## 🔄 Automatic Reflection
- Until C++26 (or later) introduces native reflection, or `auto [...ts] = X{}`, this library provides an alternative compiler trick using `to_tuple(...)`:
+Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
+
+The API is the same in both modes:
 
 ```cpp
 struct A42 {
@@ -600,7 +602,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This is not necessary todo manually, as the operator() of the de/encoder will do this for you, while stopping at the first error. The supported ranges are configured with the cmake option `CBOR_TAGS_REFLECTION_RANGES`, which defaults to "1:24". This means a struct can at maximum have 24 members, but it can handle any number of nested structs, as long as they are within the max member requirement too. The format can take multiple space separated ranges, e.g. "1:24 30:50 1000:1000", just make sure it matches your usage. Any changes to this option will trigger a regeneration the header automatically, for cmake targets that depend on cbor_tags. The tool can be run separately if not using cmake in your build process.
+This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. For generated C++20 reflection, `CBOR_TAGS_REFLECTION_RANGES` controls the generated aggregate sizes and defaults to `"1:24"`. Use `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` if you need larger or custom ranges.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -716,15 +718,16 @@ See the docs for more info.
 
 ## ✅ Requirements
 
-- tl::expected (required, if not using c++23 std::expected)
-- fmt (optional, but required for cddl)
-- nameof (optional, but required for cddl)
+- tl::expected (required, if not using C++23 `std::expected`)
+- fmt (optional, but required for CDDL)
+- nameof (optional, but required for CDDL)
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
+- Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
 - CMake 3.20+.
 
 ## 📦 Installation
 
-Standard cmake:
+Standard CMake:
 
 ```cmake
 set(CMAKE_CXX_STANDARD 20)
@@ -735,7 +738,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.11.0 # or specify a particular commit/tag
+  GIT_TAG master # or a release tag/commit that contains the features you need
 )
 
 FetchContent_MakeAvailable(cbor_tags)

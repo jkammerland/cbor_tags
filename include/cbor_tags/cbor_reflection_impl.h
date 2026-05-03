@@ -6,6 +6,8 @@
 #include <tuple>
 #include <type_traits>
 
+#if !CBOR_TAGS_HAS_STD_REFLECTION
+
 namespace cbor::tags {
 
 namespace detail {
@@ -98,3 +100,5 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {
 }
 
 } // namespace cbor::tags
+
+#endif

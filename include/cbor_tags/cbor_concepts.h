@@ -212,9 +212,12 @@ concept IsBinaryStringBase = IsBinaryHeader<std::remove_cvref_t<T>> ||
 template <typename T>
 concept IsStringBase = IsTextStringBase<T> || IsBinaryStringBase<T>;
 
+template <class T> constexpr bool is_optional_v                   = false;
+template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
+
 template <typename T>
-concept IsRangeOfCborValuesBase =
-    std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> && (!IsStringBase<std::remove_cvref_t<T>>);
+concept IsRangeOfCborValuesBase = std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> &&
+                                  (!IsStringBase<std::remove_cvref_t<T>>) && (!is_optional_v<std::remove_cvref_t<T>>);
 
 template <typename T>
 concept IsFixedArray = requires {
@@ -558,9 +561,6 @@ struct CborStream {
 
 template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
-
-template <class T> constexpr bool is_optional_v                   = false;
-template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
 
 struct any {
     template <class T> constexpr operator T() const {
