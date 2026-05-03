@@ -31,11 +31,11 @@ struct MyStruct {
 fmt::memory_buffer buffer;
 cbor::tags::cddl_schema_to<MyStruct>(buffer);
 // Output:
-// MyStruct = (
+// MyStruct = [
 //   int,
 //   tstr,
-//   bool / float
-// )
+//   bool / float32
+// ]
 ```
 
 ## Basic Usage
@@ -46,11 +46,12 @@ cbor::tags::cddl_schema_to<MyStruct>(buffer);
 struct Person {
     uint32_t age;
     std::map<std::string, int> attributes;
-    std::optional<std::vector<byte>> data;
+    std::optional<std::vector<std::byte>> data;
 };
 
 fmt::memory_buffer schema;
 cbor::tags::cddl_schema_to<Person>(schema, {.row_options = {.format_by_rows = false}});
+// Person = [uint, {* tstr => int}, bstr / null]
 ```
 
 ### CBOR Annotation
@@ -90,8 +91,16 @@ struct CustomTagged {
 Generates CDDL schema for the given type into output buffer
 
 **Options**:
-- `row_options.format_by_rows`: Format complex types across multiple lines
-- `always_inline`: Prevent type definitions from being separated
+- `row_options.format_by_rows`: Format multi-field aggregate payload arrays across multiple lines
+- `always_inline`: Inline nested aggregate definitions when possible; recursive references stay named
+- `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
+
+Generated aggregate schemas mirror the default encoder shape. Multi-field
+aggregates are arrays, single-field aggregates are the single payload value,
+maps are rendered as `{* key => value}`, and sequence containers are rendered
+as `[* value]`. Static tags render as `#6.n(payload)`. Dynamic tag values are
+not available from the type alone, so dynamic tags render as `#6(payload)`.
+Recursive aggregate types are emitted as named CDDL rules.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

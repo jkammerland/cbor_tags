@@ -707,9 +707,9 @@ fmt::print("Concise Data Definition: \n{}\n", fmt::to_string(buffer));
 
 Should output:
 ```
-A = (uint, nint, int, float64, float32, bool, tstr, bstr, map, int / tstr, int / null, B, C)
+A = [uint, nint, int, float64, float32, bool, tstr, bstr, {* int => tstr}, int / tstr, int / null, B, C]
 C = #6.141([int, tstr, B / null])
-B = #6.140([bstr, map])
+B = #6.140([bstr, {* int => tstr}])
 ```
 See the docs for more info.
 
