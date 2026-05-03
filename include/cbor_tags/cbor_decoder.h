@@ -48,36 +48,6 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     return value <= max_cbor_argument;
 }
 
-template <typename T>
-concept OrderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
-    typename T::key_compare;
-    target.key_comp();
-    target.get_allocator();
-    T{target.key_comp(), target.get_allocator()};
-    requires std::is_move_assignable_v<typename T::key_compare>;
-};
-
-template <typename T>
-concept UnorderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
-    typename T::hasher;
-    typename T::key_equal;
-    target.hash_function();
-    target.key_eq();
-    target.get_allocator();
-    T{typename T::size_type{}, target.hash_function(), target.key_eq(), target.get_allocator()};
-    requires std::is_move_assignable_v<typename T::hasher>;
-    requires std::is_move_assignable_v<typename T::key_equal>;
-};
-
-template <typename T>
-concept AllocatorStagedDecodeTarget = (!IsMap<T>) && requires(const T &target) {
-    target.get_allocator();
-    T{target.get_allocator()};
-    requires std::is_move_assignable_v<T>;
-};
-
-template <typename T>
-concept DefaultStagedDecodeTarget = (!IsMap<T>) && std::is_default_constructible_v<T> && std::is_move_assignable_v<T>;
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -101,42 +71,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
-
-    template <typename T, typename F> constexpr status_code decode_into_temp(T &out, F &&fn) {
-        if constexpr (detail::OrderedMapStagedDecodeTarget<T>) {
-            T    temp(out.key_comp(), out.get_allocator());
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else if constexpr (detail::UnorderedMapStagedDecodeTarget<T>) {
-            T    temp(typename T::size_type{}, out.hash_function(), out.key_eq(), out.get_allocator());
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else if constexpr (detail::AllocatorStagedDecodeTarget<T>) {
-            T    temp(out.get_allocator());
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else if constexpr (detail::DefaultStagedDecodeTarget<T>) {
-            T    temp{};
-            auto status = std::forward<F>(fn)(temp);
-            if (status == status_code::success) {
-                out = std::move(temp);
-            }
-            return status;
-        } else {
-            (void)out;
-            (void)fn;
-            return status_code::error;
-        }
-    }
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
@@ -246,7 +180,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
             } else {
-                return decode_into_temp(t, [this](T &temp) { return decode_indef_bstr(temp); });
+                return decode_indef_bstr(t);
             }
         }
 
@@ -302,7 +236,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
             } else {
-                return decode_into_temp(t, [this](T &temp) { return decode_indef_tstr(temp); });
+                return decode_indef_tstr(t);
             }
         }
 
@@ -327,9 +261,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
             } else if constexpr (IsMap<T>) {
-                return decode_into_temp(value, [this](T &temp) { return decode_indef_map(temp); });
+                return decode_indef_map(value);
             } else {
-                return decode_into_temp(value, [this](T &temp) { return decode_indef_array(temp); });
+                return decode_indef_array(value);
             }
         }
 
@@ -606,7 +540,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tstr_on_buffer;
         }
         if (additionalInfo == static_cast<byte>(31)) {
-            return decode_into_temp(value, [this](std::string &temp) { return decode_indef_tstr(temp); });
+            return decode_indef_tstr(value);
         }
         auto text = decode_text(additionalInfo);
         value     = std::string(text);
@@ -1290,7 +1224,7 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
-                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_bstr(temp); });
+                return dec.decode_indef_bstr(value.value_);
             }
         } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
             if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
@@ -1299,13 +1233,13 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
-                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_tstr(temp); });
+                return dec.decode_indef_tstr(value.value_);
             }
         } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
             if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_map_on_buffer;
             }
-            return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_map(temp); });
+            return dec.decode_indef_map(value.value_);
         } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
             if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_array_on_buffer;
@@ -1313,7 +1247,7 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
-                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_array(temp); });
+                return dec.decode_indef_array(value.value_);
             }
         } else {
             return status_code::error;

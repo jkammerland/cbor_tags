@@ -153,8 +153,6 @@ TEST_CASE("decode indefinite array without break returns incomplete") {
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], 99);
 }
 
 TEST_CASE("decode indefinite map into map") {
@@ -182,8 +180,6 @@ TEST_CASE("decode indefinite map without break returns incomplete") {
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[9], 9);
 }
 
 TEST_CASE("decode indefinite bstr without break returns incomplete") {
@@ -196,8 +192,6 @@ TEST_CASE("decode indefinite bstr without break returns incomplete") {
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0x01});
 }
 
 TEST_CASE("decode indefinite bstr with indefinite chunk returns no match") {
@@ -222,8 +216,6 @@ TEST_CASE("decode indefinite bstr with truncated chunk returns incomplete") {
 
     CHECK_FALSE_MESSAGE(result, "Truncated chunk payload should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0xFF});
 }
 
 TEST_CASE("roundtrip indefinite tagged class direct") {

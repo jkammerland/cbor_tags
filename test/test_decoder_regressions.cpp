@@ -331,8 +331,6 @@ TEST_CASE("decoder should report incomplete indefinite array without retry contr
 
     CHECK_FALSE_MESSAGE(result, "Truncated indefinite array should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], 99);
 }
 
 TEST_CASE("decoder should report incomplete indefinite bstr without retry contract") {
@@ -345,8 +343,6 @@ TEST_CASE("decoder should report incomplete indefinite bstr without retry contra
 
     CHECK_FALSE_MESSAGE(result, "Truncated indefinite bstr should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded[0], std::byte{0xCC});
 }
 
 TEST_CASE("decoder should decode complete definite values in one shot") {
@@ -396,7 +392,7 @@ TEST_CASE("decoder should decode complete non-contiguous definite and indefinite
     CHECK_EQ(text, "x");
 }
 
-TEST_CASE("decoder should decode definite containers without requiring default-staged targets") {
+TEST_CASE("decoder should decode definite containers without requiring indefinite temporary targets") {
     using NonDefaultMap    = std::map<int, int, NonDefaultComparator>;
     using NonAssignableMap = std::map<int, int, NonAssignableComparator>;
     using NonDefaultVector = std::vector<int, NonDefaultAllocator<int>>;
@@ -414,7 +410,7 @@ TEST_CASE("decoder should decode definite containers without requiring default-s
     NonDefaultVector non_default_vector{NonDefaultAllocator<int>{3}};
     auto             result = dec(non_default_map, non_assignable_map, non_default_vector);
 
-    REQUIRE_MESSAGE(result, "Definite decode must not instantiate indefinite staging requirements.");
+    REQUIRE_MESSAGE(result, "Definite decode must not instantiate indefinite temporary requirements.");
     CHECK_EQ(non_default_map.size(), 2);
     CHECK_EQ(non_default_map[1], 2);
     CHECK_EQ(non_default_map[3], 4);
@@ -426,28 +422,33 @@ TEST_CASE("decoder should decode definite containers without requiring default-s
     CHECK_EQ(non_default_vector.get_allocator().tag, 3);
 }
 
-TEST_CASE("decoder should stage indefinite containers with target allocator and comparator") {
+TEST_CASE("decoder should decode indefinite containers without staging through assignable temporaries") {
     using NonDefaultMap    = std::map<int, int, NonDefaultComparator>;
+    using NonAssignableMap = std::map<int, int, NonAssignableComparator>;
     using NonDefaultVector = std::vector<int, NonDefaultAllocator<int>>;
 
     std::vector<std::byte> buffer{
         std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}, // indefinite map {1: 2}
-        std::byte{0x9F}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite array [3, 4]
+        std::byte{0xBF}, std::byte{0x03}, std::byte{0x04}, std::byte{0xFF}, // indefinite map {3: 4}
+        std::byte{0x9F}, std::byte{0x05}, std::byte{0x06}, std::byte{0xFF}, // indefinite array [5, 6]
     };
 
     auto dec = make_decoder(buffer);
 
     NonDefaultMap    decoded_map{NonDefaultComparator{4}};
+    NonAssignableMap decoded_non_assignable_map{NonAssignableComparator{5}};
     NonDefaultVector decoded_vector{NonDefaultAllocator<int>{5}};
-    auto             result = dec(decoded_map, decoded_vector);
+    auto             result = dec(decoded_map, decoded_non_assignable_map, decoded_vector);
 
-    REQUIRE_MESSAGE(result, "Indefinite staging should preserve target construction state when available.");
+    REQUIRE_MESSAGE(result, "Indefinite decode should not require assigning a staged container back to the target.");
     CHECK_EQ(decoded_map.size(), 1);
     CHECK_EQ(decoded_map[1], 2);
     CHECK_EQ(decoded_map.key_comp().tag, 4);
+    CHECK_EQ(decoded_non_assignable_map.size(), 1);
+    CHECK_EQ(decoded_non_assignable_map[3], 4);
     CHECK_EQ(decoded_vector.size(), 2);
-    CHECK_EQ(decoded_vector[0], 3);
-    CHECK_EQ(decoded_vector[1], 4);
+    CHECK_EQ(decoded_vector[0], 5);
+    CHECK_EQ(decoded_vector[1], 6);
     CHECK_EQ(decoded_vector.get_allocator().tag, 5);
 }
 
