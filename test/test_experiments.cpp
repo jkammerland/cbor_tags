@@ -59,12 +59,16 @@ struct A12398 {
 
 // Helper function to print type and value
 template <typename T> void print_type_and_value(const T &value) {
-    if constexpr (std::is_same_v<T, A12398>) {
+    using type = std::remove_cvref_t<T>;
+
+    if constexpr (std::is_same_v<type, A12398>) {
         CBOR_TAGS_TEST_LOG("Got type <A>: with values a={}, s={}\n", value.a, value.s);
-    } else if constexpr (fmt::is_formattable<T>()) {
-        CBOR_TAGS_TEST_LOG("Got type <{}> with value <{}>\n", nameof::nameof_short_type<T>(), value);
+    } else if constexpr (is_optional_v<type>) {
+        CBOR_TAGS_TEST_LOG("Got type <{}>\n", nameof::nameof_short_type<type>());
+    } else if constexpr (fmt::is_formattable<type>()) {
+        CBOR_TAGS_TEST_LOG("Got type <{}> with value <{}>\n", nameof::nameof_short_type<type>(), value);
     } else {
-        CBOR_TAGS_TEST_LOG("Got type <{}>\n", nameof::nameof_short_type<T>());
+        CBOR_TAGS_TEST_LOG("Got type <{}>\n", nameof::nameof_short_type<type>());
     }
 }
 
