@@ -714,6 +714,7 @@ C = #6.141([int, tstr, B / null])
 B = #6.140([bstr, {* int => tstr}])
 ```
 See the docs for more info.
+Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_standard_coverage.md).
 
 
 ## ✅ Requirements
