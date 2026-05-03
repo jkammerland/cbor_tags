@@ -9,8 +9,8 @@
 #include <iterator>
 #include <ranges>
 #include <stdexcept>
-#include <type_traits>
 #include <tuple>
+#include <type_traits>
 
 #if defined(__cpp_impl_reflection) && __cpp_impl_reflection >= 202506L
 #include <meta>

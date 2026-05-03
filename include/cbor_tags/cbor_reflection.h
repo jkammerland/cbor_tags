@@ -25,7 +25,7 @@ template <typename T, std::size_t I> consteval std::meta::info aggregate_member(
 
 template <typename T, std::size_t... Is> constexpr auto to_tuple_impl(T &&object, std::index_sequence<Is...>) noexcept {
     using type = std::remove_cvref_t<T>;
-    return std::tie(object.[: aggregate_member<type, Is>() :]...);
+    return std::tie(object.[:aggregate_member<type, Is>():]...);
 }
 } // namespace detail
 
