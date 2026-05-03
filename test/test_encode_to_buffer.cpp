@@ -23,6 +23,33 @@ using namespace cbor::tags;
 
 namespace {
 consteval bool negative_wrapper_value_is_representable(std::uint64_t value) { return value != 0; }
+
+struct MemberEncodeOnly {
+    int value{7};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(value); }
+};
+
+struct FreeEncodeOnly {
+    int value{8};
+};
+
+template <typename Encoder> constexpr auto encode(Encoder &enc, const FreeEncodeOnly &value) { return enc(value.value); }
+
+struct FreeTranscodeOnly {
+    int value{9};
+};
+
+template <typename Transcoder> constexpr auto transcode(Transcoder &transcoder, const FreeTranscodeOnly &value) {
+    return transcoder(value.value);
+}
+
+struct TaggedMemberEncode {
+    static_tag<99> cbor_tag;
+    int            value{1};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(value); }
+};
 } // namespace
 
 static_assert(negative_wrapper_value_is_representable(1));
@@ -100,6 +127,14 @@ TEST_CASE("CBOR Encoder writes indefinite wrappers") {
 
     REQUIRE(enc(as_indefinite{values}, as_indefinite{mapping}, as_indefinite{text}, as_indefinite{bytes}));
     CHECK_EQ(to_hex(buffer), "9f0102ffbf0102ff7f626869ff5f42abcdff");
+}
+
+TEST_CASE("CBOR Encoder dispatches class encoding overload forms") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(MemberEncodeOnly{}, FreeEncodeOnly{}, FreeTranscodeOnly{}, TaggedMemberEncode{}));
+    CHECK_EQ(to_hex(buffer), "070809d86301");
 }
 
 TEST_CASE("CBOR Encoder rejects invalid indefinite wrapper type") {
