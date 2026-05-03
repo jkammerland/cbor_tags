@@ -19,6 +19,39 @@ using namespace cbor::tags;
 using namespace cbor::tags::literals;
 using namespace std::string_view_literals;
 
+TEST_CASE("status messages cover every declared status code") {
+    constexpr status_code statuses[] = {
+        status_code::success,
+        status_code::incomplete,
+        status_code::unexpected_group_size,
+        status_code::out_of_memory,
+        status_code::error,
+        status_code::contiguous_view_on_non_contiguous_data,
+        status_code::invalid_utf8_sequence,
+        status_code::begin_no_match_decoding,
+        status_code::no_match_for_tag,
+        status_code::no_match_for_tag_simple_on_buffer,
+        status_code::no_match_for_uint_on_buffer,
+        status_code::no_match_for_nint_on_buffer,
+        status_code::no_match_for_int_on_buffer,
+        status_code::no_match_for_enum_on_buffer,
+        status_code::no_match_for_bstr_on_buffer,
+        status_code::no_match_for_tstr_on_buffer,
+        status_code::no_match_for_array_on_buffer,
+        status_code::no_match_for_map_on_buffer,
+        status_code::no_match_for_tag_on_buffer,
+        status_code::no_match_for_simple_on_buffer,
+        status_code::no_match_for_optional_on_buffer,
+        status_code::no_match_in_variant_on_buffer,
+        status_code::end_no_match_decoding,
+    };
+
+    for (auto status : statuses) {
+        CHECK_NE(status_message(status), "Unknown CBOR status code"sv);
+    }
+    CHECK_EQ(status_message(static_cast<status_code>(255)), "Unknown CBOR status code"sv);
+}
+
 TEST_SUITE("Decoding the wrong thing") {
     TEST_CASE("Decode wrong tag") {
         auto data = std::vector<std::byte>{};

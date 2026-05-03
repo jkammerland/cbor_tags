@@ -12,6 +12,7 @@
 #include <fmt/base.h>
 #include <fmt/core.h>
 #include <list>
+#include <map>
 #include <memory_resource>
 #include <nameof.hpp>
 #include <numeric>
@@ -69,6 +70,47 @@ TEST_CASE("CBOR Encoder documents zero negative wrapper edge behavior") {
 
     REQUIRE(result);
     CHECK_EQ(to_hex(data), "3bffffffffffffffff");
+}
+
+TEST_CASE("CBOR Encoder writes exact-size fixed buffers") {
+    std::array<std::byte, 2> buffer{};
+    auto                     enc = make_encoder(buffer);
+
+    auto result = enc(std::uint8_t{24});
+
+    REQUIRE(result);
+    CHECK_EQ(to_hex(buffer), "1818");
+}
+
+TEST_CASE("CBOR Encoder writes floating-point major type payloads") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(float16_t{static_cast<std::uint16_t>(0x3C00)}, float{1.0F}, double{1.0}));
+    CHECK_EQ(to_hex(buffer), "f93c00fa3f800000fb3ff0000000000000");
+}
+
+TEST_CASE("CBOR Encoder writes indefinite wrappers") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    std::vector<int>       values{1, 2};
+    std::map<int, int>     mapping{{1, 2}};
+    std::string            text{"hi"};
+    std::vector<std::byte> bytes{std::byte{0xAB}, std::byte{0xCD}};
+
+    REQUIRE(enc(as_indefinite{values}, as_indefinite{mapping}, as_indefinite{text}, as_indefinite{bytes}));
+    CHECK_EQ(to_hex(buffer), "9f0102ffbf0102ff7f626869ff5f42abcdff");
+}
+
+TEST_CASE("CBOR Encoder rejects invalid indefinite wrapper type") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    int                    value{1};
+
+    auto result = enc(as_indefinite{value});
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
 }
 
 TEST_CASE("CBOR Encoder on deque") {

@@ -200,6 +200,131 @@ TEST_CASE("decoder should accept largest representable negative wrapper value") 
     }
 }
 
+TEST_CASE("decoder should reject truncated integer payloads") {
+    struct Case {
+        std::vector<std::byte> bytes;
+    };
+
+    const Case cases[] = {
+        {{std::byte{0x18}}},
+        {{std::byte{0x19}, std::byte{0x00}}},
+        {{std::byte{0x1A}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}}},
+        {{std::byte{0x1B}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+          std::byte{0x00}}},
+    };
+
+    for (const auto &test_case : cases) {
+        auto          dec = make_decoder(test_case.bytes);
+        std::uint64_t decoded{};
+        auto          result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+}
+
+TEST_CASE("decoder should reject truncated float payloads") {
+    {
+        std::vector<std::byte> buffer{std::byte{0xF9}, std::byte{0x3C}};
+        auto                   dec = make_decoder(buffer);
+        float16_t              decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0xFA}, std::byte{0x3F}, std::byte{0x80}, std::byte{0x00}};
+        auto                   dec = make_decoder(buffer);
+        float                  decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0xFB}, std::byte{0x3F}, std::byte{0xF0}, std::byte{0x00},
+                                      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+        auto                   dec = make_decoder(buffer);
+        double                 decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+}
+
+TEST_CASE("decoder should map invalid additional information to error") {
+    {
+        std::vector<std::byte> buffer{std::byte{0x1C}};
+        auto                   dec = make_decoder(buffer);
+        std::uint64_t          decoded{};
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x5C}};
+        auto                   dec = make_decoder(buffer);
+        std::vector<std::byte> decoded;
+        auto                   result = dec(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+}
+
+TEST_CASE("decoder should reject wrong chunk types inside indefinite strings") {
+    {
+        std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x61}, std::byte{'x'}, std::byte{0xFF}};
+        auto                   dec = make_decoder(buffer);
+        std::vector<std::byte> decoded;
+        auto                   result = dec(as_indefinite{decoded});
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x41}, std::byte{0x01}, std::byte{0xFF}};
+        auto                   dec = make_decoder(buffer);
+        std::string            decoded;
+        auto                   result = dec(as_indefinite{decoded});
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+    }
+}
+
+TEST_CASE("decoder should propagate incomplete from nested indefinite arrays") {
+    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x9F}, std::byte{0x01}, std::byte{0xFF}};
+
+    auto                          dec = make_decoder(buffer);
+    std::vector<std::vector<int>> decoded;
+    auto                          result = dec(as_indefinite{decoded});
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+}
+
+TEST_CASE("decoder should propagate incomplete from variant alternatives") {
+    std::vector<std::byte> buffer{std::byte{0x62}, std::byte{'a'}};
+
+    auto                                     dec = make_decoder(buffer);
+    std::variant<std::uint64_t, as_text_any> decoded;
+    auto                                     result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+}
+
+TEST_CASE("decoder should decode extended simple values") {
+    std::vector<std::byte> buffer{std::byte{0xF8}, std::byte{0x10}};
+
+    auto   dec = make_decoder(buffer);
+    simple decoded{};
+    auto   result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.value, 0x10);
+}
+
 TEST_CASE("decoder should accept empty byte strings") {
     std::vector<std::byte> buffer{std::byte{0x40}}; // 0-length bstr
 
