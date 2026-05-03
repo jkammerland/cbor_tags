@@ -182,6 +182,11 @@ template <std::ranges::input_range R> struct bstr_view : std::ranges::view_inter
 
     R range;
 
+    constexpr bstr_view()
+        requires std::default_initializable<R>
+    = default;
+    constexpr explicit bstr_view(R input_range) : range(std::move(input_range)) {}
+
     constexpr auto begin() const { return iterator{std::ranges::begin(range)}; }
     constexpr auto end() const { return iterator{std::ranges::end(range)}; }
 
@@ -196,6 +201,11 @@ template <std::ranges::input_range R> struct tstr_view : std::ranges::view_inter
     using iterator     = cast_view_iterator<std::ranges::iterator_t<const R>, value_type>;
 
     R range;
+
+    constexpr tstr_view()
+        requires std::default_initializable<R>
+    = default;
+    constexpr explicit tstr_view(R input_range) : range(std::move(input_range)) {}
 
     constexpr auto begin() const { return iterator{std::ranges::begin(range)}; }
     constexpr auto end() const { return iterator{std::ranges::end(range)}; }

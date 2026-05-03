@@ -927,7 +927,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
-            return bstr_view_t{.range = result};
+            return bstr_view_t{result};
         }
     }
 
@@ -949,7 +949,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
-            return tstr_view_t{.range = result};
+            return tstr_view_t{result};
         }
     }
 
