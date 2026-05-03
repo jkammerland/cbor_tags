@@ -7,12 +7,20 @@
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <functional>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 using namespace cbor::tags;
 
@@ -112,6 +120,46 @@ TEST_CASE("security regression: non-contiguous byte string decode materializes s
     CHECK_EQ(decoded, std::vector<std::byte>{std::byte{0xAA}, std::byte{0xBB}});
 }
 
+TEST_CASE("security regression: non-contiguous byte view iterators are not produced from non-borrowed temporaries") {
+    std::deque<char>       input{'\x43', '\x01', '\x02', '\x03'};
+    auto                   dec = make_decoder(input);
+    decltype(dec)::bstr_view_t view{};
+
+    auto result = dec(view);
+    REQUIRE(result);
+
+    using transformed_view_t = decltype(view.view());
+    CHECK(std::ranges::borrowed_range<transformed_view_t>);
+}
+
+TEST_CASE("security regression: variant simple accepts cbor undefined") {
+    using simple_variant = std::variant<simple, int>;
+
+    std::vector<std::byte> buffer{std::byte{0xF7}}; // undefined, #7.23
+    auto                   dec = make_decoder(buffer);
+    simple_variant         decoded{int{}};
+
+    auto result = dec(decoded);
+
+    REQUIRE(result);
+    REQUIRE(std::holds_alternative<simple>(decoded));
+    CHECK_EQ(std::get<simple>(decoded).value, 23);
+}
+
+TEST_CASE("security regression: optional simple does not hide bool variant alternatives") {
+    using simple_or_bool = std::variant<std::optional<simple>, bool>;
+
+    std::vector<std::byte> buffer{std::byte{0xF4}}; // false, #7.20
+    auto                   dec = make_decoder(buffer);
+    simple_or_bool         decoded{std::optional<simple>{}};
+
+    auto result = dec(decoded);
+
+    REQUIRE(result);
+    REQUIRE(std::holds_alternative<bool>(decoded));
+    CHECK_FALSE(std::get<bool>(decoded));
+}
+
 TEST_CASE("security regression: diagnostic handles empty input and empty containers in compact mode") {
     DiagnosticOptions compact{.row_options = {.format_by_rows = false}};
 
@@ -151,6 +199,25 @@ TEST_CASE("security regression: diagnostic escapes text syntax characters") {
     CHECK(diagnostic.find("\\n") != std::string::npos);
 }
 
+TEST_CASE("security regression: diagnostic renders cbor undefined as undefined") {
+    DiagnosticOptions      compact{.row_options = {.format_by_rows = false}};
+    std::vector<std::byte> buffer{std::byte{0xF7}}; // undefined, #7.23
+    std::string            diagnostic;
+
+    buffer_diagnostic(buffer, diagnostic, compact);
+
+    CHECK_EQ(diagnostic, "[undefined]");
+}
+
+TEST_CASE("security regression: diagnostic rejects excessive nesting depth") {
+    std::vector<std::byte> buffer(128, std::byte{0x81}); // array(1) nested 128 deep
+    buffer.push_back(std::byte{0x00});
+
+    std::string diagnostic;
+
+    CHECK_THROWS(buffer_diagnostic(buffer, diagnostic));
+}
+
 TEST_CASE("security regression: cddl root name is reserved before nested definitions") {
     std::string schema;
 
@@ -168,21 +235,45 @@ TEST_CASE("security regression: cddl root name is reserved before nested definit
     CHECK_EQ(exact_root_rules, 1);
 }
 
-#ifdef CBOR_TAGS_ENABLE_HANGING_SECURITY_REGRESSIONS
 TEST_CASE("security regression: cddl always_inline recursive aggregate below container root terminates") {
+#if defined(__unix__) || defined(__APPLE__)
+    const auto pid = fork();
+    REQUIRE(pid >= 0);
+
+    if (pid == 0) {
+        if (const int null_fd = open("/dev/null", O_WRONLY); null_fd >= 0) {
+            static_cast<void>(dup2(null_fd, STDOUT_FILENO));
+            static_cast<void>(dup2(null_fd, STDERR_FILENO));
+            close(null_fd);
+        }
+        alarm(3);
+
+        std::string schema;
+        cddl_schema_to<std::vector<SecurityRecursiveNode>>(
+            schema, {.row_options = {.format_by_rows = false}, .always_inline = true, .root_name = "Root"});
+
+        const bool has_recursive_rule = schema.find("SecurityRecursiveNode") != std::string::npos;
+        _exit(has_recursive_rule ? 0 : 2);
+    }
+
+    int status = 0;
+    REQUIRE_EQ(waitpid(pid, &status, 0), pid);
+    CHECK(WIFEXITED(status));
+    if (WIFEXITED(status)) {
+        CHECK_EQ(WEXITSTATUS(status), 0);
+    }
+#else
+    MESSAGE("fork-based recursion regression skipped on this platform");
+#endif
+}
+
+TEST_CASE("security regression: cddl root name is reserved for external contexts") {
+    detail::CDDLContext context;
     std::string schema;
 
-    cddl_schema_to<std::vector<SecurityRecursiveNode>>(
-        schema, {.row_options = {.format_by_rows = false}, .always_inline = true, .root_name = "Root"});
+    cddl_schema_to<std::vector<SecurityRootItem>>(
+        schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"}, std::ref(context));
 
-    CHECK(schema.find("SecurityRecursiveNode") != std::string::npos);
+    CHECK_NE(schema, "SecurityRootItem = [* SecurityRootItem]");
+    CHECK(schema.find("[* SecurityRootItem]") == std::string::npos);
 }
-
-TEST_CASE("security regression: diagnostic rejects excessive nesting depth") {
-    std::vector<std::byte> buffer(4096, std::byte{0x81});
-    buffer.push_back(std::byte{0x00});
-
-    std::string diagnostic;
-    CHECK_THROWS(buffer_diagnostic(buffer, diagnostic));
-}
-#endif
