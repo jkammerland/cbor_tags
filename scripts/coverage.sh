@@ -91,6 +91,7 @@ mkdir -p "$report_dir"
     --txt-summary \
     --html-details "$report_dir/index.html" \
     --xml "$report_dir/coverage.xml" \
-    --xml-pretty
+    --xml-pretty \
+    "$build_dir"
 
 echo "Coverage reports written to $report_dir"
