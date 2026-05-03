@@ -648,15 +648,36 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         [[maybe_unused]] std::optional<std::uint64_t> tag;
         bool                                          saw_incomplete = false;
 
-        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<typename U>() -> bool {
+        constexpr auto matches_simple_dispatch = []<bool CatchAllPass, typename U>(byte additional_info) {
+            using type = std::remove_cvref_t<U>;
+            if constexpr (IsOptional<type>) {
+                using inner_type = std::remove_cvref_t<typename type::value_type>;
+                if (additional_info == static_cast<byte>(SimpleType::Null)) {
+                    return true;
+                } else if constexpr (std::is_same_v<inner_type, simple>) {
+                    return CatchAllPass && compare_simple_value<simple>(additional_info);
+                } else if constexpr (IsSimple<inner_type>) {
+                    return !CatchAllPass && compare_simple_value<inner_type>(additional_info);
+                } else {
+                    return false;
+                }
+            } else if constexpr (std::is_same_v<type, simple>) {
+                return CatchAllPass && compare_simple_value<simple>(additional_info);
+            } else if constexpr (IsSimple<type>) {
+                return !CatchAllPass && compare_simple_value<type>(additional_info);
+            } else {
+                return true;
+            }
+        };
+
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
+                           matches_simple_dispatch]<bool CatchAllPass, typename U>() -> bool {
             if (!is_valid_major<major_type, U>(major)) {
                 return false;
             }
 
-            if constexpr (IsSimple<U>) {
-                if (!compare_simple_value<U>(additionalInfo)) {
-                    return false;
-                }
+            if (major == major_type::Simple && !matches_simple_dispatch.template operator()<CatchAllPass, U>(additionalInfo)) {
+                return false;
             }
 
             U           decoded_value;
@@ -681,7 +702,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         };
 
-        bool found = (try_decode.template operator()<T>() || ...);
+        bool found = false;
+        if (major == major_type::Simple) {
+            found = (try_decode.template operator()<false, T>() || ...);
+            if (!found) {
+                found = (try_decode.template operator()<true, T>() || ...);
+            }
+        } else {
+            found = (try_decode.template operator()<false, T>() || ...);
+        }
         if (!found) {
             if (saw_incomplete) {
                 return status_code::incomplete;

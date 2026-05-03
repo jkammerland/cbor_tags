@@ -282,7 +282,7 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         unmatched = false;
 
         auto current_tag = get_simple_tag_of_primitive_type<T>();
-        if (current_tag == SimpleType::Undefined) {
+        if (current_tag == SimpleType::Unmatched) {
             result[detail::MajorIndex::Unmatched]++;
             return;
         }
