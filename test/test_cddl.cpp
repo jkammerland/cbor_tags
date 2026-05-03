@@ -198,6 +198,10 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
 
 TEST_CASE("CDDL supports recursive aggregate containers") {
     CHECK_EQ(cddl_schema_inline<CDDLRecursiveNode>(), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
+
+    fmt::memory_buffer inline_buffer;
+    cddl_schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
+    CHECK_EQ(fmt::to_string(inline_buffer), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
 }
 
 TEST_CASE("CDDL gives colliding C++ short names distinct rule names") {
