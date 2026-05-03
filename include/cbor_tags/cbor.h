@@ -185,28 +185,12 @@ template <std::ranges::input_range R> struct tstr_view : std::ranges::view_inter
     }
 };
 
-// TODO: Not implemented! This is not the way I think.
-template <std::ranges::input_range R> struct binary_array_range_view {
-    R range;
-};
-
-// TODO: Not implemented!
-template <std::ranges::input_range R> struct binary_map_range_view {
-    R range;
-};
-
-// TODO: Not implemented!
-template <std::ranges::input_range R> struct binary_tag_range_view {
-    std::uint64_t tag;
-    R             range;
-};
-
 using variant_contiguous = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view,
                                         binary_map_view, binary_tag_view, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename R>
-using variant_ranges = std::variant<std::uint64_t, std::int64_t, bstr_view<R>, tstr_view<R>, binary_array_range_view<R>,
-                                    binary_map_range_view<R>, binary_tag_range_view<R>, float16_t, float, double, bool, std::nullptr_t>;
+using variant_ranges =
+    std::variant<std::uint64_t, std::int64_t, bstr_view<R>, tstr_view<R>, float16_t, float, double, bool, std::nullptr_t>;
 
 template <typename T> using subrange  = std::ranges::subrange<typename detail::iterator_type<T>::type>;
 template <typename T> using variant_t = std::conditional_t<IsContiguous<T>, variant_contiguous, variant_ranges<subrange<T>>>;
@@ -263,26 +247,6 @@ template <typename T> struct as_indefinite {
 };
 
 template <typename T> as_indefinite(T &) -> as_indefinite<T>;
-
-template <typename T> struct as_maybe_indefinite {
-    T value_;
-    constexpr as_maybe_indefinite() = default;
-    constexpr explicit as_maybe_indefinite(T value) : value_(std::move(value)) {}
-    constexpr T       &get() noexcept { return value_; }
-    constexpr const T &get() const noexcept { return value_; }
-};
-
-template <typename T> struct as_maybe_indefinite<T &> {
-    T *value_;
-    constexpr explicit as_maybe_indefinite(T &value) : value_(std::addressof(value)) {}
-    constexpr T &get() const noexcept { return *value_; }
-};
-
-template <typename T> using as_maybe_indefinite_ref   = as_maybe_indefinite<T &>;
-template <typename T> using as_maybe_indefinite_value = as_maybe_indefinite<T>;
-
-template <typename T> as_maybe_indefinite(T &) -> as_maybe_indefinite<T &>;
-template <typename T> as_maybe_indefinite(T &&) -> as_maybe_indefinite<std::remove_cvref_t<T>>;
 
 // Compile-time function to get CBOR major type
 template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {

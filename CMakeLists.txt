@@ -95,8 +95,13 @@ if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
 endif()
 
 option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
+option(CBOR_TAGS_TIDY_TESTS "Run clang-tidy on test sources" OFF)
+option(CBOR_TAGS_TIDY_BENCHMARKS "Run clang-tidy on benchmark sources" OFF)
 if(CBOR_TAGS_TIDY_TARGET)
   cpmaddpackage("gh:jkammerland/clang-tidy.cmake@1.2.0")
+  add_library(cbor_tags_tidy OBJECT EXCLUDE_FROM_ALL tools/cbor_tags_tidy.cpp)
+  target_link_libraries(cbor_tags_tidy PRIVATE cbor::tags)
+  target_tidy_sources(cbor_tags_tidy)
 endif()
 
 # add tests

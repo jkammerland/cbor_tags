@@ -9,6 +9,8 @@ cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
 cpmaddpackage("gh:ericniebler/range-v3#ca1388fb9da8e69314dda222dc7b139ca84e092f")
 cpmaddpackage("gh:jkammerland/doctest@1.0.1")
 
+include(CheckCXXCompilerFlag)
+
 # add executables more if needed
 add_executable(tests)
 
@@ -34,10 +36,18 @@ if(CBOR_TAGS_ENABLE_ASAN)
   endif()
 endif()
 
-if(CBOR_TAGS_TIDY_TARGET)
+if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
   message(STATUS "Tidy enabled in tests")
   target_tidy_sources(tests)
 endif()
 
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
+
+check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
+if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
+  add_executable(test_unsigned_char test_unsigned_char.cc)
+  target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
+  target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
+  add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
+endif()

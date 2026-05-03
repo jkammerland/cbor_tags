@@ -19,6 +19,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <forward_list>
 #include <iterator>
 #include <limits>
 #include <list>
@@ -44,7 +45,8 @@ TEST_CASE("Test IsUnsigned concept") {
 }
 
 TEST_CASE("Test IsSigned concept") {
-    static_assert(IsSigned<char>);
+    static_assert(IsSigned<char> == std::is_signed_v<char>);
+    static_assert(IsSigned<signed char>);
     static_assert(IsSigned<int>);
     static_assert(IsSigned<std::int8_t>);
     static_assert(IsSigned<std::int16_t>);
@@ -438,12 +440,22 @@ TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, 
     // CHECK(!wrapper(static_cast<T>(3), var1{}));
 }
 
-TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, unsigned char) {
+TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, signed char, unsigned char) {
     CBOR_TAGS_TEST_LOG("Testing concept with T: {}\n", nameof::nameof_type<T>());
     CHECK(cbor::tags::ValidCborBuffer<std::array<T, 5>>);
     CHECK(cbor::tags::ValidCborBuffer<std::vector<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::list<T>>);
     CHECK(cbor::tags::ValidCborBuffer<std::deque<T>>);
+    CHECK(!cbor::tags::ValidCborBuffer<std::forward_list<T>>);
+}
+
+TEST_CASE("CBOR buffer concept rejects non-byte storage") {
+    static_assert(!cbor::tags::ValidCborBuffer<std::vector<int>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::array<std::uint16_t, 5>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::deque<float>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::list<double>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::vector<bool>>);
+    static_assert(!cbor::tags::ValidCborBuffer<std::array<bool, 5>>);
 }
 
 TEST_CASE("Contiguous range concept") {
@@ -451,6 +463,13 @@ TEST_CASE("Contiguous range concept") {
     CHECK(cbor::tags::IsContiguous<std::vector<std::byte>>);
     CHECK(!cbor::tags::IsContiguous<std::list<std::byte>>);
     CHECK(!cbor::tags::IsContiguous<std::deque<std::byte>>);
+}
+
+TEST_CASE("Non-contiguous variant ranges expose implemented alternatives") {
+    using non_contiguous_variant = variant_t<std::list<std::byte>>;
+    using contiguous_variant     = variant_t<std::vector<std::byte>>;
+    static_assert(std::variant_size_v<non_contiguous_variant> == 9);
+    static_assert(std::variant_size_v<contiguous_variant> == 12);
 }
 
 struct AllCborMajorsExample {
@@ -702,10 +721,6 @@ TEST_CASE_TEMPLATE("ValidConceptMapping test negative", T, std::variant<int, neg
                                 B2, A2, std::array<int, 5>, std::map<int, std::string>, std::optional<E1>>,
                    std::variant<as_array_any, std::vector<int>>, std::variant<as_map_any, std::map<int, int>>,
                    std::variant<as_bstr_any, std::span<const std::byte>>, std::variant<as_text_any, std::string>,
-                   std::variant<std::vector<int>, as_maybe_indefinite<std::vector<int>>>,
-                   std::variant<std::map<int, int>, as_maybe_indefinite<std::map<int, int>>>,
-                   std::variant<std::string, as_maybe_indefinite<std::string>>,
-                   std::variant<std::vector<std::byte>, as_maybe_indefinite<std::vector<std::byte>>>,
                    std::variant<std::vector<int>, as_indefinite<std::vector<int>>>,
                    std::variant<std::map<int, int>, as_indefinite<std::map<int, int>>>,
                    std::variant<std::string, as_indefinite<std::string>>,

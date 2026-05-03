@@ -9,6 +9,7 @@
 #include <fmt/base.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <limits>
 
 using namespace cbor::tags;
 
@@ -80,6 +81,45 @@ TEST_CASE("CBOR - optional enum") {
     CHECK_EQ(e, e2);
     CHECK_EQ(f, f2);
     CHECK_EQ(g, g2);
+}
+
+TEST_CASE("CBOR - enum decode rejects out-of-range underlying values") {
+    {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(static_cast<std::uint16_t>(std::numeric_limits<std::uint8_t>::max()) + 1U));
+
+        auto dec = make_decoder(data);
+        G    value{};
+        auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_enum_on_buffer);
+    }
+
+    {
+        std::vector<std::byte> data{std::byte{0x38}, std::byte{0x80}}; // -129
+
+        auto dec = make_decoder(data);
+        H    value{};
+        auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_enum_on_buffer);
+    }
+}
+
+TEST_CASE("CBOR - enum decode accepts unnamed representable values") {
+    std::vector<std::byte> data;
+    auto                   enc = make_encoder(data);
+    REQUIRE(enc(std::uint8_t{42}));
+
+    auto dec = make_decoder(data);
+    G    value{};
+    auto result = dec(value);
+
+    REQUIRE(result);
+    CHECK_EQ(static_cast<std::uint8_t>(value), 42);
 }
 
 TEST_CASE("CBOR variant enum") {

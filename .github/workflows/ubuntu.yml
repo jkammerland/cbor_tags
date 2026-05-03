@@ -1,4 +1,4 @@
-name: Ubuntu Tests (GCC-12+, Clang-17+)
+name: Ubuntu Tests (GCC 12-16, LLVM 17-22)
 
 on:
   push:
@@ -18,86 +18,86 @@ jobs:
           - {
               name: "Ubuntu GCC 12",
               cc: "gcc-12",
-              cxx: "g++-12"
+              cxx: "g++-12",
+              family: "gcc"
             }
           - {
               name: "Ubuntu GCC 13",
               cc: "gcc-13",
-              cxx: "g++-13"
+              cxx: "g++-13",
+              family: "gcc"
             }
           - {
               name: "Ubuntu GCC 14",
               cc: "gcc-14",
-              cxx: "g++-14"
+              cxx: "g++-14",
+              family: "gcc"
             }
           # Ubuntu Clang configs
           - {
               name: "Ubuntu Clang 17",
               cc: "clang-17",
-              cxx: "clang++-17"
+              cxx: "clang++-17",
+              family: "llvm",
+              version: "17"
             }
           - {
               name: "Ubuntu Clang 18",
               cc: "clang-18",
-              cxx: "clang++-18"
+              cxx: "clang++-18",
+              family: "llvm",
+              version: "18"
             }
           - {
               name: "Ubuntu Clang 19",
               cc: "clang-19",
-              cxx: "clang++-19"
+              cxx: "clang++-19",
+              family: "llvm",
+              version: "19"
+            }
+          - {
+              name: "Ubuntu Clang 20",
+              cc: "clang-20",
+              cxx: "clang++-20",
+              family: "llvm",
+              version: "20"
+            }
+          - {
+              name: "Ubuntu Clang 21",
+              cc: "clang-21",
+              cxx: "clang++-21",
+              family: "llvm",
+              version: "21"
+            }
+          - {
+              name: "Ubuntu Clang 22",
+              cc: "clang-22",
+              cxx: "clang++-22",
+              family: "llvm",
+              version: "22"
             }
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6.0.2
 
     - name: Setup CMake
-      uses: lukka/get-cmake@latest
+      uses: lukka/get-cmake@v4.3.2
       with:
         cmakeVersion: '3.31.5'
 
-    - name: Install GCC 12 (Ubuntu)
-      if: matrix.config.cc == 'gcc-12'
+    - name: Install GCC (Ubuntu)
+      if: matrix.config.family == 'gcc'
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc-12 g++-12
+        sudo apt-get install -y ${{ matrix.config.cc }} ${{ matrix.config.cxx }}
 
-    - name: Install GCC 13 (Ubuntu)
-      if: matrix.config.cc == 'gcc-13'
+    - name: Install LLVM/Clang (Ubuntu)
+      if: matrix.config.family == 'llvm'
       run: |
-        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-        sudo apt-get update
-        sudo apt-get install -y gcc-13 g++-13
-
-    - name: Install GCC 14 (Ubuntu)
-      if: matrix.config.cc == 'gcc-14'
-      run: |
-        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-        sudo apt-get update
-        sudo apt-get install -y gcc-14 g++-14
-
-    - name: Install Clang 17 (Ubuntu)
-      if: matrix.config.cc == 'clang-17'
-      run: |
-        wget https://apt.llvm.org/llvm.sh
+        wget -q https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 17
-        sudo apt-get install -y clang-17
-
-    - name: Install Clang 18 (Ubuntu)
-      if: matrix.config.cc == 'clang-18'
-      run: |
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 18
-        sudo apt-get install -y clang-18
-
-    - name: Install Clang 19 (Ubuntu)
-      if: matrix.config.cc == 'clang-19'
-      run: |
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 19
-        sudo apt-get install -y clang-19
+        sudo ./llvm.sh ${{ matrix.config.version }}
+        sudo apt-get install -y clang-${{ matrix.config.version }}
 
     - name: Configure CMake
       shell: bash
@@ -114,3 +114,40 @@ jobs:
       working-directory: build
       shell: bash
       run: ctest -C Release --output-on-failure
+
+  gcc-current:
+    name: Ubuntu GCC ${{ matrix.gcc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gcc: [15, 16]
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Build and test in Ubuntu 26.04 container
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "${{ github.workspace }}:/work:ro,z" \
+          -w /work \
+          ubuntu:26.04 \
+          bash -euxo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates \
+              cmake \
+              git \
+              ninja-build \
+              gcc-${{ matrix.gcc }} \
+              g++-${{ matrix.gcc }}
+            cmake -S /work -B /tmp/build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCBOR_TAGS_BUILD_TESTS=ON \
+              -DCMAKE_C_COMPILER=gcc-${{ matrix.gcc }} \
+              -DCMAKE_CXX_COMPILER=g++-${{ matrix.gcc }}
+            cmake --build /tmp/build --parallel
+            ctest --test-dir /tmp/build -C Release --output-on-failure
+          '

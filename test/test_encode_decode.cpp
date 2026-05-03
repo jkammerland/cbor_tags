@@ -227,12 +227,14 @@ TEST_CASE_TEMPLATE("Test variant types", T, negative, double, std::string, std::
         T                      v;
         if constexpr (IsVariant<T>) {
             if (std::rand() % 2 == 0) {
-                v = negative(std::rand() % 100000);
+                v = negative{static_cast<positive>((std::rand() % 100000) + 1)};
             } else {
                 v = static_cast<double>(std::rand() % 100000);
             }
         } else if constexpr (std::is_same_v<T, int>) {
             v = static_cast<int>(-100);
+        } else if constexpr (std::is_same_v<T, negative>) {
+            v = negative{1};
         } else {
             v = T{};
         }

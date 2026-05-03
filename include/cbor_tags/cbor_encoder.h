@@ -259,16 +259,6 @@ template <typename T> struct cbor_indefinite_encoder {
         }
     }
 
-    template <typename U> constexpr void encode(as_maybe_indefinite<U> value) {
-        auto &enc = detail::underlying<T>(this);
-        auto &ref = value.get();
-        if constexpr ((IsBinaryString<U> && !IsBinaryHeader<U>) || (IsTextString<U> && !IsTextHeader<U>) || (IsMap<U> && !IsMapHeader<U>) ||
-                      (IsArray<U> && !IsArrayHeader<U>)) {
-            enc.encode(ref);
-        } else {
-            throw std::runtime_error("Invalid type for maybe indefinite encoding");
-        }
-    }
 };
 
 template <typename T> struct cbor_variant_encoder {

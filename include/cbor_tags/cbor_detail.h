@@ -3,16 +3,24 @@
 #include "cbor_tags/cbor_concepts.h"
 
 #include <concepts>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <ranges>
 #include <stdexcept>
 #include <type_traits>
 
 namespace cbor::tags::detail {
 
+template <typename T>
+concept AppendableContainer = requires {
+    typename T::value_type;
+    typename T::size_type;
+};
+
 template <typename T, bool IsArray = IsFixedArray<T>>
-    requires ValidCborBuffer<T>
+    requires AppendableContainer<T>
 struct appender;
 
 template <typename T> struct appender<T, false> {

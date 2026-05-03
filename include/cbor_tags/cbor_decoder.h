@@ -35,15 +35,61 @@
 
 namespace cbor::tags {
 
+namespace detail {
+template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
+    return value <= static_cast<std::uint64_t>(std::numeric_limits<T>::max());
+}
+
+template <typename T> constexpr bool negative_argument_fits(std::uint64_t value) {
+    static_assert(std::is_signed_v<T>);
+    constexpr auto min_value = std::numeric_limits<T>::min();
+    constexpr auto max_cbor_argument =
+        static_cast<std::uint64_t>(-(min_value + T{1}));
+    return value <= max_cbor_argument;
+}
+
+template <typename T>
+concept OrderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
+    typename T::key_compare;
+    target.key_comp();
+    target.get_allocator();
+    T{target.key_comp(), target.get_allocator()};
+    requires std::is_move_assignable_v<typename T::key_compare>;
+};
+
+template <typename T>
+concept UnorderedMapStagedDecodeTarget = IsMap<T> && requires(const T &target) {
+    typename T::hasher;
+    typename T::key_equal;
+    target.hash_function();
+    target.key_eq();
+    target.get_allocator();
+    T{typename T::size_type{}, target.hash_function(), target.key_eq(), target.get_allocator()};
+    requires std::is_move_assignable_v<typename T::hasher>;
+    requires std::is_move_assignable_v<typename T::key_equal>;
+};
+
+template <typename T>
+concept AllocatorStagedDecodeTarget = (!IsMap<T>) && requires(const T &target) {
+    target.get_allocator();
+    T{target.get_allocator()};
+    requires std::is_move_assignable_v<T>;
+};
+
+template <typename T>
+concept DefaultStagedDecodeTarget = (!IsMap<T>) && std::is_default_constructible_v<T> && std::is_move_assignable_v<T>;
+} // namespace detail
+
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
     requires ValidCborBuffer<InputBuffer>
 struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... {
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
-    using size_type     = typename InputBuffer::size_type;
-    using buffer_byte_t = typename InputBuffer::value_type;
-    using byte          = std::byte;
+    using size_type         = typename InputBuffer::size_type;
+    using buffer_byte_t     = typename InputBuffer::value_type;
+    using input_buffer_type = InputBuffer;
+    using byte              = std::byte;
 
     using iterator_t  = std::ranges::iterator_t<const InputBuffer>;
     using subrange    = std::ranges::subrange<iterator_t>;
@@ -55,6 +101,42 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
+
+    template <typename T, typename F> constexpr status_code decode_into_temp(T &out, F &&fn) {
+        if constexpr (detail::OrderedMapStagedDecodeTarget<T>) {
+            T    temp(out.key_comp(), out.get_allocator());
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else if constexpr (detail::UnorderedMapStagedDecodeTarget<T>) {
+            T    temp(typename T::size_type{}, out.hash_function(), out.key_eq(), out.get_allocator());
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else if constexpr (detail::AllocatorStagedDecodeTarget<T>) {
+            T    temp(out.get_allocator());
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else if constexpr (detail::DefaultStagedDecodeTarget<T>) {
+            T    temp{};
+            auto status = std::forward<F>(fn)(temp);
+            if (status == status_code::success) {
+                out = std::move(temp);
+            }
+            return status;
+        } else {
+            (void)out;
+            (void)fn;
+            return status_code::error;
+        }
+    }
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
@@ -76,11 +158,34 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <IsSigned T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+    constexpr status_code decode(integer &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
-            value = decode_unsigned(additionalInfo);
+            value = integer(decode_unsigned(additionalInfo));
         } else if (major == major_type::NegativeInteger) {
-            value = decode_integer(additionalInfo);
+            const auto decoded = decode_unsigned(additionalInfo);
+            value = integer(negative(decoded + 1));
+        } else {
+            return status_code::no_match_for_int_on_buffer;
+        }
+
+        return status_code::success;
+    }
+
+    template <IsSigned T>
+        requires(!std::is_same_v<T, integer>)
+    constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+        if (major == major_type::UnsignedInteger) {
+            const auto decoded = decode_unsigned(additionalInfo);
+            if (!detail::unsigned_value_fits<T>(decoded)) {
+                return status_code::no_match_for_int_on_buffer;
+            }
+            value = static_cast<T>(decoded);
+        } else if (major == major_type::NegativeInteger) {
+            const auto decoded = decode_unsigned(additionalInfo);
+            if (!detail::negative_argument_fits<T>(decoded)) {
+                return status_code::no_match_for_int_on_buffer;
+            }
+            value = static_cast<T>(T{-1} - static_cast<T>(decoded));
         } else {
             return status_code::no_match_for_int_on_buffer;
         }
@@ -90,24 +195,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsEnum U> constexpr status_code decode(U &value, major_type major, std::byte additionalInfo) {
         using underlying_type = std::underlying_type_t<U>;
-        if constexpr (IsSigned<underlying_type>) {
-            if (major > major_type::NegativeInteger) {
-
-                return status_code::no_match_for_enum_on_buffer;
-            }
-        } else if constexpr (IsUnsigned<underlying_type>) {
-            if (major != major_type::UnsignedInteger) {
-                return status_code::no_match_for_enum_on_buffer;
-            }
-        } else {
-
-            return status_code::no_match_for_enum_on_buffer;
-        }
-
         underlying_type result;
         auto            status = this->decode(result, major, additionalInfo);
+        if (status != status_code::success) {
+            return status_code::no_match_for_enum_on_buffer;
+        }
         value                  = static_cast<U>(result);
-        return status;
+        return status_code::success;
     }
 
     template <IsEnum U> constexpr status_code decode(U &value) {
@@ -119,7 +213,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::UnsignedInteger) {
             return status_code::no_match_for_uint_on_buffer;
         }
-        value = decode_unsigned(additionalInfo);
+        const auto decoded = decode_unsigned(additionalInfo);
+        if (!detail::unsigned_value_fits<T>(decoded)) {
+            return status_code::no_match_for_uint_on_buffer;
+        }
+        value = static_cast<T>(decoded);
 
         return status_code::success;
     }
@@ -128,7 +226,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::NegativeInteger) {
             return status_code::no_match_for_nint_on_buffer;
         }
-        value = negative(decode_unsigned(additionalInfo) + 1);
+        const auto decoded = decode_unsigned(additionalInfo);
+        value = negative(decoded + 1);
 
         return status_code::success;
     }
@@ -139,6 +238,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // Early validation
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        if (additionalInfo == static_cast<byte>(31)) {
+            if constexpr (IsConstView<T>) {
+                return status_code::no_match_for_bstr_on_buffer;
+            } else if constexpr (IsFixedArray<T>) {
+                return status_code::unexpected_group_size;
+            } else {
+                return decode_into_temp(t, [this](T &temp) { return decode_indef_bstr(temp); });
+            }
         }
 
         // Decode to intermediate form
@@ -187,6 +296,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tstr_on_buffer;
         }
 
+        if (additionalInfo == static_cast<byte>(31)) {
+            if constexpr (IsConstView<T>) {
+                return status_code::no_match_for_tstr_on_buffer;
+            } else if constexpr (IsFixedArray<T>) {
+                return status_code::unexpected_group_size;
+            } else {
+                return decode_into_temp(t, [this](T &temp) { return decode_indef_tstr(temp); });
+            }
+        }
+
         // Decode the text string
         t = decode_text(additionalInfo);
 
@@ -201,6 +320,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else {
             if (major != major_type::Array) {
                 return status_code::no_match_for_array_on_buffer;
+            }
+        }
+
+        if (additionalInfo == static_cast<byte>(31)) {
+            if constexpr (IsFixedArray<T>) {
+                return status_code::unexpected_group_size;
+            } else if constexpr (IsMap<T>) {
+                return decode_into_temp(value, [this](T &temp) { return decode_indef_map(temp); });
+            } else {
+                return decode_into_temp(value, [this](T &temp) { return decode_indef_array(temp); });
             }
         }
 
@@ -476,6 +605,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::TextString) {
             return status_code::no_match_for_tstr_on_buffer;
         }
+        if (additionalInfo == static_cast<byte>(31)) {
+            return decode_into_temp(value, [this](std::string &temp) { return decode_indef_tstr(temp); });
+        }
         auto text = decode_text(additionalInfo);
         value     = std::string(text);
         return status_code::success;
@@ -486,6 +618,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
             if (major != major_type::ByteString) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
             const auto length_u64 = decode_unsigned(additionalInfo);
@@ -517,6 +652,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
             if (major != major_type::TextString) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
                 return status_code::no_match_for_tstr_on_buffer;
             }
             value = decode_text(additionalInfo);
@@ -575,8 +713,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         // Holder for the parsed tag value
         [[maybe_unused]] std::optional<std::uint64_t> tag;
+        bool                                          saw_incomplete = false;
 
-        auto try_decode = [this, major, additionalInfo, &value, &tag]<typename U>() -> bool {
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<typename U>() -> bool {
             if (!is_valid_major<major_type, U>(major)) {
                 return false;
             }
@@ -601,6 +740,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (result == status_code::success) {
                 value = std::move(decoded_value);
                 return true;
+            } else if (result == status_code::incomplete) {
+                saw_incomplete = true;
+                return false;
             } else {
                 return false;
             }
@@ -608,6 +750,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         bool found = (try_decode.template operator()<T>() || ...);
         if (!found) {
+            if (saw_incomplete) {
+                return status_code::incomplete;
+            }
             return status_code::no_match_in_variant_on_buffer;
         }
         return status_code::success;
@@ -783,7 +928,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::incomplete;
         }
         const auto [majorType, additionalInfo] = read_initial_byte();
-
         return decode(value, majorType, additionalInfo);
     }
 
@@ -1136,6 +1280,46 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 template <typename T> struct cbor_indefinite_decoder {
     using byte = std::byte;
 
+    template <typename U>
+    constexpr status_code decode_indefinite_with_major(as_indefinite<U> value, major_type major, byte additionalInfo) {
+        auto &dec = detail::underlying<T>(this);
+        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
+            if (major != major_type::ByteString || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            if constexpr (IsFixedArray<U>) {
+                return status_code::unexpected_group_size;
+            } else {
+                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_bstr(temp); });
+            }
+        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
+            if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            if constexpr (IsFixedArray<U>) {
+                return status_code::unexpected_group_size;
+            } else {
+                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_tstr(temp); });
+            }
+        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_map(temp); });
+        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            if constexpr (IsFixedArray<U>) {
+                return status_code::unexpected_group_size;
+            } else {
+                return dec.decode_into_temp(value.value_, [&dec](U &temp) { return dec.decode_indef_array(temp); });
+            }
+        } else {
+            return status_code::error;
+        }
+    }
+
     template <typename U> constexpr status_code decode(as_indefinite<U> value) {
         auto &dec = detail::underlying<T>(this);
         if (dec.reader_.empty(dec.data_)) {
@@ -1143,85 +1327,11 @@ template <typename T> struct cbor_indefinite_decoder {
         }
 
         const auto [major, additionalInfo] = dec.read_initial_byte();
-        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
-            if (major != major_type::ByteString || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            return dec.decode_indef_bstr(value.value_);
-        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
-            if (major != major_type::TextString || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_tstr_on_buffer;
-            }
-            return dec.decode_indef_tstr(value.value_);
-        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
-            if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_map_on_buffer;
-            }
-            return dec.decode_indef_map(value.value_);
-        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
-            if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            return dec.decode_indef_array(value.value_);
-        } else {
-            return status_code::error;
-        }
+        return decode_indefinite_with_major(value, major, additionalInfo);
     }
 
-    template <typename U> constexpr status_code decode_maybe_indefinite_value(U &value) {
-        auto &dec = detail::underlying<T>(this);
-        if (dec.reader_.empty(dec.data_)) {
-            return status_code::incomplete;
-        }
-
-        const auto [major, additionalInfo] = dec.read_initial_byte();
-        if constexpr (IsBinaryString<U> && !IsBinaryHeader<U> && !IsConstView<U>) {
-            if (major != major_type::ByteString) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return dec.decode_indef_bstr(value);
-            }
-            return dec.decode(value, major, additionalInfo);
-        } else if constexpr (IsTextString<U> && !IsTextHeader<U> && !IsConstView<U>) {
-            if (major != major_type::TextString) {
-                return status_code::no_match_for_tstr_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return dec.decode_indef_tstr(value);
-            }
-            return dec.decode(value, major, additionalInfo);
-        } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
-            if (major != major_type::Map) {
-                return status_code::no_match_for_map_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return dec.decode_indef_map(value);
-            }
-            return dec.decode(value, major, additionalInfo);
-        } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
-            if (major != major_type::Array) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                return dec.decode_indef_array(value);
-            }
-            return dec.decode(value, major, additionalInfo);
-        } else {
-            return status_code::error;
-        }
-    }
-
-    template <typename U>
-        requires std::is_reference_v<U>
-    constexpr status_code decode(as_maybe_indefinite<U> value) {
-        return decode_maybe_indefinite_value(value.get());
-    }
-
-    template <typename U>
-        requires(!std::is_reference_v<U>)
-    constexpr status_code decode(as_maybe_indefinite<U> &value) {
-        return decode_maybe_indefinite_value(value.get());
+    template <typename U> constexpr status_code decode(as_indefinite<U> value, major_type major, byte additionalInfo) {
+        return decode_indefinite_with_major(value, major, additionalInfo);
     }
 };
 

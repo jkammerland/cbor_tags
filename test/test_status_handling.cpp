@@ -211,28 +211,3 @@ TEST_SUITE("Views errors") {
         CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
     }
 }
-
-TEST_SUITE("Try resume decoding") {
-    TEST_CASE("decode wrong sized group, then resume") {
-        auto data = std::vector<std::byte>{};
-        auto enc  = make_encoder(data);
-
-        CHECK(enc(140_tag, wrap_as_array{1, 2}));
-        CBOR_TAGS_TEST_LOG("data: {}\n", to_hex(data));
-
-        auto dec = make_decoder(data);
-        int  a;
-        auto c      = wrap_as_array{a};
-        auto result = dec(140_tag, c);
-        REQUIRE_FALSE(result);
-
-        CHECK_EQ(result.error(), status_code::unexpected_group_size);
-
-        // Resume decode 2 ints
-        int one, two;
-        result = dec(one, two);
-        REQUIRE(result);
-        CHECK_EQ(one, 1);
-        CHECK_EQ(two, 2);
-    }
-}

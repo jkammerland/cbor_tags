@@ -1,8 +1,8 @@
 # A C++20 CBOR Library with Automatic Reflection
 
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
-[![CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
+[![macOS CI](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/macos.yml)
+[![Ubuntu CI](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/ubuntu.yml)
+[![Windows CI](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml/badge.svg)](https://github.com/jkammerland/cbor_tags/actions/workflows/windows.yml)
 
 This is a library for encoding and decoding Concise Binary Object Representation (CBOR) data. CBOR is a data format designed for small encoded sizes and extensibility without version negotiation. As an information model, CBOR is a superset of JSON, supporting additional data types and custom type definitions via tags 🏷️. Some good examples of different binary formats can be found here [rfc8949-name-conciseness-on-the-wire](https://www.rfc-editor.org/rfc/rfc8949.html#name-conciseness-on-the-wire). Also obligatory [xkcd/927](https://xkcd.com/927/). 
 
@@ -18,6 +18,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 # Index
 
 - [🎯 Key Features](#-key-features)
+- [Decode Policy Notes](#decode-policy-notes)
 - [🔧 Quick Start](#-quick-start)
   - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
   - [Tagged Struct Example](#tagged-struct-example)
@@ -52,6 +53,12 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
 - CDDL support for schema and custom data definitions.
+
+## Decode Policy Notes
+
+- Core text string decode preserves the encoded bytes and does not validate UTF-8. `status_code::invalid_utf8_sequence` is reserved for a future validation path and is not emitted by default decode.
+- Enum decode validates that the CBOR integer is representable by the enum underlying type. It does not reject unnamed but representable enumerator values; applications that treat an enum as a closed set should validate that policy after decode or in a custom decode overload.
+- `negative` and negative `integer` store the CBOR negative argument plus one in a `std::uint64_t` magnitude. The CBOR edge value with major type 1 and argument `UINT64_MAX` is outside that exact wrapper range. Default encode/decode intentionally does not add runtime checks for this edge: decoding it wraps the stored magnitude to `0`, and encoding `negative{0}` emits it. Use compile-time validation when the value is known statically.
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
@@ -217,7 +224,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". This property is important for understanding the streaming support, though streaming API is still incomplete.
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". The primary decoder is still a one-shot API: retry/resume after incomplete input is reserved for a future explicit resumable decoder entry point.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -711,7 +718,7 @@ See the docs for more info.
 - tl::expected (required, if not using c++23 std::expected)
 - fmt (optional, but required for cddl)
 - nameof (optional, but required for cddl)
-- C++20 compatible compiler, tested with (GCC 12+, Clang 15+, Clang-CL 15+, MSVC-latest, AppleClang 15+).
+- C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - CMake 3.20+.
 
 ## 📦 Installation

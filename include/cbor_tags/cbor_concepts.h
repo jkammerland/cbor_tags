@@ -30,11 +30,21 @@ concept IsOptions = requires(T) {
 };
 
 template <typename T>
-concept ValidCborBuffer = requires(T) {
-    std::is_convertible_v<typename T::value_type, std::byte>;
-    std::is_convertible_v<typename T::size_type, std::size_t>;
-    requires std::input_or_output_iterator<typename T::iterator>;
-};
+concept IsCborBufferByte =
+    std::same_as<std::remove_cvref_t<T>, std::byte> ||
+    (std::integral<std::remove_cvref_t<T>> && sizeof(std::remove_cvref_t<T>) == 1 &&
+     !std::same_as<std::remove_cvref_t<T>, bool>);
+
+template <typename T>
+concept ValidCborBuffer =
+    requires {
+        typename std::remove_cvref_t<T>::value_type;
+        typename std::remove_cvref_t<T>::size_type;
+        typename std::remove_cvref_t<T>::iterator;
+    } && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
+    std::convertible_to<typename std::remove_cvref_t<T>::size_type, std::size_t> &&
+    std::input_or_output_iterator<typename std::remove_cvref_t<T>::iterator> &&
+    (std::ranges::contiguous_range<std::remove_cvref_t<T>> || std::ranges::bidirectional_range<std::remove_cvref_t<T>>);
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {
@@ -71,7 +81,6 @@ struct integer;
 struct simple;
 
 template <typename T> struct as_indefinite;
-template <typename T> struct as_maybe_indefinite;
 
 struct as_text_any {
     std::uint64_t size;
@@ -181,10 +190,6 @@ template <typename T> struct indefinite_value_type<as_indefinite<T>> {
     using type = T;
 };
 
-template <typename T> struct indefinite_value_type<as_maybe_indefinite<T>> {
-    using type = T;
-};
-
 template <typename T>
 using indefinite_value_t = std::remove_cvref_t<typename indefinite_value_type<std::remove_cvref_t<T>>::type>;
 
@@ -192,12 +197,14 @@ template <typename T>
 concept IsIndefiniteWrapper = !std::is_same_v<typename indefinite_value_type<std::remove_cvref_t<T>>::type, void>;
 
 template <typename T>
+concept IsTextChar = std::is_integral_v<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1 &&
+                     (std::same_as<std::remove_cv_t<T>, char> || std::is_signed_v<std::remove_cv_t<T>>);
+
+template <typename T>
 concept IsTextStringBase =
     IsTextHeader<std::remove_cvref_t<T>> || IsConstTextView<std::remove_cvref_t<T>> ||
     requires(std::remove_cvref_t<T> t) {
-        requires std::is_signed_v<typename std::remove_cvref_t<T>::value_type>;
-        requires std::is_integral_v<typename std::remove_cvref_t<T>::value_type>;
-        requires sizeof(typename std::remove_cvref_t<T>::value_type) == 1;
+        requires IsTextChar<typename std::remove_cvref_t<T>::value_type>;
         { t.substr(0, 1) };
     };
 
@@ -534,6 +541,18 @@ template <typename T> struct ContainsCborMajor<T, false> {
 
 template <typename T> struct ContainsCborMajor<T, true> {
     static constexpr bool value = IsAnyHeader<T> || (IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>);
+};
+
+template <typename T>
+    requires IsIndefiniteWrapper<T>
+struct ContainsCborMajor<T, false> {
+    static constexpr bool value = ContainsCborMajor<indefinite_value_t<T>>::value;
+};
+
+template <typename T>
+    requires IsIndefiniteWrapper<T>
+struct ContainsCborMajor<T, true> {
+    static constexpr bool value = ContainsCborMajor<indefinite_value_t<T>, IsMap<indefinite_value_t<T>>>::value;
 };
 
 template <typename Buffer>
