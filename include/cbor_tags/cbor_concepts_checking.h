@@ -113,6 +113,13 @@ struct MajorIndex {
 constexpr std::uint64_t MaxBucketsForVariantChecking = 20;
 constexpr std::uint64_t MaxTagsForVariantChecking    = 2048;
 
+template <typename T> struct is_dynamic_tagged_tuple : std::false_type {};
+template <typename T>
+    requires IsTaggedTuple<std::remove_cvref_t<T>>
+struct is_dynamic_tagged_tuple<T>
+    : std::bool_constant<is_dynamic_tag_t<std::remove_cvref_t<std::tuple_element_t<0, std::remove_cvref_t<T>>>>> {};
+template <typename T> inline constexpr bool is_dynamic_tagged_tuple_v = is_dynamic_tagged_tuple<T>::value;
+
 } // namespace detail
 
 template <typename Variant, auto... Concepts> struct ValidConceptMapping;
@@ -209,6 +216,11 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
 
     /* SPECIAL CASES */
     if constexpr (is_dynamic_tag_t<T> || HasDynamicTag<T>) {
+        unmatched = false;
+        result[MajorIndex::DynamicTag]++; // Not ok to have dynamic tags
+        return;
+    }
+    if constexpr (detail::is_dynamic_tagged_tuple_v<T>) {
         unmatched = false;
         result[MajorIndex::DynamicTag]++; // Not ok to have dynamic tags
         return;
@@ -314,6 +326,10 @@ constexpr void getTagsCounts(std::array<uint64_t, detail::MaxTagsForVariantCheck
     }
     if constexpr (IsVariant<T>) {
         ValidConceptMapping<T>::tags_fn_inner(result, tags, simples);
+        return;
+    }
+    if constexpr (detail::is_dynamic_tagged_tuple_v<T>) {
+        result[MajorIndex::DynamicTag]++;
         return;
     }
 

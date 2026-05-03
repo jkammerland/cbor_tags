@@ -544,55 +544,39 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
     using value_type = std::remove_cvref_t<T>;
     if constexpr (IsUnsigned<value_type> || IsEnumUnsigned<value_type>) {
         return "uint";
-    }
-    if constexpr (IsNegative<value_type>) {
+    } else if constexpr (IsNegative<value_type>) {
         return "nint";
-    }
-    if constexpr (IsSigned<value_type> || IsEnumSigned<value_type>) {
+    } else if constexpr (IsSigned<value_type> || IsEnumSigned<value_type>) {
         return "int";
-    }
-    if constexpr (IsTextString<value_type>) {
+    } else if constexpr (IsTextString<value_type>) {
         return "tstr";
-    }
-    if constexpr (IsBinaryString<value_type>) {
+    } else if constexpr (IsBinaryString<value_type>) {
         return "bstr";
-    }
-    if constexpr (IsIndefiniteWrapper<value_type>) {
+    } else if constexpr (IsIndefiniteWrapper<value_type>) {
         return cddl_type_expr<indefinite_value_t<value_type>>(context, options);
-    }
-    if constexpr (IsOptional<value_type>) {
+    } else if constexpr (IsOptional<value_type>) {
         return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type>(context, options));
-    }
-    if constexpr (IsVariant<value_type>) {
+    } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
             return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts>(variant_context, variant_options)...}, " / ");
         }(static_cast<value_type *>(nullptr), context, options);
-    }
-    if constexpr (IsArrayHeader<value_type>) {
+    } else if constexpr (IsArrayHeader<value_type>) {
         return "[* any]";
-    }
-    if constexpr (IsMapHeader<value_type>) {
+    } else if constexpr (IsMapHeader<value_type>) {
         return "{* any => any}";
-    }
-    if constexpr (IsTagHeader<value_type>) {
+    } else if constexpr (IsTagHeader<value_type>) {
         return "#6(any)";
-    }
-    if constexpr (IsMap<value_type>) {
+    } else if constexpr (IsMap<value_type>) {
         return cddl_map_expr<value_type>(context, options);
-    }
-    if constexpr (IsArray<value_type>) {
+    } else if constexpr (IsArray<value_type>) {
         return cddl_sequence_expr<value_type>(context, options);
-    }
-    if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
+    } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
         return cddl_tag_prefix<value_type>();
-    }
-    if constexpr (IsTuple<value_type>) {
+    } else if constexpr (IsTuple<value_type>) {
         return cddl_tuple_expr<value_type>(context, options);
-    }
-    if constexpr (IsAggregate<value_type>) {
+    } else if constexpr (IsAggregate<value_type>) {
         return ensure_cddl_definition<value_type>(context, options);
-    }
-    if constexpr (IsSimple<value_type>) {
+    } else if constexpr (IsSimple<value_type>) {
         if constexpr (IsBool<value_type>) {
             return "bool";
         } else if constexpr (IsFloat16<value_type>) {
@@ -606,8 +590,9 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         } else {
             return "#7";
         }
+    } else {
+        return cddl_type_name<value_type>();
     }
-    return cddl_type_name<value_type>();
 }
 
 template <typename Context> decltype(auto) cddl_context_ref(Context &context) {
