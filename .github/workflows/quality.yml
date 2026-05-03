@@ -69,3 +69,65 @@ jobs:
         name: coverage-report
         path: coverage-report
         if-no-files-found: error
+
+  benchmark-build:
+    name: C++ Benchmark Compile (${{ matrix.config.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              name: "GCC",
+              cc: "gcc",
+              cxx: "g++",
+              family: "gcc"
+            }
+          - {
+              name: "LLVM 21",
+              cc: "clang-21",
+              cxx: "clang++-21",
+              family: "llvm",
+              version: "21"
+            }
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install GCC build tools
+      if: matrix.config.family == 'gcc'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache g++ gcc ninja-build
+
+    - name: Install LLVM build tools
+      if: matrix.config.family == 'llvm'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates ccache gnupg ninja-build wget
+        wget -q https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${{ matrix.config.version }}
+        sudo apt-get install -y clang-${{ matrix.config.version }}
+
+    - name: Configure benchmarks
+      shell: bash
+      run: |
+        cmake -B build/benchmarks -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }} \
+          -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
+          -DCBOR_TAGS_BUILD_TESTS=OFF \
+          -DCBOR_TAGS_USE_DEV_SETTINGS=ON
+
+    - name: Build benchmarks
+      shell: bash
+      run: cmake --build build/benchmarks --parallel

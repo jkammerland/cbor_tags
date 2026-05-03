@@ -150,7 +150,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
-    bench.run("Encode a nullptr", [&gen]() {
+    bench.run("Encode a nullptr", []() {
         Buffer data;
         auto   enc = make_encoder(data);
         CHECK(enc(std::nullptr_t{}));

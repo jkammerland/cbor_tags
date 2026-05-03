@@ -245,7 +245,7 @@ TEST_CASE("joining views of different types") {
     CHECK_EQ(static_cast<int>(*std::ranges::prev(deq_view.end())), 2);
 
     // Modify the original buffers and check that views reflect the changes
-    char_buffer[0]   = 0xFF;
+    char_buffer[0]   = static_cast<char>(0xFF);
     string_buffer[0] = 'h';
 
     joined_hex = std::apply(join_hex, views_tuple);

@@ -875,19 +875,23 @@ struct struct1 {
     int    a;
     double b;
 
-    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+    template <typename T> constexpr auto decode([[maybe_unused]] T &decoder) { return /* void */; }
 };
 
 struct struct2 {
     int    a;
     double b;
 
-    template <typename T> constexpr auto decode(T &decoder) { return /* void */; }
+    template <typename T> constexpr auto decode([[maybe_unused]] T &decoder) { return /* void */; }
 };
 
 // Also works
-template <typename T> constexpr auto transcode(T &transcoder, struct2 &&obj) { return expected<void, int>{}; }
-template <typename T> constexpr auto encode(T &encoder, const struct1 &obj) { return expected<void, int>{}; }
+template <typename T> constexpr auto transcode([[maybe_unused]] T &transcoder, [[maybe_unused]] struct2 &&obj) {
+    return expected<void, int>{};
+}
+template <typename T> constexpr auto encode([[maybe_unused]] T &encoder, [[maybe_unused]] const struct1 &obj) {
+    return expected<void, int>{};
+}
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag(const struct1 &) { return 2000u; }
@@ -899,9 +903,9 @@ TEST_SUITE("Classes") {
 
       private:
         friend cbor::tags::Access;
-        template <typename T> constexpr auto transcode(T &transcoder) { return expected<void, int>{}; }
-        template <typename T> constexpr auto encode(T &encoder) { return expected<void, int>{}; }
-        template <typename T> constexpr auto decode(T &decoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto transcode([[maybe_unused]] T &transcoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto encode([[maybe_unused]] T &encoder) { return expected<void, int>{}; }
+        template <typename T> constexpr auto decode([[maybe_unused]] T &decoder) { return expected<void, int>{}; }
     };
 
     TEST_CASE("HasTranscodeFreeFunction") {

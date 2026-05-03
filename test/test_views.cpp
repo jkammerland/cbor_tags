@@ -120,6 +120,6 @@ TEST_CASE_TEMPLATE("Test big data chunk view", T, std::deque<char>, std::list<ui
 
     REQUIRE(std::ranges::equal(view.view(), vec));
 
-    data.back() = 0xff;
+    data.back() = static_cast<typename T::value_type>(0xff);
     CHECK_EQ(view.view().back(), std::byte{0xff});
 }
