@@ -658,6 +658,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         static_assert(matching_major_types[MajorIndex::float16] <= 1, "Multiple types match against major type 7 (float16)");
         static_assert(matching_major_types[MajorIndex::float32] <= 1, "Multiple types match against major type 7 (float32)");
         static_assert(matching_major_types[MajorIndex::float64] <= 1, "Multiple types match against major type 7 (float64)");
+        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
+        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
+        // and can drift from IsCborMajor/decoder overload truth.
         // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
         static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                       "Variant cannot contain dynamic tags, must be known at compile time, use as_tag_any to catch any tag");

@@ -136,12 +136,13 @@ TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools,
     CHECK(diagnostic.find("42(h'ab')") != std::string::npos);
     CHECK(diagnostic.find("true") != std::string::npos);
     CHECK(diagnostic.find("null") != std::string::npos);
+    CHECK(diagnostic.find("simple(16)") != std::string::npos);
 
     struct DummyDecoder {};
     DummyDecoder dummy;
     std::string  simple_diagnostic;
     make_diagnostic_visitor(simple_diagnostic, dummy, {})(simple{16});
-    CHECK_EQ(simple_diagnostic, "simple");
+    CHECK_EQ(simple_diagnostic, "simple(16)");
 }
 
 TEST_CASE("buffer diagnostic rejects requested utf8 validation") {

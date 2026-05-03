@@ -232,7 +232,11 @@ TEST_CASE("CDDL supports root expressions for anonymous schema roots") {
     cddl_schema_to<static_tag<7>>(tag_buffer, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(fmt::to_string(tag_buffer), "root = #6.7(any)");
 
+    CHECK_EQ(cddl_schema_inline<simple>(), "root = #7.<0..23 / 32..255>");
+
     static_assert(detail::is_empty_cddl_aggregate_v<CDDLEmpty>);
+    static_assert(detail::is_cddl_tag_only_tuple_v<std::tuple<static_tag<7>>>);
+    static_assert(!detail::is_cddl_tag_only_tuple_v<std::tuple<static_tag<7>, int>>);
 }
 
 TEST_CASE("CDDL supports catch-all header roots") {

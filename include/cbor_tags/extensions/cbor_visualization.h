@@ -17,6 +17,7 @@
 #include <optional>
 #include <span>
 #include <stack>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -114,6 +115,15 @@ struct CDDLContext {
     const definition_cddl_pair *find_by_key(std::string_view key) const {
         for (const auto &def : definitions) {
             if (std::string_view{def.key.data(), def.key.size()} == key) {
+                return &def;
+            }
+        }
+        return nullptr;
+    }
+
+    const definition_cddl_pair *find_by_name(std::string_view name) const {
+        for (const auto &def : definitions) {
+            if (std::string_view{def.name.data(), def.name.size()} == name) {
                 return &def;
             }
         }
@@ -451,6 +461,25 @@ template <typename T>
 constexpr bool is_empty_cddl_aggregate_v =
     IsAggregate<std::remove_cvref_t<T>> && !IsTag<std::remove_cvref_t<T>> && aggregate_binding_count<std::remove_cvref_t<T>> == 0;
 
+template <typename T> constexpr bool is_cddl_tag_only_tuple_v = IsTagOnlyTuple<std::remove_cvref_t<T>>;
+
+struct CDDLRootIdentity {
+    std::string_view key;
+    std::string_view name;
+};
+
+inline void reject_explicit_root_name_collision(CDDLContext &context, CDDLRootIdentity root) {
+    const auto *existing = context.find_by_name(root.name);
+    if (existing == nullptr) {
+        return;
+    }
+
+    const std::string_view existing_key{existing->key.data(), existing->key.size()};
+    if (existing_key != root.key) {
+        throw std::invalid_argument(fmt::format("CDDL root_name '{}' collides with an existing definition", root.name));
+    }
+}
+
 template <typename T> std::string cddl_aggregate_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     static_assert(!is_empty_cddl_aggregate_v<value_type>, "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
@@ -572,6 +601,9 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         return cddl_sequence_expr<value_type>(context, options);
     } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
         return cddl_tag_prefix<value_type>();
+    } else if constexpr (is_cddl_tag_only_tuple_v<value_type>) {
+        static_assert(always_false<value_type>::value, "tag-only tuple has no CBOR payload; CDDL schema unsupported");
+        return {};
     } else if constexpr (IsTuple<value_type>) {
         return cddl_tuple_expr<value_type>(context, options);
     } else if constexpr (IsAggregate<value_type>) {
@@ -588,7 +620,7 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         } else if constexpr (IsNull<value_type>) {
             return "null";
         } else {
-            return "#7";
+            return "#7.<0..23 / 32..255>";
         }
     } else {
         return cddl_type_name<value_type>();
@@ -631,10 +663,13 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
     if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
         static_assert(!detail::is_empty_cddl_aggregate_v<value_type>,
                       "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
-        const auto root_name =
-            detail::ensure_cddl_definition<value_type>(cddl_context, options, detail::root_rule_name<value_type>(options));
-        const auto  root_key = detail::cddl_type_key<value_type>();
-        const auto *root_def = cddl_context.find_by_key(root_key);
+        const auto requested_root_name = detail::root_rule_name<value_type>(options);
+        const auto root_key            = detail::cddl_type_key<value_type>();
+        if (!options.root_name.empty()) {
+            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+        }
+        const auto  root_name = detail::ensure_cddl_definition<value_type>(cddl_context, options, requested_root_name);
+        const auto *root_def  = cddl_context.find_by_key(root_key);
         if (root_def != nullptr) {
             fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         } else {
@@ -645,9 +680,15 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
         fmt::format_to(std::back_inserter(output_buffer), "{} = {}", detail::root_rule_name<value_type>(options),
                        detail::tag_marker_root_expr<value_type>(cddl_context, options));
     } else {
-        const auto root_name          = detail::root_rule_name<value_type>(options);
-        const auto root_key           = fmt::format("__cddl_root:{}", root_name);
-        bool       reserved_root_name = false;
+        auto root_name          = detail::root_rule_name<value_type>(options);
+        auto root_key           = fmt::format("__cddl_root:{}", root_name);
+        bool reserved_root_name = false;
+        if (!options.root_name.empty()) {
+            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = root_name});
+        } else if (cddl_context.contains_name(root_name)) {
+            root_name = detail::unique_cddl_name(cddl_context, root_key, root_name);
+            root_key  = fmt::format("__cddl_root:{}", root_name);
+        }
         if (!cddl_context.contains_name(root_name)) {
             (void)cddl_context.reserve(root_key, root_name);
             reserved_root_name = true;
@@ -971,7 +1012,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
                 if (arg.value == static_cast<simple::value_type>(SimpleType::Undefined)) {
                     fmt::format_to(std::back_inserter(output_buffer), "undefined");
                 } else {
-                    fmt::format_to(std::back_inserter(output_buffer), "simple");
+                    fmt::format_to(std::back_inserter(output_buffer), "simple({})", arg.value);
                 }
             } else {
                 fmt::format_to(std::back_inserter(output_buffer), "simple");

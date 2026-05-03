@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -323,4 +324,16 @@ TEST_CASE("security regression: cddl root name is reserved for external contexts
 
     CHECK_NE(schema, "SecurityRootItem = [* SecurityRootItem]");
     CHECK(schema.find("[* SecurityRootItem]") == std::string::npos);
+}
+
+TEST_CASE("security regression: cddl explicit root name collision in external context is rejected") {
+    detail::CDDLContext context;
+    std::string         existing_schema;
+    std::string         schema;
+
+    cddl_schema_to<SecurityRootItem>(existing_schema, {.row_options = {.format_by_rows = false}}, std::ref(context));
+
+    CHECK_THROWS_AS(cddl_schema_to<std::vector<SecurityRootItem>>(
+                        schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"}, std::ref(context)),
+                    std::invalid_argument);
 }
