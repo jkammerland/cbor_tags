@@ -61,20 +61,17 @@ TEST_CASE("cddl helpers generate prelude and schemas") {
 
     std::string inline_schema;
     cddl_schema_to<VisualizationInner>(inline_schema, {.row_options = {.format_by_rows = false}});
-    CHECK(inline_schema.find("VisualizationInner = (int, tstr)") != std::string::npos);
+    CHECK(inline_schema.find("VisualizationInner = [int, tstr]") != std::string::npos);
 }
 
 TEST_CASE("cddl helpers cover tuple and tagged tuple schemas") {
     std::string tuple_schema;
     cddl_schema_to<std::tuple<int, std::string>>(tuple_schema, {.row_options = {.format_by_rows = false}});
-    CHECK(tuple_schema.find("int") != std::string::npos);
-    CHECK(tuple_schema.find("tstr") != std::string::npos);
+    CHECK_EQ(tuple_schema, "root = [int, tstr]");
 
     std::string tagged_tuple_schema;
     cddl_schema_to<std::tuple<static_tag<7>, int, std::string>>(tagged_tuple_schema, {.row_options = {.format_by_rows = false}});
-    CHECK(tagged_tuple_schema.find("#6.7") != std::string::npos);
-    CHECK(tagged_tuple_schema.find("int") != std::string::npos);
-    CHECK(tagged_tuple_schema.find("tstr") != std::string::npos);
+    CHECK_EQ(tagged_tuple_schema, "root = #6.7([int, tstr])");
 }
 
 TEST_CASE("cddl context handles duplicate registration, copy, and clear") {
