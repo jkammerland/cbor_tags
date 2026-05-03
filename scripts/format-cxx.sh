@@ -40,6 +40,18 @@ if ! command -v "$clang_format" >/dev/null 2>&1; then
 fi
 
 mapfile -d '' files < <(git ls-files -z -- '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx')
+filtered_files=()
+for file in "${files[@]}"; do
+    case "$file" in
+        include/cbor_tags/cbor_reflection_impl.h)
+            # Generated file: keep generator layout stable.
+            continue
+            ;;
+    esac
+    filtered_files+=("$file")
+done
+files=("${filtered_files[@]}")
+
 if ((${#files[@]} == 0)); then
     echo "No tracked C++ files found."
     exit 0
