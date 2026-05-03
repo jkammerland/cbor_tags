@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_reflection_impl.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
 #include "tl/expected.hpp"
@@ -37,6 +38,13 @@
 #include <variant>
 #include <vector>
 using namespace cbor::tags;
+
+TEST_CASE("CMake std reflection option enables native reflection") {
+#if CBOR_TAGS_USE_STD_REFLECTION == 1
+    static_assert(CBOR_TAGS_HAS_STD_REFLECTION == 1);
+#endif
+    CHECK(true);
+}
 
 TEST_CASE("Test IsUnsigned concept") {
     static_assert(IsUnsigned<std::uint8_t>);

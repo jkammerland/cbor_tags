@@ -1,6 +1,7 @@
 #pragma once
 
 #cmakedefine01 CBOR_TAGS_DEBUG
+#cmakedefine01 CBOR_TAGS_USE_STD_REFLECTION
 
 #include <string_view>
 
