@@ -261,8 +261,14 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         unmatched = false;
 
         constexpr auto tag          = detail::get_tag_from_any<T>();
-        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
-        constexpr bool IsTagOk      = !IsTagInvalid;
+        constexpr bool IsTagInvalid = [] {
+            if constexpr (IsSigned<decltype(tag)>) {
+                return tag == -1;
+            } else {
+                return false;
+            }
+        }();
+        constexpr bool IsTagOk = !IsTagInvalid;
 
         static_assert(IsTagOk, "T must be a tagged type");
 
@@ -315,8 +321,14 @@ constexpr void getTagsCounts(std::array<uint64_t, detail::MaxTagsForVariantCheck
         result[MajorIndex::AnyTagHeader]++;
     } else if constexpr (IsTag<T>) {
         constexpr auto tag          = detail::get_tag_from_any<T>();
-        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
-        constexpr bool IsTagOk      = !IsTagInvalid;
+        constexpr bool IsTagInvalid = [] {
+            if constexpr (IsSigned<decltype(tag)>) {
+                return tag == -1;
+            } else {
+                return false;
+            }
+        }();
+        constexpr bool IsTagOk = !IsTagInvalid;
 
         static_assert(IsTagOk, "T must be a tagged type");
 

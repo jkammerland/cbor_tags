@@ -11,4 +11,5 @@ Checks: >-
   bugprone-*,
   cert-*,
   clang-analyzer-*
-HeaderFilterRegex: '^src/.*|^include/.*'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|.*/)include/cbor_tags/.*'

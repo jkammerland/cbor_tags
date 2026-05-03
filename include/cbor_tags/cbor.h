@@ -304,12 +304,8 @@ template <IsSimple T> constexpr std::byte get_simple_5_bit_value() {
         return static_cast<std::byte>(0x1A); // float32 is 26 (read next 4 bytes)
     } else if constexpr (IsFloat64<T>) {
         return static_cast<std::byte>(0x1B); // float64 is 27 (read next 8 bytes)
-    } else if constexpr (std::is_same_v<T, end_string>) {
-        return static_cast<std::byte>(0xFF); // end of string
-    } else if constexpr (std::is_same_v<T, end_array>) {
-        return static_cast<std::byte>(0xFF); // end of array
-    } else if constexpr (std::is_same_v<T, end_map>) {
-        return static_cast<std::byte>(0xFF); // end of map
+    } else if constexpr (std::is_same_v<T, end_string> || std::is_same_v<T, end_array> || std::is_same_v<T, end_map>) {
+        return static_cast<std::byte>(0xFF); // break marker
     } else {
         return static_cast<std::byte>(0x00);
     }

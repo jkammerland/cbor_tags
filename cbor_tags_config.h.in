@@ -11,7 +11,7 @@
 
 namespace cbor::tags::debug {
 struct ConfigConstants {
-    static constexpr bool debug_enabled{static_cast<bool>(CBOR_TAGS_DEBUG)};
+    static constexpr bool debug_enabled{CBOR_TAGS_DEBUG == 1};
 };
 
 template <typename... Args> inline constexpr void print([[maybe_unused]] std::string_view fmt, [[maybe_unused]] const Args &...args) {

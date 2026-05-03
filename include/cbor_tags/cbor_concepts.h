@@ -221,12 +221,12 @@ concept IsRangeOfCborValuesBase = std::ranges::range<std::remove_cvref_t<T>> && 
                                   (!IsStringBase<std::remove_cvref_t<T>>) && (!is_optional_v<std::remove_cvref_t<T>>);
 
 template <typename T>
-concept IsFixedArray = requires {
-    typename T::value_type;
-    typename T::size_type;
-} && (std::is_same_v<T, std::span<typename T::value_type>> || (requires {
-                           typename std::tuple_size<T>::type;
-                       } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>>));
+concept IsFixedArray =
+    requires {
+        typename T::value_type;
+        typename T::size_type;
+    } && (std::is_same_v<T, std::span<typename T::value_type>> ||
+          (requires { typename std::tuple_size<T>::type; } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size_v<T>>>));
 
 template <typename T>
 concept IsMapBase =
@@ -284,7 +284,7 @@ concept IsMultiMap = IsMap<T> && requires(T t) {
 template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<std::remove_cvref_t<T>>::type;
-    typename std::tuple_element<0, std::remove_cvref_t<T>>::type;
+    typename std::tuple_element_t<0, std::remove_cvref_t<T>>;
     requires(!IsFixedArray<std::remove_cvref_t<T>>);
 };
 

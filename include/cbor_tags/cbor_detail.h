@@ -149,8 +149,8 @@ template <typename T> struct reader<T, false> {
     }
 
     constexpr value_type read(const T &, size_type offset) noexcept {
-        throw std::runtime_error("Not implemented");
-        auto it = std::next(position_, offset);
+        auto it = position_;
+        std::advance(it, offset);
         return static_cast<value_type>(*it);
     }
 
