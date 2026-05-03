@@ -7,6 +7,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <doctest/doctest.h>
 #include <map>
 #include <string>
@@ -116,6 +117,18 @@ TEST_CASE("decode indefinite tstr into string") {
     CHECK_EQ(decoded, "abc");
 }
 
+TEST_CASE("decode explicit indefinite tstr from non-contiguous input") {
+    std::deque<std::byte> buffer{std::byte{0x7F}, std::byte{0x62}, std::byte{'h'}, std::byte{'i'}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    std::string decoded;
+    auto        result = dec(as_indefinite{decoded});
+
+    CHECK_MESSAGE(result, "Explicit indefinite text decode should work for non-contiguous input.");
+    CHECK_EQ(decoded, "hi");
+}
+
 TEST_CASE("decode indefinite tstr with wrong chunk type") {
     std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x40}, std::byte{0xFF}};
 
@@ -126,6 +139,18 @@ TEST_CASE("decode indefinite tstr with wrong chunk type") {
 
     CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite tstr into a normal string.");
     CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+}
+
+TEST_CASE("decode explicit indefinite bstr from non-contiguous input") {
+    std::deque<std::byte> buffer{std::byte{0x5F}, std::byte{0x42}, std::byte{0xAB}, std::byte{0xCD}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    std::vector<std::byte> decoded;
+    auto                   result = dec(as_indefinite{decoded});
+
+    CHECK_MESSAGE(result, "Explicit indefinite byte-string decode should work for non-contiguous input.");
+    CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0xAB}, std::byte{0xCD}}));
 }
 
 TEST_CASE("decode indefinite array into vector") {
@@ -141,6 +166,54 @@ TEST_CASE("decode indefinite array into vector") {
     CHECK_EQ(decoded[0], 1);
     CHECK_EQ(decoded[1], 2);
     CHECK_EQ(decoded[2], 3);
+}
+
+TEST_CASE("decode explicit indefinite array rejects fixed-size target") {
+    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x01}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    std::array<int, 2> decoded{};
+    auto               result = dec(as_indefinite{decoded});
+
+    CHECK_FALSE_MESSAGE(result, "Fixed-size arrays are intentionally not supported as indefinite targets.");
+    CHECK_EQ(result.error(), status_code::unexpected_group_size);
+}
+
+TEST_CASE("decode explicit indefinite bstr rejects fixed-size target") {
+    std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    std::array<std::byte, 1> decoded{};
+    auto                     result = dec(as_indefinite{decoded});
+
+    CHECK_FALSE_MESSAGE(result, "Fixed-size byte arrays are intentionally not supported as indefinite targets.");
+    CHECK_EQ(result.error(), status_code::unexpected_group_size);
+}
+
+TEST_CASE("decode explicit indefinite wrapper rejects wrong top-level major") {
+    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    std::map<int, int> decoded;
+    auto               result = dec(as_indefinite{decoded});
+
+    CHECK_FALSE_MESSAGE(result, "Map targets must see an indefinite map header.");
+    CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+}
+
+TEST_CASE("decode explicit indefinite wrapper rejects unsupported scalar target") {
+    std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    int  decoded{};
+    auto result = dec(as_indefinite{decoded});
+
+    CHECK_FALSE_MESSAGE(result, "Scalar targets are not valid indefinite wrapper targets.");
+    CHECK_EQ(result.error(), status_code::error);
 }
 
 TEST_CASE("decode indefinite array without break returns incomplete") {

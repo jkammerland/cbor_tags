@@ -213,6 +213,19 @@ TEST_SUITE("Open objects - wrap as etc") {
         CHECK_EQ(a, 1);
         CHECK_EQ(b, 2);
     }
+
+    TEST_CASE("Reject non-array header") {
+        std::vector<std::byte> data{std::byte{0xA0}}; // map(0), not array(0)
+
+        auto dec = make_decoder(data);
+
+        int  a{};
+        int  b{};
+        auto result = dec(wrap_as_array{a, b});
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
 }
 
 TEST_SUITE("Views errors") {
