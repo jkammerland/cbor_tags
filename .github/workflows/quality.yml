@@ -1,0 +1,71 @@
+name: Quality (Lint, Coverage)
+
+on:
+  push:
+    branches: [ master, integration ]
+  pull_request:
+    branches: [ master, integration ]
+
+permissions:
+  contents: read
+
+jobs:
+  format-and-tidy:
+    name: C++ Format + Clang-Tidy
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install LLVM 21 tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates ccache gnupg ninja-build wget
+        wget -q https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 21
+        sudo apt-get install -y clang-format-21 clang-tidy-21
+
+    - name: Run lint
+      shell: bash
+      run: |
+        CC=clang-21 \
+        CXX=clang++-21 \
+        CLANG_FORMAT=clang-format-21 \
+        CLANG_TIDY_EXE=clang-tidy-21 \
+        scripts/lint-cxx.sh
+
+  coverage:
+    name: C++ Coverage Report
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install coverage tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache gcovr g++ gcc ninja-build
+
+    - name: Generate coverage report
+      shell: bash
+      run: scripts/coverage.sh
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: coverage-report
+        path: coverage-report
+        if-no-files-found: error
