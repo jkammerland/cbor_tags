@@ -129,8 +129,8 @@ TEST_CASE("security regression: non-contiguous byte string decode materializes s
 }
 
 TEST_CASE("security regression: non-contiguous byte view iterators are not produced from non-borrowed temporaries") {
-    std::deque<char>       input{'\x43', '\x01', '\x02', '\x03'};
-    auto                   dec = make_decoder(input);
+    std::deque<char>           input{'\x43', '\x01', '\x02', '\x03'};
+    auto                       dec = make_decoder(input);
     decltype(dec)::bstr_view_t view{};
 
     auto result = dec(view);
@@ -277,10 +277,10 @@ TEST_CASE("security regression: cddl always_inline recursive aggregate below con
 
 TEST_CASE("security regression: cddl root name is reserved for external contexts") {
     detail::CDDLContext context;
-    std::string schema;
+    std::string         schema;
 
-    cddl_schema_to<std::vector<SecurityRootItem>>(
-        schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"}, std::ref(context));
+    cddl_schema_to<std::vector<SecurityRootItem>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"},
+                                                  std::ref(context));
 
     CHECK_NE(schema, "SecurityRootItem = [* SecurityRootItem]");
     CHECK(schema.find("[* SecurityRootItem]") == std::string::npos);

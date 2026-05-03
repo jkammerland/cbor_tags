@@ -55,6 +55,9 @@ configure_args=(
     -DCMAKE_C_COMPILER="$cc"
     -DCMAKE_CXX_COMPILER="$cxx"
     -DCLANG_TIDY_EXE="$clang_tidy"
+    -DCBOR_TAGS_TIDY_TARGET=ON
+    -DCBOR_TAGS_TIDY_TESTS=OFF
+    -DCBOR_TAGS_TIDY_BENCHMARKS=OFF
 )
 
 if ! command -v ccache >/dev/null 2>&1; then
