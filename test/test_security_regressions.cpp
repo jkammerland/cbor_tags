@@ -13,6 +13,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -107,6 +108,13 @@ TEST_CASE("security regression: catch-all tags cannot mix with exact tag alterna
     using tag_variant = std::variant<as_tag_any, static_tag<1>>;
 
     CHECK_FALSE(valid_concept_mapping_v<tag_variant>);
+}
+
+TEST_CASE("security regression: tag-only tuples are not valid tagged payloads") {
+    using tag_only_tuple = std::tuple<static_tag<7>>;
+
+    CHECK_FALSE(IsTaggedTuple<tag_only_tuple>);
+    CHECK_FALSE(IsUntaggedTuple<tag_only_tuple>);
 }
 
 TEST_CASE("security regression: non-contiguous byte string decode materializes safely") {
