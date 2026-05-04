@@ -5,7 +5,9 @@
 #include "cbor_tags/cbor_tags_config.h"
 
 #include <array>
+#include <bit>
 #include <cbor_tags/cbor_concepts.h>
+#include <concepts>
 #include <cstddef>
 #include <fmt/base.h>
 #include <fmt/format.h>
@@ -29,11 +31,18 @@
 
 namespace cbor::tags {
 
+enum class AnnotationMode { legacy, smart };
+
 struct AnnotationOptions {
-    bool   diagnostic_data{false};
-    size_t current_indent{0};
-    size_t offset{0};
-    size_t max_depth{std::numeric_limits<size_t>::max()};
+    bool           diagnostic_data{false};
+    size_t         current_indent{0};
+    size_t         offset{0};
+    size_t         max_depth{std::numeric_limits<size_t>::max()};
+    AnnotationMode mode{AnnotationMode::legacy};
+    size_t         annotation_column{61};
+    size_t         indent_width{3};
+    size_t         comment_indent_width{2};
+    size_t         max_structure_depth{64};
 };
 
 struct CDDLOptions {
@@ -200,6 +209,9 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
         }
     }
 }
+
+template <typename CborBuffer, typename OutputBuffer>
+void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options);
 } // namespace detail
 
 template <typename T> constexpr auto getName(const T &);
@@ -731,6 +743,10 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
     if (options.diagnostic_data) {
         throw std::runtime_error("Diagnostic data not supported");
     }
+    if (options.mode == AnnotationMode::smart) {
+        detail::buffer_annotate_smart(cbor_buffer, output_buffer, options);
+        return;
+    }
 
     auto dec = make_decoder(cbor_buffer);
 
@@ -885,6 +901,400 @@ void append_escaped_diagnostic_text(OutputBuffer &output_buffer, Iterator begin,
     }
     fmt::format_to(std::back_inserter(output_buffer), "\"");
 }
+
+namespace detail {
+
+template <typename OutputBuffer> struct smart_annotator {
+    const std::vector<std::byte> &bytes;
+    OutputBuffer                 &output_buffer;
+    AnnotationOptions             options;
+    std::size_t                   position{};
+
+    struct item_header {
+        std::size_t  begin{};
+        std::uint8_t major{};
+        std::uint8_t additional_info{};
+    };
+
+    [[nodiscard]] bool empty() const noexcept { return position >= bytes.size(); }
+
+    [[nodiscard]] std::uint8_t byte_at(std::size_t index) const { return std::to_integer<std::uint8_t>(bytes[index]); }
+
+    [[nodiscard]] bool next_is_break() const noexcept { return !empty() && bytes[position] == static_cast<std::byte>(0xFF); }
+
+    void check_depth(std::size_t depth) const {
+        if (depth >= options.max_structure_depth) {
+            throw std::runtime_error("CBOR annotation nesting depth exceeded");
+        }
+    }
+
+    std::uint8_t read_byte() {
+        if (empty()) {
+            throw std::runtime_error("Unexpected end of CBOR annotation input");
+        }
+        return byte_at(position++);
+    }
+
+    std::uint16_t read_uint16_raw() {
+        const auto byte0 = static_cast<std::uint16_t>(read_byte());
+        const auto byte1 = static_cast<std::uint16_t>(read_byte());
+        return static_cast<std::uint16_t>((byte0 << 8U) | byte1);
+    }
+
+    std::uint32_t read_uint32_raw() {
+        const auto byte0 = static_cast<std::uint32_t>(read_byte());
+        const auto byte1 = static_cast<std::uint32_t>(read_byte());
+        const auto byte2 = static_cast<std::uint32_t>(read_byte());
+        const auto byte3 = static_cast<std::uint32_t>(read_byte());
+        return (byte0 << 24U) | (byte1 << 16U) | (byte2 << 8U) | byte3;
+    }
+
+    std::uint64_t read_uint64_raw() {
+        const auto byte0 = static_cast<std::uint64_t>(read_byte());
+        const auto byte1 = static_cast<std::uint64_t>(read_byte());
+        const auto byte2 = static_cast<std::uint64_t>(read_byte());
+        const auto byte3 = static_cast<std::uint64_t>(read_byte());
+        const auto byte4 = static_cast<std::uint64_t>(read_byte());
+        const auto byte5 = static_cast<std::uint64_t>(read_byte());
+        const auto byte6 = static_cast<std::uint64_t>(read_byte());
+        const auto byte7 = static_cast<std::uint64_t>(read_byte());
+        return (byte0 << 56U) | (byte1 << 48U) | (byte2 << 40U) | (byte3 << 32U) | (byte4 << 24U) | (byte5 << 16U) | (byte6 << 8U) | byte7;
+    }
+
+    std::uint64_t read_argument(std::uint8_t additional_info) {
+        if (additional_info < 24U) {
+            return additional_info;
+        }
+        switch (additional_info) {
+        case 24: return read_byte();
+        case 25: return read_uint16_raw();
+        case 26: return read_uint32_raw();
+        case 27: return read_uint64_raw();
+        default: throw std::runtime_error("Invalid CBOR additional information");
+        }
+    }
+
+    [[nodiscard]] std::string hex_range(std::size_t begin, std::size_t end, bool spaces) const {
+        std::string result;
+        for (auto index = begin; index < end; ++index) {
+            if (spaces && index != begin) {
+                result.push_back(' ');
+            }
+            fmt::format_to(std::back_inserter(result), "{:02x}", byte_at(index));
+        }
+        return result;
+    }
+
+    [[nodiscard]] std::string indent(std::size_t depth) const {
+        std::string result((options.current_indent + depth) * options.indent_width + options.offset, ' ');
+        return result;
+    }
+
+    void emit_annotated_line(std::size_t depth, std::string left, std::string_view comment) {
+        left.insert(0, indent(depth));
+        if (left.size() >= options.annotation_column) {
+            throw std::runtime_error("CBOR annotation column too narrow");
+        }
+        const auto padding = options.annotation_column - left.size();
+        fmt::format_to(std::back_inserter(output_buffer), "{}{}# {}{}\n", left, std::string(padding, ' '),
+                       std::string(depth * options.comment_indent_width, ' '), comment);
+    }
+
+    void emit_plain_line(std::size_t depth, std::string left) {
+        left.insert(0, indent(depth));
+        if (left.size() >= options.annotation_column) {
+            throw std::runtime_error("CBOR annotation column too narrow");
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "{}\n", left);
+    }
+
+    void emit_header(std::size_t depth, std::size_t begin, std::size_t end, std::string_view comment) {
+        emit_annotated_line(depth, hex_range(begin, end, true), comment);
+    }
+
+    [[nodiscard]] std::size_t payload_bytes_per_line(std::size_t depth) const {
+        const auto left_indent = indent(depth).size();
+        if (left_indent + 2U >= options.annotation_column) {
+            throw std::runtime_error("CBOR annotation column too narrow for payload");
+        }
+        auto max_bytes = (options.annotation_column - left_indent - 1U) / 2U;
+        if (options.max_depth != std::numeric_limits<std::size_t>::max()) {
+            max_bytes = std::min(max_bytes, options.max_depth);
+        }
+        if (max_bytes == 0U) {
+            throw std::runtime_error("CBOR annotation payload wrap width too small");
+        }
+        return max_bytes;
+    }
+
+    void emit_payload(std::size_t depth, std::size_t begin, std::size_t length, std::string_view comment) {
+        if (length == 0U) {
+            return;
+        }
+        const auto bytes_per_line = payload_bytes_per_line(depth);
+        auto       offset         = std::size_t{};
+        while (offset < length) {
+            const auto chunk = std::min(bytes_per_line, length - offset);
+            auto       left  = hex_range(begin + offset, begin + offset + chunk, false);
+            if (offset == 0U) {
+                emit_annotated_line(depth, std::move(left), comment);
+            } else {
+                emit_plain_line(depth, std::move(left));
+            }
+            offset += chunk;
+        }
+    }
+
+    [[nodiscard]] std::string text_comment(std::size_t begin, std::size_t length) const {
+        std::string text;
+        text.reserve(length);
+        for (auto index = begin; index < begin + length; ++index) {
+            text.push_back(static_cast<char>(byte_at(index)));
+        }
+
+        std::string result;
+        cbor::tags::append_escaped_diagnostic_text(result, text.begin(), text.end());
+        return result;
+    }
+
+    [[nodiscard]] std::string bytes_comment(std::size_t begin, std::size_t length) const {
+        return fmt::format("h'{}'", hex_range(begin, begin + length, false));
+    }
+
+    [[nodiscard]] static std::string negative_comment(std::uint64_t argument) {
+        if (argument == std::numeric_limits<std::uint64_t>::max()) {
+            return "negative(-18446744073709551616)";
+        }
+        return fmt::format("negative(-{})", argument + 1U);
+    }
+
+    [[nodiscard]] static std::string tag_comment(std::uint64_t tag) {
+        switch (tag) {
+        case 0: return "tdate, tag(0)";
+        case 1: return "time, tag(1)";
+        case 21: return "eb64url, tag(21)";
+        case 22: return "eb64legacy, tag(22)";
+        case 23: return "eb16, tag(23)";
+        case 24: return "encoded-cbor, tag(24)";
+        case 32: return "uri, tag(32)";
+        case 33: return "b64url, tag(33)";
+        case 34: return "b64legacy, tag(34)";
+        case 35: return "regexp, tag(35)";
+        case 36: return "mime-message, tag(36)";
+        case 55799: return "cbor-any, tag(55799)";
+        default: return fmt::format("tag({})", tag);
+        }
+    }
+
+    [[nodiscard]] static std::string simple_comment(std::uint8_t value) {
+        switch (value) {
+        case 20: return "false, simple(20)";
+        case 21: return "true, simple(21)";
+        case 22: return "null, simple(22)";
+        case 23: return "undefined, simple(23)";
+        default: return fmt::format("simple({})", value);
+        }
+    }
+
+    void ensure_payload_available(std::uint64_t length) const {
+        const auto remaining = bytes.size() - position;
+        if (length > remaining) {
+            throw std::runtime_error("Unexpected end of CBOR annotation payload");
+        }
+    }
+
+    void parse_string(std::size_t depth, item_header header) {
+        const auto kind =
+            header.major == static_cast<std::uint8_t>(major_type::TextString) ? std::string_view{"text"} : std::string_view{"bytes"};
+        if (header.additional_info == 31U) {
+            emit_header(depth, header.begin, position, fmt::format("{}(*)", kind));
+            while (true) {
+                if (empty()) {
+                    throw std::runtime_error("Unterminated indefinite CBOR string");
+                }
+                if (next_is_break()) {
+                    consume_break(depth + 1U);
+                    return;
+                }
+                const auto chunk_begin  = position;
+                const auto initial_byte = read_byte();
+                const auto chunk_major  = initial_byte >> 5U;
+                const auto chunk_info   = initial_byte & 0x1FU;
+                if (chunk_major != header.major || chunk_info == 31U) {
+                    throw std::runtime_error("Invalid indefinite CBOR string chunk");
+                }
+                parse_string(depth + 1U, {.begin           = chunk_begin,
+                                          .major           = static_cast<std::uint8_t>(chunk_major),
+                                          .additional_info = static_cast<std::uint8_t>(chunk_info)});
+            }
+        }
+
+        const auto length = read_argument(header.additional_info);
+        emit_header(depth, header.begin, position, fmt::format("{}({})", kind, length));
+        ensure_payload_available(length);
+        const auto payload_begin = position;
+        const auto payload_size  = static_cast<std::size_t>(length);
+        position += payload_size;
+        emit_payload(depth + 1U, payload_begin, payload_size,
+                     header.major == static_cast<std::uint8_t>(major_type::TextString) ? text_comment(payload_begin, payload_size)
+                                                                                       : bytes_comment(payload_begin, payload_size));
+    }
+
+    void parse_array(std::size_t depth, item_header header) {
+        if (header.additional_info == 31U) {
+            emit_header(depth, header.begin, position, "array(*)");
+            while (true) {
+                if (empty()) {
+                    throw std::runtime_error("Unterminated indefinite CBOR array");
+                }
+                if (next_is_break()) {
+                    consume_break(depth + 1U);
+                    return;
+                }
+                parse_item(depth + 1U);
+            }
+        }
+
+        const auto size = read_argument(header.additional_info);
+        emit_header(depth, header.begin, position, fmt::format("array({})", size));
+        for (std::uint64_t index = 0; index < size; ++index) {
+            parse_item(depth + 1U);
+        }
+    }
+
+    void parse_map(std::size_t depth, item_header header) {
+        if (header.additional_info == 31U) {
+            emit_header(depth, header.begin, position, "map(*)");
+            while (true) {
+                if (empty()) {
+                    throw std::runtime_error("Unterminated indefinite CBOR map");
+                }
+                if (next_is_break()) {
+                    consume_break(depth + 1U);
+                    return;
+                }
+                parse_item(depth + 1U);
+                if (empty() || next_is_break()) {
+                    throw std::runtime_error("Indefinite CBOR map missing value");
+                }
+                parse_item(depth + 1U);
+            }
+        }
+
+        const auto size = read_argument(header.additional_info);
+        emit_header(depth, header.begin, position, fmt::format("map({})", size));
+        for (std::uint64_t index = 0; index < size; ++index) {
+            parse_item(depth + 1U);
+            parse_item(depth + 1U);
+        }
+    }
+
+    void parse_tag(std::size_t depth, item_header header) {
+        const auto tag = read_argument(header.additional_info);
+        emit_header(depth, header.begin, position, tag_comment(tag));
+        parse_item(depth + 1U);
+    }
+
+    void parse_simple(std::size_t depth, item_header header) {
+        if (header.additional_info == 31U) {
+            throw std::runtime_error("CBOR break outside indefinite item");
+        }
+        if (header.additional_info < 24U) {
+            emit_header(depth, header.begin, position, simple_comment(header.additional_info));
+            return;
+        }
+
+        switch (header.additional_info) {
+        case 24: {
+            const auto value = read_byte();
+            emit_header(depth, header.begin, position, simple_comment(value));
+            return;
+        }
+        case 25: {
+            const auto bits  = read_uint16_raw();
+            const auto value = static_cast<double>(float16_t{bits});
+            emit_header(depth, header.begin, position, fmt::format("float16({})", value));
+            return;
+        }
+        case 26: {
+            const auto bits  = read_uint32_raw();
+            const auto value = std::bit_cast<float>(bits);
+            emit_header(depth, header.begin, position, fmt::format("float32({})", value));
+            return;
+        }
+        case 27: {
+            const auto bits  = read_uint64_raw();
+            const auto value = std::bit_cast<double>(bits);
+            emit_header(depth, header.begin, position, fmt::format("float64({})", value));
+            return;
+        }
+        default: throw std::runtime_error("Invalid CBOR simple additional information");
+        }
+    }
+
+    void consume_break(std::size_t depth) {
+        const auto header_begin = position;
+        const auto initial_byte = read_byte();
+        if (initial_byte != 0xFFU) {
+            throw std::runtime_error("Expected CBOR break");
+        }
+        emit_header(depth, header_begin, position, "break");
+    }
+
+    void parse_item(std::size_t depth) {
+        check_depth(depth);
+        const auto header_begin = position;
+        const auto initial_byte = read_byte();
+        const auto header       = item_header{.begin           = header_begin,
+                                              .major           = static_cast<std::uint8_t>(initial_byte >> 5U),
+                                              .additional_info = static_cast<std::uint8_t>(initial_byte & 0x1FU)};
+
+        switch (header.major) {
+        case 0: {
+            const auto value = read_argument(header.additional_info);
+            emit_header(depth, header.begin, position, fmt::format("unsigned({})", value));
+            return;
+        }
+        case 1: {
+            const auto value = read_argument(header.additional_info);
+            emit_header(depth, header.begin, position, negative_comment(value));
+            return;
+        }
+        case 2:
+        case 3: parse_string(depth, header); return;
+        case 4: parse_array(depth, header); return;
+        case 5: parse_map(depth, header); return;
+        case 6: parse_tag(depth, header); return;
+        case 7: parse_simple(depth, header); return;
+        default: throw std::runtime_error("Invalid CBOR major type");
+        }
+    }
+
+    void annotate_sequence() {
+        while (!empty()) {
+            parse_item(0);
+        }
+    }
+};
+
+template <typename CborBuffer, typename OutputBuffer>
+void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options) {
+    std::vector<std::byte> bytes;
+    bytes.reserve(cbor_buffer.size());
+    for (const auto value : cbor_buffer) {
+        if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, std::byte>) {
+            bytes.push_back(value);
+        } else {
+            bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(value)));
+        }
+    }
+
+    std::string staged_output;
+    smart_annotator<std::string>{.bytes = bytes, .output_buffer = staged_output, .options = options}.annotate_sequence();
+    fmt::format_to(std::back_inserter(output_buffer), "{}", staged_output);
+}
+
+} // namespace detail
 
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor;
 

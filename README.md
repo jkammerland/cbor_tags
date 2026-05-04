@@ -675,6 +675,32 @@ d2
 ]
 ```
 
+Smart annotation is opt-in and adds a semantic right-hand column:
+```cpp
+std::vector<std::byte> data = to_bytes("bf6346756ef563416d7421ff");
+
+fmt::memory_buffer annotation;
+buffer_annotate(data, annotation, {
+    .mode = AnnotationMode::smart,
+    .annotation_column = 13
+});
+```
+Output:
+```
+bf           # map(*)
+   63        #   text(3)
+      46756e #     "Fun"
+   f5        #   true, simple(21)
+   63        #   text(3)
+      416d74 #     "Amt"
+   21        #   negative(-2)
+   ff        #   break
+```
+In smart mode, headers are padded to `annotation_column`. Text and byte string
+payload bytes wrap before that column so the annotation stays aligned. Malformed
+CBOR, excessive nesting, and layouts too narrow to show data without truncation
+throw `std::runtime_error`.
+
 ## 🤝 CDDL Schema Generation
 For Concise Data Definitions schemas you can use the `cddl_schema_to` method, e.g by applying on a struct "A":
 ```cpp

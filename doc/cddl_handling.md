@@ -108,7 +108,17 @@ Creates annotated hex view of CBOR data
 **Options**:
 - `current_indent`: Base indentation level
 - `max_depth`: Wrap lines after N bytes
+- `mode`: `AnnotationMode::legacy` by default; set `AnnotationMode::smart`
+  for semantic annotations in a right-hand column
+- `annotation_column`: Column where smart-mode `#` comments start
+- `indent_width`: Left-column indentation step in smart mode
+- `comment_indent_width`: Right-column nesting indentation step in smart mode
+- `max_structure_depth`: Hard smart-mode nesting limit
 - `diagnostic_data`: Unsupported; setting it throws `std::runtime_error`
+
+Smart mode keeps header comments aligned and wraps text/byte payload hex before
+the annotation column. It throws on malformed CBOR or layouts too narrow to
+format without truncation.
 
 ### `buffer_diagnostic(cbor_buffer, output, options)`
 Creates diagnostic-notation-like output for the supported CBOR subset.

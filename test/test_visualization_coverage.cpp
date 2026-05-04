@@ -126,6 +126,114 @@ TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and
     CHECK_THROWS_AS(buffer_annotate(buffer, annotation, {.diagnostic_data = true}), std::runtime_error);
 }
 
+TEST_CASE("smart buffer annotation matches cbor diag style indefinite map") {
+    const auto buffer = to_bytes("bf6346756ef563416d7421ff");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.mode = AnnotationMode::smart, .annotation_column = 13});
+
+    CHECK_EQ(annotation, "bf           # map(*)\n"
+                         "   63        #   text(3)\n"
+                         "      46756e #     \"Fun\"\n"
+                         "   f5        #   true, simple(21)\n"
+                         "   63        #   text(3)\n"
+                         "      416d74 #     \"Amt\"\n"
+                         "   21        #   negative(-2)\n"
+                         "   ff        #   break\n");
+}
+
+TEST_CASE("smart buffer annotation is opt in and supports common CBOR values") {
+    const auto buffer = to_bytes("8201c06378797a");
+
+    std::string legacy;
+    buffer_annotate(buffer, legacy);
+    CHECK(legacy.find('#') == std::string::npos);
+
+    std::string annotation;
+    buffer_annotate(std::deque<std::byte>{buffer.begin(), buffer.end()}, annotation,
+                    {.mode = AnnotationMode::smart, .annotation_column = 24});
+
+    INFO(annotation);
+    CHECK(annotation.find("# array(2)") != std::string::npos);
+    CHECK(annotation.find("#   unsigned(1)") != std::string::npos);
+    CHECK(annotation.find("#   tdate, tag(0)") != std::string::npos);
+    CHECK(annotation.find("#     text(3)") != std::string::npos);
+    CHECK(annotation.find("#       \"xyz\"") != std::string::npos);
+}
+
+TEST_CASE("smart buffer annotation handles floats, null, undefined, and sequences") {
+    const auto buffer = to_bytes("f93c00fa3f800000fb4000000000000000f6f70102");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.mode = AnnotationMode::smart, .annotation_column = 40});
+
+    INFO(annotation);
+    CHECK(annotation.find("float16(1)") != std::string::npos);
+    CHECK(annotation.find("float32(1)") != std::string::npos);
+    CHECK(annotation.find("float64(2)") != std::string::npos);
+    CHECK(annotation.find("null, simple(22)") != std::string::npos);
+    CHECK(annotation.find("undefined, simple(23)") != std::string::npos);
+    CHECK(annotation.find("unsigned(1)") != std::string::npos);
+    CHECK(annotation.find("unsigned(2)") != std::string::npos);
+}
+
+TEST_CASE("smart buffer annotation wraps string payloads before the annotation column") {
+    const auto buffer = to_bytes("6c48656c6c6f20776f726c6421");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.max_depth = 3, .mode = AnnotationMode::smart, .annotation_column = 16});
+
+    INFO(annotation);
+    CHECK(annotation.find("6c              # text(12)") != std::string::npos);
+    CHECK(annotation.find("   48656c       #   \"Hello world!\"") != std::string::npos);
+    CHECK(annotation.find("   6c6f20") != std::string::npos);
+    CHECK(annotation.find("   776f72") != std::string::npos);
+    CHECK(annotation.find("   6c6421") != std::string::npos);
+}
+
+TEST_CASE("smart buffer annotation handles indefinite arrays and byte strings") {
+    const auto buffer = to_bytes("9f5f42010241ffffff");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.mode = AnnotationMode::smart, .annotation_column = 24});
+
+    INFO(annotation);
+    CHECK(annotation.find("# array(*)") != std::string::npos);
+    CHECK(annotation.find("#   bytes(*)") != std::string::npos);
+    CHECK(annotation.find("#     bytes(2)") != std::string::npos);
+    CHECK(annotation.find("#       h'0102'") != std::string::npos);
+    CHECK(annotation.find("#     bytes(1)") != std::string::npos);
+    CHECK(annotation.find("#       h'ff'") != std::string::npos);
+    CHECK(annotation.find("#     break") != std::string::npos);
+    CHECK(annotation.find("#   break") != std::string::npos);
+}
+
+TEST_CASE("smart buffer annotation reports malformed input instead of truncating") {
+    constexpr AnnotationOptions options{.mode = AnnotationMode::smart, .annotation_column = 13};
+
+    std::string annotation{"unchanged"};
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("18"), annotation, options), std::runtime_error);
+    CHECK_EQ(annotation, "unchanged");
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("430102"), annotation, options), std::runtime_error);
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("1c"), annotation, options), std::runtime_error);
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("ff"), annotation, options), std::runtime_error);
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("bf01ff"), annotation, options), std::runtime_error);
+    CHECK_THROWS_AS(
+        buffer_annotate(to_bytes("8180"), annotation, {.mode = AnnotationMode::smart, .annotation_column = 13, .max_structure_depth = 1}),
+        std::runtime_error);
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("01"), annotation, {.mode = AnnotationMode::smart, .annotation_column = 2}),
+                    std::runtime_error);
+}
+
+TEST_CASE("smart buffer annotation renders uint64 max negative exactly") {
+    const auto buffer = to_bytes("3bffffffffffffffff");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.mode = AnnotationMode::smart, .annotation_column = 40});
+
+    CHECK(annotation.find("negative(-18446744073709551616)") != std::string::npos);
+}
+
 TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools, null, and simple values") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
