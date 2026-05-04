@@ -173,161 +173,161 @@ template <typename Buffer> void run_decoding_benchmarks(ankerl::nanobench::Bench
 
     bench.run("Decoding a uint", [&test_data]() {
         auto     dec = make_decoder(test_data.uint_data);
-        uint64_t value;
+        uint64_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a uint with check", [&test_data]() {
         auto     dec = make_decoder(test_data.uint_data);
-        uint64_t value;
+        uint64_t value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a int", [&test_data]() {
         auto    dec = make_decoder(test_data.int_data);
-        int64_t value;
+        int64_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a int with check", [&test_data]() {
         auto    dec = make_decoder(test_data.int_data);
-        int64_t value;
+        int64_t value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a bstr", [&test_data]() {
         auto                     dec = make_decoder(test_data.bstr_data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4> value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a bstr with check", [&test_data]() {
         auto                     dec = make_decoder(test_data.bstr_data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4> value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a tstr", [&test_data]() {
         auto        dec = make_decoder(test_data.tstr_data);
-        std::string value;
+        std::string value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a tstr with check", [&test_data]() {
         auto        dec = make_decoder(test_data.tstr_data);
-        std::string value;
+        std::string value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding an array", [&test_data]() {
         auto                   dec = make_decoder(test_data.array_data);
-        std::array<int16_t, 4> value;
+        std::array<int16_t, 4> value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding an array with check", [&test_data]() {
         auto                   dec = make_decoder(test_data.array_data);
-        std::array<int16_t, 4> value;
+        std::array<int16_t, 4> value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a map", [&test_data]() {
         auto                       dec = make_decoder(test_data.map_data);
-        std::map<int16_t, int32_t> value;
+        std::map<int16_t, int32_t> value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a map with check", [&test_data]() {
         auto                       dec = make_decoder(test_data.map_data);
-        std::map<int16_t, int32_t> value;
+        std::map<int16_t, int32_t> value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a tag", [&test_data]() {
         auto dec = make_decoder(test_data.tag_data);
-        A    value;
+        A    value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a tag with check", [&test_data]() {
         auto dec = make_decoder(test_data.tag_data);
-        A    value;
+        A    value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a nullptr", [&test_data]() {
         auto           dec = make_decoder(test_data.nullptr_data);
-        std::nullptr_t value;
+        std::nullptr_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a bool with check", [&test_data]() {
         auto dec = make_decoder(test_data.bool_data);
-        bool value;
+        bool value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float16", [&test_data]() {
         auto      dec = make_decoder(test_data.float16_data);
-        float16_t value;
+        float16_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float32", [&test_data]() {
         auto  dec = make_decoder(test_data.float32_data);
-        float value;
+        float value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float64", [&test_data]() {
         auto   dec = make_decoder(test_data.float64_data);
-        double value;
+        double value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float16_t with check", [&test_data]() {
         auto      dec = make_decoder(test_data.float16_data);
-        float16_t value;
+        float16_t value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a float32 with check", [&test_data]() {
         auto  dec = make_decoder(test_data.float32_data);
-        float value;
+        float value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a double with check", [&test_data]() {
         auto   dec = make_decoder(test_data.float64_data);
-        double value;
+        double value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
     bench.run("Decoding a simple with check", [&test_data]() {
         auto   dec = make_decoder(test_data.simple_data);
-        simple value;
+        simple value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -360,7 +360,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
 
         // Decode and benchmark
         auto     dec = make_decoder(data);
-        uint64_t value;
+        uint64_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -372,7 +372,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto     dec = make_decoder(data);
-        uint64_t value;
+        uint64_t value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -384,7 +384,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto    dec = make_decoder(data);
-        int64_t value;
+        int64_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -396,7 +396,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto    dec = make_decoder(data);
-        int64_t value;
+        int64_t value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -411,7 +411,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto                     dec = make_decoder(data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4> value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -426,7 +426,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto                     dec = make_decoder(data);
-        std::array<std::byte, 4> value;
+        std::array<std::byte, 4> value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -440,7 +440,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(s);
 
         auto        dec = make_decoder(data);
-        std::string value;
+        std::string value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -454,7 +454,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(s);
 
         auto        dec = make_decoder(data);
-        std::string value;
+        std::string value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -467,7 +467,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto                   dec = make_decoder(data);
-        std::array<int16_t, 4> value;
+        std::array<int16_t, 4> value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -480,7 +480,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto                   dec = make_decoder(data);
-        std::array<int16_t, 4> value;
+        std::array<int16_t, 4> value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -493,7 +493,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto                       dec = make_decoder(data);
-        std::map<int16_t, int32_t> value;
+        std::map<int16_t, int32_t> value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -506,7 +506,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto                       dec = make_decoder(data);
-        std::map<int16_t, int32_t> value;
+        std::map<int16_t, int32_t> value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -523,7 +523,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto dec = make_decoder(data);
-        A    value;
+        A    value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -535,18 +535,18 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto dec = make_decoder(data);
-        A    value;
+        A    value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a nullptr", [&gen]() {
+    bench.run("Decoding a nullptr", []() {
         Buffer data;
         auto   enc  = make_encoder(data);
         std::ignore = enc(std::nullptr_t{});
 
         auto           dec = make_decoder(data);
-        std::nullptr_t value;
+        std::nullptr_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -558,7 +558,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto dec = make_decoder(data);
-        bool value;
+        bool value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -570,7 +570,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto      dec = make_decoder(data);
-        float16_t value;
+        float16_t value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -582,7 +582,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto  dec = make_decoder(data);
-        float value;
+        float value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -594,7 +594,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto   dec = make_decoder(data);
-        double value;
+        double value{};
         std::ignore = dec(value);
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -606,7 +606,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto      dec = make_decoder(data);
-        float16_t value;
+        float16_t value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -618,7 +618,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto  dec = make_decoder(data);
-        float value;
+        float value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -630,7 +630,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore     = enc(original);
 
         auto   dec = make_decoder(data);
-        double value;
+        double value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });
@@ -642,7 +642,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         std::ignore = enc(original);
 
         auto   dec = make_decoder(data);
-        simple value;
+        simple value{};
         CHECK(dec(value));
         ankerl::nanobench::doNotOptimizeAway(value);
     });

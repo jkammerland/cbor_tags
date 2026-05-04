@@ -583,7 +583,8 @@ struct DynamicTagged {
 ```
 
 ## 🔄 Automatic Reflection
-Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
+
+Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24).
 
 The API is the same in both modes:
 
@@ -602,7 +603,10 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 //...
 
 ```
-This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. For generated C++20 reflection, `CBOR_TAGS_REFLECTION_RANGES` controls the generated aggregate sizes and defaults to `"1:24"`. Use `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` if you need larger or custom ranges.
+> [!IMPORTANT]
+> This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. For generated C++20 reflection, `CBOR_TAGS_REFLECTION_RANGES` controls the generated aggregate sizes and defaults to `"1:24"`. Use `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` if you need larger or custom ranges.
+
+Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -709,11 +713,12 @@ fmt::print("Concise Data Definition: \n{}\n", fmt::to_string(buffer));
 
 Should output:
 ```
-A = (uint, nint, int, float64, float32, bool, tstr, bstr, map, int / tstr, int / null, B, C)
+A = [uint, nint, int, float64, float32, bool, tstr, bstr, {* int => tstr}, int / tstr, int / null, B, C]
 C = #6.141([int, tstr, B / null])
-B = #6.140([bstr, map])
+B = #6.140([bstr, {* int => tstr}])
 ```
 See the docs for more info.
+Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_standard_coverage.md).
 
 
 ## ✅ Requirements
@@ -738,7 +743,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG master # or a release tag/commit that contains the features you need
+  GIT_TAG v0.12.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)

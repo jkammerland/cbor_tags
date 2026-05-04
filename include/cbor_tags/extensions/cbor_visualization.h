@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
 
+#include <array>
 #include <cbor_tags/cbor_concepts.h>
 #include <cstddef>
 #include <fmt/base.h>
@@ -16,9 +17,12 @@
 #include <optional>
 #include <span>
 #include <stack>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -36,7 +40,8 @@ struct CDDLOptions {
         bool   format_by_rows{true};
         size_t offset{2};
     } row_options;
-    bool always_inline{false};
+    bool             always_inline{false};
+    std::string_view root_name{};
 };
 
 struct DiagnosticOptions {
@@ -47,7 +52,9 @@ struct DiagnosticOptions {
         size_t current_indent{0};
     } row_options;
 
-    bool check_tstr_utf8{false};
+    bool   check_tstr_utf8{false};
+    size_t max_depth{64};
+    size_t current_depth{0};
 };
 
 template <typename T, typename OutputBuffer, typename Context>
@@ -55,61 +62,109 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {}, Context = {})
 
 namespace detail {
 
+struct CDDLContext;
+
+template <typename T> std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
+
 struct CDDLContext {
-    using definition_cddl_pair = std::pair<std::pmr::string, std::pmr::string>;
+    enum class DefinitionState { visiting, done };
+
+    struct definition_cddl_pair {
+        std::pmr::string key;
+        std::pmr::string name;
+        std::pmr::string cddl;
+        DefinitionState  state{DefinitionState::visiting};
+        bool             recursive_reference{false};
+    };
+
     std::array<std::byte, 2000>           buffer;
     std::pmr::monotonic_buffer_resource   memory_resource{buffer.data(), buffer.size()};
     std::pmr::deque<definition_cddl_pair> definitions{&memory_resource};
 
-    CDDLContext() {}
+    CDDLContext() = default;
 
     explicit CDDLContext(const CDDLContext &other) {
-        for (const auto &[name, cddl] : other.definitions) {
-            debug::println("copying definition: {} -> {}", name, cddl);
-            insert(std::pmr::string(name, &memory_resource), std::pmr::string(cddl, &memory_resource));
+        for (const auto &def : other.definitions) {
+            debug::println("copying definition: {} -> {}", def.name, def.cddl);
+            definitions.emplace_back(std::pmr::string(def.key, &memory_resource), std::pmr::string(def.name, &memory_resource),
+                                     std::pmr::string(def.cddl, &memory_resource), def.state, def.recursive_reference);
         }
     }
 
     template <typename T> bool contains(const T &name) const {
+        const std::string_view expected{name.data(), name.size()};
         for (const auto &def : definitions) {
-            if (std::equal(name.begin(), name.end(), def.first.begin(), def.first.end())) {
+            const std::string_view actual_key{def.key.data(), def.key.size()};
+            const std::string_view actual_name{def.name.data(), def.name.size()};
+            if (actual_key == expected || actual_name == expected) {
                 return true;
             }
         }
         return false;
     }
 
-    void insert(std::pmr::string name, std::pmr::string cddl) { definitions.emplace_back(std::move(name), std::move(cddl)); }
-
-    void clear() {
-        definitions.clear();
-        memory_resource.release();
+    definition_cddl_pair *find_by_key(std::string_view key) {
+        for (auto &def : definitions) {
+            if (std::string_view{def.key.data(), def.key.size()} == key) {
+                return &def;
+            }
+        }
+        return nullptr;
     }
 
-    template <typename T, typename Context> void register_type(CDDLOptions options, Context context) {
-        if constexpr (is_static_tag_t<T>::value || is_dynamic_tag_t<T>) {
-            return;
-        }
-
-        if constexpr (IsAggregate<T>) {
-            if (contains(nameof::nameof_type<T>())) {
-                debug::println("Skipping already registered type: {}", nameof::nameof_type<T>());
-                return;
+    const definition_cddl_pair *find_by_key(std::string_view key) const {
+        for (const auto &def : definitions) {
+            if (std::string_view{def.key.data(), def.key.size()} == key) {
+                return &def;
             }
-            debug::println("Registering type: {}", nameof::nameof_type<T>());
-            auto             name = std::pmr::string(nameof::nameof_type<T>(), &memory_resource);
-            std::pmr::string cddl(&memory_resource);
-            cddl_schema_to<T, decltype(cddl), Context>(cddl, options, std::ref(context));
-            insert(std::move(name), std::move(cddl));
-        } else {
-            debug::println("Skipping non-aggregate type: {}", nameof::nameof_type<T>());
         }
-        /* Else do nothing */
+        return nullptr;
+    }
+
+    const definition_cddl_pair *find_by_name(std::string_view name) const {
+        for (const auto &def : definitions) {
+            if (std::string_view{def.name.data(), def.name.size()} == name) {
+                return &def;
+            }
+        }
+        return nullptr;
+    }
+
+    bool contains_name(std::string_view name) const {
+        for (const auto &def : definitions) {
+            if (std::string_view{def.name.data(), def.name.size()} == name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    definition_cddl_pair &reserve(std::string_view key, std::string_view name) {
+        definitions.emplace_back(std::pmr::string(key, &memory_resource), std::pmr::string(name, &memory_resource),
+                                 std::pmr::string(&memory_resource), DefinitionState::visiting);
+        return definitions.back();
+    }
+
+    bool erase_by_key(std::string_view key) {
+        for (auto it = definitions.begin(); it != definitions.end(); ++it) {
+            if (std::string_view{it->key.data(), it->key.size()} == key) {
+                definitions.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void clear() { definitions.clear(); }
+
+    template <typename T, typename Context> void register_type(CDDLOptions options, Context context) {
+        (void)context;
+        (void)ensure_cddl_definition<std::remove_cvref_t<T>>(*this, options);
     }
 };
 
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
-                                       double, bool, std::nullptr_t>;
+                                       double, bool, std::nullptr_t, simple>;
 
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
     std::string indent(options.current_indent * 2, ' ');
@@ -261,100 +316,404 @@ template <typename T> constexpr auto getName() {
 template <typename T>
 concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T::type>>;
 
-template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context context) {
-    T t{};
-    debug::println("cddl_schema_to: {}", nameof::nameof_short_type<T>());
-    bool use_brackets     = false;
-    bool use_group        = false;
-    auto applier_register = [&](auto &&...args) {
-        if constexpr (IsReferenceWrapper<Context>) {
-            debug::println("ReferenceWrapper");
-            // std::remove_cvref_t<decltype(args)>
-            ((debug::println("register_type: {}", nameof::nameof_full_type<decltype(args)>()), ...));
-            ((context.get().template register_type<std::remove_cvref_t<decltype(args)>, Context>(options, context), ...));
-            debug::println("ReferenceWrapper end");
-        } else {
-            debug::println("Not ReferenceWrapper");
-            ((debug::println("register_type: {}", nameof::nameof_full_type<decltype(args)>()), ...));
-            ((context.template register_type<std::remove_cvref_t<decltype(args)>, Context>(options, std::ref(context)), ...));
-            debug::println("Not ReferenceWrapper end");
-        }
-    };
-    auto applier_formatter = [&](auto &&...args) {
-        int not_has_tag_member = !(HasStaticTag<T> || HasDynamicTag<T>);
-        int idx                = not_has_tag_member ? 0 : -1;
-        if (options.row_options.format_by_rows) {
-            int offset_help = not_has_tag_member;
-            ((fmt::format_to(
-                 std::back_inserter(output_buffer), "{}{}{}", idx++ < 1 ? "" : (options.row_options.format_by_rows ? ",\n" : ", "),
-                 offset_help++ == 0 ? "" : std::string(options.row_options.offset, ' '), not_has_tag_member++ == 0 ? "" : getName(args))),
-             ...);
-        } else {
-            ((fmt::format_to(std::back_inserter(output_buffer), "{}{}", idx++ < 1 ? "" : ", ",
-                             not_has_tag_member++ == 0 ? "" : getName(args)),
-              ...));
-        }
+namespace detail {
 
-        applier_register(std::forward<decltype(args)>(args)...);
-    };
+template <typename T> struct is_std_array : std::false_type {};
+template <typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std::true_type {
+    using value_type                  = T;
+    static constexpr std::size_t size = N;
+};
 
-    if constexpr (IsAggregate<T>) {
-        const auto &&tuple = to_tuple(t);
-        fmt::format_to(std::back_inserter(output_buffer), "{} = ", nameof::nameof_short_type<T>());
-        [[maybe_unused]] auto size = std::apply([](auto &&...args) { return sizeof...(args); }, tuple);
+template <typename T> struct is_std_span : std::false_type {};
+template <typename T, std::size_t Extent> struct is_std_span<std::span<T, Extent>> : std::true_type {
+    using value_type                    = T;
+    static constexpr std::size_t extent = Extent;
+};
 
-        if constexpr (IsTag<T>) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
-        }
+template <typename T> using aggregate_tuple_t = std::remove_cvref_t<decltype(to_tuple(std::declval<T &>()))>;
 
-        use_group    = size > 1 || IsTag<T>;
-        use_brackets = IsTag<T> && size > 1;
+template <typename T, typename...> struct first_type {
+    using type = T;
+};
 
-        if (options.row_options.format_by_rows) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "([\n" : (use_group ? "(\n" : ""));
-        } else {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "([" : (use_group ? "(" : ""));
-        }
+template <typename... Ts> using first_type_t = typename first_type<Ts...>::type;
 
-        std::apply(applier_formatter, tuple);
-    } else if constexpr (IsTuple<T>) {
-        [[maybe_unused]] auto size = std::apply([](auto &&...args) { return sizeof...(args); }, t);
+template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options);
 
-        if constexpr (IsTag<T>) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", getTagDef(t));
-        }
+constexpr bool is_cddl_id_start(char value) {
+    return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') || value == '_' || value == '$' || value == '@';
+}
 
-        use_group    = size > 2 || IsTag<T>;
-        use_brackets = IsTag<T> && size > 2;
+constexpr bool is_cddl_id_continue(char value) { return is_cddl_id_start(value) || (value >= '0' && value <= '9'); }
 
-        if (options.row_options.format_by_rows) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[\n" : (use_group ? "(\n" : ""));
-        } else {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "[" : (use_group ? "(" : ""));
-        }
+inline std::string sanitize_cddl_id(std::string_view raw) {
+    std::string result;
+    result.reserve(raw.size());
 
-        if constexpr (IsTag<T>) {
-            std::apply(applier_formatter, detail::tuple_tail(t));
-        } else {
-            std::apply(applier_formatter, t);
-        }
-    } else {
-        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", nameof::nameof_type<T>(), getName(t));
+    for (const auto value : raw) {
+        result += is_cddl_id_continue(value) ? value : '_';
+    }
+    while (!result.empty() && result.front() == '_') {
+        result.erase(result.begin());
+    }
+    if (result.empty()) {
+        result = "type";
+    }
+    if (!is_cddl_id_start(result.front())) {
+        result.insert(0, "type_");
+    }
+    return result;
+}
+
+template <typename T> std::string cddl_type_key() { return std::string(nameof::nameof_full_type<std::remove_cvref_t<T>>()); }
+
+template <typename T> std::string cddl_type_name() { return sanitize_cddl_id(nameof::nameof_short_type<std::remove_cvref_t<T>>()); }
+
+inline std::string unique_cddl_name(CDDLContext &context, std::string_view key, std::string_view preferred_name) {
+    auto preferred = sanitize_cddl_id(preferred_name.empty() ? key : preferred_name);
+    if (!context.contains_name(preferred)) {
+        return preferred;
     }
 
-    if (options.row_options.format_by_rows) {
-        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "\n])" : (use_group ? "\n)" : ""));
+    auto fallback = sanitize_cddl_id(key);
+    if (!context.contains_name(fallback)) {
+        return fallback;
+    }
+
+    for (std::size_t suffix = 2;; ++suffix) {
+        auto candidate = fmt::format("{}_{}", fallback, suffix);
+        if (!context.contains_name(candidate)) {
+            return candidate;
+        }
+    }
+}
+
+inline std::string parenthesize_choice(std::string value) {
+    if (value.find(" / ") == std::string::npos) {
+        return value;
+    }
+    return "(" + value + ")";
+}
+
+template <std::size_t N> std::string join_cddl(const std::array<std::string, N> &items, std::string_view separator) {
+    std::string result;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i != 0) {
+            result += separator;
+        }
+        result += items[i];
+    }
+    return result;
+}
+
+template <typename... Ts> std::string cddl_fixed_array_expr(CDDLContext &context, CDDLOptions options) {
+    std::array<std::string, sizeof...(Ts)> items{cddl_type_expr<std::remove_cvref_t<Ts>>(context, options)...};
+
+    if (!options.row_options.format_by_rows) {
+        return "[" + join_cddl(items, ", ") + "]";
+    }
+
+    std::string result = "[\n";
+    const auto  indent = std::string(options.row_options.offset, ' ');
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        result += indent;
+        result += items[i];
+        if (i + 1 != items.size()) {
+            result += ",\n";
+        }
+    }
+    result += "\n]";
+    return result;
+}
+
+template <typename... Ts> std::string cddl_payload_expr(CDDLContext &context, CDDLOptions options) {
+    if constexpr (sizeof...(Ts) == 0) {
+        return "[]";
+    } else if constexpr (sizeof...(Ts) == 1) {
+        return cddl_type_expr<std::remove_cvref_t<first_type_t<Ts...>>>(context, options);
     } else {
-        fmt::format_to(std::back_inserter(output_buffer), "{}", use_brackets ? "])" : (use_group ? ")" : ""));
+        return cddl_fixed_array_expr<Ts...>(context, options);
+    }
+}
+
+template <typename Tuple, std::size_t Offset, std::size_t... Is>
+std::string cddl_payload_from_tuple(CDDLContext &context, CDDLOptions options, std::index_sequence<Is...>) {
+    return cddl_payload_expr<std::tuple_element_t<Offset + Is, Tuple>...>(context, options);
+}
+
+template <typename Tuple, std::size_t Offset> std::string cddl_payload_from_tuple(CDDLContext &context, CDDLOptions options) {
+    using tuple_type               = std::remove_cvref_t<Tuple>;
+    constexpr std::size_t size     = std::tuple_size_v<tuple_type>;
+    constexpr std::size_t payloads = size >= Offset ? size - Offset : 0;
+    return cddl_payload_from_tuple<tuple_type, Offset>(context, options, std::make_index_sequence<payloads>{});
+}
+
+template <typename T> std::string cddl_tag_prefix() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (is_static_tag_t<value_type>::value) {
+        return fmt::format("#6.{}", value_type::cbor_tag);
+    } else {
+        return "#6";
+    }
+}
+
+template <typename T>
+constexpr bool is_empty_cddl_aggregate_v =
+    IsAggregate<std::remove_cvref_t<T>> && !IsTag<std::remove_cvref_t<T>> && aggregate_binding_count<std::remove_cvref_t<T>> == 0;
+
+template <typename T> constexpr bool is_cddl_tag_only_tuple_v = IsTagOnlyTuple<std::remove_cvref_t<T>>;
+
+struct CDDLRootIdentity {
+    std::string_view key;
+    std::string_view name;
+};
+
+inline void reject_explicit_root_name_collision(CDDLContext &context, CDDLRootIdentity root) {
+    const auto *existing = context.find_by_name(root.name);
+    if (existing == nullptr) {
+        return;
+    }
+
+    const std::string_view existing_key{existing->key.data(), existing->key.size()};
+    if (existing_key != root.key) {
+        throw std::invalid_argument(fmt::format("CDDL root_name '{}' collides with an existing definition", root.name));
+    }
+}
+
+template <typename T> std::string cddl_aggregate_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    static_assert(!is_empty_cddl_aggregate_v<value_type>, "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
+
+    using tuple_type = aggregate_tuple_t<value_type>;
+
+    if constexpr (HasInlineTag<value_type>) {
+        return fmt::format("#6.{}({})", value_type::cbor_tag, cddl_payload_from_tuple<tuple_type, 0>(context, options));
+    } else if constexpr (HasStaticTag<value_type>) {
+        using tag_type = std::remove_cvref_t<decltype(value_type::cbor_tag)>;
+        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1>(context, options));
+    } else if constexpr (HasDynamicTag<value_type>) {
+        return fmt::format("#6({})", cddl_payload_from_tuple<tuple_type, 1>(context, options));
+    } else {
+        return cddl_payload_from_tuple<tuple_type, 0>(context, options);
+    }
+}
+
+template <typename T> std::string cddl_tuple_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    using tuple_type = value_type;
+
+    if constexpr (IsTaggedTuple<value_type>) {
+        using tag_type = std::remove_cvref_t<std::tuple_element_t<0, tuple_type>>;
+        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1>(context, options));
+    } else {
+        return cddl_payload_from_tuple<tuple_type, 0>(context, options);
+    }
+}
+
+template <typename T> std::string cddl_sequence_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    using item_type  = std::remove_cvref_t<typename value_type::value_type>;
+
+    auto item = parenthesize_choice(cddl_type_expr<item_type>(context, options));
+    if constexpr (is_std_array<value_type>::value) {
+        return fmt::format("[{}*{} {}]", is_std_array<value_type>::size, is_std_array<value_type>::size, item);
+    } else if constexpr (is_std_span<value_type>::value) {
+        if constexpr (is_std_span<value_type>::extent != std::dynamic_extent) {
+            return fmt::format("[{}*{} {}]", is_std_span<value_type>::extent, is_std_span<value_type>::extent, item);
+        } else {
+            return fmt::format("[* {}]", item);
+        }
+    } else {
+        return fmt::format("[* {}]", item);
+    }
+}
+
+template <typename T> std::string cddl_map_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type  = std::remove_cvref_t<T>;
+    using key_type    = std::remove_cvref_t<typename value_type::key_type>;
+    using mapped_type = std::remove_cvref_t<typename value_type::mapped_type>;
+    auto key          = parenthesize_choice(cddl_type_expr<key_type>(context, options));
+    auto value        = parenthesize_choice(cddl_type_expr<mapped_type>(context, options));
+    return fmt::format("{{* {} => {}}}", key, value);
+}
+
+template <typename T> std::string cddl_rule_expr(CDDLContext &context, CDDLOptions options, std::string_view name) {
+    return fmt::format("{} = {}", name, cddl_aggregate_expr<T>(context, options));
+}
+
+template <typename T> std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+        const auto key = cddl_type_key<value_type>();
+        if (auto *def = context.find_by_key(key)) {
+            if (def->state == CDDLContext::DefinitionState::visiting) {
+                def->recursive_reference = true;
+            }
+            return std::string(def->name);
+        }
+
+        auto  name = unique_cddl_name(context, key, preferred_name.empty() ? cddl_type_name<value_type>() : preferred_name);
+        auto &def  = context.reserve(key, name);
+        auto  body = cddl_aggregate_expr<value_type>(context, options);
+        if (options.always_inline && preferred_name.empty() && !def.recursive_reference) {
+            context.erase_by_key(key);
+            return body;
+        }
+
+        auto cddl = fmt::format("{} = {}", name, body);
+        def.cddl  = std::pmr::string(cddl, &context.memory_resource);
+        def.state = CDDLContext::DefinitionState::done;
+        return std::string(def.name);
+    } else {
+        return cddl_type_expr<value_type>(context, options);
+    }
+}
+
+template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsUnsigned<value_type> || IsEnumUnsigned<value_type>) {
+        return "uint";
+    } else if constexpr (IsNegative<value_type>) {
+        return "nint";
+    } else if constexpr (IsSigned<value_type> || IsEnumSigned<value_type>) {
+        return "int";
+    } else if constexpr (IsTextString<value_type>) {
+        return "tstr";
+    } else if constexpr (IsBinaryString<value_type>) {
+        return "bstr";
+    } else if constexpr (IsIndefiniteWrapper<value_type>) {
+        return cddl_type_expr<indefinite_value_t<value_type>>(context, options);
+    } else if constexpr (IsOptional<value_type>) {
+        return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type>(context, options));
+    } else if constexpr (IsVariant<value_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
+            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts>(variant_context, variant_options)...}, " / ");
+        }(static_cast<value_type *>(nullptr), context, options);
+    } else if constexpr (IsArrayHeader<value_type>) {
+        return "[* any]";
+    } else if constexpr (IsMapHeader<value_type>) {
+        return "{* any => any}";
+    } else if constexpr (IsTagHeader<value_type>) {
+        return "#6(any)";
+    } else if constexpr (IsMap<value_type>) {
+        return cddl_map_expr<value_type>(context, options);
+    } else if constexpr (IsArray<value_type>) {
+        return cddl_sequence_expr<value_type>(context, options);
+    } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
+        return cddl_tag_prefix<value_type>();
+    } else if constexpr (is_cddl_tag_only_tuple_v<value_type>) {
+        static_assert(always_false<value_type>::value, "tag-only tuple has no CBOR payload; CDDL schema unsupported");
+        return {};
+    } else if constexpr (IsTuple<value_type>) {
+        return cddl_tuple_expr<value_type>(context, options);
+    } else if constexpr (IsAggregate<value_type>) {
+        return ensure_cddl_definition<value_type>(context, options);
+    } else if constexpr (IsSimple<value_type>) {
+        if constexpr (IsBool<value_type>) {
+            return "bool";
+        } else if constexpr (IsFloat16<value_type>) {
+            return "float16";
+        } else if constexpr (IsFloat32<value_type>) {
+            return "float32";
+        } else if constexpr (IsFloat64<value_type>) {
+            return "float64";
+        } else if constexpr (IsNull<value_type>) {
+            return "null";
+        } else {
+            return "#7.<0..23 / 32..255>";
+        }
+    } else {
+        return cddl_type_name<value_type>();
+    }
+}
+
+template <typename Context> decltype(auto) cddl_context_ref(Context &context) {
+    if constexpr (IsReferenceWrapper<Context>) {
+        return context.get();
+    } else {
+        return (context);
+    }
+}
+
+template <typename T> std::string root_rule_name(CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    if (!options.root_name.empty()) {
+        return sanitize_cddl_id(options.root_name);
+    } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+        return cddl_type_name<value_type>();
+    } else {
+        return "root";
+    }
+}
+
+template <typename T> std::string tag_marker_root_expr(CDDLContext &context, CDDLOptions options) {
+    (void)context;
+    (void)options;
+    return fmt::format("{}(any)", cddl_tag_prefix<std::remove_cvref_t<T>>());
+}
+
+} // namespace detail
+
+template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
+auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context context) {
+    using value_type   = std::remove_cvref_t<T>;
+    auto &cddl_context = detail::cddl_context_ref(context);
+    debug::println("cddl_schema_to: {}", nameof::nameof_short_type<T>());
+
+    if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+        static_assert(!detail::is_empty_cddl_aggregate_v<value_type>,
+                      "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
+        const auto requested_root_name = detail::root_rule_name<value_type>(options);
+        const auto root_key            = detail::cddl_type_key<value_type>();
+        if (!options.root_name.empty()) {
+            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+        }
+        const auto  root_name = detail::ensure_cddl_definition<value_type>(cddl_context, options, requested_root_name);
+        const auto *root_def  = cddl_context.find_by_key(root_key);
+        if (root_def != nullptr) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+        } else {
+            fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name,
+                           detail::cddl_aggregate_expr<value_type>(cddl_context, options));
+        }
+    } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
+        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", detail::root_rule_name<value_type>(options),
+                       detail::tag_marker_root_expr<value_type>(cddl_context, options));
+    } else {
+        auto root_name          = detail::root_rule_name<value_type>(options);
+        auto root_key           = fmt::format("__cddl_root:{}", root_name);
+        bool reserved_root_name = false;
+        if (!options.root_name.empty()) {
+            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = root_name});
+        } else if (cddl_context.contains_name(root_name)) {
+            root_name = detail::unique_cddl_name(cddl_context, root_key, root_name);
+            root_key  = fmt::format("__cddl_root:{}", root_name);
+        }
+        if (!cddl_context.contains_name(root_name)) {
+            (void)cddl_context.reserve(root_key, root_name);
+            reserved_root_name = true;
+        }
+        auto root_expr = detail::cddl_type_expr<value_type>(cddl_context, options);
+        if (reserved_root_name) {
+            cddl_context.erase_by_key(root_key);
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, root_expr);
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
-        debug::println("size: {}", context.definitions.size());
+        const auto root_key = [] {
+            if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+                return detail::cddl_type_key<value_type>();
+            } else {
+                return std::string{};
+            }
+        }();
 
-        // Reverse, higher likelyhood of top - down order
-        for (const auto &def : context.definitions | std::views::reverse) {
-            fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.second);
+        for (const auto &def : cddl_context.definitions | std::views::reverse) {
+            const std::string_view key{def.key.data(), def.key.size()};
+            if (key != root_key && def.state == detail::CDDLContext::DefinitionState::done) {
+                fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.cddl);
+            }
         }
     }
 }
@@ -388,9 +747,8 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         }
     };
     constexpr auto string_size_visitor = [](auto &&value) {
-        if constexpr (IsTextHeader<std::remove_cvref_t<decltype(value)>>) {
-            return value.size;
-        } else if constexpr (IsBinaryHeader<std::remove_cvref_t<decltype(value)>>) {
+        using value_type = std::remove_cvref_t<decltype(value)>;
+        if constexpr (IsTextHeader<value_type> || IsBinaryHeader<value_type>) {
             return value.size;
         } else {
             return std::uint64_t{0};
@@ -496,6 +854,33 @@ template <typename OutputBuffer> constexpr void cddl_prelude_to(OutputBuffer &bu
                                                "undefined = #7.23\n");
 }
 
+template <typename OutputBuffer> void append_diagnostic_separator(OutputBuffer &output_buffer, bool format_by_rows) {
+    fmt::format_to(std::back_inserter(output_buffer), "{}", format_by_rows ? ",\n" : ", ");
+}
+
+template <typename OutputBuffer, typename Iterator>
+void append_escaped_diagnostic_text(OutputBuffer &output_buffer, Iterator begin, Iterator end) {
+    fmt::format_to(std::back_inserter(output_buffer), "\"");
+    for (; begin != end; ++begin) {
+        const auto value = static_cast<unsigned char>(*begin);
+        switch (value) {
+        case '"': fmt::format_to(std::back_inserter(output_buffer), "\\\""); break;
+        case '\\': fmt::format_to(std::back_inserter(output_buffer), "\\\\"); break;
+        case '\n': fmt::format_to(std::back_inserter(output_buffer), "\\n"); break;
+        case '\r': fmt::format_to(std::back_inserter(output_buffer), "\\r"); break;
+        case '\t': fmt::format_to(std::back_inserter(output_buffer), "\\t"); break;
+        default:
+            if (value < 0x20) {
+                fmt::format_to(std::back_inserter(output_buffer), "\\x{:02x}", value);
+            } else {
+                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<char>(value));
+            }
+            break;
+        }
+    }
+    fmt::format_to(std::back_inserter(output_buffer), "\"");
+}
+
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor;
 
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
@@ -503,48 +888,80 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     Decoder          &dec;
     DiagnosticOptions options;
 
+    constexpr void check_depth() const {
+        if (options.current_depth >= options.max_depth) {
+            throw std::runtime_error("CBOR diagnostic nesting depth exceeded");
+        }
+    }
+
+    constexpr DiagnosticOptions child_options() const {
+        auto child = options;
+        ++child.current_depth;
+        return child;
+    }
+
     template <IsMapHeader T> constexpr void operator()(const T &arg) {
-        auto base_offset =
-            std::string(options.row_options.offset * options.row_options.current_indent * options.row_options.format_by_rows, ' ');
+        check_depth();
+        const auto format_by_rows = options.row_options.format_by_rows;
+        auto       base_offset    = std::string(options.row_options.offset * options.row_options.current_indent * format_by_rows, ' ');
         fmt::format_to(std::back_inserter(output_buffer), "{{{}", options.row_options.format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
+        auto child   = child_options();
+        bool emitted = false;
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant key;
             detail::catch_all_variant value;
             if (!dec(key)) {
-                break;
+                throw std::runtime_error("Malformed CBOR diagnostic map key");
             }
-            fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, key);
+            if (emitted) {
+                append_diagnostic_separator(output_buffer, format_by_rows);
+            }
+            if (format_by_rows) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+            }
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, key);
             fmt::format_to(std::back_inserter(output_buffer), ": ");
             if (!dec(value)) {
-                break;
+                throw std::runtime_error("Malformed CBOR diagnostic map value");
             }
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, value);
-            fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, value);
+            emitted = true;
         }
         options.row_options.current_indent--;
-        output_buffer.resize(output_buffer.size() - 2);
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}}}", options.row_options.format_by_rows ? "\n" : "", base_offset);
+        if (format_by_rows && emitted) {
+            fmt::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "}}");
     }
 
     template <IsArrayHeader T> constexpr void operator()(const T &arg) {
-        bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
-        auto base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
+        check_depth();
+        const bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
+        auto       base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
         fmt::format_to(std::back_inserter(output_buffer), "[{}", format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
+        auto child   = child_options();
+        bool emitted = false;
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant values;
             if (!dec(values)) {
-                break;
+                throw std::runtime_error(fmt::format("Malformed CBOR diagnostic array item {}", i));
             }
-            fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, values);
-            fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
+            if (emitted) {
+                append_diagnostic_separator(output_buffer, format_by_rows);
+            }
+            if (format_by_rows) {
+                fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+            }
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, values);
+            emitted = true;
         }
         options.row_options.current_indent--;
-        output_buffer.resize(output_buffer.size() - 2);
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}]", base_offset, format_by_rows ? "\n" : "");
+        if (format_by_rows && emitted) {
+            fmt::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
+        }
+        fmt::format_to(std::back_inserter(output_buffer), "]");
     }
 
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
@@ -555,7 +972,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if (options.check_tstr_utf8) {
             throw std::runtime_error("UTF-8 check not implemented");
         }
-        fmt::format_to(std::back_inserter(output_buffer), "\"{}\"", fmt::join(char_view, ""));
+        append_escaped_diagnostic_text(output_buffer, std::ranges::begin(char_view), std::ranges::end(char_view));
     }
 
     template <IsBinaryHeader T> constexpr void operator()(const T &arg) {
@@ -573,24 +990,30 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
             fmt::format_to(std::back_inserter(output_buffer), "-{}", arg.value);
         } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(arg)>>) {
+            check_depth();
             detail::catch_all_variant value;
             fmt::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
             if (!dec(value)) {
-                return;
+                throw std::runtime_error("Malformed CBOR diagnostic tag payload");
             }
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, options}, value);
+            std::visit<void>(diagnostic_visitor{output_buffer, dec, child_options()}, value);
             fmt::format_to(std::back_inserter(output_buffer), ")");
         } else if constexpr (IsSimple<std::remove_cvref_t<decltype(arg)>>) {
             if constexpr (IsBool<std::remove_cvref_t<decltype(arg)>>) {
                 fmt::format_to(std::back_inserter(output_buffer), "{}", arg ? "true" : "false");
             } else if constexpr (IsNull<std::remove_cvref_t<decltype(arg)>>) {
                 fmt::format_to(std::back_inserter(output_buffer), "null");
-            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float16_t>) {
-                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
-            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float>) {
+            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float16_t> ||
+                                 std::is_same_v<std::remove_cvref_t<decltype(arg)>, float>) {
                 fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
             } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, double>) {
                 fmt::format_to(std::back_inserter(output_buffer), "{}", arg);
+            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, simple>) {
+                if (arg.value == static_cast<simple::value_type>(SimpleType::Undefined)) {
+                    fmt::format_to(std::back_inserter(output_buffer), "undefined");
+                } else {
+                    fmt::format_to(std::back_inserter(output_buffer), "simple({})", arg.value);
+                }
             } else {
                 fmt::format_to(std::back_inserter(output_buffer), "simple");
             }
@@ -612,14 +1035,23 @@ constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_
 
     fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
 
-    while (dec(values)) {
+    bool emitted = false;
+    while (!dec.reader_.empty(dec.data_)) {
+        auto result = dec(values);
+        if (!result) {
+            throw std::runtime_error("Malformed CBOR diagnostic top-level item");
+        }
+        if (emitted) {
+            append_diagnostic_separator(output_buffer, options.row_options.format_by_rows);
+        }
         std::visit(make_diagnostic_visitor(output_buffer, dec, options), values);
-        fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? ",\n" : ", ");
+        emitted = true;
     }
 
-    // Remove last comma
-    output_buffer.resize(output_buffer.size() - 2);
-    fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "\n]" : "]");
+    if (options.row_options.format_by_rows && emitted) {
+        fmt::format_to(std::back_inserter(output_buffer), "\n");
+    }
+    fmt::format_to(std::back_inserter(output_buffer), "]");
 }
 
 } // namespace cbor::tags

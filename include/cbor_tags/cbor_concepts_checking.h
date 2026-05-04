@@ -56,7 +56,9 @@ template <typename ByteType, typename... T> constexpr bool is_valid_major(ByteTy
         // fmt::print("Type: {}, major: {}\n", nameof::nameof_short_type<Type>(), static_cast<int>(m));
 
         // Special case for signed types which can be either positive or negative
-        if constexpr (IsEnum<U>) {
+        if constexpr (IsOptional<U>) {
+            return m == static_cast<ByteType>(major_type::Simple) || is_valid_major<ByteType, typename U::value_type>(m);
+        } else if constexpr (IsEnum<U>) {
             using enum_type = std::underlying_type_t<Type>;
             return is_valid_major<ByteType, enum_type>(m);
         } else if constexpr (IsSigned<Type>) {
@@ -111,6 +113,13 @@ struct MajorIndex {
 constexpr std::uint64_t MaxBucketsForVariantChecking = 20;
 constexpr std::uint64_t MaxTagsForVariantChecking    = 2048;
 
+template <typename T> struct is_dynamic_tagged_tuple : std::false_type {};
+template <typename T>
+    requires IsTaggedTuple<std::remove_cvref_t<T>>
+struct is_dynamic_tagged_tuple<T>
+    : std::bool_constant<is_dynamic_tag_t<std::remove_cvref_t<std::tuple_element_t<0, std::remove_cvref_t<T>>>>> {};
+template <typename T> inline constexpr bool is_dynamic_tagged_tuple_v = is_dynamic_tagged_tuple<T>::value;
+
 } // namespace detail
 
 template <typename Variant, auto... Concepts> struct ValidConceptMapping;
@@ -133,8 +142,11 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
         counts_fn_inner(result, tags, simples);
 
         /* FINILIZE THE TAG AND SIMPLE BINS */
-        if (tags.size() > 0 || result[MajorIndex::AnyTagHeader] > 0) {
-            result[MajorIndex::Tag]++; // If any tag has been duplicated, this will be > 1, i.e invalid
+        if (tags.size() > 0) {
+            result[MajorIndex::Tag]++;
+        }
+        if (result[MajorIndex::AnyTagHeader] > 0) {
+            result[MajorIndex::Tag]++;
         }
         if (simples.size() > 0) {
             result[MajorIndex::SimpleAny]    = 1;
@@ -208,6 +220,11 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         result[MajorIndex::DynamicTag]++; // Not ok to have dynamic tags
         return;
     }
+    if constexpr (detail::is_dynamic_tagged_tuple_v<T>) {
+        unmatched = false;
+        result[MajorIndex::DynamicTag]++; // Not ok to have dynamic tags
+        return;
+    }
 
     if constexpr (IsOptional<T>) {
         unmatched        = false;
@@ -256,8 +273,14 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         unmatched = false;
 
         constexpr auto tag          = detail::get_tag_from_any<T>();
-        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
-        constexpr bool IsTagOk      = !IsTagInvalid;
+        constexpr bool IsTagInvalid = [] {
+            if constexpr (IsSigned<decltype(tag)>) {
+                return tag == -1;
+            } else {
+                return false;
+            }
+        }();
+        constexpr bool IsTagOk = !IsTagInvalid;
 
         static_assert(IsTagOk, "T must be a tagged type");
 
@@ -277,7 +300,7 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         unmatched = false;
 
         auto current_tag = get_simple_tag_of_primitive_type<T>();
-        if (current_tag == SimpleType::Undefined) {
+        if (current_tag == SimpleType::Unmatched) {
             result[detail::MajorIndex::Unmatched]++;
             return;
         }
@@ -305,13 +328,23 @@ constexpr void getTagsCounts(std::array<uint64_t, detail::MaxTagsForVariantCheck
         ValidConceptMapping<T>::tags_fn_inner(result, tags, simples);
         return;
     }
+    if constexpr (detail::is_dynamic_tagged_tuple_v<T>) {
+        result[MajorIndex::DynamicTag]++;
+        return;
+    }
 
     if constexpr (IsTagHeader<T>) {
         result[MajorIndex::AnyTagHeader]++;
     } else if constexpr (IsTag<T>) {
         constexpr auto tag          = detail::get_tag_from_any<T>();
-        constexpr bool IsTagInvalid = IsSigned<decltype(tag)> && tag == -1;
-        constexpr bool IsTagOk      = !IsTagInvalid;
+        constexpr bool IsTagInvalid = [] {
+            if constexpr (IsSigned<decltype(tag)>) {
+                return tag == -1;
+            } else {
+                return false;
+            }
+        }();
+        constexpr bool IsTagOk = !IsTagInvalid;
 
         static_assert(IsTagOk, "T must be a tagged type");
 

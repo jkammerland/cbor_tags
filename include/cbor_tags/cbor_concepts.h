@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -220,12 +221,12 @@ concept IsRangeOfCborValuesBase = std::ranges::range<std::remove_cvref_t<T>> && 
                                   (!IsStringBase<std::remove_cvref_t<T>>) && (!is_optional_v<std::remove_cvref_t<T>>);
 
 template <typename T>
-concept IsFixedArray = requires {
-    typename T::value_type;
-    typename T::size_type;
-} && (std::is_same_v<T, std::span<typename T::value_type>> || (requires {
-                           typename std::tuple_size<T>::type;
-                       } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size<T>::value>>));
+concept IsFixedArray =
+    requires {
+        typename T::value_type;
+        typename T::size_type;
+    } && (std::is_same_v<T, std::span<typename T::value_type>> ||
+          (requires { typename std::tuple_size<T>::type; } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size_v<T>>>));
 
 template <typename T>
 concept IsMapBase =
@@ -283,7 +284,7 @@ concept IsMultiMap = IsMap<T> && requires(T t) {
 template <typename T>
 concept IsTuple = requires {
     typename std::tuple_size<std::remove_cvref_t<T>>::type;
-    typename std::tuple_element<0, std::remove_cvref_t<T>>::type;
+    typename std::tuple_element_t<0, std::remove_cvref_t<T>>;
     requires(!IsFixedArray<std::remove_cvref_t<T>>);
 };
 
@@ -415,14 +416,17 @@ concept HasTagMember = requires(T t) {
 };
 
 template <typename T>
-concept IsTaggedTuple = requires(T t) {
-    requires IsTuple<T>;
-    requires(is_static_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>::value ||
-             is_dynamic_tag_t<std::remove_cvref_t<decltype(std::get<0>(t))>>);
-};
+concept IsTagOnlyTuple = IsTuple<T> && std::tuple_size_v<std::remove_cvref_t<T>> == 1 &&
+                         (is_static_tag_t<std::remove_cvref_t<std::tuple_element_t<0, std::remove_cvref_t<T>>>>::value ||
+                          is_dynamic_tag_t<std::remove_cvref_t<std::tuple_element_t<0, std::remove_cvref_t<T>>>>);
 
 template <typename T>
-concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsAnyHeader<T>;
+concept IsTaggedTuple = IsTuple<T> && std::tuple_size_v<std::remove_cvref_t<T>> >= 2 &&
+                        (is_static_tag_t<std::remove_cvref_t<std::tuple_element_t<0, std::remove_cvref_t<T>>>>::value ||
+                         is_dynamic_tag_t<std::remove_cvref_t<std::tuple_element_t<0, std::remove_cvref_t<T>>>>);
+
+template <typename T>
+concept IsUntaggedTuple = IsTuple<T> && !IsTaggedTuple<T> && !IsTagOnlyTuple<T> && !IsAnyHeader<T>;
 
 // Must have either a cbor_tag(T) exlusive or a .cbor_tag member
 template <typename T>

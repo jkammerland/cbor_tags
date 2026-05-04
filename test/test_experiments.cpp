@@ -562,13 +562,14 @@ struct uniqueASDOR {
     int a;
 
   private:
-    int y;
+    [[maybe_unused]] int y;
 };
 
 template <> constexpr auto TAGX<uniqueASDOR>() { return 1; }
 
 TEST_CASE("Non default initialization testing tags") {
     using type = decltype(uniqueARFG::a);
+    static_assert(std::is_same_v<type, int>);
     static_assert(ACCESSTEST::tag<uniqueARFG>() == 1);
     static_assert(ACCESSTEST::tag<uniqueASDOR>() == 1);
 }

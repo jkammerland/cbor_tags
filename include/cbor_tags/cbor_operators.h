@@ -25,7 +25,7 @@ template <typename Compare> struct cbor_variant_visitor {
         using namespace cbor::tags;
 
         if constexpr (std::is_same_v<T, U>) {
-            if constexpr (IsUnsigned<T> || IsSigned<T>) {
+            if constexpr (IsUnsigned<T> || IsSigned<T> || IsTag<T>) {
                 return Compare{}(lhs, rhs);
             } else if constexpr (IsBinaryString<T> || IsTextString<T> || IsArray<T> || IsMap<T>) {
                 if (lhs.size() != rhs.size()) {
@@ -63,9 +63,6 @@ template <typename Compare> struct cbor_variant_visitor {
                     return cmp > 0;
                 }
 
-            } else if constexpr (IsTag<T>) {
-                // Assuming Tag types have their own comparison operators
-                return Compare{}(lhs, rhs);
             } else if constexpr (IsSimple<T>) {
                 // Handle simple types (null, undefined, bool, etc.)
                 if constexpr (std::is_same_v<T, std::nullptr_t>) {

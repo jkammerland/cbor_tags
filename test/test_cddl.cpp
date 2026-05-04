@@ -4,6 +4,7 @@
 #include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
@@ -11,12 +12,106 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <test_util.h>
+#include <tuple>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
+
+namespace {
+template <typename T> std::string cddl_schema_inline() {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<T>(buffer, {.row_options = {.format_by_rows = false}});
+    return fmt::to_string(buffer);
+}
+
+std::size_t count_occurrences(std::string_view haystack, std::string_view needle) {
+    std::size_t count = 0;
+    std::size_t pos   = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string_view::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
+struct CDDLPlainTwo {
+    int         id;
+    std::string name;
+};
+
+struct CDDLTaggedOne {
+    static_tag<42> cbor_tag;
+    std::string    value;
+};
+
+struct CDDLInlineTaggedOne {
+    static constexpr std::uint64_t cbor_tag = 43;
+    std::string                    value;
+};
+
+struct CDDLDynamicTaggedOne {
+    dynamic_tag<std::uint64_t> cbor_tag;
+    int                        value;
+};
+
+struct CDDLContainers {
+    std::vector<int>                values;
+    std::map<int, std::string>      names;
+    std::array<int, 2>              pair;
+    std::optional<CDDLPlainTwo>     maybe_plain;
+    std::variant<int, CDDLPlainTwo> either_plain;
+};
+
+struct CDDLRecursiveNode {
+    std::vector<CDDLRecursiveNode> children;
+};
+
+enum class CDDLUnsignedEnum : std::uint8_t {};
+enum class CDDLSignedEnum : std::int8_t {};
+
+struct CDDLEnums {
+    CDDLUnsignedEnum unsigned_enum;
+    CDDLSignedEnum   signed_enum;
+};
+
+struct CDDLNestedLeaf {
+    int         id;
+    std::string name;
+};
+
+struct CDDLNestedTagged {
+    static_tag<9>  cbor_tag;
+    CDDLNestedLeaf leaf;
+};
+
+struct CDDLNestedChoices {
+    std::vector<std::optional<CDDLNestedLeaf>>                                values;
+    std::map<std::variant<int, std::string>, std::optional<CDDLNestedTagged>> lookup;
+};
+
+namespace cddl_left {
+struct Thing {
+    int value;
+};
+} // namespace cddl_left
+
+namespace cddl_right {
+struct Thing {
+    std::string value;
+};
+} // namespace cddl_right
+
+struct CDDLNameCollisionRoot {
+    cddl_left::Thing  left;
+    cddl_right::Thing right;
+};
+
+struct CDDLEmpty {};
+} // namespace
 
 struct B129058 {
     static constexpr std::uint64_t cbor_tag = 140;
@@ -83,6 +178,83 @@ TEST_CASE("CDDL aggregate tagged") {
     CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
+TEST_CASE("CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads") {
+    CHECK_EQ(cddl_schema_inline<CDDLPlainTwo>(), "CDDLPlainTwo = [int, tstr]");
+    CHECK_EQ(cddl_schema_inline<CDDLTaggedOne>(), "CDDLTaggedOne = #6.42(tstr)");
+    CHECK_EQ(cddl_schema_inline<CDDLInlineTaggedOne>(), "CDDLInlineTaggedOne = #6.43(tstr)");
+    CHECK_EQ(cddl_schema_inline<CDDLDynamicTaggedOne>(), "CDDLDynamicTaggedOne = #6(int)");
+}
+
+TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
+    const auto schema = cddl_schema_inline<CDDLContainers>();
+    CBOR_TAGS_TEST_LOG("CDDL containers: \n{}\n", schema);
+
+    CHECK(substrings_in(schema, "CDDLContainers = [[* int], {* int => tstr}, [2*2 int], CDDLPlainTwo / null, int / CDDLPlainTwo]",
+                        "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
+    CHECK_EQ(schema.find("array"), std::string::npos);
+    CHECK_EQ(schema.find("map"), std::string::npos);
+}
+
+TEST_CASE("CDDL supports recursive aggregate containers") {
+    CHECK_EQ(cddl_schema_inline<CDDLRecursiveNode>(), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
+
+    fmt::memory_buffer inline_buffer;
+    cddl_schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
+    CHECK_EQ(fmt::to_string(inline_buffer), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
+}
+
+TEST_CASE("CDDL gives colliding C++ short names distinct rule names") {
+    const auto schema = cddl_schema_inline<CDDLNameCollisionRoot>();
+    CBOR_TAGS_TEST_LOG("CDDL collision: \n{}\n", schema);
+
+    CHECK_EQ(schema.find("CDDLNameCollisionRoot = [Thing, Thing]"), std::string::npos);
+    CHECK(substrings_in(schema, "Thing = int", " = tstr"));
+}
+
+TEST_CASE("CDDL groups choices in map keys and repeated item positions") {
+    CHECK_EQ(cddl_schema_inline<CDDLNestedChoices>(),
+             "CDDLNestedChoices = [[* (CDDLNestedLeaf / null)], {* (int / tstr) => (CDDLNestedTagged / null)}]\n"
+             "CDDLNestedTagged = #6.9(CDDLNestedLeaf)\n"
+             "CDDLNestedLeaf = [int, tstr]");
+}
+
+TEST_CASE("CDDL supports root expressions for anonymous schema roots") {
+    fmt::memory_buffer vector_buffer;
+    cddl_schema_to<std::vector<int>>(vector_buffer, {.row_options = {.format_by_rows = false}});
+    CHECK_EQ(fmt::to_string(vector_buffer), "root = [* int]");
+
+    fmt::memory_buffer tuple_buffer;
+    cddl_schema_to<std::tuple<int, std::string>>(tuple_buffer, {.row_options = {.format_by_rows = false}});
+    CHECK_EQ(fmt::to_string(tuple_buffer), "root = [int, tstr]");
+
+    fmt::memory_buffer tag_buffer;
+    cddl_schema_to<static_tag<7>>(tag_buffer, {.row_options = {.format_by_rows = false}});
+    CHECK_EQ(fmt::to_string(tag_buffer), "root = #6.7(any)");
+
+    CHECK_EQ(cddl_schema_inline<simple>(), "root = #7.<0..23 / 32..255>");
+
+    static_assert(detail::is_empty_cddl_aggregate_v<CDDLEmpty>);
+    static_assert(detail::is_cddl_tag_only_tuple_v<std::tuple<static_tag<7>>>);
+    static_assert(!detail::is_cddl_tag_only_tuple_v<std::tuple<static_tag<7>, int>>);
+}
+
+TEST_CASE("CDDL supports catch-all header roots") {
+    CHECK_EQ(cddl_schema_inline<as_array_any>(), "root = [* any]");
+    CHECK_EQ(cddl_schema_inline<as_map_any>(), "root = {* any => any}");
+    CHECK_EQ(cddl_schema_inline<as_tag_any>(), "root = #6(any)");
+}
+
+TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
+    fmt::memory_buffer inline_buffer;
+    cddl_schema_to<CDDLContainers>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
+    const auto inline_schema = fmt::to_string(inline_buffer);
+    CHECK(substrings_in(inline_schema, "[int, tstr] / null", "int / [int, tstr]"));
+    CHECK_EQ(inline_schema.find("CDDLPlainTwo ="), std::string::npos);
+
+    CHECK_EQ(cddl_schema_inline<CDDLEnums>(), "CDDLEnums = [uint, int]");
+}
+
 struct A0001 {
     uint32_t                       a1;
     negative                       aminus;
@@ -105,7 +277,7 @@ TEST_CASE("CDDL no columns") {
     cddl_schema_to<A0001>(buffer, {.row_options = {.format_by_rows = false}});
     CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 
-    CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B129058 = #6.140([bstr, map])",
+    CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B129058 = #6.140([bstr, {* int => tstr}])",
                         "C122999 = #6.141([int, tstr, B129058 / null])"));
 }
 

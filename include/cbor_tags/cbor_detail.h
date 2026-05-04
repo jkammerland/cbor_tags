@@ -116,8 +116,10 @@ template <typename T> struct reader<T, true> {
 
     constexpr reader(const T &) : position_(0) {}
 
-    constexpr bool       empty(const T &container) const noexcept { return position_ >= container.size(); }
-    constexpr bool       empty(const T &container, size_type offset) const noexcept { return position_ + offset >= container.size(); }
+    constexpr bool empty(const T &container) const noexcept { return position_ >= container.size(); }
+    constexpr bool empty(const T &container, size_type offset) const noexcept {
+        return position_ >= container.size() || offset >= (container.size() - position_);
+    }
     constexpr value_type read(const T &container) noexcept { return static_cast<value_type>(container[position_++]); }
     constexpr value_type read(const T &container, size_type offset) noexcept {
         return static_cast<value_type>(container[position_ + offset]);
@@ -136,7 +138,9 @@ template <typename T> struct reader<T, false> {
 
     // Does not have random access so need to use iterator
     constexpr bool empty(const T &container) const noexcept { return position_ == container.cend(); }
-    constexpr bool empty(const T &container, size_type offset) const noexcept { return (current_offset_ + offset) >= container.size(); }
+    constexpr bool empty(const T &container, size_type offset) const noexcept {
+        return current_offset_ >= container.size() || offset >= (container.size() - current_offset_);
+    }
     constexpr value_type read(const T &) noexcept {
         auto result = static_cast<value_type>(*position_);
         ++position_;
@@ -145,8 +149,8 @@ template <typename T> struct reader<T, false> {
     }
 
     constexpr value_type read(const T &, size_type offset) noexcept {
-        throw std::runtime_error("Not implemented");
-        auto it = std::next(position_, offset);
+        auto it = position_;
+        std::advance(it, offset);
         return static_cast<value_type>(*it);
     }
 

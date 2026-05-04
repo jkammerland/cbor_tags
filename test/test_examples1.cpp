@@ -145,7 +145,7 @@ TEST_CASE("switch on tag") {
     auto visitor = [&dec](auto &&value) {
         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
             if (value.tag == 0x10) {
-                Api1 a;
+                Api1 a{};
                 auto result = dec(a);
                 REQUIRE(result);
                 if (result) {

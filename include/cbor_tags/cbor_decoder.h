@@ -47,6 +47,27 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     return value <= max_cbor_argument;
 }
 
+template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(std::byte additional_info) {
+    using type = std::remove_cvref_t<U>;
+    if constexpr (IsOptional<type>) {
+        if (additional_info == static_cast<std::byte>(SimpleType::Null)) {
+            return true;
+        }
+        return matches_simple_dispatch<CatchAllPass, typename type::value_type>(additional_info);
+    } else if constexpr (IsVariant<type>) {
+        return []<typename... Ts>(std::variant<Ts...> *, std::byte info) {
+            return (matches_simple_dispatch<CatchAllPass, Ts>(info) || ...);
+        }(static_cast<type *>(nullptr), additional_info);
+    } else if constexpr (std::is_same_v<type, simple>) {
+        const auto value = std::to_integer<std::uint8_t>(additional_info);
+        return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
+    } else if constexpr (IsSimple<type>) {
+        return !CatchAllPass && compare_simple_value<type>(additional_info);
+    } else {
+        return false;
+    }
+}
+
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -637,6 +658,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         static_assert(matching_major_types[MajorIndex::float16] <= 1, "Multiple types match against major type 7 (float16)");
         static_assert(matching_major_types[MajorIndex::float32] <= 1, "Multiple types match against major type 7 (float32)");
         static_assert(matching_major_types[MajorIndex::float64] <= 1, "Multiple types match against major type 7 (float64)");
+        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
+        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
+        // and can drift from IsCborMajor/decoder overload truth.
         // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
         static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                       "Variant cannot contain dynamic tags, must be known at compile time, use as_tag_any to catch any tag");
@@ -648,15 +672,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         [[maybe_unused]] std::optional<std::uint64_t> tag;
         bool                                          saw_incomplete = false;
 
-        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<typename U>() -> bool {
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<bool CatchAllPass, typename U>() -> bool {
             if (!is_valid_major<major_type, U>(major)) {
                 return false;
             }
 
-            if constexpr (IsSimple<U>) {
-                if (!compare_simple_value<U>(additionalInfo)) {
-                    return false;
-                }
+            if (major == major_type::Simple && !detail::matches_simple_dispatch<CatchAllPass, U>(additionalInfo)) {
+                return false;
             }
 
             U           decoded_value;
@@ -681,7 +703,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         };
 
-        bool found = (try_decode.template operator()<T>() || ...);
+        bool found = false;
+        if (major == major_type::Simple) {
+            found = (try_decode.template operator()<false, T>() || ...);
+            if (!found) {
+                found = (try_decode.template operator()<true, T>() || ...);
+            }
+        } else {
+            found = (try_decode.template operator()<false, T>() || ...);
+        }
         if (!found) {
             if (saw_incomplete) {
                 return status_code::incomplete;
@@ -814,7 +844,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
         // alternatives. If we are here, then we have already checked that this is the right tag.
         if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
-            this->decode(detail::get_major_6_tag_from_class(value));
+            auto tag_status = this->decode(detail::get_major_6_tag_from_class(value));
+            if (tag_status != status_code::success) {
+                return tag_status;
+            }
         }
 
         if constexpr (has_transcode) {
@@ -894,7 +927,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
-            return bstr_view_t{.range = result};
+            return bstr_view_t{result};
         }
     }
 
@@ -916,7 +949,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             auto result       = subrange(start, it);
             reader_.position_ = it;
             reader_.current_offset_ += span_length;
-            return tstr_view_t{.range = result};
+            return tstr_view_t{result};
         }
     }
 

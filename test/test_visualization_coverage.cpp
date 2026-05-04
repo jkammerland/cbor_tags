@@ -61,20 +61,27 @@ TEST_CASE("cddl helpers generate prelude and schemas") {
 
     std::string inline_schema;
     cddl_schema_to<VisualizationInner>(inline_schema, {.row_options = {.format_by_rows = false}});
-    CHECK(inline_schema.find("VisualizationInner = (int, tstr)") != std::string::npos);
+    CHECK(inline_schema.find("VisualizationInner = [int, tstr]") != std::string::npos);
 }
 
 TEST_CASE("cddl helpers cover tuple and tagged tuple schemas") {
     std::string tuple_schema;
     cddl_schema_to<std::tuple<int, std::string>>(tuple_schema, {.row_options = {.format_by_rows = false}});
-    CHECK(tuple_schema.find("int") != std::string::npos);
-    CHECK(tuple_schema.find("tstr") != std::string::npos);
+    CHECK_EQ(tuple_schema, "root = [int, tstr]");
 
     std::string tagged_tuple_schema;
     cddl_schema_to<std::tuple<static_tag<7>, int, std::string>>(tagged_tuple_schema, {.row_options = {.format_by_rows = false}});
-    CHECK(tagged_tuple_schema.find("#6.7") != std::string::npos);
-    CHECK(tagged_tuple_schema.find("int") != std::string::npos);
-    CHECK(tagged_tuple_schema.find("tstr") != std::string::npos);
+    CHECK_EQ(tagged_tuple_schema, "root = #6.7([int, tstr])");
+}
+
+TEST_CASE("tagged tuple schema matches encoded tuple shape") {
+    using tagged_tuple = std::tuple<static_tag<7>, int, std::string>;
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(tagged_tuple{static_tag<7>{}, 1, "x"}));
+
+    CHECK_EQ(buffer, std::vector<std::byte>{std::byte{0xC7}, std::byte{0x82}, std::byte{0x01}, std::byte{0x61}, std::byte{0x78}});
 }
 
 TEST_CASE("cddl context handles duplicate registration, copy, and clear") {
@@ -129,12 +136,13 @@ TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools,
     CHECK(diagnostic.find("42(h'ab')") != std::string::npos);
     CHECK(diagnostic.find("true") != std::string::npos);
     CHECK(diagnostic.find("null") != std::string::npos);
+    CHECK(diagnostic.find("simple(16)") != std::string::npos);
 
     struct DummyDecoder {};
     DummyDecoder dummy;
     std::string  simple_diagnostic;
     make_diagnostic_visitor(simple_diagnostic, dummy, {})(simple{16});
-    CHECK_EQ(simple_diagnostic, "simple");
+    CHECK_EQ(simple_diagnostic, "simple(16)");
 }
 
 TEST_CASE("buffer diagnostic rejects requested utf8 validation") {

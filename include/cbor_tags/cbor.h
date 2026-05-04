@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -137,54 +138,81 @@ struct binary_tag_view {
     std::span<const std::byte> data;
 };
 
+template <typename Iterator, typename Value> struct cast_view_iterator {
+    Iterator it{};
+
+    using value_type      = Value;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category =
+        std::conditional_t<std::bidirectional_iterator<Iterator>, std::bidirectional_iterator_tag,
+                           std::conditional_t<std::forward_iterator<Iterator>, std::forward_iterator_tag, std::input_iterator_tag>>;
+    using iterator_concept = iterator_category;
+
+    constexpr value_type          operator*() const { return static_cast<value_type>(*it); }
+    constexpr cast_view_iterator &operator++() {
+        ++it;
+        return *this;
+    }
+    constexpr cast_view_iterator operator++(int) {
+        auto copy = *this;
+        ++(*this);
+        return copy;
+    }
+    constexpr cast_view_iterator &operator--()
+        requires std::bidirectional_iterator<Iterator>
+    {
+        --it;
+        return *this;
+    }
+    constexpr cast_view_iterator operator--(int)
+        requires std::bidirectional_iterator<Iterator>
+    {
+        auto copy = *this;
+        --(*this);
+        return copy;
+    }
+
+    friend bool operator==(const cast_view_iterator &lhs, const cast_view_iterator &rhs) { return lhs.it == rhs.it; }
+};
+
 template <std::ranges::input_range R> struct bstr_view : std::ranges::view_interface<bstr_view<R>> {
     using value_type   = std::byte;
     using element_type = const std::byte;
+    using iterator     = cast_view_iterator<std::ranges::iterator_t<const R>, value_type>;
 
     R range;
 
-    constexpr auto begin() const {
-        auto v = view();
-        return std::ranges::begin(v);
-    }
-    constexpr auto end() const {
-        auto v = view();
-        return std::ranges::end(v);
-    }
+    constexpr bstr_view()
+        requires std::default_initializable<R>
+    = default;
+    constexpr explicit bstr_view(R input_range) : range(std::move(input_range)) {}
 
-    operator std::vector<std::byte>() const {
-        auto v = view();
-        return {v.begin(), v.end()};
-    }
+    constexpr auto begin() const { return iterator{std::ranges::begin(range)}; }
+    constexpr auto end() const { return iterator{std::ranges::end(range)}; }
 
-    constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<element_type>(c); });
-    }
+    operator std::vector<std::byte>() const { return {begin(), end()}; }
+
+    constexpr auto view() const { return std::ranges::subrange(begin(), end()); }
 };
 
 template <std::ranges::input_range R> struct tstr_view : std::ranges::view_interface<tstr_view<R>> {
     using value_type   = char;
     using element_type = const char;
+    using iterator     = cast_view_iterator<std::ranges::iterator_t<const R>, value_type>;
 
     R range;
 
-    constexpr auto begin() const {
-        auto v = view();
-        return std::ranges::begin(v);
-    }
-    constexpr auto end() const {
-        auto v = view();
-        return std::ranges::end(v);
-    }
+    constexpr tstr_view()
+        requires std::default_initializable<R>
+    = default;
+    constexpr explicit tstr_view(R input_range) : range(std::move(input_range)) {}
 
-    constexpr operator std::string() const {
-        auto v = view();
-        return {v.begin(), v.end()};
-    }
+    constexpr auto begin() const { return iterator{std::ranges::begin(range)}; }
+    constexpr auto end() const { return iterator{std::ranges::end(range)}; }
 
-    constexpr auto view() const {
-        return range | std::views::transform([](const auto &c) { return static_cast<element_type>(c); });
-    }
+    constexpr operator std::string() const { return {begin(), end()}; }
+
+    constexpr auto view() const { return std::ranges::subrange(begin(), end()); }
 };
 
 using variant_contiguous = std::variant<std::uint64_t, std::int64_t, std::span<const std::byte>, std::string_view, binary_array_view,
@@ -286,21 +314,18 @@ template <IsSimple T> constexpr std::byte get_simple_5_bit_value() {
         return static_cast<std::byte>(0x1A); // float32 is 26 (read next 4 bytes)
     } else if constexpr (IsFloat64<T>) {
         return static_cast<std::byte>(0x1B); // float64 is 27 (read next 8 bytes)
-    } else if constexpr (std::is_same_v<T, end_string>) {
-        return static_cast<std::byte>(0xFF); // end of string
-    } else if constexpr (std::is_same_v<T, end_array>) {
-        return static_cast<std::byte>(0xFF); // end of array
-    } else if constexpr (std::is_same_v<T, end_map>) {
-        return static_cast<std::byte>(0xFF); // end of map
+    } else if constexpr (std::is_same_v<T, end_string> || std::is_same_v<T, end_array> || std::is_same_v<T, end_map>) {
+        return static_cast<std::byte>(0xFF); // break marker
     } else {
         return static_cast<std::byte>(0x00);
     }
 }
 enum class SimpleType : std::uint8_t {
-    Undefined  = 0x00,
+    Unmatched  = 0xFE,
     Bool_False = 0x14,
     Bool_True  = 0x15,
     Null       = 0x16,
+    Undefined  = 0x17,
     Simple     = 0x18,
     Float16    = 0x19,
     Float32    = 0x1A,
@@ -314,7 +339,10 @@ template <IsSimple T> constexpr bool compare_simple_value(std::byte value) {
     } else if constexpr (IsNull<T>) {
         return value == static_cast<std::byte>(SimpleType::Null);
     } else if constexpr (std::is_same_v<T, simple>) {
-        return value == static_cast<std::byte>(SimpleType::Simple);
+        const auto additional_info = std::to_integer<std::uint8_t>(value);
+        return additional_info < static_cast<std::uint8_t>(SimpleType::Bool_False) ||
+               additional_info == static_cast<std::uint8_t>(SimpleType::Undefined) ||
+               additional_info == static_cast<std::uint8_t>(SimpleType::Simple);
     } else if constexpr (IsFloat16<T>) {
         return value == static_cast<std::byte>(SimpleType::Float16);
     } else if constexpr (IsFloat32<T>) {
@@ -343,7 +371,7 @@ template <IsSimple T> constexpr SimpleType get_simple_tag_of_primitive_type() {
     } else if constexpr (std::is_same_v<T, end_string> || std::is_same_v<T, end_array> || std::is_same_v<T, end_map>) {
         return SimpleType::End_Marker;
     } else {
-        return SimpleType::Undefined;
+        return SimpleType::Unmatched;
     }
 }
 

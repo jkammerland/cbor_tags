@@ -178,7 +178,7 @@ struct X {
 TEST_CASE_TEMPLATE("Class with tag", T, static_tag<1>, static_tag<2>, Class6) {
     std::variant<static_tag<1>, static_tag<2>, Class6, X> v = T{};
     if constexpr (std::is_same_v<T, X>) {
-        v = X{.e1 = X::Enum::C};
+        v = X{.cbor_tag = {}, .e1 = X::Enum::C};
     }
 
     auto buffer = std::vector<uint8_t>{};

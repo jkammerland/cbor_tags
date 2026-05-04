@@ -22,9 +22,9 @@ struct float16_t {
         float    val;
 
         if (exp == 0) {
-            val = std::ldexp(mant, -24);
+            val = std::ldexp(static_cast<float>(mant), -24);
         } else if (exp != 31) {
-            val = std::ldexp(mant + 1024, exp - 25);
+            val = std::ldexp(static_cast<float>(mant + 1024U), static_cast<int>(exp) - 25);
         } else {
             val = mant == 0 ? std::numeric_limits<float>::infinity() : std::numeric_limits<float>::quiet_NaN();
         }
@@ -39,7 +39,7 @@ struct float16_t {
         std::memcpy(&x, &f, sizeof(float));
 
         std::uint32_t sign     = (x >> 16) & 0x8000;
-        int           exponent = ((x >> 23) & 0xff) - 127;
+        int           exponent = static_cast<int>((x >> 23) & 0xffU) - 127;
         std::uint32_t mantissa = x & 0x7fffff;
 
         if (exponent > 15) {

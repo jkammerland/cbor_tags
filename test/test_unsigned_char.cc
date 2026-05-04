@@ -3,10 +3,10 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -44,24 +44,30 @@ int main() {
     static_assert(IsCborMajor<std::variant<std::string, std::vector<int>>>);
     static_assert(valid_concept_mapping_v<std::variant<std::string, std::vector<int>>>);
 
+    auto require = [](bool ok) {
+        if (!ok) {
+            std::abort();
+        }
+    };
+
     auto data = std::vector<std::byte>{};
     auto enc  = make_encoder(data);
-    assert(enc(std::string{"hi"}));
-    assert(to_hex(data) == "626869");
+    require(enc(std::string{"hi"}).has_value());
+    require(to_hex(data) == "626869");
 
     auto        dec = make_decoder(data);
     std::string decoded;
-    assert(dec(decoded));
-    assert(decoded == "hi");
+    require(dec(decoded).has_value());
+    require(decoded == "hi");
 
     auto                                        variant_data = std::vector<std::byte>{};
     auto                                        variant_enc  = make_encoder(variant_data);
     std::variant<std::string, std::vector<int>> value{std::string{"ok"}};
-    assert(variant_enc(value));
+    require(variant_enc(value).has_value());
 
     auto variant_decoded = decltype(value){};
     auto variant_dec     = make_decoder(variant_data);
-    assert(variant_dec(variant_decoded));
-    assert(std::holds_alternative<std::string>(variant_decoded));
-    assert(std::get<std::string>(variant_decoded) == "ok");
+    require(variant_dec(variant_decoded).has_value());
+    require(std::holds_alternative<std::string>(variant_decoded));
+    require(std::get<std::string>(variant_decoded) == "ok");
 }
