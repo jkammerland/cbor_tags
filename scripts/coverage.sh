@@ -7,6 +7,7 @@ Usage: scripts/coverage.sh
 
 Builds tests with coverage instrumentation, runs ctest, and generates gcovr reports.
 Coverage percentages are reported but not threshold-gated.
+Also writes coverage-report/coverage-summary.md for GitHub Actions job summaries.
 
 Environment:
   BUILD_DIR    CMake build directory (default: build/coverage)
@@ -94,15 +95,16 @@ mkdir -p "$report_dir"
     --xml-pretty \
     "$build_dir"
 
-python3 - "$report_dir/coverage.xml" "$report_dir/coverage.txt" <<'PY'
+python3 - "$report_dir/coverage.xml" "$report_dir/coverage.txt" "$report_dir/coverage-summary.md" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
-xml_path, text_report_path = sys.argv[1], sys.argv[2]
+xml_path, text_report_path, markdown_report_path = sys.argv[1], sys.argv[2], sys.argv[3]
 root = ET.parse(xml_path).getroot()
 
 total = 0
 covered = 0
+file_rows = []
 for cls in root.findall(".//class"):
     filename = cls.attrib.get("filename", "")
     if not filename.startswith("include/cbor_tags/"):
@@ -117,7 +119,11 @@ for cls in root.findall(".//class"):
         physical_lines[number] = physical_lines.get(number, 0) + hits
 
     total += len(physical_lines)
-    covered += sum(1 for hits in physical_lines.values() if hits > 0)
+    file_total = len(physical_lines)
+    file_covered = sum(1 for hits in physical_lines.values() if hits > 0)
+    covered += file_covered
+    file_percentage = (file_covered / file_total * 100.0) if file_total else 0.0
+    file_rows.append((filename, file_covered, file_total, file_percentage))
 
 percentage = (covered / total * 100.0) if total else 0.0
 summary = (
@@ -133,6 +139,46 @@ summary = (
 
 with open(text_report_path, "a", encoding="utf-8") as report:
     report.write(summary)
+
+def int_attr(name):
+    return int(root.attrib.get(name, "0"))
+
+def pct(numerator, denominator):
+    return (numerator / denominator * 100.0) if denominator else 0.0
+
+gcovr_lines_covered = int_attr("lines-covered")
+gcovr_lines_valid = int_attr("lines-valid")
+gcovr_branches_covered = int_attr("branches-covered")
+gcovr_branches_valid = int_attr("branches-valid")
+
+markdown_lines = [
+    "## C++ Coverage Report",
+    "",
+    "| Metric | Covered | Total | Coverage |",
+    "| --- | ---: | ---: | ---: |",
+    f"| Gcovr line coverage (template instantiations) | {gcovr_lines_covered} | {gcovr_lines_valid} | {pct(gcovr_lines_covered, gcovr_lines_valid):.1f}% |",
+    f"| Gcovr branch coverage | {gcovr_branches_covered} | {gcovr_branches_valid} | {pct(gcovr_branches_covered, gcovr_branches_valid):.1f}% |",
+    f"| Unique physical header lines | {covered} | {total} | {percentage:.1f}% |",
+    "",
+    "### Unique Physical Header Coverage",
+    "",
+    "| Header | Covered | Total | Coverage |",
+    "| --- | ---: | ---: | ---: |",
+]
+
+for filename, file_covered, file_total, file_percentage in sorted(file_rows):
+    markdown_lines.append(f"| `{filename}` | {file_covered} | {file_total} | {file_percentage:.1f}% |")
+
+markdown_lines.extend(
+    [
+        "",
+        "Full HTML, XML, and text reports are uploaded as the `coverage-report` artifact.",
+        "",
+    ]
+)
+
+with open(markdown_report_path, "w", encoding="utf-8") as report:
+    report.write("\n".join(markdown_lines))
 
 print(summary, end="")
 PY
