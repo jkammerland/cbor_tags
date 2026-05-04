@@ -14,6 +14,7 @@
 #include <fmt/ranges.h>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <nameof.hpp>
@@ -43,6 +44,8 @@ struct AnnotationOptions {
     size_t         indent_width{3};
     size_t         comment_indent_width{2};
     size_t         max_structure_depth{64};
+    size_t         max_input_size{std::size_t{16U} * 1024U * 1024U};
+    size_t         max_output_size{std::size_t{16U} * 1024U * 1024U};
 };
 
 struct CDDLOptions {
@@ -737,11 +740,11 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
 
 template <typename CborBuffer, typename OutputBuffer>
 auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options = {}) {
-    if (cbor_buffer.empty()) {
-        return;
-    }
     if (options.diagnostic_data) {
         throw std::runtime_error("Diagnostic data not supported");
+    }
+    if (cbor_buffer.empty()) {
+        return;
     }
     if (options.mode == AnnotationMode::smart) {
         detail::buffer_annotate_smart(cbor_buffer, output_buffer, options);
@@ -779,11 +782,11 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
     constexpr auto string_length_to_header_size = [](std::uint64_t length) {
         if (length < 24) {
             return 1;
-        } else if (length < 0xFF) {
+        } else if (length <= std::numeric_limits<std::uint8_t>::max()) {
             return 2;
-        } else if (length < 0xFFFF) {
+        } else if (length <= std::numeric_limits<std::uint16_t>::max()) {
             return 3;
-        } else if (length < 0xFFFFFFFF) {
+        } else if (length <= std::numeric_limits<std::uint32_t>::max()) {
             return 5;
         } else {
             return 9;
@@ -916,11 +919,30 @@ template <typename OutputBuffer> struct smart_annotator {
         std::uint8_t additional_info{};
     };
 
+    struct utf8_sequence {
+        std::size_t index{};
+        std::size_t length{};
+    };
+
     [[nodiscard]] bool empty() const noexcept { return position >= bytes.size(); }
 
     [[nodiscard]] std::uint8_t byte_at(std::size_t index) const { return std::to_integer<std::uint8_t>(bytes[index]); }
 
     [[nodiscard]] bool next_is_break() const noexcept { return !empty() && bytes[position] == static_cast<std::byte>(0xFF); }
+
+    [[nodiscard]] static std::size_t checked_add(std::size_t lhs, std::size_t rhs) {
+        if (lhs > std::numeric_limits<std::size_t>::max() - rhs) {
+            throw std::runtime_error("CBOR annotation size overflow");
+        }
+        return lhs + rhs;
+    }
+
+    [[nodiscard]] static std::size_t checked_mul(std::size_t lhs, std::size_t rhs) {
+        if (lhs != 0U && rhs > std::numeric_limits<std::size_t>::max() / lhs) {
+            throw std::runtime_error("CBOR annotation size overflow");
+        }
+        return lhs * rhs;
+    }
 
     void check_depth(std::size_t depth) const {
         if (depth >= options.max_structure_depth) {
@@ -986,8 +1008,15 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     [[nodiscard]] std::string indent(std::size_t depth) const {
-        std::string result((options.current_indent + depth) * options.indent_width + options.offset, ' ');
+        const auto  levels = checked_add(options.current_indent, depth);
+        std::string result(checked_add(checked_mul(levels, options.indent_width), options.offset), ' ');
         return result;
+    }
+
+    void ensure_output_capacity(std::size_t additional) const {
+        if (additional > options.max_output_size || output_buffer.size() > options.max_output_size - additional) {
+            throw std::runtime_error("CBOR annotation output size limit exceeded");
+        }
     }
 
     void emit_annotated_line(std::size_t depth, std::string left, std::string_view comment) {
@@ -995,9 +1024,13 @@ template <typename OutputBuffer> struct smart_annotator {
         if (left.size() >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
-        const auto padding = options.annotation_column - left.size();
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}# {}{}\n", left, std::string(padding, ' '),
-                       std::string(depth * options.comment_indent_width, ' '), comment);
+        const auto padding        = options.annotation_column - left.size();
+        const auto comment_indent = checked_mul(depth, options.comment_indent_width);
+        const auto output_size =
+            checked_add(checked_add(checked_add(checked_add(left.size(), padding), 2U), comment_indent), checked_add(comment.size(), 1U));
+        ensure_output_capacity(output_size);
+        fmt::format_to(std::back_inserter(output_buffer), "{}{}# {}{}\n", left, std::string(padding, ' '), std::string(comment_indent, ' '),
+                       comment);
     }
 
     void emit_plain_line(std::size_t depth, std::string left) {
@@ -1005,6 +1038,7 @@ template <typename OutputBuffer> struct smart_annotator {
         if (left.size() >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
+        ensure_output_capacity(left.size() + 1U);
         fmt::format_to(std::back_inserter(output_buffer), "{}\n", left);
     }
 
@@ -1031,6 +1065,7 @@ template <typename OutputBuffer> struct smart_annotator {
         if (length == 0U) {
             return;
         }
+        check_depth(depth);
         const auto bytes_per_line = payload_bytes_per_line(depth);
         auto       offset         = std::size_t{};
         while (offset < length) {
@@ -1059,6 +1094,77 @@ template <typename OutputBuffer> struct smart_annotator {
 
     [[nodiscard]] std::string bytes_comment(std::size_t begin, std::size_t length) const {
         return fmt::format("h'{}'", hex_range(begin, begin + length, false));
+    }
+
+    [[nodiscard]] std::size_t text_comment_size(std::size_t begin, std::size_t length) const {
+        auto size = std::size_t{2};
+        for (auto index = begin; index < begin + length; ++index) {
+            const auto value = byte_at(index);
+            if (value == static_cast<std::uint8_t>('"') || value == static_cast<std::uint8_t>('\\') ||
+                value == static_cast<std::uint8_t>('\n') || value == static_cast<std::uint8_t>('\r') ||
+                value == static_cast<std::uint8_t>('\t')) {
+                size = checked_add(size, 2U);
+            } else if (value < 0x20U) {
+                size = checked_add(size, 4U);
+            } else {
+                size = checked_add(size, 1U);
+            }
+        }
+        return size;
+    }
+
+    [[nodiscard]] static std::size_t bytes_comment_size(std::size_t length) { return checked_add(3U, checked_mul(length, 2U)); }
+
+    [[nodiscard]] bool is_continuation_byte(std::size_t index) const { return index < bytes.size() && (byte_at(index) & 0xC0U) == 0x80U; }
+
+    [[nodiscard]] static std::size_t utf8_sequence_length(std::uint8_t value) {
+        if (value <= 0x7FU) {
+            return 1U;
+        }
+        if (value >= 0xC2U && value <= 0xDFU) {
+            return 2U;
+        }
+        if (value >= 0xE0U && value <= 0xEFU) {
+            return 3U;
+        }
+        if (value >= 0xF0U && value <= 0xF4U) {
+            return 4U;
+        }
+        throw std::runtime_error("Invalid UTF-8 in CBOR text string");
+    }
+
+    void validate_utf8_second_byte(std::size_t index) const {
+        const auto first  = byte_at(index);
+        const auto second = byte_at(index + 1U);
+        if ((first == 0xE0U && second < 0xA0U) || (first == 0xEDU && second > 0x9FU) || (first == 0xF0U && second < 0x90U) ||
+            (first == 0xF4U && second > 0x8FU)) {
+            throw std::runtime_error("Invalid UTF-8 in CBOR text string");
+        }
+    }
+
+    void validate_utf8_continuations(utf8_sequence sequence) const {
+        for (std::size_t offset = 1U; offset < sequence.length; ++offset) {
+            if (!is_continuation_byte(sequence.index + offset)) {
+                throw std::runtime_error("Invalid UTF-8 in CBOR text string");
+            }
+        }
+    }
+
+    void validate_utf8(std::size_t begin, std::size_t length) const {
+        auto       index = begin;
+        const auto end   = begin + length;
+
+        while (index < end) {
+            const auto sequence_length = utf8_sequence_length(byte_at(index));
+            if (sequence_length > end - index) {
+                throw std::runtime_error("Invalid UTF-8 in CBOR text string");
+            }
+            if (sequence_length > 1U) {
+                validate_utf8_second_byte(index);
+                validate_utf8_continuations({.index = index, .length = sequence_length});
+            }
+            index += sequence_length;
+        }
     }
 
     [[nodiscard]] static std::string negative_comment(std::uint64_t argument) {
@@ -1104,6 +1210,7 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     void parse_string(std::size_t depth, item_header header) {
+        check_depth(depth);
         const auto kind =
             header.major == static_cast<std::uint8_t>(major_type::TextString) ? std::string_view{"text"} : std::string_view{"bytes"};
         if (header.additional_info == 31U) {
@@ -1135,9 +1242,13 @@ template <typename OutputBuffer> struct smart_annotator {
         const auto payload_begin = position;
         const auto payload_size  = static_cast<std::size_t>(length);
         position += payload_size;
+        const auto is_text = header.major == static_cast<std::uint8_t>(major_type::TextString);
+        if (is_text) {
+            validate_utf8(payload_begin, payload_size);
+        }
+        ensure_output_capacity(is_text ? text_comment_size(payload_begin, payload_size) : bytes_comment_size(payload_size));
         emit_payload(depth + 1U, payload_begin, payload_size,
-                     header.major == static_cast<std::uint8_t>(major_type::TextString) ? text_comment(payload_begin, payload_size)
-                                                                                       : bytes_comment(payload_begin, payload_size));
+                     is_text ? text_comment(payload_begin, payload_size) : bytes_comment(payload_begin, payload_size));
     }
 
     void parse_array(std::size_t depth, item_header header) {
@@ -1207,6 +1318,9 @@ template <typename OutputBuffer> struct smart_annotator {
         switch (header.additional_info) {
         case 24: {
             const auto value = read_byte();
+            if (value >= 24U && value <= 31U) {
+                throw std::runtime_error("Invalid CBOR simple value");
+            }
             emit_header(depth, header.begin, position, simple_comment(value));
             return;
         }
@@ -1233,6 +1347,7 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     void consume_break(std::size_t depth) {
+        check_depth(depth);
         const auto header_begin = position;
         const auto initial_byte = read_byte();
         if (initial_byte != 0xFFU) {
@@ -1279,6 +1394,10 @@ template <typename OutputBuffer> struct smart_annotator {
 
 template <typename CborBuffer, typename OutputBuffer>
 void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options) {
+    if (cbor_buffer.size() > options.max_input_size) {
+        throw std::runtime_error("CBOR annotation input size limit exceeded");
+    }
+
     std::vector<std::byte> bytes;
     bytes.reserve(cbor_buffer.size());
     for (const auto value : cbor_buffer) {

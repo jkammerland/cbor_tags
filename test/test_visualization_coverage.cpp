@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <functional>
+#include <limits>
 #include <map>
 #include <nameof.hpp>
 #include <stdexcept>
@@ -28,6 +29,16 @@ struct VisualizationTagged {
     int             id{};
     std::string     name;
 };
+
+std::size_t count_occurrences(std::string_view text, std::string_view needle) {
+    auto count    = std::size_t{};
+    auto position = std::size_t{};
+    while ((position = text.find(needle, position)) != std::string_view::npos) {
+        ++count;
+        position += needle.size();
+    }
+    return count;
+}
 } // namespace
 
 TEST_CASE("visualization names cover primitive, optional, variant, and tag types") {
@@ -124,6 +135,7 @@ TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and
     CHECK_EQ(empty_annotation, "unchanged");
 
     CHECK_THROWS_AS(buffer_annotate(buffer, annotation, {.diagnostic_data = true}), std::runtime_error);
+    CHECK_THROWS_AS(buffer_annotate(empty, annotation, {.diagnostic_data = true}), std::runtime_error);
 }
 
 TEST_CASE("buffer annotation defaults to cbor diag style indefinite map") {
@@ -158,6 +170,25 @@ TEST_CASE("buffer annotation supports no annotation mode and common smart CBOR v
     CHECK(annotation.find("#   tdate, tag(0)") != std::string::npos);
     CHECK(annotation.find("#     text(3)") != std::string::npos);
     CHECK(annotation.find("#       \"xyz\"") != std::string::npos);
+}
+
+TEST_CASE("no annotation mode splits exact uint8 and uint16 string headers") {
+    constexpr auto uint8_payload_size  = static_cast<std::size_t>(std::numeric_limits<std::uint8_t>::max());
+    constexpr auto uint16_payload_size = static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max());
+
+    std::vector<std::byte> uint8_buffer{std::byte{0x58}, std::byte{0xFF}};
+    uint8_buffer.insert(uint8_buffer.end(), uint8_payload_size, std::byte{0xAB});
+
+    std::string uint8_annotation;
+    buffer_annotate(uint8_buffer, uint8_annotation, {.mode = AnnotationMode::no_annotation});
+    CHECK_EQ(uint8_annotation.rfind("58 ff\n", 0), 0U);
+
+    std::vector<std::byte> uint16_buffer{std::byte{0x59}, std::byte{0xFF}, std::byte{0xFF}};
+    uint16_buffer.insert(uint16_buffer.end(), uint16_payload_size, std::byte{0xCD});
+
+    std::string uint16_annotation;
+    buffer_annotate(uint16_buffer, uint16_annotation, {.mode = AnnotationMode::no_annotation});
+    CHECK_EQ(uint16_annotation.rfind("59 ffff\n", 0), 0U);
 }
 
 TEST_CASE("smart buffer annotation handles floats, null, undefined, and sequences") {
@@ -219,6 +250,10 @@ TEST_CASE("smart buffer annotation reports malformed input instead of truncating
     CHECK_THROWS_AS(buffer_annotate(to_bytes("bf01ff"), annotation, options), std::runtime_error);
     CHECK_THROWS_AS(buffer_annotate(to_bytes("8180"), annotation, {.annotation_column = 13, .max_structure_depth = 1}), std::runtime_error);
     CHECK_THROWS_AS(buffer_annotate(to_bytes("01"), annotation, {.annotation_column = 2}), std::runtime_error);
+
+    std::string narrow_annotation{"sentinel"};
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("01"), narrow_annotation, {.annotation_column = 2}), std::runtime_error);
+    CHECK_EQ(narrow_annotation, "sentinel");
 }
 
 TEST_CASE("smart buffer annotation renders uint64 max negative exactly") {
@@ -248,11 +283,32 @@ TEST_CASE("smart buffer annotation stress tests targeted malformed inputs") {
         "18",                 // missing uint8 argument
         "1c",                 // invalid additional information
         "430102",             // truncated byte string
+        "5affffffff",         // huge byte string length without payload
+        "7affffffff",         // huge text string length without payload
+        "5bffffffffffffffff", // uint64 byte string length without payload
+        "7bffffffffffffffff", // uint64 text string length without payload
         "5f60ff",             // byte string with text chunk
         "7f40ff",             // text string with byte chunk
+        "5f420102",           // unterminated byte string after valid chunk
+        "7f6178",             // unterminated text string after valid chunk
+        "61ff",               // invalid UTF-8 definite text
+        "62c328",             // invalid UTF-8 continuation byte
+        "61c2",               // truncated UTF-8 sequence
+        "63e09f80",           // overlong UTF-8 three-byte sequence
+        "63eda080",           // UTF-8 surrogate
+        "64f08f8080",         // overlong UTF-8 four-byte sequence
+        "64f4908080",         // UTF-8 scalar above U+10FFFF
+        "7f61ffff",           // invalid UTF-8 indefinite text chunk
         "9f",                 // unterminated array
+        "8201",               // fixed array missing element
+        "9bffffffffffffffff", // huge array length without payload
         "bf01ff",             // indefinite map missing value
+        "a101",               // fixed map missing value
+        "bbffffffffffffffff", // huge map length without payload
         "c0",                 // tag missing payload
+        "dbffffffffffffffff", // uint64 tag missing payload
+        "f818",               // reserved simple value 24 via one-byte simple
+        "f81f",               // reserved simple value 31 via one-byte simple
         "ff",                 // stray break
         "818181818181818100", // excessive nesting with low max_structure_depth
     };
@@ -263,6 +319,98 @@ TEST_CASE("smart buffer annotation stress tests targeted malformed inputs") {
                         std::runtime_error);
         CHECK_EQ(annotation, "sentinel");
     }
+}
+
+TEST_CASE("smart buffer annotation accepts valid multibyte UTF-8 text") {
+    const auto buffer = to_bytes("62c3a9");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.annotation_column = 24});
+
+    CHECK(annotation.find("text(2)") != std::string::npos);
+    CHECK(annotation.find("c3a9") != std::string::npos);
+}
+
+TEST_CASE("smart buffer annotation enforces default depth and chunk depth boundaries") {
+    auto nested_array = [](std::size_t depth) {
+        std::vector<std::byte> buffer(depth, std::byte{0x81});
+        buffer.push_back(std::byte{0x00});
+        return buffer;
+    };
+
+    std::string annotation;
+    buffer_annotate(nested_array(63), annotation, {.annotation_column = 240});
+    CHECK(annotation.find("unsigned(0)") != std::string::npos);
+
+    std::string unchanged{"sentinel"};
+    CHECK_THROWS_AS(buffer_annotate(nested_array(64), unchanged, {.annotation_column = 240}), std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("5f40ff"), unchanged, {.annotation_column = 20, .max_structure_depth = 1}),
+                    std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("5fff"), unchanged, {.annotation_column = 20, .max_structure_depth = 1}), std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("4100"), unchanged, {.annotation_column = 20, .max_structure_depth = 1}), std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+}
+
+TEST_CASE("smart buffer annotation handles large payloads and size limits") {
+    constexpr auto payload_size = std::size_t{1024U * 1024U};
+
+    std::vector<std::byte> buffer{std::byte{0x5A}, std::byte{0x00}, std::byte{0x10}, std::byte{0x00}, std::byte{0x00}};
+    buffer.insert(buffer.end(), payload_size, std::byte{0xAB});
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.annotation_column = 120, .max_output_size = 8U * 1024U * 1024U});
+    CHECK(annotation.find("bytes(1048576)") != std::string::npos);
+    CHECK(annotation.find("h'abab") != std::string::npos);
+
+    std::string unchanged{"sentinel"};
+    CHECK_THROWS_AS(buffer_annotate(buffer, unchanged, {.annotation_column = 120, .max_output_size = 1024U}), std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+
+    CHECK_THROWS_AS(buffer_annotate(std::vector<std::byte>{std::byte{0x00}, std::byte{0x00}}, unchanged, {.max_input_size = 1U}),
+                    std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+
+    CHECK_THROWS_AS(buffer_annotate(to_bytes("5bffffffffffffffff"), unchanged, {.annotation_column = 80, .max_output_size = 1024U}),
+                    std::runtime_error);
+    CHECK_EQ(unchanged, "sentinel");
+}
+
+TEST_CASE("smart buffer annotation handles large text and collection inputs") {
+    constexpr auto text_size       = std::size_t{4096U};
+    constexpr auto collection_size = std::size_t{4096U};
+
+    std::vector<std::byte> text_buffer{std::byte{0x79}, std::byte{0x10}, std::byte{0x00}};
+    for (std::size_t index = 0; index < text_size; ++index) {
+        switch (index % 4U) {
+        case 0: text_buffer.push_back(std::byte{'"'}); break;
+        case 1: text_buffer.push_back(std::byte{'\n'}); break;
+        case 2: text_buffer.push_back(std::byte{'\\'}); break;
+        default: text_buffer.push_back(std::byte{'A'}); break;
+        }
+    }
+
+    std::string text_annotation;
+    buffer_annotate(text_buffer, text_annotation, {.annotation_column = 120, .max_output_size = 64U * 1024U});
+    CHECK(text_annotation.find("text(4096)") != std::string::npos);
+    CHECK(text_annotation.find("\\\"") != std::string::npos);
+    CHECK(text_annotation.find("\\n") != std::string::npos);
+    CHECK(text_annotation.find("\\\\") != std::string::npos);
+
+    std::vector<std::byte> array_buffer{std::byte{0x99}, std::byte{0x10}, std::byte{0x00}};
+    array_buffer.insert(array_buffer.end(), collection_size - 1U, std::byte{0x00});
+    array_buffer.push_back(std::byte{0x01});
+
+    std::string array_annotation;
+    buffer_annotate(array_buffer, array_annotation, {.annotation_column = 80, .max_output_size = 512U * 1024U});
+    CHECK(array_annotation.find("array(4096)") != std::string::npos);
+    CHECK_EQ(count_occurrences(array_annotation, "unsigned(0)"), collection_size - 1U);
+    CHECK_EQ(count_occurrences(array_annotation, "unsigned(1)"), 1U);
 }
 
 TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools, null, and simple values") {

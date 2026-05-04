@@ -621,7 +621,7 @@ std::vector<std::byte> data =
 
 // Annotate the data vector
 fmt::memory_buffer buffer;
-buffer_annotate(data, buffer, {.mode = AnnotationMode::no_annotation});
+buffer_annotate(data, buffer, {.mode = AnnotationMode::no_annotation}); // Request old plain hex view
 fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
 // Diagnostic notation of the data vector
@@ -697,8 +697,9 @@ bf           # map(*)
 ```
 In smart mode, headers are padded to `annotation_column`. Text and byte string
 payload bytes wrap before that column so the annotation stays aligned. Malformed
-CBOR, excessive nesting, and layouts too narrow to show data without truncation
-throw `std::runtime_error`.
+CBOR, excessive nesting, configured input/output size limits, and layouts too
+narrow to show data without truncation throw `std::runtime_error`. Set
+`.mode = AnnotationMode::no_annotation` to request the old plain hex view.
 
 ## 🤝 CDDL Schema Generation
 For Concise Data Definitions schemas you can use the `cddl_schema_to` method, e.g by applying on a struct "A":
