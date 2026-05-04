@@ -31,14 +31,14 @@
 
 namespace cbor::tags {
 
-enum class AnnotationMode { legacy, smart };
+enum class AnnotationMode { no_annotation, smart };
 
 struct AnnotationOptions {
     bool           diagnostic_data{false};
     size_t         current_indent{0};
     size_t         offset{0};
     size_t         max_depth{std::numeric_limits<size_t>::max()};
-    AnnotationMode mode{AnnotationMode::legacy};
+    AnnotationMode mode{AnnotationMode::smart};
     size_t         annotation_column{61};
     size_t         indent_width{3};
     size_t         comment_indent_width{2};

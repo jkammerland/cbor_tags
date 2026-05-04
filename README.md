@@ -621,7 +621,7 @@ std::vector<std::byte> data =
 
 // Annotate the data vector
 fmt::memory_buffer buffer;
-buffer_annotate(data, buffer);
+buffer_annotate(data, buffer, {.mode = AnnotationMode::no_annotation});
 fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
 // Diagnostic notation of the data vector
@@ -675,13 +675,12 @@ d2
 ]
 ```
 
-Smart annotation is opt-in and adds a semantic right-hand column:
+Smart annotation is the default and adds a semantic right-hand column:
 ```cpp
 std::vector<std::byte> data = to_bytes("bf6346756ef563416d7421ff");
 
 fmt::memory_buffer annotation;
 buffer_annotate(data, annotation, {
-    .mode = AnnotationMode::smart,
     .annotation_column = 13
 });
 ```

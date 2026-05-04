@@ -108,8 +108,8 @@ Creates annotated hex view of CBOR data
 **Options**:
 - `current_indent`: Base indentation level
 - `max_depth`: Wrap lines after N bytes
-- `mode`: `AnnotationMode::legacy` by default; set `AnnotationMode::smart`
-  for semantic annotations in a right-hand column
+- `mode`: `AnnotationMode::smart` by default; set
+  `AnnotationMode::no_annotation` for the old plain hex view
 - `annotation_column`: Column where smart-mode `#` comments start
 - `indent_width`: Left-column indentation step in smart mode
 - `comment_indent_width`: Right-column nesting indentation step in smart mode
