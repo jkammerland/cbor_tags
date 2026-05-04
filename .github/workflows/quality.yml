@@ -63,7 +63,18 @@ jobs:
       shell: bash
       run: scripts/coverage.sh
 
+    - name: Publish coverage summary
+      if: always()
+      shell: bash
+      run: |
+        if [[ ! -f coverage-report/coverage-summary.md ]]; then
+          echo "coverage-report/coverage-summary.md was not generated" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+        cat coverage-report/coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+
     - name: Upload coverage report
+      if: always()
       uses: actions/upload-artifact@v7.0.1
       with:
         name: coverage-report
