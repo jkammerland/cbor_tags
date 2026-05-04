@@ -12,6 +12,7 @@
 #include <fmt/ranges.h>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <memory_resource>
 #include <nameof.hpp>
 #include <optional>
@@ -155,7 +156,11 @@ struct CDDLContext {
         return false;
     }
 
-    void clear() { definitions.clear(); }
+    void clear() {
+        std::destroy_at(std::addressof(definitions));
+        memory_resource.release();
+        std::construct_at(std::addressof(definitions), &memory_resource);
+    }
 
     template <typename T, typename Context> void register_type(CDDLOptions options, Context context) {
         (void)context;

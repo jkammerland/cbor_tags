@@ -98,6 +98,10 @@ TEST_CASE("cddl context handles duplicate registration, copy, and clear") {
 
     context.clear();
     CHECK(context.definitions.empty());
+
+    context.register_type<VisualizationTagged>({}, std::ref(context));
+    CHECK(context.contains(nameof::nameof_type<VisualizationTagged>()));
+    CHECK_EQ(context.definitions.size(), 1);
 }
 
 TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and tags") {

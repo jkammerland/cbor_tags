@@ -27,6 +27,7 @@
 #include <map>
 #include <nameof.hpp>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -38,6 +39,12 @@
 #include <variant>
 #include <vector>
 using namespace cbor::tags;
+
+template <typename R>
+concept CanInstantiateTextView = requires { typename tstr_view<R>; };
+
+template <typename R>
+concept CanInstantiateBinaryView = requires { typename bstr_view<R>; };
 
 TEST_CASE("CMake std reflection option enables native reflection") {
 #if CBOR_TAGS_USE_STD_REFLECTION == 1
@@ -62,11 +69,16 @@ TEST_CASE("Test IsSigned concept") {
 }
 
 TEST_CASE("Test IsTextString concept") {
+    using non_common_char_range = std::ranges::istream_view<char>;
+
     static_assert(IsTextString<std::string>);
     static_assert(IsTextString<std::string_view>);
     static_assert(IsTextString<std::basic_string_view<char>>);
     static_assert(IsConstTextView<tstr_view<std::deque<uint8_t>>>);
     static_assert(IsTextString<tstr_view<std::deque<std::byte>>>);
+    static_assert(std::ranges::input_range<non_common_char_range>);
+    static_assert(!std::ranges::common_range<non_common_char_range>);
+    static_assert(!CanInstantiateTextView<non_common_char_range>);
     static_assert(!IsTextString<std::basic_string_view<std::byte>>);
     static_assert(!IsTextString<std::vector<char>>);
     static_assert(!IsTextString<std::span<char>>);
@@ -74,6 +86,8 @@ TEST_CASE("Test IsTextString concept") {
 }
 
 TEST_CASE("Test IsBinaryString concept") {
+    using non_common_char_range = std::ranges::istream_view<char>;
+
     static_assert(IsBinaryString<std::basic_string<std::byte>>);
     static_assert(IsBinaryString<std::basic_string_view<std::byte>>);
     static_assert(IsBinaryString<std::vector<std::byte>>);
@@ -82,6 +96,7 @@ TEST_CASE("Test IsBinaryString concept") {
     static_assert(IsBinaryString<std::span<std::byte>>);
     static_assert(IsConstBinaryView<bstr_view<std::list<char>>>);
     static_assert(IsBinaryString<bstr_view<std::vector<char>>>);
+    static_assert(!CanInstantiateBinaryView<non_common_char_range>);
     static_assert(!IsBinaryString<std::vector<uint8_t>>);
     static_assert(!IsBinaryString<std::span<const uint8_t>>);
     static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);

@@ -175,7 +175,9 @@ template <typename Iterator, typename Value> struct cast_view_iterator {
     friend bool operator==(const cast_view_iterator &lhs, const cast_view_iterator &rhs) { return lhs.it == rhs.it; }
 };
 
-template <std::ranges::input_range R> struct bstr_view : std::ranges::view_interface<bstr_view<R>> {
+template <std::ranges::input_range R>
+    requires std::ranges::common_range<R>
+struct bstr_view : std::ranges::view_interface<bstr_view<R>> {
     using value_type   = std::byte;
     using element_type = const std::byte;
     using iterator     = cast_view_iterator<std::ranges::iterator_t<const R>, value_type>;
@@ -195,7 +197,9 @@ template <std::ranges::input_range R> struct bstr_view : std::ranges::view_inter
     constexpr auto view() const { return std::ranges::subrange(begin(), end()); }
 };
 
-template <std::ranges::input_range R> struct tstr_view : std::ranges::view_interface<tstr_view<R>> {
+template <std::ranges::input_range R>
+    requires std::ranges::common_range<R>
+struct tstr_view : std::ranges::view_interface<tstr_view<R>> {
     using value_type   = char;
     using element_type = const char;
     using iterator     = cast_view_iterator<std::ranges::iterator_t<const R>, value_type>;
