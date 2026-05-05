@@ -634,7 +634,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::no_match_for_optional_on_buffer;
     }
 
-    template <typename U> constexpr status_code decode(as_named_map<U> value) {
+    template <typename U> constexpr status_code decode([[maybe_unused]] as_named_map<U> value) {
 #if CBOR_TAGS_HAS_STD_REFLECTION
         return decode_named_map(value.value_);
 #else

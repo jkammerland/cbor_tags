@@ -118,7 +118,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
     }
 
-    template <typename U> constexpr void encode(const as_named_map<U> &value) {
+    template <typename U> constexpr void encode([[maybe_unused]] const as_named_map<U> &value) {
 #if CBOR_TAGS_HAS_STD_REFLECTION
         encode_named_map(value.value_);
 #else
