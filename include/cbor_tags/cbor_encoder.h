@@ -258,29 +258,36 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode_named_entries(object);
     }
 
-    template <typename Object> constexpr void encode_named_entries(const Object &object) {
+    template <typename Object> constexpr void encode_named_entries(const Object &object) { encode_named_entries<Object>(object); }
+
+    template <typename RootObject, typename Object> constexpr void encode_named_entries(const Object &object) {
         using value_type = std::remove_cvref_t<Object>;
-        encode_named_entries_impl(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+        encode_named_entries_impl<RootObject>(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
     }
 
-    template <typename Object, std::size_t... Is>
+    template <typename RootObject, typename Object, std::size_t... Is>
     constexpr void encode_named_entries_impl(const Object &object, std::index_sequence<Is...>) {
-        (encode_named_member<Object, Is>(object), ...);
+        (encode_named_member<RootObject, Object, Is>(object), ...);
     }
 
-    template <typename Object, std::size_t I> constexpr void encode_named_member(const Object &object) {
+    template <typename RootObject, typename Object, std::size_t I> constexpr void encode_named_member(const Object &object) {
         using value_type  = std::remove_cvref_t<Object>;
         const auto  tuple = to_tuple(object);
         const auto &field = std::get<I>(tuple);
         using field_type  = std::remove_cvref_t<decltype(field)>;
 
         if constexpr (IsNamedGroupWrapper<field_type>) {
-            encode_named_entries(field.value_);
+            encode_named_entries<RootObject>(field.value_);
         } else if constexpr (IsNamedExtensionWrapper<field_type>) {
             using extension_type = named_extension_value_t<field_type>;
             static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
                           "as_named_extension requires a map with text-string keys");
+            static_assert(std::constructible_from<std::string_view, const typename extension_type::key_type &>,
+                          "as_named_extension key type must be convertible to std::string_view");
             for (const auto &[key, mapped_value] : field.value_) {
+                if (named_key_matches_fixed_member<RootObject>(std::string_view{key})) {
+                    throw std::runtime_error("as_named_extension key shadows a named map field");
+                }
                 encode(key);
                 encode(mapped_value);
             }
@@ -292,6 +299,31 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         } else {
             encode(std::string_view{detail::aggregate_member_name<value_type, I>()});
             encode(field);
+        }
+    }
+
+    template <typename Object> constexpr bool named_key_matches_fixed_member(std::string_view key) const {
+        using value_type = std::remove_cvref_t<Object>;
+        return named_key_matches_fixed_member_impl<value_type>(key,
+                                                               std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr bool named_key_matches_fixed_member_impl(std::string_view key, std::index_sequence<Is...>) const {
+        return (named_key_matches_fixed_member<Object, Is>(key) || ...);
+    }
+
+    template <typename Object, std::size_t I> constexpr bool named_key_matches_fixed_member(std::string_view key) const {
+        using value_type = std::remove_cvref_t<Object>;
+        using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<value_type &>()))>;
+        using field_type = std::remove_cvref_t<std::tuple_element_t<I, tuple_type>>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            return named_key_matches_fixed_member<named_group_value_t<field_type>>(key);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            return false;
+        } else {
+            return key == std::string_view{detail::aggregate_member_name<value_type, I>()};
         }
     }
 #endif

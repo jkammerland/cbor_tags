@@ -1269,37 +1269,64 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_map_on_buffer;
         }
 
-        const auto pair_count = decode_unsigned(additionalInfo);
         reset_named_optionals_and_extensions(object);
-
         std::vector<std::string> seen;
+
+        if (additionalInfo == static_cast<byte>(31)) {
+            while (true) {
+                auto [key_major, key_additionalInfo] = read_initial_byte();
+                if (key_major == major_type::Simple && key_additionalInfo == static_cast<byte>(31)) {
+                    return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
+                }
+                auto entry_status = decode_named_map_entry(object, key_major, key_additionalInfo, seen);
+                if (entry_status != status_code::success) {
+                    return entry_status;
+                }
+            }
+        }
+
+        const auto pair_count = decode_unsigned(additionalInfo);
         seen.reserve(static_cast<std::size_t>(pair_count));
         for (std::uint64_t index = 0; index < pair_count; ++index) {
-            std::string key;
-            auto        key_status = decode(key);
-            if (key_status != status_code::success) {
-                return key_status;
+            auto entry_status = decode_named_map_entry(object, seen);
+            if (entry_status != status_code::success) {
+                return entry_status;
             }
-
-            auto value_status = status_code::success;
-            if (decode_named_member_by_key(object, key, seen, value_status)) {
-                if (value_status != status_code::success) {
-                    return value_status;
-                }
-                continue;
-            }
-
-            if (decode_named_extension_by_key(object, key, value_status)) {
-                if (value_status != status_code::success) {
-                    return value_status;
-                }
-                continue;
-            }
-
-            return status_code::unexpected_group_size;
         }
 
         return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
+    }
+
+    template <typename Object> constexpr status_code decode_named_map_entry(Object &object, std::vector<std::string> &seen) {
+        std::string key;
+        auto        key_status = decode(key);
+        if (key_status != status_code::success) {
+            return key_status;
+        }
+        return decode_named_map_value(object, key, seen);
+    }
+
+    template <typename Object>
+    constexpr status_code decode_named_map_entry(Object &object, major_type key_major, byte key_additionalInfo,
+                                                 std::vector<std::string> &seen) {
+        std::string key;
+        auto        key_status = decode(key, key_major, key_additionalInfo);
+        if (key_status != status_code::success) {
+            return key_status;
+        }
+        return decode_named_map_value(object, key, seen);
+    }
+
+    template <typename Object>
+    constexpr status_code decode_named_map_value(Object &object, std::string_view key, std::vector<std::string> &seen) {
+        auto value_status = status_code::success;
+        if (decode_named_member_by_key(object, key, seen, value_status)) {
+            return value_status;
+        }
+        if (decode_named_extension_by_key(object, key, value_status)) {
+            return value_status;
+        }
+        return status_code::unexpected_group_size;
     }
 
     template <typename Object>

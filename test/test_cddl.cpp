@@ -376,6 +376,14 @@ TEST_CASE("C++26 named-map codec roundtrips and accepts unordered maps") {
     CHECK_EQ(decoded.age, 42);
     CHECK_EQ(decoded.name, "Ada");
     CHECK_EQ(decoded.employer, "AcmeCo");
+
+    auto            indefinite = to_bytes("bf63616765182a646e616d656341646168656d706c6f7965726641636d65436fff");
+    CDDLNamedPerson indefinite_decoded{};
+    auto            indefinite_dec = make_decoder(indefinite);
+    REQUIRE(indefinite_dec(as_named_map{indefinite_decoded}));
+    CHECK_EQ(indefinite_decoded.age, 42);
+    CHECK_EQ(indefinite_decoded.name, "Ada");
+    CHECK_EQ(indefinite_decoded.employer, "AcmeCo");
 }
 
 TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys") {
@@ -418,6 +426,17 @@ TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions
     CHECK_EQ(*decoded.age, 42U);
     REQUIRE(decoded.extensions.value_.contains("nickname"));
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
+}
+
+TEST_CASE("C++26 named-map codec rejects extension keys that shadow named fields") {
+    CDDLPersonalDataExtensible input{.NameComponents =
+                                         as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}}},
+                                     .age        = 42,
+                                     .extensions = as_named_extension<std::map<std::string, std::string>>{{{"age", "forty-two"}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    CHECK_FALSE(enc(as_named_map{input}));
 }
 #endif
 
