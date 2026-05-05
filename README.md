@@ -773,8 +773,12 @@ A = [uint, nint, int, float64, float32, bool, tstr, bstr, {* int => tstr}, int /
 C = #6.141([int, tstr, B / null])
 B = #6.140([bstr, {* int => tstr}])
 ```
-With C++26 static reflection enabled, `as_named_map` uses member names as CBOR
-map keys and emits RFC 8610-style named-map CDDL:
+Structs can also be encoded as maps where each key is the C++ field name.
+For example, a `Person` struct can be encoded as:
+
+```text
+{"age": 42, "name": "Ada", "employer": "Coretura"}
+```
 
 See [C++26 named maps](doc/cxx26_named_maps.md) for serialization,
 deserialization, CDDL, and exact output examples.

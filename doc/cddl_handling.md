@@ -114,7 +114,7 @@ struct Person {
     std::string employer;
 };
 
-Person person{.age = 42, .name = "Ada", .employer = "OpenAI"};
+Person person{.age = 42, .name = "Ada", .employer = "AcmeCo"};
 std::vector<std::byte> buffer;
 auto enc = cbor::tags::make_encoder(buffer);
 enc(cbor::tags::as_named_map{person});

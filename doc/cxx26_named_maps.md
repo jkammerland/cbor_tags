@@ -21,7 +21,7 @@ struct Person {
 Person person{
     .age = 42,
     .name = "Ada",
-    .employer = "OpenAI",
+    .employer = "AcmeCo",
 };
 
 std::vector<std::byte> output;
@@ -32,7 +32,7 @@ auto enc = make_encoder(output);
 // {
 //   "age": 42,
 //   "name": "Ada",
-//   "employer": "OpenAI"
+//   "employer": "AcmeCo"
 // }
 enc(as_named_map{person});
 ```
@@ -40,7 +40,7 @@ enc(as_named_map{person});
 The encoded CBOR bytes are:
 
 ```text
-a363616765182a646e616d656341646168656d706c6f796572664f70656e4149
+a363616765182a646e616d656341646168656d706c6f7965726641636d65436f
 ```
 
 Generate CDDL for the same shape:
@@ -76,7 +76,7 @@ auto dec = make_decoder(input);
 //
 // {
 //   "name": "Ada",
-//   "employer": "OpenAI",
+//   "employer": "AcmeCo",
 //   "age": 42
 // }
 dec(as_named_map{decoded});

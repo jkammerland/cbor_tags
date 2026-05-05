@@ -363,33 +363,33 @@ TEST_CASE("C++26 named-map CDDL keeps table examples typed") {
 }
 
 TEST_CASE("C++26 named-map codec roundtrips and accepts unordered maps") {
-    CDDLNamedPerson        input{.age = 42, .name = "Ada", .employer = "OpenAI"};
+    CDDLNamedPerson        input{.age = 42, .name = "Ada", .employer = "AcmeCo"};
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(as_named_map{input}));
-    CHECK_EQ(to_hex(buffer), "a363616765182a646e616d656341646168656d706c6f796572664f70656e4149");
+    CHECK_EQ(to_hex(buffer), "a363616765182a646e616d656341646168656d706c6f7965726641636d65436f");
 
-    auto            unordered = to_bytes("a3646e616d656341646168656d706c6f796572664f70656e414963616765182a");
+    auto            unordered = to_bytes("a3646e616d656341646168656d706c6f7965726641636d65436f63616765182a");
     CDDLNamedPerson decoded{};
     auto            dec = make_decoder(unordered);
     REQUIRE(dec(as_named_map{decoded}));
     CHECK_EQ(decoded.age, 42);
     CHECK_EQ(decoded.name, "Ada");
-    CHECK_EQ(decoded.employer, "OpenAI");
+    CHECK_EQ(decoded.employer, "AcmeCo");
 }
 
 TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys") {
-    auto            missing_required = to_bytes("a2646e616d656341646168656d706c6f796572664f70656e4149");
+    auto            missing_required = to_bytes("a2646e616d656341646168656d706c6f7965726641636d65436f");
     CDDLNamedPerson missing{};
     auto            missing_dec = make_decoder(missing_required);
     CHECK_FALSE(missing_dec(as_named_map{missing}));
 
-    auto            duplicate_known = to_bytes("a463616765016361676502646e616d656341646168656d706c6f796572664f70656e4149");
+    auto            duplicate_known = to_bytes("a463616765016361676502646e616d656341646168656d706c6f7965726641636d65436f");
     CDDLNamedPerson duplicate{};
     auto            duplicate_dec = make_decoder(duplicate_known);
     CHECK_FALSE(duplicate_dec(as_named_map{duplicate}));
 
-    auto            unknown_key = to_bytes("a463616765182a646e616d656341646168656d706c6f796572664f70656e414965657874726101");
+    auto            unknown_key = to_bytes("a463616765182a646e616d656341646168656d706c6f7965726641636d65436f65657874726101");
     CDDLNamedPerson unknown{};
     auto            unknown_dec = make_decoder(unknown_key);
     CHECK_FALSE(unknown_dec(as_named_map{unknown}));
