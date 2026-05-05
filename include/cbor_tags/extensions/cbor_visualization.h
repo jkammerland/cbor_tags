@@ -907,6 +907,75 @@ void append_escaped_diagnostic_text(OutputBuffer &output_buffer, Iterator begin,
 
 namespace detail {
 
+struct utf8_prefix {
+    std::uint8_t first{};
+    std::uint8_t second{};
+};
+
+template <typename T> [[nodiscard]] constexpr std::uint8_t utf8_byte(T value) noexcept {
+    if constexpr (std::same_as<std::remove_cvref_t<T>, std::byte>) {
+        return std::to_integer<std::uint8_t>(value);
+    } else {
+        return static_cast<std::uint8_t>(static_cast<unsigned char>(value));
+    }
+}
+
+[[nodiscard]] constexpr bool is_utf8_continuation_byte(std::uint8_t value) noexcept { return (value & 0xC0U) == 0x80U; }
+
+[[nodiscard]] constexpr std::size_t utf8_sequence_length(std::uint8_t value) noexcept {
+    if (value <= 0x7FU) {
+        return 1U;
+    }
+    if (value >= 0xC2U && value <= 0xDFU) {
+        return 2U;
+    }
+    if (value >= 0xE0U && value <= 0xEFU) {
+        return 3U;
+    }
+    if (value >= 0xF0U && value <= 0xF4U) {
+        return 4U;
+    }
+    return 0U;
+}
+
+[[nodiscard]] constexpr bool is_valid_utf8_second_byte(utf8_prefix prefix) noexcept {
+    return !((prefix.first == 0xE0U && prefix.second < 0xA0U) || (prefix.first == 0xEDU && prefix.second > 0x9FU) ||
+             (prefix.first == 0xF0U && prefix.second < 0x90U) || (prefix.first == 0xF4U && prefix.second > 0x8FU));
+}
+
+template <typename Iterator, typename Sentinel> [[nodiscard]] bool is_valid_utf8(Iterator begin, Sentinel end) noexcept {
+    while (begin != end) {
+        std::array<std::uint8_t, 4> sequence{};
+        sequence[0] = utf8_byte(*begin);
+        ++begin;
+
+        const auto sequence_length = utf8_sequence_length(sequence[0]);
+        if (sequence_length == 0U) {
+            return false;
+        }
+
+        for (std::size_t offset = 1U; offset < sequence_length; ++offset) {
+            if (begin == end) {
+                return false;
+            }
+            sequence[offset] = utf8_byte(*begin);
+            ++begin;
+            if (!is_utf8_continuation_byte(sequence[offset])) {
+                return false;
+            }
+        }
+
+        if (sequence_length > 1U && !is_valid_utf8_second_byte({.first = sequence[0], .second = sequence[1]})) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <std::ranges::input_range Range> [[nodiscard]] bool is_valid_utf8(Range &&range) noexcept {
+    return is_valid_utf8(std::ranges::begin(range), std::ranges::end(range));
+}
+
 template <typename OutputBuffer> struct smart_annotator {
     const std::vector<std::byte> &bytes;
     OutputBuffer                 &output_buffer;
@@ -917,11 +986,6 @@ template <typename OutputBuffer> struct smart_annotator {
         std::size_t  begin{};
         std::uint8_t major{};
         std::uint8_t additional_info{};
-    };
-
-    struct utf8_sequence {
-        std::size_t index{};
-        std::size_t length{};
     };
 
     [[nodiscard]] bool empty() const noexcept { return position >= bytes.size(); }
@@ -1115,58 +1179,6 @@ template <typename OutputBuffer> struct smart_annotator {
 
     [[nodiscard]] static std::size_t bytes_comment_size(std::size_t length) { return checked_add(3U, checked_mul(length, 2U)); }
 
-    [[nodiscard]] bool is_continuation_byte(std::size_t index) const { return index < bytes.size() && (byte_at(index) & 0xC0U) == 0x80U; }
-
-    [[nodiscard]] static std::size_t utf8_sequence_length(std::uint8_t value) {
-        if (value <= 0x7FU) {
-            return 1U;
-        }
-        if (value >= 0xC2U && value <= 0xDFU) {
-            return 2U;
-        }
-        if (value >= 0xE0U && value <= 0xEFU) {
-            return 3U;
-        }
-        if (value >= 0xF0U && value <= 0xF4U) {
-            return 4U;
-        }
-        throw std::runtime_error("Invalid UTF-8 in CBOR text string");
-    }
-
-    void validate_utf8_second_byte(std::size_t index) const {
-        const auto first  = byte_at(index);
-        const auto second = byte_at(index + 1U);
-        if ((first == 0xE0U && second < 0xA0U) || (first == 0xEDU && second > 0x9FU) || (first == 0xF0U && second < 0x90U) ||
-            (first == 0xF4U && second > 0x8FU)) {
-            throw std::runtime_error("Invalid UTF-8 in CBOR text string");
-        }
-    }
-
-    void validate_utf8_continuations(utf8_sequence sequence) const {
-        for (std::size_t offset = 1U; offset < sequence.length; ++offset) {
-            if (!is_continuation_byte(sequence.index + offset)) {
-                throw std::runtime_error("Invalid UTF-8 in CBOR text string");
-            }
-        }
-    }
-
-    void validate_utf8(std::size_t begin, std::size_t length) const {
-        auto       index = begin;
-        const auto end   = begin + length;
-
-        while (index < end) {
-            const auto sequence_length = utf8_sequence_length(byte_at(index));
-            if (sequence_length > end - index) {
-                throw std::runtime_error("Invalid UTF-8 in CBOR text string");
-            }
-            if (sequence_length > 1U) {
-                validate_utf8_second_byte(index);
-                validate_utf8_continuations({.index = index, .length = sequence_length});
-            }
-            index += sequence_length;
-        }
-    }
-
     [[nodiscard]] static std::string negative_comment(std::uint64_t argument) {
         if (argument == std::numeric_limits<std::uint64_t>::max()) {
             return "negative(-18446744073709551616)";
@@ -1200,6 +1212,18 @@ template <typename OutputBuffer> struct smart_annotator {
         case 23: return "undefined, simple(23)";
         default: return fmt::format("simple({})", value);
         }
+    }
+
+    [[nodiscard]] std::string text_or_non_utf8_comment(std::size_t begin, std::size_t length) const {
+        const auto payload_begin = bytes.begin() + static_cast<std::ptrdiff_t>(begin);
+        const auto payload_end   = bytes.begin() + static_cast<std::ptrdiff_t>(begin + length);
+        if (!is_valid_utf8(payload_begin, payload_end)) {
+            auto comment = fmt::format("non-utf8({})", length);
+            ensure_output_capacity(comment.size());
+            return comment;
+        }
+        ensure_output_capacity(text_comment_size(begin, length));
+        return text_comment(begin, length);
     }
 
     void ensure_payload_available(std::uint64_t length) const {
@@ -1243,12 +1267,11 @@ template <typename OutputBuffer> struct smart_annotator {
         const auto payload_size  = static_cast<std::size_t>(length);
         position += payload_size;
         const auto is_text = header.major == static_cast<std::uint8_t>(major_type::TextString);
-        if (is_text) {
-            validate_utf8(payload_begin, payload_size);
+        if (!is_text) {
+            ensure_output_capacity(bytes_comment_size(payload_size));
         }
-        ensure_output_capacity(is_text ? text_comment_size(payload_begin, payload_size) : bytes_comment_size(payload_size));
-        emit_payload(depth + 1U, payload_begin, payload_size,
-                     is_text ? text_comment(payload_begin, payload_size) : bytes_comment(payload_begin, payload_size));
+        const auto comment = is_text ? text_or_non_utf8_comment(payload_begin, payload_size) : bytes_comment(payload_begin, payload_size);
+        emit_payload(depth + 1U, payload_begin, payload_size, comment);
     }
 
     void parse_array(std::size_t depth, item_header header) {
@@ -1503,8 +1526,9 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         auto after_header = current_pos - arg.size;
         auto range        = std::ranges::subrange(after_header, current_pos);
         auto char_view    = range | std::views::transform([](auto b) { return static_cast<char>(b); });
-        if (options.check_tstr_utf8) {
-            throw std::runtime_error("UTF-8 check not implemented");
+        if (options.check_tstr_utf8 && !detail::is_valid_utf8(range)) {
+            fmt::format_to(std::back_inserter(output_buffer), "non-utf8({})", arg.size);
+            return;
         }
         append_escaped_diagnostic_text(output_buffer, std::ranges::begin(char_view), std::ranges::end(char_view));
     }

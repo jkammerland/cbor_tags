@@ -700,6 +700,7 @@ payload bytes wrap before that column so the annotation stays aligned. Malformed
 CBOR, excessive nesting, configured input/output size limits, and layouts too
 narrow to show data without truncation throw `std::runtime_error`. Set
 `.mode = AnnotationMode::no_annotation` to request the old plain hex view.
+Invalid UTF-8 text payloads render as `non-utf8(N)`, where `N` is byte length.
 
 ## 🤝 CDDL Schema Generation
 For Concise Data Definitions schemas you can use the `cddl_schema_to` method, e.g by applying on a struct "A":

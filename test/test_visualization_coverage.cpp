@@ -291,14 +291,6 @@ TEST_CASE("smart buffer annotation stress tests targeted malformed inputs") {
         "7f40ff",             // text string with byte chunk
         "5f420102",           // unterminated byte string after valid chunk
         "7f6178",             // unterminated text string after valid chunk
-        "61ff",               // invalid UTF-8 definite text
-        "62c328",             // invalid UTF-8 continuation byte
-        "61c2",               // truncated UTF-8 sequence
-        "63e09f80",           // overlong UTF-8 three-byte sequence
-        "63eda080",           // UTF-8 surrogate
-        "64f08f8080",         // overlong UTF-8 four-byte sequence
-        "64f4908080",         // UTF-8 scalar above U+10FFFF
-        "7f61ffff",           // invalid UTF-8 indefinite text chunk
         "9f",                 // unterminated array
         "8201",               // fixed array missing element
         "9bffffffffffffffff", // huge array length without payload
@@ -329,6 +321,23 @@ TEST_CASE("smart buffer annotation accepts valid multibyte UTF-8 text") {
 
     CHECK(annotation.find("text(2)") != std::string::npos);
     CHECK(annotation.find("c3a9") != std::string::npos);
+}
+
+TEST_CASE("smart buffer annotation renders invalid UTF-8 text as non-utf8 placeholders") {
+    std::string definite_annotation;
+    buffer_annotate(to_bytes("61ff"), definite_annotation, {.annotation_column = 24});
+    INFO(definite_annotation);
+    CHECK(definite_annotation.find("text(1)") != std::string::npos);
+    CHECK(definite_annotation.find("ff") != std::string::npos);
+    CHECK(definite_annotation.find("non-utf8(1)") != std::string::npos);
+
+    std::string indefinite_annotation;
+    buffer_annotate(to_bytes("7f61ffff"), indefinite_annotation, {.annotation_column = 24});
+    INFO(indefinite_annotation);
+    CHECK(indefinite_annotation.find("text(*)") != std::string::npos);
+    CHECK(indefinite_annotation.find("text(1)") != std::string::npos);
+    CHECK(indefinite_annotation.find("non-utf8(1)") != std::string::npos);
+    CHECK(indefinite_annotation.find("break") != std::string::npos);
 }
 
 TEST_CASE("smart buffer annotation enforces default depth and chunk depth boundaries") {
@@ -436,14 +445,43 @@ TEST_CASE("buffer diagnostic renders arrays, maps, tags, strings, floats, bools,
     CHECK_EQ(simple_diagnostic, "simple(16)");
 }
 
-TEST_CASE("buffer diagnostic rejects requested utf8 validation") {
-    std::vector<std::byte> buffer;
-    auto                   enc = make_encoder(buffer);
-    REQUIRE(enc(std::string{"hi"}));
+TEST_CASE("buffer diagnostic validates UTF-8 text when requested") {
+    DiagnosticOptions options{.row_options = {.format_by_rows = false}, .check_tstr_utf8 = true};
 
-    DiagnosticOptions options;
-    options.check_tstr_utf8 = true;
+    std::string ascii_diagnostic;
+    buffer_diagnostic(to_bytes("626869"), ascii_diagnostic, options);
+    CHECK_EQ(ascii_diagnostic, "[\"hi\"]");
 
-    std::string diagnostic;
-    CHECK_THROWS_AS(buffer_diagnostic(buffer, diagnostic, options), std::runtime_error);
+    std::string multibyte_diagnostic;
+    buffer_diagnostic(to_bytes("62c3a9"), multibyte_diagnostic, options);
+    std::string expected_multibyte{"[\""};
+    expected_multibyte.push_back(static_cast<char>(0xC3));
+    expected_multibyte.push_back(static_cast<char>(0xA9));
+    expected_multibyte.push_back('"');
+    expected_multibyte.push_back(']');
+    CHECK_EQ(multibyte_diagnostic, expected_multibyte);
+
+    constexpr std::pair<std::string_view, std::string_view> invalid_cases[] = {
+        {"61ff", "[non-utf8(1)]"},       // invalid leading byte
+        {"62c328", "[non-utf8(2)]"},     // invalid continuation byte
+        {"61c2", "[non-utf8(1)]"},       // truncated sequence
+        {"63e09f80", "[non-utf8(3)]"},   // overlong three-byte sequence
+        {"63eda080", "[non-utf8(3)]"},   // surrogate
+        {"64f08f8080", "[non-utf8(4)]"}, // overlong four-byte sequence
+        {"64f4908080", "[non-utf8(4)]"}, // scalar above U+10FFFF
+    };
+    for (const auto [hex, expected] : invalid_cases) {
+        std::string diagnostic;
+        buffer_diagnostic(to_bytes(hex), diagnostic, options);
+        CHECK_EQ(diagnostic, expected);
+    }
+
+    std::string raw_invalid_diagnostic;
+    buffer_diagnostic(to_bytes("62c328"), raw_invalid_diagnostic, {.row_options = {.format_by_rows = false}});
+    CHECK(raw_invalid_diagnostic.find("non-utf8") == std::string::npos);
+    REQUIRE(raw_invalid_diagnostic.size() >= 4U);
+    CHECK_EQ(raw_invalid_diagnostic.front(), '[');
+    CHECK_EQ(raw_invalid_diagnostic[1], '"');
+    CHECK_EQ(raw_invalid_diagnostic[raw_invalid_diagnostic.size() - 2U], '"');
+    CHECK_EQ(raw_invalid_diagnostic.back(), ']');
 }

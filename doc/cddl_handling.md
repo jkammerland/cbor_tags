@@ -130,10 +130,11 @@ Creates diagnostic-notation-like output for the supported CBOR subset.
 **Options**:
 - `row_options.format_by_rows`: Format arrays and maps across multiple lines
 - `row_options.override_array_by_columns`: Keep arrays inline when formatting by rows
-- `check_tstr_utf8`: Unsupported; setting it throws `std::runtime_error`
+- `check_tstr_utf8`: Validate text-string bytes as UTF-8 before rendering
 
-Text strings are rendered from the bytes in the buffer. UTF-8 validation is not
-implemented in this visualization layer.
+Text strings are rendered from the bytes in the buffer by default. When
+`check_tstr_utf8` is enabled, valid text strings still render as escaped text,
+and invalid text strings render as `non-utf8(N)`, where `N` is byte length.
 
 ## Dependencies
 
