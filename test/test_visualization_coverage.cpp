@@ -207,6 +207,38 @@ TEST_CASE("smart buffer annotation handles floats, null, undefined, and sequence
     CHECK(annotation.find("unsigned(2)") != std::string::npos);
 }
 
+TEST_CASE("smart buffer annotation packs multi-byte header arguments") {
+    const auto buffer = to_bytes("9f1903e81a000100001b01020304050607083901005900100102030405060708090a0b0c0d0e0f10"
+                                 "79001030313233343536373839616263646566f8f9f93c00fa3f800000fb3ff0000000000000d903e801ff");
+
+    std::string annotation;
+    buffer_annotate(buffer, annotation, {.annotation_column = 48});
+
+    INFO(annotation);
+    CHECK(annotation.find("19 03e8") != std::string::npos);
+    CHECK(annotation.find("1a 00010000") != std::string::npos);
+    CHECK(annotation.find("1b 0102030405060708") != std::string::npos);
+    CHECK(annotation.find("39 0100") != std::string::npos);
+    CHECK(annotation.find("59 0010") != std::string::npos);
+    CHECK(annotation.find("79 0010") != std::string::npos);
+    CHECK(annotation.find("f8 f9") != std::string::npos);
+    CHECK(annotation.find("f9 3c00") != std::string::npos);
+    CHECK(annotation.find("fa 3f800000") != std::string::npos);
+    CHECK(annotation.find("fb 3ff0000000000000") != std::string::npos);
+    CHECK(annotation.find("d9 03e8") != std::string::npos);
+
+    CHECK(annotation.find("19 03 e8") == std::string::npos);
+    CHECK(annotation.find("1a 00 01 00 00") == std::string::npos);
+    CHECK(annotation.find("1b 01 02 03 04 05 06 07 08") == std::string::npos);
+    CHECK(annotation.find("39 01 00") == std::string::npos);
+    CHECK(annotation.find("59 00 10") == std::string::npos);
+    CHECK(annotation.find("79 00 10") == std::string::npos);
+    CHECK(annotation.find("f9 3c 00") == std::string::npos);
+    CHECK(annotation.find("fa 3f 80 00 00") == std::string::npos);
+    CHECK(annotation.find("fb 3f f0 00 00 00 00 00 00") == std::string::npos);
+    CHECK(annotation.find("d9 03 e8") == std::string::npos);
+}
+
 TEST_CASE("smart buffer annotation wraps string payloads before the annotation column") {
     const auto buffer = to_bytes("6c48656c6c6f20776f726c6421");
 

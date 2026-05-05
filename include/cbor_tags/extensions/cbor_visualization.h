@@ -1071,6 +1071,16 @@ template <typename OutputBuffer> struct smart_annotator {
         return result;
     }
 
+    [[nodiscard]] std::string header_hex(std::size_t begin, std::size_t end) const {
+        if (end - begin <= 1U) {
+            return hex_range(begin, end, false);
+        }
+        auto result = hex_range(begin, begin + 1U, false);
+        result.push_back(' ');
+        result.append(hex_range(begin + 1U, end, false));
+        return result;
+    }
+
     [[nodiscard]] std::string indent(std::size_t depth) const {
         const auto  levels = checked_add(options.current_indent, depth);
         std::string result(checked_add(checked_mul(levels, options.indent_width), options.offset), ' ');
@@ -1107,7 +1117,7 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     void emit_header(std::size_t depth, std::size_t begin, std::size_t end, std::string_view comment) {
-        emit_annotated_line(depth, hex_range(begin, end, true), comment);
+        emit_annotated_line(depth, header_hex(begin, end), comment);
     }
 
     [[nodiscard]] std::size_t payload_bytes_per_line(std::size_t depth) const {
