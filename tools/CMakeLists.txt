@@ -3,9 +3,14 @@ project(tools VERSION 0.1.0)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
+include(GNUInstallDirs)
 
 # As soon as std::format is more widely available, we can remove this
 cpmaddpackage("gh:fmtlib/fmt#11.1.2")
+cpmaddpackage("gh:Neargye/nameof@0.10.4")
+
+add_executable(cbor_tags_cli cbor_tags_cli.cpp)
+target_link_libraries(cbor_tags_cli PRIVATE cbor::tags fmt::fmt nameof::nameof)
 
 add_executable(reflection_module_generator reflection_module_generator.cpp)
 target_link_libraries(reflection_module_generator PRIVATE fmt::fmt)
@@ -66,6 +71,11 @@ install(
   FILES ${OUTPUT_HEADER_FILE}
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cbor_tags
   COMPONENT headers)
+
+install(
+  TARGETS cbor_tags_cli
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT tools)
 
 # Optional: Keep the manual regeneration target
 add_custom_target(
