@@ -813,9 +813,9 @@ System-wide install:
 ```bash
 git clone https://github.com/jkammerland/cbor_tags
 cd cbor_tags
-mkdir build && cd build
-cmake ..
-make install
+cmake -B build -DCBOR_TAGS_INSTALL=ON -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
+cmake --build build
+cmake --install build
 ```
 
 ## 💡 CMake Integration

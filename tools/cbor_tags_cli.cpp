@@ -35,7 +35,13 @@ struct input_error final : std::runtime_error {
     return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
 
-[[nodiscard]] std::string read_stdin() { return {std::istreambuf_iterator<char>{std::cin}, std::istreambuf_iterator<char>{}}; }
+[[nodiscard]] std::string read_stdin() {
+    std::string input{std::istreambuf_iterator<char>{std::cin}, std::istreambuf_iterator<char>{}};
+    if (std::cin.bad()) {
+        throw input_error("failed to read stdin");
+    }
+    return input;
+}
 
 [[nodiscard]] std::string input_text_from_positionals(const std::vector<std::string> &positionals) {
     if (positionals.empty() || (positionals.size() == 1U && positionals.front() == "-")) {
@@ -272,6 +278,18 @@ void validate_base64_tail_bits(const std::vector<int> &values, std::size_t paddi
     return decode_base64(input);
 }
 
+template <cbor::tags::ValidCborBuffer CborBuffer> void validate_cbor_sequence(const CborBuffer &buffer) {
+    cbor::tags::detail::catch_all_variant value;
+    auto                                  dec = cbor::tags::make_decoder(buffer);
+
+    while (!dec.reader_.empty(dec.data_)) {
+        auto result = dec(value);
+        if (!result) {
+            throw std::runtime_error("Malformed CBOR input");
+        }
+    }
+}
+
 void print_usage(std::ostream &out, std::string_view executable) {
     out << "Usage:\n"
         << "  " << executable << " annotate --input hex|base64 [DATA|-] [options]\n"
@@ -458,6 +476,9 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
 
     std::string output;
     if (parsed.command == command_mode::annotate) {
+        if (parsed.annotation_options.mode == cbor::tags::AnnotationMode::no_annotation) {
+            validate_cbor_sequence(buffer);
+        }
         cbor::tags::buffer_annotate(buffer, output, parsed.annotation_options);
     } else {
         cbor::tags::buffer_diagnostic(buffer, output, parsed.diagnostic_options);

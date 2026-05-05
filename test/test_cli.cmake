@@ -75,6 +75,12 @@ run_cli(
   "__skip__"
   annotate --input hex --mode no_annotation 626869)
 run_cli(
+  annotate_numeric_options
+  0
+  "01"
+  "__skip__"
+  annotate --input hex --mode no_annotation --current-indent 1 --offset 2 --max-depth 1 --annotation-column 16 --indent-width 3 --comment-indent-width 4 --max-structure-depth 8 0102)
+run_cli(
   diagnostic_base64_standard
   0
   "\"hi\""
@@ -151,13 +157,36 @@ run_cli(
   "[non-utf8(2)]"
   "__skip__"
   diagnostic --input hex --no-format-by-rows --check-tstr-utf8 62c328)
+run_cli(
+  diagnostic_row_options
+  0
+  "[
+"
+  "__skip__"
+  diagnostic --input hex --format-by-rows --override-array-by-columns --row-offset 2 --row-current-indent 1 --max-depth 10 --current-depth 0 8101)
+run_cli(
+  diagnostic_no_override_array_by_columns
+  0
+  "[1]"
+  "__skip__"
+  diagnostic --input hex --no-format-by-rows --no-override-array-by-columns 8101)
 
 run_cli(missing_input 2 "__skip__" "error: missing required --input" diagnostic Ymhp)
+run_cli(missing_value_input 2 "__skip__" "error: --input requires a value" diagnostic --input)
+run_cli(missing_value_mode 2 "__skip__" "error: --mode requires a value" annotate --input hex --mode)
+run_cli(missing_value_annotation_column 2 "__skip__" "error: --annotation-column requires a value" annotate --input hex --annotation-column)
+run_cli(missing_value_row_offset 2 "__skip__" "error: --row-offset requires a value" diagnostic --input hex --row-offset)
 run_cli(invalid_subcommand 2 "__skip__" "error: expected subcommand" bogus --input hex 01)
+run_cli(invalid_input_value 2 "__skip__" "error: --input expects 'hex' or 'base64'" diagnostic --input bogus 01)
+run_cli(invalid_mode_value 2 "__skip__" "error: --mode expects 'smart' or 'no_annotation'" annotate --input hex --mode bogus 01)
+run_cli(invalid_annotation_column_value 2 "__skip__" "error: --annotation-column expects an unsigned integer" annotate --input hex --annotation-column nope 01)
 run_cli(annotate_rejects_diagnostic_flag 2 "__skip__" "error: unknown option '--check-tstr-utf8'" annotate --input hex --check-tstr-utf8 01)
 run_cli(odd_hex 1 "__skip__" "error: hex input has odd number of digits" diagnostic --input hex 1)
 run_cli(invalid_hex_char 1 "__skip__" "error: hex input contains non-hex character" diagnostic --input hex 0g)
 run_cli(malformed_cbor 1 "__skip__" "error: Malformed CBOR diagnostic top-level item" diagnostic --input hex 18)
+run_cli(no_annotation_rejects_truncated_uint 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation 18)
+run_cli(no_annotation_rejects_break 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation ff)
+run_cli(no_annotation_rejects_trailing_break 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation 01ff)
 run_cli(invalid_base64_char 1 "__skip__" "error: base64 input contains invalid character" diagnostic --input base64 "Ym?p")
 run_cli(invalid_base64_middle_padding 1 "__skip__" "error: base64 padding must be at the end" diagnostic --input base64 "Ym=hp")
 run_cli(invalid_base64_data_after_padding 1 "__skip__" "error: base64 padding must be at the end" diagnostic --input base64 "Yg==AA")
