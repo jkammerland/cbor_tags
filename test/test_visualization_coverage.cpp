@@ -39,6 +39,34 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     }
     return count;
 }
+
+bool has_annotation_row(std::string_view annotation, std::string_view left, std::string_view comment) {
+    auto row_begin = std::size_t{};
+    while (row_begin <= annotation.size()) {
+        auto row_end = annotation.find('\n', row_begin);
+        if (row_end == std::string_view::npos) {
+            row_end = annotation.size();
+        }
+
+        const auto row  = annotation.substr(row_begin, row_end - row_begin);
+        const auto hash = row.find('#');
+        if (hash != std::string_view::npos && row.substr(0, left.size()) == left && row.substr(hash) == comment) {
+            auto padding_only = true;
+            for (auto index = left.size(); index < hash; ++index) {
+                padding_only = padding_only && row[index] == ' ';
+            }
+            if (padding_only) {
+                return true;
+            }
+        }
+
+        if (row_end == annotation.size()) {
+            break;
+        }
+        row_begin = row_end + 1U;
+    }
+    return false;
+}
 } // namespace
 
 TEST_CASE("visualization names cover primitive, optional, variant, and tag types") {
@@ -209,34 +237,47 @@ TEST_CASE("smart buffer annotation handles floats, null, undefined, and sequence
 
 TEST_CASE("smart buffer annotation packs multi-byte header arguments") {
     const auto buffer = to_bytes("9f1903e81a000100001b01020304050607083901005900100102030405060708090a0b0c0d0e0f10"
-                                 "79001030313233343536373839616263646566f8f9f93c00fa3f800000fb3ff0000000000000d903e801ff");
+                                 "79001030313233343536373839616263646566f8f9f93c00fa3f800000fb3ff0000000000000d903e801"
+                                 "9900009a000000009b0000000000000000b90000ba00000000bb0000000000000000ff");
 
     std::string annotation;
     buffer_annotate(buffer, annotation, {.annotation_column = 48});
 
     INFO(annotation);
-    CHECK(annotation.find("19 03e8") != std::string::npos);
-    CHECK(annotation.find("1a 00010000") != std::string::npos);
-    CHECK(annotation.find("1b 0102030405060708") != std::string::npos);
-    CHECK(annotation.find("39 0100") != std::string::npos);
-    CHECK(annotation.find("59 0010") != std::string::npos);
-    CHECK(annotation.find("79 0010") != std::string::npos);
-    CHECK(annotation.find("f8 f9") != std::string::npos);
-    CHECK(annotation.find("f9 3c00") != std::string::npos);
-    CHECK(annotation.find("fa 3f800000") != std::string::npos);
-    CHECK(annotation.find("fb 3ff0000000000000") != std::string::npos);
-    CHECK(annotation.find("d9 03e8") != std::string::npos);
+    CHECK(has_annotation_row(annotation, "   19 03e8", "#   unsigned(1000)"));
+    CHECK(has_annotation_row(annotation, "   1a 00010000", "#   unsigned(65536)"));
+    CHECK(has_annotation_row(annotation, "   1b 0102030405060708", "#   unsigned(72623859790382856)"));
+    CHECK(has_annotation_row(annotation, "   39 0100", "#   negative(-257)"));
+    CHECK(has_annotation_row(annotation, "   59 0010", "#   bytes(16)"));
+    CHECK(has_annotation_row(annotation, "   79 0010", "#   text(16)"));
+    CHECK(has_annotation_row(annotation, "   f8 f9", "#   simple(249)"));
+    CHECK(has_annotation_row(annotation, "   f9 3c00", "#   float16(1)"));
+    CHECK(has_annotation_row(annotation, "   fa 3f800000", "#   float32(1)"));
+    CHECK(has_annotation_row(annotation, "   fb 3ff0000000000000", "#   float64(1)"));
+    CHECK(has_annotation_row(annotation, "   d9 03e8", "#   tag(1000)"));
+    CHECK(has_annotation_row(annotation, "   99 0000", "#   array(0)"));
+    CHECK(has_annotation_row(annotation, "   9a 00000000", "#   array(0)"));
+    CHECK(has_annotation_row(annotation, "   9b 0000000000000000", "#   array(0)"));
+    CHECK(has_annotation_row(annotation, "   b9 0000", "#   map(0)"));
+    CHECK(has_annotation_row(annotation, "   ba 00000000", "#   map(0)"));
+    CHECK(has_annotation_row(annotation, "   bb 0000000000000000", "#   map(0)"));
 
-    CHECK(annotation.find("19 03 e8") == std::string::npos);
-    CHECK(annotation.find("1a 00 01 00 00") == std::string::npos);
-    CHECK(annotation.find("1b 01 02 03 04 05 06 07 08") == std::string::npos);
-    CHECK(annotation.find("39 01 00") == std::string::npos);
-    CHECK(annotation.find("59 00 10") == std::string::npos);
-    CHECK(annotation.find("79 00 10") == std::string::npos);
-    CHECK(annotation.find("f9 3c 00") == std::string::npos);
-    CHECK(annotation.find("fa 3f 80 00 00") == std::string::npos);
-    CHECK(annotation.find("fb 3f f0 00 00 00 00 00 00") == std::string::npos);
-    CHECK(annotation.find("d9 03 e8") == std::string::npos);
+    CHECK_FALSE(has_annotation_row(annotation, "   19 03 e8", "#   unsigned(1000)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   1a 00 01 00 00", "#   unsigned(65536)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   1b 01 02 03 04 05 06 07 08", "#   unsigned(72623859790382856)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   39 01 00", "#   negative(-257)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   59 00 10", "#   bytes(16)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   79 00 10", "#   text(16)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   f9 3c 00", "#   float16(1)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   fa 3f 80 00 00", "#   float32(1)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   fb 3f f0 00 00 00 00 00 00", "#   float64(1)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   d9 03 e8", "#   tag(1000)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   99 00 00", "#   array(0)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   9a 00 00 00 00", "#   array(0)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   9b 00 00 00 00 00 00 00 00", "#   array(0)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   b9 00 00", "#   map(0)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   ba 00 00 00 00", "#   map(0)"));
+    CHECK_FALSE(has_annotation_row(annotation, "   bb 00 00 00 00 00 00 00 00", "#   map(0)"));
 }
 
 TEST_CASE("smart buffer annotation wraps string payloads before the annotation column") {
