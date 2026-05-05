@@ -621,7 +621,7 @@ std::vector<std::byte> data =
 
 // Annotate the data vector
 fmt::memory_buffer buffer;
-buffer_annotate(data, buffer);
+buffer_annotate(data, buffer, {.mode = AnnotationMode::no_annotation}); // Request only hex view
 fmt::format_to(std::back_inserter(buffer), "\n --- \n");
 
 // Diagnostic notation of the data vector
@@ -674,6 +674,33 @@ d2
 }
 ]
 ```
+
+Smart annotation is the default and adds a semantic right-hand column:
+```cpp
+std::vector<std::byte> data = to_bytes("bf6346756ef563416d7421ff");
+
+fmt::memory_buffer annotation;
+buffer_annotate(data, annotation, {
+    .annotation_column = 13
+});
+```
+Output:
+```
+bf           # map(*)
+   63        #   text(3)
+      46756e #     "Fun"
+   f5        #   true, simple(21)
+   63        #   text(3)
+      416d74 #     "Amt"
+   21        #   negative(-2)
+   ff        #   break
+```
+In smart mode, headers are padded to `annotation_column`. Text and byte string
+payload bytes wrap before that column so the annotation stays aligned. Malformed
+CBOR, excessive nesting, configured input/output size limits, and layouts too
+narrow to show data without truncation throw `std::runtime_error`. Set
+`.mode = AnnotationMode::no_annotation` to request the plain hex view.
+Invalid UTF-8 text payloads render as `non-utf8(N)`, where `N` is byte length.
 
 ## 🤝 CDDL Schema Generation
 For Concise Data Definitions schemas you can use the `cddl_schema_to` method, e.g by applying on a struct "A":
@@ -743,7 +770,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.12.0 # or specify a particular commit/tag
+  GIT_TAG v0.13.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
