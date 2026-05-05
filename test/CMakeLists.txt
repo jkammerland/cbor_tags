@@ -50,3 +50,14 @@ if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
+
+if(TARGET cbor_tags_cli)
+  add_test(
+    NAME cbor_tags_cli
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DCLI=$<TARGET_FILE:cbor_tags_cli>"
+      "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cbor_tags_cli"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/test_cli.cmake")
+endif()
