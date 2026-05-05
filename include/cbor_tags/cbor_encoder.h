@@ -255,12 +255,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <typename Object> constexpr void encode_named_map(const Object &object) {
         encode_major_and_size(named_map_pair_count(object), static_cast<byte_type>(0xA0));
-        encode_named_entries(object);
+        encode_named_entries_for_root<Object>(object);
     }
 
-    template <typename Object> constexpr void encode_named_entries(const Object &object) { encode_named_entries<Object>(object); }
-
-    template <typename RootObject, typename Object> constexpr void encode_named_entries(const Object &object) {
+    template <typename RootObject, typename Object> constexpr void encode_named_entries_for_root(const Object &object) {
         using value_type = std::remove_cvref_t<Object>;
         encode_named_entries_impl<RootObject>(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
     }
@@ -277,7 +275,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         using field_type  = std::remove_cvref_t<decltype(field)>;
 
         if constexpr (IsNamedGroupWrapper<field_type>) {
-            encode_named_entries<RootObject>(field.value_);
+            encode_named_entries_for_root<RootObject>(field.value_);
         } else if constexpr (IsNamedExtensionWrapper<field_type>) {
             using extension_type = named_extension_value_t<field_type>;
             static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
