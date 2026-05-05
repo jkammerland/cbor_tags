@@ -359,6 +359,12 @@ template <typename T, typename...> struct first_type {
 template <typename... Ts> using first_type_t = typename first_type<Ts...>::type;
 
 template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options);
+template <typename T>
+std::string ensure_cddl_named_map_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
+template <typename T>
+std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
+template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
+template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
 
 constexpr bool is_cddl_id_start(char value) {
     return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') || value == '_' || value == '$' || value == '@';
@@ -388,6 +394,38 @@ inline std::string sanitize_cddl_id(std::string_view raw) {
 template <typename T> std::string cddl_type_key() { return std::string(nameof::nameof_full_type<std::remove_cvref_t<T>>()); }
 
 template <typename T> std::string cddl_type_name() { return sanitize_cddl_id(nameof::nameof_short_type<std::remove_cvref_t<T>>()); }
+
+inline std::string quote_cddl_text(std::string_view raw) {
+    std::string result = "\"";
+    for (const auto value : raw) {
+        switch (value) {
+        case '"': result += "\\\""; break;
+        case '\\': result += "\\\\"; break;
+        case '\n': result += "\\n"; break;
+        case '\r': result += "\\r"; break;
+        case '\t': result += "\\t"; break;
+        default: result += value; break;
+        }
+    }
+    result += "\"";
+    return result;
+}
+
+inline std::string cddl_member_key(std::string_view raw) {
+    if (raw.empty() || !is_cddl_id_start(raw.front())) {
+        return quote_cddl_text(raw);
+    }
+    for (const auto value : raw.substr(1)) {
+        if (!is_cddl_id_continue(value)) {
+            return quote_cddl_text(raw);
+        }
+    }
+    return std::string(raw);
+}
+
+template <typename T> std::string cddl_named_map_key() { return "__cddl_named_map:" + cddl_type_key<T>(); }
+
+template <typename T> std::string cddl_named_group_key() { return "__cddl_named_group:" + cddl_type_key<T>(); }
 
 inline std::string unique_cddl_name(CDDLContext &context, std::string_view key, std::string_view preferred_name) {
     auto preferred = sanitize_cddl_id(preferred_name.empty() ? key : preferred_name);
@@ -557,6 +595,106 @@ template <typename T> std::string cddl_map_expr(CDDLContext &context, CDDLOption
     return fmt::format("{{* {} => {}}}", key, value);
 }
 
+#if CBOR_TAGS_HAS_STD_REFLECTION
+template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    using tuple_type = aggregate_tuple_t<value_type>;
+    using field_type = std::remove_cvref_t<std::tuple_element_t<I, tuple_type>>;
+
+    constexpr auto raw_name = detail::aggregate_member_name<value_type, I>();
+    if constexpr (IsNamedGroupWrapper<field_type>) {
+        if (options.always_inline) {
+            return cddl_named_group_expr<named_group_value_t<field_type>>(context, options);
+        }
+        return ensure_cddl_named_group_definition<named_group_value_t<field_type>>(context, options, raw_name);
+    } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+        using extension_type = named_extension_value_t<field_type>;
+        static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
+                      "as_named_extension requires a map with text-string keys");
+        return fmt::format("* tstr => {}", cddl_type_expr<typename extension_type::mapped_type>(context, options));
+    } else if constexpr (IsOptional<field_type>) {
+        return fmt::format("? {}: {}", cddl_member_key(raw_name), cddl_type_expr<typename field_type::value_type>(context, options));
+    } else {
+        return fmt::format("{}: {}", cddl_member_key(raw_name), cddl_type_expr<field_type>(context, options));
+    }
+}
+
+template <typename T, std::size_t... Is>
+std::string cddl_named_entries(CDDLContext &context, CDDLOptions options, std::index_sequence<Is...>) {
+    std::array<std::string, sizeof...(Is)> items{cddl_named_member_entry<T, Is>(context, options)...};
+    return join_cddl(items, options.row_options.format_by_rows ? ",\n" + std::string(options.row_options.offset, ' ') : ", ");
+}
+
+template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open, char close) {
+    using value_type            = std::remove_cvref_t<T>;
+    constexpr auto member_count = detail::aggregate_member_count<value_type>();
+    if (!options.row_options.format_by_rows) {
+        return fmt::format("{}{}{}", open, cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{}),
+                           close);
+    }
+
+    auto entries = cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{});
+    if (!entries.empty()) {
+        entries = std::string(options.row_options.offset, ' ') + entries;
+    }
+    return fmt::format("{}\n{}\n{}", open, entries, close);
+}
+
+template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options) {
+    return cddl_named_body<T>(context, options, '{', '}');
+}
+
+template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options) {
+    return cddl_named_body<T>(context, options, '(', ')');
+}
+
+template <typename T>
+std::string ensure_cddl_named_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name,
+                                         std::string (*key_fn)(), std::string (*expr_fn)(CDDLContext &, CDDLOptions)) {
+    const auto key = key_fn();
+    if (auto *def = context.find_by_key(key)) {
+        if (def->state == CDDLContext::DefinitionState::visiting) {
+            def->recursive_reference = true;
+        }
+        return std::string(def->name);
+    }
+
+    auto  name = unique_cddl_name(context, key, preferred_name.empty() ? cddl_type_name<T>() : preferred_name);
+    auto &def  = context.reserve(key, name);
+    auto  body = expr_fn(context, options);
+    auto  cddl = fmt::format("{} = {}", name, body);
+    def.cddl   = std::pmr::string(cddl, &context.memory_resource);
+    def.state  = CDDLContext::DefinitionState::done;
+    return std::string(def.name);
+}
+
+template <typename T>
+std::string ensure_cddl_named_map_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
+    using value_type = std::remove_cvref_t<T>;
+    static_assert(IsAggregate<value_type>, "as_named_map requires an aggregate payload");
+    return ensure_cddl_named_definition<value_type>(context, options, preferred_name, cddl_named_map_key<value_type>,
+                                                    cddl_named_map_expr<value_type>);
+}
+
+template <typename T>
+std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
+    using value_type = std::remove_cvref_t<T>;
+    static_assert(IsAggregate<value_type>, "as_named_group requires an aggregate payload");
+    return ensure_cddl_named_definition<value_type>(context, options, preferred_name, cddl_named_group_key<value_type>,
+                                                    cddl_named_group_expr<value_type>);
+}
+#else
+template <typename T> std::string ensure_cddl_named_map_definition(CDDLContext &, CDDLOptions, std::string_view) {
+    static_assert(always_false<std::remove_cvref_t<T>>::value, "as_named_map requires C++26 static reflection");
+    return {};
+}
+
+template <typename T> std::string ensure_cddl_named_group_definition(CDDLContext &, CDDLOptions, std::string_view) {
+    static_assert(always_false<std::remove_cvref_t<T>>::value, "as_named_group requires C++26 static reflection");
+    return {};
+}
+#endif
+
 template <typename T> std::string cddl_rule_expr(CDDLContext &context, CDDLOptions options, std::string_view name) {
     return fmt::format("{} = {}", name, cddl_aggregate_expr<T>(context, options));
 }
@@ -615,6 +753,13 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         return "{* any => any}";
     } else if constexpr (IsTagHeader<value_type>) {
         return "#6(any)";
+    } else if constexpr (IsNamedMapWrapper<value_type>) {
+        return ensure_cddl_named_map_definition<named_map_value_t<value_type>>(context, options);
+    } else if constexpr (IsNamedGroupWrapper<value_type>) {
+        return ensure_cddl_named_group_definition<named_group_value_t<value_type>>(context, options);
+    } else if constexpr (IsNamedExtensionWrapper<value_type>) {
+        static_assert(always_false<value_type>::value, "as_named_extension is only valid inside as_named_map aggregates");
+        return {};
     } else if constexpr (IsMap<value_type>) {
         return cddl_map_expr<value_type>(context, options);
     } else if constexpr (IsArray<value_type>) {
@@ -680,7 +825,31 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
     auto &cddl_context = detail::cddl_context_ref(context);
     debug::println("cddl_schema_to: {}", nameof::nameof_short_type<T>());
 
-    if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+    if constexpr (IsNamedMapWrapper<value_type>) {
+        using named_value_type = named_map_value_t<value_type>;
+        const auto requested_root_name =
+            options.root_name.empty() ? detail::cddl_type_name<named_value_type>() : detail::sanitize_cddl_id(options.root_name);
+        const auto root_key = detail::cddl_named_map_key<named_value_type>();
+        if (!options.root_name.empty()) {
+            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+        }
+        (void)detail::ensure_cddl_named_map_definition<named_value_type>(cddl_context, options, requested_root_name);
+        if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+        }
+    } else if constexpr (IsNamedGroupWrapper<value_type>) {
+        using named_value_type = named_group_value_t<value_type>;
+        const auto requested_root_name =
+            options.root_name.empty() ? detail::cddl_type_name<named_value_type>() : detail::sanitize_cddl_id(options.root_name);
+        const auto root_key = detail::cddl_named_group_key<named_value_type>();
+        if (!options.root_name.empty()) {
+            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+        }
+        (void)detail::ensure_cddl_named_group_definition<named_value_type>(cddl_context, options, requested_root_name);
+        if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
+            fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+        }
+    } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
         static_assert(!detail::is_empty_cddl_aggregate_v<value_type>,
                       "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
         const auto requested_root_name = detail::root_rule_name<value_type>(options);
@@ -722,7 +891,11 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
 
     if constexpr (!IsReferenceWrapper<Context>) {
         const auto root_key = [] {
-            if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+            if constexpr (IsNamedMapWrapper<value_type>) {
+                return detail::cddl_named_map_key<named_map_value_t<value_type>>();
+            } else if constexpr (IsNamedGroupWrapper<value_type>) {
+                return detail::cddl_named_group_key<named_group_value_t<value_type>>();
+            } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
                 return detail::cddl_type_key<value_type>();
             } else {
                 return std::string{};

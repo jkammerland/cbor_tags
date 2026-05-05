@@ -28,10 +28,12 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace cbor::tags {
 
@@ -632,6 +634,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::no_match_for_optional_on_buffer;
     }
 
+    template <typename U> constexpr status_code decode(as_named_map<U> value) {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+        return decode_named_map(value.value_);
+#else
+        static_assert(always_false<std::remove_cvref_t<U>>::value, "as_named_map requires C++26 static reflection");
+        return status_code::error;
+#endif
+    }
+
     template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
         using namespace detail;
         static_assert((IsCborMajor<T> && ...),
@@ -1223,6 +1234,200 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
         return status;
     }
+
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    static constexpr bool named_key_seen(const std::vector<std::string> &seen, std::string_view key) {
+        return std::ranges::any_of(seen, [key](const std::string &candidate) { return candidate == key; });
+    }
+
+    template <typename Object> constexpr void reset_named_optionals_and_extensions(Object &object) {
+        using value_type = std::remove_cvref_t<Object>;
+        reset_named_optionals_and_extensions_impl(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr void reset_named_optionals_and_extensions_impl(Object &object, std::index_sequence<Is...>) {
+        (reset_named_member<Object, Is>(object), ...);
+    }
+
+    template <typename Object, std::size_t I> constexpr void reset_named_member(Object &object) {
+        auto  tuple      = to_tuple(object);
+        auto &field      = std::get<I>(tuple);
+        using field_type = std::remove_cvref_t<decltype(field)>;
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            reset_named_optionals_and_extensions(field.value_);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            field.value_.clear();
+        } else if constexpr (IsOptional<field_type>) {
+            field.reset();
+        }
+    }
+
+    template <typename Object> constexpr status_code decode_named_map(Object &object) {
+        auto [major, additionalInfo] = read_initial_byte();
+        if (major != major_type::Map) {
+            return status_code::no_match_for_map_on_buffer;
+        }
+
+        const auto pair_count = decode_unsigned(additionalInfo);
+        reset_named_optionals_and_extensions(object);
+
+        std::vector<std::string> seen;
+        seen.reserve(static_cast<std::size_t>(pair_count));
+        for (std::uint64_t index = 0; index < pair_count; ++index) {
+            std::string key;
+            auto        key_status = decode(key);
+            if (key_status != status_code::success) {
+                return key_status;
+            }
+
+            auto value_status = status_code::success;
+            if (decode_named_member_by_key(object, key, seen, value_status)) {
+                if (value_status != status_code::success) {
+                    return value_status;
+                }
+                continue;
+            }
+
+            if (decode_named_extension_by_key(object, key, value_status)) {
+                if (value_status != status_code::success) {
+                    return value_status;
+                }
+                continue;
+            }
+
+            return status_code::unexpected_group_size;
+        }
+
+        return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
+    }
+
+    template <typename Object>
+    constexpr bool decode_named_member_by_key(Object &object, std::string_view key, std::vector<std::string> &seen, status_code &status) {
+        using value_type = std::remove_cvref_t<Object>;
+        return decode_named_member_by_key_impl(object, key, seen, status,
+                                               std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr bool decode_named_member_by_key_impl(Object &object, std::string_view key, std::vector<std::string> &seen,
+                                                   status_code &status, std::index_sequence<Is...>) {
+        bool matched = false;
+        ((matched = matched || decode_named_member<Object, Is>(object, key, seen, status)), ...);
+        return matched;
+    }
+
+    template <typename Object, std::size_t I>
+    constexpr bool decode_named_member(Object &object, std::string_view key, std::vector<std::string> &seen, status_code &status) {
+        using value_type = std::remove_cvref_t<Object>;
+        auto  tuple      = to_tuple(object);
+        auto &field      = std::get<I>(tuple);
+        using field_type = std::remove_cvref_t<decltype(field)>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            return decode_named_member_by_key(field.value_, key, seen, status);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            return false;
+        } else {
+            constexpr auto field_name = detail::aggregate_member_name<value_type, I>();
+            if (key != std::string_view{field_name}) {
+                return false;
+            }
+            if (named_key_seen(seen, key)) {
+                status = status_code::unexpected_group_size;
+                return true;
+            }
+            seen.emplace_back(key);
+            status = decode_named_field_value(field);
+            return true;
+        }
+    }
+
+    template <typename Field> constexpr status_code decode_named_field_value(Field &field) {
+        using field_type = std::remove_cvref_t<Field>;
+        if constexpr (IsOptional<field_type>) {
+            typename field_type::value_type value{};
+            auto                            status = decode(value);
+            if (status == status_code::success) {
+                field = std::move(value);
+            }
+            return status;
+        } else {
+            return decode(field);
+        }
+    }
+
+    template <typename Object> constexpr bool decode_named_extension_by_key(Object &object, std::string_view key, status_code &status) {
+        using value_type = std::remove_cvref_t<Object>;
+        return decode_named_extension_by_key_impl(object, key, status,
+                                                  std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr bool decode_named_extension_by_key_impl(Object &object, std::string_view key, status_code &status,
+                                                      std::index_sequence<Is...>) {
+        bool matched = false;
+        ((matched = matched || decode_named_extension_member<Object, Is>(object, key, status)), ...);
+        return matched;
+    }
+
+    template <typename Object, std::size_t I>
+    constexpr bool decode_named_extension_member(Object &object, std::string_view key, status_code &status) {
+        auto  tuple      = to_tuple(object);
+        auto &field      = std::get<I>(tuple);
+        using field_type = std::remove_cvref_t<decltype(field)>;
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            return decode_named_extension_by_key(field.value_, key, status);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            using extension_type = named_extension_value_t<field_type>;
+            static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
+                          "as_named_extension requires a map with text-string keys");
+            static_assert(std::constructible_from<typename extension_type::key_type, std::string_view>,
+                          "as_named_extension key type must be constructible from std::string_view");
+            using key_type    = typename extension_type::key_type;
+            using mapped_type = typename extension_type::mapped_type;
+            key_type extension_key{key};
+            if (field.value_.find(extension_key) != field.value_.end()) {
+                status = status_code::unexpected_group_size;
+                return true;
+            }
+            mapped_type mapped_value{};
+            status = decode(mapped_value);
+            if (status == status_code::success) {
+                field.value_.emplace(std::move(extension_key), std::move(mapped_value));
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    template <typename Object> constexpr bool validate_required_named_members(const Object &object, const std::vector<std::string> &seen) {
+        using value_type = std::remove_cvref_t<Object>;
+        return validate_required_named_members_impl(object, seen, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr bool validate_required_named_members_impl(const Object &object, const std::vector<std::string> &seen,
+                                                        std::index_sequence<Is...>) {
+        return (required_named_member_present<Object, Is>(object, seen) && ...);
+    }
+
+    template <typename Object, std::size_t I>
+    constexpr bool required_named_member_present(const Object &object, const std::vector<std::string> &seen) {
+        using value_type  = std::remove_cvref_t<Object>;
+        const auto  tuple = to_tuple(object);
+        const auto &field = std::get<I>(tuple);
+        using field_type  = std::remove_cvref_t<decltype(field)>;
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            return validate_required_named_members(field.value_, seen);
+        } else if constexpr (IsNamedExtensionWrapper<field_type> || IsOptional<field_type>) {
+            return true;
+        } else {
+            return named_key_seen(seen, std::string_view{detail::aggregate_member_name<value_type, I>()});
+        }
+    }
+#endif
 
     template <typename... Args> constexpr auto applier(Args &&...args) {
         status_collector<self_t> collect_status{*this};

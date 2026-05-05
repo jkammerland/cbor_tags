@@ -7,7 +7,8 @@ line-coverage report.
 ## Scope
 
 `cddl_schema_to` generates CDDL for the CBOR shapes emitted by the default
-encoder. It does not attempt to cover all CDDL language features.
+encoder. C++26 reflection builds can also generate and validate schemas for
+explicit named-map transforms such as `as_named_map<T>`.
 
 Generated schemas intentionally describe type shapes, not value refinements.
 For example, a dynamic tag field can be rendered as `#6(payload)` because the
@@ -23,8 +24,11 @@ runtime tag number is not available from the static C++ type alone.
 | Text and byte strings | RFC 8610 `tstr`, `bstr` | Yes | `CDDL no columns`; `CDDL emits typed containers and registers nested definitions once` | `std::string` maps to `tstr`; byte ranges map to `bstr`. |
 | Floating point and simple values | RFC 8610/RFC 9682 major type 7 | Yes | `CDDL no columns`; `cddl helpers generate prelude and schemas` | `float16_t`, `float`, `double`, `bool`, and `nullptr_t` map to prelude-style names. Generic `simple` maps to `#7`. |
 | Aggregate arrays | RFC 8610/RFC 9682 `[ group ]` | Yes | `CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads` | Multi-field aggregates render as fixed arrays. Single-field aggregates render as the single payload shape, matching encoder behavior. |
+| Named-map structs | RFC 8610 §3.5.1 Figures 1, 3, 4, 5, 7 | C++26 | `C++26 named-map CDDL covers RFC 8610 map and group examples`; `C++26 named-map CDDL covers RFC 8610 group factorization and personal data examples` | `as_named_map<T>` uses reflected member names as text-string keys. `std::optional<T>` fields render as optional entries and are omitted on encode when empty. |
+| Named groups | RFC 8610 §2.1, §3.5.1 Figures 2, 3, 6 | C++26 | `C++26 named-map CDDL covers RFC 8610 map and group examples` | `as_named_group<T>` emits reusable CDDL groups and flattens group members into containing named maps. |
 | Sequence containers | RFC 8610/RFC 9682 occurrence `*` in array groups | Yes | `CDDL emits typed containers and registers nested definitions once` | Variable sequences render as `[* value]`; fixed-size `std::array`/static `std::span` render as `[N*N value]`. |
 | Maps | RFC 8610/RFC 9682 `{ group }`, `memberkey =>` | Yes | `CDDL emits typed containers and registers nested definitions once`; `CDDL groups choices in map keys and repeated item positions` | Map keys and values are typed. Choice keys are parenthesized so they fit `memberkey = type1 =>`. |
+| Typed extension entries | RFC 8610 §3.5.1 Figure 7 | C++26 | `C++26 named-map CDDL covers RFC 8610 group factorization and personal data examples`; `C++26 named-map codec handles optionals, groups, and typed extensions` | `as_named_extension<std::map<std::string, T>>` renders as `* tstr => T` and captures unmatched text keys during decode. Exact arbitrary `any` values are not modeled yet. |
 | Type choices | RFC 8610/RFC 9682 `type = type1 *( "/" type1 )` | Yes | `CDDL groups choices in map keys and repeated item positions` | `std::variant` renders as `A / B`; `std::optional<T>` renders as `T / null`. Choices are grouped when embedded in positions that require `type1`. |
 | Static tags | RFC 8610/RFC 9682 `#6.n(type)` | Yes | `CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads`; `cddl helpers cover tuple and tagged tuple schemas` | Static tag members and tagged tuples render exact tag numbers. |
 | Dynamic tags | RFC 8610/RFC 9682 `#6(type)` | Partial | `CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads` | Runtime tag number is not known from the type; schema constrains only "some tag with this payload shape". |
@@ -48,6 +52,9 @@ The current standard-sensitive regression tests live primarily in
 - `CDDL groups choices in map keys and repeated item positions`
 - `CDDL supports root expressions for anonymous schema roots`
 - `CDDL supports always_inline and enum underlying integer shapes`
+- `C++26 named-map CDDL covers RFC 8610 map and group examples`
+- `C++26 named-map CDDL covers RFC 8610 group factorization and personal data examples`
+- `C++26 named-map codec handles optionals, groups, and typed extensions`
 
 Tuple and tagged-tuple schema/encoding alignment is covered in
 `test/test_visualization_coverage.cpp`.
