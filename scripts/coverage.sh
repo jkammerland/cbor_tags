@@ -52,6 +52,7 @@ configure_args=(
     --preset coverage
     -B "$build_dir"
     -DCBOR_TAGS_BUILD_TESTS=ON
+    -DCBOR_TAGS_BUILD_CLI=ON
     -DCBOR_TAGS_USE_DEV_SETTINGS=ON
     -DCMAKE_C_COMPILER="$cc"
     -DCMAKE_CXX_COMPILER="$cxx"
@@ -87,6 +88,7 @@ mkdir -p "$report_dir"
     --root "$root" \
     --object-directory "$build_dir" \
     --filter 'include/cbor_tags/' \
+    --filter 'tools/cbor_tags_cli.cpp' \
     --exclude 'include/cbor_tags/detail/.*' \
     --txt "$report_dir/coverage.txt" \
     --txt-summary \
@@ -105,8 +107,16 @@ root = ET.parse(xml_path).getroot()
 total = 0
 covered = 0
 file_rows = []
+cli_physical_lines = {}
 for cls in root.findall(".//class"):
     filename = cls.attrib.get("filename", "")
+    if filename == "tools/cbor_tags_cli.cpp":
+        for line in cls.findall("./lines/line"):
+            number = int(line.attrib["number"])
+            hits = int(line.attrib.get("hits", "0"))
+            cli_physical_lines[number] = cli_physical_lines.get(number, 0) + hits
+        continue
+
     if not filename.startswith("include/cbor_tags/"):
         continue
     if filename.startswith("include/cbor_tags/detail/"):
@@ -126,6 +136,9 @@ for cls in root.findall(".//class"):
     file_rows.append((filename, file_covered, file_total, file_percentage))
 
 percentage = (covered / total * 100.0) if total else 0.0
+cli_total = len(cli_physical_lines)
+cli_covered = sum(1 for hits in cli_physical_lines.values() if hits > 0)
+cli_percentage = (cli_covered / cli_total * 100.0) if cli_total else 0.0
 summary = (
     "\n"
     "------------------------------------------------------------------------------\n"
@@ -134,6 +147,13 @@ summary = (
     "------------------------------------------------------------------------------\n"
     f"Lines: {covered} / {total} = {percentage:.1f}%\n"
     "Note: Counts each source line once across template instantiations.\n"
+    "------------------------------------------------------------------------------\n"
+    "\n"
+    "------------------------------------------------------------------------------\n"
+    "CLI Source Line Coverage\n"
+    "File: tools/cbor_tags_cli.cpp\n"
+    "------------------------------------------------------------------------------\n"
+    f"Lines: {cli_covered} / {cli_total} = {cli_percentage:.1f}%\n"
     "------------------------------------------------------------------------------\n"
 )
 
@@ -159,6 +179,7 @@ markdown_lines = [
     f"| Gcovr line coverage (template instantiations) | {gcovr_lines_covered} | {gcovr_lines_valid} | {pct(gcovr_lines_covered, gcovr_lines_valid):.1f}% |",
     f"| Gcovr branch coverage | {gcovr_branches_covered} | {gcovr_branches_valid} | {pct(gcovr_branches_covered, gcovr_branches_valid):.1f}% |",
     f"| Unique physical header lines | {covered} | {total} | {percentage:.1f}% |",
+    f"| CLI source lines | {cli_covered} | {cli_total} | {cli_percentage:.1f}% |",
     "",
     "### Unique Physical Header Coverage",
     "",
@@ -168,6 +189,17 @@ markdown_lines = [
 
 for filename, file_covered, file_total, file_percentage in sorted(file_rows):
     markdown_lines.append(f"| `{filename}` | {file_covered} | {file_total} | {file_percentage:.1f}% |")
+
+markdown_lines.extend(
+    [
+        "",
+        "### CLI Source Coverage",
+        "",
+        "| Source | Covered | Total | Coverage |",
+        "| --- | ---: | ---: | ---: |",
+        f"| `tools/cbor_tags_cli.cpp` | {cli_covered} | {cli_total} | {cli_percentage:.1f}% |",
+    ]
+)
 
 markdown_lines.extend(
     [

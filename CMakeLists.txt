@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.13.0)
+project(cbor_tags VERSION 0.14.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
@@ -74,8 +74,19 @@ int main() { return 0; }
   endif()
 endif()
 
+# Build options
+option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
+option(CBOR_TAGS_BUILD_CLI "Build cbor_tags_cli" ${CBOR_TAGS_BUILD_TESTS})
+option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
+option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(CBOR_TAGS_INSTALL "Install the library" OFF)
+
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
+if(CBOR_TAGS_INSTALL AND NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
+  message(FATAL_ERROR "CBOR_TAGS_INSTALL requires -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON")
+endif()
+
 if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
   set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
@@ -106,9 +117,11 @@ endif()
 target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
 
 # Make ${PROJECT_NAME} depend on the generated header add tools - reflection module generator - makes cbor_reflection_impl.h
-option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
-if(CBOR_TAGS_BUILD_TOOLS)
+if(CBOR_TAGS_BUILD_CLI OR CBOR_TAGS_BUILD_TOOLS)
   add_subdirectory(tools)
+endif()
+
+if(CBOR_TAGS_BUILD_TOOLS)
   message(DEBUG "Setting ${PROJECT_NAME} to depend on generate_reflection_module, which generates cbor_reflection_impl.h")
   add_dependencies(${PROJECT_NAME} generate_reflection_module)
 else()
@@ -119,8 +132,6 @@ else()
 endif()
 
 # Extra options
-option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
-option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
   include(CTest)
   enable_testing()
@@ -150,7 +161,6 @@ if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
-option(CBOR_TAGS_INSTALL "Install the library" OFF)
 if(CBOR_TAGS_INSTALL)
   cpmaddpackage(gh:jkammerland/target_install_package.cmake@6.0.1)
   target_install_package(${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
