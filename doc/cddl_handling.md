@@ -102,6 +102,36 @@ as `[* value]`. Static tags render as `#6.n(payload)`. Dynamic tag values are
 not available from the type alone, so dynamic tags render as `#6(payload)`.
 Recursive aggregate types are emitted as named CDDL rules.
 
+### C++26 Named Maps
+
+When `CBOR_TAGS_USE_STD_REFLECTION=ON`, reflected member names can be used as
+CBOR map keys through the explicit named-map transform:
+
+```cpp
+struct Person {
+    int age;
+    std::string name;
+    std::string employer;
+};
+
+Person person{.age = 42, .name = "Ada", .employer = "AcmeCo"};
+std::vector<std::byte> buffer;
+auto enc = cbor::tags::make_encoder(buffer);
+enc(cbor::tags::as_named_map{person});
+
+fmt::memory_buffer schema;
+cbor::tags::cddl_schema_to<cbor::tags::as_named_map<Person>>(
+    schema, {.row_options = {.format_by_rows = false}, .root_name = "person"});
+// person = {age: int, name: tstr, employer: tstr}
+```
+
+`std::optional<T>` named-map fields are omitted when empty and render as
+`? key: T`. Use `as_named_group<T>` as a member to flatten a reusable CDDL
+group into the surrounding map, and use
+`as_named_extension<std::map<std::string, T>>` to capture unmatched text keys
+and render `* tstr => T`. Unknown keys are rejected unless such an extension
+field is present.
+
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data
 

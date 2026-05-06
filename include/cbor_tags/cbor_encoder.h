@@ -118,6 +118,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
     }
 
+    template <typename U> constexpr void encode([[maybe_unused]] const as_named_map<U> &value) {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+        encode_named_map(value.value_);
+#else
+        static_assert(always_false<std::remove_cvref_t<U>>::value, "as_named_map requires C++26 static reflection");
+#endif
+    }
+
     template <IsTaggedTuple T> constexpr void encode(const T &value) {
         /* Tag being first already garanteed by the concept */
         encode(std::get<0>(value));
@@ -216,6 +224,108 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     OutputBuffer                  &data_;
 
   private:
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    template <typename Object> constexpr std::uint64_t named_map_pair_count(const Object &object) {
+        using value_type = std::remove_cvref_t<Object>;
+        return named_map_pair_count_impl(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr std::uint64_t named_map_pair_count_impl(const Object &object, std::index_sequence<Is...>) {
+        return (std::uint64_t{} + ... + named_member_pair_count<Object, Is>(object));
+    }
+
+    template <typename Object, std::size_t I> constexpr std::uint64_t named_member_pair_count(const Object &object) {
+        const auto  tuple = to_tuple(object);
+        const auto &field = std::get<I>(tuple);
+        using field_type  = std::remove_cvref_t<decltype(field)>;
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            return named_map_pair_count(field.value_);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            using extension_type = named_extension_value_t<field_type>;
+            static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
+                          "as_named_extension requires a map with text-string keys");
+            return static_cast<std::uint64_t>(field.value_.size());
+        } else if constexpr (IsOptional<field_type>) {
+            return field.has_value() ? 1U : 0U;
+        } else {
+            return 1U;
+        }
+    }
+
+    template <typename Object> constexpr void encode_named_map(const Object &object) {
+        encode_major_and_size(named_map_pair_count(object), static_cast<byte_type>(0xA0));
+        encode_named_entries_for_root<Object>(object);
+    }
+
+    template <typename RootObject, typename Object> constexpr void encode_named_entries_for_root(const Object &object) {
+        using value_type = std::remove_cvref_t<Object>;
+        encode_named_entries_impl<RootObject>(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename RootObject, typename Object, std::size_t... Is>
+    constexpr void encode_named_entries_impl(const Object &object, std::index_sequence<Is...>) {
+        (encode_named_member<RootObject, Object, Is>(object), ...);
+    }
+
+    template <typename RootObject, typename Object, std::size_t I> constexpr void encode_named_member(const Object &object) {
+        using value_type  = std::remove_cvref_t<Object>;
+        const auto  tuple = to_tuple(object);
+        const auto &field = std::get<I>(tuple);
+        using field_type  = std::remove_cvref_t<decltype(field)>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            encode_named_entries_for_root<RootObject>(field.value_);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            using extension_type = named_extension_value_t<field_type>;
+            static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
+                          "as_named_extension requires a map with text-string keys");
+            static_assert(std::constructible_from<std::string_view, const typename extension_type::key_type &>,
+                          "as_named_extension key type must be convertible to std::string_view");
+            for (const auto &[key, mapped_value] : field.value_) {
+                if (named_key_matches_fixed_member<RootObject>(std::string_view{key})) {
+                    throw std::runtime_error("as_named_extension key shadows a named map field");
+                }
+                encode(key);
+                encode(mapped_value);
+            }
+        } else if constexpr (IsOptional<field_type>) {
+            if (field.has_value()) {
+                encode(std::string_view{detail::aggregate_member_name<value_type, I>()});
+                encode(*field);
+            }
+        } else {
+            encode(std::string_view{detail::aggregate_member_name<value_type, I>()});
+            encode(field);
+        }
+    }
+
+    template <typename Object> constexpr bool named_key_matches_fixed_member(std::string_view key) const {
+        using value_type = std::remove_cvref_t<Object>;
+        return named_key_matches_fixed_member_impl<value_type>(key,
+                                                               std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
+    }
+
+    template <typename Object, std::size_t... Is>
+    constexpr bool named_key_matches_fixed_member_impl(std::string_view key, std::index_sequence<Is...>) const {
+        return (named_key_matches_fixed_member<Object, Is>(key) || ...);
+    }
+
+    template <typename Object, std::size_t I> constexpr bool named_key_matches_fixed_member(std::string_view key) const {
+        using value_type = std::remove_cvref_t<Object>;
+        using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<value_type &>()))>;
+        using field_type = std::remove_cvref_t<std::tuple_element_t<I, tuple_type>>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>) {
+            return named_key_matches_fixed_member<named_group_value_t<field_type>>(key);
+        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            return false;
+        } else {
+            return key == std::string_view{detail::aggregate_member_name<value_type, I>()};
+        }
+    }
+#endif
+
     // Helper method to avoid code duplication
     template <typename Tuple> void aggregate_encode(Tuple &&tuple) {
         std::apply(

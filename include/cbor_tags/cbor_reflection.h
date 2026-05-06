@@ -23,6 +23,8 @@ template <typename T, std::size_t I> consteval std::meta::info aggregate_member(
     return std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())[I];
 }
 
+template <typename T, std::size_t I> consteval auto aggregate_member_name() { return std::meta::identifier_of(aggregate_member<T, I>()); }
+
 template <typename T, std::size_t... Is> constexpr auto to_tuple_impl(T &&object, std::index_sequence<Is...>) noexcept {
     using type = std::remove_cvref_t<T>;
     return std::tie(object.[:aggregate_member<type, Is>():]...);

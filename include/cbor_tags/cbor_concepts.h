@@ -81,6 +81,9 @@ struct integer;
 struct simple;
 
 template <typename T> struct as_indefinite;
+template <typename T> struct as_named_map;
+template <typename T> struct as_named_group;
+template <typename T> struct as_named_extension;
 
 struct as_text_any {
     std::uint64_t size;
@@ -193,6 +196,49 @@ template <typename T> using indefinite_value_t = std::remove_cvref_t<typename in
 
 template <typename T>
 concept IsIndefiniteWrapper = !std::is_same_v<typename indefinite_value_type<std::remove_cvref_t<T>>::type, void>;
+
+template <typename T> struct named_map_value_type {
+    using type = void;
+};
+
+template <typename T> struct named_map_value_type<as_named_map<T>> {
+    using type = T;
+};
+
+template <typename T> using named_map_value_t = std::remove_cvref_t<typename named_map_value_type<std::remove_cvref_t<T>>::type>;
+
+template <typename T>
+concept IsNamedMapWrapper = !std::is_same_v<typename named_map_value_type<std::remove_cvref_t<T>>::type, void>;
+
+template <typename T> struct named_group_value_type {
+    using type = void;
+};
+
+template <typename T> struct named_group_value_type<as_named_group<T>> {
+    using type = T;
+};
+
+template <typename T> using named_group_value_t = std::remove_cvref_t<typename named_group_value_type<std::remove_cvref_t<T>>::type>;
+
+template <typename T>
+concept IsNamedGroupWrapper = !std::is_same_v<typename named_group_value_type<std::remove_cvref_t<T>>::type, void>;
+
+template <typename T> struct named_extension_value_type {
+    using type = void;
+};
+
+template <typename T> struct named_extension_value_type<as_named_extension<T>> {
+    using type = T;
+};
+
+template <typename T>
+using named_extension_value_t = std::remove_cvref_t<typename named_extension_value_type<std::remove_cvref_t<T>>::type>;
+
+template <typename T>
+concept IsNamedExtensionWrapper = !std::is_same_v<typename named_extension_value_type<std::remove_cvref_t<T>>::type, void>;
+
+template <typename T>
+concept IsNamedWrapper = IsNamedMapWrapper<T> || IsNamedGroupWrapper<T> || IsNamedExtensionWrapper<T>;
 
 template <typename T>
 concept IsTextChar = std::is_integral_v<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1 &&
@@ -509,7 +555,7 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> && !IsNamedWrapper<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
@@ -525,8 +571,8 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 template <typename T>
 concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
                       (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsEnum<T> ||
-                      (IsClassWithTagOverload<T>);
+                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) ||
+                      IsNamedMapWrapper<T> || IsEnum<T> || (IsClassWithTagOverload<T>);
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);

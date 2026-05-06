@@ -14,6 +14,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -281,6 +282,36 @@ template <typename T> struct as_indefinite {
 };
 
 template <typename T> as_indefinite(T &) -> as_indefinite<T>;
+
+template <typename T> struct as_named_map {
+    T &value_;
+    constexpr explicit as_named_map(T &value) : value_(value) {}
+};
+
+template <typename T> as_named_map(T &) -> as_named_map<T>;
+template <typename T> as_named_map(const T &) -> as_named_map<const T>;
+
+template <typename T> struct as_named_group {
+    using value_type = T;
+    T value_{};
+
+    constexpr as_named_group() = default;
+    constexpr explicit as_named_group(const T &value) : value_(value) {}
+    constexpr explicit as_named_group(T &&value) : value_(std::move(value)) {}
+};
+
+template <typename T> as_named_group(T) -> as_named_group<T>;
+
+template <typename T> struct as_named_extension {
+    using value_type = T;
+    T value_{};
+
+    constexpr as_named_extension() = default;
+    constexpr explicit as_named_extension(const T &value) : value_(value) {}
+    constexpr explicit as_named_extension(T &&value) : value_(std::move(value)) {}
+};
+
+template <typename T> as_named_extension(T) -> as_named_extension<T>;
 
 // Compile-time function to get CBOR major type
 template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {
