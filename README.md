@@ -48,18 +48,13 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 
 - Support for both contiguous and non-contiguous buffers.
 - Ranges support.
-- Zero-copy encoding by joining multiple buffers.
-- Zero-copy decoding using views and spans.
+- Potential for zero-copy encoding by joining multiple buffers.
+- Potential for zero-copy decoding using views and spans.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
-- noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` (with an almost 1-to-1 mapping).
+- noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` 
 - CDDL support for schema and custom data definitions.
-
-## Decode Policy Notes
-
-- Core text string decode preserves the encoded bytes and does not validate UTF-8. `status_code::invalid_utf8_sequence` is reserved for a future validation path and is not emitted by default decode.
-- Enum decode validates that the CBOR integer is representable by the enum underlying type. It does not reject unnamed but representable enumerator values; applications that treat an enum as a closed set should validate that policy after decode or in a custom decode overload.
-- `negative` and negative `integer` store the CBOR negative argument plus one in a `std::uint64_t` magnitude. The CBOR edge value with major type 1 and argument `UINT64_MAX` is outside that exact wrapper range. Default encode/decode intentionally does not add runtime checks for this edge: decoding it wraps the stored magnitude to `0`, and encoding `negative{0}` emits it. Use compile-time validation when the value is known statically.
+- Upcoming: resumable encoding and decoding (useful for streaming usecases).
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
