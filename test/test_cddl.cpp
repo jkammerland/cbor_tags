@@ -161,6 +161,27 @@ struct CDDLPersonalDataExtensible {
     std::optional<std::uint32_t>                           age;
     as_named_extension<std::map<std::string, std::string>> extensions;
 };
+
+struct CDDLAccountOwner {
+    std::optional<std::string> givenName;
+    std::optional<std::string> familyName;
+};
+
+struct CDDLAccountLocation {
+    std::string                office;
+    std::string                country;
+    std::optional<std::string> timezone;
+};
+
+struct CDDLAccountProfile {
+    std::string                                            accountId;
+    as_named_group<CDDLAccountOwner>                       owner;
+    as_named_group<CDDLAccountLocation>                    location;
+    std::vector<std::string>                               roles;
+    std::map<std::string, std::uint32_t>                   counters;
+    std::optional<bool>                                    active;
+    as_named_extension<std::map<std::string, std::string>> metadata;
+};
 #endif
 } // namespace
 
@@ -351,6 +372,16 @@ TEST_CASE("C++26 named-map CDDL covers RFC 8610 group factorization and personal
                                          "NameComponents = (? firstName: tstr, ? familyName: tstr)");
 }
 
+TEST_CASE("C++26 named-map CDDL covers a larger grouped profile") {
+    fmt::memory_buffer account;
+    cddl_schema_to<as_named_map<CDDLAccountProfile>>(account, {.row_options = {.format_by_rows = false}, .root_name = "AccountProfile"});
+    CHECK_EQ(fmt::to_string(account),
+             "AccountProfile = {accountId: tstr, owner, location, roles: [* tstr], counters: {* tstr => uint}, ? active: bool, "
+             "* tstr => tstr}\n"
+             "location = (office: tstr, country: tstr, ? timezone: tstr)\n"
+             "owner = (? givenName: tstr, ? familyName: tstr)");
+}
+
 TEST_CASE("C++26 named-map CDDL keeps table examples typed") {
     fmt::memory_buffer square_roots;
     cddl_schema_to<std::map<int, float>>(square_roots, {.row_options = {.format_by_rows = false}, .root_name = "square_roots"});
@@ -403,6 +434,55 @@ TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys"
     CHECK_FALSE(unknown_dec(as_named_map{unknown}));
 }
 
+TEST_CASE("C++26 named-map codec rejects malformed named-map shapes") {
+    auto            non_text_key = to_bytes("a10102");
+    CDDLNamedPerson non_text{};
+    auto            non_text_dec = make_decoder(non_text_key);
+    CHECK_FALSE(non_text_dec(as_named_map{non_text}));
+
+    auto                       duplicate_group_key = to_bytes("a26966697273744e616d65634164616966697273744e616d6563457665");
+    CDDLPersonalDataExtensible duplicate_group{};
+    auto                       duplicate_group_dec = make_decoder(duplicate_group_key);
+    CHECK_FALSE(duplicate_group_dec(as_named_map{duplicate_group}));
+
+    auto                       duplicate_extension_key = to_bytes("a2686e69636b6e616d6563616365686e69636b6e616d6563616461");
+    CDDLPersonalDataExtensible duplicate_extension{};
+    auto                       duplicate_extension_dec = make_decoder(duplicate_extension_key);
+    CHECK_FALSE(duplicate_extension_dec(as_named_map{duplicate_extension}));
+
+    auto                       null_optional = to_bytes("a16b646973706c61794e616d65f6");
+    CDDLPersonalDataExtensible null_value{};
+    auto                       null_value_dec = make_decoder(null_optional);
+    CHECK_FALSE(null_value_dec(as_named_map{null_value}));
+}
+
+TEST_CASE("C++26 named-map codec validates required fields inside named groups") {
+    auto                        missing_group_member = to_bytes("a263616765182a68656d706c6f7965726641636d65436f");
+    CDDLNamedPersonWithIdentity missing{};
+    auto                        missing_dec = make_decoder(missing_group_member);
+    CHECK_FALSE(missing_dec(as_named_map{missing}));
+}
+
+TEST_CASE("C++26 named-map codec resets optionals and extensions before decode") {
+    CDDLPersonalDataExtensible decoded{
+        .displayName = std::string{"old"},
+        .NameComponents =
+            as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"old"}, .familyName = std::string{"old"}}},
+        .age        = std::uint32_t{99},
+        .extensions = as_named_extension<std::map<std::string, std::string>>{{{"old", "value"}}}};
+
+    auto input = to_bytes("a16966697273744e616d6563416461");
+    auto dec   = make_decoder(input);
+    REQUIRE(dec(as_named_map{decoded}));
+
+    CHECK_FALSE(decoded.displayName.has_value());
+    REQUIRE(decoded.NameComponents.value_.firstName.has_value());
+    CHECK_EQ(*decoded.NameComponents.value_.firstName, "Ada");
+    CHECK_FALSE(decoded.NameComponents.value_.familyName.has_value());
+    CHECK_FALSE(decoded.age.has_value());
+    CHECK(decoded.extensions.value_.empty());
+}
+
 TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions") {
     CDDLPersonalDataExtensible input{
         .NameComponents =
@@ -428,6 +508,47 @@ TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
 }
 
+TEST_CASE("C++26 named-map codec handles a larger grouped profile") {
+    CDDLAccountProfile input{
+        .accountId = "acct-7",
+        .owner = as_named_group<CDDLAccountOwner>{CDDLAccountOwner{.givenName = std::string{"Ada"}, .familyName = std::string{"Lovelace"}}},
+        .location = as_named_group<CDDLAccountLocation>{CDDLAccountLocation{.office = "London", .country = "GB", .timezone = std::nullopt}},
+        .roles    = {"admin", "writer"},
+        .counters = {{"logins", 42}, {"projects", 3}},
+        .active   = true,
+        .metadata = as_named_extension<std::map<std::string, std::string>>{{{"nickname", "ace"}, {"team", "compiler"}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLAccountProfile decoded{};
+    auto               dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+
+    CHECK_EQ(decoded.accountId, "acct-7");
+    REQUIRE(decoded.owner.value_.givenName.has_value());
+    CHECK_EQ(*decoded.owner.value_.givenName, "Ada");
+    REQUIRE(decoded.owner.value_.familyName.has_value());
+    CHECK_EQ(*decoded.owner.value_.familyName, "Lovelace");
+    CHECK_EQ(decoded.location.value_.office, "London");
+    CHECK_EQ(decoded.location.value_.country, "GB");
+    CHECK_FALSE(decoded.location.value_.timezone.has_value());
+    REQUIRE_EQ(decoded.roles.size(), 2U);
+    CHECK_EQ(decoded.roles[0], "admin");
+    CHECK_EQ(decoded.roles[1], "writer");
+    REQUIRE(decoded.counters.contains("logins"));
+    CHECK_EQ(decoded.counters.at("logins"), 42U);
+    REQUIRE(decoded.counters.contains("projects"));
+    CHECK_EQ(decoded.counters.at("projects"), 3U);
+    REQUIRE(decoded.active.has_value());
+    CHECK(*decoded.active);
+    REQUIRE(decoded.metadata.value_.contains("nickname"));
+    CHECK_EQ(decoded.metadata.value_.at("nickname"), "ace");
+    REQUIRE(decoded.metadata.value_.contains("team"));
+    CHECK_EQ(decoded.metadata.value_.at("team"), "compiler");
+}
+
 TEST_CASE("C++26 named-map codec rejects extension keys that shadow named fields") {
     CDDLPersonalDataExtensible input{.NameComponents =
                                          as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}}},
@@ -437,6 +558,14 @@ TEST_CASE("C++26 named-map codec rejects extension keys that shadow named fields
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
     CHECK_FALSE(enc(as_named_map{input}));
+
+    CDDLPersonalDataExtensible group_shadow{.NameComponents =
+                                                as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}}},
+                                            .age        = 42,
+                                            .extensions = as_named_extension<std::map<std::string, std::string>>{{{"firstName", "Eve"}}}};
+
+    buffer.clear();
+    CHECK_FALSE(enc(as_named_map{group_shadow}));
 }
 #endif
 

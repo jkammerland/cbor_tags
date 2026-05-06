@@ -215,3 +215,128 @@ field.
 // Without the extension field:
 //   "nickname" is rejected as an unknown key.
 ```
+
+## Larger Example
+
+```cpp
+struct AccountOwner {
+    // Empty fields are omitted.
+    std::optional<std::string> givenName;
+    std::optional<std::string> familyName;
+};
+
+struct AccountLocation {
+    // Required fields must be present when decoding.
+    std::string office;
+    std::string country;
+
+    // Optional fields are omitted when empty.
+    std::optional<std::string> timezone;
+};
+
+using OwnerGroup = as_named_group<AccountOwner>;
+using LocationGroup = as_named_group<AccountLocation>;
+using Metadata = as_named_extension<std::map<std::string, std::string>>;
+
+struct AccountProfile {
+    std::string accountId;
+
+    // Both groups are flattened into the same map as accountId.
+    OwnerGroup owner;
+    LocationGroup location;
+
+    std::vector<std::string> roles;
+    std::map<std::string, std::uint32_t> counters;
+    std::optional<bool> active;
+
+    // Extra text keys are decoded here as string values.
+    Metadata metadata;
+};
+
+AccountProfile profile{
+    .accountId = "acct-7",
+    .owner = OwnerGroup{
+        AccountOwner{
+            .givenName = std::string{"Ada"},
+            .familyName = std::string{"Lovelace"},
+        },
+    },
+    .location = LocationGroup{
+        AccountLocation{
+            .office = "London",
+            .country = "GB",
+        },
+    },
+    .roles = {"admin", "writer"},
+    .counters = {{"logins", 42}, {"projects", 3}},
+    .active = true,
+    .metadata = Metadata{
+        {
+            {"nickname", "ace"},
+            {"team", "compiler"},
+        },
+    },
+};
+
+std::vector<std::byte> output;
+auto enc = make_encoder(output);
+
+// Encodes as one flat map:
+//
+// {
+//   "accountId": "acct-7",
+//   "givenName": "Ada",
+//   "familyName": "Lovelace",
+//   "office": "London",
+//   "country": "GB",
+//   "roles": ["admin", "writer"],
+//   "counters": {"logins": 42, "projects": 3},
+//   "active": true,
+//   "nickname": "ace",
+//   "team": "compiler"
+// }
+enc(as_named_map{profile});
+```
+
+Generate CDDL:
+
+```cpp
+fmt::memory_buffer schema;
+
+cddl_schema_to<as_named_map<AccountProfile>>(
+    schema,
+    {
+        .row_options = {.format_by_rows = false},
+        .root_name = "AccountProfile",
+    });
+
+fmt::print("{}\n", fmt::to_string(schema));
+```
+
+Output:
+
+```cddl
+AccountProfile = {accountId: tstr, owner, location, roles: [* tstr], counters: {* tstr => uint}, ? active: bool, * tstr => tstr}
+location = (office: tstr, country: tstr, ? timezone: tstr)
+owner = (? givenName: tstr, ? familyName: tstr)
+```
+
+```cpp
+// Decode checks:
+//   "office" and "country" are required because AccountLocation uses
+//   plain std::string fields.
+//
+//   "timezone" may be absent because it is std::optional<std::string>.
+//
+//   Duplicate known keys are rejected:
+//     "givenName" twice
+//
+//   Duplicate extension keys are rejected:
+//     "nickname" twice
+//
+//   Extension keys must not shadow known fields:
+//     "accountId", "givenName", "familyName", "office", "country",
+//     "timezone", "roles", "counters", and "active"
+//
+//   Named-map keys must be text strings.
+```
