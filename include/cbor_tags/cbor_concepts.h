@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -37,10 +38,13 @@ concept IsCborBufferByte =
     (std::integral<std::remove_cvref_t<T>> && sizeof(std::remove_cvref_t<T>) == 1 && !std::same_as<std::remove_cvref_t<T>, bool>);
 
 template <typename T>
-concept ValidCborBuffer =
+concept CborInputBuffer =
     std::ranges::range<std::remove_cvref_t<T>> && std::ranges::range<const std::remove_cvref_t<T>> &&
     std::ranges::common_range<const std::remove_cvref_t<T>> && IsCborBufferByte<std::ranges::range_value_t<std::remove_cvref_t<T>>> &&
     (std::ranges::contiguous_range<const std::remove_cvref_t<T>> || std::ranges::bidirectional_range<const std::remove_cvref_t<T>>);
+
+template <typename T>
+concept ValidCborBuffer = CborInputBuffer<T>;
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {
@@ -263,13 +267,22 @@ concept IsByteLikeRange =
     std::ranges::input_range<std::remove_cvref_t<T>> && IsByteLike<std::ranges::range_value_t<std::remove_cvref_t<T>>>;
 
 template <typename T>
-concept IsPairLike = requires(T value) {
-    std::get<0>(value);
-    std::get<1>(value);
-} || requires(T value) {
-    value.first;
-    value.second;
+concept IsTuplePairLike = requires {
+    typename std::tuple_size<std::remove_cvref_t<T>>::type;
+    requires std::tuple_size_v<std::remove_cvref_t<T>> == 2;
+} && requires(T &&value) {
+    std::get<0>(std::forward<T>(value));
+    std::get<1>(std::forward<T>(value));
 };
+
+template <typename T>
+concept IsMemberPairLike = requires(T &&value) {
+    std::forward<T>(value).first;
+    std::forward<T>(value).second;
+};
+
+template <typename T>
+concept IsPairLike = IsTuplePairLike<T> || IsMemberPairLike<T>;
 
 template <typename T>
 concept IsPairLikeRange =
@@ -289,6 +302,25 @@ concept IsFixedArray =
         typename T::size_type;
     } && (std::is_same_v<T, std::span<typename T::value_type>> ||
           (requires { typename std::tuple_size<T>::type; } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size_v<T>>>));
+
+template <typename T>
+concept CborFixedOutputBuffer = IsFixedArray<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> buffer) {
+    { buffer[typename std::remove_cvref_t<T>::size_type{}] } -> std::assignable_from<typename std::remove_cvref_t<T>::value_type>;
+};
+
+template <typename T>
+concept CborAppendOutputBuffer = requires(std::remove_cvref_t<T> &buffer, typename std::remove_cvref_t<T>::value_type byte) {
+    buffer.push_back(byte);
+    buffer.insert(buffer.end(), &byte, &byte + 1);
+};
+
+template <typename T>
+concept CborOutputBuffer =
+    requires {
+        typename std::remove_cvref_t<T>::value_type;
+        typename std::remove_cvref_t<T>::size_type;
+    } && (!std::is_const_v<std::remove_reference_t<T>>) && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
+    (CborFixedOutputBuffer<T> || CborAppendOutputBuffer<T>);
 
 template <typename T>
 concept IsMapBase =
@@ -614,10 +646,10 @@ struct ContainsCborMajor<T, true> {
 };
 
 template <typename Buffer>
-    requires ValidCborBuffer<Buffer>
+    requires CborInputBuffer<Buffer> && requires { typename std::remove_cvref_t<Buffer>::size_type; }
 struct CborStream {
-    Buffer           &buffer;
-    Buffer::size_type head{};
+    Buffer                                         &buffer;
+    typename std::remove_cvref_t<Buffer>::size_type head{};
 
     constexpr explicit CborStream(Buffer &buffer) : buffer(buffer) {}
     template <typename... Args> void operator()(const Args &...) { /* (de)serialize cbor onto buffer */ }

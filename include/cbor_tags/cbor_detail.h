@@ -105,7 +105,7 @@ template <typename T> struct appender<T, true> {
 };
 
 template <typename T, bool IsContiguous = IsContiguous<T>>
-    requires ValidCborBuffer<T>
+    requires CborInputBuffer<T>
 struct reader;
 
 template <typename T> struct reader<T, true> {

@@ -29,6 +29,7 @@
 #include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
@@ -479,6 +480,43 @@ TEST_CASE("CBOR buffer concept rejects non-byte storage") {
     static_assert(!cbor::tags::ValidCborBuffer<std::list<double>>);
     static_assert(!cbor::tags::ValidCborBuffer<std::vector<bool>>);
     static_assert(!cbor::tags::ValidCborBuffer<std::array<bool, 5>>);
+}
+
+namespace {
+
+template <typename Buffer>
+concept CanMakeEncoder = requires(Buffer &buffer) { cbor::tags::make_encoder(buffer); };
+
+template <typename Buffer>
+concept CanMakeDecoder = requires(Buffer &buffer) { cbor::tags::make_decoder(buffer); };
+
+} // namespace
+
+TEST_CASE("CBOR input and output buffer concepts are split") {
+    using byte_vector       = std::vector<std::byte>;
+    using byte_subrange     = std::ranges::subrange<byte_vector::const_iterator>;
+    using mutable_subrange  = std::ranges::subrange<byte_vector::iterator>;
+    using const_byte_span   = std::span<const std::byte>;
+    using mutable_byte_span = std::span<std::byte>;
+
+    static_assert(cbor::tags::CborInputBuffer<byte_vector>);
+    static_assert(cbor::tags::CborInputBuffer<const_byte_span>);
+    static_assert(cbor::tags::CborInputBuffer<byte_subrange>);
+    static_assert(cbor::tags::CborInputBuffer<mutable_subrange>);
+
+    static_assert(cbor::tags::CborOutputBuffer<byte_vector>);
+    static_assert(cbor::tags::CborOutputBuffer<std::vector<std::uint8_t>>);
+    static_assert(cbor::tags::CborOutputBuffer<std::array<std::byte, 8>>);
+    static_assert(cbor::tags::CborOutputBuffer<mutable_byte_span>);
+    static_assert(!cbor::tags::CborOutputBuffer<const byte_vector>);
+    static_assert(!cbor::tags::CborOutputBuffer<const_byte_span>);
+    static_assert(!cbor::tags::CborOutputBuffer<std::string_view>);
+    static_assert(!cbor::tags::CborOutputBuffer<byte_subrange>);
+    static_assert(!cbor::tags::CborOutputBuffer<mutable_subrange>);
+
+    static_assert(std::ranges::output_range<mutable_subrange, std::byte>);
+    static_assert(!CanMakeEncoder<mutable_subrange>);
+    static_assert(CanMakeDecoder<mutable_subrange>);
 }
 
 TEST_CASE("Contiguous range concept") {

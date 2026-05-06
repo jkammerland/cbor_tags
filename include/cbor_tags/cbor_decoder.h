@@ -25,6 +25,7 @@
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
 
+#include <array>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -75,7 +76,7 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
-    requires ValidCborBuffer<InputBuffer>
+    requires CborInputBuffer<InputBuffer>
 struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... {
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
@@ -1562,7 +1563,7 @@ template <typename T> struct cbor_header_decoder {
     constexpr status_code decode(as_map value) { return validate_size(major_type::Map, value.size_); }
 };
 
-template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
+template <CborInputBuffer InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
     return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
 }
 
@@ -1776,7 +1777,7 @@ template <std::uint64_t... Tags> struct static_tag_filter {
 
 } // namespace detail
 
-template <ValidCborBuffer Buffer> struct tag_payload_decoder {
+template <CborInputBuffer Buffer> struct tag_payload_decoder {
     using buffer_type = std::remove_cvref_t<Buffer>;
     using iterator    = std::ranges::iterator_t<const buffer_type>;
     using subrange    = std::ranges::subrange<iterator>;
@@ -1788,13 +1789,10 @@ template <ValidCborBuffer Buffer> struct tag_payload_decoder {
         return dec(std::forward<T>(values)...);
     }
 
-    template <typename T> [[nodiscard]] auto decode(T &value) {
-        auto dec = cbor::tags::make_decoder(range_);
-        return dec.decode(value);
-    }
+    template <typename T> [[nodiscard]] auto decode(T &value) { return (*this)(value); }
 };
 
-template <ValidCborBuffer Buffer> struct tag_match {
+template <CborInputBuffer Buffer> struct tag_match {
     using buffer_type = std::remove_cvref_t<Buffer>;
     using iterator    = std::ranges::iterator_t<const buffer_type>;
     using subrange    = std::ranges::subrange<iterator>;
@@ -1823,7 +1821,7 @@ template <ValidCborBuffer Buffer> struct tag_match {
     }
 };
 
-template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public std::ranges::view_interface<tag_view<Buffer, Predicate>> {
+template <CborInputBuffer Buffer, typename Predicate> class tag_view : public std::ranges::view_interface<tag_view<Buffer, Predicate>> {
   public:
     using buffer_type = std::remove_cvref_t<Buffer>;
     using iterator_t  = std::ranges::iterator_t<const buffer_type>;
@@ -1862,16 +1860,16 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
         }
 
         void pop_completed_frames() {
-            while (!stack_.empty() && !stack_.back().indefinite && stack_.back().remaining == 0) {
-                stack_.pop_back();
+            while (!stack_empty() && !stack_back().indefinite && stack_back().remaining == 0) {
+                stack_pop_back();
             }
         }
 
         bool consume_parent_item() {
-            if (stack_.empty()) {
+            if (stack_empty()) {
                 return true;
             }
-            auto &frame = stack_.back();
+            auto &frame = stack_back();
             if (frame.indefinite) {
                 if (frame.major == major_type::Map) {
                     frame.map_expects_value = !frame.map_expects_value;
@@ -1886,15 +1884,15 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
         }
 
         bool consume_indefinite_break_if_present() {
-            if (stack_.empty() || !stack_.back().indefinite || cursor_ == end_ || detail::scanner_byte_to_u8(*cursor_) != 0xFFU) {
+            if (stack_empty() || !stack_back().indefinite || cursor_ == end_ || detail::scanner_byte_to_u8(*cursor_) != 0xFFU) {
                 return false;
             }
-            if (stack_.back().major == major_type::Map && stack_.back().map_expects_value) {
+            if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
                 fail(status_code::error);
                 return true;
             }
             ++cursor_;
-            stack_.pop_back();
+            stack_pop_back();
             return true;
         }
 
@@ -1934,7 +1932,7 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
                 pop_completed_frames();
 
                 if (cursor_ == end_) {
-                    if (stack_.empty()) {
+                    if (stack_empty()) {
                         view_->status_ = status_code::success;
                         done_          = true;
                     } else {
@@ -1998,21 +1996,27 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
                 }
                 case major_type::Array: {
                     if (additional_info == 31U) {
-                        stack_.push_back(detail::tag_scan_frame{.indefinite = true, .major = major_type::Array});
+                        if (!push_frame(detail::tag_scan_frame{.indefinite = true, .major = major_type::Array})) {
+                            return;
+                        }
                     } else {
                         std::uint64_t length{};
                         if (!read_argument(additional_info, length)) {
                             return;
                         }
                         if (length > 0) {
-                            stack_.push_back(detail::tag_scan_frame{.major = major_type::Array, .remaining = length});
+                            if (!push_frame(detail::tag_scan_frame{.major = major_type::Array, .remaining = length})) {
+                                return;
+                            }
                         }
                     }
                     break;
                 }
                 case major_type::Map: {
                     if (additional_info == 31U) {
-                        stack_.push_back(detail::tag_scan_frame{.indefinite = true, .major = major_type::Map});
+                        if (!push_frame(detail::tag_scan_frame{.indefinite = true, .major = major_type::Map})) {
+                            return;
+                        }
                     } else {
                         std::uint64_t length{};
                         if (!read_argument(additional_info, length)) {
@@ -2023,7 +2027,9 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
                             return;
                         }
                         if (length > 0) {
-                            stack_.push_back(detail::tag_scan_frame{.major = major_type::Map, .remaining = length * 2U});
+                            if (!push_frame(detail::tag_scan_frame{.major = major_type::Map, .remaining = length * 2U})) {
+                                return;
+                            }
                         }
                     }
                     break;
@@ -2044,7 +2050,9 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
                         return;
                     }
 
-                    stack_.push_back(detail::tag_scan_frame{.major = major_type::Tag, .remaining = 1});
+                    if (!push_frame(detail::tag_scan_frame{.major = major_type::Tag, .remaining = 1})) {
+                        return;
+                    }
                     if (std::invoke(view_->predicate_, tag)) {
                         current_ = match_type{.buffer_        = view_->buffer_,
                                               .tag_           = tag,
@@ -2068,12 +2076,26 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
             }
         }
 
-        tag_view                           *view_{};
-        iterator_t                          cursor_{};
-        iterator_t                          end_{};
-        std::vector<detail::tag_scan_frame> stack_{};
-        match_type                          current_{};
-        bool                                done_{};
+        [[nodiscard]] bool  stack_empty() const noexcept { return stack_size_ == 0; }
+        [[nodiscard]] auto &stack_back() noexcept { return stack_[stack_size_ - 1]; }
+        void                stack_pop_back() noexcept { --stack_size_; }
+        bool                push_frame(detail::tag_scan_frame frame) {
+            if (stack_size_ == stack_.size()) {
+                fail(status_code::error);
+                return false;
+            }
+            stack_[stack_size_++] = frame;
+            return true;
+        }
+
+        static constexpr std::size_t                        max_stack_depth = 256;
+        tag_view                                           *view_{};
+        iterator_t                                          cursor_{};
+        iterator_t                                          end_{};
+        std::array<detail::tag_scan_frame, max_stack_depth> stack_{};
+        std::size_t                                         stack_size_{};
+        match_type                                          current_{};
+        bool                                                done_{};
     };
 
     constexpr tag_view(const buffer_type &buffer, Predicate predicate) : buffer_(&buffer), predicate_(std::move(predicate)) {}
@@ -2095,12 +2117,22 @@ template <ValidCborBuffer Buffer, typename Predicate> class tag_view : public st
     friend class iterator;
 };
 
-template <std::uint64_t... Tags, ValidCborBuffer Buffer> [[nodiscard]] auto find_tags(const Buffer &buffer) {
+template <std::uint64_t... Tags, CborInputBuffer Buffer> [[nodiscard]] auto find_tags(Buffer &buffer) {
     return tag_view<std::remove_cvref_t<Buffer>, detail::static_tag_filter<Tags...>>{buffer, {}};
 }
 
-template <ValidCborBuffer Buffer, typename Predicate> [[nodiscard]] auto find_tags(const Buffer &buffer, Predicate predicate) {
+template <std::uint64_t... Tags, CborInputBuffer Buffer>
+auto find_tags(Buffer &&buffer)
+    requires(!std::is_lvalue_reference_v<Buffer>)
+= delete;
+
+template <CborInputBuffer Buffer, typename Predicate> [[nodiscard]] auto find_tags(Buffer &buffer, Predicate predicate) {
     return tag_view<std::remove_cvref_t<Buffer>, std::remove_cvref_t<Predicate>>{buffer, std::forward<Predicate>(predicate)};
 }
+
+template <CborInputBuffer Buffer, typename Predicate>
+auto find_tags(Buffer &&buffer, Predicate &&predicate)
+    requires(!std::is_lvalue_reference_v<Buffer>)
+= delete;
 
 } // namespace cbor::tags

@@ -37,6 +37,27 @@
 
 using namespace cbor::tags;
 
+namespace {
+
+struct member_pair_entry {
+    int first;
+    int second;
+};
+
+template <typename R>
+concept CanMakeMapRange = requires(R &&range) { cbor::tags::as_map_range(std::forward<R>(range)); };
+
+} // namespace
+
+static_assert(IsPairLike<std::pair<int, int>>);
+static_assert(IsPairLike<std::tuple<int, int>>);
+static_assert(IsPairLike<std::array<int, 2>>);
+static_assert(IsPairLike<member_pair_entry>);
+static_assert(!IsPairLike<std::tuple<int>>);
+static_assert(!IsPairLike<std::tuple<int, int, int>>);
+static_assert(!IsPairLike<std::array<int, 3>>);
+static_assert(!CanMakeMapRange<std::array<std::tuple<int, int, int>, 1> &>);
+
 TEST_CASE("Test ranges 1") {
     // Create a deque of chars (non-contiguous in memory)
     std::deque<char> char_deque{'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'};
@@ -284,6 +305,15 @@ TEST_CASE("explicit array range wrappers encode sized and non-sized views") {
     auto evens = std::views::iota(0, 6) | std::views::filter([](int value) { return value % 2 == 0; });
     REQUIRE(enc(as_array_range(evens)));
     CHECK_EQ(to_hex(buffer), "9f000204ff");
+
+    buffer.clear();
+    REQUIRE(enc(as_array_range(std::vector<int>{1, 2, 3})));
+    CHECK_EQ(to_hex(buffer), "83010203");
+
+    buffer.clear();
+    auto wrapped = as_array_range(std::vector<int>{4, 5});
+    REQUIRE(enc(wrapped));
+    CHECK_EQ(to_hex(buffer), "820405");
 }
 
 TEST_CASE("explicit map range wrappers encode transformed pair views") {
@@ -299,6 +329,20 @@ TEST_CASE("explicit map range wrappers encode transformed pair views") {
                      std::views::transform([](int value) { return std::pair{value, value * 10}; });
     REQUIRE(enc(as_map_range(odd_pairs)));
     CHECK_EQ(to_hex(buffer), "bf010a03181eff");
+
+    buffer.clear();
+    REQUIRE(enc(as_map_range(std::vector<std::pair<int, int>>{{1, 2}, {3, 4}})));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    auto tuple_pairs = std::array{std::tuple{1, 2}, std::tuple{3, 4}};
+    REQUIRE(enc(as_map_range(tuple_pairs)));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    auto member_pairs = std::array{member_pair_entry{1, 2}, member_pair_entry{3, 4}};
+    REQUIRE(enc(as_map_range(member_pairs)));
+    CHECK_EQ(to_hex(buffer), "a201020304");
 }
 
 TEST_CASE("explicit byte string range wrappers encode byte-like views") {
@@ -307,6 +351,10 @@ TEST_CASE("explicit byte string range wrappers encode byte-like views") {
 
     auto sized_bytes = std::views::iota(1, 4) | std::views::transform([](int value) { return static_cast<std::uint8_t>(value); });
     REQUIRE(enc(as_bstr_range(sized_bytes)));
+    CHECK_EQ(to_hex(buffer), "43010203");
+
+    buffer.clear();
+    REQUIRE(enc(as_bstr_range(std::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}}, 2)));
     CHECK_EQ(to_hex(buffer), "43010203");
 
     buffer.clear();

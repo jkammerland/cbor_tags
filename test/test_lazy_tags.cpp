@@ -2,15 +2,78 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <doctest/doctest.h>
+#include <new>
 #include <ranges>
+#include <span>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace cbor::tags;
+
+namespace {
+
+bool fail_lazy_tag_allocations = false;
+
+struct allocation_failure_guard {
+    allocation_failure_guard() { fail_lazy_tag_allocations = true; }
+    ~allocation_failure_guard() { fail_lazy_tag_allocations = false; }
+};
+
+struct accept_any_tag {
+    bool operator()(std::uint64_t) const { return true; }
+};
+
+template <typename Buffer>
+concept CanFindStaticTags = requires(Buffer &&buffer) { cbor::tags::find_tags<100>(std::forward<Buffer>(buffer)); };
+
+template <typename Buffer>
+concept CanFindRuntimeTags = requires(Buffer &&buffer) { cbor::tags::find_tags(std::forward<Buffer>(buffer), accept_any_tag{}); };
+
+} // namespace
+
+void *operator new(std::size_t size) {
+    if (fail_lazy_tag_allocations) {
+        throw std::bad_alloc{};
+    }
+    if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
+        return ptr;
+    }
+    throw std::bad_alloc{};
+}
+
+void *operator new[](std::size_t size) {
+    if (fail_lazy_tag_allocations) {
+        throw std::bad_alloc{};
+    }
+    if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
+        return ptr;
+    }
+    throw std::bad_alloc{};
+}
+
+void operator delete(void *ptr) noexcept { std::free(ptr); }
+void operator delete[](void *ptr) noexcept { std::free(ptr); }
+void operator delete(void *ptr, std::size_t) noexcept { std::free(ptr); }
+void operator delete[](void *ptr, std::size_t) noexcept { std::free(ptr); }
+
+static_assert(CanFindStaticTags<std::vector<std::byte> &>);
+static_assert(CanFindStaticTags<const std::vector<std::byte> &>);
+static_assert(CanFindStaticTags<std::span<const std::byte> &>);
+static_assert(!CanFindStaticTags<std::vector<std::byte>>);
+static_assert(!CanFindStaticTags<std::span<const std::byte>>);
+static_assert(!CanFindRuntimeTags<std::vector<std::byte>>);
+
+using lazy_tag_byte_vector   = std::vector<std::byte>;
+using lazy_tag_byte_subrange = std::ranges::subrange<lazy_tag_byte_vector::const_iterator>;
+static_assert(CanFindStaticTags<lazy_tag_byte_subrange &>);
+static_assert(!CanFindStaticTags<lazy_tag_byte_subrange>);
 
 TEST_CASE("lazy tag scanner finds matching tags in nested arrays and maps") {
     auto buffer = to_bytes("82d864182aa101d8c863616263");
@@ -40,9 +103,15 @@ TEST_CASE("lazy tag scanner supports runtime predicates and decodes only matchin
     CHECK(it->decode(decoded));
     CHECK_EQ(decoded, "abc");
 
-    auto dec = it->make_decoder();
+    auto dec                    = it->make_decoder();
+    using match_decode_result   = decltype(it->decode(decoded));
+    using decoder_call_result   = decltype(dec(decoded));
+    using decoder_decode_result = decltype(dec.decode(decoded));
+    static_assert(std::same_as<match_decode_result, decoder_call_result>);
+    static_assert(std::same_as<decoder_call_result, decoder_decode_result>);
+
     decoded.clear();
-    CHECK(dec(decoded));
+    CHECK(dec.decode(decoded));
     CHECK_EQ(decoded, "abc");
 }
 
@@ -52,6 +121,16 @@ TEST_CASE("lazy tag scanner exposes contiguous payload spans") {
     auto it     = view.begin();
 
     REQUIRE(it != view.end());
+    CHECK_EQ(to_hex(it->payload_span()), "182a");
+}
+
+TEST_CASE("lazy tag scanner accepts const lvalue buffers") {
+    const auto buffer = to_bytes("d864182a");
+    auto       view   = find_tags<100>(buffer);
+    auto       it     = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
     CHECK_EQ(to_hex(it->payload_span()), "182a");
 }
 
@@ -88,6 +167,41 @@ TEST_CASE("lazy tag scanner skips large unrelated byte strings") {
     ++it;
     CHECK(it == view.end());
     CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner uses no heap allocation while scanning") {
+    auto buffer = to_bytes("82820102d86401");
+    auto view   = find_tags<100>(buffer);
+    auto it     = decltype(view.begin()){};
+    bool threw  = false;
+
+    {
+        allocation_failure_guard guard;
+        try {
+            it = view.begin();
+            if (it != view.end()) {
+                ++it;
+            }
+        } catch (...) { threw = true; }
+    }
+
+    CHECK(!threw);
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner status reflects scanning performed so far") {
+    auto buffer = to_bytes("d86401ff");
+    auto view   = find_tags<100>(buffer);
+    auto it     = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
+    CHECK_EQ(view.status(), status_code::success);
+
+    ++it;
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::error);
 }
 
 TEST_CASE("lazy tag scanner reports truncated matching payloads") {
