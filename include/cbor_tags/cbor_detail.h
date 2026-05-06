@@ -38,10 +38,10 @@ template <typename T> struct appender<T, false> {
         if constexpr (IsMap<T>) {
             const auto &[key, mapped_value] = value;
 
-            if constexpr (IsMultiMap<T>) {
-                container.insert({key, mapped_value});
-            } else {
+            if constexpr (requires { container.insert_or_assign(key, mapped_value); }) {
                 container.insert_or_assign(key, mapped_value);
+            } else {
+                container.insert(value);
             }
         } else {
             container.push_back(value);
@@ -109,37 +109,57 @@ template <typename T, bool IsContiguous = IsContiguous<T>>
 struct reader;
 
 template <typename T> struct reader<T, true> {
-    using size_type  = T::size_type;
+    using size_type  = std::size_t;
     using value_type = std::byte;
-    using iterator   = typename T::iterator;
-    size_type position_;
+    using iterator   = std::ranges::iterator_t<const T>;
+    size_type position_{0};
 
-    constexpr reader(const T &) : position_(0) {}
+    constexpr reader(const T &) {}
 
-    constexpr bool empty(const T &container) const noexcept { return position_ >= container.size(); }
-    constexpr bool empty(const T &container, size_type offset) const noexcept {
-        return position_ >= container.size() || offset >= (container.size() - position_);
+    constexpr size_type size(const T &container) const noexcept {
+        if constexpr (std::ranges::sized_range<const T>) {
+            return static_cast<size_type>(std::ranges::size(container));
+        } else {
+            return static_cast<size_type>(std::ranges::distance(container));
+        }
     }
-    constexpr value_type read(const T &container) noexcept { return static_cast<value_type>(container[position_++]); }
+
+    constexpr bool empty(const T &container) const noexcept { return position_ >= size(container); }
+    constexpr bool empty(const T &container, size_type offset) const noexcept {
+        const auto range_size = size(container);
+        return position_ >= range_size || offset >= (range_size - position_);
+    }
+    constexpr value_type read(const T &container) noexcept {
+        auto result = static_cast<value_type>(*(std::ranges::begin(container) + static_cast<std::ptrdiff_t>(position_)));
+        ++position_;
+        return result;
+    }
     constexpr value_type read(const T &container, size_type offset) noexcept {
-        return static_cast<value_type>(container[position_ + offset]);
+        return static_cast<value_type>(*(std::ranges::begin(container) + static_cast<std::ptrdiff_t>(position_ + offset)));
     }
 
     constexpr void seek(int i) { position_ += i; }
 };
 
 template <typename T> struct reader<T, false> {
-    using size_type  = T::size_type;
+    using size_type  = std::size_t;
     using value_type = std::byte;
-    using iterator   = typename T::const_iterator;
+    using iterator   = std::ranges::iterator_t<const T>;
     iterator  position_;
     size_type current_offset_{0};
-    constexpr reader(const T &container) : position_(container.cbegin()) {}
+    constexpr reader(const T &container) : position_(std::ranges::begin(container)) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool empty(const T &container) const noexcept { return position_ == container.cend(); }
+    constexpr bool empty(const T &container) const noexcept { return position_ == std::ranges::end(container); }
     constexpr bool empty(const T &container, size_type offset) const noexcept {
-        return current_offset_ >= container.size() || offset >= (container.size() - current_offset_);
+        auto it = position_;
+        for (size_type i = 0; i <= offset; ++i) {
+            if (it == std::ranges::end(container)) {
+                return true;
+            }
+            ++it;
+        }
+        return false;
     }
     constexpr value_type read(const T &) noexcept {
         auto result = static_cast<value_type>(*position_);
@@ -150,13 +170,17 @@ template <typename T> struct reader<T, false> {
 
     constexpr value_type read(const T &, size_type offset) noexcept {
         auto it = position_;
-        std::advance(it, offset);
+        std::advance(it, static_cast<std::ptrdiff_t>(offset));
         return static_cast<value_type>(*it);
     }
 
     constexpr void seek(int i) {
         position_ = std::next(position_, i);
-        current_offset_ += i;
+        if (i >= 0) {
+            current_offset_ += static_cast<size_type>(i);
+        } else {
+            current_offset_ -= static_cast<size_type>(-i);
+        }
     }
 };
 
@@ -201,6 +225,22 @@ template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr
 template <typename Encoder, typename C> inline constexpr auto adl_indirect_encode(Encoder &enc, const C &c) { return encode(enc, c); }
 template <typename Decoder, typename C> inline constexpr auto adl_indirect_decode(Decoder &dec, C &&c) {
     return decode(dec, std::forward<C>(c));
+}
+
+template <typename Pair> constexpr decltype(auto) pair_first(Pair &&pair) {
+    if constexpr (requires { std::get<0>(std::forward<Pair>(pair)); }) {
+        return std::get<0>(std::forward<Pair>(pair));
+    } else {
+        return std::forward<Pair>(pair).first;
+    }
+}
+
+template <typename Pair> constexpr decltype(auto) pair_second(Pair &&pair) {
+    if constexpr (requires { std::get<1>(std::forward<Pair>(pair)); }) {
+        return std::get<1>(std::forward<Pair>(pair));
+    } else {
+        return std::forward<Pair>(pair).second;
+    }
 }
 
 template <typename T> inline constexpr auto get_major_6_tag_from_tuple(const T &t) {

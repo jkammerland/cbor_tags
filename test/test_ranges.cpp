@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cbor_tags/cbor.h>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -15,6 +17,23 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#if __has_include(<boost/container/flat_map.hpp>) && __has_include(<boost/container/list.hpp>) && __has_include(<boost/container/small_vector.hpp>) && \
+    __has_include(<boost/container/static_vector.hpp>) && __has_include(<boost/container/string.hpp>) && __has_include(<boost/container/vector.hpp>)
+#include <boost/container/flat_map.hpp>
+#include <boost/container/list.hpp>
+#include <boost/container/small_vector.hpp>
+#include <boost/container/static_vector.hpp>
+#include <boost/container/string.hpp>
+#include <boost/container/vector.hpp>
+#define CBOR_TAGS_HAS_BOOST_CONTAINER_RANGES 1
+#endif
+
+#if __has_include(<boost/container/map.hpp>) && __has_include(<boost/unordered/unordered_map.hpp>)
+#include <boost/container/map.hpp>
+#include <boost/unordered/unordered_map.hpp>
+#define CBOR_TAGS_HAS_BOOST_MAPS 1
+#endif
 
 using namespace cbor::tags;
 
@@ -252,3 +271,104 @@ TEST_CASE("joining views of different types") {
     CHECK_NE(joined_hex, "01020348656c6c6f576f726c0102"); // Should be different after modification
     CHECK_EQ(joined_hex, "ff020368656c6c6f576f726c0102");
 }
+
+TEST_CASE("explicit array range wrappers encode sized and non-sized views") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    auto sized = std::views::iota(1, 4);
+    REQUIRE(enc(as_array_range(sized)));
+    CHECK_EQ(to_hex(buffer), "83010203");
+
+    buffer.clear();
+    auto evens = std::views::iota(0, 6) | std::views::filter([](int value) { return value % 2 == 0; });
+    REQUIRE(enc(as_array_range(evens)));
+    CHECK_EQ(to_hex(buffer), "9f000204ff");
+}
+
+TEST_CASE("explicit map range wrappers encode transformed pair views") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    auto sized_pairs = std::views::iota(1, 4) | std::views::transform([](int value) { return std::pair{value, value + 10}; });
+    REQUIRE(enc(as_map_range(sized_pairs)));
+    CHECK_EQ(to_hex(buffer), "a3010b020c030d");
+
+    buffer.clear();
+    auto odd_pairs = std::views::iota(0, 5) | std::views::filter([](int value) { return value % 2 == 1; }) |
+                     std::views::transform([](int value) { return std::pair{value, value * 10}; });
+    REQUIRE(enc(as_map_range(odd_pairs)));
+    CHECK_EQ(to_hex(buffer), "bf010a03181eff");
+}
+
+TEST_CASE("explicit byte string range wrappers encode byte-like views") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    auto sized_bytes = std::views::iota(1, 4) | std::views::transform([](int value) { return static_cast<std::uint8_t>(value); });
+    REQUIRE(enc(as_bstr_range(sized_bytes)));
+    CHECK_EQ(to_hex(buffer), "43010203");
+
+    buffer.clear();
+    auto chunked_bytes = std::views::iota(0, 5) | std::views::filter([](int) { return true; }) |
+                         std::views::transform([](int value) { return static_cast<std::byte>(value); });
+    REQUIRE(enc(as_bstr_range(chunked_bytes, 2)));
+    CHECK_EQ(to_hex(buffer), "5f4200014202034104ff");
+}
+
+#ifdef CBOR_TAGS_HAS_BOOST_CONTAINER_RANGES
+TEST_CASE("boost containers classify as maps, arrays, text, and explicit bstr ranges") {
+    static_assert(IsMap<boost::container::flat_map<int, int>>);
+    static_assert(!IsArray<boost::container::flat_map<int, int>>);
+    static_assert(IsArray<boost::container::vector<int>>);
+    static_assert(IsArray<boost::container::list<int>>);
+    static_assert(IsArray<boost::container::small_vector<int, 4>>);
+    static_assert(IsArray<boost::container::static_vector<int, 4>>);
+    static_assert(IsTextString<boost::container::string>);
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    boost::container::flat_map<int, int> flat_map{{1, 2}, {3, 4}};
+    REQUIRE(enc(flat_map));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    boost::container::vector<std::uint8_t> bytes{1, 2, 3};
+    REQUIRE(enc(as_bstr_range(bytes)));
+    CHECK_EQ(to_hex(buffer), "43010203");
+}
+#endif
+
+#ifdef CBOR_TAGS_HAS_BOOST_MAPS
+TEST_CASE("boost map containers decode from cbor maps") {
+    auto bytes = to_bytes("a201020304");
+
+    {
+        auto                            dec = make_decoder(bytes);
+        boost::container::map<int, int> decoded;
+        auto                            result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+
+    {
+        auto                                 dec = make_decoder(bytes);
+        boost::container::flat_map<int, int> decoded;
+        auto                                 result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+
+    {
+        auto                           dec = make_decoder(bytes);
+        boost::unordered_map<int, int> decoded;
+        auto                           result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+}
+#endif

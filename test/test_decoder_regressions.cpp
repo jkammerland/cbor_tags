@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
@@ -692,6 +694,27 @@ TEST_CASE("decoder should reject array length mismatch for fixed-size spans") {
     CHECK_EQ(result.error(), status_code::unexpected_group_size);
     CHECK_EQ(storage[0], -1);
     CHECK_EQ(storage[1], -1);
+}
+
+TEST_CASE("decoder duplicate map keys follow target container insertion semantics") {
+    auto bytes = to_bytes("a201010102");
+
+    {
+        auto               dec = make_decoder(bytes);
+        std::map<int, int> decoded;
+        auto               result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.size(), 1);
+        CHECK_EQ(decoded.at(1), 2);
+    }
+
+    {
+        auto                    dec = make_decoder(bytes);
+        std::multimap<int, int> decoded;
+        auto                    result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.count(1), 2);
+    }
 }
 
 TEST_CASE("encoder should not overflow fixed-size output buffers") {

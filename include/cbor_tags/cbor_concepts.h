@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -37,14 +38,9 @@ concept IsCborBufferByte =
 
 template <typename T>
 concept ValidCborBuffer =
-    requires {
-        typename std::remove_cvref_t<T>::value_type;
-        typename std::remove_cvref_t<T>::size_type;
-        typename std::remove_cvref_t<T>::iterator;
-    } && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
-    std::convertible_to<typename std::remove_cvref_t<T>::size_type, std::size_t> &&
-    std::input_or_output_iterator<typename std::remove_cvref_t<T>::iterator> &&
-    (std::ranges::contiguous_range<std::remove_cvref_t<T>> || std::ranges::bidirectional_range<std::remove_cvref_t<T>>);
+    std::ranges::range<std::remove_cvref_t<T>> && std::ranges::range<const std::remove_cvref_t<T>> &&
+    std::ranges::common_range<const std::remove_cvref_t<T>> && IsCborBufferByte<std::ranges::range_value_t<std::remove_cvref_t<T>>> &&
+    (std::ranges::contiguous_range<const std::remove_cvref_t<T>> || std::ranges::bidirectional_range<const std::remove_cvref_t<T>>);
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {
@@ -259,6 +255,26 @@ concept IsBinaryStringBase = IsBinaryHeader<std::remove_cvref_t<T>> ||
 template <typename T>
 concept IsStringBase = IsTextStringBase<T> || IsBinaryStringBase<T>;
 
+template <typename T>
+concept IsByteLike = IsCborBufferByte<T>;
+
+template <typename T>
+concept IsByteLikeRange =
+    std::ranges::input_range<std::remove_cvref_t<T>> && IsByteLike<std::ranges::range_value_t<std::remove_cvref_t<T>>>;
+
+template <typename T>
+concept IsPairLike = requires(T value) {
+    std::get<0>(value);
+    std::get<1>(value);
+} || requires(T value) {
+    value.first;
+    value.second;
+};
+
+template <typename T>
+concept IsPairLikeRange =
+    std::ranges::input_range<std::remove_cvref_t<T>> && IsPairLike<std::ranges::range_reference_t<std::remove_cvref_t<T>>>;
+
 template <class T> constexpr bool is_optional_v                   = false;
 template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
 
@@ -279,10 +295,8 @@ concept IsMapBase =
     IsMapHeader<std::remove_cvref_t<T>> || (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> t) {
         typename std::remove_cvref_t<T>::key_type;
         typename std::remove_cvref_t<T>::mapped_type;
-        typename std::remove_cvref_t<T>::value_type;
-        requires std::same_as<typename std::remove_cvref_t<T>::value_type,
-                              std::pair<const typename std::remove_cvref_t<T>::key_type, typename std::remove_cvref_t<T>::mapped_type>>;
-        { t.find(std::declval<typename std::remove_cvref_t<T>::key_type>()) } -> std::same_as<typename std::remove_cvref_t<T>::iterator>;
+        requires IsPairLike<std::ranges::range_reference_t<std::remove_cvref_t<T>>>;
+        t.find(std::declval<typename std::remove_cvref_t<T>::key_type>());
     });
 
 template <typename T>
@@ -656,11 +670,7 @@ namespace detail {
 
 // requires(!std::same_as<T, std::span<typename T::value_type>>)
 template <typename T> struct iterator_type {
-    using type = typename T::const_iterator;
-};
-
-template <typename T> struct iterator_type<std::span<T>> {
-    using type = typename std::span<T>::iterator;
+    using type = std::ranges::iterator_t<const std::remove_cvref_t<T>>;
 };
 
 // Helper for decimal parsing
