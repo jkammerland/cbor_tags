@@ -38,6 +38,22 @@ concept MemberPairLike = requires(T &&value) {
 template <typename T>
 concept PairLike = TuplePairLike<T> || MemberPairLike<T>;
 
+template <typename Pair> constexpr decltype(auto) pair_first(Pair &&pair) {
+    if constexpr (requires { std::get<0>(std::forward<Pair>(pair)); }) {
+        return std::get<0>(std::forward<Pair>(pair));
+    } else {
+        return (std::forward<Pair>(pair).first);
+    }
+}
+
+template <typename Pair> constexpr decltype(auto) pair_second(Pair &&pair) {
+    if constexpr (requires { std::get<1>(std::forward<Pair>(pair)); }) {
+        return std::get<1>(std::forward<Pair>(pair));
+    } else {
+        return (std::forward<Pair>(pair).second);
+    }
+}
+
 template <typename T>
 concept PairLikeRange =
     std::ranges::input_range<std::remove_cvref_t<T>> && PairLike<std::ranges::range_reference_t<std::remove_cvref_t<T>>>;

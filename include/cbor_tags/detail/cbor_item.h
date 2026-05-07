@@ -132,6 +132,245 @@ struct cbor_item_reader {
     }
 };
 
+template <typename Iterator> struct cbor_tag_event {
+    std::uint64_t tag{};
+    Iterator      payload_begin{};
+};
+
+template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
+  public:
+    cbor_item_walker() = default;
+    constexpr cbor_item_walker(Iterator begin, Iterator end) : cursor_(begin), end_(end) {}
+
+    [[nodiscard]] constexpr Iterator    end() const { return end_; }
+    [[nodiscard]] constexpr status_code status() const noexcept { return status_; }
+    [[nodiscard]] constexpr bool        failed() const noexcept { return status_ != status_code::success; }
+    [[nodiscard]] constexpr bool        done() const noexcept { return done_; }
+
+    constexpr bool next_tag(cbor_tag_event<Iterator> &event) {
+        if (done_) {
+            return false;
+        }
+
+        while (true) {
+            pop_completed_frames();
+
+            if (cursor_ == end_) {
+                if (stack_empty()) {
+                    done_   = true;
+                    status_ = status_code::success;
+                } else {
+                    fail(status_code::incomplete);
+                }
+                return false;
+            }
+
+            if (consume_indefinite_break_if_present()) {
+                if (done_) {
+                    return false;
+                }
+                continue;
+            }
+
+            if (is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
+                fail(status_code::error);
+                return false;
+            }
+
+            if (!consume_parent_item()) {
+                fail(status_code::error);
+                return false;
+            }
+
+            cbor_item_header header{};
+            auto             read_status = status_code::success;
+            if (!cbor_item_reader::read_header(cursor_, end_, header, read_status)) {
+                fail(read_status);
+                return false;
+            }
+
+            switch (header.major) {
+            case major_type::UnsignedInteger:
+            case major_type::NegativeInteger: {
+                std::uint64_t ignored{};
+                if (header.additional_info == 31U || !read_argument(header.additional_info, ignored)) {
+                    if (!done_) {
+                        fail(status_code::error);
+                    }
+                    return false;
+                }
+                break;
+            }
+            case major_type::ByteString:
+            case major_type::TextString: {
+                if (header.additional_info == 31U) {
+                    if (!skip_indefinite_string(header.major)) {
+                        return false;
+                    }
+                } else {
+                    std::uint64_t length{};
+                    if (!read_argument(header.additional_info, length) || !skip_bytes(length)) {
+                        return false;
+                    }
+                }
+                break;
+            }
+            case major_type::Array: {
+                if (header.additional_info == 31U) {
+                    if (!push_frame(cbor_item_frame{.indefinite = true, .major = major_type::Array})) {
+                        return false;
+                    }
+                } else {
+                    std::uint64_t length{};
+                    if (!read_argument(header.additional_info, length)) {
+                        return false;
+                    }
+                    if (length > 0U && !push_frame(cbor_item_frame{.major = major_type::Array, .remaining = length})) {
+                        return false;
+                    }
+                }
+                break;
+            }
+            case major_type::Map: {
+                if (header.additional_info == 31U) {
+                    if (!push_frame(cbor_item_frame{.indefinite = true, .major = major_type::Map})) {
+                        return false;
+                    }
+                } else {
+                    std::uint64_t length{};
+                    if (!read_argument(header.additional_info, length)) {
+                        return false;
+                    }
+                    if (length > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
+                        fail(status_code::error);
+                        return false;
+                    }
+                    const auto item_count = length * 2U;
+                    if (item_count > 0U && !push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
+                        return false;
+                    }
+                }
+                break;
+            }
+            case major_type::Tag: {
+                std::uint64_t tag{};
+                if (header.additional_info == 31U || !read_argument(header.additional_info, tag)) {
+                    if (!done_) {
+                        fail(status_code::error);
+                    }
+                    return false;
+                }
+                auto payload_begin = cursor_;
+                if (!push_frame(cbor_item_frame{.major = major_type::Tag, .remaining = 1})) {
+                    return false;
+                }
+                event = cbor_tag_event<Iterator>{.tag = tag, .payload_begin = payload_begin};
+                return true;
+            }
+            case major_type::Simple:
+                if (is_reserved_simple_argument(header.additional_info)) {
+                    fail(status_code::error);
+                    return false;
+                }
+                if (header.additional_info >= 24U && !skip_bytes(std::uint64_t{1U << (header.additional_info - 24U)})) {
+                    return false;
+                }
+                break;
+            default: fail(status_code::error); return false;
+            }
+        }
+    }
+
+  private:
+    constexpr void fail(status_code status) noexcept {
+        status_ = status;
+        done_   = true;
+    }
+
+    constexpr void pop_completed_frames() noexcept {
+        while (!stack_empty() && !stack_back().indefinite && stack_back().remaining == 0) {
+            stack_pop_back();
+        }
+    }
+
+    constexpr bool consume_parent_item() noexcept {
+        if (stack_empty()) {
+            return true;
+        }
+        auto &frame = stack_back();
+        if (frame.indefinite) {
+            if (frame.major == major_type::Map) {
+                frame.map_expects_value = !frame.map_expects_value;
+            }
+            return true;
+        }
+        if (frame.remaining == 0) {
+            return false;
+        }
+        --frame.remaining;
+        return true;
+    }
+
+    constexpr bool consume_indefinite_break_if_present() {
+        if (stack_empty() || !stack_back().indefinite || cursor_ == end_ || !is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
+            return false;
+        }
+        if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
+            fail(status_code::error);
+            return true;
+        }
+        ++cursor_;
+        stack_pop_back();
+        return true;
+    }
+
+    constexpr bool read_argument(std::uint8_t additional_info, std::uint64_t &value) {
+        auto read_status = status_code::success;
+        if (!cbor_item_reader::read_argument(cursor_, end_, additional_info, value, read_status)) {
+            fail(read_status);
+            return false;
+        }
+        return true;
+    }
+
+    constexpr bool skip_indefinite_string(major_type major) {
+        auto read_status = status_code::success;
+        if (!cbor_item_reader::skip_indefinite_string(cursor_, end_, major, read_status)) {
+            fail(read_status);
+            return false;
+        }
+        return true;
+    }
+
+    constexpr bool skip_bytes(std::uint64_t length) {
+        auto read_status = status_code::success;
+        if (!cbor_item_reader::advance_bytes(cursor_, end_, length, read_status)) {
+            fail(read_status);
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] constexpr bool  stack_empty() const noexcept { return stack_size_ == 0; }
+    [[nodiscard]] constexpr auto &stack_back() noexcept { return stack_[stack_size_ - 1]; }
+    constexpr void                stack_pop_back() noexcept { --stack_size_; }
+    constexpr bool                push_frame(cbor_item_frame frame) {
+        if (stack_size_ == stack_.size()) {
+            fail(status_code::error);
+            return false;
+        }
+        stack_[stack_size_++] = frame;
+        return true;
+    }
+
+    Iterator                              cursor_{};
+    Iterator                              end_{};
+    std::array<cbor_item_frame, MaxDepth> stack_{};
+    std::size_t                           stack_size_{};
+    status_code                           status_{status_code::success};
+    bool                                  done_{};
+};
+
 template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
     template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status) {
         std::array<cbor_item_frame, MaxDepth> stack{};

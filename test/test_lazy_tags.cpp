@@ -43,6 +43,19 @@ struct lazy_tag_payload {
     std::map<std::string, int> lookup;
 };
 
+std::vector<std::byte> make_deeply_nested_tag(std::size_t depth) {
+    std::vector<std::byte> buffer;
+    buffer.reserve(depth + 4);
+    for (std::size_t index = 0; index < depth; ++index) {
+        buffer.push_back(std::byte{0x81});
+    }
+    buffer.push_back(std::byte{0xD8});
+    buffer.push_back(std::byte{0x64});
+    buffer.push_back(std::byte{0x18});
+    buffer.push_back(std::byte{0x2A});
+    return buffer;
+}
+
 template <typename Buffer>
 concept CanFindStaticTags = requires(Buffer &&buffer) { cbor::tags::find_tags<100>(std::forward<Buffer>(buffer)); };
 
@@ -83,10 +96,12 @@ static_assert(!CanFindStaticTags<std::vector<std::byte>>);
 static_assert(!CanFindStaticTags<std::span<const std::byte>>);
 static_assert(!CanFindRuntimeTags<std::vector<std::byte>>);
 
-using lazy_tag_byte_vector   = std::vector<std::byte>;
-using lazy_tag_byte_subrange = std::ranges::subrange<lazy_tag_byte_vector::const_iterator>;
+using lazy_tag_byte_vector        = std::vector<std::byte>;
+using lazy_tag_byte_subrange      = std::ranges::subrange<lazy_tag_byte_vector::const_iterator>;
+using lazy_tag_mutable_span_match = cbor::tags::tag_match<std::span<std::byte>>;
 static_assert(CanFindStaticTags<lazy_tag_byte_subrange &>);
 static_assert(!CanFindStaticTags<lazy_tag_byte_subrange>);
+static_assert(!std::assignable_from<decltype(*std::declval<lazy_tag_mutable_span_match &>().payload_range().begin()), std::byte>);
 
 TEST_CASE("lazy tag scanner finds matching tags in nested arrays and maps") {
     auto buffer = to_bytes("82d864182aa101d8c863616263");
@@ -160,6 +175,22 @@ TEST_CASE("lazy tag scanner supports non-contiguous buffers") {
     std::string decoded;
     CHECK(it->decode(decoded));
     CHECK_EQ(decoded, "abc");
+}
+
+TEST_CASE("lazy tag scanner finds tags inside valid indefinite containers") {
+    auto buffer = to_bytes("9fa101d864182abf02d8c863616263ffff");
+
+    auto                     view = find_tags<100, 200>(buffer);
+    std::vector<uint64_t>    tags;
+    std::vector<std::string> payloads;
+    for (const auto &match : view) {
+        tags.push_back(match.tag());
+        payloads.push_back(to_hex(match.payload_range()));
+    }
+
+    CHECK_EQ(tags, (std::vector<std::uint64_t>{100, 200}));
+    CHECK_EQ(payloads, (std::vector<std::string>{"182a", "63616263"}));
+    CHECK_EQ(view.status(), status_code::success);
 }
 
 TEST_CASE("lazy tag scanner skips large unrelated byte strings") {
@@ -238,17 +269,25 @@ TEST_CASE("lazy tag scanner decodes nested aggregate payloads after no-allocatio
     ++it;
     CHECK(it == view.end());
     CHECK_EQ(view.status(), status_code::success);
+
+    auto full_view = find_tags<901>(buffer);
+    int  matches{};
+    threw = false;
+    {
+        allocation_failure_guard guard;
+        try {
+            for (auto full_it = full_view.begin(); full_it != full_view.end(); ++full_it) {
+                ++matches;
+            }
+        } catch (...) { threw = true; }
+    }
+    CHECK(!threw);
+    CHECK_EQ(matches, 1);
+    CHECK_EQ(full_view.status(), status_code::success);
 }
 
 TEST_CASE("lazy tag scanner stress scans deeply nested definite containers without heap allocation") {
-    std::vector<std::byte> buffer;
-    for (std::size_t depth = 0; depth < 200; ++depth) {
-        buffer.push_back(std::byte{0x81});
-    }
-    buffer.push_back(std::byte{0xD8});
-    buffer.push_back(std::byte{0x64});
-    buffer.push_back(std::byte{0x18});
-    buffer.push_back(std::byte{0x2A});
+    auto buffer = make_deeply_nested_tag(200);
 
     auto view  = find_tags<100>(buffer);
     auto it    = decltype(view.begin()){};
@@ -274,6 +313,46 @@ TEST_CASE("lazy tag scanner stress scans deeply nested definite containers witho
     CHECK_EQ(view.status(), status_code::success);
 }
 
+TEST_CASE("lazy tag scanner handles no-allocation depth boundary") {
+    {
+        auto buffer = make_deeply_nested_tag(255);
+        auto view   = find_tags<100>(buffer);
+        bool threw  = false;
+        int  matches{};
+
+        {
+            allocation_failure_guard guard;
+            try {
+                for (auto it = view.begin(); it != view.end(); ++it) {
+                    ++matches;
+                }
+            } catch (...) { threw = true; }
+        }
+
+        CHECK(!threw);
+        CHECK_EQ(matches, 1);
+        CHECK_EQ(view.status(), status_code::success);
+    }
+
+    {
+        auto buffer = make_deeply_nested_tag(256);
+        auto view   = find_tags<100>(buffer);
+        bool threw  = false;
+
+        {
+            allocation_failure_guard guard;
+            try {
+                auto it = view.begin();
+                CHECK(it == view.end());
+            } catch (...) { threw = true; }
+        }
+
+        CHECK(!threw);
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
+}
+
 TEST_CASE("lazy tag scanner status reflects scanning performed so far") {
     auto buffer = to_bytes("d86401ff");
     auto view   = find_tags<100>(buffer);
@@ -286,6 +365,28 @@ TEST_CASE("lazy tag scanner status reflects scanning performed so far") {
     ++it;
     CHECK(it == view.end());
     CHECK_EQ(view.status(), status_code::error);
+}
+
+TEST_CASE("lazy tag scanner yields nested matches before malformed nonmatching tag tails") {
+    auto buffer = to_bytes("c19fd8640118");
+    auto view   = find_tags<100>(buffer);
+    auto it     = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
+    CHECK_EQ(to_hex(it->payload_range()), "01");
+    CHECK_EQ(view.status(), status_code::success);
+
+    bool threw = false;
+    {
+        allocation_failure_guard guard;
+        try {
+            ++it;
+        } catch (...) { threw = true; }
+    }
+    CHECK(!threw);
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::incomplete);
 }
 
 TEST_CASE("lazy tag scanner reports truncated matching payloads") {

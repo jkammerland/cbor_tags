@@ -103,12 +103,20 @@ template <typename T, bool IsContiguous = IsContiguous<T>>
     requires CborInputBuffer<T>
 struct reader;
 
-template <typename T, typename = void> struct reader_size_type {
+template <typename T, typename = void> struct nested_size_type {
     using type = std::size_t;
 };
 
-template <typename T> struct reader_size_type<T, std::void_t<typename std::remove_cvref_t<T>::size_type>> {
-    using type = typename std::remove_cvref_t<T>::size_type;
+template <typename T> struct nested_size_type<T, std::void_t<typename T::size_type>> {
+    using type = typename T::size_type;
+};
+
+template <typename T, bool IsSizedRange = std::ranges::sized_range<const std::remove_cvref_t<T>>> struct reader_size_type {
+    using type = typename nested_size_type<std::remove_cvref_t<T>>::type;
+};
+
+template <typename T> struct reader_size_type<T, true> {
+    using type = std::ranges::range_size_t<const std::remove_cvref_t<T>>;
 };
 
 template <typename T> struct reader<T, true> {
@@ -145,7 +153,11 @@ template <typename T> struct reader<T, true> {
         if (i >= 0) {
             position_ += static_cast<size_type>(i);
         } else {
-            position_ -= static_cast<size_type>(-i);
+            const auto amount = static_cast<size_type>(-i);
+            if (amount > position_) {
+                throw std::runtime_error("CBOR input seek before begin");
+            }
+            position_ -= amount;
         }
     }
 };
@@ -184,6 +196,12 @@ template <typename T> struct reader<T, false> {
     }
 
     constexpr void seek(std::ptrdiff_t i) {
+        if (i < 0) {
+            const auto amount = static_cast<size_type>(-i);
+            if (amount > current_offset_) {
+                throw std::runtime_error("CBOR input seek before begin");
+            }
+        }
         position_ = std::next(position_, i);
         if (i >= 0) {
             current_offset_ += static_cast<size_type>(i);
@@ -198,45 +216,11 @@ template <typename Tuple> constexpr auto tuple_tail(Tuple &&tuple) {
                       std::forward<Tuple>(tuple));
 }
 
-#if !CBOR_TAGS_HAS_STD_REFLECTION
-
-template <typename T, typename... TArgs>
-    requires IsAggregate<T> || IsTuple<T>
-constexpr std::size_t num_bindings_impl() {
-    if constexpr (requires { T{std::declval<TArgs>()...}; }) {
-        return num_bindings_impl<T, any, TArgs...>();
-    } else {
-        return sizeof...(TArgs) - 1;
-    }
-}
-
-template <typename T>
-    requires IsAggregate<T> || IsTuple<T>
-constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
-
-#endif
-
 template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr) { return static_cast<T &>(*this_ptr); }
 
 template <typename Encoder, typename C> inline constexpr auto adl_indirect_encode(Encoder &enc, const C &c) { return encode(enc, c); }
 template <typename Decoder, typename C> inline constexpr auto adl_indirect_decode(Decoder &dec, C &&c) {
     return decode(dec, std::forward<C>(c));
-}
-
-template <typename Pair> constexpr decltype(auto) pair_first(Pair &&pair) {
-    if constexpr (requires { std::get<0>(std::forward<Pair>(pair)); }) {
-        return std::get<0>(std::forward<Pair>(pair));
-    } else {
-        return (std::forward<Pair>(pair).first);
-    }
-}
-
-template <typename Pair> constexpr decltype(auto) pair_second(Pair &&pair) {
-    if constexpr (requires { std::get<1>(std::forward<Pair>(pair)); }) {
-        return std::get<1>(std::forward<Pair>(pair));
-    } else {
-        return (std::forward<Pair>(pair).second);
-    }
 }
 
 template <typename T> inline constexpr auto get_major_6_tag_from_tuple(const T &t) {

@@ -12,6 +12,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -79,6 +80,16 @@ struct CustomSizeByteBuffer {
     [[nodiscard]] auto data() const noexcept { return bytes.data(); }
     [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
 };
+
+struct AdlSizedByteRange {
+    std::array<std::byte, 4> bytes{};
+
+    friend std::byte       *begin(AdlSizedByteRange &range) noexcept { return range.bytes.data(); }
+    friend const std::byte *begin(const AdlSizedByteRange &range) noexcept { return range.bytes.data(); }
+    friend std::byte       *end(AdlSizedByteRange &range) noexcept { return range.bytes.data() + range.bytes.size(); }
+    friend const std::byte *end(const AdlSizedByteRange &range) noexcept { return range.bytes.data() + range.bytes.size(); }
+    friend std::uint16_t    size(const AdlSizedByteRange &range) noexcept { return static_cast<std::uint16_t>(range.bytes.size()); }
+};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
@@ -91,6 +102,8 @@ static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
 static_assert(CborInputBuffer<CustomSizeByteBuffer>);
 static_assert(
     std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
+static_assert(CborInputBuffer<AdlSizedByteRange>);
+static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 
 TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
     const auto cancelled = integer{2, true} + integer{2};
@@ -491,6 +504,30 @@ TEST_CASE("decoder should preserve custom input buffer size_type") {
     CHECK_EQ(decoded[0], std::byte{0x01});
     CHECK_EQ(decoded[1], std::byte{0x02});
     CHECK_EQ(next_value, 1);
+}
+
+TEST_CASE("decoder tell supports ADL-only ranges") {
+    AdlSizedByteRange buffer{.bytes = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}}};
+
+    auto dec = make_decoder(buffer);
+    CHECK(dec.tell() == std::ranges::begin(buffer));
+
+    std::uint8_t value{};
+    auto         result = dec(value);
+
+    REQUIRE(result);
+    CHECK_EQ(value, 1);
+    CHECK(dec.tell() == std::ranges::begin(buffer) + 1);
+}
+
+TEST_CASE("decoder readers reject negative seeks before begin") {
+    std::vector<std::byte>                             contiguous{std::byte{0x01}};
+    cbor::tags::detail::reader<std::vector<std::byte>> contiguous_reader{contiguous};
+    CHECK_THROWS_AS(contiguous_reader.seek(-1), std::runtime_error);
+
+    std::deque<std::byte>                             non_contiguous{std::byte{0x01}};
+    cbor::tags::detail::reader<std::deque<std::byte>> non_contiguous_reader{non_contiguous};
+    CHECK_THROWS_AS(non_contiguous_reader.seek(-1), std::runtime_error);
 }
 
 TEST_CASE("decoder should report incomplete byte-string view without retry contract") {

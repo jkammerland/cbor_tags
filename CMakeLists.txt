@@ -68,7 +68,7 @@ int main() { return 0; }
     if(NOT CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
       message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION requires GCC with C++26 reflection support (-std=gnu++26 -freflection).")
     endif()
-    target_compile_options(${PROJECT_NAME} INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-freflection>)
+    target_compile_options(${PROJECT_NAME} INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++26> $<$<COMPILE_LANGUAGE:CXX>:-freflection>)
   else()
     message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION currently supports GCC's C++26 reflection implementation only.")
   endif()

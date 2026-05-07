@@ -3,8 +3,10 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_reflection_config.h"
 
+#include <cstddef>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace cbor::tags::detail {
 
@@ -21,6 +23,21 @@ constexpr auto aggregate_binding_count = [] consteval {
     }
 }();
 
-#endif
+#else
 
+template <typename T, typename... TArgs>
+    requires IsAggregate<T> || IsTuple<T>
+constexpr std::size_t num_bindings_impl() {
+    if constexpr (requires { T{std::declval<TArgs>()...}; }) {
+        return num_bindings_impl<T, any, TArgs...>();
+    } else {
+        return sizeof...(TArgs) - 1;
+    }
+}
+
+template <typename T>
+    requires IsAggregate<T> || IsTuple<T>
+constexpr auto aggregate_binding_count = num_bindings_impl<T, any>();
+
+#endif
 } // namespace cbor::tags::detail

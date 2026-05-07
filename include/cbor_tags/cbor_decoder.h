@@ -1255,7 +1255,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr auto tell() const noexcept {
         if constexpr (IsContiguous<InputBuffer>) {
-            return /* Iterator */ data_.begin() + reader_.position_;
+            return /* Iterator */ std::ranges::begin(data_) + static_cast<std::ptrdiff_t>(reader_.position_);
         } else {
             return /* Iterator */ reader_.position_; // TODO: actual Iterator
         }

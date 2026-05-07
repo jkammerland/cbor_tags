@@ -32,7 +32,9 @@
 #define CBOR_TAGS_HAS_BOOST_CONTAINER_RANGES 1
 #endif
 
-#if __has_include(<boost/container/map.hpp>) && __has_include(<boost/unordered/unordered_map.hpp>)
+#if __has_include(<boost/container/flat_map.hpp>) && __has_include(<boost/container/map.hpp>) && \
+    __has_include(<boost/unordered/unordered_map.hpp>)
+#include <boost/container/flat_map.hpp>
 #include <boost/container/map.hpp>
 #include <boost/unordered/unordered_map.hpp>
 #define CBOR_TAGS_HAS_BOOST_MAPS 1
@@ -47,6 +49,8 @@ struct member_pair_entry {
     int second;
 };
 
+struct range_not_cbor {};
+
 template <typename R>
 concept CanMakeMapRange = requires(R &&range) { cbor::tags::as_map_range(std::forward<R>(range)); };
 
@@ -60,6 +64,8 @@ static_assert(!IsPairLike<std::tuple<int>>);
 static_assert(!IsPairLike<std::tuple<int, int, int>>);
 static_assert(!IsPairLike<std::array<int, 3>>);
 static_assert(!CanMakeMapRange<std::array<std::tuple<int, int, int>, 1> &>);
+static_assert(!CanMakeMapRange<std::array<std::pair<int, range_not_cbor>, 1> &>);
+static_assert(!CanMakeMapRange<std::array<std::pair<range_not_cbor, int>, 1> &>);
 static_assert(std::is_same_v<decltype(cbor::tags::detail::pair_first(std::declval<member_pair_entry &>())), int &>);
 static_assert(std::is_same_v<decltype(cbor::tags::detail::pair_second(std::declval<const member_pair_entry &>())), const int &>);
 
