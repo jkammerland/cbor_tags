@@ -74,6 +74,38 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
     }
 }
 
+template <typename InputBuffer, typename Reader>
+constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffer &data, std::uint64_t length) {
+    using size_type = typename Reader::size_type;
+
+    if (length == 0) {
+        return status_code::success;
+    }
+
+    if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+        if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+            return status_code::error;
+        }
+    }
+
+    const auto needed = static_cast<size_type>(length);
+    if (reader.empty(data, needed - 1)) {
+        return status_code::incomplete;
+    }
+
+    if constexpr (IsContiguous<InputBuffer>) {
+        reader.position_ += needed;
+    } else {
+        if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
+            return status_code::error;
+        }
+        reader.position_ = std::next(reader.position_, static_cast<std::ptrdiff_t>(needed));
+        reader.current_offset_ += needed;
+    }
+
+    return status_code::success;
+}
+
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -742,64 +774,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tstr_on_buffer;
         }
         value.size = decode_unsigned(additionalInfo);
-        if (value.size == 0) {
-            return status_code::success;
-        }
-
-        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
-            if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                return status_code::error;
-            }
-        }
-
-        const auto needed = static_cast<size_type>(value.size);
-        if (reader_.empty(data_, needed - 1)) {
-            return status_code::incomplete;
-        }
-
-        if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += needed;
-        } else {
-            if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
-                return status_code::error;
-            }
-            reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
-            reader_.current_offset_ += needed;
-        }
-
-        return status_code::success;
+        return detail::skip_sized_string_payload(reader_, data_, value.size);
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
         }
         value.size = decode_unsigned(additionalInfo);
-        if (value.size == 0) {
-            return status_code::success;
-        }
-
-        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
-            if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                return status_code::error;
-            }
-        }
-
-        const auto needed = static_cast<size_type>(value.size);
-        if (reader_.empty(data_, needed - 1)) {
-            return status_code::incomplete;
-        }
-
-        if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += needed;
-        } else {
-            if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
-                return status_code::error;
-            }
-            reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
-            reader_.current_offset_ += needed;
-        }
-
-        return status_code::success;
+        return detail::skip_sized_string_payload(reader_, data_, value.size);
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Array) {

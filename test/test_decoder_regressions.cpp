@@ -548,14 +548,29 @@ TEST_CASE("decoder readers reject negative seeks before begin") {
 }
 
 TEST_CASE("decoder skips any byte strings on signed-size non-contiguous ranges") {
-    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x41}, std::byte{0x01}}};
+    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x41}, std::byte{0x01}, std::byte{0x02}}};
 
-    auto        dec = make_decoder(buffer);
-    as_bstr_any decoded{};
-    auto        result = dec(decoded);
+    auto         dec = make_decoder(buffer);
+    as_bstr_any  decoded{};
+    std::uint8_t following{};
+    auto         result = dec(decoded, following);
 
     REQUIRE(result);
     CHECK_EQ(decoded.size, 1);
+    CHECK_EQ(following, 2);
+}
+
+TEST_CASE("decoder skips any text strings on signed-size non-contiguous ranges") {
+    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x61}, std::byte{0x41}, std::byte{0x02}}};
+
+    auto         dec = make_decoder(buffer);
+    as_text_any  decoded{};
+    std::uint8_t following{};
+    auto         result = dec(decoded, following);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.size, 1);
+    CHECK_EQ(following, 2);
 }
 
 TEST_CASE("decoder should report incomplete byte-string view without retry contract") {
