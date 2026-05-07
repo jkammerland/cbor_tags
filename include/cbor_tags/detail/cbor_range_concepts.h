@@ -46,8 +46,8 @@ template <class T> constexpr bool is_optional_v                   = false;
 template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
 
 template <typename T, bool IsStringBase, bool IsOptional>
-concept RangeOfCborValuesBase = std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> && !IsStringBase &&
-                                !IsOptional;
+concept RangeOfCborValuesBase =
+    std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> && !IsStringBase && !IsOptional;
 
 template <typename T, bool IsRangeOfCborValuesBase>
 concept MapLikeContainer = IsRangeOfCborValuesBase && requires(std::remove_cvref_t<T> t) {

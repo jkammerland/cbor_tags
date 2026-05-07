@@ -139,7 +139,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
         bool                                  root_started{};
 
         auto stack_empty = [&] { return stack_size == 0; };
-        auto stack_back  = [&]() -> cbor_item_frame & { return stack[stack_size - 1]; };
+        auto stack_back  = [&]() -> cbor_item_frame  &{ return stack[stack_size - 1]; };
         auto pop_frame   = [&] { --stack_size; };
         auto push_frame  = [&](cbor_item_frame frame) {
             if (stack_size == stack.size()) {
@@ -283,9 +283,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                     return false;
                 }
                 break;
-            default:
-                status = status_code::error;
-                return false;
+            default: status = status_code::error; return false;
             }
         }
     }
