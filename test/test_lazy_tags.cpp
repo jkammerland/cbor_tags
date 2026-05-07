@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <deque>
 #include <doctest/doctest.h>
+#include <map>
 #include <new>
 #include <ranges>
 #include <span>
@@ -29,6 +30,17 @@ struct allocation_failure_guard {
 
 struct accept_any_tag {
     bool operator()(std::uint64_t) const { return true; }
+};
+
+struct lazy_tag_leaf {
+    std::uint64_t id{};
+    std::string   name;
+};
+
+struct lazy_tag_payload {
+    lazy_tag_leaf              leaf;
+    std::vector<int>           values;
+    std::map<std::string, int> lookup;
 };
 
 template <typename Buffer>
@@ -187,6 +199,77 @@ TEST_CASE("lazy tag scanner uses no heap allocation while scanning") {
     }
 
     CHECK(!threw);
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner decodes nested aggregate payloads after no-allocation scanning") {
+    lazy_tag_payload       payload{.leaf = {.id = 7, .name = "alpha"}, .values = {1, 2, 3, 4}, .lookup = {{"x", 10}, {"y", 20}}};
+    std::vector<std::byte> unrelated(16 * 1024, std::byte{0xAB});
+    using payload_tag = tagged_object<static_tag<901>, lazy_tag_payload>;
+    std::map<int, payload_tag> nested{{5, make_tag_pair(static_tag<901>{}, payload)}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_array{2}, make_tag_pair(static_tag<1000>{}, unrelated), nested));
+
+    auto view  = find_tags<901>(buffer);
+    auto it    = decltype(view.begin()){};
+    bool threw = false;
+
+    {
+        allocation_failure_guard guard;
+        try {
+            it = view.begin();
+        } catch (...) { threw = true; }
+    }
+
+    CHECK(!threw);
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 901);
+
+    lazy_tag_payload decoded;
+    REQUIRE(it->decode(decoded));
+    CHECK_EQ(decoded.leaf.id, payload.leaf.id);
+    CHECK_EQ(decoded.leaf.name, payload.leaf.name);
+    CHECK_EQ(decoded.values, payload.values);
+    CHECK_EQ(decoded.lookup, payload.lookup);
+
+    ++it;
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner stress scans deeply nested definite containers without heap allocation") {
+    std::vector<std::byte> buffer;
+    for (std::size_t depth = 0; depth < 200; ++depth) {
+        buffer.push_back(std::byte{0x81});
+    }
+    buffer.push_back(std::byte{0xD8});
+    buffer.push_back(std::byte{0x64});
+    buffer.push_back(std::byte{0x18});
+    buffer.push_back(std::byte{0x2A});
+
+    auto view  = find_tags<100>(buffer);
+    auto it    = decltype(view.begin()){};
+    bool threw = false;
+
+    {
+        allocation_failure_guard guard;
+        try {
+            it = view.begin();
+        } catch (...) { threw = true; }
+    }
+
+    CHECK(!threw);
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
+
+    int decoded{};
+    REQUIRE(it->decode(decoded));
+    CHECK_EQ(decoded, 42);
+
+    ++it;
     CHECK(it == view.end());
     CHECK_EQ(view.status(), status_code::success);
 }

@@ -4,6 +4,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -14,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace cbor::tags;
@@ -62,6 +64,21 @@ template <typename T> struct NonDefaultAllocator {
 
     template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept { return tag == other.tag; }
 };
+
+struct CustomSizeByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::uint16_t;
+
+    std::vector<std::byte> bytes;
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto data() noexcept { return bytes.data(); }
+    [[nodiscard]] auto data() const noexcept { return bytes.data(); }
+    [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
+};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
@@ -71,6 +88,9 @@ static_assert(std::is_move_assignable_v<NonDefaultComparator>);
 static_assert(!std::is_default_constructible_v<NonAssignableComparator>);
 static_assert(!std::is_move_assignable_v<NonAssignableComparator>);
 static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
+static_assert(CborInputBuffer<CustomSizeByteBuffer>);
+static_assert(
+    std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
 
 TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
     const auto cancelled = integer{2, true} + integer{2};
@@ -455,6 +475,22 @@ TEST_CASE("decoder should accept empty byte strings for basic_string_view at end
 
     CHECK_MESSAGE(result, "Decoding an empty byte-string view should succeed without touching payload bytes.");
     CHECK(decoded.empty());
+}
+
+TEST_CASE("decoder should preserve custom input buffer size_type") {
+    CustomSizeByteBuffer buffer{.bytes = {std::byte{0x42}, std::byte{0x01}, std::byte{0x02}, std::byte{0x01}}};
+
+    auto dec = make_decoder(buffer);
+
+    std::basic_string_view<std::byte> decoded;
+    std::uint8_t                      next_value{};
+    auto                              result = dec(decoded, next_value);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.size(), 2);
+    CHECK_EQ(decoded[0], std::byte{0x01});
+    CHECK_EQ(decoded[1], std::byte{0x02});
+    CHECK_EQ(next_value, 1);
 }
 
 TEST_CASE("decoder should report incomplete byte-string view without retry contract") {

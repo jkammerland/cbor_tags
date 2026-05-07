@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cbor_tags/detail/cbor_range_concepts.h"
+
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -260,40 +262,28 @@ template <typename T>
 concept IsStringBase = IsTextStringBase<T> || IsBinaryStringBase<T>;
 
 template <typename T>
-concept IsByteLike = IsCborBufferByte<T>;
+concept IsByteLike = detail::RangeByteLike<T>;
 
 template <typename T>
-concept IsByteLikeRange =
-    std::ranges::input_range<std::remove_cvref_t<T>> && IsByteLike<std::ranges::range_value_t<std::remove_cvref_t<T>>>;
+concept IsByteLikeRange = detail::ByteLikeRange<T>;
 
 template <typename T>
-concept IsTuplePairLike = requires {
-    typename std::tuple_size<std::remove_cvref_t<T>>::type;
-    requires std::tuple_size_v<std::remove_cvref_t<T>> == 2;
-} && requires(T &&value) {
-    std::get<0>(std::forward<T>(value));
-    std::get<1>(std::forward<T>(value));
-};
+concept IsTuplePairLike = detail::TuplePairLike<T>;
 
 template <typename T>
-concept IsMemberPairLike = requires(T &&value) {
-    std::forward<T>(value).first;
-    std::forward<T>(value).second;
-};
+concept IsMemberPairLike = detail::MemberPairLike<T>;
 
 template <typename T>
-concept IsPairLike = IsTuplePairLike<T> || IsMemberPairLike<T>;
+concept IsPairLike = detail::PairLike<T>;
 
 template <typename T>
-concept IsPairLikeRange =
-    std::ranges::input_range<std::remove_cvref_t<T>> && IsPairLike<std::ranges::range_reference_t<std::remove_cvref_t<T>>>;
+concept IsPairLikeRange = detail::PairLikeRange<T>;
 
-template <class T> constexpr bool is_optional_v                   = false;
-template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
+template <class T> constexpr bool is_optional_v = detail::is_optional_v<T>;
 
 template <typename T>
-concept IsRangeOfCborValuesBase = std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> &&
-                                  (!IsStringBase<std::remove_cvref_t<T>>) && (!is_optional_v<std::remove_cvref_t<T>>);
+concept IsRangeOfCborValuesBase =
+    detail::RangeOfCborValuesBase<T, IsStringBase<std::remove_cvref_t<T>>, is_optional_v<std::remove_cvref_t<T>>>;
 
 template <typename T>
 concept IsFixedArray =
@@ -323,13 +313,7 @@ concept CborOutputBuffer =
     (CborFixedOutputBuffer<T> || CborAppendOutputBuffer<T>);
 
 template <typename T>
-concept IsMapBase =
-    IsMapHeader<std::remove_cvref_t<T>> || (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> t) {
-        typename std::remove_cvref_t<T>::key_type;
-        typename std::remove_cvref_t<T>::mapped_type;
-        requires IsPairLike<std::ranges::range_reference_t<std::remove_cvref_t<T>>>;
-        t.find(std::declval<typename std::remove_cvref_t<T>::key_type>());
-    });
+concept IsMapBase = IsMapHeader<std::remove_cvref_t<T>> || detail::MapLikeContainer<T, IsRangeOfCborValuesBase<std::remove_cvref_t<T>>>;
 
 template <typename T>
 concept IsArrayBase =

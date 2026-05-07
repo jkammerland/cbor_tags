@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/detail/cbor_item.h"
 
 #include <array>
 #include <cstddef>
@@ -17,216 +18,6 @@
 namespace cbor::tags {
 
 namespace detail {
-
-template <typename Byte> constexpr std::uint8_t scanner_byte_to_u8(Byte value) {
-    if constexpr (std::same_as<std::remove_cvref_t<Byte>, std::byte>) {
-        return std::to_integer<std::uint8_t>(value);
-    } else {
-        return static_cast<std::uint8_t>(value);
-    }
-}
-
-struct tag_scan_frame {
-    bool          indefinite{};
-    major_type    major{};
-    std::uint64_t remaining{};
-    bool          map_expects_value{};
-};
-
-struct cbor_item_skipper {
-    template <typename Iterator> static bool read_byte(Iterator &cursor, Iterator end, std::uint8_t &value, status_code &status) {
-        if (cursor == end) {
-            status = status_code::incomplete;
-            return false;
-        }
-        value = scanner_byte_to_u8(*cursor);
-        ++cursor;
-        return true;
-    }
-
-    template <typename Iterator> static bool advance_bytes(Iterator &cursor, Iterator end, std::uint64_t length, status_code &status) {
-        for (std::uint64_t index = 0; index < length; ++index) {
-            if (cursor == end) {
-                status = status_code::incomplete;
-                return false;
-            }
-            ++cursor;
-        }
-        return true;
-    }
-
-    template <typename Iterator>
-    static bool read_argument(Iterator &cursor, Iterator end, std::uint8_t additional_info, std::uint64_t &value, status_code &status) {
-        if (additional_info < 24) {
-            value = additional_info;
-            return true;
-        }
-        if (additional_info > 27) {
-            status = status_code::error;
-            return false;
-        }
-
-        const auto byte_count = static_cast<std::uint8_t>(1U << (additional_info - 24U));
-        value                 = 0;
-        for (std::uint8_t index = 0; index < byte_count; ++index) {
-            std::uint8_t byte{};
-            if (!read_byte(cursor, end, byte, status)) {
-                return false;
-            }
-            value = (value << 8U) | byte;
-        }
-        return true;
-    }
-
-    template <typename Iterator>
-    static bool skip_indefinite_string(Iterator &cursor, Iterator end, major_type expected_major, status_code &status) {
-        while (true) {
-            if (cursor == end) {
-                status = status_code::incomplete;
-                return false;
-            }
-            if (scanner_byte_to_u8(*cursor) == 0xFFU) {
-                ++cursor;
-                return true;
-            }
-
-            std::uint8_t initial{};
-            if (!read_byte(cursor, end, initial, status)) {
-                return false;
-            }
-            const auto    chunk_major     = static_cast<major_type>(initial >> 5U);
-            const auto    additional_info = static_cast<std::uint8_t>(initial & 0x1FU);
-            std::uint64_t chunk_length{};
-            if (chunk_major != expected_major || additional_info == 31U) {
-                status = status_code::error;
-                return false;
-            }
-            if (!read_argument(cursor, end, additional_info, chunk_length, status)) {
-                return false;
-            }
-            if (!advance_bytes(cursor, end, chunk_length, status)) {
-                return false;
-            }
-        }
-    }
-
-    template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status) {
-        std::uint8_t initial{};
-        if (!read_byte(cursor, end, initial, status)) {
-            return false;
-        }
-
-        const auto major           = static_cast<major_type>(initial >> 5U);
-        const auto additional_info = static_cast<std::uint8_t>(initial & 0x1FU);
-
-        switch (major) {
-        case major_type::UnsignedInteger:
-        case major_type::NegativeInteger: {
-            std::uint64_t ignored{};
-            if (additional_info == 31U) {
-                status = status_code::error;
-                return false;
-            }
-            return read_argument(cursor, end, additional_info, ignored, status);
-        }
-        case major_type::ByteString:
-        case major_type::TextString: {
-            if (additional_info == 31U) {
-                return skip_indefinite_string(cursor, end, major, status);
-            }
-            std::uint64_t length{};
-            return read_argument(cursor, end, additional_info, length, status) && advance_bytes(cursor, end, length, status);
-        }
-        case major_type::Array: {
-            if (additional_info == 31U) {
-                while (true) {
-                    if (cursor == end) {
-                        status = status_code::incomplete;
-                        return false;
-                    }
-                    if (scanner_byte_to_u8(*cursor) == 0xFFU) {
-                        ++cursor;
-                        return true;
-                    }
-                    if (!skip_item(cursor, end, status)) {
-                        return false;
-                    }
-                }
-            }
-            std::uint64_t length{};
-            if (!read_argument(cursor, end, additional_info, length, status)) {
-                return false;
-            }
-            for (std::uint64_t index = 0; index < length; ++index) {
-                if (!skip_item(cursor, end, status)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        case major_type::Map: {
-            if (additional_info == 31U) {
-                while (true) {
-                    if (cursor == end) {
-                        status = status_code::incomplete;
-                        return false;
-                    }
-                    if (scanner_byte_to_u8(*cursor) == 0xFFU) {
-                        ++cursor;
-                        return true;
-                    }
-                    if (!skip_item(cursor, end, status)) {
-                        return false;
-                    }
-                    if (cursor == end) {
-                        status = status_code::incomplete;
-                        return false;
-                    }
-                    if (scanner_byte_to_u8(*cursor) == 0xFFU) {
-                        status = status_code::error;
-                        return false;
-                    }
-                    if (!skip_item(cursor, end, status)) {
-                        return false;
-                    }
-                }
-            }
-            std::uint64_t length{};
-            if (!read_argument(cursor, end, additional_info, length, status)) {
-                return false;
-            }
-            if (length > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
-                status = status_code::error;
-                return false;
-            }
-            for (std::uint64_t index = 0; index < length * 2U; ++index) {
-                if (!skip_item(cursor, end, status)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        case major_type::Tag: {
-            std::uint64_t ignored{};
-            if (additional_info == 31U) {
-                status = status_code::error;
-                return false;
-            }
-            return read_argument(cursor, end, additional_info, ignored, status) && skip_item(cursor, end, status);
-        }
-        case major_type::Simple:
-            if (additional_info == 31U || additional_info == 28U || additional_info == 29U || additional_info == 30U) {
-                status = status_code::error;
-                return false;
-            }
-            if (additional_info < 24U) {
-                return true;
-            }
-            return advance_bytes(cursor, end, std::uint64_t{1U << (additional_info - 24U)}, status);
-        default: status = status_code::error; return false;
-        }
-    }
-};
 
 template <std::uint64_t... Tags> struct static_tag_filter {
     constexpr bool operator()(std::uint64_t tag) const { return ((tag == Tags) || ...); }
@@ -341,7 +132,8 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
         }
 
         bool consume_indefinite_break_if_present() {
-            if (stack_empty() || !stack_back().indefinite || cursor_ == end_ || detail::scanner_byte_to_u8(*cursor_) != 0xFFU) {
+            if (stack_empty() || !stack_back().indefinite || cursor_ == end_ ||
+                !detail::is_cbor_break_byte(detail::cbor_byte_to_u8(*cursor_))) {
                 return false;
             }
             if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
@@ -355,7 +147,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
 
         bool read_argument(std::uint8_t additional_info, std::uint64_t &value) {
             status_code status = status_code::success;
-            if (!detail::cbor_item_skipper::read_argument(cursor_, end_, additional_info, value, status)) {
+            if (!detail::cbor_item_reader::read_argument(cursor_, end_, additional_info, value, status)) {
                 fail(status);
                 return false;
             }
@@ -364,7 +156,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
 
         bool skip_indefinite_string(major_type major) {
             status_code status = status_code::success;
-            if (!detail::cbor_item_skipper::skip_indefinite_string(cursor_, end_, major, status)) {
+            if (!detail::cbor_item_reader::skip_indefinite_string(cursor_, end_, major, status)) {
                 fail(status);
                 return false;
             }
@@ -373,7 +165,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
 
         bool skip_bytes(std::uint64_t length) {
             status_code status = status_code::success;
-            if (!detail::cbor_item_skipper::advance_bytes(cursor_, end_, length, status)) {
+            if (!detail::cbor_item_reader::advance_bytes(cursor_, end_, length, status)) {
                 fail(status);
                 return false;
             }
@@ -405,7 +197,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                     continue;
                 }
 
-                if (detail::scanner_byte_to_u8(*cursor_) == 0xFFU) {
+                if (detail::is_cbor_break_byte(detail::cbor_byte_to_u8(*cursor_))) {
                     fail(status_code::error);
                     return;
                 }
@@ -415,21 +207,18 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                     return;
                 }
 
-                std::uint8_t initial{};
-                status_code  status = status_code::success;
-                if (!detail::cbor_item_skipper::read_byte(cursor_, end_, initial, status)) {
+                detail::cbor_item_header header{};
+                status_code              status = status_code::success;
+                if (!detail::cbor_item_reader::read_header(cursor_, end_, header, status)) {
                     fail(status);
                     return;
                 }
 
-                const auto major           = static_cast<major_type>(initial >> 5U);
-                const auto additional_info = static_cast<std::uint8_t>(initial & 0x1FU);
-
-                switch (major) {
+                switch (header.major) {
                 case major_type::UnsignedInteger:
                 case major_type::NegativeInteger: {
                     std::uint64_t ignored{};
-                    if (additional_info == 31U || !read_argument(additional_info, ignored)) {
+                    if (header.additional_info == 31U || !read_argument(header.additional_info, ignored)) {
                         if (!done_) {
                             fail(status_code::error);
                         }
@@ -439,30 +228,30 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                 }
                 case major_type::ByteString:
                 case major_type::TextString: {
-                    if (additional_info == 31U) {
-                        if (!skip_indefinite_string(major)) {
+                    if (header.additional_info == 31U) {
+                        if (!skip_indefinite_string(header.major)) {
                             return;
                         }
                     } else {
                         std::uint64_t length{};
-                        if (!read_argument(additional_info, length) || !skip_bytes(length)) {
+                        if (!read_argument(header.additional_info, length) || !skip_bytes(length)) {
                             return;
                         }
                     }
                     break;
                 }
                 case major_type::Array: {
-                    if (additional_info == 31U) {
-                        if (!push_frame(detail::tag_scan_frame{.indefinite = true, .major = major_type::Array})) {
+                    if (header.additional_info == 31U) {
+                        if (!push_frame(detail::cbor_item_frame{.indefinite = true, .major = major_type::Array})) {
                             return;
                         }
                     } else {
                         std::uint64_t length{};
-                        if (!read_argument(additional_info, length)) {
+                        if (!read_argument(header.additional_info, length)) {
                             return;
                         }
                         if (length > 0) {
-                            if (!push_frame(detail::tag_scan_frame{.major = major_type::Array, .remaining = length})) {
+                            if (!push_frame(detail::cbor_item_frame{.major = major_type::Array, .remaining = length})) {
                                 return;
                             }
                         }
@@ -470,13 +259,13 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                     break;
                 }
                 case major_type::Map: {
-                    if (additional_info == 31U) {
-                        if (!push_frame(detail::tag_scan_frame{.indefinite = true, .major = major_type::Map})) {
+                    if (header.additional_info == 31U) {
+                        if (!push_frame(detail::cbor_item_frame{.indefinite = true, .major = major_type::Map})) {
                             return;
                         }
                     } else {
                         std::uint64_t length{};
-                        if (!read_argument(additional_info, length)) {
+                        if (!read_argument(header.additional_info, length)) {
                             return;
                         }
                         if (length > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
@@ -484,7 +273,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                             return;
                         }
                         if (length > 0) {
-                            if (!push_frame(detail::tag_scan_frame{.major = major_type::Map, .remaining = length * 2U})) {
+                            if (!push_frame(detail::cbor_item_frame{.major = major_type::Map, .remaining = length * 2U})) {
                                 return;
                             }
                         }
@@ -493,7 +282,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                 }
                 case major_type::Tag: {
                     std::uint64_t tag{};
-                    if (additional_info == 31U || !read_argument(additional_info, tag)) {
+                    if (header.additional_info == 31U || !read_argument(header.additional_info, tag)) {
                         if (!done_) {
                             fail(status_code::error);
                         }
@@ -502,12 +291,12 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                     auto payload_begin = cursor_;
                     auto payload_end   = payload_begin;
                     status             = status_code::success;
-                    if (!detail::cbor_item_skipper::skip_item(payload_end, end_, status)) {
+                    if (!detail::cbor_item_skipper<max_stack_depth>::skip_item(payload_end, end_, status)) {
                         fail(status);
                         return;
                     }
 
-                    if (!push_frame(detail::tag_scan_frame{.major = major_type::Tag, .remaining = 1})) {
+                    if (!push_frame(detail::cbor_item_frame{.major = major_type::Tag, .remaining = 1})) {
                         return;
                     }
                     if (std::invoke(view_->predicate_, tag)) {
@@ -520,11 +309,11 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                     break;
                 }
                 case major_type::Simple:
-                    if (additional_info == 31U || additional_info == 28U || additional_info == 29U || additional_info == 30U) {
+                    if (detail::is_reserved_simple_argument(header.additional_info)) {
                         fail(status_code::error);
                         return;
                     }
-                    if (additional_info >= 24U && !skip_bytes(std::uint64_t{1U << (additional_info - 24U)})) {
+                    if (header.additional_info >= 24U && !skip_bytes(std::uint64_t{1U << (header.additional_info - 24U)})) {
                         return;
                     }
                     break;
@@ -536,7 +325,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
         [[nodiscard]] bool  stack_empty() const noexcept { return stack_size_ == 0; }
         [[nodiscard]] auto &stack_back() noexcept { return stack_[stack_size_ - 1]; }
         void                stack_pop_back() noexcept { --stack_size_; }
-        bool                push_frame(detail::tag_scan_frame frame) {
+        bool                push_frame(detail::cbor_item_frame frame) {
             if (stack_size_ == stack_.size()) {
                 fail(status_code::error);
                 return false;
@@ -545,14 +334,14 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
             return true;
         }
 
-        static constexpr std::size_t                        max_stack_depth = 256;
-        tag_view                                           *view_{};
-        iterator_t                                          cursor_{};
-        iterator_t                                          end_{};
-        std::array<detail::tag_scan_frame, max_stack_depth> stack_{};
-        std::size_t                                         stack_size_{};
-        match_type                                          current_{};
-        bool                                                done_{};
+        static constexpr std::size_t                         max_stack_depth = 256;
+        tag_view                                            *view_{};
+        iterator_t                                           cursor_{};
+        iterator_t                                           end_{};
+        std::array<detail::cbor_item_frame, max_stack_depth> stack_{};
+        std::size_t                                          stack_size_{};
+        match_type                                           current_{};
+        bool                                                 done_{};
     };
 
     constexpr tag_view(const buffer_type &buffer, Predicate predicate) : buffer_(&buffer), predicate_(std::move(predicate)) {}

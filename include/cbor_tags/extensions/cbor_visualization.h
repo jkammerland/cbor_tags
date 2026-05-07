@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
+#include "cbor_tags/detail/cbor_item.h"
 
 #include <array>
 #include <bit>
@@ -1221,16 +1222,16 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     std::uint64_t read_argument(std::uint8_t additional_info) {
-        if (additional_info < 24U) {
-            return additional_info;
+        std::uint64_t value{};
+        auto          status = status_code::success;
+        const auto    ok     = read_cbor_argument(additional_info, value, status, [this](std::uint8_t &byte_value) {
+            byte_value = read_byte();
+            return true;
+        });
+        if (!ok) {
+            throw std::runtime_error("Invalid CBOR additional information");
         }
-        switch (additional_info) {
-        case 24: return read_byte();
-        case 25: return read_uint16_raw();
-        case 26: return read_uint32_raw();
-        case 27: return read_uint64_raw();
-        default: throw std::runtime_error("Invalid CBOR additional information");
-        }
+        return value;
     }
 
     [[nodiscard]] std::string hex_range(std::size_t begin, std::size_t end, bool spaces) const {

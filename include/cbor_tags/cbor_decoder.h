@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
@@ -81,7 +82,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
-    using size_type         = std::size_t;
+    using reader_type       = detail::reader<InputBuffer>;
+    using size_type         = typename reader_type::size_type;
     using buffer_byte_t     = std::ranges::range_value_t<InputBuffer>;
     using input_buffer_type = InputBuffer;
     using byte              = std::byte;
@@ -1121,13 +1123,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr uint64_t read_unsigned(byte additionalInfo) {
-        switch (static_cast<uint8_t>(additionalInfo)) {
-        case 24: return read_uint8();
-        case 25: return read_uint16();
-        case 26: return read_uint32();
-        case 27: return read_uint64();
-        default: throw std::runtime_error("Invalid additional info for integer");
+        std::uint64_t value{};
+        auto          status = status_code::success;
+        const auto    ok =
+            detail::read_cbor_argument(static_cast<std::uint8_t>(additionalInfo), value, status, [this](std::uint8_t &byte_value) {
+                byte_value = read_uint8();
+                return true;
+            });
+        if (!ok) {
+            if (status == status_code::incomplete) {
+                throw parse_incomplete_exception("Unexpected end of input");
+            }
+            throw std::runtime_error("Invalid additional info for integer");
         }
+        return value;
     }
 
     constexpr uint8_t read_uint8() {
@@ -1253,8 +1262,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     // Internal reference, must be public, variadic friends only in c++26
-    const InputBuffer          &data_;
-    detail::reader<InputBuffer> reader_;
+    const InputBuffer &data_;
+    reader_type        reader_;
 };
 
 template <typename T> struct cbor_indefinite_decoder {

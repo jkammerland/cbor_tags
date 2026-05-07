@@ -103,8 +103,16 @@ template <typename T, bool IsContiguous = IsContiguous<T>>
     requires CborInputBuffer<T>
 struct reader;
 
+template <typename T, typename = void> struct reader_size_type {
+    using type = std::size_t;
+};
+
+template <typename T> struct reader_size_type<T, std::void_t<typename std::remove_cvref_t<T>::size_type>> {
+    using type = typename std::remove_cvref_t<T>::size_type;
+};
+
 template <typename T> struct reader<T, true> {
-    using size_type  = std::size_t;
+    using size_type  = typename reader_size_type<T>::type;
     using value_type = std::byte;
     using iterator   = std::ranges::iterator_t<const T>;
     size_type position_{0};
@@ -133,11 +141,17 @@ template <typename T> struct reader<T, true> {
         return static_cast<value_type>(*(std::ranges::begin(container) + static_cast<std::ptrdiff_t>(position_ + offset)));
     }
 
-    constexpr void seek(int i) { position_ += i; }
+    constexpr void seek(std::ptrdiff_t i) {
+        if (i >= 0) {
+            position_ += static_cast<size_type>(i);
+        } else {
+            position_ -= static_cast<size_type>(-i);
+        }
+    }
 };
 
 template <typename T> struct reader<T, false> {
-    using size_type  = std::size_t;
+    using size_type  = typename reader_size_type<T>::type;
     using value_type = std::byte;
     using iterator   = std::ranges::iterator_t<const T>;
     iterator  position_;
@@ -169,7 +183,7 @@ template <typename T> struct reader<T, false> {
         return static_cast<value_type>(*it);
     }
 
-    constexpr void seek(int i) {
+    constexpr void seek(std::ptrdiff_t i) {
         position_ = std::next(position_, i);
         if (i >= 0) {
             current_offset_ += static_cast<size_type>(i);
