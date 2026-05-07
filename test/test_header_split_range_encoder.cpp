@@ -1,6 +1,5 @@
-#include <cbor_tags/cbor_range_encoder.h>
-
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_range_encoder.h>
 #include <doctest/doctest.h>
 #include <vector>
 

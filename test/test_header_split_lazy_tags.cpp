@@ -1,5 +1,4 @@
 #include <cbor_tags/cbor_lazy_tags.h>
-
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <vector>

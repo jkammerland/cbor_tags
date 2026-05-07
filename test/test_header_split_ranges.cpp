@@ -1,5 +1,4 @@
 #include <cbor_tags/cbor_ranges.h>
-
 #include <doctest/doctest.h>
 #include <ranges>
 #include <utility>

@@ -53,9 +53,10 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {
 
 namespace detail {
 
-template <typename Object> constexpr std::uint64_t named_map_pair_count(const Object &object);
+template <typename Object> constexpr std::uint64_t                named_map_pair_count(const Object &object);
 template <typename Object, std::size_t I> constexpr std::uint64_t named_member_pair_count(const Object &object);
-template <typename RootObject, typename Object, typename Encoder> constexpr void encode_named_entries_for_root(Encoder &enc, const Object &object);
+template <typename RootObject, typename Object, typename Encoder>
+constexpr void encode_named_entries_for_root(Encoder &enc, const Object &object);
 
 template <typename Object, std::size_t... Is>
 constexpr std::uint64_t named_map_pair_count_impl(const Object &object, std::index_sequence<Is...>) {
@@ -149,7 +150,8 @@ constexpr void encode_named_entries_impl(Encoder &enc, const Object &object, std
     (encode_named_member<RootObject, Object, Encoder, Is>(enc, object), ...);
 }
 
-template <typename RootObject, typename Object, typename Encoder> constexpr void encode_named_entries_for_root(Encoder &enc, const Object &object) {
+template <typename RootObject, typename Object, typename Encoder>
+constexpr void encode_named_entries_for_root(Encoder &enc, const Object &object) {
     using value_type = std::remove_cvref_t<Object>;
     encode_named_entries_impl<RootObject>(enc, object, std::make_index_sequence<aggregate_member_count<value_type>()>{});
 }
@@ -163,7 +165,7 @@ static constexpr bool named_key_seen(const std::vector<std::string> &seen, std::
     return std::ranges::any_of(seen, [key](const std::string &candidate) { return candidate == key; });
 }
 
-template <typename Object> constexpr void reset_named_optionals_and_extensions(Object &object);
+template <typename Object> constexpr void                reset_named_optionals_and_extensions(Object &object);
 template <typename Object, std::size_t I> constexpr void reset_named_member(Object &object);
 
 template <typename Object, std::size_t... Is>
@@ -287,7 +289,8 @@ template <typename Field, typename Decoder> constexpr status_code decode_named_f
 }
 
 template <typename Object, typename Decoder, std::size_t I>
-constexpr bool decode_named_member(Decoder &dec, Object &object, std::string_view key, std::vector<std::string> &seen, status_code &status) {
+constexpr bool decode_named_member(Decoder &dec, Object &object, std::string_view key, std::vector<std::string> &seen,
+                                   status_code &status) {
     using value_type = std::remove_cvref_t<Object>;
     auto  tuple      = to_tuple(object);
     auto &field      = std::get<I>(tuple);
@@ -324,7 +327,8 @@ template <typename Object, typename Decoder>
 constexpr bool decode_named_member_by_key(Decoder &dec, Object &object, std::string_view key, std::vector<std::string> &seen,
                                           status_code &status) {
     using value_type = std::remove_cvref_t<Object>;
-    return decode_named_member_by_key_impl(dec, object, key, seen, status, std::make_index_sequence<aggregate_member_count<value_type>()>{});
+    return decode_named_member_by_key_impl(dec, object, key, seen, status,
+                                           std::make_index_sequence<aggregate_member_count<value_type>()>{});
 }
 
 template <typename Object, typename Decoder, std::size_t I>
@@ -388,7 +392,8 @@ constexpr bool required_named_member_present(const Object &object, const std::ve
 }
 
 template <typename Object, std::size_t... Is>
-constexpr bool validate_required_named_members_impl(const Object &object, const std::vector<std::string> &seen, std::index_sequence<Is...>) {
+constexpr bool validate_required_named_members_impl(const Object &object, const std::vector<std::string> &seen,
+                                                    std::index_sequence<Is...>) {
     return (required_named_member_present<Object, Is>(object, seen) && ...);
 }
 
