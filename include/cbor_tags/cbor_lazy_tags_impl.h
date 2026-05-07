@@ -40,16 +40,16 @@ template <CborInputBuffer Buffer> struct tag_payload_decoder {
     template <typename T> [[nodiscard]] auto decode(T &value) { return (*this)(value); }
 };
 
-template <CborInputBuffer Buffer> struct tag_match {
+template <CborInputBuffer Buffer> class tag_match {
+  public:
     using buffer_type  = std::remove_cvref_t<Buffer>;
     using iterator     = std::ranges::iterator_t<const buffer_type>;
     using subrange     = std::ranges::subrange<iterator>;
     using payload_view = bstr_view<subrange>;
 
-    const buffer_type *buffer_{};
-    std::uint64_t      tag_{};
-    iterator           payload_begin_{};
-    iterator           payload_end_{};
+    constexpr tag_match() = default;
+    constexpr tag_match(std::uint64_t tag, iterator payload_begin, iterator payload_end)
+        : tag_(tag), payload_begin_(payload_begin), payload_end_(payload_end) {}
 
     [[nodiscard]] constexpr std::uint64_t tag() const noexcept { return tag_; }
     [[nodiscard]] constexpr payload_view  payload_range() const { return payload_view{subrange{payload_begin_, payload_end_}}; }
@@ -68,6 +68,11 @@ template <CborInputBuffer Buffer> struct tag_match {
         auto dec   = cbor::tags::make_decoder(range);
         return dec(value);
     }
+
+  private:
+    std::uint64_t tag_{};
+    iterator      payload_begin_{};
+    iterator      payload_end_{};
 };
 
 template <CborInputBuffer Buffer, typename Predicate> class tag_view : public std::ranges::view_interface<tag_view<Buffer, Predicate>> {
@@ -125,10 +130,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
                     return;
                 }
 
-                current_ = match_type{.buffer_        = view_->buffer_,
-                                      .tag_           = event.tag,
-                                      .payload_begin_ = event.payload_begin,
-                                      .payload_end_   = payload_end};
+                current_ = match_type{event.tag, event.payload_begin, payload_end};
                 return;
             }
 

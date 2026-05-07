@@ -28,9 +28,22 @@ template <std::ranges::view R> struct bstr_range {
     constexpr explicit bstr_range(R range, std::size_t chunk_size = 4096) : range_(std::move(range)), chunk_size_(chunk_size) {}
 };
 
+namespace detail {
+
+template <typename T> struct is_explicit_range_wrapper : std::false_type {};
+template <std::ranges::view R> struct is_explicit_range_wrapper<array_range<R>> : std::true_type {};
+template <std::ranges::view R> struct is_explicit_range_wrapper<map_range<R>> : std::true_type {};
+template <std::ranges::view R> struct is_explicit_range_wrapper<bstr_range<R>> : std::true_type {};
+template <typename T> constexpr bool is_explicit_range_wrapper_v = is_explicit_range_wrapper<std::remove_cvref_t<T>>::value;
+
 template <typename T>
-concept IsCborMapEntry = IsPairLike<T> && IsCborMajor<std::remove_cvref_t<decltype(detail::pair_first(std::declval<T>()))>> &&
-                         IsCborMajor<std::remove_cvref_t<decltype(detail::pair_second(std::declval<T>()))>>;
+concept CborMapEntryComponent = IsCborMajor<std::remove_cvref_t<T>> || is_explicit_range_wrapper_v<T>;
+
+template <typename T>
+concept CborMapEntry = IsPairLike<T> && CborMapEntryComponent<decltype(pair_first(std::declval<T>()))> &&
+                       CborMapEntryComponent<decltype(pair_second(std::declval<T>()))>;
+
+} // namespace detail
 
 template <std::ranges::viewable_range R>
     requires IsCborMajor<std::ranges::range_value_t<std::views::all_t<R>>>
@@ -39,7 +52,7 @@ template <std::ranges::viewable_range R>
 }
 
 template <std::ranges::viewable_range R>
-    requires IsPairLikeRange<std::views::all_t<R>> && IsCborMapEntry<std::ranges::range_reference_t<std::views::all_t<R>>>
+    requires IsPairLikeRange<std::views::all_t<R>> && detail::CborMapEntry<std::ranges::range_reference_t<std::views::all_t<R>>>
 [[nodiscard]] constexpr auto as_map_range(R &&range) {
     return map_range<std::views::all_t<R>>{std::views::all(std::forward<R>(range))};
 }

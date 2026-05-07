@@ -366,6 +366,13 @@ TEST_CASE("explicit map range wrappers encode transformed pair views") {
     auto member_pairs = std::array{member_pair_entry{1, 2}, member_pair_entry{3, 4}};
     REQUIRE(enc(as_map_range(member_pairs)));
     CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    std::vector<int> nested_values{1, 2};
+    auto             nested_entries = std::array{std::pair{1, as_array_range(nested_values)}};
+    static_assert(CanMakeMapRange<decltype(nested_entries) &>);
+    REQUIRE(enc(as_map_range(nested_entries)));
+    CHECK_EQ(to_hex(buffer), "a101820102");
 }
 
 TEST_CASE("explicit byte string range wrappers encode byte-like views") {

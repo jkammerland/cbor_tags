@@ -760,7 +760,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (IsContiguous<InputBuffer>) {
             reader_.position_ += needed;
         } else {
-            if (needed > static_cast<size_type>(std::numeric_limits<std::ptrdiff_t>::max())) {
+            if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
                 return status_code::error;
             }
             reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
@@ -792,7 +792,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (IsContiguous<InputBuffer>) {
             reader_.position_ += needed;
         } else {
-            if (needed > static_cast<size_type>(std::numeric_limits<std::ptrdiff_t>::max())) {
+            if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
                 return status_code::error;
             }
             reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));

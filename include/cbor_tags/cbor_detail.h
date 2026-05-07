@@ -9,10 +9,12 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace cbor::tags::detail {
 
@@ -103,21 +105,27 @@ template <typename T, bool IsContiguous = IsContiguous<T>>
     requires CborInputBuffer<T>
 struct reader;
 
-template <typename T, typename = void> struct nested_size_type {
+template <typename T, bool HasNestedSize = requires { typename std::remove_cvref_t<T>::size_type; },
+          bool IsSizedRange = std::ranges::sized_range<const std::remove_cvref_t<T>>>
+struct reader_size_type {
     using type = std::size_t;
 };
 
-template <typename T> struct nested_size_type<T, std::void_t<typename T::size_type>> {
-    using type = typename T::size_type;
+template <typename T, bool IsSizedRange> struct reader_size_type<T, true, IsSizedRange> {
+    using type = typename std::remove_cvref_t<T>::size_type;
 };
 
-template <typename T, bool IsSizedRange = std::ranges::sized_range<const std::remove_cvref_t<T>>> struct reader_size_type {
-    using type = typename nested_size_type<std::remove_cvref_t<T>>::type;
-};
-
-template <typename T> struct reader_size_type<T, true> {
+template <typename T> struct reader_size_type<T, false, true> {
     using type = std::ranges::range_size_t<const std::remove_cvref_t<T>>;
 };
+
+[[nodiscard]] constexpr auto negative_seek_magnitude(std::ptrdiff_t value) noexcept {
+    using magnitude_type = std::make_unsigned_t<std::ptrdiff_t>;
+    if (value == std::numeric_limits<std::ptrdiff_t>::min()) {
+        return static_cast<magnitude_type>(std::numeric_limits<std::ptrdiff_t>::max()) + magnitude_type{1};
+    }
+    return static_cast<magnitude_type>(-value);
+}
 
 template <typename T> struct reader<T, true> {
     using size_type  = typename reader_size_type<T>::type;
@@ -153,11 +161,11 @@ template <typename T> struct reader<T, true> {
         if (i >= 0) {
             position_ += static_cast<size_type>(i);
         } else {
-            const auto amount = static_cast<size_type>(-i);
-            if (amount > position_) {
+            const auto amount = negative_seek_magnitude(i);
+            if (std::cmp_greater(amount, position_)) {
                 throw std::runtime_error("CBOR input seek before begin");
             }
-            position_ -= amount;
+            position_ -= static_cast<size_type>(amount);
         }
     }
 };
@@ -197,8 +205,8 @@ template <typename T> struct reader<T, false> {
 
     constexpr void seek(std::ptrdiff_t i) {
         if (i < 0) {
-            const auto amount = static_cast<size_type>(-i);
-            if (amount > current_offset_) {
+            const auto amount = negative_seek_magnitude(i);
+            if (std::cmp_greater(amount, current_offset_)) {
                 throw std::runtime_error("CBOR input seek before begin");
             }
         }
@@ -206,7 +214,7 @@ template <typename T> struct reader<T, false> {
         if (i >= 0) {
             current_offset_ += static_cast<size_type>(i);
         } else {
-            current_offset_ -= static_cast<size_type>(-i);
+            current_offset_ -= static_cast<size_type>(negative_seek_magnitude(i));
         }
     }
 };

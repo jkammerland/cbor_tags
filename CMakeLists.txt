@@ -47,9 +47,9 @@ if(CBOR_TAGS_USE_STD_REFLECTION)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     include(CheckCXXSourceCompiles)
     set(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
-    set(CMAKE_CXX_STANDARD 26)
-    set(CMAKE_CXX_EXTENSIONS ON)
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -freflection")
+    set(_CBOR_TAGS_CMAKE_CXX_STANDARD "${CMAKE_CXX_STANDARD}")
+    unset(CMAKE_CXX_STANDARD)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=gnu++26 -freflection")
     check_cxx_source_compiles(
       [=[
 #include <meta>
@@ -63,7 +63,9 @@ int main() { return 0; }
 ]=]
       CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
     set(CMAKE_REQUIRED_FLAGS "${_CBOR_TAGS_CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_CXX_STANDARD "${_CBOR_TAGS_CMAKE_CXX_STANDARD}")
     unset(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS)
+    unset(_CBOR_TAGS_CMAKE_CXX_STANDARD)
 
     if(NOT CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
       message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION requires GCC with C++26 reflection support (-std=gnu++26 -freflection).")

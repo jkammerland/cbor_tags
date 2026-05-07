@@ -90,6 +90,19 @@ struct AdlSizedByteRange {
     friend const std::byte *end(const AdlSizedByteRange &range) noexcept { return range.bytes.data() + range.bytes.size(); }
     friend std::uint16_t    size(const AdlSizedByteRange &range) noexcept { return static_cast<std::uint16_t>(range.bytes.size()); }
 };
+
+struct SignedSizeDequeByteRange {
+    using value_type = std::byte;
+    using size_type  = int;
+
+    std::deque<std::byte> bytes;
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
+};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
@@ -104,6 +117,8 @@ static_assert(
     std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
 static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
+static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
+static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
 
 TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
     const auto cancelled = integer{2, true} + integer{2};
@@ -524,10 +539,23 @@ TEST_CASE("decoder readers reject negative seeks before begin") {
     std::vector<std::byte>                             contiguous{std::byte{0x01}};
     cbor::tags::detail::reader<std::vector<std::byte>> contiguous_reader{contiguous};
     CHECK_THROWS_AS(contiguous_reader.seek(-1), std::runtime_error);
+    CHECK_THROWS_AS(contiguous_reader.seek(std::numeric_limits<std::ptrdiff_t>::min()), std::runtime_error);
 
     std::deque<std::byte>                             non_contiguous{std::byte{0x01}};
     cbor::tags::detail::reader<std::deque<std::byte>> non_contiguous_reader{non_contiguous};
     CHECK_THROWS_AS(non_contiguous_reader.seek(-1), std::runtime_error);
+    CHECK_THROWS_AS(non_contiguous_reader.seek(std::numeric_limits<std::ptrdiff_t>::min()), std::runtime_error);
+}
+
+TEST_CASE("decoder skips any byte strings on signed-size non-contiguous ranges") {
+    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x41}, std::byte{0x01}}};
+
+    auto        dec = make_decoder(buffer);
+    as_bstr_any decoded{};
+    auto        result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.size, 1);
 }
 
 TEST_CASE("decoder should report incomplete byte-string view without retry contract") {

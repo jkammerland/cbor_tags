@@ -101,6 +101,7 @@ using lazy_tag_byte_subrange      = std::ranges::subrange<lazy_tag_byte_vector::
 using lazy_tag_mutable_span_match = cbor::tags::tag_match<std::span<std::byte>>;
 static_assert(CanFindStaticTags<lazy_tag_byte_subrange &>);
 static_assert(!CanFindStaticTags<lazy_tag_byte_subrange>);
+static_assert(!std::is_aggregate_v<lazy_tag_mutable_span_match>);
 static_assert(!std::assignable_from<decltype(*std::declval<lazy_tag_mutable_span_match &>().payload_range().begin()), std::byte>);
 
 TEST_CASE("lazy tag scanner finds matching tags in nested arrays and maps") {
