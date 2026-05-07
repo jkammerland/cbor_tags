@@ -2,6 +2,7 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_lazy_tags.h>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -212,6 +213,26 @@ TEST_CASE("lazy tag scanner reports truncated matching payloads") {
     CHECK(it == view.end());
     CHECK(view.failed());
     CHECK_EQ(view.status(), status_code::incomplete);
+}
+
+TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
+    {
+        auto buffer = to_bytes("d8641f");
+        auto view   = find_tags<100>(buffer);
+        auto it     = view.begin();
+        CHECK(it == view.end());
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
+
+    {
+        auto buffer = to_bytes("d864df");
+        auto view   = find_tags<100>(buffer);
+        auto it     = view.begin();
+        CHECK(it == view.end());
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
 }
 
 TEST_CASE("lazy tag scanner reports malformed indefinite items") {

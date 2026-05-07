@@ -5,6 +5,7 @@
 #include <cbor_tags/cbor.h>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_ranges.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -12,9 +13,11 @@
 #include <fmt/base.h>
 #include <functional>
 #include <iomanip>
+#include <memory>
 #include <ranges>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -57,6 +60,8 @@ static_assert(!IsPairLike<std::tuple<int>>);
 static_assert(!IsPairLike<std::tuple<int, int, int>>);
 static_assert(!IsPairLike<std::array<int, 3>>);
 static_assert(!CanMakeMapRange<std::array<std::tuple<int, int, int>, 1> &>);
+static_assert(std::is_same_v<decltype(cbor::tags::detail::pair_first(std::declval<member_pair_entry &>())), int &>);
+static_assert(std::is_same_v<decltype(cbor::tags::detail::pair_second(std::declval<const member_pair_entry &>())), const int &>);
 
 TEST_CASE("Test ranges 1") {
     // Create a deque of chars (non-contiguous in memory)
@@ -314,6 +319,18 @@ TEST_CASE("explicit array range wrappers encode sized and non-sized views") {
     auto wrapped = as_array_range(std::vector<int>{4, 5});
     REQUIRE(enc(wrapped));
     CHECK_EQ(to_hex(buffer), "820405");
+}
+
+TEST_CASE("manual encoder aliases retain range wrapper support") {
+    std::vector<std::byte> buffer;
+    cbor::tags::encoder<std::vector<std::byte>, cbor::tags::Options<cbor::tags::default_expected, cbor::tags::default_wrapping>,
+                        cbor::tags::cbor_header_encoder, cbor::tags::cbor_indefinite_encoder, cbor::tags::cbor_optional_encoder,
+                        cbor::tags::cbor_variant_encoder>
+        enc{buffer};
+
+    auto values = std::views::iota(1, 4);
+    REQUIRE(enc(as_array_range(values)));
+    CHECK_EQ(to_hex(buffer), "83010203");
 }
 
 TEST_CASE("explicit map range wrappers encode transformed pair views") {

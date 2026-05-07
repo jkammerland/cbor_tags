@@ -29,7 +29,7 @@ if(CBOR_TAGS_USE_DEV_SETTINGS)
 endif()
 
 # THE LIBRARY
-file(GLOB_RECURSE CBOR_HEADERS include/*.h include/*.hpp)
+file(GLOB_RECURSE CBOR_HEADERS CONFIGURE_DEPENDS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
 target_sources(
   ${PROJECT_NAME}
