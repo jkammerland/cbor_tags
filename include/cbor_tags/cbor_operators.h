@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -94,47 +95,58 @@ struct variant_hasher {
     template <IsVariant Variant> size_t operator()(const Variant &v) const noexcept {
         // Start with the index hash
         size_t seed = std::hash<size_t>{}(v.index());
-
-        // Combine with value hash
-        return std::visit(
-            [seed](const auto &arg) mutable -> size_t {
-                using T = std::decay_t<decltype(arg)>;
-
-                size_t value_hash;
-                if constexpr (IsUnsigned<T> || IsSigned<T>) {
-                    value_hash = std::hash<T>{}(arg);
-                } else if constexpr (IsBinaryString<T> || IsTextString<T>) {
-                    // Hash the contents of the string/binary data
-                    value_hash =
-                        std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(std::data(arg)), std::size(arg)));
-                } else if constexpr (IsArray<T> || IsMap<T>) {
-                    // Hash each element in the container
-                    value_hash = 0;
-                    for (const auto &elem : arg) {
-                        // Combine hashes using FNV-1a-like algorithm
-                        value_hash ^= std::hash<std::decay_t<decltype(elem)>>{}(elem);
-                        value_hash *= 16777619;
-                    }
-                } else if constexpr (IsTag<T>) {
-                    value_hash = std::hash<T>{}(arg);
-                } else if constexpr (IsSimple<T>) {
-                    if constexpr (std::is_same_v<T, std::nullptr_t>) {
-                        value_hash = 0;
-                    } else {
-                        value_hash = std::hash<T>{}(arg);
-                    }
-                } else {
-                    static_assert(always_false<T>::value, "Non-exhaustive visitor!");
-                }
-
-                // Combine the seed (index hash) with the value hash
-                // Using FNV-1a-like combining
-                seed ^= value_hash;
-                seed *= 16777619;
-                return seed;
-            },
-            v);
+        seed ^= hash_variant_value(v);
+        seed *= fnv_prime;
+        return seed;
     }
+
+  private:
+    static constexpr size_t fnv_prime = 16777619;
+
+    template <typename T> static size_t hash_cbor_value(const T &arg) noexcept {
+        using value_type = std::decay_t<T>;
+
+        if constexpr (IsUnsigned<value_type> || IsSigned<value_type>) {
+            return std::hash<value_type>{}(arg);
+        } else if constexpr (IsBinaryString<value_type> || IsTextString<value_type>) {
+            // Hash the contents of the string/binary data
+            return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char *>(std::data(arg)), std::size(arg)));
+        } else if constexpr (IsArray<value_type> || IsMap<value_type>) {
+            // Hash each element in the container
+            size_t value_hash = 0;
+            for (const auto &elem : arg) {
+                // Combine hashes using FNV-1a-like algorithm
+                value_hash ^= std::hash<std::decay_t<decltype(elem)>>{}(elem);
+                value_hash *= fnv_prime;
+            }
+            return value_hash;
+        } else if constexpr (IsTag<value_type>) {
+            return std::hash<value_type>{}(arg);
+        } else if constexpr (IsSimple<value_type>) {
+            if constexpr (std::is_same_v<value_type, std::nullptr_t>) {
+                return 0;
+            } else {
+                return std::hash<value_type>{}(arg);
+            }
+        } else {
+            static_assert(always_false<value_type>::value, "Non-exhaustive visitor!");
+        }
+    }
+
+    template <std::size_t I, IsVariant Variant> static size_t hash_variant_value_impl(const Variant &v) noexcept {
+        using variant_type = std::remove_cvref_t<Variant>;
+
+        if constexpr (I == std::variant_size_v<variant_type>) {
+            std::terminate();
+        } else {
+            if (v.index() == I) {
+                return hash_cbor_value(std::get<I>(v));
+            }
+            return hash_variant_value_impl<I + 1>(v);
+        }
+    }
+
+    template <IsVariant Variant> static size_t hash_variant_value(const Variant &v) noexcept { return hash_variant_value_impl<0>(v); }
 };
 
 } // namespace cbor::tags
