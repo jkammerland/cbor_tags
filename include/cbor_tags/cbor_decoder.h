@@ -268,6 +268,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // Copy approach (if ownership semantics allow):
             // std::vector<typename T::value_type> temp(bstring.begin(), bstring.end());
             // t = T(...); // Construct from temp somehow
+        } else if constexpr (IsConstView<T>) {
+            t = T(std::ranges::data(bstring), std::ranges::size(bstring));
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {

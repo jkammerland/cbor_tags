@@ -40,6 +40,51 @@ auto dec = cbor::tags::make_decoder(data);
 dec(values);
 ```
 
+## Explicit Range Encoding
+
+Plain pair ranges are not treated as maps automatically. Use the explicit range
+wrappers when the source is a view or when the CBOR shape should be forced:
+
+```cpp
+std::vector<int> values{1, 2, 3};
+enc(cbor::tags::as_array_range(values)); // 83 01 02 03
+
+auto odd_pairs = std::views::iota(0, 5)
+               | std::views::filter([](int value) { return value % 2 == 1; })
+               | std::views::transform([](int value) {
+                     return std::pair{value, value * 10};
+                 });
+enc(cbor::tags::as_map_range(odd_pairs)); // bf 01 0a 03 18 1e ff
+```
+
+Sized ranges encode as definite CBOR arrays or maps. Non-sized ranges encode as
+indefinite arrays or maps. Proxy-reference array ranges, such as
+`std::vector<bool>`, are encoded from their value type without copying lvalue
+containers. Map range entries are stricter: pair-like key and mapped references
+must be directly CBOR-encodable.
+
+Nested wrappers are supported when the wrapper object can be iterated in the
+same cv-qualified context used by the outer range. For example, a non-const
+outer range may hold an `as_array_range(filter_view)` value, but a `const`
+outer range is rejected because standard `filter_view` is not const-iterable.
+
+Use `as_bstr_range(byte_range, chunk_size)` to encode byte-like ranges as CBOR
+byte strings:
+
+```cpp
+auto bytes = std::views::iota(0, 5)
+           | std::views::filter([](int) { return true; })
+           | std::views::transform([](int value) {
+                 return static_cast<std::byte>(value);
+             });
+
+enc(cbor::tags::as_bstr_range(bytes, 2)); // 5f 42 00 01 42 02 03 41 04 ff
+```
+
+Sized byte ranges encode as definite byte strings. Non-sized byte ranges encode
+as indefinite byte strings in definite chunks. `chunk_size` must be greater
+than zero.
+
 ## View Decode Targets
 
 View decode targets avoid copying. They reference the original input buffer.
@@ -86,3 +131,30 @@ values:
 Non-contiguous array, map, and tag range-view placeholders are not part of the
 public variant surface. Decode those structures into owning arrays, maps, tagged
 types, or custom visitor targets instead.
+
+## Lazy Tag Scanning
+
+`find_tags` scans an existing CBOR buffer and yields matching tags without
+materializing unrelated payloads:
+
+```cpp
+auto view = cbor::tags::find_tags<100, 200>(buffer);
+
+for (const auto& match : view) {
+    auto tag = match.tag();
+    auto encoded_payload = match.payload_range();
+
+    payload_type payload{};
+    auto result = match.decode(payload);
+}
+```
+
+The returned view borrows from the original buffer. The buffer must outlive the
+tag view, matches, payload ranges, and payload decoders, and its iterators must
+not be invalidated while they are used. `payload_span()` is available only for
+contiguous buffers. `payload_range()` exposes read-only byte values even when
+the original buffer is mutable.
+
+The scanner uses fixed stack storage for nested CBOR traversal. Malformed or
+truncated input stops iteration and is reported through `view.status()` and
+`view.failed()`.

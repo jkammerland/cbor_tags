@@ -23,14 +23,19 @@ template <std::uint64_t... Tags> struct static_tag_filter {
     constexpr bool operator()(std::uint64_t tag) const { return ((tag == Tags) || ...); }
 };
 
+template <typename Buffer>
+concept LazyTagViewableBuffer =
+    requires(Buffer &buffer) { std::views::all(buffer); } && CborInputBuffer<decltype(std::views::all(std::declval<Buffer &>()))>;
+
 } // namespace detail
 
-template <CborInputBuffer Buffer> struct tag_payload_decoder {
+template <CborInputBuffer Buffer> class tag_payload_decoder {
+  public:
     using buffer_type = std::remove_cvref_t<Buffer>;
     using iterator    = std::ranges::iterator_t<const buffer_type>;
     using subrange    = std::ranges::subrange<iterator>;
 
-    subrange range_;
+    constexpr explicit tag_payload_decoder(subrange range) : range_(std::move(range)) {}
 
     template <typename... T> [[nodiscard]] auto operator()(T &&...values) {
         auto dec = cbor::tags::make_decoder(range_);
@@ -38,21 +43,28 @@ template <CborInputBuffer Buffer> struct tag_payload_decoder {
     }
 
     template <typename T> [[nodiscard]] auto decode(T &value) { return (*this)(value); }
+
+  private:
+    subrange range_;
 };
 
 template <CborInputBuffer Buffer> class tag_match {
   public:
-    using buffer_type  = std::remove_cvref_t<Buffer>;
-    using iterator     = std::ranges::iterator_t<const buffer_type>;
-    using subrange     = std::ranges::subrange<iterator>;
-    using payload_view = bstr_view<subrange>;
+    using buffer_type      = std::remove_cvref_t<Buffer>;
+    using iterator         = std::ranges::iterator_t<const buffer_type>;
+    using subrange         = std::ranges::subrange<iterator>;
+    using payload_iterator = cast_view_iterator<iterator, std::byte>;
+    using payload_subrange = std::ranges::subrange<payload_iterator>;
+    using payload_view     = bstr_view<payload_subrange>;
 
     constexpr tag_match() = default;
     constexpr tag_match(std::uint64_t tag, iterator payload_begin, iterator payload_end)
         : tag_(tag), payload_begin_(payload_begin), payload_end_(payload_end) {}
 
     [[nodiscard]] constexpr std::uint64_t tag() const noexcept { return tag_; }
-    [[nodiscard]] constexpr payload_view  payload_range() const { return payload_view{subrange{payload_begin_, payload_end_}}; }
+    [[nodiscard]] constexpr payload_view  payload_range() const {
+        return payload_view{payload_subrange{payload_iterator{payload_begin_}, payload_iterator{payload_end_}}};
+    }
 
     [[nodiscard]] auto payload_span() const
         requires std::ranges::contiguous_range<const buffer_type>
@@ -89,7 +101,8 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
         using iterator_concept  = std::input_iterator_tag;
 
         iterator() = default;
-        explicit iterator(tag_view *view) : view_(view), walker_(std::ranges::begin(view->buffer_), std::ranges::end(view->buffer_)) {
+        explicit iterator(tag_view *view)
+            : view_(view), walker_(std::ranges::begin(std::as_const(view->buffer_)), std::ranges::end(std::as_const(view->buffer_))) {
             find_next();
         }
 
@@ -164,7 +177,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
     friend class iterator;
 };
 
-template <std::uint64_t... Tags, CborInputBuffer Buffer> [[nodiscard]] auto find_tags(Buffer &buffer) {
+template <std::uint64_t... Tags, detail::LazyTagViewableBuffer Buffer> [[nodiscard]] auto find_tags(Buffer &buffer) {
     auto view = std::views::all(buffer);
     return tag_view<decltype(view), detail::static_tag_filter<Tags...>>{std::move(view), {}};
 }
@@ -174,7 +187,7 @@ auto find_tags(Buffer &&buffer)
     requires(!std::is_lvalue_reference_v<Buffer>)
 = delete;
 
-template <CborInputBuffer Buffer, typename Predicate> [[nodiscard]] auto find_tags(Buffer &buffer, Predicate predicate) {
+template <detail::LazyTagViewableBuffer Buffer, typename Predicate> [[nodiscard]] auto find_tags(Buffer &buffer, Predicate predicate) {
     auto view = std::views::all(buffer);
     return tag_view<decltype(view), std::remove_cvref_t<Predicate>>{std::move(view), std::forward<Predicate>(predicate)};
 }

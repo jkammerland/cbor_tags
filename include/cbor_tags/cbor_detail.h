@@ -28,6 +28,12 @@ template <typename T, bool IsArray = IsFixedArray<T>>
     requires AppendableContainer<T>
 struct appender;
 
+template <typename Container, typename Pair>
+concept AssignableInsertOrAssignMap = IsMap<Container> && IsPairLike<Pair> && requires(Container &container, Pair &&value) {
+    requires std::assignable_from<typename Container::mapped_type &, decltype(pair_second(std::forward<Pair>(value)))>;
+    container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
+};
+
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
 
@@ -40,9 +46,7 @@ template <typename T> struct appender<T, false> {
     template <typename Pair>
         requires IsMap<T> && IsPairLike<Pair>
     constexpr void operator()(T &container, Pair &&value) {
-        if constexpr (requires {
-                          container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
-                      }) {
+        if constexpr (AssignableInsertOrAssignMap<T, Pair>) {
             container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
         } else {
             container.insert(std::forward<Pair>(value));

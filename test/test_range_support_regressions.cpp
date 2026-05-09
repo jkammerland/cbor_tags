@@ -36,7 +36,9 @@ static_assert(CanMakeArrayRange<regression_nested_array &>);
 static_assert(!CanMakeMapRange<regression_bad_map_entries &>);
 static_assert(cbor::tags::IsFixedArray<std::span<int>>);
 static_assert(cbor::tags::IsFixedArray<std::span<int, 2>>);
+static_assert(cbor::tags::IsFixedArray<std::span<const std::byte, 2>>);
 static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte>>);
+static_assert(CanMakeArrayRange<std::vector<bool> &>);
 
 struct range_regression_move_only_value {
     int value{};
@@ -46,6 +48,18 @@ struct range_regression_move_only_value {
     range_regression_move_only_value &operator=(const range_regression_move_only_value &)     = delete;
     range_regression_move_only_value(range_regression_move_only_value &&) noexcept            = default;
     range_regression_move_only_value &operator=(range_regression_move_only_value &&) noexcept = default;
+
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(value); }
+};
+
+struct range_regression_non_move_assignable_value {
+    int value{};
+
+    range_regression_non_move_assignable_value()                                                              = default;
+    range_regression_non_move_assignable_value(const range_regression_non_move_assignable_value &)            = delete;
+    range_regression_non_move_assignable_value &operator=(const range_regression_non_move_assignable_value &) = delete;
+    range_regression_non_move_assignable_value(range_regression_non_move_assignable_value &&) noexcept        = default;
+    range_regression_non_move_assignable_value &operator=(range_regression_non_move_assignable_value &&)      = delete;
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(value); }
 };
@@ -75,6 +89,34 @@ TEST_CASE("explicit array range wrappers can be nested") {
 
     REQUIRE(enc(as_array_range(nested)));
     CHECK_EQ(to_hex(buffer), "81820102");
+}
+
+TEST_CASE("explicit array range wrappers encode proxy reference ranges") {
+    std::vector<bool>      flags{true, false, true};
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_array_range(flags)));
+    CHECK_EQ(to_hex(buffer), "83f5f4f5");
+}
+
+TEST_CASE("explicit map range wrappers keep proxy pair components strict") {
+    std::vector<bool> flags{true, false};
+    auto              proxy_pairs = flags | std::views::transform([](auto bit) { return std::pair{1, bit}; });
+
+    CHECK_FALSE(CanMakeMapRange<decltype(proxy_pairs) &>);
+}
+
+TEST_CASE("explicit const nested wrappers reject non-const-iterable views early") {
+    std::vector<int> values{1, 2};
+
+    auto mutable_filtered = values | std::views::filter([](int) { return true; });
+    auto mutable_nested   = std::array{as_array_range(mutable_filtered)};
+    static_assert(CanMakeArrayRange<decltype(mutable_nested) &>);
+
+    auto       filtered = values | std::views::filter([](int) { return true; });
+    const auto nested   = std::array{as_array_range(filtered)};
+    static_assert(!CanMakeArrayRange<decltype(nested) &>);
 }
 
 TEST_CASE("byte string range wrappers reject zero chunk size for sized and unsized ranges") {
@@ -186,6 +228,37 @@ TEST_CASE("fixed-size byte string targets validate length before reading payload
     }
 }
 
+TEST_CASE("const static extent byte spans validate length before rebinding") {
+    {
+        auto buffer = to_bytes("420102");
+        auto dec    = make_decoder(buffer);
+
+        std::array<std::byte, 2>      storage{std::byte{0xAA}, std::byte{0xBB}};
+        std::span<const std::byte, 2> decoded{storage};
+
+        auto result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.data(), buffer.data() + 1);
+        CHECK_EQ(to_hex(decoded), "0102");
+    }
+
+    {
+        auto buffer = to_bytes("4101");
+        auto dec    = make_decoder(buffer);
+
+        std::array<std::byte, 2>      storage{std::byte{0xAA}, std::byte{0xBB}};
+        std::span<const std::byte, 2> decoded{storage};
+
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK_EQ(decoded.data(), storage.data());
+        CHECK_EQ(to_hex(decoded), "aabb");
+    }
+}
+
 TEST_CASE("map decode moves decoded entries into associative containers") {
     {
         auto bytes = to_bytes("a201020103");
@@ -220,5 +293,31 @@ TEST_CASE("map decode moves decoded entries into associative containers") {
         REQUIRE(result);
         REQUIRE_EQ(decoded.size(), 1);
         CHECK_EQ(decoded.at(2).value, 4);
+    }
+}
+
+TEST_CASE("map decode inserts move-constructible non-move-assignable mapped values") {
+    {
+        auto bytes = to_bytes("a10102");
+        auto dec   = make_decoder(bytes);
+
+        std::map<int, range_regression_non_move_assignable_value> decoded;
+        auto                                                      result = dec(decoded);
+
+        REQUIRE(result);
+        REQUIRE_EQ(decoded.size(), 1);
+        CHECK_EQ(decoded.at(1).value, 2);
+    }
+
+    {
+        auto bytes = to_bytes("a201020103");
+        auto dec   = make_decoder(bytes);
+
+        std::map<int, range_regression_non_move_assignable_value> decoded;
+        auto                                                      result = dec(decoded);
+
+        REQUIRE(result);
+        REQUIRE_EQ(decoded.size(), 1);
+        CHECK_EQ(decoded.at(1).value, 2);
     }
 }

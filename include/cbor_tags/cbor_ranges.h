@@ -31,17 +31,33 @@ template <std::ranges::view R> struct bstr_range {
 namespace detail {
 
 template <typename T> struct is_valid_explicit_range_wrapper : std::false_type {};
+template <typename T> struct is_const_iterable_explicit_range_wrapper : std::false_type {};
 
 template <typename T>
-concept CborRangeComponent = IsCborMajor<std::remove_cvref_t<T>> || is_valid_explicit_range_wrapper<std::remove_cvref_t<T>>::value;
+concept ExplicitRangeWrapperReference = is_valid_explicit_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept ExplicitRangeWrapperComponent =
+    ExplicitRangeWrapperReference<T> &&
+    (!std::is_const_v<std::remove_reference_t<T>> || is_const_iterable_explicit_range_wrapper<std::remove_cvref_t<T>>::value);
+
+template <typename T>
+concept CborRangeComponent = IsCborMajor<std::remove_cvref_t<T>> || ExplicitRangeWrapperComponent<T>;
+
+template <typename Reference, typename Value>
+concept MaterializableCborRangeComponent =
+    CborRangeComponent<Reference> ||
+    (!ExplicitRangeWrapperReference<Reference> && CborRangeComponent<Value> && std::constructible_from<Value, Reference>);
+
+template <typename R>
+concept CborArrayRange =
+    std::ranges::input_range<R> && MaterializableCborRangeComponent<std::ranges::range_reference_t<R>, std::ranges::range_value_t<R>>;
 
 template <typename T>
 concept CborMapEntry = IsPairLike<T> && CborRangeComponent<decltype(pair_first(std::declval<T>()))> &&
                        CborRangeComponent<decltype(pair_second(std::declval<T>()))>;
 
-template <std::ranges::view R>
-struct is_valid_explicit_range_wrapper<array_range<R>>
-    : std::bool_constant<std::ranges::input_range<R> && CborRangeComponent<std::ranges::range_reference_t<R>>> {};
+template <std::ranges::view R> struct is_valid_explicit_range_wrapper<array_range<R>> : std::bool_constant<CborArrayRange<R>> {};
 
 template <std::ranges::view R>
 struct is_valid_explicit_range_wrapper<map_range<R>>
@@ -49,10 +65,19 @@ struct is_valid_explicit_range_wrapper<map_range<R>>
 
 template <std::ranges::view R> struct is_valid_explicit_range_wrapper<bstr_range<R>> : std::bool_constant<IsByteLikeRange<R>> {};
 
+template <std::ranges::view R>
+struct is_const_iterable_explicit_range_wrapper<array_range<R>> : std::bool_constant<std::ranges::range<const R>> {};
+
+template <std::ranges::view R>
+struct is_const_iterable_explicit_range_wrapper<map_range<R>> : std::bool_constant<std::ranges::range<const R>> {};
+
+template <std::ranges::view R>
+struct is_const_iterable_explicit_range_wrapper<bstr_range<R>> : std::bool_constant<std::ranges::range<const R>> {};
+
 } // namespace detail
 
 template <std::ranges::viewable_range R>
-    requires detail::CborRangeComponent<std::ranges::range_reference_t<std::views::all_t<R>>>
+    requires detail::CborArrayRange<std::views::all_t<R>>
 [[nodiscard]] constexpr auto as_array_range(R &&range) {
     return array_range<std::views::all_t<R>>{std::views::all(std::forward<R>(range))};
 }

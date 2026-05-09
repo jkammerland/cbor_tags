@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <deque>
 #include <doctest/doctest.h>
+#include <iterator>
 #include <map>
 #include <new>
 #include <ranges>
@@ -62,6 +63,54 @@ concept CanFindStaticTags = requires(Buffer &&buffer) { cbor::tags::find_tags<10
 template <typename Buffer>
 concept CanFindRuntimeTags = requires(Buffer &&buffer) { cbor::tags::find_tags(std::forward<Buffer>(buffer), accept_any_tag{}); };
 
+template <typename Ptr> struct lazy_tag_byte_iterator {
+    Ptr p{};
+
+    using value_type        = std::byte;
+    using difference_type   = std::ptrdiff_t;
+    using iterator_category = std::bidirectional_iterator_tag;
+    using iterator_concept  = std::bidirectional_iterator_tag;
+
+    decltype(auto) operator*() const { return *p; }
+
+    lazy_tag_byte_iterator &operator++() {
+        ++p;
+        return *this;
+    }
+
+    lazy_tag_byte_iterator operator++(int) {
+        auto copy = *this;
+        ++(*this);
+        return copy;
+    }
+
+    lazy_tag_byte_iterator &operator--() {
+        --p;
+        return *this;
+    }
+
+    lazy_tag_byte_iterator operator--(int) {
+        auto copy = *this;
+        --(*this);
+        return copy;
+    }
+
+    friend bool operator==(lazy_tag_byte_iterator lhs, lazy_tag_byte_iterator rhs) { return lhs.p == rhs.p; }
+};
+
+struct lazy_tag_distinct_const_iterator_view : std::ranges::view_interface<lazy_tag_distinct_const_iterator_view> {
+    std::byte  *first{};
+    std::size_t count{};
+
+    lazy_tag_distinct_const_iterator_view() = default;
+    lazy_tag_distinct_const_iterator_view(std::byte *data, std::size_t size) : first(data), count(size) {}
+
+    lazy_tag_byte_iterator<std::byte *>       begin() { return {first}; }
+    lazy_tag_byte_iterator<std::byte *>       end() { return {first + count}; }
+    lazy_tag_byte_iterator<const std::byte *> begin() const { return {first}; }
+    lazy_tag_byte_iterator<const std::byte *> end() const { return {first + count}; }
+};
+
 } // namespace
 
 void *operator new(std::size_t size) {
@@ -95,14 +144,20 @@ static_assert(CanFindStaticTags<std::span<const std::byte> &>);
 static_assert(!CanFindStaticTags<std::vector<std::byte>>);
 static_assert(!CanFindStaticTags<std::span<const std::byte>>);
 static_assert(!CanFindRuntimeTags<std::vector<std::byte>>);
+static_assert(!CanFindStaticTags<std::ranges::owning_view<std::vector<std::byte>> &>);
+static_assert(std::ranges::view<lazy_tag_distinct_const_iterator_view>);
+static_assert(CborInputBuffer<lazy_tag_distinct_const_iterator_view>);
+static_assert(CanFindStaticTags<lazy_tag_distinct_const_iterator_view &>);
 
 using lazy_tag_byte_vector        = std::vector<std::byte>;
 using lazy_tag_byte_subrange      = std::ranges::subrange<lazy_tag_byte_vector::const_iterator>;
 using lazy_tag_mutable_span_match = cbor::tags::tag_match<std::span<std::byte>>;
+using lazy_tag_mutable_payload    = decltype(std::declval<lazy_tag_mutable_span_match &>().payload_range());
 static_assert(CanFindStaticTags<lazy_tag_byte_subrange &>);
 static_assert(!CanFindStaticTags<lazy_tag_byte_subrange>);
 static_assert(!std::is_aggregate_v<lazy_tag_mutable_span_match>);
 static_assert(!std::assignable_from<decltype(*std::declval<lazy_tag_mutable_span_match &>().payload_range().begin()), std::byte>);
+static_assert(!std::assignable_from<decltype(*std::declval<lazy_tag_mutable_payload &>().range.begin()), std::byte>);
 
 namespace {
 
@@ -231,6 +286,26 @@ TEST_CASE("lazy tag scanner accepts const lvalue buffers") {
     REQUIRE(it != view.end());
     CHECK_EQ(it->tag(), 100);
     CHECK_EQ(to_hex(it->payload_span()), "182a");
+}
+
+TEST_CASE("lazy tag scanner supports views with distinct const and mutable iterators") {
+    auto                                  buffer = to_bytes("d864182a");
+    lazy_tag_distinct_const_iterator_view input{buffer.data(), buffer.size()};
+
+    auto view = find_tags<100>(input);
+    auto it   = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
+    CHECK_EQ(to_hex(it->payload_range()), "182a");
+
+    int decoded{};
+    REQUIRE(it->decode(decoded));
+    CHECK_EQ(decoded, 42);
+
+    ++it;
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::success);
 }
 
 TEST_CASE("lazy tag scanner supports non-contiguous buffers") {

@@ -40,12 +40,23 @@ template <typename T> struct cbor_range_encoder {
         }
     }
 
+    template <typename R, typename Item> constexpr void encode_array_range_item(Item &&item) {
+        auto &enc = detail::underlying<T>(this);
+        if constexpr (detail::CborRangeComponent<Item>) {
+            enc.encode(std::forward<Item>(item));
+        } else {
+            using value_type = std::ranges::range_value_t<std::remove_reference_t<R>>;
+            static_assert(detail::MaterializableCborRangeComponent<Item, value_type>);
+            enc.encode(static_cast<value_type>(std::forward<Item>(item)));
+        }
+    }
+
   public:
     template <typename R> constexpr void encode_array_range(R &&range) {
         encode_container_range(
             std::forward<R>(range),
             container_range_markers{.definite_major = std::byte{0x80}, .indefinite_start = get_indefinite_start<as_indefinite_array>()},
-            [](auto &enc, auto &&item) { enc.encode(std::forward<decltype(item)>(item)); });
+            [this]<typename Enc, typename Item>(Enc &, Item &&item) { encode_array_range_item<R>(std::forward<Item>(item)); });
     }
 
     template <typename R> constexpr void encode(array_range<R> &value) { encode_array_range(value.range_); }
