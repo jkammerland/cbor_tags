@@ -157,12 +157,12 @@ template <typename T> struct reader<T, true> {
         return position_ >= range_size || offset >= (range_size - position_);
     }
     constexpr value_type read(const T &container) noexcept {
-        auto result = static_cast<value_type>(*(std::ranges::begin(container) + static_cast<std::ptrdiff_t>(position_)));
+        auto result = static_cast<value_type>(std::ranges::data(container)[position_]);
         ++position_;
         return result;
     }
     constexpr value_type read(const T &container, size_type offset) noexcept {
-        return static_cast<value_type>(*(std::ranges::begin(container) + static_cast<std::ptrdiff_t>(position_ + offset)));
+        return static_cast<value_type>(std::ranges::data(container)[position_ + offset]);
     }
 
     constexpr void seek(std::ptrdiff_t i) {
