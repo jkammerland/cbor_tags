@@ -189,6 +189,11 @@ template <typename T> struct reader<T, false> {
     // Does not have random access so need to use iterator
     constexpr bool empty(const T &container) const noexcept { return position_ == std::ranges::end(container); }
     constexpr bool empty(const T &container, size_type offset) const noexcept {
+        if constexpr (std::ranges::sized_range<const T>) {
+            const auto range_size = static_cast<size_type>(std::ranges::size(container));
+            return current_offset_ >= range_size || offset >= (range_size - current_offset_);
+        }
+
         auto it = position_;
         for (size_type i = 0; i <= offset; ++i) {
             if (it == std::ranges::end(container)) {

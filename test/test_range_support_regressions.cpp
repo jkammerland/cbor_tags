@@ -2,12 +2,14 @@
 
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_detail.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
 #include <cbor_tags/cbor_ranges.h>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <iterator>
 #include <map>
 #include <ranges>
 #include <span>
@@ -36,9 +38,63 @@ static_assert(CanMakeArrayRange<regression_nested_array &>);
 static_assert(!CanMakeMapRange<regression_bad_map_entries &>);
 static_assert(cbor::tags::IsFixedArray<std::span<int>>);
 static_assert(cbor::tags::IsFixedArray<std::span<int, 2>>);
-static_assert(cbor::tags::IsFixedArray<std::span<const std::byte, 2>>);
+static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte, 2>>);
 static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte>>);
+static_assert(cbor::tags::detail::is_static_extent_span_v<std::span<const std::byte, 2>>);
 static_assert(CanMakeArrayRange<std::vector<bool> &>);
+
+struct counting_sized_bidirectional_bytes {
+    using size_type = std::size_t;
+
+    struct iterator {
+        using iterator_category = std::bidirectional_iterator_tag;
+        using iterator_concept  = std::bidirectional_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = std::byte;
+
+        const counting_sized_bidirectional_bytes *owner{};
+        size_type                                 index{};
+
+        std::byte operator*() const { return owner->bytes[index]; }
+
+        iterator &operator++() {
+            ++owner->increments;
+            ++index;
+            return *this;
+        }
+
+        iterator operator++(int) {
+            auto copy = *this;
+            ++(*this);
+            return copy;
+        }
+
+        iterator &operator--() {
+            ++owner->increments;
+            --index;
+            return *this;
+        }
+
+        iterator operator--(int) {
+            auto copy = *this;
+            --(*this);
+            return copy;
+        }
+
+        friend bool operator==(const iterator &, const iterator &) = default;
+    };
+
+    std::vector<std::byte> bytes;
+    mutable size_type      increments{};
+
+    explicit counting_sized_bidirectional_bytes(size_type size) : bytes(size, std::byte{0x01}) {}
+
+    iterator  begin() const { return iterator{this, 0}; }
+    iterator  end() const { return iterator{this, bytes.size()}; }
+    size_type size() const noexcept { return bytes.size(); }
+};
+
+static_assert(cbor::tags::CborInputBuffer<counting_sized_bidirectional_bytes>);
 
 struct range_regression_move_only_value {
     int value{};
@@ -145,6 +201,21 @@ TEST_CASE("byte string range wrappers reject zero chunk size for sized and unsiz
         CHECK_EQ(result.error(), status_code::error);
         CHECK(buffer.empty());
     }
+}
+
+TEST_CASE("sized non-contiguous readers use size for offset bounds checks") {
+    counting_sized_bidirectional_bytes                                    input{1024};
+    cbor::tags::detail::reader<counting_sized_bidirectional_bytes, false> reader{input};
+
+    CHECK_FALSE(reader.empty(input, 1023));
+    CHECK(reader.empty(input, 1024));
+    CHECK_EQ(input.increments, 0);
+
+    CHECK_EQ(reader.read(input), std::byte{0x01});
+    CHECK_EQ(input.increments, 1);
+    CHECK_FALSE(reader.empty(input, 1022));
+    CHECK(reader.empty(input, 1023));
+    CHECK_EQ(input.increments, 1);
 }
 
 TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload validation") {

@@ -244,7 +244,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         const auto bstring_size = decode_unsigned(additionalInfo);
-        if constexpr (IsFixedArray<T>) {
+        if constexpr (IsFixedArray<T> || (IsConstBinaryView<T> && detail::is_static_extent_span_v<T>)) {
             if (bstring_size != static_cast<std::uint64_t>(t.size())) {
                 debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
                 return status_code::unexpected_group_size;

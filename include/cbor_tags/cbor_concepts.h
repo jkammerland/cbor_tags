@@ -284,9 +284,13 @@ template <class T> constexpr bool is_optional_v = detail::is_optional_v<T>;
 namespace detail {
 
 template <typename T> struct is_fixed_array_span : std::false_type {};
-template <typename T, std::size_t Extent>
-struct is_fixed_array_span<std::span<T, Extent>> : std::bool_constant<!std::is_const_v<T> || Extent != std::dynamic_extent> {};
+template <typename T, std::size_t Extent> struct is_fixed_array_span<std::span<T, Extent>> : std::bool_constant<!std::is_const_v<T>> {};
 template <typename T> constexpr bool is_fixed_array_span_v = is_fixed_array_span<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct is_static_extent_span : std::false_type {};
+template <typename T, std::size_t Extent>
+struct is_static_extent_span<std::span<T, Extent>> : std::bool_constant<Extent != std::dynamic_extent> {};
+template <typename T> constexpr bool is_static_extent_span_v = is_static_extent_span<std::remove_cvref_t<T>>::value;
 
 } // namespace detail
 

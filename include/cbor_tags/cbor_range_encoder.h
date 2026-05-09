@@ -53,10 +53,13 @@ template <typename T> struct cbor_range_encoder {
 
   public:
     template <typename R> constexpr void encode_array_range(R &&range) {
+        auto *self = this;
         encode_container_range(
             std::forward<R>(range),
             container_range_markers{.definite_major = std::byte{0x80}, .indefinite_start = get_indefinite_start<as_indefinite_array>()},
-            [this]<typename Enc, typename Item>(Enc &, Item &&item) { encode_array_range_item<R>(std::forward<Item>(item)); });
+            [self]<typename Enc, typename Item>(Enc &, Item &&item) {
+                self->template encode_array_range_item<R>(std::forward<Item>(item));
+            });
     }
 
     template <typename R> constexpr void encode(array_range<R> &value) { encode_array_range(value.range_); }
