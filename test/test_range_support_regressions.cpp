@@ -1,0 +1,224 @@
+#include "test_util.h"
+
+#include <array>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_lazy_tags.h>
+#include <cbor_tags/cbor_ranges.h>
+#include <cstddef>
+#include <cstdint>
+#include <doctest/doctest.h>
+#include <map>
+#include <ranges>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+using namespace cbor::tags;
+
+namespace {
+
+struct range_regression_not_cbor {};
+
+template <typename R>
+concept CanMakeArrayRange = requires(R &&range) { cbor::tags::as_array_range(std::forward<R>(range)); };
+
+template <typename R>
+concept CanMakeMapRange = requires(R &&range) { cbor::tags::as_map_range(std::forward<R>(range)); };
+
+using regression_int_array_wrapper = cbor::tags::array_range<std::ranges::ref_view<std::vector<int>>>;
+using regression_nested_array      = std::array<regression_int_array_wrapper, 1>;
+using regression_bad_array_wrapper = cbor::tags::array_range<std::ranges::single_view<range_regression_not_cbor>>;
+using regression_bad_map_entries   = std::array<std::pair<int, regression_bad_array_wrapper>, 1>;
+
+static_assert(CanMakeArrayRange<regression_nested_array &>);
+static_assert(!CanMakeMapRange<regression_bad_map_entries &>);
+static_assert(cbor::tags::IsFixedArray<std::span<int>>);
+static_assert(cbor::tags::IsFixedArray<std::span<int, 2>>);
+static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte>>);
+
+struct range_regression_move_only_value {
+    int value{};
+
+    range_regression_move_only_value()                                                        = default;
+    range_regression_move_only_value(const range_regression_move_only_value &)                = delete;
+    range_regression_move_only_value &operator=(const range_regression_move_only_value &)     = delete;
+    range_regression_move_only_value(range_regression_move_only_value &&) noexcept            = default;
+    range_regression_move_only_value &operator=(range_regression_move_only_value &&) noexcept = default;
+
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(value); }
+};
+
+std::vector<std::byte> make_deep_tag_with_array_payload(std::size_t depth) {
+    std::vector<std::byte> buffer;
+    buffer.reserve(depth + 5);
+    for (std::size_t index = 0; index < depth; ++index) {
+        buffer.push_back(std::byte{0x81});
+    }
+    buffer.push_back(std::byte{0xD8});
+    buffer.push_back(std::byte{0x64});
+    buffer.push_back(std::byte{0x81});
+    buffer.push_back(std::byte{0x18});
+    buffer.push_back(std::byte{0x2A});
+    return buffer;
+}
+
+} // namespace
+
+TEST_CASE("explicit array range wrappers can be nested") {
+    std::vector<int> values{1, 2};
+    auto             nested = std::array{as_array_range(values)};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_array_range(nested)));
+    CHECK_EQ(to_hex(buffer), "81820102");
+}
+
+TEST_CASE("byte string range wrappers reject zero chunk size for sized and unsized ranges") {
+    {
+        std::array<std::byte, 2> bytes{std::byte{0x01}, std::byte{0x02}};
+        std::vector<std::byte>   buffer;
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(as_bstr_range(bytes, 0));
+
+        CHECK_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(buffer.empty());
+    }
+
+    {
+        std::array<std::byte, 2> bytes{std::byte{0x01}, std::byte{0x02}};
+        auto                     unsized = bytes | std::views::filter([](std::byte) { return true; });
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+
+        auto result = enc(as_bstr_range(unsized, 0));
+
+        CHECK_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(buffer.empty());
+    }
+}
+
+TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload validation") {
+    {
+        auto buffer = make_deep_tag_with_array_payload(254);
+        auto view   = find_tags<100>(buffer);
+        auto it     = view.begin();
+
+        REQUIRE(it != view.end());
+        CHECK_EQ(it->tag(), 100);
+        CHECK_EQ(to_hex(it->payload_range()), "81182a");
+
+        ++it;
+        CHECK(it == view.end());
+        CHECK_EQ(view.status(), status_code::success);
+    }
+
+    {
+        auto buffer = make_deep_tag_with_array_payload(255);
+        auto view   = find_tags<100>(buffer);
+        auto it     = view.begin();
+
+        CHECK(it == view.end());
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
+}
+
+TEST_CASE("static extent spans decode with fixed-size length checks") {
+    {
+        auto buffer = to_bytes("820102");
+        auto dec    = make_decoder(buffer);
+
+        std::array<int, 2> storage{};
+        std::span<int, 2>  decoded{storage};
+
+        auto result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(storage, (std::array{1, 2}));
+    }
+
+    {
+        auto buffer = to_bytes("83010203");
+        auto dec    = make_decoder(buffer);
+
+        std::array<int, 2> storage{-1, -1};
+        std::span<int, 2>  decoded{storage};
+
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK_EQ(storage, (std::array{-1, -1}));
+    }
+}
+
+TEST_CASE("fixed-size byte string targets validate length before reading payload") {
+    {
+        std::vector<std::byte> buffer{std::byte{0x42}, std::byte{0x01}};
+        auto                   dec = make_decoder(buffer);
+
+        std::array<std::byte, 1> decoded{std::byte{0xCC}};
+        auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK_EQ(decoded[0], std::byte{0xCC});
+    }
+
+    {
+        std::vector<std::byte> buffer{std::byte{0x42}, std::byte{0x01}};
+        auto                   dec = make_decoder(buffer);
+
+        std::array<std::byte, 2> decoded{std::byte{0xCC}, std::byte{0xCC}};
+        auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, (std::array{std::byte{0xCC}, std::byte{0xCC}}));
+    }
+}
+
+TEST_CASE("map decode moves decoded entries into associative containers") {
+    {
+        auto bytes = to_bytes("a201020103");
+        auto dec   = make_decoder(bytes);
+
+        std::map<int, range_regression_move_only_value> decoded;
+        auto                                            result = dec(decoded);
+
+        REQUIRE(result);
+        REQUIRE_EQ(decoded.size(), 1);
+        CHECK_EQ(decoded.at(1).value, 3);
+    }
+
+    {
+        auto bytes = to_bytes("a201020103");
+        auto dec   = make_decoder(bytes);
+
+        std::multimap<int, range_regression_move_only_value> decoded;
+        auto                                                 result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.count(1), 2);
+    }
+
+    {
+        auto bytes = to_bytes("bf0204ff");
+        auto dec   = make_decoder(bytes);
+
+        std::map<int, range_regression_move_only_value> decoded;
+        auto                                            result = dec(decoded);
+
+        REQUIRE(result);
+        REQUIRE_EQ(decoded.size(), 1);
+        CHECK_EQ(decoded.at(2).value, 4);
+    }
+}

@@ -146,6 +146,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
     [[nodiscard]] constexpr status_code status() const noexcept { return status_; }
     [[nodiscard]] constexpr bool        failed() const noexcept { return status_ != status_code::success; }
     [[nodiscard]] constexpr bool        done() const noexcept { return done_; }
+    [[nodiscard]] constexpr std::size_t stack_depth() const noexcept { return stack_size_; }
 
     constexpr bool next_tag(cbor_tag_event<Iterator> &event) {
         if (done_) {
@@ -372,7 +373,11 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
 };
 
 template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
-    template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status) {
+    template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status, std::size_t initial_depth = 0) {
+        if (initial_depth > MaxDepth) {
+            status = status_code::error;
+            return false;
+        }
         std::array<cbor_item_frame, MaxDepth> stack{};
         std::size_t                           stack_size{};
         bool                                  root_started{};
@@ -381,7 +386,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
         auto stack_back  = [&]() -> cbor_item_frame  &{ return stack[stack_size - 1]; };
         auto pop_frame   = [&] { --stack_size; };
         auto push_frame  = [&](cbor_item_frame frame) {
-            if (stack_size == stack.size()) {
+            if (initial_depth + stack_size == stack.size()) {
                 status = status_code::error;
                 return false;
             }

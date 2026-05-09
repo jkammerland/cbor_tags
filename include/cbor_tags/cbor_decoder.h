@@ -243,9 +243,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
+        const auto bstring_size = decode_unsigned(additionalInfo);
+        if constexpr (IsFixedArray<T>) {
+            if (bstring_size != static_cast<std::uint64_t>(t.size())) {
+                debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
+                return status_code::unexpected_group_size;
+            }
+        }
+
         // Decode to intermediate form
-        auto       bstring      = decode_bstring(additionalInfo);
-        const auto bstring_size = static_cast<std::size_t>(std::ranges::distance(bstring.begin(), bstring.end()));
+        auto bstring = decode_bstring_payload(bstring_size);
 
         // Now handle the target assignment based on contiguity constraints
         if constexpr (std::is_same_v<T, decltype(bstring)>) {
@@ -262,11 +269,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // std::vector<typename T::value_type> temp(bstring.begin(), bstring.end());
             // t = T(...); // Construct from temp somehow
         } else if constexpr (IsFixedArray<T>) {
-            // Fixed-size array assignment requires exact match
-            if (bstring_size != t.size()) {
-                debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
-                return status_code::unexpected_group_size;
-            }
             std::ranges::copy(bstring, t.begin());
         } else {
             // Standard case - construct from iterators
@@ -346,7 +348,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (status != status_code::success) {
                     return status;
                 }
-                appender_(value, result);
+                appender_(value, std::move(result));
             } else {
                 using value_type = typename T::value_type;
                 value_type result;
@@ -354,7 +356,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (status != status_code::success) {
                     return status;
                 }
-                appender_(value, result);
+                appender_(value, std::move(result));
             }
         }
 
@@ -907,8 +909,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return -1 - static_cast<int64_t>(value);
     }
 
-    constexpr auto decode_bstring(byte additionalInfo) {
-        const auto length      = decode_unsigned(additionalInfo);
+    constexpr auto decode_bstring(byte additionalInfo) { return decode_bstring_payload(decode_unsigned(additionalInfo)); }
+
+    constexpr auto decode_bstring_payload(std::uint64_t length) {
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
@@ -1044,7 +1047,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (status != status_code::success) {
                     return status;
                 }
-                appender_(value, result);
+                appender_(value, std::move(result));
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {
@@ -1077,7 +1080,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (status != status_code::success) {
                     return status;
                 }
-                appender_(value, result);
+                appender_(value, std::move(result));
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {

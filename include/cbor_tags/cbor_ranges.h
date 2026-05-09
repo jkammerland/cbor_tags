@@ -30,23 +30,29 @@ template <std::ranges::view R> struct bstr_range {
 
 namespace detail {
 
-template <typename T> struct is_explicit_range_wrapper : std::false_type {};
-template <std::ranges::view R> struct is_explicit_range_wrapper<array_range<R>> : std::true_type {};
-template <std::ranges::view R> struct is_explicit_range_wrapper<map_range<R>> : std::true_type {};
-template <std::ranges::view R> struct is_explicit_range_wrapper<bstr_range<R>> : std::true_type {};
-template <typename T> constexpr bool is_explicit_range_wrapper_v = is_explicit_range_wrapper<std::remove_cvref_t<T>>::value;
+template <typename T> struct is_valid_explicit_range_wrapper : std::false_type {};
 
 template <typename T>
-concept CborMapEntryComponent = IsCborMajor<std::remove_cvref_t<T>> || is_explicit_range_wrapper_v<T>;
+concept CborRangeComponent = IsCborMajor<std::remove_cvref_t<T>> || is_valid_explicit_range_wrapper<std::remove_cvref_t<T>>::value;
 
 template <typename T>
-concept CborMapEntry = IsPairLike<T> && CborMapEntryComponent<decltype(pair_first(std::declval<T>()))> &&
-                       CborMapEntryComponent<decltype(pair_second(std::declval<T>()))>;
+concept CborMapEntry = IsPairLike<T> && CborRangeComponent<decltype(pair_first(std::declval<T>()))> &&
+                       CborRangeComponent<decltype(pair_second(std::declval<T>()))>;
+
+template <std::ranges::view R>
+struct is_valid_explicit_range_wrapper<array_range<R>>
+    : std::bool_constant<std::ranges::input_range<R> && CborRangeComponent<std::ranges::range_reference_t<R>>> {};
+
+template <std::ranges::view R>
+struct is_valid_explicit_range_wrapper<map_range<R>>
+    : std::bool_constant<std::ranges::input_range<R> && IsPairLikeRange<R> && CborMapEntry<std::ranges::range_reference_t<R>>> {};
+
+template <std::ranges::view R> struct is_valid_explicit_range_wrapper<bstr_range<R>> : std::bool_constant<IsByteLikeRange<R>> {};
 
 } // namespace detail
 
 template <std::ranges::viewable_range R>
-    requires IsCborMajor<std::ranges::range_value_t<std::views::all_t<R>>>
+    requires detail::CborRangeComponent<std::ranges::range_reference_t<std::views::all_t<R>>>
 [[nodiscard]] constexpr auto as_array_range(R &&range) {
     return array_range<std::views::all_t<R>>{std::views::all(std::forward<R>(range))};
 }

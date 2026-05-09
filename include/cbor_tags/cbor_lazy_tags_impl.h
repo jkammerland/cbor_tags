@@ -125,7 +125,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
 
                 auto        payload_end = event.payload_begin;
                 status_code status      = status_code::success;
-                if (!detail::cbor_item_skipper<max_stack_depth>::skip_item(payload_end, walker_.end(), status)) {
+                if (!detail::cbor_item_skipper<max_stack_depth>::skip_item(payload_end, walker_.end(), status, walker_.stack_depth())) {
                     fail(status);
                     return;
                 }

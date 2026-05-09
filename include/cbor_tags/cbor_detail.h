@@ -31,17 +31,21 @@ struct appender;
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
 
-    constexpr void operator()(T &container, const value_type &value) {
-        if constexpr (IsMap<T>) {
-            const auto &[key, mapped_value] = value;
+    constexpr void operator()(T &container, const value_type &value)
+        requires(!IsMap<T>)
+    {
+        container.push_back(value);
+    }
 
-            if constexpr (requires { container.insert_or_assign(key, mapped_value); }) {
-                container.insert_or_assign(key, mapped_value);
-            } else {
-                container.insert(value);
-            }
+    template <typename Pair>
+        requires IsMap<T> && IsPairLike<Pair>
+    constexpr void operator()(T &container, Pair &&value) {
+        if constexpr (requires {
+                          container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
+                      }) {
+            container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
         } else {
-            container.push_back(value);
+            container.insert(std::forward<Pair>(value));
         }
     }
 

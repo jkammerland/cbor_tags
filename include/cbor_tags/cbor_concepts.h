@@ -281,6 +281,14 @@ concept IsPairLikeRange = detail::PairLikeRange<T>;
 
 template <class T> constexpr bool is_optional_v = detail::is_optional_v<T>;
 
+namespace detail {
+
+template <typename T> struct is_fixed_array_span : std::false_type {};
+template <typename T, std::size_t Extent> struct is_fixed_array_span<std::span<T, Extent>> : std::bool_constant<!std::is_const_v<T>> {};
+template <typename T> constexpr bool is_fixed_array_span_v = is_fixed_array_span<std::remove_cvref_t<T>>::value;
+
+} // namespace detail
+
 template <typename T>
 concept IsRangeOfCborValuesBase =
     detail::RangeOfCborValuesBase<T, IsStringBase<std::remove_cvref_t<T>>, is_optional_v<std::remove_cvref_t<T>>>;
@@ -290,7 +298,7 @@ concept IsFixedArray =
     requires {
         typename T::value_type;
         typename T::size_type;
-    } && (std::is_same_v<T, std::span<typename T::value_type>> ||
+    } && (detail::is_fixed_array_span_v<T> ||
           (requires { typename std::tuple_size<T>::type; } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size_v<T>>>));
 
 template <typename T>
