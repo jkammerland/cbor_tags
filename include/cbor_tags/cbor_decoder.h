@@ -1110,20 +1110,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr uint64_t read_unsigned(byte additionalInfo) {
-        std::uint64_t value{};
-        auto          status = status_code::success;
-        const auto    ok =
-            detail::read_cbor_argument(static_cast<std::uint8_t>(additionalInfo), value, status, [this](std::uint8_t &byte_value) {
-                byte_value = read_uint8();
-                return true;
-            });
-        if (!ok) {
-            if (status == status_code::incomplete) {
-                throw parse_incomplete_exception("Unexpected end of input");
-            }
-            throw std::runtime_error("Invalid additional info for integer");
+        switch (std::to_integer<std::uint8_t>(additionalInfo)) {
+        case 24: return read_uint8();
+        case 25: return read_uint16();
+        case 26: return read_uint32();
+        case 27: return read_uint64();
+        default: throw std::runtime_error("Invalid additional info for integer");
         }
-        return value;
     }
 
     constexpr uint8_t read_uint8() {
