@@ -104,6 +104,76 @@ static_assert(!CanFindStaticTags<lazy_tag_byte_subrange>);
 static_assert(!std::is_aggregate_v<lazy_tag_mutable_span_match>);
 static_assert(!std::assignable_from<decltype(*std::declval<lazy_tag_mutable_span_match &>().payload_range().begin()), std::byte>);
 
+namespace {
+
+[[nodiscard]] auto make_static_tags_from_local_span(const lazy_tag_byte_vector &buffer) {
+    std::span<const std::byte> span{buffer.data(), buffer.size()};
+    return cbor::tags::find_tags<100>(span);
+}
+
+[[nodiscard]] auto make_runtime_tags_from_local_subrange(const lazy_tag_byte_vector &buffer) {
+    lazy_tag_byte_subrange subrange{buffer.begin(), buffer.end()};
+    return cbor::tags::find_tags(subrange, [](std::uint64_t tag) { return tag == 100; });
+}
+
+} // namespace
+
+TEST_CASE("lazy tag scanner keeps local span descriptors alive") {
+    auto buffer = to_bytes("d864182a");
+    auto view   = make_static_tags_from_local_span(buffer);
+    auto it     = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
+    CHECK_EQ(to_hex(it->payload_span()), "182a");
+
+    ++it;
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner keeps local subrange descriptors alive") {
+    auto buffer = to_bytes("d864182a");
+    auto view   = make_runtime_tags_from_local_subrange(buffer);
+    auto it     = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 100);
+    CHECK_EQ(to_hex(it->payload_range()), "182a");
+
+    int decoded{};
+    CHECK(it->decode(decoded));
+    CHECK_EQ(decoded, 42);
+
+    ++it;
+    CHECK(it == view.end());
+    CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner view construction does not copy buffer contents") {
+    auto buffer = to_bytes("d864182a");
+    bool threw  = false;
+
+    {
+        allocation_failure_guard guard;
+        try {
+            auto vector_view = cbor::tags::find_tags<100>(buffer);
+
+            std::span<const std::byte> span{buffer.data(), buffer.size()};
+            auto                       span_view = cbor::tags::find_tags<100>(span);
+
+            lazy_tag_byte_subrange subrange{buffer.begin(), buffer.end()};
+            auto                   subrange_view = cbor::tags::find_tags<100>(subrange);
+
+            (void)vector_view;
+            (void)span_view;
+            (void)subrange_view;
+        } catch (...) { threw = true; }
+    }
+
+    CHECK(!threw);
+}
+
 TEST_CASE("lazy tag scanner finds matching tags in nested arrays and maps") {
     auto buffer = to_bytes("82d864182aa101d8c863616263");
 

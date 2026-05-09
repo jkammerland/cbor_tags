@@ -89,7 +89,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
         using iterator_concept  = std::input_iterator_tag;
 
         iterator() = default;
-        explicit iterator(tag_view *view) : view_(view), walker_(std::ranges::begin(*view->buffer_), std::ranges::end(*view->buffer_)) {
+        explicit iterator(tag_view *view) : view_(view), walker_(std::ranges::begin(view->buffer_), std::ranges::end(view->buffer_)) {
             find_next();
         }
 
@@ -145,7 +145,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
         bool                                                  done_{};
     };
 
-    constexpr tag_view(const buffer_type &buffer, Predicate predicate) : buffer_(&buffer), predicate_(std::move(predicate)) {}
+    constexpr tag_view(buffer_type buffer, Predicate predicate) : buffer_(std::move(buffer)), predicate_(std::move(predicate)) {}
 
     iterator begin() {
         status_ = status_code::success;
@@ -157,15 +157,16 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
     [[nodiscard]] bool        failed() const noexcept { return status_ != status_code::success; }
 
   private:
-    const buffer_type *buffer_;
-    Predicate          predicate_;
-    status_code        status_{status_code::success};
+    buffer_type buffer_;
+    Predicate   predicate_;
+    status_code status_{status_code::success};
 
     friend class iterator;
 };
 
 template <std::uint64_t... Tags, CborInputBuffer Buffer> [[nodiscard]] auto find_tags(Buffer &buffer) {
-    return tag_view<std::remove_cvref_t<Buffer>, detail::static_tag_filter<Tags...>>{buffer, {}};
+    auto view = std::views::all(buffer);
+    return tag_view<decltype(view), detail::static_tag_filter<Tags...>>{std::move(view), {}};
 }
 
 template <std::uint64_t... Tags, CborInputBuffer Buffer>
@@ -174,7 +175,8 @@ auto find_tags(Buffer &&buffer)
 = delete;
 
 template <CborInputBuffer Buffer, typename Predicate> [[nodiscard]] auto find_tags(Buffer &buffer, Predicate predicate) {
-    return tag_view<std::remove_cvref_t<Buffer>, std::remove_cvref_t<Predicate>>{buffer, std::forward<Predicate>(predicate)};
+    auto view = std::views::all(buffer);
+    return tag_view<decltype(view), std::remove_cvref_t<Predicate>>{std::move(view), std::forward<Predicate>(predicate)};
 }
 
 template <CborInputBuffer Buffer, typename Predicate>
