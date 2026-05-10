@@ -11,6 +11,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -183,6 +184,27 @@ concept SpanBackedEncodedItemView =
     segments.reserve(2);
     segments.append_owned(header.span());
     segments.append_borrowed(payload);
+    return segments;
+}
+
+[[nodiscard]] inline cbor_segments encode_indefinite_bstr_segments(std::span<const std::byte> payload, std::size_t chunk_size = 4096) {
+    if (chunk_size == 0) {
+        throw std::invalid_argument("CBOR indefinite byte string chunk size must be greater than zero");
+    }
+
+    cbor_segments segments;
+    const auto    chunk_count = payload.empty() ? std::size_t{0} : ((payload.size() + chunk_size - 1U) / chunk_size);
+    segments.reserve(2U + (chunk_count * 2U));
+    segments.append_owned({std::byte{0x5F}});
+
+    for (std::size_t offset = 0; offset < payload.size(); offset += chunk_size) {
+        const auto chunk_length = std::min(chunk_size, payload.size() - offset);
+        const auto header       = detail::encode_segment_major_and_size(chunk_length, std::byte{0x40});
+        segments.append_owned(header.span());
+        segments.append_borrowed(payload.subspan(offset, chunk_length));
+    }
+
+    segments.append_owned({std::byte{0xFF}});
     return segments;
 }
 

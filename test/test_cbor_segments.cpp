@@ -7,6 +7,7 @@
 #include <doctest/doctest.h>
 #include <list>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 using namespace cbor::tags;
@@ -57,6 +58,37 @@ TEST_CASE("tagged bstr segmented output preserves CBOR bytes and borrows payload
     CHECK(dynamic_segments[1].is_owned());
     CHECK(dynamic_segments[2].is_borrowed());
     CHECK_EQ(dynamic_segments[2].data(), payload.data());
+}
+
+TEST_CASE("indefinite bstr segmented output preserves chunks and borrows payload slices") {
+    auto payload = to_bytes("0102030405");
+    auto span    = std::span<const std::byte>{payload};
+
+    const auto segments = encode_indefinite_bstr_segments(span, 3);
+
+    REQUIRE_EQ(segments.size(), 6U);
+    CHECK(segments[0].is_owned());
+    CHECK_EQ(to_hex(segments[0].bytes()), "5f");
+    CHECK(segments[1].is_owned());
+    CHECK_EQ(to_hex(segments[1].bytes()), "43");
+    CHECK(segments[2].is_borrowed());
+    CHECK_EQ(segments[2].data(), payload.data());
+    CHECK_EQ(segments[2].size(), 3U);
+    CHECK(segments[3].is_owned());
+    CHECK_EQ(to_hex(segments[3].bytes()), "42");
+    CHECK(segments[4].is_borrowed());
+    CHECK_EQ(segments[4].data(), payload.data() + 3);
+    CHECK_EQ(segments[4].size(), 2U);
+    CHECK(segments[5].is_owned());
+    CHECK_EQ(to_hex(segments[5].bytes()), "ff");
+    CHECK_EQ(to_hex(flatten_segments(segments)), "5f43010203420405ff");
+}
+
+TEST_CASE("indefinite bstr segmented output rejects zero chunk size") {
+    auto payload = to_bytes("0102");
+    auto span    = std::span<const std::byte>{payload};
+
+    CHECK_THROWS_AS((void)encode_indefinite_bstr_segments(span, 0), std::invalid_argument);
 }
 
 TEST_CASE("span-backed raw encoded views become one borrowed segment without normalization") {
