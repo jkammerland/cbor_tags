@@ -22,7 +22,7 @@ concept EncodedByteViewRange = std::ranges::view<R> && std::ranges::input_range<
 
 template <std::ranges::view R>
     requires detail::EncodedByteViewRange<R>
-class basic_encoded_byte_view : public std::ranges::view_interface<basic_encoded_byte_view<R>> {
+class basic_encoded_byte_view {
   public:
     using range_type = R;
     using size_type  = std::size_t;
@@ -123,6 +123,10 @@ template <typename T>
 concept IsEncodedMapView = is_encoded_map_view<std::remove_cvref_t<T>>::value;
 
 } // namespace cbor::tags
+
+template <typename R>
+    requires cbor::tags::detail::EncodedByteViewRange<R>
+inline constexpr bool std::ranges::enable_view<cbor::tags::basic_encoded_byte_view<R>> = true;
 
 template <typename R>
     requires cbor::tags::detail::EncodedByteViewRange<R>
