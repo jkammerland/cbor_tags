@@ -109,6 +109,74 @@ TEST_CASE("CBOR Encoder writes exact-size fixed buffers") {
     CHECK_EQ(to_hex(buffer), "1818");
 }
 
+TEST_CASE("CBOR Encoder writes extended integer headers to exact-size fixed buffers") {
+    {
+        std::array<std::byte, 3> buffer{};
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(std::uint16_t{256});
+
+        REQUIRE(result);
+        CHECK_EQ(to_hex(buffer), "190100");
+    }
+
+    {
+        std::array<std::byte, 5> buffer{};
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(std::uint32_t{65536});
+
+        REQUIRE(result);
+        CHECK_EQ(to_hex(buffer), "1a00010000");
+    }
+
+    {
+        std::array<std::byte, 9> buffer{};
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(std::uint64_t{0x100000000ULL});
+
+        REQUIRE(result);
+        CHECK_EQ(to_hex(buffer), "1b0000000100000000");
+    }
+}
+
+TEST_CASE("CBOR Encoder rejects too-small fixed buffers for extended integer headers") {
+    {
+        std::array<std::byte, 2> buffer{std::byte{0xCC}, std::byte{0xCC}};
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(std::uint16_t{256});
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(to_hex(buffer), "cccc");
+    }
+
+    {
+        std::array<std::byte, 4> buffer{std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}};
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(std::uint32_t{65536});
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(to_hex(buffer), "cccccccc");
+    }
+
+    {
+        std::array<std::byte, 8> buffer{std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC},
+                                        std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}};
+        auto                     enc = make_encoder(buffer);
+
+        auto result = enc(std::uint64_t{0x100000000ULL});
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(to_hex(buffer), "cccccccccccccccc");
+    }
+}
+
 TEST_CASE("CBOR Encoder writes floating-point major type payloads") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);

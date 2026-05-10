@@ -558,6 +558,16 @@ TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
         CHECK(view.failed());
         CHECK_EQ(view.status(), status_code::error);
     }
+
+    for (const auto *hex : {"d864fc", "d864fd", "d864fe"}) {
+        auto buffer = to_bytes(hex);
+        auto view   = find_tags<100>(buffer);
+        auto it     = view.begin();
+        CAPTURE(hex);
+        CHECK(it == view.end());
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
 }
 
 TEST_CASE("lazy tag scanner reports malformed indefinite items") {

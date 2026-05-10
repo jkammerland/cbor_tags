@@ -251,7 +251,7 @@ TEST_CASE("raw encoded views reject malformed and truncated input") {
 }
 
 TEST_CASE("raw encoded views reject invalid additional-info values and truncated arguments") {
-    for (const auto *hex : {"1c", "1d", "1e", "1f", "5c", "9c", "bc", "dc"}) {
+    for (const auto *hex : {"1c", "1d", "1e", "1f", "5c", "9c", "bc", "dc", "fc", "fd", "fe"}) {
         check_raw_item_decode_error(hex, status_code::error);
     }
 
