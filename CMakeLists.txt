@@ -180,6 +180,7 @@ message(STATUS "")
 message(STATUS "Standard build types: debug, release, relwithdebinfo, minsizerel")
 message(STATUS "Analysis presets: coverage, coverage-release, tidy, tidy-fix")
 message(STATUS "Profiling presets: profile, profile-release, profile-gprof, pgo-generate, pgo-use")
+message(STATUS "Benchmark presets: benchmark-comparison")
 message(STATUS "Diagnostic presets (platform-dependent): alsan, alusan, msan, cfihwasan, fullsan")
 message(STATUS "Memory-check presets (Linux): valgrind")
 

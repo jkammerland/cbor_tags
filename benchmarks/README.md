@@ -28,3 +28,22 @@ The existing decoder benchmarks also prepare some payloads from
 `std::random_device`. Before making release-to-release performance claims, add
 or use fixed-payload benchmarks so each version decodes the same CBOR integer
 widths and container contents.
+
+## Serialization Comparison Suite
+
+The cross-library comparison suite is opt-in because it fetches and builds extra
+dependencies. It compares `cbor_tags`, bitsery, zpp_bits, cereal,
+Boost.Serialization, and FlatBuffers across fixed fixtures, then writes a
+Markdown report plus raw nanobench JSON/CSV.
+
+Run it with:
+
+```bash
+scripts/run-comparison-benchmarks.sh
+```
+
+The default output is `build/benchmark-comparison/report/`. Pass a path as the
+first argument, or set `CBOR_TAGS_BENCHMARK_REPORT_DIR`, to write the report
+elsewhere. The generated report calls out wire-format, schema, decode-behavior,
+and allocation differences so the numbers are not mistaken for like-for-like
+protocol equivalence.

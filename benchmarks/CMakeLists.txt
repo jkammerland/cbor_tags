@@ -36,6 +36,11 @@ add_subdirectory(encoder)
 add_subdirectory(decoder)
 add_subdirectory(ranges)
 
+option(CBOR_TAGS_BUILD_COMPARISON_BENCHMARKS "Build serialization comparison benchmarks" OFF)
+if(CBOR_TAGS_BUILD_COMPARISON_BENCHMARKS)
+  add_subdirectory(serialization_compare)
+endif()
+
 option(CBOR_TAGS_OLD_BENCHMARKS "Run old benchmarks" OFF)
 if(CBOR_TAGS_OLD_BENCHMARKS)
   add_subdirectory(old_benchmarks)

@@ -371,6 +371,18 @@
         "LSAN_OPTIONS": "print_suppressions=false:report_objects=1:use_unaligned=1",
         "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:report_error_type=1:silence_unsigned_overflow=0"
       }
+    },
+    {
+      "name": "benchmark-comparison",
+      "inherits": "base-release",
+      "binaryDir": "${sourceDir}/build/benchmark-comparison",
+      "displayName": "Serialization Comparison Benchmarks",
+      "description": "Release build for the opt-in cross-library serialization comparison suite",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "OFF",
+        "CBOR_TAGS_BUILD_BENCHMARKS": "ON",
+        "CBOR_TAGS_BUILD_COMPARISON_BENCHMARKS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -398,6 +410,17 @@
       "configurePreset": "release",
       "displayName": "Release Build",
       "description": "Build with release configuration, full optimizations and no debug symbols",
+      "jobs": 0
+    },
+    {
+      "name": "benchmark-comparison",
+      "inherits": "build-base",
+      "configurePreset": "benchmark-comparison",
+      "displayName": "Serialization Comparison Benchmark Build",
+      "description": "Build only the cross-library serialization comparison benchmark executable",
+      "targets": [
+        "bench_serialization_compare"
+      ],
       "jobs": 0
     },
     {
