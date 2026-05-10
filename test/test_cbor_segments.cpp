@@ -10,6 +10,7 @@
 #include <list>
 #include <span>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace cbor::tags;
@@ -19,10 +20,21 @@ namespace {
 template <typename RawView>
 concept CanEncodeBorrowedSegments = requires(const RawView &view) { encode_encoded_segments(view); };
 
+template <typename RawView>
+concept CanVisitBorrowedSegments = requires(const RawView &view) {
+    visit_encoded_segments(view, [](std::span<const std::byte>) {});
+};
+
 std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
     std::vector<std::byte> output;
     auto                   enc = make_encoder(output);
     REQUIRE(enc(payload));
+    return output;
+}
+
+template <typename VisitSegments> std::vector<std::byte> flatten_visited_segments(VisitSegments &&visit_segments) {
+    std::vector<std::byte> output;
+    visit_segments([&](std::span<const std::byte> segment) { output.insert(output.end(), segment.begin(), segment.end()); });
     return output;
 }
 
@@ -63,6 +75,15 @@ TEST_CASE("bstr segmented output flattens like normal encode and borrows payload
     auto payload = to_bytes("01020304");
     auto span    = std::span<const std::byte>{payload};
 
+    std::vector<std::byte> appended;
+    append_bstr_segments(appended, span);
+    CHECK_EQ(to_hex(appended), to_hex(encode_normal_bstr(span)));
+
+    const auto visited = flatten_visited_segments([&](auto &&visit_segment) {
+        visit_bstr_segments(span, std::forward<decltype(visit_segment)>(visit_segment));
+    });
+    CHECK_EQ(to_hex(visited), to_hex(appended));
+
     const auto segments = encode_bstr_segments(span);
     const auto flat     = flatten_segments(segments);
 
@@ -91,6 +112,10 @@ TEST_CASE("empty bstr segmented output preserves definite and indefinite headers
     }
 
     {
+        std::vector<std::byte> appended;
+        append_indefinite_bstr_segments(appended, payload, 4);
+        CHECK_EQ(to_hex(appended), "5fff");
+
         const auto segments = encode_indefinite_bstr_segments(payload, 4);
 
         REQUIRE_EQ(segments.size(), 2U);
@@ -107,6 +132,13 @@ TEST_CASE("tagged bstr segmented output preserves CBOR bytes and borrows payload
     const auto dynamic_segments = encode_tagged_bstr_segments(dynamic_tag<std::uint64_t>{24}, span);
     const auto static_segments  = encode_tagged_bstr_segments(static_tag<24>{}, span);
 
+    std::vector<std::byte> dynamic_appended;
+    std::vector<std::byte> static_appended;
+    append_tagged_bstr_segments(dynamic_appended, dynamic_tag<std::uint64_t>{24}, span);
+    append_tagged_bstr_segments(static_appended, static_tag<24>{}, span);
+
+    CHECK_EQ(to_hex(dynamic_appended), "d81843aabbcc");
+    CHECK_EQ(to_hex(static_appended), "d81843aabbcc");
     CHECK_EQ(to_hex(flatten_segments(dynamic_segments)), "d81843aabbcc");
     CHECK_EQ(to_hex(flatten_segments(static_segments)), "d81843aabbcc");
     REQUIRE_EQ(dynamic_segments.size(), 3U);
@@ -121,6 +153,10 @@ TEST_CASE("indefinite bstr segmented output preserves chunks and borrows payload
     auto span    = std::span<const std::byte>{payload};
 
     const auto segments = encode_indefinite_bstr_segments(span, 3);
+
+    std::vector<std::byte> appended;
+    append_indefinite_bstr_segments(appended, span, 3);
+    CHECK_EQ(to_hex(appended), "5f43010203420405ff");
 
     REQUIRE_EQ(segments.size(), 6U);
     CHECK(segments[0].is_owned());
@@ -166,6 +202,7 @@ TEST_CASE("indefinite bstr segmented output rejects zero chunk size") {
     auto payload = to_bytes("0102");
     auto span    = std::span<const std::byte>{payload};
 
+    CHECK_THROWS_AS(append_indefinite_bstr_segments(payload, span, 0), std::invalid_argument);
     CHECK_THROWS_AS((void)encode_indefinite_bstr_segments(span, 0), std::invalid_argument);
 }
 
@@ -177,6 +214,11 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
 
         item_view item;
         REQUIRE(dec(item));
+
+        static_assert(CanVisitBorrowedSegments<item_view>);
+        std::vector<std::byte> appended;
+        append_encoded_segments(appended, item);
+        CHECK_EQ(to_hex(appended), "820102");
 
         const auto segments = encode_encoded_segments(item);
         REQUIRE_EQ(segments.size(), 1U);
@@ -240,9 +282,14 @@ TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fall
     using array_view         = typename decltype(dec)::raw_encoded_array_view;
 
     static_assert(!CanEncodeBorrowedSegments<array_view>);
+    static_assert(!CanVisitBorrowedSegments<array_view>);
 
     array_view array;
     REQUIRE(dec(array));
+
+    std::vector<std::byte> appended;
+    append_encoded_segments(appended, array);
+    CHECK_EQ(to_hex(appended), "9f01820203ff");
 
     const auto segments = encode_encoded_segments_copy(array);
     const auto flat     = flatten_segments(segments);

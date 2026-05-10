@@ -13,6 +13,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace cbor::tags {
@@ -131,14 +132,129 @@ concept SpanBackedEncodedItemView =
         { value.span() } -> std::same_as<std::span<const std::byte>>;
     };
 
+template <CborAppendOutputBuffer OutputBuffer> constexpr void append_segment_bytes(OutputBuffer &output, std::span<const std::byte> segment) {
+    if (segment.empty()) {
+        return;
+    }
+    using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
+    output.insert(output.end(), reinterpret_cast<const output_byte *>(segment.data()),
+                  reinterpret_cast<const output_byte *>(segment.data() + segment.size()));
+}
+
 } // namespace detail
+
+template <typename VisitSegment> constexpr void visit_bstr_segments(std::span<const std::byte> payload, VisitSegment &&visit_segment) {
+    const auto header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
+    visit_segment(header.span());
+    visit_segment(payload);
+}
+
+template <typename VisitSegment>
+constexpr void visit_indefinite_bstr_segments(std::span<const std::byte> payload, VisitSegment &&visit_segment,
+                                               std::size_t chunk_size = 4096) {
+    if (chunk_size == 0) {
+        throw std::invalid_argument("CBOR indefinite byte string chunk size must be greater than zero");
+    }
+
+    constexpr std::array start{std::byte{0x5F}};
+    constexpr std::array stop{std::byte{0xFF}};
+    visit_segment(std::span<const std::byte>{start});
+
+    for (std::size_t offset = 0; offset < payload.size(); offset += chunk_size) {
+        const auto chunk_length = std::min(chunk_size, payload.size() - offset);
+        const auto header       = detail::encode_cbor_major_argument_header(chunk_length, std::byte{0x40});
+        visit_segment(header.span());
+        visit_segment(payload.subspan(offset, chunk_length));
+    }
+
+    visit_segment(std::span<const std::byte>{stop});
+}
+
+template <typename VisitSegment>
+constexpr void visit_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload, VisitSegment &&visit_segment) {
+    const auto tag_header  = detail::encode_cbor_major_argument_header(tag, std::byte{0xC0});
+    const auto bstr_header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
+    visit_segment(tag_header.span());
+    visit_segment(bstr_header.span());
+    visit_segment(payload);
+}
+
+template <std::uint64_t Tag, typename VisitSegment>
+constexpr void visit_tagged_bstr_segments(static_tag<Tag>, std::span<const std::byte> payload, VisitSegment &&visit_segment) {
+    visit_tagged_bstr_segments(Tag, payload, std::forward<VisitSegment>(visit_segment));
+}
+
+template <IsUnsigned Tag, typename VisitSegment>
+constexpr void visit_tagged_bstr_segments(dynamic_tag<Tag> tag, std::span<const std::byte> payload, VisitSegment &&visit_segment) {
+    visit_tagged_bstr_segments(static_cast<std::uint64_t>(tag.cbor_tag), payload, std::forward<VisitSegment>(visit_segment));
+}
+
+template <typename RawView, typename VisitSegment>
+    requires detail::SpanBackedEncodedItemView<RawView>
+constexpr void visit_encoded_segments(const RawView &view, VisitSegment &&visit_segment) {
+    visit_segment(view.span());
+}
+
+template <CborAppendOutputBuffer OutputBuffer, typename VisitSegments>
+constexpr void append_visited_segments(OutputBuffer &output, VisitSegments &&visit_segments) {
+    visit_segments([&](std::span<const std::byte> segment) { detail::append_segment_bytes(output, segment); });
+}
+
+template <CborAppendOutputBuffer OutputBuffer> constexpr void append_bstr_segments(OutputBuffer &output, std::span<const std::byte> payload) {
+    append_visited_segments(output, [&](auto &&visit_segment) { visit_bstr_segments(payload, std::forward<decltype(visit_segment)>(visit_segment)); });
+}
+
+template <CborAppendOutputBuffer OutputBuffer>
+constexpr void append_indefinite_bstr_segments(OutputBuffer &output, std::span<const std::byte> payload, std::size_t chunk_size = 4096) {
+    append_visited_segments(output, [&](auto &&visit_segment) {
+        visit_indefinite_bstr_segments(payload, std::forward<decltype(visit_segment)>(visit_segment), chunk_size);
+    });
+}
+
+template <CborAppendOutputBuffer OutputBuffer>
+constexpr void append_tagged_bstr_segments(OutputBuffer &output, std::uint64_t tag, std::span<const std::byte> payload) {
+    append_visited_segments(output, [&](auto &&visit_segment) {
+        visit_tagged_bstr_segments(tag, payload, std::forward<decltype(visit_segment)>(visit_segment));
+    });
+}
+
+template <CborAppendOutputBuffer OutputBuffer, std::uint64_t Tag>
+constexpr void append_tagged_bstr_segments(OutputBuffer &output, static_tag<Tag> tag, std::span<const std::byte> payload) {
+    append_visited_segments(output, [&](auto &&visit_segment) {
+        visit_tagged_bstr_segments(tag, payload, std::forward<decltype(visit_segment)>(visit_segment));
+    });
+}
+
+template <CborAppendOutputBuffer OutputBuffer, IsUnsigned Tag>
+constexpr void append_tagged_bstr_segments(OutputBuffer &output, dynamic_tag<Tag> tag, std::span<const std::byte> payload) {
+    append_visited_segments(output, [&](auto &&visit_segment) {
+        visit_tagged_bstr_segments(tag, payload, std::forward<decltype(visit_segment)>(visit_segment));
+    });
+}
+
+template <CborAppendOutputBuffer OutputBuffer, typename RawView>
+    requires IsEncodedItemView<RawView>
+constexpr void append_encoded_segments(OutputBuffer &output, const RawView &view) {
+    using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
+    if constexpr (requires { { view.span() } -> std::same_as<std::span<const std::byte>>; }) {
+        detail::append_segment_bytes(output, view.span());
+    } else {
+        for (auto byte : view.bytes()) {
+            output.push_back(static_cast<output_byte>(byte));
+        }
+    }
+}
 
 [[nodiscard]] inline cbor_segments encode_bstr_segments(std::span<const std::byte> payload) {
     cbor_segments segments;
-    const auto    header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
     segments.reserve(2);
-    segments.append_owned(header.span());
-    segments.append_borrowed(payload);
+    visit_bstr_segments(payload, [&](std::span<const std::byte> segment) {
+        if (segment.data() == payload.data()) {
+            segments.append_borrowed(segment);
+        } else {
+            segments.append_owned(segment);
+        }
+    });
     return segments;
 }
 
@@ -150,27 +266,29 @@ concept SpanBackedEncodedItemView =
     cbor_segments segments;
     const auto    chunk_count = payload.empty() ? std::size_t{0} : ((payload.size() + chunk_size - 1U) / chunk_size);
     segments.reserve(2U + (chunk_count * 2U));
-    segments.append_owned({std::byte{0x5F}});
-
-    for (std::size_t offset = 0; offset < payload.size(); offset += chunk_size) {
-        const auto chunk_length = std::min(chunk_size, payload.size() - offset);
-        const auto header       = detail::encode_cbor_major_argument_header(chunk_length, std::byte{0x40});
-        segments.append_owned(header.span());
-        segments.append_borrowed(payload.subspan(offset, chunk_length));
-    }
-
-    segments.append_owned({std::byte{0xFF}});
+    const auto payload_begin = reinterpret_cast<std::uintptr_t>(payload.data());
+    const auto payload_end   = payload_begin + payload.size();
+    visit_indefinite_bstr_segments(payload, [&](std::span<const std::byte> segment) {
+        const auto segment_begin = reinterpret_cast<std::uintptr_t>(segment.data());
+        if (!payload.empty() && segment_begin >= payload_begin && segment_begin < payload_end) {
+            segments.append_borrowed(segment);
+        } else {
+            segments.append_owned(segment);
+        }
+    }, chunk_size);
     return segments;
 }
 
 [[nodiscard]] inline cbor_segments encode_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload) {
     cbor_segments segments;
-    const auto    tag_header  = detail::encode_cbor_major_argument_header(tag, std::byte{0xC0});
-    const auto    bstr_header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
     segments.reserve(3);
-    segments.append_owned(tag_header.span());
-    segments.append_owned(bstr_header.span());
-    segments.append_borrowed(payload);
+    visit_tagged_bstr_segments(tag, payload, [&](std::span<const std::byte> segment) {
+        if (segment.data() == payload.data()) {
+            segments.append_borrowed(segment);
+        } else {
+            segments.append_owned(segment);
+        }
+    });
     return segments;
 }
 
