@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor_raw_views.h"
+#include "cbor_tags/detail/cbor_argument.h"
 
 #include <algorithm>
 #include <array>
@@ -123,51 +124,6 @@ class cbor_segments {
 
 namespace detail {
 
-struct cbor_segment_header {
-    std::array<std::byte, 9> bytes{};
-    std::size_t              size{};
-
-    [[nodiscard]] std::span<const std::byte> span() const noexcept { return {bytes.data(), size}; }
-};
-
-[[nodiscard]] constexpr std::byte segment_byte(std::uint64_t value) noexcept {
-    return static_cast<std::byte>(static_cast<std::uint8_t>(value));
-}
-
-[[nodiscard]] constexpr cbor_segment_header encode_segment_major_and_size(std::uint64_t value, std::byte major_type) noexcept {
-    cbor_segment_header header;
-    const auto          major = static_cast<std::uint8_t>(major_type);
-    auto                push  = [&](std::byte byte) { header.bytes[header.size++] = byte; };
-
-    if (value < 24) {
-        push(static_cast<std::byte>(static_cast<std::uint8_t>(major | static_cast<std::uint8_t>(value))));
-    } else if (value <= 0xFFU) {
-        push(static_cast<std::byte>(static_cast<std::uint8_t>(major | 24U)));
-        push(segment_byte(value));
-    } else if (value <= 0xFFFFU) {
-        push(static_cast<std::byte>(static_cast<std::uint8_t>(major | 25U)));
-        push(segment_byte(value >> 8U));
-        push(segment_byte(value));
-    } else if (value <= 0xFFFFFFFFULL) {
-        push(static_cast<std::byte>(static_cast<std::uint8_t>(major | 26U)));
-        push(segment_byte(value >> 24U));
-        push(segment_byte(value >> 16U));
-        push(segment_byte(value >> 8U));
-        push(segment_byte(value));
-    } else {
-        push(static_cast<std::byte>(static_cast<std::uint8_t>(major | 27U)));
-        push(segment_byte(value >> 56U));
-        push(segment_byte(value >> 48U));
-        push(segment_byte(value >> 40U));
-        push(segment_byte(value >> 32U));
-        push(segment_byte(value >> 24U));
-        push(segment_byte(value >> 16U));
-        push(segment_byte(value >> 8U));
-        push(segment_byte(value));
-    }
-    return header;
-}
-
 template <typename T>
 concept SpanBackedEncodedItemView =
     IsEncodedItemView<T> && requires { typename std::remove_cvref_t<T>::range_type; } &&
@@ -180,7 +136,7 @@ concept SpanBackedEncodedItemView =
 
 [[nodiscard]] inline cbor_segments encode_bstr_segments(std::span<const std::byte> payload) {
     cbor_segments segments;
-    const auto    header = detail::encode_segment_major_and_size(payload.size(), std::byte{0x40});
+    const auto    header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
     segments.reserve(2);
     segments.append_owned(header.span());
     segments.append_borrowed(payload);
@@ -199,7 +155,7 @@ concept SpanBackedEncodedItemView =
 
     for (std::size_t offset = 0; offset < payload.size(); offset += chunk_size) {
         const auto chunk_length = std::min(chunk_size, payload.size() - offset);
-        const auto header       = detail::encode_segment_major_and_size(chunk_length, std::byte{0x40});
+        const auto header       = detail::encode_cbor_major_argument_header(chunk_length, std::byte{0x40});
         segments.append_owned(header.span());
         segments.append_borrowed(payload.subspan(offset, chunk_length));
     }
@@ -210,8 +166,8 @@ concept SpanBackedEncodedItemView =
 
 [[nodiscard]] inline cbor_segments encode_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload) {
     cbor_segments segments;
-    const auto    tag_header  = detail::encode_segment_major_and_size(tag, std::byte{0xC0});
-    const auto    bstr_header = detail::encode_segment_major_and_size(payload.size(), std::byte{0x40});
+    const auto    tag_header  = detail::encode_cbor_major_argument_header(tag, std::byte{0xC0});
+    const auto    bstr_header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
     segments.reserve(3);
     segments.append_owned(tag_header.span());
     segments.append_owned(bstr_header.span());

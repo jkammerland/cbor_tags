@@ -9,6 +9,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
@@ -823,36 +824,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::incomplete;
         }
 
-        const auto start = tell();
-        const auto end   = std::ranges::end(data_);
-
-        auto                     header_cursor = start;
-        detail::cbor_item_header header{};
-        auto                     status = status_code::success;
-        if (!detail::cbor_item_reader::read_header(header_cursor, end, header, status)) {
-            return status;
-        }
-        if (expected_major && header.major != *expected_major) {
-            return major_mismatch;
-        }
-
-        auto cursor = start;
-        if (!detail::cbor_item_skipper<>::skip_item(cursor, end, status)) {
+        const auto                                             start = tell();
+        detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
+        const auto                                             status =
+            detail::read_raw_encoded_item_bounds<InputBuffer, size_type>(data_, start, expected_major, major_mismatch, bounds);
+        if (status != status_code::success) {
             return status;
         }
 
-        const auto distance = std::ranges::distance(start, cursor);
-        if (distance < 0 || std::cmp_greater(distance, std::numeric_limits<size_type>::max())) {
-            return status_code::error;
-        }
-
-        const auto size = static_cast<size_type>(distance);
-        assign_encoded_view(value, start, cursor, size);
+        assign_encoded_view(value, bounds.start, bounds.cursor, bounds.size);
         if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += size;
+            reader_.position_ += bounds.size;
         } else {
-            reader_.position_ = cursor;
-            reader_.current_offset_ += size;
+            reader_.position_ = bounds.cursor;
+            reader_.current_offset_ += bounds.size;
         }
 
         return status_code::success;
@@ -1183,13 +1168,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr uint64_t read_unsigned(byte additionalInfo) {
-        switch (std::to_integer<std::uint8_t>(additionalInfo)) {
-        case 24: return read_uint8();
-        case 25: return read_uint16();
-        case 26: return read_uint32();
-        case 27: return read_uint64();
-        default: throw std::runtime_error("Invalid additional info for integer");
+        const auto info = std::to_integer<std::uint8_t>(additionalInfo);
+        if (!detail::is_valid_cbor_argument_info(info)) {
+            throw std::runtime_error("Invalid additional info for integer");
         }
+
+        const auto payload_size = detail::cbor_argument_payload_size(info);
+        if (payload_size > 0U && reader_.empty(data_, payload_size - 1U)) {
+            throw parse_incomplete_exception("Unexpected end of input");
+        }
+
+        std::uint64_t value{};
+        auto          status = status_code::success;
+        const auto    ok     = detail::read_cbor_argument(info, value, status, [this](std::uint8_t &byte_value) {
+            byte_value = static_cast<std::uint8_t>(reader_.read(data_));
+            return true;
+        });
+        if (!ok) {
+            throw std::runtime_error("Invalid additional info for integer");
+        }
+        return value;
     }
 
     constexpr uint8_t read_uint8() {

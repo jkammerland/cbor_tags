@@ -27,7 +27,7 @@ std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
 }
 
 void check_segment_header(std::uint64_t value, std::byte major, const char *expected_hex) {
-    const auto header = cbor::tags::detail::encode_segment_major_and_size(value, major);
+    const auto header = cbor::tags::detail::encode_cbor_major_argument_header(value, major);
     CHECK_EQ(to_hex(header.span()), expected_hex);
 }
 

@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_segments.h"
+#include "cbor_tags/detail/cbor_argument.h"
 
 #include <bit>
 #include <concepts>
@@ -74,56 +75,6 @@ template <IsRfc8746TypedArrayElement T> [[nodiscard]] std::vector<std::byte> rfc
     return bytes;
 }
 
-[[nodiscard]] inline status_code read_rfc8746_uint_argument(std::span<const std::byte> input, std::size_t &offset, std::uint8_t info,
-                                                            std::uint64_t &value) noexcept {
-    auto require = [&](std::size_t count) { return count <= (input.size() - offset); };
-
-    if (info < 24U) {
-        value = info;
-        return status_code::success;
-    }
-    if (info == 24U) {
-        if (!require(1)) {
-            return status_code::incomplete;
-        }
-        value = std::to_integer<std::uint8_t>(input[offset]);
-        ++offset;
-        return status_code::success;
-    }
-    if (info == 25U) {
-        if (!require(2)) {
-            return status_code::incomplete;
-        }
-        value = (static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset])) << 8U) |
-                static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset + 1U]));
-        offset += 2U;
-        return status_code::success;
-    }
-    if (info == 26U) {
-        if (!require(4)) {
-            return status_code::incomplete;
-        }
-        value = (static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset])) << 24U) |
-                (static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset + 1U])) << 16U) |
-                (static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset + 2U])) << 8U) |
-                static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset + 3U]));
-        offset += 4U;
-        return status_code::success;
-    }
-    if (info == 27U) {
-        if (!require(8)) {
-            return status_code::incomplete;
-        }
-        value = 0;
-        for (std::size_t i = 0; i < 8U; ++i) {
-            value = (value << 8U) | static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(input[offset + i]));
-        }
-        offset += 8U;
-        return status_code::success;
-    }
-    return status_code::error;
-}
-
 } // namespace detail
 
 template <IsRfc8746TypedArrayElement T> class rfc8746_typed_array {
@@ -183,9 +134,10 @@ template <IsRfc8746TypedArrayElement T>
 }
 
 template <IsRfc8746TypedArrayElement T> [[nodiscard]] cbor_segments encode_rfc8746_typed_array_segments_copy(std::span<const T> values) {
-    const auto tag_header  = detail::encode_segment_major_and_size(rfc8746_typed_array_traits<std::remove_cv_t<T>>::tag, std::byte{0xC0});
+    const auto tag_header =
+        detail::encode_cbor_major_argument_header(rfc8746_typed_array_traits<std::remove_cv_t<T>>::tag, std::byte{0xC0});
     auto       payload     = detail::rfc8746_little_endian_payload(values);
-    const auto bstr_header = detail::encode_segment_major_and_size(payload.size(), std::byte{0x40});
+    const auto bstr_header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
 
     cbor_segments segments;
     segments.reserve(3);
@@ -260,7 +212,7 @@ decode_rfc8746_typed_array_view(std::span<const std::byte> input) {
     }
 
     std::uint64_t tag{};
-    auto          status = detail::read_rfc8746_uint_argument(input, offset, tag_initial & 0x1FU, tag);
+    auto          status = detail::read_cbor_argument_from_span(input, offset, tag_initial & 0x1FU, tag);
     if (status != status_code::success) {
         return unexpected<status_code>(status);
     }
@@ -277,7 +229,7 @@ decode_rfc8746_typed_array_view(std::span<const std::byte> input) {
     }
 
     std::uint64_t payload_length{};
-    status = detail::read_rfc8746_uint_argument(input, offset, bstr_initial & 0x1FU, payload_length);
+    status = detail::read_cbor_argument_from_span(input, offset, bstr_initial & 0x1FU, payload_length);
     if (status != status_code::success) {
         return unexpected<status_code>(status);
     }

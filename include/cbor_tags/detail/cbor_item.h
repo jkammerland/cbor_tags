@@ -1,31 +1,16 @@
 #pragma once
 
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/detail/cbor_argument.h"
 
 #include <array>
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <limits>
 #include <ranges>
-#include <type_traits>
 
 namespace cbor::tags::detail {
-
-template <typename Byte> constexpr std::uint8_t cbor_byte_to_u8(Byte value) {
-    if constexpr (std::same_as<std::remove_cvref_t<Byte>, std::byte>) {
-        return std::to_integer<std::uint8_t>(value);
-    } else {
-        return static_cast<std::uint8_t>(value);
-    }
-}
-
-[[nodiscard]] constexpr bool is_cbor_break_byte(std::uint8_t value) noexcept { return value == 0xFFU; }
-
-[[nodiscard]] constexpr bool is_reserved_simple_argument(std::uint8_t additional_info) noexcept {
-    return additional_info == 28U || additional_info == 29U || additional_info == 30U || additional_info == 31U;
-}
 
 struct cbor_item_header {
     major_type    major{};
@@ -39,29 +24,6 @@ struct cbor_item_frame {
     std::uint64_t remaining{};
     bool          map_expects_value{};
 };
-
-template <typename ReadByte>
-bool read_cbor_argument(std::uint8_t additional_info, std::uint64_t &value, status_code &status, ReadByte &&read_byte) {
-    if (additional_info < 24U) {
-        value = additional_info;
-        return true;
-    }
-    if (additional_info > 27U) {
-        status = status_code::error;
-        return false;
-    }
-
-    const auto byte_count = static_cast<std::uint8_t>(1U << (additional_info - 24U));
-    value                 = 0;
-    for (std::uint8_t index = 0; index < byte_count; ++index) {
-        std::uint8_t byte{};
-        if (!read_byte(byte)) {
-            return false;
-        }
-        value = (value << 8U) | byte;
-    }
-    return true;
-}
 
 struct cbor_item_reader {
     template <typename Iterator> static bool read_byte(Iterator &cursor, Iterator end, std::uint8_t &value, status_code &status) {

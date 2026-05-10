@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_range_encoder.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_argument.h"
 #include "tl/expected.hpp"
 
 #include <bit>
@@ -53,24 +54,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
-        if (value < 24) {
-            appender_(data_, static_cast<byte_type>(value) | majorType);
-        } else if (value <= 0xFF) {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(24) | majorType), static_cast<byte_type>(value));
-        } else if (value <= 0xFFFF) {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(25) | majorType),
-                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
-        } else if (value <= 0xFFFFFFFF) {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(26) | majorType),
-                                   static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
-                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
-        } else {
-            appender_.multi_append(data_, static_cast<byte_type>(static_cast<byte_type>(27) | majorType),
-                                   static_cast<byte_type>(value >> 56), static_cast<byte_type>(value >> 48),
-                                   static_cast<byte_type>(value >> 40), static_cast<byte_type>(value >> 32),
-                                   static_cast<byte_type>(value >> 24), static_cast<byte_type>(value >> 16),
-                                   static_cast<byte_type>(value >> 8), static_cast<byte_type>(value));
-        }
+        detail::append_cbor_major_argument(appender_, data_, value, majorType);
     }
 
     template <IsUnsigned T> constexpr void encode(T value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
