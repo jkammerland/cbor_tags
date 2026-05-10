@@ -6,6 +6,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
 #include <cbor_tags/cbor_ranges.h>
+#include <cbor_tags/cbor_raw_views.h>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -323,6 +324,75 @@ TEST_CASE("contiguous sized byte string ranges match direct byte string encoding
     }
 }
 
+TEST_CASE("byte string range wrappers encode to exact-size fixed output buffers") {
+    const std::array<std::byte, 5> bytes{std::byte{0x00}, std::byte{0x01}, std::byte{0x7F}, std::byte{0x80}, std::byte{0xFF}};
+
+    {
+        std::array<std::byte, 6> output{};
+        auto                     enc = make_encoder(output);
+
+        REQUIRE(enc(as_bstr_range(bytes)));
+        CHECK_EQ(to_hex(output), "4500017f80ff");
+    }
+
+    {
+        std::array<std::byte, 6> storage{};
+        std::span<std::byte, 6>  output{storage};
+        auto                     enc = make_encoder(output);
+
+        REQUIRE(enc(as_bstr_range(bytes)));
+        CHECK_EQ(to_hex(storage), "4500017f80ff");
+    }
+}
+
+TEST_CASE("byte string range wrappers report too-small fixed output buffers") {
+    const std::array<std::byte, 5> bytes{std::byte{0x00}, std::byte{0x01}, std::byte{0x7F}, std::byte{0x80}, std::byte{0xFF}};
+    std::array<std::byte, 5>       output{std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}};
+    auto                           enc = make_encoder(output);
+
+    const auto result = enc(as_bstr_range(bytes));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(to_hex(output), "45cccccccc");
+}
+
+TEST_CASE("raw encoded views encode to fixed output buffers without normalization") {
+    auto bytes = to_bytes("820102");
+    auto dec   = make_decoder(bytes);
+
+    encoded_array_view array;
+    REQUIRE(dec(array));
+
+    {
+        std::array<std::byte, 3> output{};
+        auto                     enc = make_encoder(output);
+
+        REQUIRE(enc(array));
+        CHECK_EQ(to_hex(output), "820102");
+    }
+
+    {
+        std::array<std::byte, 3> storage{};
+        std::span<std::byte, 3>  output{storage};
+        auto                     enc = make_encoder(output);
+
+        REQUIRE(enc(array));
+        CHECK_EQ(to_hex(storage), "820102");
+    }
+
+    {
+        std::array<std::byte, 2> output{std::byte{0xCC}, std::byte{0xCC}};
+        auto                     enc = make_encoder(output);
+
+        const auto result = enc(array);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(to_hex(output), "cccc");
+    }
+}
+
 TEST_CASE("contiguous sized byte string ranges use bulk append when available") {
     const std::vector<std::uint8_t> bytes{0x00, 0x01, 0x7F, 0x80, 0xFF};
     counting_append_buffer          buffer;
@@ -331,6 +401,19 @@ TEST_CASE("contiguous sized byte string ranges use bulk append when available") 
     REQUIRE(enc(as_bstr_range(bytes)));
 
     CHECK_EQ(to_hex(buffer), "4500017f80ff");
+    CHECK_EQ(buffer.push_back_calls, 1);
+    CHECK_EQ(buffer.range_insert_calls, 1);
+    CHECK_EQ(buffer.range_inserted_bytes, bytes.size());
+}
+
+TEST_CASE("non-contiguous std::byte ranges use direct insert when available") {
+    const std::list<std::byte> bytes{std::byte{0x00}, std::byte{0xFF}, std::byte{0x10}, std::byte{0x20}};
+    counting_append_buffer     buffer;
+    auto                       enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bstr_range(bytes)));
+
+    CHECK_EQ(to_hex(buffer), "4400ff1020");
     CHECK_EQ(buffer.push_back_calls, 1);
     CHECK_EQ(buffer.range_insert_calls, 1);
     CHECK_EQ(buffer.range_inserted_bytes, bytes.size());

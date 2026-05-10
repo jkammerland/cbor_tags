@@ -1,9 +1,11 @@
 #include "test_util.h"
 
+#include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_segments.h>
 #include <cstddef>
+#include <cstdint>
 #include <doctest/doctest.h>
 #include <list>
 #include <span>
@@ -24,7 +26,38 @@ std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
     return output;
 }
 
+void check_segment_header(std::uint64_t value, std::byte major, const char *expected_hex) {
+    const auto header = cbor::tags::detail::encode_segment_major_and_size(value, major);
+    CHECK_EQ(to_hex(header.span()), expected_hex);
+}
+
 } // namespace
+
+TEST_CASE("segment header encoding covers CBOR size boundaries") {
+    struct header_case {
+        std::uint64_t value;
+        const char   *bstr_hex;
+        const char   *tag_hex;
+    };
+
+    constexpr std::array cases{
+        header_case{0, "40", "c0"},
+        header_case{23, "57", "d7"},
+        header_case{24, "5818", "d818"},
+        header_case{255, "58ff", "d8ff"},
+        header_case{256, "590100", "d90100"},
+        header_case{65535, "59ffff", "d9ffff"},
+        header_case{65536, "5a00010000", "da00010000"},
+        header_case{0xFFFFFFFFULL, "5affffffff", "daffffffff"},
+        header_case{0x100000000ULL, "5b0000000100000000", "db0000000100000000"},
+    };
+
+    for (const auto &test_case : cases) {
+        CAPTURE(test_case.value);
+        check_segment_header(test_case.value, std::byte{0x40}, test_case.bstr_hex);
+        check_segment_header(test_case.value, std::byte{0xC0}, test_case.tag_hex);
+    }
+}
 
 TEST_CASE("bstr segmented output flattens like normal encode and borrows payload") {
     auto payload = to_bytes("01020304");
@@ -42,6 +75,29 @@ TEST_CASE("bstr segmented output flattens like normal encode and borrows payload
     CHECK_EQ(segments[1].kind(), cbor_segment_kind::borrowed);
     CHECK_EQ(segments[1].data(), payload.data());
     CHECK_EQ(segments[1].size(), payload.size());
+}
+
+TEST_CASE("empty bstr segmented output preserves definite and indefinite headers") {
+    const std::span<const std::byte> payload;
+
+    {
+        const auto segments = encode_bstr_segments(payload);
+
+        REQUIRE_EQ(segments.size(), 2U);
+        CHECK(segments[0].is_owned());
+        CHECK(segments[1].is_borrowed());
+        CHECK(segments[1].empty());
+        CHECK_EQ(to_hex(flatten_segments(segments)), "40");
+    }
+
+    {
+        const auto segments = encode_indefinite_bstr_segments(payload, 4);
+
+        REQUIRE_EQ(segments.size(), 2U);
+        CHECK(segments[0].is_owned());
+        CHECK(segments[1].is_owned());
+        CHECK_EQ(to_hex(flatten_segments(segments)), "5fff");
+    }
 }
 
 TEST_CASE("tagged bstr segmented output preserves CBOR bytes and borrows payload") {
@@ -82,6 +138,28 @@ TEST_CASE("indefinite bstr segmented output preserves chunks and borrows payload
     CHECK(segments[5].is_owned());
     CHECK_EQ(to_hex(segments[5].bytes()), "ff");
     CHECK_EQ(to_hex(flatten_segments(segments)), "5f43010203420405ff");
+}
+
+TEST_CASE("owned and borrowed cbor segments keep their lifetime contracts") {
+    auto short_payload = to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    auto long_payload  = to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+
+    REQUIRE_EQ(short_payload.size(), cbor_segment::inline_owned_capacity);
+    REQUIRE_EQ(long_payload.size(), cbor_segment::inline_owned_capacity + 1U);
+
+    auto short_owned = cbor_segment::owned(std::span<const std::byte>{short_payload});
+    auto long_owned  = cbor_segment::owned(std::span<const std::byte>{long_payload});
+    auto borrowed    = cbor_segment::borrowed(std::span<const std::byte>{short_payload});
+
+    short_payload[0] = std::byte{0xFF};
+    long_payload[0]  = std::byte{0xEE};
+
+    CHECK(short_owned.is_owned());
+    CHECK(long_owned.is_owned());
+    CHECK(borrowed.is_borrowed());
+    CHECK_EQ(to_hex(short_owned.bytes()), "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    CHECK_EQ(to_hex(long_owned.bytes()), "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+    CHECK_EQ(to_hex(borrowed.bytes()), "ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
 }
 
 TEST_CASE("indefinite bstr segmented output rejects zero chunk size") {
@@ -136,6 +214,22 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         CHECK(segments[0].is_borrowed());
         CHECK_EQ(segments[0].data(), bytes.data());
         CHECK_EQ(to_hex(flatten_segments(segments)), "a10102");
+    }
+
+    {
+        auto bytes = to_bytes("f5820102f4");
+        auto dec   = make_decoder(bytes);
+
+        bool               prefix{};
+        encoded_array_view array;
+        bool               suffix{};
+        REQUIRE(dec(prefix, array, suffix));
+
+        const auto segments = encode_encoded_segments(array);
+        REQUIRE_EQ(segments.size(), 1U);
+        CHECK(segments[0].is_borrowed());
+        CHECK_EQ(segments[0].data(), bytes.data() + 1);
+        CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
     }
 }
 

@@ -48,6 +48,18 @@ template <typename RawView> std::vector<std::byte> reencode(const RawView &view)
     return output;
 }
 
+void check_raw_item_decode_error(const char *hex, status_code expected) {
+    auto bytes = to_bytes(hex);
+    auto dec   = make_decoder(bytes);
+
+    encoded_item_view item;
+    auto              result = dec(item);
+
+    CAPTURE(hex);
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), expected);
+}
+
 } // namespace
 
 TEST_CASE("raw encoded item views decode one item and re-encode exact bytes") {
@@ -122,6 +134,65 @@ TEST_CASE("raw encoded views preserve indefinite arrays and maps") {
     }
 }
 
+TEST_CASE("raw encoded item views preserve tags and indefinite strings") {
+    {
+        auto bytes = to_bytes("d82a820102");
+        auto dec   = make_decoder(bytes);
+
+        encoded_item_view item;
+
+        REQUIRE(dec(item));
+        CHECK_EQ(to_hex(item.bytes()), "d82a820102");
+        CHECK_EQ(to_hex(reencode(item)), "d82a820102");
+    }
+
+    {
+        auto bytes = to_bytes("5f4101ff");
+        auto dec   = make_decoder(bytes);
+
+        encoded_item_view item;
+
+        REQUIRE(dec(item));
+        CHECK_EQ(to_hex(item.bytes()), "5f4101ff");
+        CHECK_EQ(to_hex(reencode(item)), "5f4101ff");
+    }
+
+    {
+        auto bytes = to_bytes("7f6161ff");
+        auto dec   = make_decoder(bytes);
+
+        encoded_item_view item;
+
+        REQUIRE(dec(item));
+        CHECK_EQ(to_hex(item.bytes()), "7f6161ff");
+        CHECK_EQ(to_hex(reencode(item)), "7f6161ff");
+    }
+}
+
+TEST_CASE("raw encoded array and map views reject tagged items with major mismatch") {
+    auto bytes = to_bytes("d82a820102");
+
+    {
+        auto dec = make_decoder(bytes);
+
+        encoded_array_view array;
+        auto               result = dec(array);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
+    }
+
+    {
+        auto dec = make_decoder(bytes);
+
+        encoded_map_view map;
+        auto             result = dec(map);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+    }
+}
+
 TEST_CASE("raw encoded views reject malformed and truncated input") {
     {
         auto bytes = to_bytes("ff");
@@ -176,6 +247,16 @@ TEST_CASE("raw encoded views reject malformed and truncated input") {
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
+    }
+}
+
+TEST_CASE("raw encoded views reject invalid additional-info values and truncated arguments") {
+    for (const auto *hex : {"1c", "1d", "1e", "1f", "5c", "9c", "bc", "dc"}) {
+        check_raw_item_decode_error(hex, status_code::error);
+    }
+
+    for (const auto *hex : {"18", "19ff", "1a0000", "1b00000000000000"}) {
+        check_raw_item_decode_error(hex, status_code::incomplete);
     }
 }
 
