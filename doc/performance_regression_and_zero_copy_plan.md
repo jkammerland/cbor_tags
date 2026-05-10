@@ -270,6 +270,27 @@ Typed-array decode must validate:
 
 ## Implementation Sequence
 
+Current branch status:
+
+- steps 2-4 are implemented by the append-strategy helpers used by
+  `as_bstr_range`, including bulk appends for contiguous sized byte ranges and
+  chunk flushes for indefinite byte-string ranges
+- steps 5-6 are implemented by `cbor_raw_views.h` with
+  `encoded_item_view`, `encoded_array_view`, `encoded_map_view`, and typed
+  `encoded_*_view_for<Buffer>` aliases for non-contiguous buffers
+- step 7 is implemented by opt-in `cbor_segments.h` helpers for definite,
+  indefinite, tagged, and raw-view segmented output
+- step 8 is implemented by opt-in `cbor_typed_arrays.h` helpers for RFC 8746
+  little-endian int32, int64, and float64 arrays
+
+Remaining work:
+
+- complete the historical benchmark/regression attribution against `v0.10.0`
+- decide whether the new opt-in APIs should be re-exported by broader public
+  headers or remain split-header-only
+- extend typed-array support beyond the initial benchmark tags only if there is
+  a concrete user need
+
 1. Benchmark and report regressions from `v0.10.0`.
 2. Add append-strategy helpers behind existing encoder APIs.
 3. Optimize direct bstr/tstr and contiguous `as_bstr_range` without changing
