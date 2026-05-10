@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -129,7 +128,7 @@ concept SpanBackedEncodedItemView =
     IsEncodedItemView<T> && requires { typename std::remove_cvref_t<T>::range_type; } &&
     std::ranges::contiguous_range<const typename std::remove_cvref_t<T>::range_type> &&
     std::ranges::sized_range<const typename std::remove_cvref_t<T>::range_type> && requires(const std::remove_cvref_t<T> &value) {
-        { value.span() } -> std::same_as<std::optional<std::span<const std::byte>>>;
+        { value.span() } -> std::same_as<std::span<const std::byte>>;
     };
 
 } // namespace detail
@@ -191,7 +190,7 @@ template <typename RawView>
     cbor_segments segments;
     const auto    bytes = view.span();
     segments.reserve(1);
-    segments.append_borrowed(*bytes);
+    segments.append_borrowed(bytes);
     return segments;
 }
 

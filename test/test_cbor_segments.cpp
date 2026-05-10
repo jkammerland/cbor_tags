@@ -243,7 +243,6 @@ TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fall
 
     array_view array;
     REQUIRE(dec(array));
-    CHECK_FALSE(array.span().has_value());
 
     const auto segments = encode_encoded_segments_copy(array);
     const auto flat     = flatten_segments(segments);

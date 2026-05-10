@@ -10,7 +10,6 @@
 #include <cstring>
 #include <iterator>
 #include <limits>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -130,16 +129,9 @@ constexpr void append_byte_range(Appender &appender, OutputBuffer &output, R &&r
     using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
 
     if constexpr (requires {
-                      { range.span() } -> std::same_as<std::optional<std::span<const std::byte>>>;
+                      { range.span() } -> std::same_as<std::span<const std::byte>>;
                   }) {
-        const auto bytes = range.span();
-        if (bytes) {
-            appender(output, *bytes);
-            return;
-        }
-        for (auto &&byte : range) {
-            appender(output, static_cast<output_byte>(byte));
-        }
+        appender(output, range.span());
     } else if constexpr (std::ranges::contiguous_range<R> && std::ranges::sized_range<R>) {
         appender(output, as_byte_span(std::forward<R>(range)));
     } else if constexpr (DirectlyInsertableByteRange<OutputBuffer, R>) {

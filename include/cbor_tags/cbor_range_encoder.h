@@ -2,7 +2,7 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_detail.h"
-#include "cbor_tags/cbor_raw_view_encoder.h"
+#include "cbor_tags/detail/cbor_raw_view_encoder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,9 +13,9 @@
 
 namespace cbor::tags {
 
-template <typename T> struct cbor_range_encoder : cbor_raw_view_encoder<T> {
-    using cbor_raw_view_encoder<T>::encode;
-    using cbor_raw_view_encoder<T>::encode_encoded_view;
+template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<T> {
+    using detail::cbor_raw_view_encoder<T>::encode;
+    using detail::cbor_raw_view_encoder<T>::encode_encoded_view;
 
     template <typename Byte> static constexpr auto output_byte(Byte value) { return static_cast<typename T::byte_type>(value); }
 

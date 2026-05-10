@@ -20,6 +20,11 @@ namespace {
 template <typename R>
 concept CanMakeBstrRange = requires(R &&range) { cbor::tags::as_bstr_range(std::forward<R>(range)); };
 
+template <typename RawView>
+concept HasEncodedSpan = requires(const RawView &view) {
+    { view.span() } -> std::same_as<std::span<const std::byte>>;
+};
+
 static_assert(std::ranges::view<encoded_byte_view>);
 static_assert(std::ranges::borrowed_range<encoded_byte_view>);
 static_assert(std::ranges::common_range<encoded_byte_view>);
@@ -28,6 +33,7 @@ static_assert(std::ranges::range<const encoded_byte_view>);
 static_assert(IsByteLikeRange<encoded_byte_view>);
 static_assert(CanMakeBstrRange<encoded_byte_view>);
 static_assert(std::same_as<std::ranges::range_value_t<encoded_byte_view>, std::byte>);
+static_assert(HasEncodedSpan<encoded_byte_view>);
 
 using list_encoded_byte_view  = encoded_byte_view_for<std::list<std::byte>>;
 using list_encoded_array_view = encoded_array_view_for<std::list<std::byte>>;
@@ -40,6 +46,8 @@ static_assert(std::ranges::range<const list_encoded_byte_view>);
 static_assert(IsByteLikeRange<list_encoded_byte_view>);
 static_assert(CanMakeBstrRange<list_encoded_byte_view>);
 static_assert(IsEncodedArrayView<list_encoded_array_view>);
+static_assert(!HasEncodedSpan<list_encoded_byte_view>);
+static_assert(!HasEncodedSpan<list_encoded_array_view>);
 
 template <typename RawView> std::vector<std::byte> reencode(const RawView &view) {
     std::vector<std::byte> output;
@@ -299,9 +307,8 @@ TEST_CASE("raw encoded views expose contiguous bytes as a span") {
     REQUIRE(dec(array));
     auto span = array.span();
 
-    REQUIRE(span.has_value());
-    CHECK_EQ(span->data(), reinterpret_cast<const std::byte *>(bytes.data()));
-    CHECK_EQ(to_hex(*span), "820102");
+    CHECK_EQ(span.data(), reinterpret_cast<const std::byte *>(bytes.data()));
+    CHECK_EQ(to_hex(span), "820102");
 }
 
 TEST_CASE("raw encoded views expose offset contiguous bytes as a span") {
@@ -315,9 +322,8 @@ TEST_CASE("raw encoded views expose offset contiguous bytes as a span") {
     REQUIRE(dec(prefix, array, suffix));
 
     auto span = array.span();
-    REQUIRE(span.has_value());
-    CHECK_EQ(span->data(), reinterpret_cast<const std::byte *>(bytes.data() + 1));
-    CHECK_EQ(to_hex(*span), "820102");
+    CHECK_EQ(span.data(), reinterpret_cast<const std::byte *>(bytes.data() + 1));
+    CHECK_EQ(to_hex(span), "820102");
     CHECK(prefix);
     CHECK_FALSE(suffix);
 }
@@ -332,7 +338,6 @@ TEST_CASE("raw encoded views borrow non-contiguous input without copying") {
     auto                   enc = make_encoder(output);
 
     REQUIRE(dec(array));
-    CHECK_FALSE(array.span().has_value());
     CHECK_EQ(to_hex(array.bytes()), "820102");
 
     auto it = bytes.begin();

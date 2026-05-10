@@ -4,7 +4,6 @@
 
 #include <concepts>
 #include <cstddef>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <type_traits>
@@ -40,13 +39,11 @@ class basic_encoded_byte_view {
         return static_cast<size_type>(std::ranges::size(bytes_));
     }
 
-    [[nodiscard]] constexpr std::optional<std::span<const std::byte>> span() const noexcept {
-        if constexpr (std::ranges::contiguous_range<const R> && std::ranges::sized_range<const R>) {
-            auto values = std::span{std::ranges::data(bytes_), static_cast<std::size_t>(std::ranges::size(bytes_))};
-            return std::as_bytes(values);
-        } else {
-            return std::nullopt;
-        }
+    [[nodiscard]] constexpr std::span<const std::byte> span() const noexcept
+        requires std::ranges::contiguous_range<const R>
+    {
+        auto values = std::span{std::ranges::data(bytes_), static_cast<std::size_t>(std::ranges::size(bytes_))};
+        return std::as_bytes(values);
     }
 
   private:
@@ -66,9 +63,13 @@ class basic_encoded_item_view {
     constexpr explicit basic_encoded_item_view(byte_view_type bytes) : bytes_(std::move(bytes)) {}
     constexpr explicit basic_encoded_item_view(R bytes) : bytes_(byte_view_type{std::move(bytes)}) {}
 
-    [[nodiscard]] constexpr byte_view_type                            bytes() const { return bytes_; }
-    [[nodiscard]] constexpr std::optional<std::span<const std::byte>> span() const noexcept { return bytes_.span(); }
-    [[nodiscard]] constexpr std::size_t                               size() const noexcept { return bytes_.size(); }
+    [[nodiscard]] constexpr byte_view_type              bytes() const { return bytes_; }
+    [[nodiscard]] constexpr std::span<const std::byte>  span() const noexcept
+        requires std::ranges::contiguous_range<const R>
+    {
+        return bytes_.span();
+    }
+    [[nodiscard]] constexpr std::size_t                 size() const noexcept { return bytes_.size(); }
 
   private:
     byte_view_type bytes_{};
