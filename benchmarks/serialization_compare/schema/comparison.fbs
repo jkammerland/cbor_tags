@@ -27,4 +27,16 @@ table NestedSnapshot {
   payload:[ubyte];
 }
 
+table Int32Series {
+  values:[int];
+}
+
+table Int64Series {
+  values:[long];
+}
+
+table Float64Series {
+  values:[double];
+}
+
 root_type NestedSnapshot;
