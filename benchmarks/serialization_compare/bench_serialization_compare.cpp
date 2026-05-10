@@ -1,8 +1,7 @@
 #include "comparison_generated.h"
 
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
-
+#include <algorithm>
+#include <bit>
 #include <bitsery/adapter/buffer.h>
 #include <bitsery/bitsery.h>
 #include <bitsery/deserializer.h>
@@ -14,23 +13,22 @@
 #include <boost/serialization/split_free.hpp>
 #include <boost/serialization/string.hpp>
 #include <boost/serialization/vector.hpp>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
 #include <cereal/archives/binary.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
-#include <flatbuffers/flatbuffers.h>
-#include <nanobench.h>
-#include <zpp_bits.h>
-
-#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <flatbuffers/flatbuffers.h>
 #include <fstream>
 #include <ios>
 #include <iostream>
+#include <nanobench.h>
 #include <new>
 #include <ostream>
 #include <sstream>
@@ -41,6 +39,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <zpp_bits.h>
 
 #ifndef CBOR_TAGS_BENCH_BUILD_TYPE
 #define CBOR_TAGS_BENCH_BUILD_TYPE "unknown"
@@ -114,14 +113,14 @@ void *operator new(std::size_t size) { return bench_compare::allocate_bytes(size
 void *operator new[](std::size_t size) { return bench_compare::allocate_bytes(size); }
 void *operator new(std::size_t size, std::align_val_t alignment) { return bench_compare::allocate_aligned_bytes(size, alignment); }
 void *operator new[](std::size_t size, std::align_val_t alignment) { return bench_compare::allocate_aligned_bytes(size, alignment); }
-void operator delete(void *ptr) noexcept { std::free(ptr); }
-void operator delete[](void *ptr) noexcept { std::free(ptr); }
-void operator delete(void *ptr, std::size_t) noexcept { std::free(ptr); }
-void operator delete[](void *ptr, std::size_t) noexcept { std::free(ptr); }
-void operator delete(void *ptr, std::align_val_t) noexcept { std::free(ptr); }
-void operator delete[](void *ptr, std::align_val_t) noexcept { std::free(ptr); }
-void operator delete(void *ptr, std::size_t, std::align_val_t) noexcept { std::free(ptr); }
-void operator delete[](void *ptr, std::size_t, std::align_val_t) noexcept { std::free(ptr); }
+void  operator delete(void *ptr) noexcept { std::free(ptr); }
+void  operator delete[](void *ptr) noexcept { std::free(ptr); }
+void  operator delete(void *ptr, std::size_t) noexcept { std::free(ptr); }
+void  operator delete[](void *ptr, std::size_t) noexcept { std::free(ptr); }
+void  operator delete(void *ptr, std::align_val_t) noexcept { std::free(ptr); }
+void  operator delete[](void *ptr, std::align_val_t) noexcept { std::free(ptr); }
+void  operator delete(void *ptr, std::size_t, std::align_val_t) noexcept { std::free(ptr); }
+void  operator delete[](void *ptr, std::size_t, std::align_val_t) noexcept { std::free(ptr); }
 
 namespace bench_compare {
 
@@ -157,13 +156,13 @@ template <typename Fn> allocation_sample count_allocations(Fn &&fn) {
 }
 
 struct FlatRecord {
-    std::int32_t          id{};
-    std::uint64_t         sequence{};
-    bool                  active{};
-    std::uint8_t          kind{};
-    float                 temperature{};
-    double                score{};
-    std::string           name;
+    std::int32_t              id{};
+    std::uint64_t             sequence{};
+    bool                      active{};
+    std::uint8_t              kind{};
+    float                     temperature{};
+    double                    score{};
+    std::string               name;
     std::vector<std::int32_t> samples;
 
     bool operator==(const FlatRecord &) const = default;
@@ -215,9 +214,7 @@ struct NestedSnapshot {
     }
 };
 
-std::uint64_t mix(std::uint64_t seed, std::uint64_t value) {
-    return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U));
-}
+std::uint64_t mix(std::uint64_t seed, std::uint64_t value) { return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U)); }
 
 std::uint64_t mix_string(std::uint64_t seed, std::string_view value) {
     seed = mix(seed, value.size());
@@ -392,9 +389,7 @@ template <typename Archive> void save(Archive &archive, const bench_compare::Rec
     archive & value.records;
 }
 
-template <typename Archive> void load(Archive &archive, bench_compare::RecordBatch &value, const unsigned int) {
-    archive & value.records;
-}
+template <typename Archive> void load(Archive &archive, bench_compare::RecordBatch &value, const unsigned int) { archive & value.records; }
 
 template <typename Archive> void serialize(Archive &archive, bench_compare::RecordBatch &value, const unsigned int version) {
     split_free(archive, value, version);
@@ -425,13 +420,18 @@ namespace bench_compare {
 struct cbor_tags_codec {
     static constexpr std::string_view name = "cbor_tags";
 
-    template <typename T> static byte_buffer encode(const T &value) {
-        byte_buffer buffer;
-        auto        enc    = cbor::tags::make_encoder(buffer);
-        auto        result = enc(value);
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        buffer.clear();
+        auto enc    = cbor::tags::make_encoder(buffer);
+        auto result = enc(value);
         if (!result) {
             throw std::runtime_error(std::string{"cbor_tags encode failed: "} + std::string{cbor::tags::status_message(result.error())});
         }
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
         return buffer;
     }
 
@@ -477,23 +477,30 @@ struct bitsery_codec {
         } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, KeyValue>) {
             process_key_value(archive, value);
         } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, RecordBatch>) {
-            archive.container(value.records, max_records, [](auto &nested_archive, auto &record) { process_record(nested_archive, record); });
+            archive.container(value.records, max_records,
+                              [](auto &nested_archive, auto &record) { process_record(nested_archive, record); });
         } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, NestedSnapshot>) {
             archive.text1b(value.title, max_string_size);
-            archive.container(value.records, max_records, [](auto &nested_archive, auto &record) { process_record(nested_archive, record); });
+            archive.container(value.records, max_records,
+                              [](auto &nested_archive, auto &record) { process_record(nested_archive, record); });
             archive.container(value.counters, max_counters,
                               [](auto &nested_archive, auto &entry) { process_key_value(nested_archive, entry); });
             archive.container1b(value.payload, max_payload);
         }
     }
 
-    template <typename T> static byte_buffer encode(const T &value) {
-        byte_buffer buffer;
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        buffer.clear();
         using output_adapter = bitsery::OutputBufferAdapter<byte_buffer>;
         bitsery::Serializer<output_adapter> serializer{output_adapter{buffer}};
         process(serializer, value);
         serializer.adapter().flush();
         buffer.resize(serializer.adapter().writtenBytesCount());
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
         return buffer;
     }
 
@@ -512,10 +519,15 @@ struct bitsery_codec {
 struct zpp_bits_codec {
     static constexpr std::string_view name = "zpp_bits";
 
-    template <typename T> static byte_buffer encode(const T &value) {
-        byte_buffer     buffer;
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        buffer.clear();
         zpp::bits::out out{buffer};
         out(value).or_throw();
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
         return buffer;
     }
 
@@ -596,17 +608,23 @@ struct cereal_codec {
         archive(value.payload);
     }
 
-    template <typename T> static byte_buffer encode(const T &value) {
-        std::ostringstream stream(std::ios::out | std::ios::binary);
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        std::ostringstream          stream(std::ios::out | std::ios::binary);
         cereal::BinaryOutputArchive archive(stream);
         process(archive, value);
         auto text = stream.str();
-        return byte_buffer(text.begin(), text.end());
+        buffer.assign(text.begin(), text.end());
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
     }
 
     template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer) {
-        T value;
-        byte_input_stream stream(buffer);
+        T                          value;
+        byte_input_stream          stream(buffer);
         cereal::BinaryInputArchive archive(stream);
         process(archive, value);
         return checksum(value);
@@ -616,17 +634,23 @@ struct cereal_codec {
 struct boost_serialization_codec {
     static constexpr std::string_view name = "boost_serialization";
 
-    template <typename T> static byte_buffer encode(const T &value) {
-        std::ostringstream stream(std::ios::out | std::ios::binary);
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        std::ostringstream              stream(std::ios::out | std::ios::binary);
         boost::archive::binary_oarchive archive(stream, boost::archive::no_header);
         archive & value;
         auto text = stream.str();
-        return byte_buffer(text.begin(), text.end());
+        buffer.assign(text.begin(), text.end());
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
     }
 
     template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer) {
-        T value;
-        byte_input_stream stream(buffer);
+        T                               value;
+        byte_input_stream               stream(buffer);
         boost::archive::binary_iarchive archive(stream, boost::archive::no_header);
         archive & value;
         return checksum(value);
@@ -692,19 +716,31 @@ template <typename FlatbufferRoot> const FlatbufferRoot &checked_flatbuffer_root
 struct flatbuffers_codec {
     static constexpr std::string_view name = "flatbuffers";
 
-    static byte_buffer finish(flatbuffers::FlatBufferBuilder &builder) {
+    static flatbuffers::FlatBufferBuilder make_builder(const byte_buffer &buffer) {
+        return flatbuffers::FlatBufferBuilder{std::max<std::size_t>(1024, buffer.capacity())};
+    }
+
+    static void copy_finished(flatbuffers::FlatBufferBuilder &builder, byte_buffer &buffer) {
         const auto *begin = builder.GetBufferPointer();
-        return byte_buffer(begin, begin + builder.GetSize());
+        buffer.assign(begin, begin + builder.GetSize());
+    }
+
+    static void encode_into(const FlatRecord &value, byte_buffer &buffer) {
+        buffer.clear();
+        auto builder = make_builder(buffer);
+        builder.Finish(create_flat_record(builder, value));
+        copy_finished(builder, buffer);
     }
 
     static byte_buffer encode(const FlatRecord &value) {
-        flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(create_flat_record(builder, value));
-        return finish(builder);
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
     }
 
-    static byte_buffer encode(const RecordBatch &value) {
-        flatbuffers::FlatBufferBuilder builder;
+    static void encode_into(const RecordBatch &value, byte_buffer &buffer) {
+        buffer.clear();
+        auto                                             builder = make_builder(buffer);
         std::vector<flatbuffers::Offset<fb::FlatRecord>> records;
         records.reserve(value.records.size());
         for (const auto &record : value.records) {
@@ -712,12 +748,19 @@ struct flatbuffers_codec {
         }
         auto records_vector = builder.CreateVector(records);
         builder.Finish(fb::CreateRecordBatch(builder, records_vector));
-        return finish(builder);
+        copy_finished(builder, buffer);
     }
 
-    static byte_buffer encode(const NestedSnapshot &value) {
-        flatbuffers::FlatBufferBuilder builder;
-        auto title = builder.CreateString(value.title);
+    static byte_buffer encode(const RecordBatch &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
+    }
+
+    static void encode_into(const NestedSnapshot &value, byte_buffer &buffer) {
+        buffer.clear();
+        auto builder = make_builder(buffer);
+        auto title   = builder.CreateString(value.title);
 
         std::vector<flatbuffers::Offset<fb::FlatRecord>> records;
         records.reserve(value.records.size());
@@ -735,7 +778,13 @@ struct flatbuffers_codec {
         auto payload_vector  = builder.CreateVector(value.payload);
 
         builder.Finish(fb::CreateNestedSnapshot(builder, title, records_vector, counters_vector, payload_vector));
-        return finish(builder);
+        copy_finished(builder, buffer);
+    }
+
+    static byte_buffer encode(const NestedSnapshot &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
     }
 
     template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer);
@@ -798,7 +847,8 @@ struct metric_row {
     std::string       fixture;
     std::string       library;
     std::size_t       encoded_size{};
-    allocation_sample encode_allocations;
+    allocation_sample encode_cold_allocations;
+    allocation_sample encode_reserved_allocations;
     allocation_sample decode_allocations;
     std::uint64_t     checksum{};
 };
@@ -812,24 +862,44 @@ byte_buffer collect_codec_metrics(std::string_view fixture_name, const Fixture &
         throw std::runtime_error{std::string{Codec::name} + " checksum mismatch for " + std::string{fixture_name}};
     }
 
-    auto encode_allocations = count_allocations([&] { return Codec::encode(fixture); });
-    auto decode_allocations = count_allocations([&] { return Codec::template decode_checksum<Fixture>(encoded); });
-    metrics.push_back(metric_row{.fixture            = std::string{fixture_name},
-                                 .library            = std::string{Codec::name},
-                                 .encoded_size       = encoded.size(),
-                                 .encode_allocations = encode_allocations,
-                                 .decode_allocations = decode_allocations,
-                                 .checksum           = expected_digest});
+    auto        encode_allocations = count_allocations([&] { return Codec::encode(fixture); });
+    byte_buffer reserved_buffer;
+    reserved_buffer.reserve(encoded.size());
+    auto reserved_encode_allocations = count_allocations([&] {
+        Codec::encode_into(fixture, reserved_buffer);
+        return reserved_buffer.size();
+    });
+    auto decode_allocations          = count_allocations([&] { return Codec::template decode_checksum<Fixture>(encoded); });
+    metrics.push_back(metric_row{.fixture                     = std::string{fixture_name},
+                                 .library                     = std::string{Codec::name},
+                                 .encoded_size                = encoded.size(),
+                                 .encode_cold_allocations     = encode_allocations,
+                                 .encode_reserved_allocations = reserved_encode_allocations,
+                                 .decode_allocations          = decode_allocations,
+                                 .checksum                    = expected_digest});
     return encoded;
 }
 
 template <typename Codec, typename Fixture>
-void run_encode_benchmark(std::string_view fixture_name, const Fixture &fixture, std::size_t encoded_size, ankerl::nanobench::Bench &bench,
-                          std::vector<ankerl::nanobench::Result> &results) {
+void run_encode_cold_benchmark(std::string_view fixture_name, const Fixture &fixture, std::size_t encoded_size,
+                               ankerl::nanobench::Bench &bench, std::vector<ankerl::nanobench::Result> &results) {
     const auto library_name = std::string{Codec::name};
-    bench.title(std::string{fixture_name} + " encode").batch(encoded_size).run(library_name, [&] {
+    bench.title(std::string{fixture_name} + " encode cold").batch(encoded_size).run(library_name, [&] {
         auto output = Codec::encode(fixture);
         ankerl::nanobench::doNotOptimizeAway(output);
+    });
+    results.push_back(bench.results().back());
+}
+
+template <typename Codec, typename Fixture>
+void run_encode_reused_benchmark(std::string_view fixture_name, const Fixture &fixture, std::size_t encoded_size,
+                                 ankerl::nanobench::Bench &bench, std::vector<ankerl::nanobench::Result> &results) {
+    const auto  library_name = std::string{Codec::name};
+    byte_buffer buffer;
+    buffer.reserve(encoded_size);
+    bench.title(std::string{fixture_name} + " encode reused buffer").batch(encoded_size).run(library_name, [&] {
+        Codec::encode_into(fixture, buffer);
+        ankerl::nanobench::doNotOptimizeAway(buffer);
     });
     results.push_back(bench.results().back());
 }
@@ -848,19 +918,26 @@ void run_decode_benchmark(std::string_view fixture_name, const byte_buffer &enco
 template <typename Fixture>
 void run_fixture(std::string_view name, const Fixture &fixture, ankerl::nanobench::Bench &bench, std::vector<metric_row> &metrics,
                  std::vector<ankerl::nanobench::Result> &results) {
-    const auto cbor_tags_encoded            = collect_codec_metrics<cbor_tags_codec>(name, fixture, metrics);
-    const auto bitsery_encoded              = collect_codec_metrics<bitsery_codec>(name, fixture, metrics);
-    const auto zpp_bits_encoded             = collect_codec_metrics<zpp_bits_codec>(name, fixture, metrics);
-    const auto cereal_encoded               = collect_codec_metrics<cereal_codec>(name, fixture, metrics);
-    const auto boost_serialization_encoded  = collect_codec_metrics<boost_serialization_codec>(name, fixture, metrics);
-    const auto flatbuffers_encoded          = collect_codec_metrics<flatbuffers_codec>(name, fixture, metrics);
+    const auto cbor_tags_encoded           = collect_codec_metrics<cbor_tags_codec>(name, fixture, metrics);
+    const auto bitsery_encoded             = collect_codec_metrics<bitsery_codec>(name, fixture, metrics);
+    const auto zpp_bits_encoded            = collect_codec_metrics<zpp_bits_codec>(name, fixture, metrics);
+    const auto cereal_encoded              = collect_codec_metrics<cereal_codec>(name, fixture, metrics);
+    const auto boost_serialization_encoded = collect_codec_metrics<boost_serialization_codec>(name, fixture, metrics);
+    const auto flatbuffers_encoded         = collect_codec_metrics<flatbuffers_codec>(name, fixture, metrics);
 
-    run_encode_benchmark<cbor_tags_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
-    run_encode_benchmark<bitsery_codec>(name, fixture, bitsery_encoded.size(), bench, results);
-    run_encode_benchmark<zpp_bits_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
-    run_encode_benchmark<cereal_codec>(name, fixture, cereal_encoded.size(), bench, results);
-    run_encode_benchmark<boost_serialization_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
-    run_encode_benchmark<flatbuffers_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
+    run_encode_cold_benchmark<cbor_tags_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
+    run_encode_cold_benchmark<bitsery_codec>(name, fixture, bitsery_encoded.size(), bench, results);
+    run_encode_cold_benchmark<zpp_bits_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
+    run_encode_cold_benchmark<cereal_codec>(name, fixture, cereal_encoded.size(), bench, results);
+    run_encode_cold_benchmark<boost_serialization_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
+    run_encode_cold_benchmark<flatbuffers_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
+
+    run_encode_reused_benchmark<cbor_tags_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
+    run_encode_reused_benchmark<bitsery_codec>(name, fixture, bitsery_encoded.size(), bench, results);
+    run_encode_reused_benchmark<zpp_bits_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
+    run_encode_reused_benchmark<cereal_codec>(name, fixture, cereal_encoded.size(), bench, results);
+    run_encode_reused_benchmark<boost_serialization_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
+    run_encode_reused_benchmark<flatbuffers_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
 
     run_decode_benchmark<cbor_tags_codec, Fixture>(name, cbor_tags_encoded, bench, results);
     run_decode_benchmark<bitsery_codec, Fixture>(name, bitsery_encoded, bench, results);
@@ -916,8 +993,7 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
            << " | Fixed-width binary fields with explicit container limits | Materializes native fixtures |\n";
     report << "| zpp_bits | " << CBOR_TAGS_BENCH_ZPP_BITS_VERSION
            << " | Binary aggregate serialization, native-endian defaults | Materializes native fixtures |\n";
-    report << "| cereal | " << CBOR_TAGS_BENCH_CEREAL_VERSION
-           << " | BinaryArchive over iostreams | Materializes native fixtures |\n";
+    report << "| cereal | " << CBOR_TAGS_BENCH_CEREAL_VERSION << " | BinaryArchive over iostreams | Materializes native fixtures |\n";
     report << "| Boost.Serialization | system Boost | Binary archive with `no_header` | Materializes native fixtures |\n";
     report << "| FlatBuffers | " << CBOR_TAGS_BENCH_FLATBUFFERS_VERSION
            << " | Schema-generated table/vector format | Verifies and reads fields through zero-copy views |\n\n";
@@ -930,11 +1006,13 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
     report << "| nested_snapshot | 64 records, 24 string/integer counters, and a 2048-byte payload |\n\n";
 
     report << "## Size And Allocation Summary\n\n";
-    report << "| Fixture | Library | Encoded bytes | Encode allocs | Encode bytes | Decode allocs | Decode bytes |\n";
-    report << "|---|---|---:|---:|---:|---:|---:|\n";
+    report << "| Fixture | Library | Encoded bytes | Cold encode allocs | Cold encode bytes | Reserved encode allocs | Reserved encode "
+              "bytes | Decode allocs | Decode bytes |\n";
+    report << "|---|---|---:|---:|---:|---:|---:|---:|---:|\n";
     for (const auto &row : metrics) {
-        report << "| " << row.fixture << " | " << row.library << " | " << row.encoded_size << " | " << row.encode_allocations.count << " | "
-               << row.encode_allocations.bytes << " | " << row.decode_allocations.count << " | " << row.decode_allocations.bytes
+        report << "| " << row.fixture << " | " << row.library << " | " << row.encoded_size << " | " << row.encode_cold_allocations.count
+               << " | " << row.encode_cold_allocations.bytes << " | " << row.encode_reserved_allocations.count << " | "
+               << row.encode_reserved_allocations.bytes << " | " << row.decode_allocations.count << " | " << row.decode_allocations.bytes
                << " |\n";
     }
     report << "\n";
@@ -943,12 +1021,21 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
     report << benchmark_markdown << "\n";
 
     report << "## Interpretation Notes\n\n";
-    report << "- The wire formats are intentionally different: CBOR is self-describing, FlatBuffers is schema-based, and several binary archives "
+    report << "- The wire formats are intentionally different: CBOR is self-describing, FlatBuffers is schema-based, and several binary "
+              "archives "
               "depend on C++ type/archive contracts.\n";
-    report << "- FlatBuffers decode rows measure verifier plus field access without native object materialization; that is a representative "
-              "FlatBuffers usage mode and should not be read as a like-for-like materializing decode.\n";
-    report << "- Allocation rows count global `operator new` calls in one encode or decode operation. They include output buffers and archive "
-              "scaffolding, but not stack storage.\n";
+    report
+        << "- FlatBuffers decode rows measure verifier plus field access without native object materialization; that is a representative "
+           "FlatBuffers usage mode and should not be read as a like-for-like materializing decode.\n";
+    report << "- Cold encode allocation rows start from an empty destination buffer and include output growth. Reserved encode allocation "
+              "rows "
+              "reserve the final encoded size before measurement and count only additional encode-time allocations.\n";
+    report
+        << "- Reserved encode rows still include archive or builder internals for libraries that do not write directly into the caller's "
+           "byte buffer.\n";
+    report << "- Decode allocation rows count global `operator new` calls in one decode operation. They include materialized output "
+              "objects and "
+              "archive scaffolding, but not stack storage.\n";
     report << "- `results.json` and `results.csv` contain the raw nanobench measurements used by the Markdown report.\n";
 }
 
@@ -971,14 +1058,9 @@ int run(int argc, char **argv) {
 
     std::ostringstream       benchmark_markdown;
     ankerl::nanobench::Bench bench;
-    bench.output(&benchmark_markdown)
-        .unit("byte")
-        .relative(true)
-        .performanceCounters(false)
-        .epochs(11)
-        .minEpochIterations(20);
+    bench.output(&benchmark_markdown).unit("byte").relative(true).performanceCounters(false).epochs(11).minEpochIterations(20);
 
-    std::vector<metric_row>                 metrics;
+    std::vector<metric_row>                metrics;
     std::vector<ankerl::nanobench::Result> results;
     run_fixture("flat_record", make_flat_record(42), bench, metrics, results);
     run_fixture("record_batch", make_record_batch(), bench, metrics, results);

@@ -47,3 +47,8 @@ first argument, or set `CBOR_TAGS_BENCHMARK_REPORT_DIR`, to write the report
 elsewhere. The generated report calls out wire-format, schema, decode-behavior,
 and allocation differences so the numbers are not mistaken for like-for-like
 protocol equivalence.
+
+Encode allocation reporting is split into cold and reserved destination paths.
+Cold encode rows start from an empty byte buffer and include output growth.
+Reserved encode rows reserve the final encoded byte length before measurement
+and count only additional encode-time allocations.
