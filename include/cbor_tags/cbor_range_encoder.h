@@ -95,9 +95,7 @@ template <typename T> struct cbor_range_encoder {
         }
         if constexpr (std::ranges::sized_range<R>) {
             enc.encode_major_and_size(static_cast<std::uint64_t>(std::ranges::size(range)), static_cast<typename T::byte_type>(0x40));
-            for (auto byte : range) {
-                enc.appender_(enc.data_, output_byte(byte));
-            }
+            detail::append_byte_range(enc.appender_, enc.data_, range);
         } else {
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_byte_string>()));
             std::vector<typename T::byte_type> chunk;
@@ -107,9 +105,7 @@ template <typename T> struct cbor_range_encoder {
                     return;
                 }
                 enc.encode_major_and_size(static_cast<std::uint64_t>(chunk.size()), static_cast<typename T::byte_type>(0x40));
-                for (auto byte : chunk) {
-                    enc.appender_(enc.data_, byte);
-                }
+                detail::append_byte_range(enc.appender_, enc.data_, chunk);
                 chunk.clear();
             };
 

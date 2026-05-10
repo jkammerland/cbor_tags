@@ -9,8 +9,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <initializer_list>
 #include <iterator>
+#include <list>
 #include <map>
+#include <memory_resource>
 #include <ranges>
 #include <span>
 #include <type_traits>
@@ -95,6 +98,63 @@ struct counting_sized_bidirectional_bytes {
 };
 
 static_assert(cbor::tags::CborInputBuffer<counting_sized_bidirectional_bytes>);
+
+struct counting_append_buffer {
+    using value_type     = std::byte;
+    using size_type      = std::size_t;
+    using storage_type   = std::vector<value_type>;
+    using iterator       = storage_type::iterator;
+    using const_iterator = storage_type::const_iterator;
+
+    storage_type bytes;
+    size_type    push_back_calls{};
+    size_type    range_insert_calls{};
+    size_type    range_inserted_bytes{};
+
+    void push_back(value_type byte) {
+        ++push_back_calls;
+        bytes.push_back(byte);
+    }
+
+    iterator       begin() noexcept { return bytes.begin(); }
+    iterator       end() noexcept { return bytes.end(); }
+    const_iterator begin() const noexcept { return bytes.begin(); }
+    const_iterator end() const noexcept { return bytes.end(); }
+    size_type      size() const noexcept { return bytes.size(); }
+
+    template <typename Iterator> iterator insert(const_iterator position, Iterator first, Iterator last) {
+        const auto before = bytes.size();
+        auto       result = bytes.insert(position, first, last);
+        ++range_insert_calls;
+        range_inserted_bytes += bytes.size() - before;
+        return result;
+    }
+
+    iterator insert(const_iterator position, std::initializer_list<value_type> values) {
+        const auto before = bytes.size();
+        auto       result = bytes.insert(position, values);
+        ++range_insert_calls;
+        range_inserted_bytes += bytes.size() - before;
+        return result;
+    }
+};
+
+static_assert(cbor::tags::CborOutputBuffer<counting_append_buffer>);
+
+struct counting_memory_resource : std::pmr::memory_resource {
+    std::size_t                allocations{};
+    std::pmr::memory_resource *upstream{std::pmr::new_delete_resource()};
+
+  private:
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocations;
+        return upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *ptr, std::size_t bytes, std::size_t alignment) override { upstream->deallocate(ptr, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
 
 struct range_regression_move_only_value {
     int value{};
@@ -201,6 +261,97 @@ TEST_CASE("byte string range wrappers reject zero chunk size for sized and unsiz
         CHECK_EQ(result.error(), status_code::error);
         CHECK(buffer.empty());
     }
+}
+
+TEST_CASE("contiguous sized byte string ranges match direct byte string encoding") {
+    const std::vector<std::byte> bytes{std::byte{0x00}, std::byte{0x01}, std::byte{0x7F}, std::byte{0x80}, std::byte{0xFF}};
+
+    std::vector<std::byte> direct;
+    {
+        auto enc = make_encoder(direct);
+        REQUIRE(enc(bytes));
+    }
+
+    {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(as_bstr_range(bytes)));
+        CHECK_EQ(buffer, direct);
+    }
+
+    {
+        const std::array<std::byte, 5> array_bytes{std::byte{0x00}, std::byte{0x01}, std::byte{0x7F}, std::byte{0x80}, std::byte{0xFF}};
+        std::vector<std::byte>         buffer;
+        auto                           enc = make_encoder(buffer);
+        REQUIRE(enc(as_bstr_range(array_bytes)));
+        CHECK_EQ(buffer, direct);
+    }
+
+    {
+        const std::span<const std::byte> span_bytes{bytes};
+        std::vector<std::byte>           buffer;
+        auto                             enc = make_encoder(buffer);
+        REQUIRE(enc(as_bstr_range(span_bytes)));
+        CHECK_EQ(buffer, direct);
+    }
+
+    {
+        const std::vector<std::uint8_t> uint8_bytes{0x00, 0x01, 0x7F, 0x80, 0xFF};
+        std::vector<std::byte>          buffer;
+        auto                            enc = make_encoder(buffer);
+        REQUIRE(enc(as_bstr_range(uint8_bytes)));
+        CHECK_EQ(buffer, direct);
+    }
+}
+
+TEST_CASE("contiguous sized byte string ranges use bulk append when available") {
+    const std::vector<std::uint8_t> bytes{0x00, 0x01, 0x7F, 0x80, 0xFF};
+    counting_append_buffer          buffer;
+    auto                            enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bstr_range(bytes)));
+
+    CHECK_EQ(to_hex(buffer), "4500017f80ff");
+    CHECK_EQ(buffer.push_back_calls, 1);
+    CHECK_EQ(buffer.range_insert_calls, 1);
+    CHECK_EQ(buffer.range_inserted_bytes, bytes.size());
+}
+
+TEST_CASE("non-contiguous sized byte string ranges preserve bytes") {
+    const std::list<std::uint8_t> bytes{0x00, 0xFF, 0x10, 0x20};
+    std::vector<std::byte>        buffer;
+    auto                          enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bstr_range(bytes)));
+
+    CHECK_EQ(to_hex(buffer), "4400ff1020");
+}
+
+TEST_CASE("indefinite byte string range chunks preserve exact headers and payloads") {
+    const std::vector<std::byte> bytes{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05}};
+    auto                         unsized = bytes | std::views::filter([](std::byte) { return true; });
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bstr_range(unsized, 3)));
+
+    CHECK_EQ(to_hex(buffer), "5f43010203420405ff");
+}
+
+TEST_CASE("reserved definite byte string range encode does not allocate") {
+    counting_memory_resource          resource;
+    std::pmr::vector<std::byte>       buffer{&resource};
+    const std::array<std::uint8_t, 4> bytes{0x01, 0x02, 0x03, 0x04};
+
+    buffer.reserve(bytes.size() + 1);
+    resource.allocations = 0;
+
+    auto enc = make_encoder(buffer);
+    REQUIRE(enc(as_bstr_range(bytes)));
+
+    CHECK_EQ(to_hex(buffer), "4401020304");
+    CHECK_EQ(resource.allocations, 0);
 }
 
 TEST_CASE("sized non-contiguous readers use size for offset bounds checks") {

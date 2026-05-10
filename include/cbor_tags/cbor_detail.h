@@ -11,6 +11,7 @@
 #include <iterator>
 #include <limits>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
@@ -108,6 +109,35 @@ template <typename T> struct appender<T, true> {
         head_ += value.size();
     }
 };
+
+template <typename OutputBuffer, typename R>
+concept DirectlyInsertableByteRange =
+    (!IsFixedArray<std::remove_cvref_t<OutputBuffer>>) && std::ranges::common_range<R> &&
+    std::same_as<std::remove_cvref_t<std::ranges::range_reference_t<R>>, typename std::remove_cvref_t<OutputBuffer>::value_type> &&
+    requires(OutputBuffer &output, R &&range) { output.insert(output.end(), std::ranges::begin(range), std::ranges::end(range)); };
+
+template <std::ranges::contiguous_range R>
+    requires std::ranges::sized_range<R> && ByteLikeRange<R>
+[[nodiscard]] constexpr std::span<const std::byte> as_byte_span(R &&range) {
+    auto values = std::span{std::ranges::data(range), static_cast<std::size_t>(std::ranges::size(range))};
+    return std::as_bytes(values);
+}
+
+template <typename Appender, typename OutputBuffer, typename R>
+    requires ByteLikeRange<R>
+constexpr void append_byte_range(Appender &appender, OutputBuffer &output, R &&range) {
+    using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
+
+    if constexpr (std::ranges::contiguous_range<R> && std::ranges::sized_range<R>) {
+        appender(output, as_byte_span(std::forward<R>(range)));
+    } else if constexpr (DirectlyInsertableByteRange<OutputBuffer, R>) {
+        output.insert(output.end(), std::ranges::begin(range), std::ranges::end(range));
+    } else {
+        for (auto &&byte : range) {
+            appender(output, static_cast<output_byte>(byte));
+        }
+    }
+}
 
 template <typename T, bool IsContiguous = IsContiguous<T>>
     requires CborInputBuffer<T>
