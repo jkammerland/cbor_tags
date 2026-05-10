@@ -213,7 +213,7 @@ Add a segmented output model with:
 Typed-array and raw-view examples:
 
 ```cpp
-auto encoded = encode_segments(rfc8746_typed_array(values));
+auto encoded = encode_segments(as_typed_array(values));
 
 // Conceptual shape:
 // segment 0: CBOR tag + bstr header
@@ -280,8 +280,8 @@ Current branch status:
   `encoded_*_view_for<Buffer>` aliases for non-contiguous buffers
 - step 7 is implemented by opt-in `cbor_segments.h` helpers for definite,
   indefinite, tagged, and raw-view segmented output
-- step 8 is implemented by opt-in `cbor_typed_arrays.h` helpers for RFC 8746
-  little-endian int32, int64, and float64 arrays
+- step 8 is implemented by opt-in `extensions/rfc8746_typed_arrays.h` helpers
+  for RFC 8746 little-endian int32, int64, float16, float32, and float64 arrays
 
 Remaining work:
 

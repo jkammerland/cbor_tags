@@ -43,6 +43,14 @@ class cbor_segment {
         return owned(std::span<const std::byte>{bytes.begin(), bytes.size()});
     }
 
+    [[nodiscard]] static cbor_segment owned(detail::cbor_argument_header header) {
+        cbor_segment segment;
+        segment.kind_              = cbor_segment_kind::owned;
+        segment.inline_owned_size_ = std::min(header.size, header.bytes.size());
+        std::ranges::copy_n(header.bytes.begin(), static_cast<std::ptrdiff_t>(segment.inline_owned_size_), segment.inline_owned_.begin());
+        return segment;
+    }
+
     [[nodiscard]] static cbor_segment borrowed(std::span<const std::byte> bytes) {
         cbor_segment segment;
         segment.kind_     = cbor_segment_kind::borrowed;
@@ -86,6 +94,7 @@ class cbor_segments {
 
     void append_owned(std::span<const std::byte> bytes) { segments_.push_back(cbor_segment::owned(bytes)); }
     void append_owned(std::initializer_list<std::byte> bytes) { segments_.push_back(cbor_segment::owned(bytes)); }
+    void append_owned(detail::cbor_argument_header header) { segments_.push_back(cbor_segment::owned(header)); }
     void append_borrowed(std::span<const std::byte> bytes) { segments_.push_back(cbor_segment::borrowed(bytes)); }
 
     [[nodiscard]] const_iterator begin() const noexcept { return segments_.begin(); }
@@ -253,13 +262,8 @@ constexpr void append_encoded_segments(OutputBuffer &output, const RawView &view
 [[nodiscard]] inline cbor_segments encode_bstr_segments(std::span<const std::byte> payload) {
     cbor_segments segments;
     segments.reserve(2);
-    visit_bstr_segments(payload, [&](std::span<const std::byte> segment) {
-        if (segment.data() == payload.data()) {
-            segments.append_borrowed(segment);
-        } else {
-            segments.append_owned(segment);
-        }
-    });
+    segments.append_owned(detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40}));
+    segments.append_borrowed(payload);
     return segments;
 }
 
@@ -290,13 +294,9 @@ constexpr void append_encoded_segments(OutputBuffer &output, const RawView &view
 [[nodiscard]] inline cbor_segments encode_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload) {
     cbor_segments segments;
     segments.reserve(3);
-    visit_tagged_bstr_segments(tag, payload, [&](std::span<const std::byte> segment) {
-        if (segment.data() == payload.data()) {
-            segments.append_borrowed(segment);
-        } else {
-            segments.append_owned(segment);
-        }
-    });
+    segments.append_owned(detail::encode_cbor_major_argument_header(tag, std::byte{0xC0}));
+    segments.append_owned(detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40}));
+    segments.append_borrowed(payload);
     return segments;
 }
 

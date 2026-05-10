@@ -29,7 +29,7 @@ concept LazyTagViewableBuffer =
 
 } // namespace detail
 
-template <CborInputBuffer Buffer> class tag_payload_decoder {
+template <CborInputBuffer Buffer, template <typename> typename... Extensions> class tag_payload_decoder {
   public:
     using buffer_type = std::remove_cvref_t<Buffer>;
     using iterator    = std::ranges::iterator_t<const buffer_type>;
@@ -38,13 +38,21 @@ template <CborInputBuffer Buffer> class tag_payload_decoder {
     constexpr explicit tag_payload_decoder(subrange range) : range_(std::move(range)) {}
 
     template <typename... T> [[nodiscard]] auto operator()(T &&...values) {
-        auto dec = cbor::tags::make_decoder(range_);
+        auto dec = make_payload_decoder();
         return dec(std::forward<T>(values)...);
     }
 
     template <typename T> [[nodiscard]] auto decode(T &value) { return (*this)(value); }
 
   private:
+    [[nodiscard]] auto make_payload_decoder() {
+        if constexpr (sizeof...(Extensions) == 0) {
+            return cbor::tags::make_decoder(range_);
+        } else {
+            return cbor::tags::make_decoder<Extensions...>(range_);
+        }
+    }
+
     subrange range_;
 };
 
@@ -73,11 +81,12 @@ template <CborInputBuffer Buffer> class tag_match {
         return std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::to_address(payload_begin_)), size};
     }
 
-    [[nodiscard]] auto make_decoder() const { return tag_payload_decoder<buffer_type>{subrange{payload_begin_, payload_end_}}; }
+    template <template <typename> typename... Extensions> [[nodiscard]] auto make_decoder() const {
+        return tag_payload_decoder<buffer_type, Extensions...>{subrange{payload_begin_, payload_end_}};
+    }
 
-    template <typename T> [[nodiscard]] auto decode(T &value) const {
-        auto range = subrange{payload_begin_, payload_end_};
-        auto dec   = cbor::tags::make_decoder(range);
+    template <template <typename> typename... Extensions, typename T> [[nodiscard]] auto decode(T &value) const {
+        auto dec = make_decoder<Extensions...>();
         return dec(value);
     }
 

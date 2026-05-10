@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_range_encoder.h"
@@ -289,5 +290,12 @@ template <typename T> struct cbor_header_encoder : cbor_range_encoder<T> {
 template <CborOutputBuffer OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
     return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_indefinite_encoder,
                    cbor_optional_encoder, cbor_variant_encoder>(buffer);
+}
+
+template <template <typename> typename... Extensions, CborOutputBuffer OutputBuffer>
+    requires(sizeof...(Extensions) > 0)
+inline auto make_encoder(OutputBuffer &buffer) {
+    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_indefinite_encoder,
+                   cbor_optional_encoder, cbor_variant_encoder, Extensions...>(buffer);
 }
 } // namespace cbor::tags

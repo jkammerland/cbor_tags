@@ -5,6 +5,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
@@ -1425,6 +1426,13 @@ template <typename T> struct cbor_header_decoder {
 
 template <CborInputBuffer InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
     return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
+}
+
+template <template <typename> typename... Extensions, CborInputBuffer InputBuffer>
+    requires(sizeof...(Extensions) > 0)
+inline auto make_decoder(InputBuffer &buffer) {
+    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder, Extensions...>(
+        buffer);
 }
 
 } // namespace cbor::tags
