@@ -62,6 +62,13 @@ inline std::vector<byte> to_bytes(std::string_view hex) {
 }
 
 namespace cbor::tags::test::detail {
+inline bool fail_test_allocations = false;
+
+struct allocation_failure_guard {
+    allocation_failure_guard() { fail_test_allocations = true; }
+    ~allocation_failure_guard() { fail_test_allocations = false; }
+};
+
 inline bool logs_always_enabled() {
     static const bool enabled = [] {
         if (const char *env = std::getenv("CBOR_TAGS_TEST_LOGS")) {

@@ -22,12 +22,7 @@ using namespace cbor::tags;
 
 namespace {
 
-bool fail_lazy_tag_allocations = false;
-
-struct allocation_failure_guard {
-    allocation_failure_guard() { fail_lazy_tag_allocations = true; }
-    ~allocation_failure_guard() { fail_lazy_tag_allocations = false; }
-};
+using cbor::tags::test::detail::allocation_failure_guard;
 
 struct accept_any_tag {
     bool operator()(std::uint64_t) const { return true; }
@@ -114,7 +109,7 @@ struct lazy_tag_distinct_const_iterator_view : std::ranges::view_interface<lazy_
 } // namespace
 
 void *operator new(std::size_t size) {
-    if (fail_lazy_tag_allocations) {
+    if (cbor::tags::test::detail::fail_test_allocations) {
         throw std::bad_alloc{};
     }
     if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
@@ -124,7 +119,7 @@ void *operator new(std::size_t size) {
 }
 
 void *operator new[](std::size_t size) {
-    if (fail_lazy_tag_allocations) {
+    if (cbor::tags::test::detail::fail_test_allocations) {
         throw std::bad_alloc{};
     }
     if (void *ptr = std::malloc(size == 0 ? 1 : size)) {

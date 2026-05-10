@@ -120,10 +120,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using input_buffer_type = InputBuffer;
     using byte              = std::byte;
 
-    using iterator_t  = std::ranges::iterator_t<const InputBuffer>;
-    using subrange    = std::ranges::subrange<iterator_t>;
-    using bstr_view_t = bstr_view<subrange>;
-    using tstr_view_t = tstr_view<subrange>;
+    using iterator_t             = std::ranges::iterator_t<const InputBuffer>;
+    using subrange               = std::ranges::subrange<iterator_t>;
+    using bstr_view_t            = bstr_view<subrange>;
+    using tstr_view_t            = tstr_view<subrange>;
+    using raw_encoded_item_view  = encoded_item_view_for<InputBuffer>;
+    using raw_encoded_array_view = encoded_array_view_for<InputBuffer>;
+    using raw_encoded_map_view   = encoded_map_view_for<InputBuffer>;
 
     using expected_type   = typename Options::return_type;
     using unexpected_type = typename Options::error_type;
@@ -813,6 +816,76 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
+    template <typename RawView>
+        requires IsEncodedItemView<RawView>
+    constexpr status_code decode_encoded_view(RawView &value, std::optional<major_type> expected_major, status_code major_mismatch) {
+        if (reader_.empty(data_)) {
+            return status_code::incomplete;
+        }
+
+        const auto start = tell();
+        const auto end   = std::ranges::end(data_);
+
+        auto                     header_cursor = start;
+        detail::cbor_item_header header{};
+        auto                     status = status_code::success;
+        if (!detail::cbor_item_reader::read_header(header_cursor, end, header, status)) {
+            return status;
+        }
+        if (expected_major && header.major != *expected_major) {
+            return major_mismatch;
+        }
+
+        auto cursor = start;
+        if (!detail::cbor_item_skipper<>::skip_item(cursor, end, status)) {
+            return status;
+        }
+
+        const auto distance = std::ranges::distance(start, cursor);
+        if (distance < 0 || std::cmp_greater(distance, std::numeric_limits<size_type>::max())) {
+            return status_code::error;
+        }
+
+        const auto size = static_cast<size_type>(distance);
+        assign_encoded_view(value, start, cursor, size);
+        if constexpr (IsContiguous<InputBuffer>) {
+            reader_.position_ += size;
+        } else {
+            reader_.position_ = cursor;
+            reader_.current_offset_ += size;
+        }
+
+        return status_code::success;
+    }
+
+    template <typename RawView>
+        requires IsEncodedItemView<RawView>
+    constexpr status_code decode(RawView &value) {
+        if constexpr (IsEncodedArrayView<RawView>) {
+            return decode_encoded_view(value, major_type::Array, status_code::no_match_for_array_on_buffer);
+        } else if constexpr (IsEncodedMapView<RawView>) {
+            return decode_encoded_view(value, major_type::Map, status_code::no_match_for_map_on_buffer);
+        } else {
+            return decode_encoded_view(value, std::nullopt, status_code::error);
+        }
+    }
+
+    template <typename RawView>
+        requires IsEncodedItemView<RawView>
+    constexpr status_code decode(RawView &value, major_type major, byte) {
+        if constexpr (IsEncodedArrayView<RawView>) {
+            if (major != major_type::Array) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+        } else if constexpr (IsEncodedMapView<RawView>) {
+            if (major != major_type::Map) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+        }
+        reader_.seek(-1);
+        return decode(value);
+    }
+
     constexpr status_code decode(simple &value, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
@@ -1244,6 +1317,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     // Internal reference, must be public, variadic friends only in c++26
     const InputBuffer &data_;
     reader_type        reader_;
+
+  private:
+    template <typename RawView, typename Iterator>
+    constexpr void assign_encoded_view(RawView &value, Iterator start, Iterator cursor, size_type size) const {
+        using raw_view_type       = std::remove_cvref_t<RawView>;
+        using raw_range_type      = typename raw_view_type::range_type;
+        using raw_byte_view_type  = typename raw_view_type::byte_view_type;
+        using raw_range_size_type = std::ranges::range_size_t<raw_range_type>;
+
+        if constexpr (std::constructible_from<raw_range_type, Iterator, Iterator, raw_range_size_type>) {
+            value = RawView{raw_byte_view_type{raw_range_type{start, cursor, static_cast<raw_range_size_type>(size)}}};
+        } else if constexpr (IsContiguous<InputBuffer> && std::constructible_from<raw_range_type, std::span<const std::byte>>) {
+            const auto *begin = std::ranges::data(data_) + reader_.position_;
+            value             = RawView{raw_byte_view_type{
+                raw_range_type{std::span<const std::byte>{reinterpret_cast<const std::byte *>(begin), static_cast<std::size_t>(size)}}}};
+        } else {
+            static_assert(always_false<raw_range_type>::value,
+                          "Decode contiguous raw views only from contiguous buffers; use encoded_*_view_for<Buffer> or the decoder "
+                          "raw_encoded_*_view aliases for non-contiguous buffers.");
+        }
+    }
 };
 
 template <typename T> struct cbor_indefinite_decoder {

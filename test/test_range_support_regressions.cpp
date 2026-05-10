@@ -99,6 +99,25 @@ struct counting_sized_bidirectional_bytes {
 
 static_assert(cbor::tags::CborInputBuffer<counting_sized_bidirectional_bytes>);
 
+struct byte_view_with_unrelated_span : std::ranges::view_interface<byte_view_with_unrelated_span> {
+    std::array<std::uint8_t, 3> bytes{};
+
+    byte_view_with_unrelated_span() = default;
+    explicit byte_view_with_unrelated_span(std::array<std::uint8_t, 3> input) : bytes(input) {}
+
+    auto begin() noexcept { return bytes.begin(); }
+    auto begin() const noexcept { return bytes.begin(); }
+    auto end() noexcept { return bytes.end(); }
+    auto end() const noexcept { return bytes.end(); }
+    auto data() const noexcept { return bytes.data(); }
+    auto size() const noexcept { return bytes.size(); }
+
+    std::span<const std::uint8_t> span() const noexcept { return bytes; }
+};
+
+static_assert(std::ranges::view<byte_view_with_unrelated_span>);
+static_assert(cbor::tags::IsByteLikeRange<byte_view_with_unrelated_span>);
+
 struct counting_append_buffer {
     using value_type     = std::byte;
     using size_type      = std::size_t;
@@ -315,6 +334,16 @@ TEST_CASE("contiguous sized byte string ranges use bulk append when available") 
     CHECK_EQ(buffer.push_back_calls, 1);
     CHECK_EQ(buffer.range_insert_calls, 1);
     CHECK_EQ(buffer.range_inserted_bytes, bytes.size());
+}
+
+TEST_CASE("byte string range append ignores unrelated span members") {
+    byte_view_with_unrelated_span bytes{{0x01, 0x02, 0x03}};
+    std::vector<std::byte>        buffer;
+    auto                          enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bstr_range(std::move(bytes))));
+
+    CHECK_EQ(to_hex(buffer), "43010203");
 }
 
 TEST_CASE("non-contiguous sized byte string ranges preserve bytes") {

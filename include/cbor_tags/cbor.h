@@ -5,6 +5,7 @@
 // Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_ranges.h"
+#include "cbor_tags/cbor_raw_views.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
