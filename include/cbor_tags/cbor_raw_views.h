@@ -63,13 +63,13 @@ class basic_encoded_item_view {
     constexpr explicit basic_encoded_item_view(byte_view_type bytes) : bytes_(std::move(bytes)) {}
     constexpr explicit basic_encoded_item_view(R bytes) : bytes_(byte_view_type{std::move(bytes)}) {}
 
-    [[nodiscard]] constexpr byte_view_type              bytes() const { return bytes_; }
-    [[nodiscard]] constexpr std::span<const std::byte>  span() const noexcept
+    [[nodiscard]] constexpr byte_view_type             bytes() const { return bytes_; }
+    [[nodiscard]] constexpr std::span<const std::byte> span() const noexcept
         requires std::ranges::contiguous_range<const R>
     {
         return bytes_.span();
     }
-    [[nodiscard]] constexpr std::size_t                 size() const noexcept { return bytes_.size(); }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return bytes_.size(); }
 
   private:
     byte_view_type bytes_{};

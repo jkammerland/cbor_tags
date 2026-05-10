@@ -21,9 +21,7 @@ template <typename RawView>
 concept CanEncodeBorrowedSegments = requires(const RawView &view) { encode_encoded_segments(view); };
 
 template <typename RawView>
-concept CanVisitBorrowedSegments = requires(const RawView &view) {
-    visit_encoded_segments(view, [](std::span<const std::byte>) {});
-};
+concept CanVisitBorrowedSegments = requires(const RawView &view) { visit_encoded_segments(view, [](std::span<const std::byte>) {}); };
 
 std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
     std::vector<std::byte> output;
@@ -79,9 +77,8 @@ TEST_CASE("bstr segmented output flattens like normal encode and borrows payload
     append_bstr_segments(appended, span);
     CHECK_EQ(to_hex(appended), to_hex(encode_normal_bstr(span)));
 
-    const auto visited = flatten_visited_segments([&](auto &&visit_segment) {
-        visit_bstr_segments(span, std::forward<decltype(visit_segment)>(visit_segment));
-    });
+    const auto visited = flatten_visited_segments(
+        [&](auto &&visit_segment) { visit_bstr_segments(span, std::forward<decltype(visit_segment)>(visit_segment)); });
     CHECK_EQ(to_hex(visited), to_hex(appended));
 
     const auto segments = encode_bstr_segments(span);

@@ -132,7 +132,8 @@ concept SpanBackedEncodedItemView =
         { value.span() } -> std::same_as<std::span<const std::byte>>;
     };
 
-template <CborAppendOutputBuffer OutputBuffer> constexpr void append_segment_bytes(OutputBuffer &output, std::span<const std::byte> segment) {
+template <CborAppendOutputBuffer OutputBuffer>
+constexpr void append_segment_bytes(OutputBuffer &output, std::span<const std::byte> segment) {
     if (segment.empty()) {
         return;
     }
@@ -151,7 +152,7 @@ template <typename VisitSegment> constexpr void visit_bstr_segments(std::span<co
 
 template <typename VisitSegment>
 constexpr void visit_indefinite_bstr_segments(std::span<const std::byte> payload, VisitSegment &&visit_segment,
-                                               std::size_t chunk_size = 4096) {
+                                              std::size_t chunk_size = 4096) {
     if (chunk_size == 0) {
         throw std::invalid_argument("CBOR indefinite byte string chunk size must be greater than zero");
     }
@@ -200,8 +201,10 @@ constexpr void append_visited_segments(OutputBuffer &output, VisitSegments &&vis
     visit_segments([&](std::span<const std::byte> segment) { detail::append_segment_bytes(output, segment); });
 }
 
-template <CborAppendOutputBuffer OutputBuffer> constexpr void append_bstr_segments(OutputBuffer &output, std::span<const std::byte> payload) {
-    append_visited_segments(output, [&](auto &&visit_segment) { visit_bstr_segments(payload, std::forward<decltype(visit_segment)>(visit_segment)); });
+template <CborAppendOutputBuffer OutputBuffer>
+constexpr void append_bstr_segments(OutputBuffer &output, std::span<const std::byte> payload) {
+    append_visited_segments(
+        output, [&](auto &&visit_segment) { visit_bstr_segments(payload, std::forward<decltype(visit_segment)>(visit_segment)); });
 }
 
 template <CborAppendOutputBuffer OutputBuffer>
@@ -236,7 +239,9 @@ template <CborAppendOutputBuffer OutputBuffer, typename RawView>
     requires IsEncodedItemView<RawView>
 constexpr void append_encoded_segments(OutputBuffer &output, const RawView &view) {
     using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
-    if constexpr (requires { { view.span() } -> std::same_as<std::span<const std::byte>>; }) {
+    if constexpr (requires {
+                      { view.span() } -> std::same_as<std::span<const std::byte>>;
+                  }) {
         detail::append_segment_bytes(output, view.span());
     } else {
         for (auto byte : view.bytes()) {
@@ -268,14 +273,17 @@ constexpr void append_encoded_segments(OutputBuffer &output, const RawView &view
     segments.reserve(2U + (chunk_count * 2U));
     const auto payload_begin = reinterpret_cast<std::uintptr_t>(payload.data());
     const auto payload_end   = payload_begin + payload.size();
-    visit_indefinite_bstr_segments(payload, [&](std::span<const std::byte> segment) {
-        const auto segment_begin = reinterpret_cast<std::uintptr_t>(segment.data());
-        if (!payload.empty() && segment_begin >= payload_begin && segment_begin < payload_end) {
-            segments.append_borrowed(segment);
-        } else {
-            segments.append_owned(segment);
-        }
-    }, chunk_size);
+    visit_indefinite_bstr_segments(
+        payload,
+        [&](std::span<const std::byte> segment) {
+            const auto segment_begin = reinterpret_cast<std::uintptr_t>(segment.data());
+            if (!payload.empty() && segment_begin >= payload_begin && segment_begin < payload_end) {
+                segments.append_borrowed(segment);
+            } else {
+                segments.append_owned(segment);
+            }
+        },
+        chunk_size);
     return segments;
 }
 
