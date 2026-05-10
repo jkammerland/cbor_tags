@@ -143,7 +143,7 @@ endif()
 
 option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
 option(CBOR_TAGS_TIDY_TESTS "Run clang-tidy on test sources" OFF)
-option(CBOR_TAGS_TIDY_BENCHMARKS "Run clang-tidy on benchmark sources" OFF)
+option(CBOR_TAGS_TIDY_BENCHMARKS "Deprecated/no-op: benchmark sources are excluded from clang-tidy" OFF)
 if(CBOR_TAGS_TIDY_TARGET)
   cpmaddpackage("gh:fmtlib/fmt#11.1.2")
   cpmaddpackage("gh:Neargye/nameof@0.10.4")

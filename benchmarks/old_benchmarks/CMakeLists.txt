@@ -15,6 +15,7 @@ find_package(Catch2 CONFIG REQUIRED)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE cbor_tags fmt::fmt Catch2::Catch2WithMain benchmark_util)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+cbor_tags_configure_benchmark_target(${PROJECT_NAME})
 
 # add tests for ctest
 add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})

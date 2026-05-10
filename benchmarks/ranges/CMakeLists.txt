@@ -15,10 +15,6 @@ target_link_libraries(
           nameof
           benchmark_util
           test_util)
+cbor_tags_configure_benchmark_target(${PROJECT_NAME})
 
 add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
-
-if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_BENCHMARKS)
-  message(STATUS "Tidy enabled in ${PROJECT_NAME}")
-  target_tidy_sources(${PROJECT_NAME})
-endif()

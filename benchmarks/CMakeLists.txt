@@ -4,6 +4,20 @@ project(benchmarks_new CXX)
 add_library(benchmark_util INTERFACE)
 target_include_directories(benchmark_util INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+function(cbor_tags_configure_benchmark_target target_name)
+  # Benchmarks intentionally leave decode destinations with minimal setup so they measure the
+  # codec path instead of benchmark scaffolding. Keep warning/tidy policy on production and tests.
+  set_target_properties(${target_name} PROPERTIES COMPILE_WARNING_AS_ERROR OFF CXX_CLANG_TIDY "")
+  target_compile_options(
+    ${target_name}
+    PRIVATE $<$<CXX_COMPILER_ID:GNU>:-Wno-maybe-uninitialized>
+            $<$<CXX_COMPILER_ID:GNU>:-Wno-uninitialized>
+            $<$<CXX_COMPILER_ID:Clang>:-Wno-uninitialized>
+            $<$<CXX_COMPILER_ID:AppleClang>:-Wno-uninitialized>
+            $<$<CXX_COMPILER_ID:Clang>:-Wno-sometimes-uninitialized>
+            $<$<CXX_COMPILER_ID:AppleClang>:-Wno-sometimes-uninitialized>)
+endfunction()
+
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 
