@@ -8,7 +8,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -168,25 +168,18 @@ template <IsRfc8746TypedArrayElement T> class rfc8746_typed_array_view {
     [[nodiscard]] constexpr std::span<const std::byte> payload_bytes() const noexcept { return payload_; }
     [[nodiscard]] constexpr std::size_t                size() const noexcept { return payload_.size() / sizeof(value_type); }
 
-    [[nodiscard]] std::optional<std::span<const value_type>> aligned_native_span() const noexcept {
-        if constexpr (std::endian::native == std::endian::little) {
-            const auto address = reinterpret_cast<std::uintptr_t>(payload_.data());
-            if ((address % alignof(value_type)) != 0U) {
-                return std::nullopt;
-            }
-            return std::span<const value_type>{reinterpret_cast<const value_type *>(payload_.data()), size()};
-        } else {
-            return std::nullopt;
-        }
+    [[nodiscard]] auto values() const {
+        return std::views::iota(std::size_t{}, size()) | std::views::transform([payload = payload_](std::size_t index) {
+                   const auto offset = index * sizeof(value_type);
+                   return detail::rfc8746_from_little_endian<value_type>(payload.subspan(offset, sizeof(value_type)));
+               });
     }
-
-    [[nodiscard]] std::optional<std::span<const value_type>> native_span() const noexcept { return aligned_native_span(); }
 
     [[nodiscard]] std::vector<value_type> copy_values() const {
         std::vector<value_type> values;
         values.reserve(size());
-        for (std::size_t offset = 0; offset < payload_.size(); offset += sizeof(value_type)) {
-            values.push_back(detail::rfc8746_from_little_endian<value_type>(payload_.subspan(offset, sizeof(value_type))));
+        for (auto value : this->values()) {
+            values.push_back(value);
         }
         return values;
     }

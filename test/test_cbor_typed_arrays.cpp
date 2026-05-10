@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -20,6 +21,12 @@ template <typename T> std::vector<std::byte> encode_normal(std::span<const T> va
     REQUIRE(enc(as_rfc8746_typed_array(values)));
     return output;
 }
+
+template <typename T>
+concept HasAlignedNativeSpan = requires(const T &value) { value.aligned_native_span(); };
+
+template <typename T>
+concept HasNativeSpan = requires(const T &value) { value.native_span(); };
 
 template <typename T> void check_roundtrip(const std::vector<T> &values) {
     const auto encoded = encode_normal(std::span<const T>{values});
@@ -119,21 +126,20 @@ TEST_CASE("rfc8746 typed array segmented output borrows native little-endian pay
     }
 }
 
-TEST_CASE("rfc8746 typed array view exposes aligned native span when safe") {
-    if constexpr (std::endian::native == std::endian::little) {
-        const std::vector<std::int32_t> values{1, -2, 3};
-        const auto                      payload = std::as_bytes(std::span<const std::int32_t>{values});
-        const auto                      view    = rfc8746_typed_array_view<std::int32_t>{payload};
+TEST_CASE("rfc8746 typed array view exposes decoded values as a range") {
+    const auto bytes = to_bytes("01000000feffffff03000000");
+    const auto view  = rfc8746_typed_array_view<std::int32_t>{std::span<const std::byte>{bytes}};
 
-        auto native = view.aligned_native_span();
-
-        REQUIRE(native.has_value());
-        CHECK_EQ(native->data(), values.data());
-        CHECK_EQ(std::vector<std::int32_t>{native->begin(), native->end()}, values);
+    std::vector<std::int32_t> observed;
+    for (auto value : view.values()) {
+        observed.push_back(value);
     }
+
+    CHECK_EQ(observed, std::vector<std::int32_t>{1, -2, 3});
+    CHECK_EQ(view.copy_values(), observed);
 }
 
-TEST_CASE("rfc8746 typed array view rejects unaligned native span but still copies values") {
+TEST_CASE("rfc8746 typed array view reads unaligned payload bytes without a native span") {
     std::array<std::byte, sizeof(std::int32_t) + alignof(std::int32_t)> storage{};
     storage[0] = std::byte{0xCC};
     storage[1] = std::byte{0x01};
@@ -159,7 +165,9 @@ TEST_CASE("rfc8746 typed array view rejects unaligned native span but still copi
 
     const auto view = rfc8746_typed_array_view<std::int32_t>{std::span<const std::byte>{storage.data() + offset, sizeof(std::int32_t)}};
 
-    CHECK_FALSE(view.aligned_native_span().has_value());
+    static_assert(!HasAlignedNativeSpan<rfc8746_typed_array_view<std::int32_t>>);
+    static_assert(!HasNativeSpan<rfc8746_typed_array_view<std::int32_t>>);
+    CHECK_EQ(std::ranges::distance(view.values()), 1);
     CHECK_EQ(view.copy_values(), std::vector<std::int32_t>{0x04030201});
 }
 
