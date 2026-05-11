@@ -174,14 +174,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
             const auto decoded = decode_unsigned(additionalInfo);
-            if (!detail::unsigned_value_fits<T>(decoded)) {
-                return status_code::no_match_for_int_on_buffer;
+            // Default native integer decode intentionally slices through the target type.
+            // strict_integer_decode keeps this check enabled for users that need representability.
+            if constexpr (Options::strict_integer_decode) {
+                if (!detail::unsigned_value_fits<T>(decoded)) {
+                    return status_code::no_match_for_int_on_buffer;
+                }
             }
             value = static_cast<T>(decoded);
         } else if (major == major_type::NegativeInteger) {
             const auto decoded = decode_unsigned(additionalInfo);
-            if (!detail::negative_argument_fits<T>(decoded)) {
-                return status_code::no_match_for_int_on_buffer;
+            // Default native integer decode intentionally slices through the target type.
+            // strict_integer_decode keeps this check enabled for users that need representability.
+            if constexpr (Options::strict_integer_decode) {
+                if (!detail::negative_argument_fits<T>(decoded)) {
+                    return status_code::no_match_for_int_on_buffer;
+                }
             }
             value = static_cast<T>(T{-1} - static_cast<T>(decoded));
         } else {
@@ -212,8 +220,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_uint_on_buffer;
         }
         const auto decoded = decode_unsigned(additionalInfo);
-        if (!detail::unsigned_value_fits<T>(decoded)) {
-            return status_code::no_match_for_uint_on_buffer;
+        // Default native integer decode intentionally slices through the target type.
+        // strict_integer_decode keeps this check enabled for users that need representability.
+        if constexpr (Options::strict_integer_decode) {
+            if (!detail::unsigned_value_fits<T>(decoded)) {
+                return status_code::no_match_for_uint_on_buffer;
+            }
         }
         value = static_cast<T>(decoded);
 
@@ -1425,14 +1437,18 @@ template <typename T> struct cbor_header_decoder {
 };
 
 template <CborInputBuffer InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
+    return decoder<InputBuffer, default_options, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
 }
 
 template <template <typename> typename... Extensions, CborInputBuffer InputBuffer>
     requires(sizeof...(Extensions) > 0)
 inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder, Extensions...>(
-        buffer);
+    return decoder<InputBuffer, default_options, cbor_header_decoder, cbor_indefinite_decoder, Extensions...>(buffer);
+}
+
+template <IsOptions DecoderOptions, template <typename> typename... Extensions, CborInputBuffer InputBuffer>
+inline auto make_decoder_with_options(InputBuffer &buffer) {
+    return decoder<InputBuffer, DecoderOptions, cbor_header_decoder, cbor_indefinite_decoder, Extensions...>(buffer);
 }
 
 } // namespace cbor::tags

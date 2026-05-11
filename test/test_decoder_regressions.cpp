@@ -144,7 +144,7 @@ TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
     CHECK_EQ(underflow.value, 0);
 }
 
-TEST_CASE("decoder should reject unsigned integer overflow") {
+TEST_CASE("decoder should slice unsigned integer overflow") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
@@ -154,14 +154,52 @@ TEST_CASE("decoder should reject unsigned integer overflow") {
     std::uint32_t decoded{};
     auto          result = dec(decoded);
 
+    REQUIRE(result);
+    CHECK_EQ(decoded, 0U);
+}
+
+TEST_CASE("decoder should slice signed positive integer overflow") {
+    std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0x80}}; // uint(128)
+
+    auto dec = make_decoder(buffer);
+
+    std::int8_t decoded{};
+    auto        result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded, std::numeric_limits<std::int8_t>::min());
+}
+
+TEST_CASE("decoder should slice signed negative integer underflow") {
+    std::vector<std::byte> buffer{std::byte{0x38}, std::byte{0x80}}; // -129
+
+    auto dec = make_decoder(buffer);
+
+    std::int8_t decoded{};
+    auto        result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded, std::numeric_limits<std::int8_t>::max());
+}
+
+TEST_CASE("strict integer decoder option should reject unsigned integer overflow") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
+
+    auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
+
+    std::uint32_t decoded{};
+    auto          result = dec(decoded);
+
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
 }
 
-TEST_CASE("decoder should reject signed integer overflow") {
+TEST_CASE("strict integer decoder option should reject signed positive integer overflow") {
     std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0x80}}; // uint(128)
 
-    auto dec = make_decoder(buffer);
+    auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
 
     std::int8_t decoded{};
     auto        result = dec(decoded);
@@ -170,10 +208,10 @@ TEST_CASE("decoder should reject signed integer overflow") {
     CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
 }
 
-TEST_CASE("decoder should reject signed negative underflow") {
+TEST_CASE("strict integer decoder option should reject signed negative integer underflow") {
     std::vector<std::byte> buffer{std::byte{0x38}, std::byte{0x80}}; // -129
 
-    auto dec = make_decoder(buffer);
+    auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
 
     std::int8_t decoded{};
     auto        result = dec(decoded);

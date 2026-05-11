@@ -296,14 +296,14 @@ template <typename T> struct cbor_header_encoder : cbor_range_encoder<T> {
 };
 
 template <CborOutputBuffer OutputBuffer> inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_indefinite_encoder,
-                   cbor_optional_encoder, cbor_variant_encoder>(buffer);
+    return encoder<OutputBuffer, default_options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder,
+                   cbor_variant_encoder>(buffer);
 }
 
 template <template <typename> typename... Extensions, CborOutputBuffer OutputBuffer>
     requires(sizeof...(Extensions) > 0)
 inline auto make_encoder(OutputBuffer &buffer) {
-    return encoder<OutputBuffer, Options<default_expected, default_wrapping>, cbor_header_encoder, cbor_indefinite_encoder,
-                   cbor_optional_encoder, cbor_variant_encoder, Extensions...>(buffer);
+    return encoder<OutputBuffer, default_options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder,
+                   Extensions...>(buffer);
 }
 } // namespace cbor::tags

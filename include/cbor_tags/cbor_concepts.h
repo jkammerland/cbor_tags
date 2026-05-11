@@ -32,6 +32,7 @@ concept IsOptions = requires(T) {
     typename T::is_options;
     typename T::return_type;
     { T::wrap_groups } -> std::convertible_to<bool>;
+    { T::strict_integer_decode } -> std::convertible_to<bool>;
 };
 
 template <typename T>

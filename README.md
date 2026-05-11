@@ -56,6 +56,24 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - CDDL support for schema and custom data definitions.
 - Upcoming: resumable encoding and decoding (useful for streaming usecases).
 
+## Decode Policy Notes
+
+Decoding CBOR integers into fixed-width native integer types intentionally slices
+through the target type. For unsigned targets this follows the normal modulo
+conversion. For signed targets the library uses the target implementation's
+native signed conversion behavior; on the supported two's-complement toolchains
+this preserves the low bits. Decode to `cbor::tags::integer`, `positive`, or
+`negative` when the full CBOR integer domain matters.
+
+Use `strict_integer_decoder_options` when integer representability should be
+validated during decode:
+
+```cpp
+auto dec = cbor::tags::make_decoder_with_options<
+    cbor::tags::strict_integer_decoder_options
+>(buffer);
+```
+
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
 Basic example of encoding and decoding a single cbor items:
