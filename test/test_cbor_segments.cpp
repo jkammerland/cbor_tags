@@ -81,6 +81,8 @@ static_assert(CborOutputBuffer<cbor_segments>);
 static_assert(CborSegmentOutputBuffer<cbor_segments>);
 static_assert(!CborAppendOutputBuffer<cbor_segments>);
 static_assert(!std::constructible_from<encoded_item_segments, cbor_segments>);
+static_assert(!std::constructible_from<encoded_item_bstr, const encoded_item_segments &>);
+static_assert(!std::constructible_from<encoded_item_bstr, encoded_item_segments &&>);
 static_assert(CanWrapSegmentItemAsBstr<encoded_item_segments &>);
 static_assert(CanWrapSegmentItemAsBstr<const encoded_item_segments &>);
 static_assert(!CanWrapSegmentItemAsBstr<encoded_item_segments &&>);

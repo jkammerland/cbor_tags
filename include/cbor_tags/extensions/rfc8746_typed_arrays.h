@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -183,8 +184,8 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
       public:
         using value_type        = typed_array_values_view::value_type;
         using difference_type   = std::ptrdiff_t;
-        using iterator_category = std::input_iterator_tag;
-        using iterator_concept  = std::input_iterator_tag;
+        using iterator_category = std::forward_iterator_tag;
+        using iterator_concept  = std::forward_iterator_tag;
 
         iterator() = default;
         constexpr iterator(std::ranges::iterator_t<const ByteRange> current, std::size_t remaining)
@@ -208,8 +209,16 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
             return *this;
         }
 
-        constexpr void operator++(int) { ++(*this); }
+        constexpr iterator operator++(int) {
+            auto copy = *this;
+            ++(*this);
+            return copy;
+        }
 
+        friend constexpr bool operator==(const iterator &lhs, const iterator &rhs) noexcept {
+            return lhs.current_ == rhs.current_ && lhs.remaining_ == rhs.remaining_;
+        }
+        friend constexpr bool operator!=(const iterator &lhs, const iterator &rhs) noexcept { return !(lhs == rhs); }
         friend constexpr bool operator==(const iterator &it, std::default_sentinel_t) noexcept { return it.remaining_ == 0U; }
         friend constexpr bool operator==(std::default_sentinel_t, const iterator &it) noexcept { return it == std::default_sentinel; }
 
@@ -218,16 +227,19 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
         std::size_t                              remaining_{};
     };
 
-    constexpr typed_array_values_view() = default;
-    constexpr typed_array_values_view(const ByteRange &payload, std::size_t value_count) : payload_(&payload), value_count_(value_count) {}
+    constexpr typed_array_values_view()
+        requires std::default_initializable<ByteRange>
+    = default;
+    constexpr typed_array_values_view(ByteRange payload, std::size_t value_count)
+        : payload_(std::move(payload)), value_count_(value_count) {}
 
-    [[nodiscard]] constexpr iterator                begin() const { return iterator{std::ranges::begin(*payload_), value_count_}; }
+    [[nodiscard]] constexpr iterator                begin() const { return iterator{std::ranges::begin(payload_), value_count_}; }
     [[nodiscard]] constexpr std::default_sentinel_t end() const noexcept { return {}; }
     [[nodiscard]] constexpr std::size_t             size() const noexcept { return value_count_; }
 
   private:
-    const ByteRange *payload_{};
-    std::size_t      value_count_{};
+    ByteRange   payload_;
+    std::size_t value_count_{};
 };
 
 template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>> class typed_array_view {

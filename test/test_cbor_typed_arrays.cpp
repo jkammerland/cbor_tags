@@ -237,6 +237,26 @@ TEST_CASE("rfc8746 typed array view exposes decoded values as a range") {
     CHECK_EQ(view.copy_values(), observed);
 }
 
+TEST_CASE("rfc8746 typed array values view is safe when created from a temporary view") {
+    const auto bytes  = to_bytes("01000000feffffff03000000");
+    auto       values = typed_array_view<std::int32_t>{std::span<const std::byte>{bytes}}.values();
+
+    static_assert(std::ranges::forward_range<decltype(values)>);
+    CHECK_EQ(std::ranges::distance(values), 3);
+
+    auto it = values.begin();
+    REQUIRE(it != values.end());
+    CHECK_EQ(*it, 1);
+    ++it;
+    REQUIRE(it != values.end());
+    CHECK_EQ(*it, -2);
+    ++it;
+    REQUIRE(it != values.end());
+    CHECK_EQ(*it, 3);
+    ++it;
+    CHECK(it == values.end());
+}
+
 TEST_CASE("rfc8746 typed array view reads unaligned payload bytes without a native span") {
     std::array<std::byte, sizeof(std::int32_t) + alignof(std::int32_t)> storage{};
     storage[0] = std::byte{0xCC};

@@ -247,12 +247,14 @@ class encoded_item_segments {
 
 class encoded_item_bstr {
   public:
-    explicit encoded_item_bstr(const encoded_item_segments &item) noexcept : item_(&item) {}
-
     [[nodiscard]] const encoded_item_segments &item() const noexcept { return *item_; }
 
   private:
+    explicit encoded_item_bstr(const encoded_item_segments &item) noexcept : item_(&item) {}
+
     const encoded_item_segments *item_{};
+
+    friend encoded_item_bstr as_bstr(const encoded_item_segments &item) noexcept;
 };
 
 [[nodiscard]] inline encoded_item_bstr as_bstr(const encoded_item_segments &item) noexcept { return encoded_item_bstr{item}; }
