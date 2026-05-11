@@ -154,6 +154,29 @@ TEST_CASE("direct segmented encode writes are visible without operator flush") {
     CHECK_EQ(to_hex(segmented.flatten()), "8101");
 }
 
+TEST_CASE("direct segmented byte string encode borrows span payload") {
+    auto payload = to_bytes("01020304");
+
+    cbor_segments segmented;
+    auto          enc = make_encoder(segmented);
+    REQUIRE(enc(std::span<const std::byte>{payload}));
+
+    CHECK_EQ(to_hex(segmented.flatten()), "4401020304");
+    CHECK(has_borrowed_segment(segmented, payload.data(), payload.size()));
+}
+
+TEST_CASE("direct segmented raw encoded view encode borrows span payload") {
+    auto bytes = to_bytes("820102");
+    auto raw   = encoded_item_view{std::span<const std::byte>{bytes}};
+
+    cbor_segments segmented;
+    auto          enc = make_encoder(segmented);
+    REQUIRE(enc(raw));
+
+    CHECK_EQ(to_hex(segmented.flatten()), "820102");
+    CHECK(has_borrowed_segment(segmented, bytes.data(), bytes.size()));
+}
+
 TEST_CASE("encoded item segments can be array elements map values tags and bstr payloads") {
     auto payload = to_bytes("010203");
 

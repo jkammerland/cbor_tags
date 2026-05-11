@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -58,6 +59,11 @@ namespace detail {
 
 template <typename R>
 concept TypedArrayPayloadRange = std::ranges::view<R> && std::ranges::forward_range<const R> && cbor::tags::detail::ByteLikeRange<const R>;
+
+template <typename Decoder, typename R>
+concept DecodableTypedArrayPayloadRange =
+    TypedArrayPayloadRange<R> && ((std::ranges::contiguous_range<const R> && !IsContiguous<typename Decoder::input_buffer_type>) ||
+                                  requires(Decoder &dec, std::uint64_t length) { R{dec.decode_bstring_payload(length)}; });
 
 template <IsTypedArrayElement T> [[nodiscard]] constexpr auto to_bits(T value) noexcept {
     using value_type = std::remove_cv_t<T>;
@@ -250,6 +256,7 @@ template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std:
 
     constexpr typed_array_view() = default;
     constexpr explicit typed_array_view(ByteRange payload) : payload_(std::move(payload)), payload_size_(payload_size(payload_)) {}
+    constexpr typed_array_view(ByteRange payload, std::size_t payload_size) : payload_(std::move(payload)), payload_size_(payload_size) {}
 
     [[nodiscard]] constexpr const ByteRange &payload_range() const noexcept { return payload_; }
 
@@ -318,7 +325,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     }
 
     template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
-        requires std::default_initializable<ByteRange>
+        requires detail::DecodableTypedArrayPayloadRange<Self, ByteRange>
     [[nodiscard]] status_code decode(typed_array_view<T, ByteRange> &view, major_type major, std::byte additional_info) {
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
@@ -326,33 +333,48 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
             if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
                 return status_code::contiguous_view_on_non_contiguous_data;
+            } else {
+                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
+                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+                    if (payload_size_u64 > payload_size_limit) {
+                        return status_code::error;
+                    }
+                }
+
+                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+                if ((payload_size % sizeof(value_type)) != 0U) {
+                    return status_code::unexpected_group_size;
+                }
+                view = typed_array_view<value_type, ByteRange>{ByteRange{std::move(raw_payload)}, payload_size};
+                return status_code::success;
             }
-            ByteRange payload;
-            auto      status = dec.decode(payload, payload_major, payload_info);
-            if (status != status_code::success) {
-                return status;
-            }
-            const auto payload_size = static_cast<std::size_t>(std::ranges::distance(payload));
-            if ((payload_size % sizeof(value_type)) != 0U) {
-                return status_code::unexpected_group_size;
-            }
-            view = typed_array_view<value_type, ByteRange>{std::move(payload)};
-            return status_code::success;
         });
     }
 
   private:
+    void encode_owned_payload(std::span<const std::byte> payload) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode_major_and_size(static_cast<std::uint64_t>(payload.size()), static_cast<typename Self::byte_type>(0x40));
+        if constexpr (requires { enc.appender_.append_owned(enc.data_, payload); }) {
+            enc.appender_.append_owned(enc.data_, payload);
+        } else {
+            enc.appender_(enc.data_, payload);
+        }
+    }
+
     template <IsTypedArrayElement T> void encode_owned_values(std::span<const T> values) {
         using value_type = std::remove_cv_t<T>;
         auto &enc        = static_cast<Self &>(*this);
 
         if constexpr (std::endian::native == std::endian::little) {
             enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
-            enc.encode(std::as_bytes(values));
+            encode_owned_payload(std::as_bytes(values));
         } else {
             auto payload = detail::little_endian_payload(values);
             enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
-            enc.encode(std::span<const std::byte>{payload});
+            encode_owned_payload(std::span<const std::byte>{payload});
         }
     }
 
@@ -366,7 +388,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         } else {
             auto payload = detail::little_endian_payload(values);
             enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
-            enc.encode(std::span<const std::byte>{payload});
+            encode_owned_payload(std::span<const std::byte>{payload});
         }
     }
 };

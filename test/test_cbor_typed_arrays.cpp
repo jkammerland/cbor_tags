@@ -51,6 +51,11 @@ template <typename Self> struct toy_codec : cbor_codec_mixin_base<Self> {
 template <typename Enc, typename T>
 concept CanEncode = requires(Enc &enc, const T &value) { enc.encode(value); };
 
+template <typename Dec, typename T>
+concept CanDecode = requires(Dec &dec, T &value, major_type major, std::byte additional_info) {
+    { dec.decode(value, major, additional_info) } -> std::same_as<status_code>;
+};
+
 template <typename T>
 concept CanWrapAsTypedArray = requires(T &&values) { as_typed_array(std::forward<T>(values)); };
 
@@ -59,6 +64,11 @@ concept HasTypedArrayPayloadBytes = requires(const T &view) { view.payload_bytes
 
 static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::byte>>);
 static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
+
+using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
+using bad_payload_range = std::ranges::iota_view<unsigned char, unsigned char>;
+static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<bad_payload_range>);
+static_assert(!CanDecode<extension_decoder, typed_array_view<std::int32_t, bad_payload_range>>);
 
 template <typename T> std::vector<std::byte> encode_normal(std::span<const T> values) {
     std::vector<std::byte> output;

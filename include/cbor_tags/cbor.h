@@ -194,6 +194,11 @@ struct bstr_view : std::ranges::view_interface<bstr_view<R>> {
 
     constexpr auto begin() const { return iterator{std::ranges::begin(range)}; }
     constexpr auto end() const { return iterator{std::ranges::end(range)}; }
+    constexpr auto size() const
+        requires std::ranges::sized_range<const R>
+    {
+        return std::ranges::size(range);
+    }
 
     operator std::vector<std::byte>() const { return {begin(), end()}; }
 

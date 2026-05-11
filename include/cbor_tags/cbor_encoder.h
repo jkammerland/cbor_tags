@@ -20,6 +20,7 @@
 #include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
+#include <ranges>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -87,7 +88,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <IsString T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));
-        appender_(data_, value);
+        if constexpr (IsBinaryString<T> && std::ranges::borrowed_range<std::remove_cvref_t<T>> &&
+                      std::ranges::contiguous_range<const std::remove_cvref_t<T>> &&
+                      std::ranges::sized_range<const std::remove_cvref_t<T>> &&
+                      requires { appender_.append_borrowed(data_, detail::as_byte_span(value)); }) {
+            appender_.append_borrowed(data_, detail::as_byte_span(value));
+        } else {
+            appender_(data_, value);
+        }
     }
 
     template <IsArray T> constexpr void encode(const T &value) {
