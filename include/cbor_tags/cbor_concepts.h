@@ -317,13 +317,28 @@ concept CborAppendOutputBuffer = requires(std::remove_cvref_t<T> &buffer, typena
     buffer.insert(buffer.end(), &byte, &byte + 1);
 };
 
+namespace detail {
+template <typename T> struct is_segment_output_buffer : std::false_type {};
+} // namespace detail
+
 template <typename T>
-concept CborOutputBuffer =
+concept CborByteOutputBuffer =
     requires {
         typename std::remove_cvref_t<T>::value_type;
         typename std::remove_cvref_t<T>::size_type;
     } && (!std::is_const_v<std::remove_reference_t<T>>) && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
     (CborFixedOutputBuffer<T> || CborAppendOutputBuffer<T>);
+
+template <typename T>
+concept CborSegmentOutputBuffer =
+    requires {
+        typename std::remove_cvref_t<T>::value_type;
+        typename std::remove_cvref_t<T>::size_type;
+    } && (!std::is_const_v<std::remove_reference_t<T>>) && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
+    detail::is_segment_output_buffer<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept CborOutputBuffer = CborByteOutputBuffer<T> || CborSegmentOutputBuffer<T>;
 
 template <typename T>
 concept IsMapBase = IsMapHeader<std::remove_cvref_t<T>> || detail::MapLikeContainer<T, IsRangeOfCborValuesBase<std::remove_cvref_t<T>>>;

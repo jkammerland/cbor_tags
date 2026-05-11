@@ -4,10 +4,12 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_segments.h>
+#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <list>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -22,6 +24,9 @@ concept CanEncodeBorrowedSegments = requires(const RawView &view) { encode_encod
 
 template <typename RawView>
 concept CanVisitBorrowedSegments = requires(const RawView &view) { visit_encoded_segments(view, [](std::span<const std::byte>) {}); };
+
+template <typename T>
+concept CanWrapSegmentItemAsBstr = requires(T &&value) { as_bstr(std::forward<T>(value)); };
 
 std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
     std::vector<std::byte> output;
@@ -41,7 +46,44 @@ void check_segment_header(std::uint64_t value, std::byte major, const char *expe
     CHECK_EQ(to_hex(header.span()), expected_hex);
 }
 
+bool has_borrowed_segment(const cbor_segments &segments, const std::byte *data, std::size_t size) {
+    for (const auto &segment : segments) {
+        if (segment.is_borrowed() && segment.data() == data && segment.size() == size) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int count_borrowed_segments(const cbor_segments &segments, const std::byte *data, std::size_t size) {
+    int count{};
+    for (const auto &segment : segments) {
+        if (segment.is_borrowed() && segment.data() == data && segment.size() == size) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int count_borrowed_segments(const cbor_segments &segments) {
+    int count{};
+    for (const auto &segment : segments) {
+        if (segment.is_borrowed()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 } // namespace
+
+static_assert(CborOutputBuffer<cbor_segments>);
+static_assert(CborSegmentOutputBuffer<cbor_segments>);
+static_assert(!CborAppendOutputBuffer<cbor_segments>);
+static_assert(!std::constructible_from<encoded_item_segments, cbor_segments>);
+static_assert(CanWrapSegmentItemAsBstr<encoded_item_segments &>);
+static_assert(CanWrapSegmentItemAsBstr<const encoded_item_segments &>);
+static_assert(!CanWrapSegmentItemAsBstr<encoded_item_segments &&>);
 
 TEST_CASE("segment header encoding covers CBOR size boundaries") {
     struct header_case {
@@ -66,6 +108,161 @@ TEST_CASE("segment header encoding covers CBOR size boundaries") {
         CAPTURE(test_case.value);
         check_segment_header(test_case.value, std::byte{0x40}, test_case.bstr_hex);
         check_segment_header(test_case.value, std::byte{0xC0}, test_case.tag_hex);
+    }
+}
+
+TEST_CASE("cbor segments can be used as the normal encoder output backend") {
+    std::vector<int> ints{1, 2, 3};
+    auto             blob0 = to_bytes("0102");
+    auto             blob1 = to_bytes("aabbcc");
+    std::array       blobs{std::span<const std::byte>{blob0}, std::span<const std::byte>{blob1}};
+
+    auto make_bstrs = [&] { return blobs | std::views::transform([](std::span<const std::byte> blob) { return as_bstr_range(blob); }); };
+
+    cbor_segments segmented;
+    auto          segment_encoder = make_encoder(segmented);
+    REQUIRE(segment_encoder(as_array{2}, as_array_range(ints), as_array_range(make_bstrs())));
+
+    std::vector<std::byte> contiguous;
+    auto                   contiguous_encoder = make_encoder(contiguous);
+    REQUIRE(contiguous_encoder(as_array{2}, as_array_range(ints), as_array_range(make_bstrs())));
+
+    CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
+    CHECK(has_borrowed_segment(segmented, blob0.data(), blob0.size()));
+    CHECK(has_borrowed_segment(segmented, blob1.data(), blob1.size()));
+}
+
+TEST_CASE("segmented byte string range preserves header order for non-contiguous payloads") {
+    std::list<std::byte> payload{std::byte{0x00}, std::byte{0xFF}, std::byte{0x10}, std::byte{0x20}};
+
+    cbor_segments segmented;
+    auto          enc = make_encoder(segmented);
+    REQUIRE(enc(as_bstr_range(payload)));
+
+    CHECK_EQ(to_hex(segmented.flatten()), "4400ff1020");
+}
+
+TEST_CASE("direct segmented encode writes are visible without operator flush") {
+    cbor_segments segmented;
+    auto          enc = make_encoder(segmented);
+
+    enc.encode(as_array{1});
+    enc.encode(1);
+
+    CHECK_EQ(to_hex(segmented.flatten()), "8101");
+}
+
+TEST_CASE("encoded item segments can be array elements map values tags and bstr payloads") {
+    auto payload = to_bytes("010203");
+
+    auto item_result = encode_item_segments(as_bstr_range(std::span<const std::byte>{payload}));
+    REQUIRE(item_result);
+    auto item = std::move(item_result).value();
+
+    cbor_segments segmented;
+    auto          segment_encoder = make_encoder(segmented);
+    REQUIRE(
+        segment_encoder(as_array{4}, item, make_tag_pair(static_tag<100>{}, item), as_bstr(item), as_map{1}, std::string{"payload"}, item));
+
+    const auto item_bytes = item.flatten();
+    auto       item_view  = encoded_item_view{std::span<const std::byte>{item_bytes}};
+
+    std::vector<std::byte> contiguous;
+    auto                   contiguous_encoder = make_encoder(contiguous);
+    REQUIRE(contiguous_encoder(as_array{4}, item_view, make_tag_pair(static_tag<100>{}, item_view), std::span<const std::byte>{item_bytes},
+                               as_map{1}, std::string{"payload"}, item_view));
+
+    CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
+    CHECK_EQ(count_borrowed_segments(segmented, payload.data(), payload.size()), 4);
+}
+
+TEST_CASE("encoded item segment validation requires exactly one complete cbor item") {
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x01}});
+
+        auto item = validate_item_segments(std::move(segments));
+
+        REQUIRE(item);
+        CHECK_EQ(to_hex(item->flatten()), "01");
+    }
+
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x01}, std::byte{0x02}});
+
+        auto item = validate_item_segments(std::move(segments));
+
+        REQUIRE_FALSE(item);
+        CHECK_EQ(item.error(), status_code::error);
+    }
+
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x58}});
+
+        auto item = validate_item_segments(std::move(segments));
+
+        REQUIRE_FALSE(item);
+        CHECK_EQ(item.error(), status_code::incomplete);
+    }
+}
+
+TEST_CASE("typed array codec borrows payload when the encoder output is segmented") {
+    using namespace cbor::tags::ext::rfc8746;
+
+    std::vector<std::int32_t> values{1, -2, 3};
+
+    cbor_segments segmented;
+    auto          segment_encoder = make_encoder<typed_array_codec>(segmented);
+    REQUIRE(segment_encoder(as_typed_array(values)));
+
+    std::vector<std::byte> contiguous;
+    auto                   contiguous_encoder = make_encoder<typed_array_codec>(contiguous);
+    REQUIRE(contiguous_encoder(as_typed_array(values)));
+
+    const auto payload = std::as_bytes(std::span<const std::int32_t>{values});
+    CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
+    CHECK(has_borrowed_segment(segmented, payload.data(), payload.size()));
+}
+
+TEST_CASE("owning typed array codec copies payload when the encoder output is segmented") {
+    using namespace cbor::tags::ext::rfc8746;
+
+    auto array = typed_array<std::int32_t>{{1, -2, 3}};
+
+    cbor_segments segmented;
+    auto          segment_encoder = make_encoder<typed_array_codec>(segmented);
+    REQUIRE(segment_encoder(array));
+
+    std::vector<std::byte> contiguous;
+    auto                   contiguous_encoder = make_encoder<typed_array_codec>(contiguous);
+    REQUIRE(contiguous_encoder(array));
+
+    const auto payload = std::as_bytes(array.span());
+    CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
+    CHECK_FALSE(has_borrowed_segment(segmented, payload.data(), payload.size()));
+}
+
+TEST_CASE("segmented bstr range borrowing is limited to explicit borrowed ranges") {
+    auto bytes = to_bytes("01020304");
+
+    {
+        cbor_segments segmented;
+        auto          enc = make_encoder(segmented);
+        REQUIRE(enc(as_bstr_range(bytes)));
+
+        CHECK(has_borrowed_segment(segmented, bytes.data(), bytes.size()));
+        CHECK_EQ(to_hex(segmented.flatten()), "4401020304");
+    }
+
+    {
+        cbor_segments segmented;
+        auto          enc = make_encoder(segmented);
+        REQUIRE(enc(as_bstr_range(to_bytes("01020304"))));
+
+        CHECK_EQ(count_borrowed_segments(segmented), 0);
+        CHECK_EQ(to_hex(segmented.flatten()), "4401020304");
     }
 }
 
@@ -115,9 +312,9 @@ TEST_CASE("empty bstr segmented output preserves definite and indefinite headers
 
         const auto segments = encode_indefinite_bstr_segments(payload, 4);
 
-        REQUIRE_EQ(segments.size(), 2U);
+        REQUIRE_EQ(segments.size(), 1U);
         CHECK(segments[0].is_owned());
-        CHECK(segments[1].is_owned());
+        CHECK_EQ(to_hex(segments[0].bytes()), "5fff");
         CHECK_EQ(to_hex(flatten_segments(segments)), "5fff");
     }
 }
@@ -138,11 +335,11 @@ TEST_CASE("tagged bstr segmented output preserves CBOR bytes and borrows payload
     CHECK_EQ(to_hex(static_appended), "d81843aabbcc");
     CHECK_EQ(to_hex(flatten_segments(dynamic_segments)), "d81843aabbcc");
     CHECK_EQ(to_hex(flatten_segments(static_segments)), "d81843aabbcc");
-    REQUIRE_EQ(dynamic_segments.size(), 3U);
+    REQUIRE_EQ(dynamic_segments.size(), 2U);
     CHECK(dynamic_segments[0].is_owned());
-    CHECK(dynamic_segments[1].is_owned());
-    CHECK(dynamic_segments[2].is_borrowed());
-    CHECK_EQ(dynamic_segments[2].data(), payload.data());
+    CHECK_EQ(to_hex(dynamic_segments[0].bytes()), "d81843");
+    CHECK(dynamic_segments[1].is_borrowed());
+    CHECK_EQ(dynamic_segments[1].data(), payload.data());
 }
 
 TEST_CASE("indefinite bstr segmented output preserves chunks and borrows payload slices") {
@@ -155,21 +352,19 @@ TEST_CASE("indefinite bstr segmented output preserves chunks and borrows payload
     append_indefinite_bstr_segments(appended, span, 3);
     CHECK_EQ(to_hex(appended), "5f43010203420405ff");
 
-    REQUIRE_EQ(segments.size(), 6U);
+    REQUIRE_EQ(segments.size(), 5U);
     CHECK(segments[0].is_owned());
-    CHECK_EQ(to_hex(segments[0].bytes()), "5f");
-    CHECK(segments[1].is_owned());
-    CHECK_EQ(to_hex(segments[1].bytes()), "43");
-    CHECK(segments[2].is_borrowed());
-    CHECK_EQ(segments[2].data(), payload.data());
-    CHECK_EQ(segments[2].size(), 3U);
-    CHECK(segments[3].is_owned());
-    CHECK_EQ(to_hex(segments[3].bytes()), "42");
-    CHECK(segments[4].is_borrowed());
-    CHECK_EQ(segments[4].data(), payload.data() + 3);
-    CHECK_EQ(segments[4].size(), 2U);
-    CHECK(segments[5].is_owned());
-    CHECK_EQ(to_hex(segments[5].bytes()), "ff");
+    CHECK_EQ(to_hex(segments[0].bytes()), "5f43");
+    CHECK(segments[1].is_borrowed());
+    CHECK_EQ(segments[1].data(), payload.data());
+    CHECK_EQ(segments[1].size(), 3U);
+    CHECK(segments[2].is_owned());
+    CHECK_EQ(to_hex(segments[2].bytes()), "42");
+    CHECK(segments[3].is_borrowed());
+    CHECK_EQ(segments[3].data(), payload.data() + 3);
+    CHECK_EQ(segments[3].size(), 2U);
+    CHECK(segments[4].is_owned());
+    CHECK_EQ(to_hex(segments[4].bytes()), "ff");
     CHECK_EQ(to_hex(flatten_segments(segments)), "5f43010203420405ff");
 }
 

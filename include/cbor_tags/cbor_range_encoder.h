@@ -8,10 +8,21 @@
 #include <cstdint>
 #include <ranges>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace cbor::tags {
+
+namespace detail {
+
+template <typename R> struct segment_borrowable_byte_range : std::false_type {};
+template <typename T, std::size_t Extent> struct segment_borrowable_byte_range<std::span<T, Extent>> : std::true_type {};
+template <typename R> struct segment_borrowable_byte_range<std::ranges::ref_view<R>> : std::true_type {};
+
+template <typename R> inline constexpr bool segment_borrowable_byte_range_v = segment_borrowable_byte_range<std::remove_cvref_t<R>>::value;
+
+} // namespace detail
 
 template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<T> {
     using detail::cbor_raw_view_encoder<T>::encode;
@@ -52,6 +63,16 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
             using value_type = std::ranges::range_value_t<std::remove_reference_t<R>>;
             static_assert(detail::MaterializableCborRangeComponent<Item, value_type>);
             enc.encode(static_cast<value_type>(std::forward<Item>(item)));
+        }
+    }
+
+    template <typename R> constexpr void append_bstr_payload(R &&range) {
+        auto &enc = detail::underlying<T>(this);
+        if constexpr (detail::segment_borrowable_byte_range_v<R> && std::ranges::contiguous_range<R> && std::ranges::sized_range<R> &&
+                      requires { enc.appender_.append_borrowed(enc.data_, detail::as_byte_span(std::forward<R>(range))); }) {
+            enc.appender_.append_borrowed(enc.data_, detail::as_byte_span(std::forward<R>(range)));
+        } else {
+            detail::append_byte_range(enc.appender_, enc.data_, std::forward<R>(range));
         }
     }
 
@@ -99,7 +120,7 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
         }
         if constexpr (std::ranges::sized_range<R>) {
             enc.encode_major_and_size(static_cast<std::uint64_t>(std::ranges::size(range)), static_cast<typename T::byte_type>(0x40));
-            detail::append_byte_range(enc.appender_, enc.data_, range);
+            append_bstr_payload(range);
         } else {
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_byte_string>()));
             std::vector<typename T::byte_type> chunk;
@@ -109,7 +130,7 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
                     return;
                 }
                 enc.encode_major_and_size(static_cast<std::uint64_t>(chunk.size()), static_cast<typename T::byte_type>(0x40));
-                detail::append_byte_range(enc.appender_, enc.data_, chunk);
+                append_bstr_payload(chunk);
                 chunk.clear();
             };
 

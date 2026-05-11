@@ -1,7 +1,10 @@
 #pragma once
 
+#include "cbor_tags/cbor.h"
+#include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_raw_views.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/cbor_item.h"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +15,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -62,6 +66,27 @@ class cbor_segment {
     [[nodiscard]] bool              is_owned() const noexcept { return kind_ == cbor_segment_kind::owned; }
     [[nodiscard]] bool              is_borrowed() const noexcept { return kind_ == cbor_segment_kind::borrowed; }
 
+    bool append_owned(std::span<const std::byte> bytes) {
+        if (!is_owned()) {
+            return false;
+        }
+        if (!owned_.empty()) {
+            owned_.insert(owned_.end(), bytes.begin(), bytes.end());
+            return true;
+        }
+        if ((inline_owned_size_ + bytes.size()) <= inline_owned_capacity) {
+            std::ranges::copy(bytes, inline_owned_.begin() + static_cast<std::ptrdiff_t>(inline_owned_size_));
+            inline_owned_size_ += bytes.size();
+            return true;
+        }
+
+        owned_.reserve(inline_owned_size_ + bytes.size());
+        owned_.insert(owned_.end(), inline_owned_.begin(), inline_owned_.begin() + static_cast<std::ptrdiff_t>(inline_owned_size_));
+        owned_.insert(owned_.end(), bytes.begin(), bytes.end());
+        inline_owned_size_ = 0;
+        return true;
+    }
+
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
         if (is_borrowed()) {
             return borrowed_;
@@ -86,15 +111,23 @@ class cbor_segment {
 
 class cbor_segments {
   public:
+    using value_type      = std::byte;
+    using size_type       = std::size_t;
     using container_type  = std::vector<cbor_segment>;
     using const_iterator  = container_type::const_iterator;
+    using iterator        = const_iterator;
     using const_reference = container_type::const_reference;
 
     void reserve(std::size_t count) { segments_.reserve(count); }
 
-    void append_owned(std::span<const std::byte> bytes) { segments_.push_back(cbor_segment::owned(bytes)); }
-    void append_owned(std::initializer_list<std::byte> bytes) { segments_.push_back(cbor_segment::owned(bytes)); }
-    void append_owned(detail::cbor_argument_header header) { segments_.push_back(cbor_segment::owned(header)); }
+    void append_owned(std::span<const std::byte> bytes) {
+        if (!segments_.empty() && segments_.back().append_owned(bytes)) {
+            return;
+        }
+        segments_.push_back(cbor_segment::owned(bytes));
+    }
+    void append_owned(std::initializer_list<std::byte> bytes) { append_owned(std::span<const std::byte>{bytes.begin(), bytes.size()}); }
+    void append_owned(detail::cbor_argument_header header) { append_owned(header.span()); }
     void append_borrowed(std::span<const std::byte> bytes) { segments_.push_back(cbor_segment::borrowed(bytes)); }
 
     [[nodiscard]] const_iterator begin() const noexcept { return segments_.begin(); }
@@ -129,9 +162,151 @@ class cbor_segments {
     container_type segments_{};
 };
 
+namespace detail {
+
+template <> struct is_segment_output_buffer<cbor_segments> : std::true_type {};
+
+class cbor_segment_byte_iterator {
+  public:
+    using iterator_category = std::input_iterator_tag;
+    using iterator_concept  = std::input_iterator_tag;
+    using value_type        = std::byte;
+    using difference_type   = std::ptrdiff_t;
+
+    cbor_segment_byte_iterator() = default;
+    cbor_segment_byte_iterator(cbor_segments::const_iterator current, cbor_segments::const_iterator end) : current_(current), end_(end) {
+        skip_empty_segments();
+    }
+
+    [[nodiscard]] std::byte operator*() const noexcept { return current_->bytes()[offset_]; }
+
+    cbor_segment_byte_iterator &operator++() {
+        ++offset_;
+        if (offset_ == current_->size()) {
+            ++current_;
+            offset_ = 0;
+            skip_empty_segments();
+        }
+        return *this;
+    }
+
+    void operator++(int) { ++(*this); }
+
+    friend bool operator==(const cbor_segment_byte_iterator &lhs, const cbor_segment_byte_iterator &rhs) noexcept {
+        return lhs.current_ == rhs.current_ && (lhs.current_ == lhs.end_ || lhs.offset_ == rhs.offset_);
+    }
+
+    friend bool operator!=(const cbor_segment_byte_iterator &lhs, const cbor_segment_byte_iterator &rhs) noexcept { return !(lhs == rhs); }
+
+  private:
+    void skip_empty_segments() noexcept {
+        while (current_ != end_ && current_->empty()) {
+            ++current_;
+        }
+    }
+
+    cbor_segments::const_iterator current_{};
+    cbor_segments::const_iterator end_{};
+    std::size_t                   offset_{};
+};
+
+} // namespace detail
+
+class encoded_item_segments {
+  public:
+    encoded_item_segments() = delete;
+
+    [[nodiscard]] const cbor_segments   &segments() const noexcept { return segments_; }
+    [[nodiscard]] std::size_t            total_size() const noexcept { return segments_.total_size(); }
+    [[nodiscard]] std::vector<std::byte> flatten() const { return segments_.flatten(); }
+
+  private:
+    struct validated_t {};
+
+    explicit encoded_item_segments(cbor_segments segments, validated_t) : segments_(std::move(segments)) {}
+
+    cbor_segments segments_{};
+
+    friend expected<encoded_item_segments, status_code> validate_item_segments(cbor_segments segments);
+};
+
+[[nodiscard]] inline expected<encoded_item_segments, status_code> validate_item_segments(cbor_segments segments) {
+    auto cursor = detail::cbor_segment_byte_iterator{segments.begin(), segments.end()};
+    auto end    = detail::cbor_segment_byte_iterator{segments.end(), segments.end()};
+
+    auto status = status_code::success;
+    if (!detail::cbor_item_skipper<>::skip_item(cursor, end, status)) {
+        return unexpected<status_code>{status};
+    }
+    if (cursor != end) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    return encoded_item_segments{std::move(segments), encoded_item_segments::validated_t{}};
+}
+
+class encoded_item_bstr {
+  public:
+    explicit encoded_item_bstr(const encoded_item_segments &item) noexcept : item_(&item) {}
+
+    [[nodiscard]] const encoded_item_segments &item() const noexcept { return *item_; }
+
+  private:
+    const encoded_item_segments *item_{};
+};
+
+[[nodiscard]] inline encoded_item_bstr as_bstr(const encoded_item_segments &item) noexcept { return encoded_item_bstr{item}; }
+[[nodiscard]] inline encoded_item_bstr as_bstr(encoded_item_segments &&)       = delete;
+[[nodiscard]] inline encoded_item_bstr as_bstr(const encoded_item_segments &&) = delete;
+
 [[nodiscard]] inline std::vector<std::byte> flatten_segments(const cbor_segments &segments) { return segments.flatten(); }
 
 namespace detail {
+
+template <> struct appender<cbor_segments, false> {
+    using value_type = std::byte;
+
+    void operator()(cbor_segments &segments, value_type value) { segments.append_owned(std::span<const std::byte>{&value, 1}); }
+
+    template <typename... Ts> void multi_append(cbor_segments &segments, Ts &&...values) {
+        static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
+        constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
+        static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
+        const std::array bytes{static_cast<value_type>(values)...};
+        segments.append_owned(std::span<const std::byte>{bytes});
+    }
+
+    void operator()(cbor_segments &segments, std::span<const std::byte> values) { append_owned(segments, values); }
+
+    void operator()(cbor_segments &segments, std::string_view value) {
+        append_owned(segments, std::as_bytes(std::span{value.data(), value.size()}));
+    }
+
+    void append_owned(cbor_segments &segments, std::span<const std::byte> values) { segments.append_owned(values); }
+    void append_borrowed(cbor_segments &segments, std::span<const std::byte> values) { segments.append_borrowed(values); }
+};
+
+template <typename Encoder> void append_segment_to_encoder(Encoder &enc, const cbor_segment &segment) {
+    const auto bytes = segment.bytes();
+    if constexpr (requires {
+                      enc.appender_.append_borrowed(enc.data_, bytes);
+                      enc.appender_.append_owned(enc.data_, bytes);
+                  }) {
+        if (segment.is_borrowed()) {
+            enc.appender_.append_borrowed(enc.data_, bytes);
+        } else {
+            enc.appender_.append_owned(enc.data_, bytes);
+        }
+    } else {
+        append_byte_range(enc.appender_, enc.data_, bytes);
+    }
+}
+
+template <typename Encoder> void append_item_segments_to_encoder(Encoder &enc, const encoded_item_segments &item) {
+    for (const auto &segment : item.segments()) {
+        append_segment_to_encoder(enc, segment);
+    }
+}
 
 template <typename T>
 concept SpanBackedEncodedItemView =
@@ -152,6 +327,17 @@ constexpr void append_segment_bytes(OutputBuffer &output, std::span<const std::b
 }
 
 } // namespace detail
+
+template <typename Encoder> auto encode(Encoder &enc, const encoded_item_segments &item) {
+    detail::append_item_segments_to_encoder(enc, item);
+    return typename Encoder::expected_type{};
+}
+
+template <typename Encoder> auto encode(Encoder &enc, encoded_item_bstr value) {
+    enc.encode_major_and_size(value.item().total_size(), static_cast<typename Encoder::byte_type>(0x40));
+    detail::append_item_segments_to_encoder(enc, value.item());
+    return typename Encoder::expected_type{};
+}
 
 template <typename VisitSegment> constexpr void visit_bstr_segments(std::span<const std::byte> payload, VisitSegment &&visit_segment) {
     const auto header = detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
@@ -333,6 +519,34 @@ template <typename RawView>
     segments.reserve(1);
     segments.append_owned(bytes);
     return segments;
+}
+
+} // namespace cbor::tags
+
+#include "cbor_tags/cbor_encoder.h"
+
+namespace cbor::tags {
+
+template <typename T> [[nodiscard]] inline expected<encoded_item_segments, status_code> encode_item_segments(T &&value) {
+    cbor_segments segments;
+    auto          enc    = make_encoder(segments);
+    const auto    result = enc(std::forward<T>(value));
+    if (!result) {
+        return unexpected<status_code>{result.error()};
+    }
+    return validate_item_segments(std::move(segments));
+}
+
+template <template <typename> typename... Extensions, typename T>
+    requires(sizeof...(Extensions) > 0)
+[[nodiscard]] inline expected<encoded_item_segments, status_code> encode_item_segments(T &&value) {
+    cbor_segments segments;
+    auto          enc    = make_encoder<Extensions...>(segments);
+    const auto    result = enc(std::forward<T>(value));
+    if (!result) {
+        return unexpected<status_code>{result.error()};
+    }
+    return validate_item_segments(std::move(segments));
 }
 
 } // namespace cbor::tags

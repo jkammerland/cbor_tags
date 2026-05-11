@@ -54,6 +54,12 @@ concept CanEncode = requires(Enc &enc, const T &value) { enc.encode(value); };
 template <typename T>
 concept CanWrapAsTypedArray = requires(T &&values) { as_typed_array(std::forward<T>(values)); };
 
+template <typename T>
+concept HasTypedArrayPayloadBytes = requires(const T &view) { view.payload_bytes(); };
+
+static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::byte>>);
+static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
+
 template <typename T> std::vector<std::byte> encode_normal(std::span<const T> values) {
     std::vector<std::byte> output;
     auto                   enc = make_encoder<typed_array_codec>(output);
@@ -197,10 +203,8 @@ TEST_CASE("rfc8746 typed array owned segment fallback matches normal encoding") 
     const auto                      normal   = encode_normal(span);
     const auto                      segments = encode_typed_array_segments_copy(span);
 
-    REQUIRE_EQ(segments.size(), 3U);
+    REQUIRE_EQ(segments.size(), 1U);
     CHECK(segments[0].is_owned());
-    CHECK(segments[1].is_owned());
-    CHECK(segments[2].is_owned());
     CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(normal));
 }
 
@@ -212,12 +216,11 @@ TEST_CASE("rfc8746 typed array segmented output borrows native little-endian pay
 
         const auto segments = encode_typed_array_segments(span);
 
-        REQUIRE_EQ(segments.size(), 3U);
+        REQUIRE_EQ(segments.size(), 2U);
         CHECK(segments[0].is_owned());
-        CHECK(segments[1].is_owned());
-        CHECK(segments[2].is_borrowed());
-        CHECK_EQ(segments[2].data(), original_bytes.data());
-        CHECK_EQ(segments[2].size(), original_bytes.size());
+        CHECK(segments[1].is_borrowed());
+        CHECK_EQ(segments[1].data(), original_bytes.data());
+        CHECK_EQ(segments[1].size(), original_bytes.size());
     }
 }
 
@@ -264,7 +267,7 @@ TEST_CASE("rfc8746 typed array view reads unaligned payload bytes without a nati
     CHECK_EQ(view.copy_values(), std::vector<std::int32_t>{0x04030201});
 }
 
-TEST_CASE("rfc8746 typed array view decode requires contiguous input while owning decode supports non-contiguous input") {
+TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings without copying") {
     const auto encoded = encode_normal(std::span<const std::int32_t>{std::array{1, -2, 3}});
     const auto input   = std::deque<std::byte>{encoded.begin(), encoded.end()};
 
@@ -275,6 +278,29 @@ TEST_CASE("rfc8746 typed array view decode requires contiguous input while ownin
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
+        CHECK_EQ(to_hex(std::ranges::subrange(dec.tell(), input.end())), "01000000feffffff03000000");
+    }
+
+    {
+        auto dec                  = make_decoder<typed_array_codec>(input);
+        using non_contiguous_view = typed_array_view_for<std::int32_t, decltype(dec)>;
+        static_assert(std::same_as<typename non_contiguous_view::payload_range_type, typename decltype(dec)::bstr_view_t>);
+        static_assert(!HasTypedArrayPayloadBytes<non_contiguous_view>);
+
+        non_contiguous_view decoded;
+        const auto          result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.size(), 3U);
+        CHECK_EQ(decoded.copy_values(), std::vector<std::int32_t>{1, -2, 3});
+        CHECK_EQ(to_hex(decoded.payload_range()), "01000000feffffff03000000");
+    }
+
+    {
+        auto dec              = make_decoder<typed_array_codec>(encoded);
+        using contiguous_view = typed_array_view_for<std::int32_t, decltype(dec)>;
+        static_assert(std::same_as<typename contiguous_view::payload_range_type, std::span<const std::byte>>);
+        static_assert(HasTypedArrayPayloadBytes<contiguous_view>);
     }
 
     {
