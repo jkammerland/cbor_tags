@@ -4,9 +4,11 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_ranges.h>
 #include <cbor_tags/cbor_raw_views.h>
+#include <compare>
 #include <cstddef>
 #include <deque>
 #include <doctest/doctest.h>
+#include <iterator>
 #include <list>
 #include <ranges>
 #include <span>
@@ -55,6 +57,83 @@ template <typename RawView> std::vector<std::byte> reencode(const RawView &view)
     REQUIRE(enc(view));
     return output;
 }
+
+struct counting_random_access_bytes {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    struct iterator {
+        using value_type        = std::byte;
+        using difference_type   = std::ptrdiff_t;
+        using iterator_category = std::random_access_iterator_tag;
+        using iterator_concept  = std::random_access_iterator_tag;
+
+        const counting_random_access_bytes *owner{};
+        size_type                           index{};
+
+        [[nodiscard]] value_type operator*() const { return owner->bytes[index]; }
+        [[nodiscard]] value_type operator[](difference_type offset) const {
+            return owner->bytes[static_cast<size_type>(static_cast<difference_type>(index) + offset)];
+        }
+
+        iterator &operator++() {
+            ++owner->increments;
+            ++index;
+            return *this;
+        }
+        iterator operator++(int) {
+            auto copy = *this;
+            ++(*this);
+            return copy;
+        }
+        iterator &operator--() {
+            ++owner->increments;
+            --index;
+            return *this;
+        }
+        iterator operator--(int) {
+            auto copy = *this;
+            --(*this);
+            return copy;
+        }
+        iterator &operator+=(difference_type offset) {
+            ++owner->jumps;
+            index = static_cast<size_type>(static_cast<difference_type>(index) + offset);
+            return *this;
+        }
+        iterator &operator-=(difference_type offset) {
+            ++owner->jumps;
+            index = static_cast<size_type>(static_cast<difference_type>(index) - offset);
+            return *this;
+        }
+
+        friend iterator operator+(iterator it, difference_type offset) {
+            it += offset;
+            return it;
+        }
+        friend iterator operator+(difference_type offset, iterator it) { return it + offset; }
+        friend iterator operator-(iterator it, difference_type offset) {
+            it -= offset;
+            return it;
+        }
+        friend difference_type operator-(iterator lhs, iterator rhs) {
+            return static_cast<difference_type>(lhs.index) - static_cast<difference_type>(rhs.index);
+        }
+        friend bool operator==(iterator lhs, iterator rhs) { return lhs.owner == rhs.owner && lhs.index == rhs.index; }
+        friend auto operator<=>(iterator lhs, iterator rhs) { return lhs.index <=> rhs.index; }
+    };
+
+    std::vector<std::byte> bytes;
+    mutable size_type      increments{};
+    mutable size_type      jumps{};
+
+    [[nodiscard]] iterator  begin() const { return iterator{this, 0}; }
+    [[nodiscard]] iterator  end() const { return iterator{this, bytes.size()}; }
+    [[nodiscard]] size_type size() const noexcept { return bytes.size(); }
+};
+
+static_assert(std::ranges::random_access_range<const counting_random_access_bytes>);
+static_assert(CborInputBuffer<counting_random_access_bytes>);
 
 void check_raw_item_decode_error(const char *hex, status_code expected) {
     auto bytes = to_bytes(hex);
@@ -326,6 +405,20 @@ TEST_CASE("raw encoded views expose offset contiguous bytes as a span") {
     CHECK_EQ(to_hex(span), "820102");
     CHECK(prefix);
     CHECK_FALSE(suffix);
+}
+
+TEST_CASE("raw encoded views skip large random-access payloads by jumping") {
+    counting_random_access_bytes input;
+    input.bytes = {std::byte{0x5A}, std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x00}};
+    input.bytes.resize(input.bytes.size() + 65536U, std::byte{0xAB});
+
+    auto                                          dec = make_decoder(input);
+    typename decltype(dec)::raw_encoded_item_view item;
+
+    REQUIRE(dec(item));
+    CHECK_EQ(item.size(), input.bytes.size());
+    CHECK_GE(input.jumps, 1U);
+    CHECK_LT(input.increments, 32U);
 }
 
 TEST_CASE("raw encoded views borrow non-contiguous input without copying") {

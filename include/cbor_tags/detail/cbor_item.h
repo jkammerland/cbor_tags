@@ -37,6 +37,20 @@ struct cbor_item_reader {
     }
 
     template <typename Iterator> static bool advance_bytes(Iterator &cursor, Iterator end, std::uint64_t length, status_code &status) {
+        if constexpr (std::random_access_iterator<Iterator>) {
+            const auto remaining = end - cursor;
+            if (remaining < 0) {
+                status = status_code::error;
+                return false;
+            }
+            if (length > static_cast<std::uint64_t>(remaining)) {
+                status = status_code::incomplete;
+                return false;
+            }
+            cursor += static_cast<std::iter_difference_t<Iterator>>(length);
+            return true;
+        }
+
         for (std::uint64_t index = 0; index < length; ++index) {
             if (cursor == end) {
                 status = status_code::incomplete;
