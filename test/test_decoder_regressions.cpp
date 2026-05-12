@@ -27,6 +27,17 @@ consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument
     return argument != std::numeric_limits<std::uint64_t>::max();
 }
 
+struct legacy_decoder_options_without_strict_integer_flag {
+    using is_options  = void;
+    using return_type = expected<void, status_code>;
+    using error_type  = status_code;
+
+    static constexpr bool wrap_groups = true;
+};
+
+static_assert(IsOptions<legacy_decoder_options_without_strict_integer_flag>);
+static_assert(!cbor::tags::detail::strict_integer_decode_option_v<legacy_decoder_options_without_strict_integer_flag>);
+
 struct NonDefaultComparator {
     int tag;
 
@@ -218,6 +229,20 @@ TEST_CASE("strict integer decoder option should reject signed negative integer u
 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+}
+
+TEST_CASE("decoder options without strict integer flag default to slicing") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
+
+    auto dec = make_decoder_with_options<legacy_decoder_options_without_strict_integer_flag>(buffer);
+
+    std::uint32_t decoded{};
+    auto          result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded, 0U);
 }
 
 TEST_CASE("decoder should accept integer decode boundaries") {

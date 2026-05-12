@@ -176,7 +176,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             const auto decoded = decode_unsigned(additionalInfo);
             // Default native integer decode intentionally slices through the target type.
             // strict_integer_decode keeps this check enabled for users that need representability.
-            if constexpr (Options::strict_integer_decode) {
+            if constexpr (detail::strict_integer_decode_option_v<Options>) {
                 if (!detail::unsigned_value_fits<T>(decoded)) {
                     return status_code::no_match_for_int_on_buffer;
                 }
@@ -186,7 +186,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             const auto decoded = decode_unsigned(additionalInfo);
             // Default native integer decode intentionally slices through the target type.
             // strict_integer_decode keeps this check enabled for users that need representability.
-            if constexpr (Options::strict_integer_decode) {
+            if constexpr (detail::strict_integer_decode_option_v<Options>) {
                 if (!detail::negative_argument_fits<T>(decoded)) {
                     return status_code::no_match_for_int_on_buffer;
                 }
@@ -222,7 +222,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto decoded = decode_unsigned(additionalInfo);
         // Default native integer decode intentionally slices through the target type.
         // strict_integer_decode keeps this check enabled for users that need representability.
-        if constexpr (Options::strict_integer_decode) {
+        if constexpr (detail::strict_integer_decode_option_v<Options>) {
             if (!detail::unsigned_value_fits<T>(decoded)) {
                 return status_code::no_match_for_uint_on_buffer;
             }

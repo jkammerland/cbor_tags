@@ -32,8 +32,22 @@ concept IsOptions = requires(T) {
     typename T::is_options;
     typename T::return_type;
     { T::wrap_groups } -> std::convertible_to<bool>;
+};
+
+namespace detail {
+
+template <typename T>
+concept HasStrictIntegerDecodeOption = requires {
     { T::strict_integer_decode } -> std::convertible_to<bool>;
 };
+
+template <typename T, bool HasOption = HasStrictIntegerDecodeOption<T>> struct strict_integer_decode_option : std::false_type {};
+
+template <typename T> struct strict_integer_decode_option<T, true> : std::bool_constant<static_cast<bool>(T::strict_integer_decode)> {};
+
+template <typename T> inline constexpr bool strict_integer_decode_option_v = strict_integer_decode_option<T>::value;
+
+} // namespace detail
 
 template <typename T>
 concept IsCborBufferByte =
