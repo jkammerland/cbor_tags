@@ -5,6 +5,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_segments.h>
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -20,13 +21,156 @@ using namespace cbor::tags;
 namespace {
 
 template <typename RawView>
-concept CanEncodeBorrowedSegments = requires(const RawView &view) { encode_encoded_segments(view); };
+concept CanEncodeSegments = requires(const RawView &view) { to_segments(view); };
+
+template <typename RawView>
+concept CanBorrowSegments = requires(const RawView &view) { borrow_segments(view); };
+
+template <typename RawView>
+concept CanBorrowSegmentsRvalue = requires { borrow_segments(std::declval<RawView>()); };
+
+template <typename RawView>
+concept CanBorrowSegmentsExplicitRvalue = requires { borrow_segments<RawView>(std::declval<std::remove_reference_t<RawView>>()); };
+
+template <typename RawView>
+concept CanEncodeEncodedSegments = requires(const RawView &view) { encode_encoded_segments(view); };
+
+template <typename RawView>
+concept CanEncodeEncodedSegmentsRvalue = requires { encode_encoded_segments(std::declval<RawView>()); };
+
+template <typename RawView>
+concept CanEncodeEncodedSegmentsExplicitRvalue =
+    requires { encode_encoded_segments<RawView>(std::declval<std::remove_reference_t<RawView>>()); };
+
+template <typename Segments, typename Output>
+concept CanFlattenTo = requires(const Segments &segments, Output &output) { segments.flatten_to(output); };
 
 template <typename RawView>
 concept CanVisitBorrowedSegments = requires(const RawView &view) { visit_encoded_segments(view, [](std::span<const std::byte>) {}); };
 
+template <typename RawView>
+concept CanVisitBorrowedSegmentsRvalue = requires { visit_encoded_segments(std::declval<RawView>(), [](std::span<const std::byte>) {}); };
+
+template <typename RawView>
+concept CanVisitBorrowedSegmentsExplicitRvalue =
+    requires { visit_encoded_segments<RawView>(std::declval<std::remove_reference_t<RawView>>(), [](std::span<const std::byte>) {}); };
+
+template <typename Storage>
+concept CanBuildByteSegments = requires { typename basic_byte_segments<Storage>; };
+
 template <typename T>
 concept CanWrapSegmentItemAsBstr = requires(T &&value) { as_bstr(std::forward<T>(value)); };
+
+struct copyable_owning_byte_view : std::ranges::view_interface<copyable_owning_byte_view> {
+    std::vector<std::byte> bytes;
+
+    copyable_owning_byte_view() = default;
+    explicit copyable_owning_byte_view(std::vector<std::byte> input) : bytes(std::move(input)) {}
+
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto data() const noexcept { return bytes.data(); }
+    [[nodiscard]] auto size() const noexcept { return bytes.size(); }
+};
+
+using owning_encoded_item_view = basic_encoded_item_view<copyable_owning_byte_view>;
+
+struct tracking_byte_segment_storage {
+    using segment_type   = basic_byte_segment<4>;
+    using container_type = std::vector<segment_type>;
+
+    int         *reserve_owned_calls{};
+    std::size_t *last_owned_reserve{};
+
+    [[nodiscard]] container_type make_container() const { return {}; }
+    [[nodiscard]] segment_type   make_owned(std::span<const std::byte> bytes) const { return segment_type::owned(bytes); }
+    [[nodiscard]] segment_type   make_borrowed(std::span<const std::byte> bytes) const { return segment_type::borrowed(bytes); }
+
+    void reserve_owned_bytes(std::size_t count) {
+        if (reserve_owned_calls != nullptr) {
+            ++(*reserve_owned_calls);
+        }
+        if (last_owned_reserve != nullptr) {
+            *last_owned_reserve = count;
+        }
+    }
+};
+
+struct declining_try_append_byte_segment_storage {
+    using segment_type   = basic_byte_segment<4>;
+    using container_type = std::vector<segment_type>;
+
+    int *try_calls{};
+
+    [[nodiscard]] container_type make_container() const { return {}; }
+    [[nodiscard]] segment_type   make_owned(std::span<const std::byte> bytes) const { return segment_type::owned(bytes); }
+    [[nodiscard]] segment_type   make_borrowed(std::span<const std::byte> bytes) const { return segment_type::borrowed(bytes); }
+
+    bool try_append_owned(container_type &, std::span<const std::byte>) {
+        if (try_calls != nullptr) {
+            ++(*try_calls);
+        }
+        return false;
+    }
+};
+
+struct invalid_byte_segment_storage {
+    using segment_type   = basic_byte_segment<4>;
+    using container_type = std::vector<segment_type>;
+
+    [[nodiscard]] container_type make_container() const { return {}; }
+    [[nodiscard]] segment_type   make_owned(std::span<const std::byte> bytes) const { return segment_type::owned(bytes); }
+};
+
+struct non_coalescing_byte_segment {
+    [[nodiscard]] static non_coalescing_byte_segment owned(std::span<const std::byte> bytes) {
+        non_coalescing_byte_segment segment;
+        segment.kind_ = byte_segment_kind::owned;
+        segment.owned_.assign(bytes.begin(), bytes.end());
+        return segment;
+    }
+
+    [[nodiscard]] static non_coalescing_byte_segment borrowed(std::span<const std::byte> bytes) {
+        non_coalescing_byte_segment segment;
+        segment.kind_     = byte_segment_kind::borrowed;
+        segment.borrowed_ = bytes;
+        return segment;
+    }
+
+    [[nodiscard]] byte_segment_kind kind() const noexcept { return kind_; }
+    [[nodiscard]] bool              is_owned() const noexcept { return kind_ == byte_segment_kind::owned; }
+    [[nodiscard]] bool              is_borrowed() const noexcept { return kind_ == byte_segment_kind::borrowed; }
+
+    [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
+        if (is_borrowed()) {
+            return borrowed_;
+        }
+        return std::span<const std::byte>{owned_.data(), owned_.size()};
+    }
+
+    [[nodiscard]] const std::byte *data() const noexcept { return bytes().data(); }
+    [[nodiscard]] std::size_t      size() const noexcept { return bytes().size(); }
+    [[nodiscard]] bool             empty() const noexcept { return bytes().empty(); }
+
+  private:
+    byte_segment_kind          kind_{byte_segment_kind::owned};
+    std::vector<std::byte>     owned_{};
+    std::span<const std::byte> borrowed_{};
+};
+
+struct non_coalescing_byte_segment_storage {
+    using segment_type   = non_coalescing_byte_segment;
+    using container_type = std::vector<segment_type>;
+
+    [[nodiscard]] container_type make_container() const { return {}; }
+    [[nodiscard]] segment_type   make_owned(std::span<const std::byte> bytes) const { return segment_type::owned(bytes); }
+    [[nodiscard]] segment_type   make_borrowed(std::span<const std::byte> bytes) const { return segment_type::borrowed(bytes); }
+};
+
+static_assert(IsEncodedItemView<owning_encoded_item_view>);
+static_assert(cbor::tags::detail::SpanBackedEncodedItemView<owning_encoded_item_view>);
+static_assert(!cbor::tags::detail::BorrowedSpanBackedEncodedItemView<owning_encoded_item_view>);
+static_assert(!cbor::tags::detail::EncodedByteViewRange<std::ranges::owning_view<std::vector<std::byte>>>);
 
 std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
     std::vector<std::byte> output;
@@ -46,7 +190,7 @@ void check_segment_header(std::uint64_t value, std::byte major, const char *expe
     CHECK_EQ(to_hex(header.span()), expected_hex);
 }
 
-bool has_borrowed_segment(const cbor_segments &segments, const std::byte *data, std::size_t size) {
+template <typename Segments> bool has_borrowed_segment(const Segments &segments, const std::byte *data, std::size_t size) {
     for (const auto &segment : segments) {
         if (segment.is_borrowed() && segment.data() == data && segment.size() == size) {
             return true;
@@ -77,9 +221,36 @@ int count_borrowed_segments(const cbor_segments &segments) {
 
 } // namespace
 
+using tiny_inline_byte_segments   = basic_byte_segments<default_byte_segment_storage<4>>;
+using tracking_byte_segments      = basic_byte_segments<tracking_byte_segment_storage>;
+using split_byte_segments         = basic_byte_segments<non_coalescing_byte_segment_storage>;
+using declining_try_byte_segments = basic_byte_segments<declining_try_append_byte_segment_storage>;
+
+static_assert(std::same_as<byte_segment_kind, cbor_segment_kind>);
+static_assert(std::same_as<byte_segment, cbor_segment>);
+static_assert(std::same_as<byte_segments, cbor_segments>);
+static_assert(CborOutputBuffer<byte_segments>);
+static_assert(CborSegmentOutputBuffer<byte_segments>);
+static_assert(!CborAppendOutputBuffer<byte_segments>);
+static_assert(CborOutputBuffer<tiny_inline_byte_segments>);
+static_assert(CborSegmentOutputBuffer<tiny_inline_byte_segments>);
+static_assert(!CborAppendOutputBuffer<tiny_inline_byte_segments>);
+static_assert(CborOutputBuffer<tracking_byte_segments>);
+static_assert(CborSegmentOutputBuffer<tracking_byte_segments>);
+static_assert(!CborAppendOutputBuffer<tracking_byte_segments>);
+static_assert(CborOutputBuffer<split_byte_segments>);
+static_assert(CborSegmentOutputBuffer<split_byte_segments>);
+static_assert(!CborAppendOutputBuffer<split_byte_segments>);
+static_assert(CborOutputBuffer<declining_try_byte_segments>);
+static_assert(CborSegmentOutputBuffer<declining_try_byte_segments>);
+static_assert(!CborAppendOutputBuffer<declining_try_byte_segments>);
+static_assert(!CanBuildByteSegments<invalid_byte_segment_storage>);
 static_assert(CborOutputBuffer<cbor_segments>);
 static_assert(CborSegmentOutputBuffer<cbor_segments>);
 static_assert(!CborAppendOutputBuffer<cbor_segments>);
+static_assert(CanFlattenTo<cbor_segments, std::vector<std::byte>>);
+static_assert(CanFlattenTo<cbor_segments, std::vector<unsigned char>>);
+static_assert(!CanFlattenTo<cbor_segments, std::vector<std::uint16_t>>);
 static_assert(!std::constructible_from<encoded_item_segments, cbor_segments>);
 static_assert(!std::constructible_from<encoded_item_bstr, const encoded_item_segments &>);
 static_assert(!std::constructible_from<encoded_item_bstr, encoded_item_segments &&>);
@@ -113,6 +284,19 @@ TEST_CASE("segment header encoding covers CBOR size boundaries") {
     }
 }
 
+TEST_CASE("cbor argument headers remain accepted as owned segment input") {
+    const auto header = cbor::tags::detail::encode_cbor_major_argument_header(24, std::byte{0x40});
+
+    const auto segment = cbor_segment::owned(header);
+    CHECK(segment.is_owned());
+    CHECK_EQ(to_hex(segment.bytes()), "5818");
+
+    cbor_segments segments;
+    segments.append_owned(header);
+
+    CHECK_EQ(to_hex(flatten_segments(segments)), "5818");
+}
+
 TEST_CASE("cbor segments can be used as the normal encoder output backend") {
     std::vector<int> ints{1, 2, 3};
     auto             blob0 = to_bytes("0102");
@@ -132,6 +316,198 @@ TEST_CASE("cbor segments can be used as the normal encoder output backend") {
     CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
     CHECK(has_borrowed_segment(segmented, blob0.data(), blob0.size()));
     CHECK(has_borrowed_segment(segmented, blob1.data(), blob1.size()));
+}
+
+TEST_CASE("byte segments support custom inline storage as encoder backend") {
+    auto payload = to_bytes("010203040506");
+
+    tiny_inline_byte_segments segmented;
+    auto                      enc = make_encoder(segmented);
+    REQUIRE(enc(as_bstr_range(std::span<const std::byte>{payload})));
+
+    std::vector<std::byte> flattened;
+    segmented.flatten_to(flattened);
+
+    CHECK_EQ(to_hex(flattened), "46010203040506");
+    CHECK(has_borrowed_segment(segmented, payload.data(), payload.size()));
+}
+
+TEST_CASE("byte segments do not require custom segment coalescing") {
+    split_byte_segments segmented;
+    auto                enc = make_encoder(segmented);
+
+    REQUIRE(enc(as_array{2}, 1, 2));
+
+    CHECK_EQ(to_hex(flatten_segments(segmented)), "820102");
+    CHECK_GT(segmented.size(), 1U);
+}
+
+TEST_CASE("storage try append hook falls back when it declines") {
+    int try_calls{};
+
+    declining_try_byte_segments segmented{declining_try_append_byte_segment_storage{.try_calls = &try_calls}};
+    auto                        enc = make_encoder(segmented);
+
+    REQUIRE(enc(as_array{2}, 1, 2));
+
+    CHECK_GT(try_calls, 0);
+    CHECK_EQ(to_hex(flatten_segments(segmented)), "820102");
+}
+
+TEST_CASE("bstr segment helpers can append into custom segment storage") {
+    auto payload = to_bytes("aabbccdd");
+
+    tiny_inline_byte_segments segments;
+    encode_tagged_bstr_segments_into(segments, static_tag<24>{}, std::span<const std::byte>{payload});
+
+    CHECK_EQ(to_hex(flatten_segments(segments)), "d81844aabbccdd");
+    CHECK(has_borrowed_segment(segments, payload.data(), payload.size()));
+}
+
+TEST_CASE("bstr segment into helpers append to existing segment buffers") {
+    auto payload = to_bytes("aabbcc");
+    auto span    = std::span<const std::byte>{payload};
+
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x00}});
+
+        encode_bstr_segments_into(segments, span.first(2));
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "0042aabb");
+        CHECK(has_borrowed_segment(segments, payload.data(), 2U));
+    }
+
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x00}});
+
+        encode_indefinite_bstr_segments_into(segments, span, 2);
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "005f42aabb41ccff");
+        CHECK(has_borrowed_segment(segments, payload.data(), 2U));
+        CHECK(has_borrowed_segment(segments, payload.data() + 2, 1U));
+    }
+
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x00}});
+
+        encode_tagged_bstr_segments_into(segments, std::uint64_t{24}, span.first(2));
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "00d81842aabb");
+        CHECK(has_borrowed_segment(segments, payload.data(), 2U));
+    }
+
+    {
+        cbor_segments segments;
+        segments.append_owned({std::byte{0x00}});
+
+        encode_tagged_bstr_segments_into(segments, dynamic_tag<std::uint64_t>{24}, span.first(2));
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "00d81842aabb");
+        CHECK(has_borrowed_segment(segments, payload.data(), 2U));
+    }
+}
+
+TEST_CASE("bstr segment into helpers reject zero chunk size") {
+    auto          payload = to_bytes("0102");
+    cbor_segments segments;
+
+    CHECK_THROWS_AS(encode_indefinite_bstr_segments_into(segments, std::span<const std::byte>{payload}, 0), std::invalid_argument);
+}
+
+TEST_CASE("segment into helpers avoid allocation after segment reserve") {
+    auto payload = to_bytes("aabbcc");
+    auto span    = std::span<const std::byte>{payload};
+    auto prefix  = to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+
+    {
+        cbor_segments segments;
+        segments.reserve_segments(2);
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_bstr_segments_into(segments, span);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "43aabbcc");
+    }
+
+    {
+        cbor_segments segments;
+        segments.reserve_segments(6);
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_indefinite_bstr_segments_into(segments, span, 2);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "5f42aabb41ccff");
+    }
+
+    {
+        cbor_segments segments;
+        segments.reserve_segments(3);
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_tagged_bstr_segments_into(segments, static_tag<24>{}, span);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), "d81843aabbcc");
+    }
+
+    {
+        cbor_segments segments;
+        segments.reserve_segments(3);
+        segments.append_owned(std::span<const std::byte>{prefix});
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_bstr_segments_into(segments, span);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(prefix) + "43aabbcc");
+    }
+
+    {
+        cbor_segments segments;
+        segments.reserve_segments(7);
+        segments.append_owned(std::span<const std::byte>{prefix});
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_indefinite_bstr_segments_into(segments, span, 2);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(prefix) + "5f42aabb41ccff");
+    }
+
+    {
+        cbor_segments segments;
+        segments.reserve_segments(4);
+        segments.append_owned(std::span<const std::byte>{prefix});
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_tagged_bstr_segments_into(segments, static_tag<24>{}, span);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(prefix) + "d81843aabbcc");
+    }
+}
+
+TEST_CASE("byte segments forward owned-byte reserve to storage policy") {
+    int         reserve_calls{};
+    std::size_t last_reserve{};
+
+    tracking_byte_segments segments{
+        tracking_byte_segment_storage{.reserve_owned_calls = &reserve_calls, .last_owned_reserve = &last_reserve}};
+    segments.reserve_owned_bytes(128);
+
+    CHECK_EQ(reserve_calls, 1);
+    CHECK_EQ(last_reserve, 128U);
 }
 
 TEST_CASE("segmented byte string range preserves header order for non-contiguous payloads") {
@@ -199,6 +575,12 @@ TEST_CASE("encoded item segments can be array elements map values tags and bstr 
 
     CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
     CHECK_EQ(count_borrowed_segments(segmented, payload.data(), payload.size()), 4);
+
+    std::vector<std::byte> appendable;
+    auto                   appendable_encoder = make_encoder(appendable);
+    REQUIRE(appendable_encoder(as_array{3}, item, make_tag_pair(static_tag<100>{}, item), as_bstr(item)));
+
+    CHECK_EQ(to_hex(appendable), "8343010203d864430102034443010203");
 }
 
 TEST_CASE("encoded item segment validation requires exactly one complete cbor item") {
@@ -413,6 +795,19 @@ TEST_CASE("owned and borrowed cbor segments keep their lifetime contracts") {
     CHECK_EQ(to_hex(short_owned.bytes()), "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
     CHECK_EQ(to_hex(long_owned.bytes()), "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
     CHECK_EQ(to_hex(borrowed.bytes()), "ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+
+    auto coalesced = cbor_segment::owned(std::span<const std::byte>{short_payload});
+    auto byte_20   = to_bytes("20");
+    auto byte_21   = to_bytes("21");
+
+    REQUIRE(coalesced.append_owned(std::span<const std::byte>{byte_20}));
+    REQUIRE(coalesced.append_owned(std::span<const std::byte>{byte_21}));
+
+    byte_20[0] = std::byte{0xAA};
+    byte_21[0] = std::byte{0xBB};
+
+    CHECK(coalesced.is_owned());
+    CHECK_EQ(to_hex(coalesced.bytes()), "ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021");
 }
 
 TEST_CASE("indefinite bstr segmented output rejects zero chunk size") {
@@ -433,15 +828,49 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         REQUIRE(dec(item));
 
         static_assert(CanVisitBorrowedSegments<item_view>);
+        static_assert(!CanVisitBorrowedSegmentsRvalue<item_view>);
+        static_assert(!CanVisitBorrowedSegmentsExplicitRvalue<const item_view &>);
+        static_assert(CanBorrowSegments<item_view>);
+        static_assert(!CanBorrowSegmentsRvalue<item_view>);
+        static_assert(!CanBorrowSegmentsExplicitRvalue<const item_view &>);
+        static_assert(CanEncodeEncodedSegments<item_view>);
+        static_assert(!CanEncodeEncodedSegmentsRvalue<item_view>);
+        static_assert(!CanEncodeEncodedSegmentsExplicitRvalue<const item_view &>);
         std::vector<std::byte> appended;
         append_encoded_segments(appended, item);
         CHECK_EQ(to_hex(appended), "820102");
 
-        const auto segments = encode_encoded_segments(item);
+        const auto segments = to_segments(item);
         REQUIRE_EQ(segments.size(), 1U);
-        CHECK(segments[0].is_borrowed());
-        CHECK_EQ(segments[0].data(), bytes.data());
+        CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
+
+        const auto as_segments_copy = as_segments(item);
+        REQUIRE_EQ(as_segments_copy.size(), 1U);
+        CHECK(as_segments_copy[0].is_owned());
+        CHECK_EQ(to_hex(flatten_segments(as_segments_copy)), "820102");
+
+        const auto borrowed_segments = borrow_segments(item);
+        REQUIRE_EQ(borrowed_segments.size(), 1U);
+        CHECK(borrowed_segments[0].is_borrowed());
+        CHECK_EQ(borrowed_segments[0].data(), bytes.data());
+        CHECK_EQ(to_hex(flatten_segments(borrowed_segments)), "820102");
+
+        const auto encoded_segments = encode_encoded_segments(item);
+        REQUIRE_EQ(encoded_segments.size(), 1U);
+        CHECK(encoded_segments[0].is_borrowed());
+        CHECK_EQ(encoded_segments[0].data(), bytes.data());
+        CHECK_EQ(to_hex(flatten_segments(encoded_segments)), "820102");
+
+        const auto copied_segments = copy_segments(item);
+        REQUIRE_EQ(copied_segments.size(), 1U);
+        CHECK(copied_segments[0].is_owned());
+        CHECK_EQ(to_hex(flatten_segments(copied_segments)), "820102");
+
+        const auto encoded_segments_copy = encode_encoded_segments_copy(item);
+        REQUIRE_EQ(encoded_segments_copy.size(), 1U);
+        CHECK(encoded_segments_copy[0].is_owned());
+        CHECK_EQ(to_hex(flatten_segments(encoded_segments_copy)), "820102");
     }
 
     {
@@ -451,13 +880,17 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         encoded_array_view array;
         REQUIRE(dec(array));
 
-        const auto segments = encode_encoded_segments(array);
+        const auto segments = to_segments(array);
         const auto flat     = flatten_segments(segments);
 
         REQUIRE_EQ(segments.size(), 1U);
-        CHECK(segments[0].is_borrowed());
-        CHECK_EQ(segments[0].data(), bytes.data());
+        CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flat), "9f018202039f0405ffff");
+
+        const auto borrowed_segments = borrow_segments(array);
+        REQUIRE_EQ(borrowed_segments.size(), 1U);
+        CHECK(borrowed_segments[0].is_borrowed());
+        CHECK_EQ(borrowed_segments[0].data(), bytes.data());
     }
 
     {
@@ -468,11 +901,15 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         map_view map;
         REQUIRE(dec(map));
 
-        const auto segments = encode_encoded_segments(map);
+        const auto segments = to_segments(map);
         REQUIRE_EQ(segments.size(), 1U);
-        CHECK(segments[0].is_borrowed());
-        CHECK_EQ(segments[0].data(), bytes.data());
+        CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(segments)), "a10102");
+
+        const auto borrowed_segments = borrow_segments(map);
+        REQUIRE_EQ(borrowed_segments.size(), 1U);
+        CHECK(borrowed_segments[0].is_borrowed());
+        CHECK_EQ(borrowed_segments[0].data(), bytes.data());
     }
 
     {
@@ -484,12 +921,39 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         bool               suffix{};
         REQUIRE(dec(prefix, array, suffix));
 
-        const auto segments = encode_encoded_segments(array);
+        const auto segments = to_segments(array);
         REQUIRE_EQ(segments.size(), 1U);
-        CHECK(segments[0].is_borrowed());
-        CHECK_EQ(segments[0].data(), bytes.data() + 1);
+        CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
+
+        const auto borrowed_segments = borrow_segments(array);
+        REQUIRE_EQ(borrowed_segments.size(), 1U);
+        CHECK(borrowed_segments[0].is_borrowed());
+        CHECK_EQ(borrowed_segments[0].data(), bytes.data() + 1);
     }
+}
+
+TEST_CASE("owning span-backed raw encoded views are copied into segments") {
+    cbor_segments segments;
+    {
+        auto view = owning_encoded_item_view{copyable_owning_byte_view{to_bytes("820102")}};
+
+        static_assert(!CanBorrowSegments<owning_encoded_item_view>);
+        static_assert(!CanEncodeEncodedSegments<owning_encoded_item_view>);
+        static_assert(!CanVisitBorrowedSegments<owning_encoded_item_view>);
+        segments = to_segments(view);
+
+        REQUIRE_EQ(segments.size(), 1U);
+        CHECK(segments[0].is_owned());
+    }
+
+    CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
+
+    segments = to_segments(owning_encoded_item_view{copyable_owning_byte_view{to_bytes("83010203")}});
+
+    REQUIRE_EQ(segments.size(), 1U);
+    CHECK(segments[0].is_owned());
+    CHECK_EQ(to_hex(flatten_segments(segments)), "83010203");
 }
 
 TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fallback") {
@@ -498,8 +962,9 @@ TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fall
     auto                 dec = make_decoder(bytes);
     using array_view         = typename decltype(dec)::raw_encoded_array_view;
 
-    static_assert(!CanEncodeBorrowedSegments<array_view>);
+    static_assert(CanEncodeSegments<array_view>);
     static_assert(!CanVisitBorrowedSegments<array_view>);
+    static_assert(!CanBorrowSegments<array_view>);
 
     array_view array;
     REQUIRE(dec(array));
@@ -508,7 +973,7 @@ TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fall
     append_encoded_segments(appended, array);
     CHECK_EQ(to_hex(appended), "9f01820203ff");
 
-    const auto segments = encode_encoded_segments_copy(array);
+    const auto segments = to_segments(array);
     const auto flat     = flatten_segments(segments);
 
     REQUIRE_EQ(segments.size(), 1U);

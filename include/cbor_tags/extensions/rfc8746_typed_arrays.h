@@ -58,7 +58,8 @@ concept IsTypedArrayElement = requires {
 namespace detail {
 
 template <typename R>
-concept TypedArrayPayloadRange = std::ranges::view<R> && std::ranges::forward_range<const R> && cbor::tags::detail::ByteLikeRange<const R>;
+concept TypedArrayPayloadRange =
+    std::ranges::view<R> && std::copy_constructible<R> && std::ranges::forward_range<const R> && cbor::tags::detail::ByteLikeRange<const R>;
 
 template <typename Decoder, typename R>
 concept DecodableTypedArrayPayloadRange =
@@ -401,10 +402,25 @@ template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_
     }
 }
 
+template <cbor::tags::detail::ByteSegmentsOutputBuffer Segments, IsTypedArrayElement T>
+void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
+    if constexpr (std::endian::native == std::endian::little) {
+        encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>>::tag, std::as_bytes(values));
+    } else {
+        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires a little-endian native payload");
+    }
+}
+
 template <IsTypedArrayElement T>
     requires(!std::is_const_v<T>)
 [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<T> values) {
     return encode_typed_array_segments(std::span<const T>{values.data(), values.size()});
+}
+
+template <cbor::tags::detail::ByteSegmentsOutputBuffer Segments, IsTypedArrayElement T>
+    requires(!std::is_const_v<T>)
+void encode_typed_array_segments_into(Segments &segments, std::span<T> values) {
+    encode_typed_array_segments_into(segments, std::span<const T>{values.data(), values.size()});
 }
 
 template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
@@ -415,8 +431,8 @@ template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_
 
     cbor_segments segments;
     segments.reserve(3);
-    segments.append_owned(tag_header);
-    segments.append_owned(bstr_header);
+    segments.append_owned(tag_header.span());
+    segments.append_owned(bstr_header.span());
     segments.append_owned(payload);
     return segments;
 }

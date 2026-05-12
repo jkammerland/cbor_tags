@@ -14,8 +14,8 @@ namespace cbor::tags {
 namespace detail {
 
 template <typename R>
-concept EncodedByteViewRange = std::ranges::view<R> && std::ranges::input_range<const R> && std::ranges::sized_range<const R> &&
-                               std::ranges::common_range<const R> && IsByteLikeRange<const R>;
+concept EncodedByteViewRange = std::ranges::view<R> && std::copy_constructible<R> && std::ranges::input_range<const R> &&
+                               std::ranges::sized_range<const R> && std::ranges::common_range<const R> && IsByteLikeRange<const R>;
 
 } // namespace detail
 

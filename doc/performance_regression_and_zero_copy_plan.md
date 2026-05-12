@@ -236,17 +236,24 @@ For indefinite/chunked output:
 
 Segmented output must make ownership explicit. A segment that borrows from a
 temporary range must be rejected or impossible to construct safely.
+`to_segments(view)` and `as_segments(view)` therefore materialize owned bytes.
+Callers that want zero-copy output must opt in with `borrow_segments(view)`,
+which is constrained to lvalue, borrowed, span-backed encoded views.
 
-Owned segment boundaries are not semantic. `cbor_segments` may coalesce adjacent
-owned writes, while borrowed segments remain explicit because they carry the
-zero-copy lifetime contract. Code that needs byte-for-byte output should use
-`flatten_segments` or iterate segment bytes, not infer meaning from owned segment
-boundaries.
+Owned segment boundaries are not semantic. `byte_segments`/`cbor_segments` may
+coalesce adjacent owned writes, while borrowed segments remain explicit because
+they carry the zero-copy lifetime contract. Code that needs byte-for-byte output
+should use `flatten_segments` or iterate segment bytes, not infer meaning from
+owned segment boundaries.
 
 The visitor and `append_*_segments` helpers target ordinary appendable byte
-buffers. `cbor_segments` is an encoder backend with explicit `append_owned` and
+buffers. `byte_segments` is an encoder backend with explicit `append_owned` and
 `append_borrowed` operations, so it intentionally satisfies `CborOutputBuffer`
-without pretending to be a plain `CborAppendOutputBuffer`.
+without pretending to be a plain `CborAppendOutputBuffer`. `cbor_segments`
+remains an alias for the default `byte_segments` backend.
+Custom `basic_byte_segments<Storage>` backends are currently scoped to encoder
+output and the explicit `_into` helpers. Validated encoded-item APIs still
+produce the default `cbor_segments` type.
 
 ## Typed Array Direction
 

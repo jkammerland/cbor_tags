@@ -70,6 +70,9 @@ using bad_payload_range = std::ranges::iota_view<unsigned char, unsigned char>;
 static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<bad_payload_range>);
 static_assert(!CanDecode<extension_decoder, typed_array_view<std::int32_t, bad_payload_range>>);
 
+using owning_payload_range = std::ranges::owning_view<std::vector<std::byte>>;
+static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<owning_payload_range>);
+
 template <typename T> std::vector<std::byte> encode_normal(std::span<const T> values) {
     std::vector<std::byte> output;
     auto                   enc = make_encoder<typed_array_codec>(output);
@@ -121,6 +124,15 @@ template <typename T> void check_decode_error(const char *hex, status_code expec
     CAPTURE(hex);
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), expected);
+}
+
+template <typename Segments> bool has_borrowed_segment(const Segments &segments, const std::byte *data, std::size_t size) {
+    for (const auto &segment : segments) {
+        if (segment.is_borrowed() && segment.data() == data && segment.size() == size) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -231,6 +243,25 @@ TEST_CASE("rfc8746 typed array segmented output borrows native little-endian pay
         CHECK(segments[1].is_borrowed());
         CHECK_EQ(segments[1].data(), original_bytes.data());
         CHECK_EQ(segments[1].size(), original_bytes.size());
+    }
+}
+
+TEST_CASE("rfc8746 typed array segmented into helper does not allocate after reserve") {
+    if constexpr (std::endian::native == std::endian::little) {
+        std::vector<std::int32_t> values{1, -2, 3};
+        const auto                span           = std::span<std::int32_t>{values};
+        const auto                original_bytes = std::as_bytes(span);
+
+        cbor_segments segments;
+        segments.reserve_segments(3);
+
+        {
+            cbor::tags::test::detail::allocation_failure_guard guard;
+            encode_typed_array_segments_into(segments, span);
+        }
+
+        CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(encode_normal(std::span<const std::int32_t>{values})));
+        CHECK(has_borrowed_segment(segments, original_bytes.data(), original_bytes.size()));
     }
 }
 
