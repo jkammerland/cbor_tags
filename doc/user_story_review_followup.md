@@ -70,7 +70,7 @@ policy, and iterator invalidation behavior.
 6. Public placeholder range-view types that are not implemented are removed from the advertised public variant surface, or they are fully implemented and covered by tests.
 7. Documentation explains lifetime requirements for `std::string_view`, `std::span<const std::byte>`, `bstr_view`, and `tstr_view` decode results.
 8. `doc/cddl_handling.md` no longer references a missing `cbor_tags/cbor_cddl.h` header.
-9. `doc/range_handling.md` is no longer an empty TODO and describes currently supported range behavior and limitations.
+9. `doc/experimental_ranges.md` describes currently supported range behavior and limitations.
 10. New tests cover:
    - signed overflow / out-of-range negative decode slicing
    - enum decode edge cases
@@ -86,7 +86,7 @@ policy, and iterator invalidation behavior.
   - `include/cbor_tags/cbor.h`
   - `include/cbor_tags/extensions/cbor_visualization.h`
   - `doc/cddl_handling.md`
-  - `doc/range_handling.md`
+  - `doc/experimental_ranges.md`
   - targeted tests under `test/`
 - Review source:
   - This story summarizes the local review notes generated during the review pass. Those notes are not required repo artifacts.

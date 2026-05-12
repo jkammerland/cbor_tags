@@ -35,6 +35,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [✅ Requirements](#-requirements)
 - [📦 Installation](#-installation)
 - [💡 CMake Integration](#-cmake-integration)
+- [✨ WIP Features](#-wip-features)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
 - [🌟 Practical Use Cases](#-practical-use-cases)
@@ -47,9 +48,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 ## 🎯 Key Features
 
 - Support for both contiguous and non-contiguous buffers.
-- Ranges support.
-- Potential for zero-copy encoding by joining multiple buffers.
-- Potential for zero-copy decoding using views and spans.
+- Buffer-backed decode views for contiguous and non-contiguous inputs.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` 
@@ -855,7 +854,7 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 ## ✨ WIP Features
 
 - Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
-- WIP: Complete ranges support
+- WIP / experimental: range wrappers, raw encoded views, lazy tag scanning, and segmented output for zero-copy-oriented encoding. See [Experimental Range And Segment APIs](doc/experimental_ranges.md).
 - TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
 - TODO: Options for encoder/decoder, such as (un)expected type tuning
 - TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
@@ -863,6 +862,10 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 - TODO: `shared_ptr` support.
 
 ## 📚 Documentation
+
+User-facing docs:
+
+- [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:
 

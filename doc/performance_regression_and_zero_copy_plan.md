@@ -7,6 +7,9 @@ since `v0.10.0` and for designing the next range/raw-view/zero-copy feature
 set. It is intentionally a plan document, not a claim that the described APIs
 already exist.
 
+For current user-facing behavior, see
+[`doc/experimental_ranges.md`](experimental_ranges.md).
+
 The goals are:
 
 - identify and attribute regressions introduced after `v0.10.0`
