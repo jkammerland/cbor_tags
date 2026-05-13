@@ -71,6 +71,7 @@ struct CDDLOptions {
     struct RowOptions {
         bool   format_by_rows{true};
         size_t offset{2};
+        size_t current_indent{0};
     } row_options;
     bool             always_inline{false};
     std::string_view root_name{};
@@ -782,6 +783,15 @@ template <typename T> std::string cddl_map_expr(CDDLContext &context, CDDLOption
 }
 
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
+inline std::string cddl_row_indent(CDDLOptions options, std::size_t extra_indent = 0) {
+    return std::string((options.row_options.current_indent + extra_indent) * options.row_options.offset, ' ');
+}
+
+inline CDDLOptions cddl_nested_row_options(CDDLOptions options) {
+    ++options.row_options.current_indent;
+    return options;
+}
+
 template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using tuple_type = aggregate_tuple_t<value_type>;
@@ -790,7 +800,7 @@ template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLCon
     constexpr auto raw_name = detail::aggregate_member_name<value_type, I>();
     if constexpr (IsNamedGroupWrapper<field_type>) {
         if (options.always_inline) {
-            return cddl_named_group_expr<named_group_value_t<field_type>>(context, options);
+            return cddl_named_group_expr<named_group_value_t<field_type>>(context, cddl_nested_row_options(options));
         }
         return ensure_cddl_named_group_definition<named_group_value_t<field_type>>(context, options, raw_name);
     } else if constexpr (IsNamedExtensionWrapper<field_type>) {
@@ -808,7 +818,7 @@ template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLCon
 template <typename T, std::size_t... Is>
 std::string cddl_named_entries(CDDLContext &context, CDDLOptions options, std::index_sequence<Is...>) {
     std::array<std::string, sizeof...(Is)> items{cddl_named_member_entry<T, Is>(context, options)...};
-    return join_cddl(items, options.row_options.format_by_rows ? ",\n" + std::string(options.row_options.offset, ' ') : ", ");
+    return join_cddl(items, options.row_options.format_by_rows ? ",\n" + cddl_row_indent(options, 1) : ", ");
 }
 
 template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open, char close) {
@@ -821,9 +831,9 @@ template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOpti
 
     auto entries = cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{});
     if (!entries.empty()) {
-        entries = std::string(options.row_options.offset, ' ') + entries;
+        entries = cddl_row_indent(options, 1) + entries;
     }
-    return fmt::format("{}\n{}\n{}", open, entries, close);
+    return fmt::format("{}\n{}\n{}{}", open, entries, cddl_row_indent(options), close);
 }
 
 template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options) {
@@ -1002,6 +1012,11 @@ template <typename T> std::string root_rule_name(CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     if (!options.root_name.empty()) {
         return sanitize_cddl_id(options.root_name);
+    } else if constexpr (IsEnum<value_type>) {
+        if (cddl_use_named_enum<value_type>(options)) {
+            return cddl_type_name<value_type>();
+        }
+        return "root";
     } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
         return cddl_type_name<value_type>();
     } else {

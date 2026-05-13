@@ -75,6 +75,7 @@ enum class CDDLSignedEnum : std::int8_t {};
 enum class CDDLTrafficLight : std::uint8_t { red = 1, yellow = 2, green = 4 };
 enum class CDDLSignedChoice : std::int8_t { negative = -2, zero = 0, positive = 3 };
 enum class CDDLUnorderedChoice : std::int8_t { high = 5, low = 1, negative = -1 };
+enum class CDDLWideMagicEnum : std::uint16_t { low = 1, high = 1000 };
 
 struct CDDLEnums {
     CDDLUnsignedEnum unsigned_enum;
@@ -192,6 +193,40 @@ struct CDDLAccountProfile {
     std::map<std::string, std::uint32_t>                   counters;
     std::optional<bool>                                    active;
     as_named_extension<std::map<std::string, std::string>> metadata;
+};
+
+struct CDDLNestedInlineLeaf {
+    std::optional<std::string> one;
+    std::optional<std::string> two;
+};
+
+struct CDDLNestedInlineMiddle {
+    as_named_group<CDDLNestedInlineLeaf> leaf;
+    std::string                          middle;
+};
+
+struct CDDLNestedInlineRoot {
+    as_named_group<CDDLNestedInlineMiddle> middle;
+    std::string                            root;
+};
+
+struct CDDLNamedCollisionGroup {
+    int value;
+};
+
+struct CDDLNamedCollisionRoot {
+    as_named_group<CDDLNamedCollisionGroup> group;
+    int                                     value;
+};
+
+struct CDDLBorrowedExtensionRoot {
+    int                                                         id;
+    as_named_extension<std::map<std::string_view, std::string>> extensions;
+};
+
+struct CDDLMultipleExtensionRoot {
+    as_named_extension<std::map<std::string, std::string>> labels;
+    as_named_extension<std::map<std::string, int>>         numbers;
 };
 #endif
 } // namespace
@@ -348,12 +383,12 @@ TEST_CASE("CDDL can emit named enum choices") {
     fmt::memory_buffer inline_root;
     cddl_schema_to<CDDLTrafficLight>(
         inline_root, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
-    CHECK_EQ(fmt::to_string(inline_root), "root = &(red: 1, yellow: 2, green: 4)");
+    CHECK_EQ(fmt::to_string(inline_root), "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)");
 
     fmt::memory_buffer unordered;
     cddl_schema_to<CDDLUnorderedChoice>(
         unordered, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
-    CHECK_EQ(fmt::to_string(unordered), "root = &(negative: -1, low: 1, high: 5)");
+    CHECK_EQ(fmt::to_string(unordered), "CDDLUnorderedChoice = &(negative: -1, low: 1, high: 5)");
 }
 
 TEST_CASE("CDDL reuses named enum definitions inside aggregate schemas") {
@@ -375,6 +410,20 @@ TEST_CASE("CDDL keeps enum underlying shapes unless named enum mode is requested
     fmt::memory_buffer empty_enum;
     cddl_schema_to<CDDLUnsignedEnum>(empty_enum, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
     CHECK_EQ(fmt::to_string(empty_enum), "root = uint");
+}
+
+TEST_CASE("CDDL named enum backend emits all enumerators outside the magic_enum default range") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLWideMagicEnum>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(buffer), "CDDLWideMagicEnum = &(low: 1, high: 1000)");
+}
+#endif
+
+#if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+TEST_CASE("CDDL named enum mode falls back without enum-name backend") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLTrafficLight>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(buffer), "root = uint");
 }
 #endif
 
@@ -433,6 +482,44 @@ TEST_CASE("named-map CDDL covers a larger grouped profile") {
              "owner = (? givenName: tstr, ? familyName: tstr)");
 }
 
+TEST_CASE("named-map CDDL indents nested inline named groups by depth") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLNestedInlineRoot>>(
+        buffer, {.row_options = {.format_by_rows = true}, .always_inline = true, .root_name = "Root"});
+    CHECK_EQ(fmt::to_string(buffer), "Root = {\n"
+                                     "  (\n"
+                                     "    (\n"
+                                     "      ? one: tstr,\n"
+                                     "      ? two: tstr\n"
+                                     "    ),\n"
+                                     "    middle: tstr\n"
+                                     "  ),\n"
+                                     "  root: tstr\n"
+                                     "}");
+}
+
+TEST_CASE("nested named groups roundtrip with the C++20 named reflection backend") {
+    CDDLNestedInlineRoot input{
+        .middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
+            .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{.one = std::string{"a"}, .two = std::string{"b"}}},
+            .middle = "m"}},
+        .root   = "r"};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedInlineRoot decoded{};
+    auto                 dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    REQUIRE(decoded.middle.value_.leaf.value_.one.has_value());
+    REQUIRE(decoded.middle.value_.leaf.value_.two.has_value());
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.one, "a");
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.two, "b");
+    CHECK_EQ(decoded.middle.value_.middle, "m");
+    CHECK_EQ(decoded.root, "r");
+}
+
 TEST_CASE("named-map CDDL keeps table examples typed") {
     fmt::memory_buffer square_roots;
     cddl_schema_to<std::map<int, float>>(square_roots, {.row_options = {.format_by_rows = false}, .root_name = "square_roots"});
@@ -466,6 +553,47 @@ TEST_CASE("named-map codec roundtrips and accepts unordered maps") {
     CHECK_EQ(indefinite_decoded.age, 42);
     CHECK_EQ(indefinite_decoded.name, "Ada");
     CHECK_EQ(indefinite_decoded.employer, "AcmeCo");
+}
+
+TEST_CASE("named-map codec accepts contiguous indefinite text-string keys") {
+    auto            input = to_bytes("a37f63616765ff182a7f646e616d65ff634164617f68656d706c6f796572ff6641636d65436f");
+    CDDLNamedPerson decoded{};
+    auto            dec = make_decoder(input);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.age, 42);
+    CHECK_EQ(decoded.name, "Ada");
+    CHECK_EQ(decoded.employer, "AcmeCo");
+}
+
+TEST_CASE("named-map codec rejects flattened fixed-field name collisions") {
+    CDDLNamedCollisionRoot input{.group = as_named_group<CDDLNamedCollisionGroup>{CDDLNamedCollisionGroup{.value = 7}}, .value = 9};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    CHECK_FALSE(enc(as_named_map{input}));
+
+    auto                   encoded_one_value = to_bytes("a16576616c756507");
+    CDDLNamedCollisionRoot decoded{};
+    auto                   dec = make_decoder(encoded_one_value);
+    CHECK_FALSE(dec(as_named_map{decoded}));
+}
+
+TEST_CASE("named-map codec rejects borrowed extension keys from non-contiguous inputs") {
+    auto input_vector = to_bytes("a262696401686e69636b6e616d6563616365");
+    auto input        = std::deque<std::byte>(input_vector.begin(), input_vector.end());
+
+    CDDLBorrowedExtensionRoot decoded{};
+    auto                      dec = make_decoder(input);
+    CHECK_FALSE(dec(as_named_map{decoded}));
+}
+
+TEST_CASE("named-map codec rejects multiple flattened extension fields") {
+    CDDLMultipleExtensionRoot input{.labels  = as_named_extension<std::map<std::string, std::string>>{{{"label", "one"}}},
+                                    .numbers = as_named_extension<std::map<std::string, int>>{{{"count", 2}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    CHECK_FALSE(enc(as_named_map{input}));
 }
 
 TEST_CASE("named-map codec enforces required, duplicate, and unknown keys") {
