@@ -4,14 +4,17 @@
 resolved by the encoder or decoder type, not checked dynamically for every
 value.
 
+The examples assume:
+
+```cpp
+using namespace cbor::tags;
+```
+
 Options are selected through `Options<...>` marker packs. The default option set
 is:
 
 ```cpp
-using default_options = cbor::tags::Options<
-    cbor::tags::default_expected,
-    cbor::tags::default_wrapping
->;
+using default_options = Options<default_expected, default_wrapping>;
 ```
 
 ## Decoder Options
@@ -20,18 +23,13 @@ Use `make_decoder_with_options<Options>(buffer)` when a decoder should use a
 non-default policy.
 
 ```cpp
-auto dec = cbor::tags::make_decoder_with_options<
-    cbor::tags::strict_integer_decoder_options
->(buffer);
+auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
 ```
 
 Extensions still compose with decoder options:
 
 ```cpp
-auto dec = cbor::tags::make_decoder_with_options<
-    cbor::tags::strict_integer_decoder_options,
-    my_extension
->(buffer);
+auto dec = make_decoder_with_options<strict_integer_decoder_options, my_extension>(buffer);
 ```
 
 ## Strict Integer Decode
@@ -56,8 +54,8 @@ if (!result) {
 }
 ```
 
-Decode to `cbor::tags::integer`, `cbor::tags::positive`, or
-`cbor::tags::negative` when the full CBOR integer domain matters.
+Decode to `integer`, `positive`, or `negative` when the full CBOR integer
+domain matters.
 
 ## Wrapping Groups
 
@@ -66,9 +64,7 @@ values are wrapped as CBOR arrays when they contain multiple payload items. It
 is part of `default_options`.
 
 ```cpp
-using no_group_wrapping = cbor::tags::Options<
-    cbor::tags::default_expected
->;
+using no_group_wrapping = Options<default_expected>;
 ```
 
 The public factories currently use `default_options` for encoders. Advanced
@@ -82,12 +78,12 @@ Option sets must model `IsOptions`:
 ```cpp
 struct my_decoder_options {
     using is_options  = void;
-    using return_type = cbor::tags::expected<void, cbor::tags::status_code>;
-    using error_type  = cbor::tags::status_code;
+    using return_type = expected<void, status_code>;
+    using error_type  = status_code;
 
     static constexpr bool wrap_groups = true;
 };
 ```
 
-`strict_integer_decode` is optional for compatibility with older custom option
-types. If it is absent, the decoder uses the default slicing integer policy.
+If `strict_integer_decode` is omitted, the decoder uses the default slicing
+integer policy.

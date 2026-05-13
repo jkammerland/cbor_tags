@@ -1,160 +1,142 @@
 # Experimental Range And Segment APIs
 
 > [!WARNING]
-> EXPERIMENTAL. The range wrappers, raw encoded views, lazy tag scanner, and
-> segmented output helpers are still WIP. Names, constraints, and exact
-> borrowing behavior may change before they are treated as stable API.
+> EXPERIMENTAL. These APIs are still WIP. Names and exact borrowing behavior may
+> change before they are treated as stable API.
 
-This document describes the current range-related surface. It intentionally
-keeps the experimental pieces together because they share the same core rule:
-views and borrowed segments reference caller-owned storage, while copied or
-owned forms can outlive their source.
-
-## Includes
-
-Use the normal encoder/decoder headers for core behavior. Include the dedicated
-headers only when using the experimental APIs.
+This page shows the current user-facing range, raw-view, lazy tag, and segment
+APIs. The examples assume:
 
 ```cpp
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_ranges.h>
 
-#include <cbor_tags/cbor_lazy_tags.h> // find_tags
-#include <cbor_tags/cbor_raw_views.h> // encoded_*_view types
-#include <cbor_tags/cbor_segments.h>  // segmented output helpers
+#include <cbor_tags/cbor_lazy_tags.h>
+#include <cbor_tags/cbor_segments.h>
+
+using namespace cbor::tags;
 ```
 
-## Supported CBOR Buffers
+## Encode Views As Arrays Or Maps
 
-CBOR input/output buffers must use `std::byte` or a one-byte non-`bool`
-integral byte type. Common accepted element types are `std::byte`, `char`,
-`signed char`, `unsigned char`, `std::uint8_t`, and `std::int8_t` when the
-integer aliases are one byte on the target.
+Use explicit wrappers when a C++ range should become a CBOR array or map.
 
-Supported input buffers are:
+```cpp
+std::vector<std::byte> out;
+auto enc = make_encoder(out);
 
-- contiguous ranges such as `std::vector<std::byte>`, `std::array<std::byte, N>`,
-  and `std::span<std::byte>`
-- bidirectional non-contiguous ranges such as `std::deque<std::byte>` and
-  `std::list<std::byte>`
+std::vector<int> values{1, 2, 3};
+enc(as_array_range(values)); // 83 01 02 03
 
-Forward-only non-contiguous buffers are intentionally rejected. Decoder retry
-paths need to step back one byte after a failed alternative match, and that is
-not safe for forward-only non-contiguous iterators.
+auto pairs = std::views::iota(1, 4)
+           | std::views::transform([](int value) {
+                 return std::pair{value, value * 10};
+             });
 
-## Explicit Range Encoding
+enc(as_map_range(pairs)); // a3 01 0a 02 14 03 18 1e
+```
 
-Use range wrappers when the source is a view or when the CBOR shape must be
-explicit. Plain pair ranges are not encoded as maps automatically.
+Sized ranges encode as definite arrays/maps. Non-sized ranges encode as
+indefinite arrays/maps. Pair ranges are maps only when wrapped with
+`as_map_range`.
+
+## Encode Byte Ranges As Bstr
+
+Use `as_bstr_range` when a byte-like range should become a CBOR byte string.
+
+```cpp
+std::array<unsigned char, 5> source{0, 1, 2, 3, 4};
+
+auto bytes = source | std::views::transform([](unsigned char value) {
+    return static_cast<std::byte>(value);
+});
+
+enc(as_bstr_range(bytes)); // 45 00 01 02 03 04
+```
+
+For non-sized byte ranges, `as_bstr_range(range, chunk_size)` emits an
+indefinite byte string in definite chunks.
+
+```cpp
+auto odd_bytes = source
+               | std::views::filter([](unsigned char value) {
+                     return (value % 2U) == 1U;
+                 })
+               | std::views::transform([](unsigned char value) {
+                     return static_cast<std::byte>(value);
+                 });
+
+enc(as_bstr_range(odd_bytes, 2)); // 5f 42 01 03 ff
+```
+
+`chunk_size` defaults to `4096` and must be greater than zero.
+
+## Decode Into Borrowed Views
+
+Contiguous buffers can decode text and byte strings into normal view types.
 
 ```cpp
 std::vector<std::byte> data;
-auto enc = cbor::tags::make_encoder(data);
+auto enc = make_encoder(data);
+enc(std::string{"hello"});
 
-std::vector<int> values{1, 2, 3};
-enc(cbor::tags::as_array_range(values)); // 83 01 02 03
-
-auto odd_pairs = std::views::iota(0, 5)
-               | std::views::filter([](int value) { return (value % 2) == 1; })
-               | std::views::transform([](int value) {
-                     return std::pair{value, value * 10};
-                 });
-
-enc(cbor::tags::as_map_range(odd_pairs)); // bf 01 0a 03 18 1e ff
+auto dec = make_decoder(data);
+std::string_view text;
+dec(text);
 ```
 
-Sized ranges encode as definite CBOR arrays or maps. Non-sized ranges encode as
-indefinite arrays or maps.
-
-Array ranges may materialize proxy references through the range value type when
-that value type is CBOR-encodable. This is needed for sources such as
-`std::vector<bool>`. Map ranges are stricter: each entry must be pair-like, and
-the key and mapped references must be directly CBOR-encodable.
-
-Nested wrappers are supported only when the wrapper can be iterated in the
-cv-qualified context used by the outer range. For example, a mutable outer range
-can hold `as_array_range(filter_view)`, but a `const` outer range is rejected
-when the wrapped standard `filter_view` is not const-iterable.
-
-## Byte-String Ranges
-
-Use `as_bstr_range(byte_range, chunk_size)` to encode byte-like ranges as CBOR
-byte strings.
-
-```cpp
-auto bytes = std::views::iota(0, 5)
-           | std::views::filter([](int) { return true; })
-           | std::views::transform([](int value) {
-                 return static_cast<std::byte>(value);
-             });
-
-enc(cbor::tags::as_bstr_range(bytes, 2)); // 5f 42 00 01 42 02 03 41 04 ff
-```
-
-Sized byte ranges encode as definite byte strings. Non-sized byte ranges encode
-as indefinite byte strings in definite chunks. `chunk_size` defaults to `4096`
-and must be greater than zero.
-
-`as_bstr_range` is only a byte-string wrapper. It does not add typed-array
-semantics or CBOR tag 24 encoded-CBOR semantics.
-
-## View Decode Targets
-
-View decode targets avoid copying and borrow from the original input buffer.
-The input buffer must remain alive and must not be reallocated or mutated while
-the view is used.
-
-Contiguous input buffers can decode:
-
-- `std::string_view` for text strings
-- `std::span<const std::byte>` or `std::basic_string_view<std::byte>` for byte
-  strings
-- `encoded_item_view`, `encoded_array_view`, and `encoded_map_view` for raw
-  encoded CBOR items
-
-Non-contiguous input buffers cannot produce contiguous views. Use the
-decoder-provided aliases for those cases:
+For non-contiguous input, use the decoder-provided view aliases.
 
 ```cpp
 std::deque<std::byte> data;
-auto enc = cbor::tags::make_encoder(data);
+auto enc = make_encoder(data);
 enc(std::string{"hello"});
 
-auto dec = cbor::tags::make_decoder(data);
+auto dec = make_decoder(data);
 decltype(dec)::tstr_view_t text;
 dec(text);
-
-std::string copied{text};
 ```
 
-For raw encoded values from non-contiguous buffers, use:
+The returned view borrows from `data`. Keep the input buffer alive and do not
+invalidate its iterators while the view is used.
+
+## Reuse Raw Encoded Items
+
+Decode a complete CBOR item as raw encoded bytes when you want to forward or
+embed it without decoding the payload type.
 
 ```cpp
-auto dec = cbor::tags::make_decoder(data);
+std::vector<std::byte> data;
+auto enc = make_encoder(data);
+enc(std::vector<int>{1, 2, 3});
 
-decltype(dec)::raw_encoded_item_view item;
-decltype(dec)::raw_encoded_array_view array;
-decltype(dec)::raw_encoded_map_view map;
+auto dec = make_decoder(data);
+decltype(dec)::raw_encoded_array_view raw;
+dec(raw);
+
+std::vector<std::byte> forwarded;
+auto out = make_encoder(forwarded);
+out(raw);
 ```
 
-Trying to decode `std::string_view`, `std::span<const std::byte>`, or a
-span-backed raw encoded view from a non-contiguous buffer fails with
-`status_code::contiguous_view_on_non_contiguous_data`.
+Raw views borrow from the decoder input. For contiguous input, `raw.span()` is
+available. For all inputs, `raw.bytes()` can be iterated.
 
-## Lazy Tag Scanning
+## Scan Tags Lazily
 
-`find_tags` scans an existing CBOR buffer and yields matching tags without
-materializing unrelated payloads.
+`find_tags` scans nested CBOR and returns matching tags without materializing
+unrelated payloads.
 
 ```cpp
-auto matches = cbor::tags::find_tags<100, 200>(buffer);
+auto matches = find_tags<100, 200>(buffer);
 
 for (const auto& match : matches) {
-    auto tag = match.tag();
-    auto encoded_payload = match.payload_range();
+    if (match.tag() != 100) {
+        continue;
+    }
 
-    payload_type payload{};
+    MyPayload payload{};
     auto result = match.decode(payload);
 }
 
@@ -163,167 +145,107 @@ if (matches.failed()) {
 }
 ```
 
-Runtime filters are also supported:
+Runtime filters are also supported.
 
 ```cpp
-auto even_tags = cbor::tags::find_tags(buffer, [](std::uint64_t tag) {
+auto even_tags = find_tags(buffer, [](std::uint64_t tag) {
     return (tag % 2U) == 0U;
 });
 ```
 
-Each match exposes:
+Use `payload_range()` for encoded payload bytes. Use `payload_span()` only when
+the original buffer is contiguous.
 
-- `tag()` for the numeric tag
-- `payload_range()` for the encoded payload bytes as a read-only range
-- `payload_span()` only when the original buffer is contiguous
-- `decode(T&)` and `make_decoder()` for decoding only the payload
+## Emit Segmented Output
 
-The scanner descends into arrays, maps, and tags, and skips non-matching payloads
-without decoding them into user objects. Malformed or truncated CBOR stops
-iteration and is reported through `status()` and `failed()`.
-
-The returned view borrows from the original buffer. The buffer must outlive the
-tag view, matches, payload ranges, payload spans, and payload decoders.
-
-## Segmented Output
-
-`cbor_segments` stores encoded output as a sequence of owned and borrowed byte
-segments. It is useful when a large payload already exists and should be emitted
-without copying into one contiguous output buffer.
+`cbor_segments` keeps output as owned headers plus borrowed payload spans. This
+is useful when a large byte payload already exists and should not be copied into
+one contiguous output buffer.
 
 ```cpp
 std::array<std::byte, 4> payload{
     std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}
 };
 
-auto segments = cbor::tags::encode_bstr_segments(std::span<const std::byte>{payload});
+auto segments = encode_bstr_segments(std::span<const std::byte>{payload});
 
-// The header is owned by the segment container. The payload is borrowed.
 for (const auto& segment : segments) {
     auto bytes = segment.bytes();
 }
 
-auto contiguous = cbor::tags::flatten_segments(segments); // copies all bytes
+auto contiguous = flatten_segments(segments); // copies all segment bytes
 ```
 
-The encoder can also write directly into a segment container:
+You can also use segments as the encoder output backend.
 
 ```cpp
-cbor::tags::cbor_segments segments;
-auto enc = cbor::tags::make_encoder(segments);
-enc(cbor::tags::as_array{2}, 1, 2);
+cbor_segments segments;
+auto enc = make_encoder(segments);
+enc(as_array{2}, 1, 2);
 
-auto bytes = segments.flatten();
+auto contiguous = segments.flatten();
 ```
 
-Helpers are available for common byte-string shapes:
+Append helpers let you build a segmented output incrementally.
 
 ```cpp
-cbor::tags::cbor_segments segments;
+cbor_segments segments;
 auto payload_span = std::span<const std::byte>{payload};
 
-cbor::tags::encode_bstr_segments_into(segments, payload_span);
-cbor::tags::encode_indefinite_bstr_segments_into(segments, payload_span, 4096);
-cbor::tags::encode_tagged_bstr_segments_into(segments, std::uint64_t{24}, payload_span);
+encode_bstr_segments_into(segments, payload_span);
+encode_indefinite_bstr_segments_into(segments, payload_span, 4096);
+encode_tagged_bstr_segments_into(segments, std::uint64_t{24}, payload_span);
 ```
 
-Owned segment boundaries are not semantic. The default `byte_segments` storage
-may coalesce adjacent owned writes. Borrowed segment boundaries are preserved
-because they carry the caller-owned lifetime contract. Compare output with
-`flatten_segments(...)` or `flatten_to(...)` when byte-for-byte equality matters.
+Flattening always copies. Borrowed segment payloads must outlive the segment
+container.
 
-## Raw Encoded Views As Segments
+## Convert Raw Views To Segments
 
-Raw encoded views can be converted to segments. The default path is safe and
-owned:
+Use `to_segments` or `copy_segments` when the segment output should own the raw
+encoded bytes.
 
 ```cpp
-auto dec = cbor::tags::make_decoder(buffer);
-decltype(dec)::raw_encoded_array_view array;
-dec(array);
+auto dec = make_decoder(buffer);
+decltype(dec)::raw_encoded_array_view raw;
+dec(raw);
 
-auto owned_segments = cbor::tags::to_segments(array);   // copies bytes
-auto also_owned     = cbor::tags::as_segments(array);   // same behavior
-auto explicit_copy  = cbor::tags::copy_segments(array); // same ownership
+auto owned = to_segments(raw);
 ```
 
-Use `borrow_segments` only when the raw encoded view is span-backed and the
-source buffer is an lvalue with a lifetime that will outlive the segments. This
-is available for contiguous raw views:
+Use `borrow_segments` only when the raw view came from contiguous lvalue input
+that will outlive the segments.
 
 ```cpp
 std::vector<std::byte> buffer{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
-auto dec = cbor::tags::make_decoder(buffer);
-decltype(dec)::raw_encoded_array_view array;
-dec(array);
+auto dec = make_decoder(buffer);
+decltype(dec)::raw_encoded_array_view raw;
+dec(raw);
 
-auto borrowed = cbor::tags::borrow_segments(array); // no payload copy
+auto borrowed = borrow_segments(raw);
 ```
 
-`borrow_segments` is deleted for rvalue views. Non-contiguous raw encoded views
-must use `copy_segments`.
-
-The older `encode_encoded_segments(view)` name is a compatibility wrapper around
-`borrow_segments(view)`. Prefer `borrow_segments` or `copy_segments` in new code.
-
-## Encoded Items Inside Byte Strings
+## Wrap Encoded Items In Bstr
 
 Validated encoded item segments can be wrapped as a CBOR byte string without
 flattening first.
 
 ```cpp
 std::vector<int> values{1, 2};
-auto encoded = cbor::tags::encode_item_segments(values);
+auto encoded = encode_item_segments(values);
 
 std::vector<std::byte> output;
-auto enc = cbor::tags::make_encoder(output);
+auto enc = make_encoder(output);
+
 if (encoded) {
-    enc(cbor::tags::as_bstr(*encoded));
+    enc(as_bstr(*encoded));
 }
 ```
 
-`as_bstr(encoded_item_segments)` only accepts lvalues. This prevents a borrowed
-byte string wrapper from outliving the validated item.
+## Rules To Remember
 
-## Custom Segment Storage
-
-The default type is:
-
-```cpp
-using cbor_segments = cbor::tags::basic_byte_segments<
-    cbor::tags::default_byte_segment_storage<>
->;
-```
-
-Custom storage can tune the segment object and backing container, for example to
-use inline capacity or a `std::pmr::vector`. The storage type must provide:
-
-- `segment_type`
-- `container_type`
-- `make_container()`
-- `make_owned(std::span<const std::byte>)`
-- `make_borrowed(std::span<const std::byte>)`
-
-Optional hooks are:
-
-- `try_append_owned(container, bytes) -> bool`
-- `append_owned(container, bytes) -> void`
-- `reserve_owned_bytes(count)`
-
-Custom `basic_byte_segments<Storage>` backends are currently scoped to direct
-encoder output and `_into` helpers. Validated item helpers such as
-`encode_item_segments(...)` currently return the default `encoded_item_segments`
-using the default `cbor_segments` backend.
-
-## Current Limitations
-
-- These APIs are experimental and may change.
-- Lazy array/map element decode views are not part of this pass.
-- `payload_span()` exists only for contiguous input buffers.
-- `borrow_segments` is intentionally explicit and limited to lvalue,
-  span-backed raw encoded views.
-- Flattening segmented output always copies.
-- A single contiguous output buffer cannot be true zero-copy when payload bytes
-  live elsewhere.
-- Text-string view decode is byte-preserving; UTF-8 validation is not currently
-  performed by these view APIs.
+- Range wrappers select CBOR shape explicitly: array, map, or byte string.
+- Views, lazy tag matches, and borrowed segments reference the original buffer.
+- `payload_span()` and `borrow_segments()` require contiguous input.
+- Non-contiguous text and byte views use decoder-provided aliases.
+- `flatten_segments(...)` produces a contiguous copy.
