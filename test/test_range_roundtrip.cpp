@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 #include <map>
 #include <ranges>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -166,6 +167,30 @@ TEST_CASE("explicit byte string range wrappers roundtrip byte-like views") {
 
         CHECK_EQ(to_hex(buffer), "5f4200014202034104ff");
         CHECK_EQ(to_hex(decoded), "0001020304");
+    }
+}
+
+TEST_CASE("explicit text string range wrappers roundtrip char views") {
+    {
+        std::string text{"hello"};
+        auto        chars = text | std::views::transform([](char value) { return value; });
+        std::string decoded;
+
+        auto buffer = roundtrip_through_vector(as_tstr_range(chars), decoded);
+
+        CHECK_EQ(to_hex(buffer), "6568656c6c6f");
+        CHECK_EQ(decoded, "hello");
+    }
+
+    {
+        std::string text{"hello"};
+        auto        chars = text | std::views::filter([](char) { return true; });
+        std::string decoded;
+
+        auto buffer = roundtrip_through_vector(as_tstr_range(chars, 2), decoded);
+
+        CHECK_EQ(to_hex(buffer), "7f626865626c6c616fff");
+        CHECK_EQ(decoded, "hello");
     }
 }
 

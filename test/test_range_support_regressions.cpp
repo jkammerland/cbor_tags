@@ -17,6 +17,7 @@
 #include <memory_resource>
 #include <ranges>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -33,6 +34,9 @@ concept CanMakeArrayRange = requires(R &&range) { cbor::tags::as_array_range(std
 template <typename R>
 concept CanMakeMapRange = requires(R &&range) { cbor::tags::as_map_range(std::forward<R>(range)); };
 
+template <typename R>
+concept CanMakeTstrRange = requires(R &&range) { cbor::tags::as_tstr_range(std::forward<R>(range)); };
+
 using regression_int_array_wrapper = cbor::tags::array_range<std::ranges::ref_view<std::vector<int>>>;
 using regression_nested_array      = std::array<regression_int_array_wrapper, 1>;
 using regression_bad_array_wrapper = cbor::tags::array_range<std::ranges::single_view<range_regression_not_cbor>>;
@@ -46,6 +50,10 @@ static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte, 2>>);
 static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte>>);
 static_assert(cbor::tags::detail::is_static_extent_span_v<std::span<const std::byte, 2>>);
 static_assert(CanMakeArrayRange<std::vector<bool> &>);
+static_assert(CanMakeTstrRange<std::string &>);
+static_assert(CanMakeTstrRange<std::array<char, 2> &>);
+static_assert(!CanMakeTstrRange<std::array<std::byte, 2> &>);
+static_assert(!CanMakeTstrRange<std::array<unsigned char, 2> &>);
 
 struct counting_sized_bidirectional_bytes {
     using size_type = std::size_t;
@@ -283,6 +291,34 @@ TEST_CASE("byte string range wrappers reject zero chunk size for sized and unsiz
     }
 }
 
+TEST_CASE("text string range wrappers reject zero chunk size for sized and unsized ranges") {
+    {
+        std::string            text{"hi"};
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+
+        auto result = enc(as_tstr_range(text, 0));
+
+        CHECK_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(buffer.empty());
+    }
+
+    {
+        std::string text{"hi"};
+        auto        unsized = text | std::views::filter([](char) { return true; });
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+
+        auto result = enc(as_tstr_range(unsized, 0));
+
+        CHECK_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(buffer.empty());
+    }
+}
+
 TEST_CASE("contiguous sized byte string ranges match direct byte string encoding") {
     const std::vector<std::byte> bytes{std::byte{0x00}, std::byte{0x01}, std::byte{0x7F}, std::byte{0x80}, std::byte{0xFF}};
 
@@ -321,6 +357,41 @@ TEST_CASE("contiguous sized byte string ranges match direct byte string encoding
         auto                            enc = make_encoder(buffer);
         REQUIRE(enc(as_bstr_range(uint8_bytes)));
         CHECK_EQ(buffer, direct);
+    }
+}
+
+TEST_CASE("contiguous sized text string ranges match direct text string encoding") {
+    const std::string text{"hello"};
+
+    std::vector<std::byte> direct;
+    {
+        auto enc = make_encoder(direct);
+        REQUIRE(enc(text));
+    }
+
+    {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(as_tstr_range(text)));
+        CHECK_EQ(buffer, direct);
+    }
+
+    {
+        const std::array<char, 5> chars{'h', 'e', 'l', 'l', 'o'};
+        std::vector<std::byte>    buffer;
+        auto                      enc = make_encoder(buffer);
+        REQUIRE(enc(as_tstr_range(chars)));
+        CHECK_EQ(buffer, direct);
+    }
+
+    {
+        std::vector<std::byte> buffer;
+        auto                   enc   = make_encoder(buffer);
+        auto                   upper = text | std::views::transform(
+                                [](char value) { return static_cast<char>(value >= 'a' && value <= 'z' ? value - 'a' + 'A' : value); });
+
+        REQUIRE(enc(as_tstr_range(upper)));
+        CHECK_EQ(to_hex(buffer), "6548454c4c4f");
     }
 }
 
@@ -449,6 +520,18 @@ TEST_CASE("indefinite byte string range chunks preserve exact headers and payloa
     REQUIRE(enc(as_bstr_range(unsized, 3)));
 
     CHECK_EQ(to_hex(buffer), "5f43010203420405ff");
+}
+
+TEST_CASE("indefinite text string range chunks preserve exact headers and payloads") {
+    const std::string text{"hello"};
+    auto              unsized = text | std::views::filter([](char) { return true; });
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_tstr_range(unsized, 2)));
+
+    CHECK_EQ(to_hex(buffer), "7f626865626c6c616fff");
 }
 
 TEST_CASE("reserved definite byte string range encode does not allocate") {

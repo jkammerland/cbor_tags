@@ -41,7 +41,19 @@ Sized ranges encode as definite arrays/maps. Non-sized ranges encode as
 indefinite arrays/maps. Pair ranges are maps only when wrapped with
 `as_map_range`.
 
-## Encode Byte Ranges As Bstr
+## Encode Text Or Byte Ranges
+
+Use `as_tstr_range` when a char range should become a CBOR text string.
+
+```cpp
+std::string name{"Ada"};
+
+auto upper = name | std::views::transform([](char value) {
+    return static_cast<char>(value >= 'a' && value <= 'z' ? value - 'a' + 'A' : value);
+});
+
+enc(as_tstr_range(upper)); // 63 41 44 41
+```
 
 Use `as_bstr_range` when a byte-like range should become a CBOR byte string.
 
@@ -55,17 +67,15 @@ auto bytes = source | std::views::transform([](unsigned char value) {
 enc(as_bstr_range(bytes)); // 45 00 01 02 03 04
 ```
 
-For non-sized byte ranges, `as_bstr_range(range, chunk_size)` emits an
-indefinite byte string in definite chunks.
+For non-sized text or byte ranges, pass a chunk size to emit an indefinite
+string in definite chunks.
 
 ```cpp
-auto odd_bytes = source
-               | std::views::filter([](unsigned char value) {
-                     return (value % 2U) == 1U;
-                 })
-               | std::views::transform([](unsigned char value) {
-                     return static_cast<std::byte>(value);
-                 });
+auto odd_bytes = source | std::views::filter([](unsigned char value) {
+    return (value % 2U) == 1U;
+}) | std::views::transform([](unsigned char value) {
+    return static_cast<std::byte>(value);
+});
 
 enc(as_bstr_range(odd_bytes, 2)); // 5f 42 01 03 ff
 ```
