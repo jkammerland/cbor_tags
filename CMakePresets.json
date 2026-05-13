@@ -5,6 +5,7 @@
     "",
     "Configure presets:",
     "- debug/release/relwithdebinfo/minsizerel: CMAKE_BUILD_TYPE presets",
+    "- boost-pfr-names: Debug tests with C++20 Boost.PFR named-map reflection",
     "- coverage/coverage-release: --coverage instrumentation (non-Windows)",
     "- tidy/tidy-fix: clang-tidy integration",
     "- profile/profile-release/profile-gprof/pgo-*: profiling and PGO flags (non-Windows)",
@@ -95,6 +96,17 @@
       "inherits": "base-debug",
       "displayName": "Debug",
       "description": "CMAKE_BUILD_TYPE=Debug (typically -O0 -g)"
+    },
+    {
+      "name": "boost-pfr-names",
+      "inherits": "base-debug",
+      "binaryDir": "${sourceDir}/build/boost-pfr-names",
+      "displayName": "Boost.PFR Named Reflection",
+      "description": "Debug build with C++20 named-map reflection through Boost.PFR field names",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON",
+        "CBOR_TAGS_USE_BOOST_PFR_NAMES": "ON"
+      }
     },
     {
       "name": "release",
@@ -405,6 +417,14 @@
       "jobs": 0
     },
     {
+      "name": "boost-pfr-names",
+      "inherits": "build-base",
+      "configurePreset": "boost-pfr-names",
+      "displayName": "Boost.PFR Named Reflection Build",
+      "description": "Build tests with C++20 named-map reflection through Boost.PFR field names",
+      "jobs": 0
+    },
+    {
       "name": "release",
       "inherits": "build-base",
       "configurePreset": "release",
@@ -659,6 +679,13 @@
       "description": "Run all tests in debug mode"
     },
     {
+      "name": "boost-pfr-names",
+      "inherits": "test-base",
+      "configurePreset": "boost-pfr-names",
+      "displayName": "Boost.PFR Named Reflection Tests",
+      "description": "Run tests with C++20 named-map reflection through Boost.PFR field names"
+    },
+    {
       "name": "release",
       "inherits": "test-base",
       "configurePreset": "release",
@@ -852,6 +879,25 @@
         {
           "type": "test",
           "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "boost-pfr-names",
+      "displayName": "Boost.PFR Named Reflection Workflow",
+      "description": "Configure/build/test with C++20 named-map reflection through Boost.PFR field names",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "boost-pfr-names"
+        },
+        {
+          "type": "build",
+          "name": "boost-pfr-names"
+        },
+        {
+          "type": "test",
+          "name": "boost-pfr-names"
         }
       ]
     },
