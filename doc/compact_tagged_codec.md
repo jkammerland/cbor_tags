@@ -117,6 +117,64 @@ owning types such as `std::string` and `std::vector<std::byte>` instead.
 Borrowed views point into the input buffer. Destroying, mutating, or reallocating
 that buffer invalidates the decoded views.
 
+## Segmented Encoding Direction
+
+The current compact encoder has to know the byte-string payload length before it
+can write the payload header. That is why it measures the compact payload before
+writing it.
+
+`cbor_segments` is the right direction for removing that repeated walk without
+forcing one contiguous temporary buffer. The compact payload can be encoded once
+into replayable segments, then the outer tag and byte-string header can be
+prepended after the payload size is known.
+
+This is the intended implementation shape; `encode_compact_payload_segments` is
+not currently a public API.
+
+```cpp
+#include <cbor_tags/cbor_segments.h>
+
+template <typename T>
+cbor_segments encode_compact_tagged_segments(std::uint64_t tag, const T& value) {
+    cbor_segments payload = encode_compact_payload_segments(value);
+
+    cbor_segments out;
+    out.reserve_segments(payload.size() + 2);
+
+    out.append_owned(detail::encode_cbor_major_argument_header(tag, std::byte{0xc0}).span());
+    out.append_owned(detail::encode_cbor_major_argument_header(payload.total_size(), std::byte{0x40}).span());
+
+    for (const auto& segment : payload) {
+        if (segment.is_borrowed()) {
+            out.append_borrowed(segment.bytes());
+        } else {
+            out.append_owned(segment.bytes());
+        }
+    }
+
+    return out;
+}
+```
+
+The caller can then replay the segments directly to a vectored I/O interface
+without flattening:
+
+```cpp
+std::vector<iovec> iovecs;
+iovecs.reserve(segments.size());
+
+for (const auto& segment : segments) {
+    auto bytes = segment.bytes();
+    iovecs.push_back(iovec{
+        .iov_base = const_cast<std::byte*>(bytes.data()),
+        .iov_len  = bytes.size(),
+    });
+}
+```
+
+Small generated headers remain owned by the segment container. Large payload
+ranges can be borrowed when their source storage outlives the write operation.
+
 ## Known Limitations
 
 - Compact payload encoding measures the payload and then writes it. Do not pass
