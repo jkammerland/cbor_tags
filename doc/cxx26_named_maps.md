@@ -100,6 +100,10 @@ dec(as_named_map{decoded});
 // Required fields:
 //   Missing required keys are rejected.
 //
+// Optional fields:
+//   Missing optional keys decode as std::nullopt.
+//   Explicit CBOR null values are rejected for optional named-map fields.
+//
 // Duplicate fields:
 //   Duplicate known keys are rejected.
 //

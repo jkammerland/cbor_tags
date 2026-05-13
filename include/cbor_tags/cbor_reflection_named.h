@@ -16,6 +16,10 @@
 #include <utility>
 
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
+#include "cbor_tags/cbor_reflection.h"
+#endif
+
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
 
 namespace cbor::tags::detail {
 

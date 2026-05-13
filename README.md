@@ -604,7 +604,7 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 
 Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
-Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer).
+Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer). Installed packages export this compile definition and Boost dependency only when they were built with the Boost.PFR names option enabled.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -825,6 +825,17 @@ cmake -B build -DCBOR_TAGS_INSTALL=ON -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
 cmake --build build
 cmake --install build
 ```
+
+Package-manager opt-in for the Boost.PFR names backend:
+
+```bash
+conan install . -o cbor-tags/*:boost_pfr_names=True
+vcpkg install --x-feature=boost-pfr-names
+```
+
+The Boost.PFR package feature installs the dependency; still configure
+`cbor_tags` with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON` when building a PFR-enabled
+install.
 
 ## 💡 CMake Integration
 

@@ -9,6 +9,8 @@ class CborTagsConan(ConanFile):
     homepage = "https://github.com/jkammerland/cbor_tags"
     topics = ("cbor", "serialization", "reflection", "tags")
     settings = "os", "compiler", "build_type", "arch"
+    options = {"boost_pfr_names": [True, False]}
+    default_options = {"boost_pfr_names": False}
     generators = "CMakeDeps", "CMakeToolchain"
     exports_sources = (
         "CMakeLists.txt",
@@ -18,9 +20,12 @@ class CborTagsConan(ConanFile):
         "tools/*",
         "LICENSE",
     )
-    
-    requires = "tl-expected/1.1.0"
-    
+
+    def requirements(self):
+        self.requires("tl-expected/1.1.0")
+        if self.options.boost_pfr_names:
+            self.requires("boost/[>=1.84.0 <2]")
+
     def configure(self):
         # Header-only library
         self.package_type = "header-library"
@@ -36,6 +41,7 @@ class CborTagsConan(ConanFile):
         tc.variables["CBOR_TAGS_BUILD_TESTS"] = "OFF"
         tc.variables["CBOR_TAGS_INSTALL"] = "ON"
         tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "ON"
+        tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.generate()
         deps = CMakeDeps(self)
         deps.generate()
@@ -55,6 +61,8 @@ class CborTagsConan(ConanFile):
         self.cpp_info.set_property("cmake_target_name", "cbor_tags")
         self.cpp_info.bindirs = []
         self.cpp_info.libdirs = []
-        
+        if self.options.boost_pfr_names:
+            self.cpp_info.defines.append("CBOR_TAGS_USE_BOOST_PFR_NAMES=1")
+
         # Header-only library
         self.cpp_info.header_only = True
