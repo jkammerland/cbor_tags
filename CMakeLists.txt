@@ -78,7 +78,26 @@ int main() { return 0; }
 endif()
 
 if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  if(POLICY CMP0167)
+    cmake_policy(PUSH)
+    cmake_policy(SET CMP0167 OLD)
+  endif()
+  find_package(Boost 1.84 REQUIRED)
+  if(POLICY CMP0167)
+    cmake_policy(POP)
+  endif()
+
   include(CheckCXXSourceCompiles)
+  set(_CBOR_TAGS_CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}")
+  set(_CBOR_TAGS_BOOST_INCLUDE_DIRS ${Boost_INCLUDE_DIRS})
+  if(TARGET Boost::headers)
+    get_target_property(_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS Boost::headers INTERFACE_INCLUDE_DIRECTORIES)
+    if(_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS)
+      list(APPEND _CBOR_TAGS_BOOST_INCLUDE_DIRS ${_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS})
+    endif()
+  endif()
+  list(REMOVE_DUPLICATES _CBOR_TAGS_BOOST_INCLUDE_DIRS)
+  set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${_CBOR_TAGS_BOOST_INCLUDE_DIRS})
   check_cxx_source_compiles(
     [=[
 #include <boost/pfr/core.hpp>
@@ -96,6 +115,10 @@ static_assert(boost::pfr::get_name<0, S>() == std::string_view{"field_name"});
 int main() { return 0; }
 ]=]
     CBOR_TAGS_COMPILER_HAS_BOOST_PFR_NAMES)
+  set(CMAKE_REQUIRED_INCLUDES "${_CBOR_TAGS_CMAKE_REQUIRED_INCLUDES}")
+  unset(_CBOR_TAGS_CMAKE_REQUIRED_INCLUDES)
+  unset(_CBOR_TAGS_BOOST_INCLUDE_DIRS)
+  unset(_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS)
 
   if(NOT CBOR_TAGS_COMPILER_HAS_BOOST_PFR_NAMES)
     message(FATAL_ERROR "CBOR_TAGS_USE_BOOST_PFR_NAMES requires Boost.PFR field names "
@@ -103,6 +126,7 @@ int main() { return 0; }
   endif()
 
   target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_BOOST_PFR_NAMES=1)
+  target_link_libraries(${PROJECT_NAME} INTERFACE Boost::headers)
 endif()
 
 # Build options
@@ -141,7 +165,10 @@ endif()
 set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
 # If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
 if(CBOR_TAGS_USE_SYSTEM_EXPECTED)
-  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(tl-expected)")
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "tl-expected REQUIRED")
+endif()
+if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "Boost 1.84 REQUIRED CONFIG")
 endif()
 
 # Link dependencies
@@ -194,7 +221,11 @@ endif()
 
 if(CBOR_TAGS_INSTALL)
   cpmaddpackage(gh:jkammerland/target_install_package.cmake@6.0.1)
-  target_install_package(${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
+  set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
+  if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
+    list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
+  endif()
+  target_install_package(${CBOR_TAGS_INSTALL_PACKAGE_ARGS})
 endif()
 
 # CMake Presets are available for this project

@@ -18,9 +18,7 @@ constexpr std::size_t MAX_REFLECTION_MEMBERS = std::numeric_limits<std::size_t>:
 
 template <typename T> consteval auto aggregate_member_count() { return boost::pfr::tuple_size_v<std::remove_cvref_t<T>>; }
 
-template <typename T, std::size_t I> consteval auto aggregate_member_name() {
-    return boost::pfr::get_name<I, std::remove_cvref_t<T>>();
-}
+template <typename T, std::size_t I> consteval auto aggregate_member_name() { return boost::pfr::get_name<I, std::remove_cvref_t<T>>(); }
 
 } // namespace detail
 
