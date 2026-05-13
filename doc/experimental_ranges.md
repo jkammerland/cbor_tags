@@ -44,6 +44,8 @@ indefinite arrays/maps. Pair ranges are maps only when wrapped with
 ## Encode Text Or Byte Ranges
 
 Use `as_tstr_range` when a char range should become a CBOR text string.
+The wrapper accepts `char` and other signed one-byte character ranges. It does
+not validate UTF-8.
 
 ```cpp
 std::string name{"Ada"};
@@ -71,6 +73,12 @@ For non-sized text or byte ranges, pass a chunk size to emit an indefinite
 string in definite chunks.
 
 ```cpp
+auto every_char = name | std::views::filter([](char) {
+    return true;
+});
+
+enc(as_tstr_range(every_char, 2)); // 7f 62 41 64 61 61 ff
+
 auto odd_bytes = source | std::views::filter([](unsigned char value) {
     return (value % 2U) == 1U;
 }) | std::views::transform([](unsigned char value) {
@@ -254,8 +262,11 @@ if (encoded) {
 
 ## Rules To Remember
 
-- Range wrappers select CBOR shape explicitly: array, map, or byte string.
+- Range wrappers select CBOR shape explicitly: array, map, text string, or byte
+  string.
 - Views, lazy tag matches, and borrowed segments reference the original buffer.
+- Segment-backed encoders may borrow contiguous lvalue range payloads; keep the
+  source alive and unchanged until the segments are flattened or written.
 - `payload_span()` and `borrow_segments()` require contiguous input.
 - Non-contiguous text and byte views use decoder-provided aliases.
 - `flatten_segments(...)` produces a contiguous copy.

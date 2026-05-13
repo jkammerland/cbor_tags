@@ -13,6 +13,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -520,6 +521,17 @@ TEST_CASE("segmented byte string range preserves header order for non-contiguous
     CHECK_EQ(to_hex(segmented.flatten()), "4400ff1020");
 }
 
+TEST_CASE("segmented text string range preserves header order for non-contiguous payloads") {
+    std::list<char> payload{'t', 'e', 'x', 't'};
+
+    cbor_segments segmented;
+    auto          enc = make_encoder(segmented);
+    REQUIRE(enc(as_tstr_range(payload)));
+
+    CHECK_EQ(count_borrowed_segments(segmented), 0);
+    CHECK_EQ(to_hex(segmented.flatten()), "6474657874");
+}
+
 TEST_CASE("direct segmented encode writes are visible without operator flush") {
     cbor_segments segmented;
     auto          enc = make_encoder(segmented);
@@ -670,6 +682,29 @@ TEST_CASE("segmented bstr range borrowing is limited to explicit borrowed ranges
 
         CHECK_EQ(count_borrowed_segments(segmented), 0);
         CHECK_EQ(to_hex(segmented.flatten()), "4401020304");
+    }
+}
+
+TEST_CASE("segmented tstr range borrowing is limited to explicit borrowed ranges") {
+    std::string text{"text"};
+    const auto  text_bytes = std::as_bytes(std::span{text.data(), text.size()});
+
+    {
+        cbor_segments segmented;
+        auto          enc = make_encoder(segmented);
+        REQUIRE(enc(as_tstr_range(text)));
+
+        CHECK(has_borrowed_segment(segmented, text_bytes.data(), text_bytes.size()));
+        CHECK_EQ(to_hex(segmented.flatten()), "6474657874");
+    }
+
+    {
+        cbor_segments segmented;
+        auto          enc = make_encoder(segmented);
+        REQUIRE(enc(as_tstr_range(std::string{"text"})));
+
+        CHECK_EQ(count_borrowed_segments(segmented), 0);
+        CHECK_EQ(to_hex(segmented.flatten()), "6474657874");
     }
 }
 

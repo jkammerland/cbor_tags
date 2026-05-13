@@ -416,6 +416,27 @@ TEST_CASE("byte string range wrappers encode to exact-size fixed output buffers"
     }
 }
 
+TEST_CASE("text string range wrappers encode to exact-size fixed output buffers") {
+    const std::string text{"hello"};
+
+    {
+        std::array<std::byte, 6> output{};
+        auto                     enc = make_encoder(output);
+
+        REQUIRE(enc(as_tstr_range(text)));
+        CHECK_EQ(to_hex(output), "6568656c6c6f");
+    }
+
+    {
+        std::array<std::byte, 6> storage{};
+        std::span<std::byte, 6>  output{storage};
+        auto                     enc = make_encoder(output);
+
+        REQUIRE(enc(as_tstr_range(text)));
+        CHECK_EQ(to_hex(storage), "6568656c6c6f");
+    }
+}
+
 TEST_CASE("byte string range wrappers report too-small fixed output buffers") {
     const std::array<std::byte, 5> bytes{std::byte{0x00}, std::byte{0x01}, std::byte{0x7F}, std::byte{0x80}, std::byte{0xFF}};
     std::array<std::byte, 5>       output{std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}};
@@ -426,6 +447,18 @@ TEST_CASE("byte string range wrappers report too-small fixed output buffers") {
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::error);
     CHECK_EQ(to_hex(output), "45cccccccc");
+}
+
+TEST_CASE("text string range wrappers report too-small fixed output buffers") {
+    const std::string        text{"hello"};
+    std::array<std::byte, 5> output{std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}, std::byte{0xCC}};
+    auto                     enc = make_encoder(output);
+
+    const auto result = enc(as_tstr_range(text));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(to_hex(output), "65cccccccc");
 }
 
 TEST_CASE("raw encoded views encode to fixed output buffers without normalization") {
