@@ -4,7 +4,7 @@
   "description": "RFC 8949 implementation with automatic reflection",
   "homepage": "https://github.com/jkammerland/cbor_tags",
   "license": "MIT",
-  "builtin-baseline": "8f7641a3f5bb68d1d1b9f367039dcb08ac77671d",
+  "builtin-baseline": "a7f2963aed6b381ce54c0803330bb4de36cd3241",
   "dependencies": [
     {
       "name": "tl-expected",
@@ -38,7 +38,7 @@
       "dependencies": [
         {
           "name": "magic-enum",
-          "version>=": "0.9.7"
+          "version>=": "0.9.8"
         }
       ]
     }

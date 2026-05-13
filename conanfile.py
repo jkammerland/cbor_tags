@@ -26,7 +26,7 @@ class CborTagsConan(ConanFile):
         if self.options.boost_pfr_names:
             self.requires("boost/[>=1.84.0 <2]")
         if self.options.magic_enum_names:
-            self.requires("magic_enum/0.9.7")
+            self.requires("magic_enum/0.9.8")
 
     def configure(self):
         # Header-only library
