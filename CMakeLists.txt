@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
 option(CBOR_TAGS_USE_STD_REFLECTION "Build cbor_tags tests with GCC C++26 std::meta reflection" OFF)
 option(CBOR_TAGS_USE_BOOST_PFR_NAMES "Enable C++20 named-map reflection via Boost.PFR field names" OFF)
+option(CBOR_TAGS_USE_MAGIC_ENUM_NAMES "Enable CDDL enum-name definitions via magic_enum" OFF)
 
 # Configure a header file to pass the CMake setting to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cbor_tags_config.h.in" "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
@@ -123,12 +124,25 @@ int main() { return 0; }
   target_link_libraries(${PROJECT_NAME} INTERFACE Boost::headers)
 endif()
 
+if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
+  find_package(magic_enum 0.9.7 REQUIRED CONFIG)
+  if(NOT TARGET magic_enum::magic_enum)
+    message(FATAL_ERROR "CBOR_TAGS_USE_MAGIC_ENUM_NAMES requires a magic_enum CMake config that exports magic_enum::magic_enum.")
+  endif()
+
+  target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1)
+  target_link_libraries(${PROJECT_NAME} INTERFACE magic_enum::magic_enum)
+endif()
+
 # Build options
 option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
 option(CBOR_TAGS_BUILD_CLI "Build cbor_tags_cli" ${CBOR_TAGS_BUILD_TESTS})
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
+if(CBOR_TAGS_INSTALL AND CMAKE_VERSION VERSION_LESS 3.25)
+  message(FATAL_ERROR "CBOR_TAGS_INSTALL requires CMake 3.25 or newer because target_install_package.cmake v7 requires it.")
+endif()
 
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
@@ -163,6 +177,9 @@ if(CBOR_TAGS_USE_SYSTEM_EXPECTED)
 endif()
 if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "Boost 1.84 REQUIRED CONFIG")
+endif()
+if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.7 REQUIRED CONFIG")
 endif()
 
 # Link dependencies

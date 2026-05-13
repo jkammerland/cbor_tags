@@ -6,6 +6,7 @@
     "Configure presets:",
     "- debug/release/relwithdebinfo/minsizerel: CMAKE_BUILD_TYPE presets",
     "- boost-pfr-names: Debug tests with C++20 Boost.PFR named-map reflection",
+    "- magic-enum-names: Debug tests with CDDL enum-name definitions through magic_enum",
     "- coverage/coverage-release: --coverage instrumentation (non-Windows)",
     "- tidy/tidy-fix: clang-tidy integration",
     "- profile/profile-release/profile-gprof/pgo-*: profiling and PGO flags (non-Windows)",
@@ -106,6 +107,17 @@
       "cacheVariables": {
         "CBOR_TAGS_BUILD_TESTS": "ON",
         "CBOR_TAGS_USE_BOOST_PFR_NAMES": "ON"
+      }
+    },
+    {
+      "name": "magic-enum-names",
+      "inherits": "base-debug",
+      "binaryDir": "${sourceDir}/build/magic-enum-names",
+      "displayName": "magic_enum CDDL Enum Names",
+      "description": "Debug build with CDDL enum-name definitions through magic_enum",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON",
+        "CBOR_TAGS_USE_MAGIC_ENUM_NAMES": "ON"
       }
     },
     {
@@ -425,6 +437,14 @@
       "jobs": 0
     },
     {
+      "name": "magic-enum-names",
+      "inherits": "build-base",
+      "configurePreset": "magic-enum-names",
+      "displayName": "magic_enum CDDL Enum Names Build",
+      "description": "Build tests with CDDL enum-name definitions through magic_enum",
+      "jobs": 0
+    },
+    {
       "name": "release",
       "inherits": "build-base",
       "configurePreset": "release",
@@ -686,6 +706,13 @@
       "description": "Run tests with C++20 named-map reflection through Boost.PFR field names"
     },
     {
+      "name": "magic-enum-names",
+      "inherits": "test-base",
+      "configurePreset": "magic-enum-names",
+      "displayName": "magic_enum CDDL Enum Names Tests",
+      "description": "Run tests with CDDL enum-name definitions through magic_enum"
+    },
+    {
       "name": "release",
       "inherits": "test-base",
       "configurePreset": "release",
@@ -898,6 +925,25 @@
         {
           "type": "test",
           "name": "boost-pfr-names"
+        }
+      ]
+    },
+    {
+      "name": "magic-enum-names",
+      "displayName": "magic_enum CDDL Enum Names Workflow",
+      "description": "Configure/build/test with CDDL enum-name definitions through magic_enum",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "magic-enum-names"
+        },
+        {
+          "type": "build",
+          "name": "magic-enum-names"
+        },
+        {
+          "type": "test",
+          "name": "magic-enum-names"
         }
       ]
     },

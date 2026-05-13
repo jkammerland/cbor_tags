@@ -5,7 +5,9 @@ set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 
 cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 cpmaddpackage("gh:Neargye/nameof@0.10.4")
-cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
+if(NOT TARGET magic_enum::magic_enum)
+  cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
+endif()
 cpmaddpackage("gh:jkammerland/doctest@1.0.1")
 
 include(CheckCXXCompilerFlag)

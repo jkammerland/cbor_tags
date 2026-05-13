@@ -94,6 +94,7 @@ Generates CDDL schema for the given type into output buffer
 - `row_options.format_by_rows`: Format multi-field aggregate payload arrays across multiple lines
 - `always_inline`: Inline nested aggregate definitions when possible; recursive references stay named
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
+- `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`
 
 Generated aggregate schemas mirror the default encoder shape. Multi-field
 aggregates are arrays, single-field aggregates are the single payload value,
@@ -101,6 +102,34 @@ maps are rendered as `{* key => value}`, and sequence containers are rendered
 as `[* value]`. Static tags render as `#6.n(payload)`. Dynamic tag values are
 not available from the type alone, so dynamic tags render as `#6(payload)`.
 Recursive aggregate types are emitted as named CDDL rules.
+
+### Enum Names
+
+By default, C++ enum types render as their CBOR integer shape because the
+decoder accepts any value representable by the enum's underlying type:
+
+```cpp
+enum class Color : std::uint8_t { red = 1, green = 2, blue = 4 };
+
+fmt::memory_buffer schema;
+cbor::tags::cddl_schema_to<Color>(schema, {.row_options = {.format_by_rows = false}});
+// root = uint
+```
+
+When the library is built with `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, CDDL output
+can opt into declared enumerator values:
+
+```cpp
+fmt::memory_buffer named_schema;
+cbor::tags::cddl_schema_to<Color>(
+    named_schema,
+    {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::CDDLEnumMode::named_values});
+// Color = &(red: 1, green: 2, blue: 4)
+```
+
+This schema is stricter than the default decoder policy: unnamed but
+underlying-representable enum values still decode, while the generated named
+CDDL choice only accepts the declared enumerators reported by magic_enum.
 
 ### C++26 Named Maps
 
@@ -171,6 +200,7 @@ and invalid text strings render as `non-utf8(N)`, where `N` is byte length.
 - C++20 compiler
 - [fmtlib](https://github.com/fmtlib/fmt)
 - [nameof](https://github.com/Neargye/nameof)
+- [magic_enum](https://github.com/Neargye/magic_enum), optional for named enum CDDL
 
 ## Documentation
 

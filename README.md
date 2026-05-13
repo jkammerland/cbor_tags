@@ -606,6 +606,8 @@ Native C++26 reflection is explicit and opt-in for now. When consuming code is c
 
 Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer). CMake builds with this option require a Boost package config that exports `Boost::headers`; installed packages export the compile definition and Boost dependency only when they were built with the Boost.PFR names option enabled.
 
+CDDL enum value names can be enabled in C++20 or later with magic_enum. Configure with `-DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, or define `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1` before including `cbor_tags/extensions/cbor_visualization.h`. This requires a `magic_enum` package config that exports `magic_enum::magic_enum`; installed packages export the compile definition and dependency only when they were built with the magic_enum names option enabled. Existing schemas keep rendering enums as `uint` or `int` unless `CDDLOptions::enum_mode` is set to `CDDLEnumMode::named_values`.
+
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
 
@@ -792,7 +794,8 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
-- CMake 3.20+.
+- Optional CDDL enum-name support through magic_enum 0.9.7 or newer.
+- CMake 3.20+, or 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`.
 
 ## 📦 Installation
 
@@ -826,16 +829,20 @@ cmake --build build
 cmake --install build
 ```
 
-Package-manager opt-in for the Boost.PFR names backend:
+`CBOR_TAGS_INSTALL=ON` requires CMake 3.25 or newer because the install package
+helper is target_install_package.cmake v7.
+
+Package-manager opt-in for optional reflection backends:
 
 ```bash
 conan install . -o cbor-tags/*:boost_pfr_names=True
+conan install . -o cbor-tags/*:magic_enum_names=True
 vcpkg install --x-feature=boost-pfr-names
+vcpkg install --x-feature=magic-enum-names
 ```
 
-The Boost.PFR package feature installs the dependency; still configure
-`cbor_tags` with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON` when building a PFR-enabled
-install.
+The package features install the optional dependencies; still configure
+`cbor_tags` with the matching CMake option when building an enabled install.
 
 ## 💡 CMake Integration
 

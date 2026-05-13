@@ -32,6 +32,15 @@
           "version>=": "1.84.0"
         }
       ]
+    },
+    "magic-enum-names": {
+      "description": "Install magic_enum dependencies for optional CDDL enum-name definitions.",
+      "dependencies": [
+        {
+          "name": "magic-enum",
+          "version>=": "0.9.7"
+        }
+      ]
     }
   }
 }
