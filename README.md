@@ -19,7 +19,6 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 # Index
 
 - [🎯 Key Features](#-key-features)
-- [Decode Policy Notes](#decode-policy-notes)
 - [🔧 Quick Start](#-quick-start)
   - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
   - [Tagged Struct Example](#tagged-struct-example)
@@ -54,24 +53,6 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` 
 - CDDL support for schema and custom data definitions.
 - Upcoming: resumable encoding and decoding (useful for streaming usecases).
-
-## Decode Policy Notes
-
-Decoding CBOR integers into fixed-width native integer types intentionally slices
-through the target type. For unsigned targets this follows the normal modulo
-conversion. For signed targets the library uses the target implementation's
-native signed conversion behavior; on the supported two's-complement toolchains
-this preserves the low bits. Decode to `cbor::tags::integer`, `positive`, or
-`negative` when the full CBOR integer domain matters.
-
-Use `strict_integer_decoder_options` when integer representability should be
-validated during decode:
-
-```cpp
-auto dec = cbor::tags::make_decoder_with_options<
-    cbor::tags::strict_integer_decoder_options
->(buffer);
-```
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
@@ -865,6 +846,7 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 
 User-facing docs:
 
+- [Encoder And Decoder Options](doc/options.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:
