@@ -990,6 +990,7 @@ allocating the target object graph first.
 
 User-facing docs:
 
+- [Compact Tagged Codec](doc/compact_tagged_codec.md)
 - [Encoder And Decoder Options](doc/options.md)
 - [Codec Extensions](doc/codec_extensions.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)
