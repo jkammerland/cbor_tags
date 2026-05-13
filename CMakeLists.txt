@@ -220,7 +220,7 @@ if(CBOR_TAGS_BUILD_BENCHMARKS)
 endif()
 
 if(CBOR_TAGS_INSTALL)
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@6.0.1)
+  cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.6)
   set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
