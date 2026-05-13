@@ -19,6 +19,7 @@
 #define CBOR_TAGS_HAS_MAGIC_ENUM_NAMES 0
 #endif
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cbor_tags/cbor_concepts.h>
@@ -496,11 +497,106 @@ inline std::string join_cddl(const std::vector<std::string> &items, std::string_
     return result;
 }
 
+template <typename T> consteval std::size_t cddl_std_enum_entry_count() {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    using value_type = std::remove_cvref_t<T>;
+    return std::meta::enumerators_of(^^value_type).size();
+#else
+    return 0;
+#endif
+}
+
+template <typename T> std::string cddl_enum_value_literal(T value);
+
+template <typename T> struct cddl_enum_item {
+    T                value;
+    std::string_view name;
+};
+
+template <typename T> bool cddl_enum_value_less(T lhs, T rhs) {
+    using underlying_type = std::underlying_type_t<std::remove_cvref_t<T>>;
+    if constexpr (std::is_signed_v<underlying_type>) {
+        return static_cast<std::intmax_t>(static_cast<underlying_type>(lhs)) <
+               static_cast<std::intmax_t>(static_cast<underlying_type>(rhs));
+    } else {
+        return static_cast<std::uintmax_t>(static_cast<underlying_type>(lhs)) <
+               static_cast<std::uintmax_t>(static_cast<underlying_type>(rhs));
+    }
+}
+
+template <typename T> std::vector<std::string> cddl_enum_items_to_cddl(std::vector<cddl_enum_item<T>> items) {
+    std::stable_sort(items.begin(), items.end(),
+                     [](const auto &lhs, const auto &rhs) { return cddl_enum_value_less(lhs.value, rhs.value); });
+
+    std::vector<std::string> cddl_items;
+    cddl_items.reserve(items.size());
+    for (const auto &[value, name] : items) {
+        cddl_items.push_back(fmt::format("{}: {}", cddl_member_key(name), cddl_enum_value_literal(value)));
+    }
+    return cddl_items;
+}
+
+#if CBOR_TAGS_HAS_STD_REFLECTION
+template <typename T, std::size_t I> consteval std::meta::info cddl_std_enum_entry() {
+    using value_type = std::remove_cvref_t<T>;
+    return std::meta::enumerators_of(^^value_type)[I];
+}
+
+template <typename T, std::size_t I> consteval std::string_view cddl_std_enum_entry_name() {
+    return std::meta::identifier_of(cddl_std_enum_entry<T, I>());
+}
+
+template <typename T, std::size_t I> consteval std::remove_cvref_t<T> cddl_std_enum_entry_value() {
+    return std::meta::extract<std::remove_cvref_t<T>>(cddl_std_enum_entry<T, I>());
+}
+
+template <typename T, std::size_t... Is>
+std::vector<cddl_enum_item<std::remove_cvref_t<T>>> cddl_std_enum_items(std::index_sequence<Is...>) {
+    using value_type = std::remove_cvref_t<T>;
+    std::vector<cddl_enum_item<value_type>> items;
+    items.reserve(sizeof...(Is));
+    (items.push_back({cddl_std_enum_entry_value<T, Is>(), cddl_std_enum_entry_name<T, Is>()}), ...);
+    return items;
+}
+#endif
+
 template <typename T> constexpr std::size_t cddl_enum_entry_count() {
-#if CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    return cddl_std_enum_entry_count<std::remove_cvref_t<T>>();
+#elif CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
     return magic_enum::enum_count<std::remove_cvref_t<T>>();
 #else
     return 0;
+#endif
+}
+
+template <typename T> std::string cddl_enum_value_literal(T value) {
+    using underlying_type = std::underlying_type_t<std::remove_cvref_t<T>>;
+    const auto underlying = static_cast<underlying_type>(value);
+    if constexpr (std::is_signed_v<underlying_type>) {
+        return fmt::format("{}", static_cast<std::intmax_t>(underlying));
+    } else {
+        return fmt::format("{}", static_cast<std::uintmax_t>(underlying));
+    }
+}
+
+template <typename T> std::vector<std::string> cddl_enum_items() {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    return cddl_enum_items_to_cddl(
+        cddl_std_enum_items<std::remove_cvref_t<T>>(std::make_index_sequence<cddl_enum_entry_count<std::remove_cvref_t<T>>()>{}));
+#elif CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+    using value_type = std::remove_cvref_t<T>;
+    std::vector<cddl_enum_item<value_type>> items;
+    if constexpr (cddl_enum_entry_count<value_type>() != 0) {
+        constexpr auto entries = magic_enum::enum_entries<value_type>();
+        items.reserve(entries.size());
+        for (const auto &[value, name] : entries) {
+            items.push_back({value, name});
+        }
+    }
+    return cddl_enum_items_to_cddl(std::move(items));
+#else
+    return {};
 #endif
 }
 
@@ -517,31 +613,9 @@ template <typename T> std::string cddl_enum_underlying_expr() {
     }
 }
 
-template <typename T> std::string cddl_enum_value_literal(T value) {
-    using underlying_type = std::underlying_type_t<std::remove_cvref_t<T>>;
-    const auto underlying = static_cast<underlying_type>(value);
-    if constexpr (std::is_signed_v<underlying_type>) {
-        return fmt::format("{}", static_cast<std::intmax_t>(underlying));
-    } else {
-        return fmt::format("{}", static_cast<std::uintmax_t>(underlying));
-    }
-}
-
 template <typename T> std::string cddl_enum_expr(CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    std::vector<std::string> items;
-
-#if CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
-    if constexpr (cddl_enum_entry_count<value_type>() != 0) {
-        constexpr auto entries = magic_enum::enum_entries<value_type>();
-        items.reserve(entries.size());
-        for (const auto &[value, name] : entries) {
-            items.push_back(fmt::format("{}: {}", cddl_member_key(name), cddl_enum_value_literal(value)));
-        }
-    }
-#else
-    (void)options;
-#endif
+    auto items       = cddl_enum_items<value_type>();
 
     if (items.empty()) {
         return cddl_enum_underlying_expr<value_type>();

@@ -116,8 +116,9 @@ cbor::tags::cddl_schema_to<Color>(schema, {.row_options = {.format_by_rows = fal
 // root = uint
 ```
 
-When the library is built with `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, CDDL output
-can opt into declared enumerator values:
+When the library is built with `CBOR_TAGS_USE_STD_REFLECTION=ON` or
+`CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, CDDL output can opt into declared
+enumerator values:
 
 ```cpp
 fmt::memory_buffer named_schema;
@@ -129,7 +130,8 @@ cbor::tags::cddl_schema_to<Color>(
 
 This schema is stricter than the default decoder policy: unnamed but
 underlying-representable enum values still decode, while the generated named
-CDDL choice only accepts the declared enumerators reported by magic_enum.
+CDDL choice only accepts the declared enumerators reported by native reflection
+or magic_enum.
 
 ### C++26 Named Maps
 
@@ -200,7 +202,7 @@ and invalid text strings render as `non-utf8(N)`, where `N` is byte length.
 - C++20 compiler
 - [fmtlib](https://github.com/fmtlib/fmt)
 - [nameof](https://github.com/Neargye/nameof)
-- [magic_enum](https://github.com/Neargye/magic_enum), optional for named enum CDDL
+- [magic_enum](https://github.com/Neargye/magic_enum), optional for named enum CDDL in C++20 builds
 
 ## Documentation
 

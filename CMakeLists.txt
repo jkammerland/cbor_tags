@@ -55,12 +55,17 @@ if(CBOR_TAGS_USE_STD_REFLECTION)
     check_cxx_source_compiles(
       [=[
 #include <meta>
+#include <string_view>
 #ifndef __cpp_impl_reflection
 #error "__cpp_impl_reflection is not defined"
 #endif
 struct S { int a; };
+enum class Color : unsigned char { red = 1, green = 2 };
 static_assert(__cpp_impl_reflection >= 202506L);
 static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
+static_assert(std::meta::enumerators_of(^^Color).size() == 2);
+static_assert(std::meta::identifier_of(std::meta::enumerators_of(^^Color)[0]) == std::string_view{"red"});
+static_assert(std::meta::extract<Color>(std::meta::enumerators_of(^^Color)[1]) == Color::green);
 int main() { return 0; }
 ]=]
       CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)

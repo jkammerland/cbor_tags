@@ -74,6 +74,7 @@ enum class CDDLUnsignedEnum : std::uint8_t {};
 enum class CDDLSignedEnum : std::int8_t {};
 enum class CDDLTrafficLight : std::uint8_t { red = 1, yellow = 2, green = 4 };
 enum class CDDLSignedChoice : std::int8_t { negative = -2, zero = 0, positive = 3 };
+enum class CDDLUnorderedChoice : std::int8_t { high = 5, low = 1, negative = -1 };
 
 struct CDDLEnums {
     CDDLUnsignedEnum unsigned_enum;
@@ -337,8 +338,8 @@ TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
     CHECK_EQ(cddl_schema_inline<CDDLEnums>(), "CDDLEnums = [uint, int]");
 }
 
-#if CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
-TEST_CASE("CDDL can emit magic_enum named enum choices") {
+#if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+TEST_CASE("CDDL can emit named enum choices") {
     fmt::memory_buffer root;
     cddl_schema_to<CDDLTrafficLight>(
         root, {.row_options = {.format_by_rows = false}, .root_name = "traffic-light", .enum_mode = CDDLEnumMode::named_values});
@@ -348,9 +349,14 @@ TEST_CASE("CDDL can emit magic_enum named enum choices") {
     cddl_schema_to<CDDLTrafficLight>(
         inline_root, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
     CHECK_EQ(fmt::to_string(inline_root), "root = &(red: 1, yellow: 2, green: 4)");
+
+    fmt::memory_buffer unordered;
+    cddl_schema_to<CDDLUnorderedChoice>(
+        unordered, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(unordered), "root = &(negative: -1, low: 1, high: 5)");
 }
 
-TEST_CASE("CDDL reuses magic_enum definitions inside aggregate schemas") {
+TEST_CASE("CDDL reuses named enum definitions inside aggregate schemas") {
     fmt::memory_buffer buffer;
     cddl_schema_to<CDDLEnumNames>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
     const auto schema = fmt::to_string(buffer);
