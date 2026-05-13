@@ -3,6 +3,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
+#include <cbor_tags/extensions/compact_tagged.h>
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <concepts>
 #include <cstddef>
@@ -38,6 +39,14 @@ struct lazy_tag_payload {
     lazy_tag_leaf              leaf;
     std::vector<int>           values;
     std::map<std::string, int> lookup;
+};
+
+struct lazy_compact_payload {
+    std::uint16_t    id{};
+    std::string      label;
+    std::vector<int> values;
+
+    bool operator==(const lazy_compact_payload &) const = default;
 };
 
 std::vector<std::byte> make_deeply_nested_tag(std::size_t depth) {
@@ -285,6 +294,38 @@ TEST_CASE("lazy tag payload decoder accepts opt-in codec mixins") {
     ext::rfc8746::typed_array<std::int32_t> decoded_via_match;
     REQUIRE(it->decode<ext::rfc8746::typed_array_codec>(decoded_via_match));
     CHECK_EQ(decoded_via_match.values(), values);
+}
+
+TEST_CASE("lazy tag payload decoder accepts compact tagged payloads") {
+    using namespace ext::compact;
+
+    const lazy_compact_payload payload{.id = 7, .label = "ready", .values = {1, -2, 3}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder<compact_tagged_codec>(buffer);
+    REQUIRE(enc(as_compact(static_tag<1001>{}, payload)));
+
+    auto view = find_tags<1001>(buffer);
+    auto it   = view.begin();
+
+    REQUIRE(it != view.end());
+    CHECK_EQ(it->tag(), 1001);
+
+    lazy_compact_payload decoded_via_decoder{};
+    auto                 payload_decoder = it->make_decoder<compact_tagged_codec>();
+    REQUIRE(payload_decoder(as_compact_payload(decoded_via_decoder)));
+    CHECK(decoded_via_decoder == payload);
+
+    lazy_compact_payload decoded_via_match{};
+    auto                 payload_ref = as_compact_payload(decoded_via_match);
+    REQUIRE(it->decode<compact_tagged_codec>(payload_ref));
+    CHECK(decoded_via_match == payload);
+
+    lazy_compact_payload full_envelope_decoded{};
+    auto                 full_envelope_ref    = as_compact(static_tag<1001>{}, full_envelope_decoded);
+    auto                 full_envelope_result = it->decode<compact_tagged_codec>(full_envelope_ref);
+    REQUIRE_FALSE(full_envelope_result);
+    CHECK_EQ(full_envelope_result.error(), status_code::no_match_for_tag_on_buffer);
 }
 
 TEST_CASE("lazy tag scanner exposes contiguous payload spans") {

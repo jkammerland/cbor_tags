@@ -20,6 +20,10 @@ template <typename T> struct compact_ref {
     T *value_{};
 };
 
+template <typename T> struct compact_payload_ref {
+    T *value_{};
+};
+
 template <typename Tag, typename T> struct compact_tag_ref {
     Tag tag_{};
     T  *value_{};
@@ -32,6 +36,16 @@ template <typename T> constexpr compact_ref<const T> as_compact(const T &value) 
 template <typename T>
     requires(!std::is_lvalue_reference_v<T>)
 void as_compact(T &&) = delete;
+
+template <typename T>
+    requires(!std::is_const_v<T>)
+constexpr compact_payload_ref<T> as_compact_payload(T &value) noexcept {
+    return {std::addressof(value)};
+}
+
+template <typename T>
+    requires(std::is_const_v<std::remove_reference_t<T>> || !std::is_lvalue_reference_v<T>)
+void as_compact_payload(T &&) = delete;
 
 template <typename Tag, typename T> constexpr compact_tag_ref<std::remove_cvref_t<Tag>, T> as_compact(Tag &&tag, T &value) noexcept {
     return {std::forward<Tag>(tag), std::addressof(value)};
@@ -67,6 +81,15 @@ template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mi
         return decode(value, major, additional_info);
     }
 
+    template <typename T> [[nodiscard]] constexpr status_code decode(compact_payload_ref<T> value) {
+        auto &dec = static_cast<Self &>(*this);
+        if (dec.reader_.empty(dec.data_)) {
+            return status_code::incomplete;
+        }
+        auto [major, additional_info] = dec.read_initial_byte();
+        return decode(value, major, additional_info);
+    }
+
     template <typename Tag, typename T> [[nodiscard]] constexpr status_code decode(compact_tag_ref<Tag, T> value) {
         auto &dec = static_cast<Self &>(*this);
         if (dec.reader_.empty(dec.data_)) {
@@ -78,6 +101,11 @@ template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mi
 
     template <typename T> [[nodiscard]] constexpr status_code decode(compact_ref<T> value, major_type major, std::byte additional_info) {
         return decode_tagged(cbor::tags::detail::compact::tag_for(*value.value_), *value.value_, major, additional_info);
+    }
+
+    template <typename T>
+    [[nodiscard]] constexpr status_code decode(compact_payload_ref<T> value, major_type major, std::byte additional_info) {
+        return decode_payload_bstr(*value.value_, major, additional_info);
     }
 
     template <typename Tag, typename T>
@@ -116,11 +144,17 @@ template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mi
         }
 
         auto [payload_major, payload_info] = dec.read_initial_byte();
+        return decode_payload_bstr(value, payload_major, payload_info);
+    }
+
+    template <typename T>
+    [[nodiscard]] constexpr status_code decode_payload_bstr(T &value, major_type payload_major, std::byte payload_info) {
+        auto &dec = static_cast<Self &>(*this);
         if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
             return status_code::no_match_for_bstr_on_buffer;
         }
 
-        argument_status = validate_argument_available(dec, payload_info);
+        auto argument_status = validate_argument_available(dec, payload_info);
         if (argument_status != status_code::success) {
             return argument_status;
         }
@@ -134,14 +168,16 @@ template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mi
             return status_code::incomplete;
         }
 
+        using payload_type = decltype(std::declval<Self &>().decode_bstring_payload(std::declval<std::uint64_t>()));
+        if constexpr (!std::ranges::contiguous_range<payload_type> && cbor::tags::detail::compact::has_borrowed_decode_refs_v<T>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        }
+
         auto payload = dec.decode_bstring_payload(payload_size);
         if constexpr (std::ranges::contiguous_range<decltype(payload)>) {
             return cbor::tags::detail::compact::decode_payload(
                 std::span<const std::byte>(std::ranges::data(payload), std::ranges::size(payload)), value);
         } else {
-            if constexpr (cbor::tags::detail::compact::has_borrowed_decode_refs_v<T>) {
-                return status_code::contiguous_view_on_non_contiguous_data;
-            }
             std::vector<std::byte> payload_bytes(payload.begin(), payload.end());
             return cbor::tags::detail::compact::decode_payload(std::span<const std::byte>(payload_bytes.data(), payload_bytes.size()),
                                                                value);

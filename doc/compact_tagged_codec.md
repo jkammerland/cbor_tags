@@ -11,7 +11,8 @@ The outer value is still CBOR:
 ```
 
 The byte-string payload is a compact schema-bound format. It is not standalone
-CBOR, and a generic CBOR decoder can only see the tag and opaque byte string.
+CBOR, and a generic CBOR decoder can only see the tag and opaque definite-length
+byte string.
 
 Use the normal CBOR codec when data should remain self-describing. Use this
 codec when the tag identifies the schema and compactness matters more than
@@ -22,6 +23,7 @@ generic field inspection.
 ```cpp
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_lazy_tags.h>
 #include <cbor_tags/extensions/compact_tagged.h>
 
 #include <cstddef>
@@ -58,13 +60,42 @@ site, pass it explicitly:
 auto result = enc(as_compact(static_tag<1001>{}, message));
 ```
 
+## Lazy Tag Payloads
+
+`find_tags` matches the outer CBOR tag and exposes only the tag payload. For
+compact tagged values, that payload is the definite-length byte string, not the
+whole `#6.<tag>(bstr)` envelope. Decode it with `as_compact_payload`.
+
+```cpp
+auto matches = find_tags<1001>(out);
+auto it      = matches.begin();
+
+Message decoded_from_match{};
+auto    payload_ref = as_compact_payload(decoded_from_match);
+auto    ok          = it->decode<compact_tagged_codec>(payload_ref);
+```
+
+The payload decoder object also accepts the wrapper directly:
+
+```cpp
+Message decoded_from_payload{};
+auto    payload_decoder = it->make_decoder<compact_tagged_codec>();
+auto    ok = payload_decoder(as_compact_payload(decoded_from_payload));
+```
+
+Use `as_compact(...)` for full buffers that still contain the outer tag. Use
+`as_compact_payload(...)` only when the decoder starts at the tag payload bstr,
+as lazy tag matches do.
+
 ## Payload Rules
 
 - Integral values, enums, and floats are encoded in fixed-width little-endian
   form.
 - `bool` uses one byte: `0` or `1`.
-- Text strings, byte strings, ranges, and maps use a compact varuint length
-  followed by their elements or bytes.
+- Text strings, byte strings, variable-size ranges, and maps use a compact
+  varuint length followed by their elements or bytes.
+- `std::array` stores its elements directly; its length is part of the C++
+  schema, not the payload.
 - `std::optional<T>` uses a one-byte presence marker followed by `T` when set.
 - `std::variant<...>` stores the selected alternative index followed by that
   alternative.
@@ -82,6 +113,22 @@ Decoded `std::string_view`, `std::span<const std::byte>`, and nested structures
 containing those views borrow from the byte-string payload. They require a
 contiguous input buffer. When the decoder input is non-contiguous, decode into
 owning types such as `std::string` and `std::vector<std::byte>` instead.
+
+Borrowed views point into the input buffer. Destroying, mutating, or reallocating
+that buffer invalidates the decoded views.
+
+## Known Limitations
+
+- Compact payload encoding measures the payload and then writes it. Do not pass
+  one-shot or stateful input ranges to `as_compact(...)`; materialize them into a
+  stable container first.
+- Malformed compact payloads can currently declare very large variable-size
+  container lengths before the decoder proves the payload is incomplete. Decode
+  compact tagged data only from inputs that are already bounded by your
+  transport, file-size limit, or application framing.
+- Additional opt-in codecs passed beside `compact_tagged_codec` compose at the
+  outer CBOR level. Compact payload fields use this codec's schema-bound payload
+  rules, not the normal extension dispatch path.
 
 ## Name
 
