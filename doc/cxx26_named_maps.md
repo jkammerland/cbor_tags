@@ -1,7 +1,18 @@
-# C++26 Named Maps
+# Named Maps
 
 Named maps encode a struct as a CBOR map using reflected C++ member names as
-text-string keys. This requires C++26 static reflection.
+text-string keys. This requires named reflection, either C++26 static reflection
+or the C++20 Boost.PFR field-name backend.
+
+Enable one of the named-reflection backends:
+
+```bash
+cmake -B build -DCBOR_TAGS_USE_STD_REFLECTION=ON
+cmake -B build -DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON
+```
+
+The Boost.PFR backend requires Boost 1.84 or newer, `<boost/pfr/core_name.hpp>`,
+and `BOOST_PFR_CORE_NAME_ENABLED`.
 
 All examples below assume:
 

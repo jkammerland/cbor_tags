@@ -596,7 +596,7 @@ template <typename T> std::string cddl_map_expr(CDDLContext &context, CDDLOption
     return fmt::format("{{* {} => {}}}", key, value);
 }
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
 template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using tuple_type = aggregate_tuple_t<value_type>;
@@ -686,12 +686,14 @@ std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions
 }
 #else
 template <typename T> std::string ensure_cddl_named_map_definition(CDDLContext &, CDDLOptions, std::string_view) {
-    static_assert(always_false<std::remove_cvref_t<T>>::value, "as_named_map requires C++26 static reflection");
+    static_assert(always_false<std::remove_cvref_t<T>>::value,
+                  "as_named_map requires named reflection (C++26 std::meta or Boost.PFR field names)");
     return {};
 }
 
 template <typename T> std::string ensure_cddl_named_group_definition(CDDLContext &, CDDLOptions, std::string_view) {
-    static_assert(always_false<std::remove_cvref_t<T>>::value, "as_named_group requires C++26 static reflection");
+    static_assert(always_false<std::remove_cvref_t<T>>::value,
+                  "as_named_group requires named reflection (C++26 std::meta or Boost.PFR field names)");
     return {};
 }
 #endif

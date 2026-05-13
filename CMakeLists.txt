@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add option for debug mode
 option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
 option(CBOR_TAGS_USE_STD_REFLECTION "Build cbor_tags tests with GCC C++26 std::meta reflection" OFF)
+option(CBOR_TAGS_USE_BOOST_PFR_NAMES "Enable C++20 named-map reflection via Boost.PFR field names" OFF)
 
 # Configure a header file to pass the CMake setting to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cbor_tags_config.h.in" "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
@@ -74,6 +75,34 @@ int main() { return 0; }
   else()
     message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION currently supports GCC's C++26 reflection implementation only.")
   endif()
+endif()
+
+if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles(
+    [=[
+#include <boost/pfr/core.hpp>
+#include <boost/pfr/core_name.hpp>
+#include <string_view>
+#ifndef BOOST_PFR_CORE_NAME_ENABLED
+#error "BOOST_PFR_CORE_NAME_ENABLED is not defined"
+#endif
+#if !BOOST_PFR_CORE_NAME_ENABLED
+#error "BOOST_PFR_CORE_NAME_ENABLED is disabled"
+#endif
+struct S { int field_name; };
+static_assert(boost::pfr::tuple_size_v<S> == 1);
+static_assert(boost::pfr::get_name<0, S>() == std::string_view{"field_name"});
+int main() { return 0; }
+]=]
+    CBOR_TAGS_COMPILER_HAS_BOOST_PFR_NAMES)
+
+  if(NOT CBOR_TAGS_COMPILER_HAS_BOOST_PFR_NAMES)
+    message(FATAL_ERROR "CBOR_TAGS_USE_BOOST_PFR_NAMES requires Boost.PFR field names "
+                        "(<boost/pfr/core_name.hpp>, Boost 1.84 or newer, BOOST_PFR_CORE_NAME_ENABLED).")
+  endif()
+
+  target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_BOOST_PFR_NAMES=1)
 endif()
 
 # Build options

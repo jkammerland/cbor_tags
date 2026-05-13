@@ -604,6 +604,8 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 
 Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
+Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer).
+
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
 
@@ -776,7 +778,7 @@ For example, a `Person` struct can be encoded as:
 {"age": 42, "name": "Ada", "employer": "Coretura"}
 ```
 
-See [C++26 named maps](doc/cxx26_named_maps.md) for serialization,
+See [named maps](doc/cxx26_named_maps.md) for serialization,
 deserialization, CDDL, and exact output examples.
 
 Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_standard_coverage.md).
@@ -789,6 +791,7 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 - nameof (optional, but required for CDDL)
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
+- Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer and `BOOST_PFR_CORE_NAME_ENABLED`.
 - CMake 3.20+.
 
 ## 📦 Installation

@@ -50,6 +50,15 @@ concept CanInstantiateBinaryView = requires { typename bstr_view<R>; };
 TEST_CASE("CMake std reflection option enables native reflection") {
 #if CBOR_TAGS_USE_STD_REFLECTION == 1
     static_assert(CBOR_TAGS_HAS_STD_REFLECTION == 1);
+    static_assert(CBOR_TAGS_HAS_NAMED_REFLECTION == 1);
+#endif
+    CHECK(true);
+}
+
+TEST_CASE("CMake Boost.PFR names option enables named reflection") {
+#if CBOR_TAGS_USE_BOOST_PFR_NAMES == 1
+    static_assert(CBOR_TAGS_HAS_BOOST_PFR_NAMES == 1);
+    static_assert(CBOR_TAGS_HAS_NAMED_REFLECTION == 1);
 #endif
     CHECK(true);
 }

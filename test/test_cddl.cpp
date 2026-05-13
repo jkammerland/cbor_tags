@@ -112,7 +112,7 @@ struct CDDLNameCollisionRoot {
 
 struct CDDLEmpty {};
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
 struct CDDLNamedPerson {
     int         age;
     std::string name;
@@ -327,8 +327,8 @@ TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
     CHECK_EQ(cddl_schema_inline<CDDLEnums>(), "CDDLEnums = [uint, int]");
 }
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
-TEST_CASE("C++26 named-map CDDL covers RFC 8610 map and group examples") {
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+TEST_CASE("named-map CDDL covers RFC 8610 map and group examples") {
     fmt::memory_buffer direct_map;
     cddl_schema_to<as_named_map<CDDLNamedPerson>>(direct_map, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(direct_map), "person = {age: int, name: tstr, employer: tstr}");
@@ -351,7 +351,7 @@ TEST_CASE("C++26 named-map CDDL covers RFC 8610 map and group examples") {
     CHECK_EQ(fmt::to_string(parenthesized_group), "person = {(age: int, name: tstr, employer: tstr)}");
 }
 
-TEST_CASE("C++26 named-map CDDL covers RFC 8610 group factorization and personal data examples") {
+TEST_CASE("named-map CDDL covers RFC 8610 group factorization and personal data examples") {
     fmt::memory_buffer person;
     cddl_schema_to<as_named_map<CDDLNamedPersonWithIdentity>>(person, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(person), "person = {identity, employer: tstr}\nidentity = (age: int, name: tstr)");
@@ -372,7 +372,7 @@ TEST_CASE("C++26 named-map CDDL covers RFC 8610 group factorization and personal
                                          "NameComponents = (? firstName: tstr, ? familyName: tstr)");
 }
 
-TEST_CASE("C++26 named-map CDDL covers a larger grouped profile") {
+TEST_CASE("named-map CDDL covers a larger grouped profile") {
     fmt::memory_buffer account;
     cddl_schema_to<as_named_map<CDDLAccountProfile>>(account, {.row_options = {.format_by_rows = false}, .root_name = "AccountProfile"});
     CHECK_EQ(fmt::to_string(account),
@@ -382,7 +382,7 @@ TEST_CASE("C++26 named-map CDDL covers a larger grouped profile") {
              "owner = (? givenName: tstr, ? familyName: tstr)");
 }
 
-TEST_CASE("C++26 named-map CDDL keeps table examples typed") {
+TEST_CASE("named-map CDDL keeps table examples typed") {
     fmt::memory_buffer square_roots;
     cddl_schema_to<std::map<int, float>>(square_roots, {.row_options = {.format_by_rows = false}, .root_name = "square_roots"});
     CHECK_EQ(fmt::to_string(square_roots), "square_roots = {* int => float32}");
@@ -393,7 +393,7 @@ TEST_CASE("C++26 named-map CDDL keeps table examples typed") {
     CHECK_EQ(fmt::to_string(to_string_table), "tostring = {* (int / float32) => tstr}");
 }
 
-TEST_CASE("C++26 named-map codec roundtrips and accepts unordered maps") {
+TEST_CASE("named-map codec roundtrips and accepts unordered maps") {
     CDDLNamedPerson        input{.age = 42, .name = "Ada", .employer = "AcmeCo"};
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -417,7 +417,7 @@ TEST_CASE("C++26 named-map codec roundtrips and accepts unordered maps") {
     CHECK_EQ(indefinite_decoded.employer, "AcmeCo");
 }
 
-TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys") {
+TEST_CASE("named-map codec enforces required, duplicate, and unknown keys") {
     auto            missing_required = to_bytes("a2646e616d656341646168656d706c6f7965726641636d65436f");
     CDDLNamedPerson missing{};
     auto            missing_dec = make_decoder(missing_required);
@@ -434,7 +434,7 @@ TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys"
     CHECK_FALSE(unknown_dec(as_named_map{unknown}));
 }
 
-TEST_CASE("C++26 named-map codec rejects malformed named-map shapes") {
+TEST_CASE("named-map codec rejects malformed named-map shapes") {
     auto            non_text_key = to_bytes("a10102");
     CDDLNamedPerson non_text{};
     auto            non_text_dec = make_decoder(non_text_key);
@@ -456,14 +456,14 @@ TEST_CASE("C++26 named-map codec rejects malformed named-map shapes") {
     CHECK_FALSE(null_value_dec(as_named_map{null_value}));
 }
 
-TEST_CASE("C++26 named-map codec validates required fields inside named groups") {
+TEST_CASE("named-map codec validates required fields inside named groups") {
     auto                        missing_group_member = to_bytes("a263616765182a68656d706c6f7965726641636d65436f");
     CDDLNamedPersonWithIdentity missing{};
     auto                        missing_dec = make_decoder(missing_group_member);
     CHECK_FALSE(missing_dec(as_named_map{missing}));
 }
 
-TEST_CASE("C++26 named-map codec resets optionals and extensions before decode") {
+TEST_CASE("named-map codec resets optionals and extensions before decode") {
     CDDLPersonalDataExtensible decoded{
         .displayName = std::string{"old"},
         .NameComponents =
@@ -483,7 +483,7 @@ TEST_CASE("C++26 named-map codec resets optionals and extensions before decode")
     CHECK(decoded.extensions.value_.empty());
 }
 
-TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions") {
+TEST_CASE("named-map codec handles optionals, groups, and typed extensions") {
     CDDLPersonalDataExtensible input{
         .NameComponents =
             as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}, .familyName = std::nullopt}},
@@ -508,7 +508,7 @@ TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
 }
 
-TEST_CASE("C++26 named-map codec handles a larger grouped profile") {
+TEST_CASE("named-map codec handles a larger grouped profile") {
     CDDLAccountProfile input{
         .accountId = "acct-7",
         .owner = as_named_group<CDDLAccountOwner>{CDDLAccountOwner{.givenName = std::string{"Ada"}, .familyName = std::string{"Lovelace"}}},
@@ -549,7 +549,7 @@ TEST_CASE("C++26 named-map codec handles a larger grouped profile") {
     CHECK_EQ(decoded.metadata.value_.at("team"), "compiler");
 }
 
-TEST_CASE("C++26 named-map codec rejects extension keys that shadow named fields") {
+TEST_CASE("named-map codec rejects extension keys that shadow named fields") {
     CDDLPersonalDataExtensible input{.NameComponents =
                                          as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}}},
                                      .age        = 42,

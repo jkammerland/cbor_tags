@@ -114,10 +114,11 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <typename U> constexpr void encode([[maybe_unused]] const as_named_map<U> &value) {
-#if CBOR_TAGS_HAS_STD_REFLECTION
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
         detail::encode_named_map(*this, value.value_);
 #else
-        static_assert(always_false<std::remove_cvref_t<U>>::value, "as_named_map requires C++26 static reflection");
+        static_assert(always_false<std::remove_cvref_t<U>>::value,
+                      "as_named_map requires named reflection (C++26 std::meta or Boost.PFR field names)");
 #endif
     }
 

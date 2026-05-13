@@ -6,7 +6,7 @@
 #include <tuple>
 #include <type_traits>
 
-#if !CBOR_TAGS_HAS_STD_REFLECTION
+#if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_BOOST_PFR_NAMES
 
 namespace cbor::tags {
 

@@ -1,7 +1,16 @@
 #pragma once
 
+#ifndef CBOR_TAGS_DEBUG
 #cmakedefine01 CBOR_TAGS_DEBUG
+#endif
+
+#ifndef CBOR_TAGS_USE_STD_REFLECTION
 #cmakedefine01 CBOR_TAGS_USE_STD_REFLECTION
+#endif
+
+#ifndef CBOR_TAGS_USE_BOOST_PFR_NAMES
+#cmakedefine01 CBOR_TAGS_USE_BOOST_PFR_NAMES
+#endif
 
 #include <string_view>
 
