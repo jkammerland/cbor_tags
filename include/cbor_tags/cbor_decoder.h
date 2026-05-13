@@ -291,23 +291,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            if constexpr (requires { t.clear(); }) {
-                t.clear();
-            }
+            auto decoded = detail::make_decode_value_for<T>(t);
             if constexpr (HasReserve<T>) {
                 if (std::cmp_greater(bstring_size, std::numeric_limits<typename T::size_type>::max())) {
                     throw std::length_error("CBOR byte string length exceeds target container size_type");
                 }
-                t.reserve(static_cast<typename T::size_type>(bstring_size));
+                decoded.reserve(static_cast<typename T::size_type>(bstring_size));
             }
             detail::appender<T> appender_;
             if constexpr (IsContiguous<decltype(bstring)>) {
-                appender_(t, bstring);
+                appender_(decoded, bstring);
             } else {
                 for (auto byte_value : bstring) {
-                    appender_(t, static_cast<typename T::value_type>(byte_value));
+                    appender_(decoded, static_cast<typename T::value_type>(byte_value));
                 }
             }
+            t = std::move(decoded);
         }
 
         return status_code::success;

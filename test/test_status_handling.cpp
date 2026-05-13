@@ -245,6 +245,25 @@ TEST_SUITE("Decoding the wrong thing") {
         }
     }
 
+    TEST_CASE("Decode bounded pmr binary string failure preserves target") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(std::vector<std::byte>(64, std::byte{0xAB})));
+
+        std::array<std::byte, 32>           storage{};
+        std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+        const auto                          original = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        std::pmr::vector<std::byte>         decoded(original.begin(), original.end(), &resource);
+
+        auto dec    = make_decoder(data);
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::out_of_memory);
+        CHECK_EQ(decoded.size(), original.size());
+        CHECK(std::ranges::equal(decoded, original));
+    }
+
     TEST_CASE("Decode pmr strings use target resource instead of default resource") {
         {
             const auto             source = std::string(64, 'x');
