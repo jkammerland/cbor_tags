@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.14.0)
+project(cbor_tags VERSION 0.15.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
@@ -29,7 +29,7 @@ if(CBOR_TAGS_USE_DEV_SETTINGS)
 endif()
 
 # THE LIBRARY
-file(GLOB_RECURSE CBOR_HEADERS include/*.h include/*.hpp)
+file(GLOB_RECURSE CBOR_HEADERS CONFIGURE_DEPENDS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
 target_sources(
   ${PROJECT_NAME}
@@ -47,9 +47,9 @@ if(CBOR_TAGS_USE_STD_REFLECTION)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     include(CheckCXXSourceCompiles)
     set(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
-    set(CMAKE_CXX_STANDARD 26)
-    set(CMAKE_CXX_EXTENSIONS ON)
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -freflection")
+    set(_CBOR_TAGS_CMAKE_CXX_STANDARD "${CMAKE_CXX_STANDARD}")
+    unset(CMAKE_CXX_STANDARD)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=gnu++26 -freflection")
     check_cxx_source_compiles(
       [=[
 #include <meta>
@@ -63,12 +63,14 @@ int main() { return 0; }
 ]=]
       CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
     set(CMAKE_REQUIRED_FLAGS "${_CBOR_TAGS_CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_CXX_STANDARD "${_CBOR_TAGS_CMAKE_CXX_STANDARD}")
     unset(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS)
+    unset(_CBOR_TAGS_CMAKE_CXX_STANDARD)
 
     if(NOT CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
       message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION requires GCC with C++26 reflection support (-std=gnu++26 -freflection).")
     endif()
-    target_compile_options(${PROJECT_NAME} INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-freflection>)
+    target_compile_options(${PROJECT_NAME} INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++26> $<$<COMPILE_LANGUAGE:CXX>:-freflection>)
   else()
     message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION currently supports GCC's C++26 reflection implementation only.")
   endif()
@@ -141,7 +143,7 @@ endif()
 
 option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
 option(CBOR_TAGS_TIDY_TESTS "Run clang-tidy on test sources" OFF)
-option(CBOR_TAGS_TIDY_BENCHMARKS "Run clang-tidy on benchmark sources" OFF)
+option(CBOR_TAGS_TIDY_BENCHMARKS "Deprecated/no-op: benchmark sources are excluded from clang-tidy" OFF)
 if(CBOR_TAGS_TIDY_TARGET)
   cpmaddpackage("gh:fmtlib/fmt#11.1.2")
   cpmaddpackage("gh:Neargye/nameof@0.10.4")
@@ -178,6 +180,7 @@ message(STATUS "")
 message(STATUS "Standard build types: debug, release, relwithdebinfo, minsizerel")
 message(STATUS "Analysis presets: coverage, coverage-release, tidy, tidy-fix")
 message(STATUS "Profiling presets: profile, profile-release, profile-gprof, pgo-generate, pgo-use")
+message(STATUS "Benchmark presets: benchmark-comparison")
 message(STATUS "Diagnostic presets (platform-dependent): alsan, alusan, msan, cfihwasan, fullsan")
 message(STATUS "Memory-check presets (Linux): valgrind")
 

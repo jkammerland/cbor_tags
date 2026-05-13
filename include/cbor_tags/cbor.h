@@ -4,6 +4,8 @@
 
 // Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_ranges.h"
+#include "cbor_tags/cbor_raw_views.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
@@ -93,9 +95,11 @@ using default_expected                           = Option<expected<void, status_
 
 namespace detail {
 struct wrap_groups {};
+struct strict_integer_decode {};
 }; // namespace detail
 
-using default_wrapping = Option<detail::wrap_groups>;
+using default_wrapping        = Option<detail::wrap_groups>;
+using strict_integer_decoding = Option<detail::strict_integer_decode>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
@@ -121,9 +125,14 @@ template <typename... T> struct Options {
 
     // When false, a tagged type or tuple of multiple items will not be wrapped in an array by default
     static constexpr bool wrap_groups = contains<default_wrapping, T...>();
+    // When true, decoding a CBOR integer into a narrower native integer target rejects instead of slicing.
+    static constexpr bool strict_integer_decode = contains<strict_integer_decoding, T...>();
 
     constexpr Options() = default;
 };
+
+using default_options                = Options<default_expected, default_wrapping>;
+using strict_integer_decoder_options = Options<default_expected, default_wrapping, strict_integer_decoding>;
 // ---------
 
 struct binary_array_view {
@@ -192,6 +201,11 @@ struct bstr_view : std::ranges::view_interface<bstr_view<R>> {
 
     constexpr auto begin() const { return iterator{std::ranges::begin(range)}; }
     constexpr auto end() const { return iterator{std::ranges::end(range)}; }
+    constexpr auto size() const
+        requires std::ranges::sized_range<const R>
+    {
+        return std::ranges::size(range);
+    }
 
     operator std::vector<std::byte>() const { return {begin(), end()}; }
 

@@ -1,7 +1,10 @@
+#include "test_util.h"
+
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -9,9 +12,11 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace cbor::tags;
@@ -21,6 +26,17 @@ namespace {
 consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument) {
     return argument != std::numeric_limits<std::uint64_t>::max();
 }
+
+struct minimal_decoder_options {
+    using is_options  = void;
+    using return_type = expected<void, status_code>;
+    using error_type  = status_code;
+
+    static constexpr bool wrap_groups = true;
+};
+
+static_assert(IsOptions<minimal_decoder_options>);
+static_assert(!cbor::tags::detail::strict_integer_decode_option_v<minimal_decoder_options>);
 
 struct NonDefaultComparator {
     int tag;
@@ -60,6 +76,44 @@ template <typename T> struct NonDefaultAllocator {
 
     template <typename U> constexpr bool operator==(const NonDefaultAllocator<U> &other) const noexcept { return tag == other.tag; }
 };
+
+struct CustomSizeByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::uint16_t;
+
+    std::vector<std::byte> bytes;
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto data() noexcept { return bytes.data(); }
+    [[nodiscard]] auto data() const noexcept { return bytes.data(); }
+    [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
+};
+
+struct AdlSizedByteRange {
+    std::array<std::byte, 4> bytes{};
+
+    friend std::byte       *begin(AdlSizedByteRange &range) noexcept { return range.bytes.data(); }
+    friend const std::byte *begin(const AdlSizedByteRange &range) noexcept { return range.bytes.data(); }
+    friend std::byte       *end(AdlSizedByteRange &range) noexcept { return range.bytes.data() + range.bytes.size(); }
+    friend const std::byte *end(const AdlSizedByteRange &range) noexcept { return range.bytes.data() + range.bytes.size(); }
+    friend std::uint16_t    size(const AdlSizedByteRange &range) noexcept { return static_cast<std::uint16_t>(range.bytes.size()); }
+};
+
+struct SignedSizeDequeByteRange {
+    using value_type = std::byte;
+    using size_type  = int;
+
+    std::deque<std::byte> bytes;
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
+};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
@@ -69,6 +123,13 @@ static_assert(std::is_move_assignable_v<NonDefaultComparator>);
 static_assert(!std::is_default_constructible_v<NonAssignableComparator>);
 static_assert(!std::is_move_assignable_v<NonAssignableComparator>);
 static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
+static_assert(CborInputBuffer<CustomSizeByteBuffer>);
+static_assert(
+    std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
+static_assert(CborInputBuffer<AdlSizedByteRange>);
+static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
+static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
+static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
 
 TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
     const auto cancelled = integer{2, true} + integer{2};
@@ -94,7 +155,7 @@ TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
     CHECK_EQ(underflow.value, 0);
 }
 
-TEST_CASE("decoder should reject unsigned integer overflow") {
+TEST_CASE("decoder should slice unsigned integer overflow") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
@@ -104,11 +165,11 @@ TEST_CASE("decoder should reject unsigned integer overflow") {
     std::uint32_t decoded{};
     auto          result = dec(decoded);
 
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
+    REQUIRE(result);
+    CHECK_EQ(decoded, 0U);
 }
 
-TEST_CASE("decoder should reject signed integer overflow") {
+TEST_CASE("decoder should slice signed positive integer overflow") {
     std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0x80}}; // uint(128)
 
     auto dec = make_decoder(buffer);
@@ -116,11 +177,11 @@ TEST_CASE("decoder should reject signed integer overflow") {
     std::int8_t decoded{};
     auto        result = dec(decoded);
 
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+    REQUIRE(result);
+    CHECK_EQ(decoded, std::numeric_limits<std::int8_t>::min());
 }
 
-TEST_CASE("decoder should reject signed negative underflow") {
+TEST_CASE("decoder should slice signed negative integer underflow") {
     std::vector<std::byte> buffer{std::byte{0x38}, std::byte{0x80}}; // -129
 
     auto dec = make_decoder(buffer);
@@ -128,8 +189,60 @@ TEST_CASE("decoder should reject signed negative underflow") {
     std::int8_t decoded{};
     auto        result = dec(decoded);
 
+    REQUIRE(result);
+    CHECK_EQ(decoded, std::numeric_limits<std::int8_t>::max());
+}
+
+TEST_CASE("strict integer decoder option should reject unsigned integer overflow") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
+
+    auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
+
+    std::uint32_t decoded{};
+    auto          result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
+}
+
+TEST_CASE("strict integer decoder option should reject signed positive integer overflow") {
+    std::vector<std::byte> buffer{std::byte{0x18}, std::byte{0x80}}; // uint(128)
+
+    auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
+
+    std::int8_t decoded{};
+    auto        result = dec(decoded);
+
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+}
+
+TEST_CASE("strict integer decoder option should reject signed negative integer underflow") {
+    std::vector<std::byte> buffer{std::byte{0x38}, std::byte{0x80}}; // -129
+
+    auto dec = make_decoder_with_options<strict_integer_decoder_options>(buffer);
+
+    std::int8_t decoded{};
+    auto        result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+}
+
+TEST_CASE("minimal decoder options use default integer slicing") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U));
+
+    auto dec = make_decoder_with_options<minimal_decoder_options>(buffer);
+
+    std::uint32_t decoded{};
+    auto          result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded, 0U);
 }
 
 TEST_CASE("decoder should accept integer decode boundaries") {
@@ -455,6 +568,74 @@ TEST_CASE("decoder should accept empty byte strings for basic_string_view at end
     CHECK(decoded.empty());
 }
 
+TEST_CASE("decoder should preserve custom input buffer size_type") {
+    CustomSizeByteBuffer buffer{.bytes = {std::byte{0x42}, std::byte{0x01}, std::byte{0x02}, std::byte{0x01}}};
+
+    auto dec = make_decoder(buffer);
+
+    std::basic_string_view<std::byte> decoded;
+    std::uint8_t                      next_value{};
+    auto                              result = dec(decoded, next_value);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.size(), 2);
+    CHECK_EQ(decoded[0], std::byte{0x01});
+    CHECK_EQ(decoded[1], std::byte{0x02});
+    CHECK_EQ(next_value, 1);
+}
+
+TEST_CASE("decoder tell supports ADL-only ranges") {
+    AdlSizedByteRange buffer{.bytes = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}}};
+
+    auto dec = make_decoder(buffer);
+    CHECK(dec.tell() == std::ranges::begin(buffer));
+
+    std::uint8_t value{};
+    auto         result = dec(value);
+
+    REQUIRE(result);
+    CHECK_EQ(value, 1);
+    CHECK(dec.tell() == std::ranges::begin(buffer) + 1);
+}
+
+TEST_CASE("decoder readers reject negative seeks before begin") {
+    std::vector<std::byte>                             contiguous{std::byte{0x01}};
+    cbor::tags::detail::reader<std::vector<std::byte>> contiguous_reader{contiguous};
+    CHECK_THROWS_AS(contiguous_reader.seek(-1), std::runtime_error);
+    CHECK_THROWS_AS(contiguous_reader.seek(std::numeric_limits<std::ptrdiff_t>::min()), std::runtime_error);
+
+    std::deque<std::byte>                             non_contiguous{std::byte{0x01}};
+    cbor::tags::detail::reader<std::deque<std::byte>> non_contiguous_reader{non_contiguous};
+    CHECK_THROWS_AS(non_contiguous_reader.seek(-1), std::runtime_error);
+    CHECK_THROWS_AS(non_contiguous_reader.seek(std::numeric_limits<std::ptrdiff_t>::min()), std::runtime_error);
+}
+
+TEST_CASE("decoder skips any byte strings on signed-size non-contiguous ranges") {
+    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x41}, std::byte{0x01}, std::byte{0x02}}};
+
+    auto         dec = make_decoder(buffer);
+    as_bstr_any  decoded{};
+    std::uint8_t following{};
+    auto         result = dec(decoded, following);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.size, 1);
+    CHECK_EQ(following, 2);
+}
+
+TEST_CASE("decoder skips any text strings on signed-size non-contiguous ranges") {
+    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x61}, std::byte{0x41}, std::byte{0x02}}};
+
+    auto         dec = make_decoder(buffer);
+    as_text_any  decoded{};
+    std::uint8_t following{};
+    auto         result = dec(decoded, following);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.size, 1);
+    CHECK_EQ(following, 2);
+}
+
 TEST_CASE("decoder should report incomplete byte-string view without retry contract") {
     // bstr(2): 0x42, but only 1 byte payload initially
     std::vector<std::byte> buffer{std::byte{0x42}, std::byte{0x01}};
@@ -692,6 +873,27 @@ TEST_CASE("decoder should reject array length mismatch for fixed-size spans") {
     CHECK_EQ(result.error(), status_code::unexpected_group_size);
     CHECK_EQ(storage[0], -1);
     CHECK_EQ(storage[1], -1);
+}
+
+TEST_CASE("decoder duplicate map keys follow target container insertion semantics") {
+    auto bytes = to_bytes("a201010102");
+
+    {
+        auto               dec = make_decoder(bytes);
+        std::map<int, int> decoded;
+        auto               result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.size(), 1);
+        CHECK_EQ(decoded.at(1), 2);
+    }
+
+    {
+        auto                    dec = make_decoder(bytes);
+        std::multimap<int, int> decoded;
+        auto                    result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.count(1), 2);
+    }
 }
 
 TEST_CASE("encoder should not overflow fixed-size output buffers") {

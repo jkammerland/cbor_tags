@@ -67,6 +67,9 @@ person = {age: int, name: tstr, employer: tstr}
 ## Decode Behavior
 
 Named-map decoding is key based, so map entries may arrive in any order.
+Named-map keys are matched as text strings. Encoders produced by this library
+emit definite text-string keys for named maps; chunked indefinite text-string
+keys are outside the named-map matching contract.
 
 ```cpp
 Person decoded{};

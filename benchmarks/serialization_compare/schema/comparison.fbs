@@ -1,0 +1,42 @@
+namespace cbor_tags_bench;
+
+table FlatRecord {
+  id:int;
+  sequence:ulong;
+  active:bool;
+  kind:ubyte;
+  temperature:float;
+  score:double;
+  name:string;
+  samples:[int];
+}
+
+table KeyValue {
+  key:string;
+  value:long;
+}
+
+table RecordBatch {
+  records:[FlatRecord];
+}
+
+table NestedSnapshot {
+  title:string;
+  records:[FlatRecord];
+  counters:[KeyValue];
+  payload:[ubyte];
+}
+
+table Int32Series {
+  values:[int];
+}
+
+table Int64Series {
+  values:[long];
+}
+
+table Float64Series {
+  values:[double];
+}
+
+root_type NestedSnapshot;

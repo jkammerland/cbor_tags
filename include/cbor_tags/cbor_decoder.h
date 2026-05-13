@@ -5,9 +5,12 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
@@ -17,12 +20,15 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
+#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
+#include <memory>
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
 
+#include <array>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -30,6 +36,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -70,23 +77,59 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
     }
 }
 
+template <typename InputBuffer, typename Reader>
+constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffer &data, std::uint64_t length) {
+    using size_type = typename Reader::size_type;
+
+    if (length == 0) {
+        return status_code::success;
+    }
+
+    if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+        if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+            return status_code::error;
+        }
+    }
+
+    const auto needed = static_cast<size_type>(length);
+    if (reader.empty(data, needed - 1)) {
+        return status_code::incomplete;
+    }
+
+    if constexpr (IsContiguous<InputBuffer>) {
+        reader.position_ += needed;
+    } else {
+        if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
+            return status_code::error;
+        }
+        reader.position_ = std::next(reader.position_, static_cast<std::ptrdiff_t>(needed));
+        reader.current_offset_ += needed;
+    }
+
+    return status_code::success;
+}
+
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
-    requires ValidCborBuffer<InputBuffer>
+    requires CborInputBuffer<InputBuffer>
 struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... {
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
-    using size_type         = typename InputBuffer::size_type;
-    using buffer_byte_t     = typename InputBuffer::value_type;
+    using reader_type       = detail::reader<InputBuffer>;
+    using size_type         = typename reader_type::size_type;
+    using buffer_byte_t     = std::ranges::range_value_t<InputBuffer>;
     using input_buffer_type = InputBuffer;
     using byte              = std::byte;
 
-    using iterator_t  = std::ranges::iterator_t<const InputBuffer>;
-    using subrange    = std::ranges::subrange<iterator_t>;
-    using bstr_view_t = bstr_view<subrange>;
-    using tstr_view_t = tstr_view<subrange>;
+    using iterator_t             = std::ranges::iterator_t<const InputBuffer>;
+    using subrange               = std::ranges::subrange<iterator_t>;
+    using bstr_view_t            = bstr_view<subrange>;
+    using tstr_view_t            = tstr_view<subrange>;
+    using raw_encoded_item_view  = encoded_item_view_for<InputBuffer>;
+    using raw_encoded_array_view = encoded_array_view_for<InputBuffer>;
+    using raw_encoded_map_view   = encoded_map_view_for<InputBuffer>;
 
     using expected_type   = typename Options::return_type;
     using unexpected_type = typename Options::error_type;
@@ -104,7 +147,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return unexpected<decltype(collect_status.result)>(collect_status.result);
             }
             return expected_type{};
-        } catch (const std::bad_alloc &) {
+        } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch (const parse_incomplete_exception &) {
             return unexpected<status_code>(status_code::incomplete);
@@ -132,14 +175,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
             const auto decoded = decode_unsigned(additionalInfo);
-            if (!detail::unsigned_value_fits<T>(decoded)) {
-                return status_code::no_match_for_int_on_buffer;
+            // Default native integer decode intentionally slices through the target type.
+            // strict_integer_decode keeps this check enabled for users that need representability.
+            if constexpr (detail::strict_integer_decode_option_v<Options>) {
+                if (!detail::unsigned_value_fits<T>(decoded)) {
+                    return status_code::no_match_for_int_on_buffer;
+                }
             }
             value = static_cast<T>(decoded);
         } else if (major == major_type::NegativeInteger) {
             const auto decoded = decode_unsigned(additionalInfo);
-            if (!detail::negative_argument_fits<T>(decoded)) {
-                return status_code::no_match_for_int_on_buffer;
+            // Default native integer decode intentionally slices through the target type.
+            // strict_integer_decode keeps this check enabled for users that need representability.
+            if constexpr (detail::strict_integer_decode_option_v<Options>) {
+                if (!detail::negative_argument_fits<T>(decoded)) {
+                    return status_code::no_match_for_int_on_buffer;
+                }
             }
             value = static_cast<T>(T{-1} - static_cast<T>(decoded));
         } else {
@@ -170,8 +221,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_uint_on_buffer;
         }
         const auto decoded = decode_unsigned(additionalInfo);
-        if (!detail::unsigned_value_fits<T>(decoded)) {
-            return status_code::no_match_for_uint_on_buffer;
+        // Default native integer decode intentionally slices through the target type.
+        // strict_integer_decode keeps this check enabled for users that need representability.
+        if constexpr (detail::strict_integer_decode_option_v<Options>) {
+            if (!detail::unsigned_value_fits<T>(decoded)) {
+                return status_code::no_match_for_uint_on_buffer;
+            }
         }
         value = static_cast<T>(decoded);
 
@@ -206,9 +261,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
+        const auto bstring_size = decode_unsigned(additionalInfo);
+        if constexpr (IsFixedArray<T> || (IsConstBinaryView<T> && detail::is_static_extent_span_v<T>)) {
+            if (bstring_size != static_cast<std::uint64_t>(t.size())) {
+                debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
+                return status_code::unexpected_group_size;
+            }
+        }
+
         // Decode to intermediate form
-        auto       bstring      = decode_bstring(additionalInfo);
-        const auto bstring_size = static_cast<std::size_t>(std::ranges::distance(bstring.begin(), bstring.end()));
+        auto bstring = decode_bstring_payload(bstring_size);
 
         // Now handle the target assignment based on contiguity constraints
         if constexpr (std::is_same_v<T, decltype(bstring)>) {
@@ -224,16 +286,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             // Copy approach (if ownership semantics allow):
             // std::vector<typename T::value_type> temp(bstring.begin(), bstring.end());
             // t = T(...); // Construct from temp somehow
+        } else if constexpr (IsConstView<T>) {
+            t = T(std::ranges::data(bstring), std::ranges::size(bstring));
         } else if constexpr (IsFixedArray<T>) {
-            // Fixed-size array assignment requires exact match
-            if (bstring_size != t.size()) {
-                debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
-                return status_code::unexpected_group_size;
-            }
             std::ranges::copy(bstring, t.begin());
         } else {
-            // Standard case - construct from iterators
-            t = T(bstring.begin(), bstring.end());
+            auto decoded = detail::make_decode_value_for<T>(t);
+            if constexpr (HasReserve<T>) {
+                if (std::cmp_greater(bstring_size, std::numeric_limits<typename T::size_type>::max())) {
+                    throw std::length_error("CBOR byte string length exceeds target container size_type");
+                }
+                decoded.reserve(static_cast<typename T::size_type>(bstring_size));
+            }
+            detail::appender<T> appender_;
+            if constexpr (IsContiguous<decltype(bstring)>) {
+                appender_(decoded, bstring);
+            } else {
+                for (auto byte_value : bstring) {
+                    appender_(decoded, static_cast<typename T::value_type>(byte_value));
+                }
+            }
+            t = std::move(decoded);
         }
 
         return status_code::success;
@@ -296,28 +369,46 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
         if constexpr (HasReserve<T>) {
-            value.reserve(length);
+            if (std::cmp_greater(length, std::numeric_limits<typename T::size_type>::max())) {
+                throw std::length_error("CBOR array length exceeds target container size_type");
+            }
+            value.reserve(static_cast<typename T::size_type>(length));
         }
         detail::appender<T> appender_;
         for (auto i = length; i > 0; --i) {
             if constexpr (IsMap<T>) {
-                using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
-                value_type result;
-                auto &[key, mapped_value] = result;
-                auto status               = decode(key);
-                status                    = status == status_code::success ? decode(mapped_value) : status;
-                if (status != status_code::success) {
-                    return status;
+                using key_type    = typename T::key_type;
+                using mapped_type = typename T::mapped_type;
+                using value_type  = std::pair<key_type, mapped_type>;
+                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
+                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
+                    auto key          = detail::make_decode_value_for<key_type>(value);
+                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
+                    auto status       = decode(key);
+                    status            = status == status_code::success ? decode(mapped_value) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    value_type result{std::move(key), std::move(mapped_value)};
+                    appender_(value, std::move(result));
+                } else {
+                    value_type result;
+                    auto &[key, mapped_value] = result;
+                    auto status               = decode(key);
+                    status                    = status == status_code::success ? decode(mapped_value) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    appender_(value, std::move(result));
                 }
-                appender_(value, result);
             } else {
                 using value_type = typename T::value_type;
-                value_type result;
-                auto       status = decode(result);
+                auto result      = detail::make_decode_value_for<value_type>(value);
+                auto status      = decode(result);
                 if (status != status_code::success) {
                     return status;
                 }
-                appender_(value, result);
+                appender_(value, std::move(result));
             }
         }
 
@@ -624,8 +715,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::success;
         } else {
             using value_type = std::remove_cvref_t<T>;
-            value_type t;
-            auto       result = decode(t, major, additionalInfo);
+            auto t           = detail::make_decode_value_for_optional<value_type>(value);
+            auto result      = decode(t, major, additionalInfo);
             if (result == status_code::success) {
                 value = std::move(t);
             }
@@ -636,7 +727,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename U> constexpr status_code decode([[maybe_unused]] as_named_map<U> value) {
 #if CBOR_TAGS_HAS_STD_REFLECTION
-        return decode_named_map(value.value_);
+        return detail::decode_named_map(*this, value.value_);
 #else
         static_assert(always_false<std::remove_cvref_t<U>>::value, "as_named_map requires C++26 static reflection");
         return status_code::error;
@@ -737,64 +828,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tstr_on_buffer;
         }
         value.size = decode_unsigned(additionalInfo);
-        if (value.size == 0) {
-            return status_code::success;
-        }
-
-        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
-            if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                return status_code::error;
-            }
-        }
-
-        const auto needed = static_cast<size_type>(value.size);
-        if (reader_.empty(data_, needed - 1)) {
-            return status_code::incomplete;
-        }
-
-        if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += needed;
-        } else {
-            if (needed > static_cast<size_type>(std::numeric_limits<std::ptrdiff_t>::max())) {
-                return status_code::error;
-            }
-            reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
-            reader_.current_offset_ += needed;
-        }
-
-        return status_code::success;
+        return detail::skip_sized_string_payload(reader_, data_, value.size);
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
         }
         value.size = decode_unsigned(additionalInfo);
-        if (value.size == 0) {
-            return status_code::success;
-        }
-
-        if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
-            if (value.size > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                return status_code::error;
-            }
-        }
-
-        const auto needed = static_cast<size_type>(value.size);
-        if (reader_.empty(data_, needed - 1)) {
-            return status_code::incomplete;
-        }
-
-        if constexpr (IsContiguous<InputBuffer>) {
-            reader_.position_ += needed;
-        } else {
-            if (needed > static_cast<size_type>(std::numeric_limits<std::ptrdiff_t>::max())) {
-                return status_code::error;
-            }
-            reader_.position_ = std::next(reader_.position_, static_cast<std::ptrdiff_t>(needed));
-            reader_.current_offset_ += needed;
-        }
-
-        return status_code::success;
+        return detail::skip_sized_string_payload(reader_, data_, value.size);
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Array) {
@@ -820,6 +861,60 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr status_code decode(as_tag_any &value, std::uint64_t tag) {
         value.tag = tag;
         return status_code::success;
+    }
+
+    template <typename RawView>
+        requires IsEncodedItemView<RawView>
+    constexpr status_code decode_encoded_view(RawView &value, std::optional<major_type> expected_major, status_code major_mismatch) {
+        if (reader_.empty(data_)) {
+            return status_code::incomplete;
+        }
+
+        const auto                                             start = tell();
+        detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
+        const auto                                             status =
+            detail::read_raw_encoded_item_bounds<InputBuffer, size_type>(data_, start, expected_major, major_mismatch, bounds);
+        if (status != status_code::success) {
+            return status;
+        }
+
+        assign_encoded_view(value, bounds.start, bounds.cursor, bounds.size);
+        if constexpr (IsContiguous<InputBuffer>) {
+            reader_.position_ += bounds.size;
+        } else {
+            reader_.position_ = bounds.cursor;
+            reader_.current_offset_ += bounds.size;
+        }
+
+        return status_code::success;
+    }
+
+    template <typename RawView>
+        requires IsEncodedItemView<RawView>
+    constexpr status_code decode(RawView &value) {
+        if constexpr (IsEncodedArrayView<RawView>) {
+            return decode_encoded_view(value, major_type::Array, status_code::no_match_for_array_on_buffer);
+        } else if constexpr (IsEncodedMapView<RawView>) {
+            return decode_encoded_view(value, major_type::Map, status_code::no_match_for_map_on_buffer);
+        } else {
+            return decode_encoded_view(value, std::nullopt, status_code::error);
+        }
+    }
+
+    template <typename RawView>
+        requires IsEncodedItemView<RawView>
+    constexpr status_code decode(RawView &value, major_type major, byte) {
+        if constexpr (IsEncodedArrayView<RawView>) {
+            if (major != major_type::Array) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+        } else if constexpr (IsEncodedMapView<RawView>) {
+            if (major != major_type::Map) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+        }
+        reader_.seek(-1);
+        return decode(value);
     }
 
     constexpr status_code decode(simple &value, major_type major, byte additionalInfo) {
@@ -920,8 +1015,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return -1 - static_cast<int64_t>(value);
     }
 
-    constexpr auto decode_bstring(byte additionalInfo) {
-        const auto length      = decode_unsigned(additionalInfo);
+    constexpr auto decode_bstring(byte additionalInfo) { return decode_bstring_payload(decode_unsigned(additionalInfo)); }
+
+    constexpr auto decode_bstring_payload(std::uint64_t length) {
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
@@ -1052,12 +1148,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 }
 
                 using value_type = typename T::value_type;
-                value_type result{};
-                auto       status = decode(result, major, additionalInfo);
+                auto result      = detail::make_decode_value_for<value_type>(value);
+                auto status      = decode(result, major, additionalInfo);
                 if (status != status_code::success) {
                     return status;
                 }
-                appender_(value, result);
+                appender_(value, std::move(result));
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {
@@ -1083,14 +1179,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     return status_code::success;
                 }
 
-                using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
-                value_type result{};
-                auto       status = decode(result.first, major, additionalInfo);
-                status            = (status == status_code::success) ? decode(result.second) : status;
-                if (status != status_code::success) {
-                    return status;
+                using key_type    = typename T::key_type;
+                using mapped_type = typename T::mapped_type;
+                using value_type  = std::pair<key_type, mapped_type>;
+                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
+                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
+                    auto key          = detail::make_decode_value_for<key_type>(value);
+                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
+                    auto status       = decode(key, major, additionalInfo);
+                    status            = (status == status_code::success) ? decode(mapped_value) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    value_type result{std::move(key), std::move(mapped_value)};
+                    appender_(value, std::move(result));
+                } else {
+                    value_type result{};
+                    auto       status = decode(result.first, major, additionalInfo);
+                    status            = (status == status_code::success) ? decode(result.second) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    appender_(value, std::move(result));
                 }
-                appender_(value, result);
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {
@@ -1118,13 +1229,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr uint64_t read_unsigned(byte additionalInfo) {
-        switch (static_cast<uint8_t>(additionalInfo)) {
-        case 24: return read_uint8();
-        case 25: return read_uint16();
-        case 26: return read_uint32();
-        case 27: return read_uint64();
-        default: throw std::runtime_error("Invalid additional info for integer");
+        const auto info = std::to_integer<std::uint8_t>(additionalInfo);
+        if (!detail::is_valid_cbor_argument_info(info)) {
+            throw std::runtime_error("Invalid additional info for integer");
         }
+
+        const auto payload_size = detail::cbor_argument_payload_size(info);
+        if (payload_size > 0U && reader_.empty(data_, payload_size - 1U)) {
+            throw parse_incomplete_exception("Unexpected end of input");
+        }
+
+        std::uint64_t value{};
+        auto          status = status_code::success;
+        const auto    ok     = detail::read_cbor_argument(info, value, status, [this](std::uint8_t &byte_value) {
+            byte_value = static_cast<std::uint8_t>(reader_.read(data_));
+            return true;
+        });
+        if (!ok) {
+            throw std::runtime_error("Invalid additional info for integer");
+        }
+        return value;
     }
 
     constexpr uint8_t read_uint8() {
@@ -1235,227 +1359,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status;
     }
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
-    static constexpr bool named_key_seen(const std::vector<std::string> &seen, std::string_view key) {
-        return std::ranges::any_of(seen, [key](const std::string &candidate) { return candidate == key; });
-    }
-
-    template <typename Object> constexpr void reset_named_optionals_and_extensions(Object &object) {
-        using value_type = std::remove_cvref_t<Object>;
-        reset_named_optionals_and_extensions_impl(object, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
-    }
-
-    template <typename Object, std::size_t... Is>
-    constexpr void reset_named_optionals_and_extensions_impl(Object &object, std::index_sequence<Is...>) {
-        (reset_named_member<Object, Is>(object), ...);
-    }
-
-    template <typename Object, std::size_t I> constexpr void reset_named_member(Object &object) {
-        auto  tuple      = to_tuple(object);
-        auto &field      = std::get<I>(tuple);
-        using field_type = std::remove_cvref_t<decltype(field)>;
-        if constexpr (IsNamedGroupWrapper<field_type>) {
-            reset_named_optionals_and_extensions(field.value_);
-        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
-            field.value_.clear();
-        } else if constexpr (IsOptional<field_type>) {
-            field.reset();
-        }
-    }
-
-    template <typename Object> constexpr status_code decode_named_map(Object &object) {
-        auto [major, additionalInfo] = read_initial_byte();
-        if (major != major_type::Map) {
-            return status_code::no_match_for_map_on_buffer;
-        }
-
-        reset_named_optionals_and_extensions(object);
-        std::vector<std::string> seen;
-
-        if (additionalInfo == static_cast<byte>(31)) {
-            while (true) {
-                auto [key_major, key_additionalInfo] = read_initial_byte();
-                if (key_major == major_type::Simple && key_additionalInfo == static_cast<byte>(31)) {
-                    return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
-                }
-                auto entry_status = decode_named_map_entry(object, key_major, key_additionalInfo, seen);
-                if (entry_status != status_code::success) {
-                    return entry_status;
-                }
-            }
-        }
-
-        const auto pair_count = decode_unsigned(additionalInfo);
-        seen.reserve(static_cast<std::size_t>(pair_count));
-        for (std::uint64_t index = 0; index < pair_count; ++index) {
-            auto entry_status = decode_named_map_entry(object, seen);
-            if (entry_status != status_code::success) {
-                return entry_status;
-            }
-        }
-
-        return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
-    }
-
-    template <typename Object> constexpr status_code decode_named_map_entry(Object &object, std::vector<std::string> &seen) {
-        std::string key;
-        auto        key_status = decode(key);
-        if (key_status != status_code::success) {
-            return key_status;
-        }
-        return decode_named_map_value(object, key, seen);
-    }
-
-    template <typename Object>
-    constexpr status_code decode_named_map_entry(Object &object, major_type key_major, byte key_additionalInfo,
-                                                 std::vector<std::string> &seen) {
-        std::string key;
-        auto        key_status = decode(key, key_major, key_additionalInfo);
-        if (key_status != status_code::success) {
-            return key_status;
-        }
-        return decode_named_map_value(object, key, seen);
-    }
-
-    template <typename Object>
-    constexpr status_code decode_named_map_value(Object &object, std::string_view key, std::vector<std::string> &seen) {
-        auto value_status = status_code::success;
-        if (decode_named_member_by_key(object, key, seen, value_status)) {
-            return value_status;
-        }
-        if (decode_named_extension_by_key(object, key, value_status)) {
-            return value_status;
-        }
-        return status_code::unexpected_group_size;
-    }
-
-    template <typename Object>
-    constexpr bool decode_named_member_by_key(Object &object, std::string_view key, std::vector<std::string> &seen, status_code &status) {
-        using value_type = std::remove_cvref_t<Object>;
-        return decode_named_member_by_key_impl(object, key, seen, status,
-                                               std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
-    }
-
-    template <typename Object, std::size_t... Is>
-    constexpr bool decode_named_member_by_key_impl(Object &object, std::string_view key, std::vector<std::string> &seen,
-                                                   status_code &status, std::index_sequence<Is...>) {
-        bool matched = false;
-        ((matched = matched || decode_named_member<Object, Is>(object, key, seen, status)), ...);
-        return matched;
-    }
-
-    template <typename Object, std::size_t I>
-    constexpr bool decode_named_member(Object &object, std::string_view key, std::vector<std::string> &seen, status_code &status) {
-        using value_type = std::remove_cvref_t<Object>;
-        auto  tuple      = to_tuple(object);
-        auto &field      = std::get<I>(tuple);
-        using field_type = std::remove_cvref_t<decltype(field)>;
-
-        if constexpr (IsNamedGroupWrapper<field_type>) {
-            return decode_named_member_by_key(field.value_, key, seen, status);
-        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
-            return false;
-        } else {
-            constexpr auto field_name = detail::aggregate_member_name<value_type, I>();
-            if (key != std::string_view{field_name}) {
-                return false;
-            }
-            if (named_key_seen(seen, key)) {
-                status = status_code::unexpected_group_size;
-                return true;
-            }
-            seen.emplace_back(key);
-            status = decode_named_field_value(field);
-            return true;
-        }
-    }
-
-    template <typename Field> constexpr status_code decode_named_field_value(Field &field) {
-        using field_type = std::remove_cvref_t<Field>;
-        if constexpr (IsOptional<field_type>) {
-            typename field_type::value_type value{};
-            auto                            status = decode(value);
-            if (status == status_code::success) {
-                field = std::move(value);
-            }
-            return status;
-        } else {
-            return decode(field);
-        }
-    }
-
-    template <typename Object> constexpr bool decode_named_extension_by_key(Object &object, std::string_view key, status_code &status) {
-        using value_type = std::remove_cvref_t<Object>;
-        return decode_named_extension_by_key_impl(object, key, status,
-                                                  std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
-    }
-
-    template <typename Object, std::size_t... Is>
-    constexpr bool decode_named_extension_by_key_impl(Object &object, std::string_view key, status_code &status,
-                                                      std::index_sequence<Is...>) {
-        bool matched = false;
-        ((matched = matched || decode_named_extension_member<Object, Is>(object, key, status)), ...);
-        return matched;
-    }
-
-    template <typename Object, std::size_t I>
-    constexpr bool decode_named_extension_member(Object &object, std::string_view key, status_code &status) {
-        auto  tuple      = to_tuple(object);
-        auto &field      = std::get<I>(tuple);
-        using field_type = std::remove_cvref_t<decltype(field)>;
-        if constexpr (IsNamedGroupWrapper<field_type>) {
-            return decode_named_extension_by_key(field.value_, key, status);
-        } else if constexpr (IsNamedExtensionWrapper<field_type>) {
-            using extension_type = named_extension_value_t<field_type>;
-            static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
-                          "as_named_extension requires a map with text-string keys");
-            static_assert(std::constructible_from<typename extension_type::key_type, std::string_view>,
-                          "as_named_extension key type must be constructible from std::string_view");
-            using key_type    = typename extension_type::key_type;
-            using mapped_type = typename extension_type::mapped_type;
-            key_type extension_key{key};
-            if (field.value_.find(extension_key) != field.value_.end()) {
-                status = status_code::unexpected_group_size;
-                return true;
-            }
-            mapped_type mapped_value{};
-            status = decode(mapped_value);
-            if (status == status_code::success) {
-                field.value_.emplace(std::move(extension_key), std::move(mapped_value));
-            }
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    template <typename Object> constexpr bool validate_required_named_members(const Object &object, const std::vector<std::string> &seen) {
-        using value_type = std::remove_cvref_t<Object>;
-        return validate_required_named_members_impl(object, seen, std::make_index_sequence<detail::aggregate_member_count<value_type>()>{});
-    }
-
-    template <typename Object, std::size_t... Is>
-    constexpr bool validate_required_named_members_impl(const Object &object, const std::vector<std::string> &seen,
-                                                        std::index_sequence<Is...>) {
-        return (required_named_member_present<Object, Is>(object, seen) && ...);
-    }
-
-    template <typename Object, std::size_t I>
-    constexpr bool required_named_member_present(const Object &object, const std::vector<std::string> &seen) {
-        using value_type  = std::remove_cvref_t<Object>;
-        const auto  tuple = to_tuple(object);
-        const auto &field = std::get<I>(tuple);
-        using field_type  = std::remove_cvref_t<decltype(field)>;
-        if constexpr (IsNamedGroupWrapper<field_type>) {
-            return validate_required_named_members(field.value_, seen);
-        } else if constexpr (IsNamedExtensionWrapper<field_type> || IsOptional<field_type>) {
-            return true;
-        } else {
-            return named_key_seen(seen, std::string_view{detail::aggregate_member_name<value_type, I>()});
-        }
-    }
-#endif
-
     template <typename... Args> constexpr auto applier(Args &&...args) {
         status_collector<self_t> collect_status{*this};
         [[maybe_unused]] auto    success = (collect_status(std::forward<Args>(args)) && ...);
@@ -1464,15 +1367,36 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr auto tell() const noexcept {
         if constexpr (IsContiguous<InputBuffer>) {
-            return /* Iterator */ data_.begin() + reader_.position_;
+            return /* Iterator */ std::ranges::begin(data_) + static_cast<std::ptrdiff_t>(reader_.position_);
         } else {
             return /* Iterator */ reader_.position_; // TODO: actual Iterator
         }
     }
 
     // Internal reference, must be public, variadic friends only in c++26
-    const InputBuffer          &data_;
-    detail::reader<InputBuffer> reader_;
+    const InputBuffer &data_;
+    reader_type        reader_;
+
+  private:
+    template <typename RawView, typename Iterator>
+    constexpr void assign_encoded_view(RawView &value, Iterator start, Iterator cursor, size_type size) const {
+        using raw_view_type       = std::remove_cvref_t<RawView>;
+        using raw_range_type      = typename raw_view_type::range_type;
+        using raw_byte_view_type  = typename raw_view_type::byte_view_type;
+        using raw_range_size_type = std::ranges::range_size_t<raw_range_type>;
+
+        if constexpr (std::constructible_from<raw_range_type, Iterator, Iterator, raw_range_size_type>) {
+            value = RawView{raw_byte_view_type{raw_range_type{start, cursor, static_cast<raw_range_size_type>(size)}}};
+        } else if constexpr (IsContiguous<InputBuffer> && std::constructible_from<raw_range_type, std::span<const std::byte>>) {
+            const auto *begin = std::ranges::data(data_) + reader_.position_;
+            value             = RawView{raw_byte_view_type{
+                raw_range_type{std::span<const std::byte>{reinterpret_cast<const std::byte *>(begin), static_cast<std::size_t>(size)}}}};
+        } else {
+            static_assert(always_false<raw_range_type>::value,
+                          "Decode contiguous raw views only from contiguous buffers; use encoded_*_view_for<Buffer> or the decoder "
+                          "raw_encoded_*_view aliases for non-contiguous buffers.");
+        }
+    }
 };
 
 template <typename T> struct cbor_indefinite_decoder {
@@ -1560,8 +1484,19 @@ template <typename T> struct cbor_header_decoder {
     constexpr status_code decode(as_map value) { return validate_size(major_type::Map, value.size_); }
 };
 
-template <typename InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
-    return decoder<InputBuffer, Options<default_expected, default_wrapping>, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
+template <CborInputBuffer InputBuffer> inline auto make_decoder(InputBuffer &buffer) {
+    return decoder<InputBuffer, default_options, cbor_header_decoder, cbor_indefinite_decoder>(buffer);
+}
+
+template <template <typename> typename... Extensions, CborInputBuffer InputBuffer>
+    requires(sizeof...(Extensions) > 0)
+inline auto make_decoder(InputBuffer &buffer) {
+    return decoder<InputBuffer, default_options, cbor_header_decoder, cbor_indefinite_decoder, Extensions...>(buffer);
+}
+
+template <IsOptions DecoderOptions, template <typename> typename... Extensions, CborInputBuffer InputBuffer>
+inline auto make_decoder_with_options(InputBuffer &buffer) {
+    return decoder<InputBuffer, DecoderOptions, cbor_header_decoder, cbor_indefinite_decoder, Extensions...>(buffer);
 }
 
 } // namespace cbor::tags

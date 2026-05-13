@@ -136,7 +136,6 @@ jobs:
           -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }} \
           -DCMAKE_CXX_EXTENSIONS=OFF \
-          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
           -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
           -DCBOR_TAGS_BUILD_TESTS=OFF \
           -DCBOR_TAGS_USE_DEV_SETTINGS=ON

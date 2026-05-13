@@ -1,10 +1,14 @@
 #pragma once
 
+#include "cbor_tags/detail/cbor_range_concepts.h"
+
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -30,21 +34,34 @@ concept IsOptions = requires(T) {
     { T::wrap_groups } -> std::convertible_to<bool>;
 };
 
+namespace detail {
+
+template <typename T>
+concept HasStrictIntegerDecodeOption = requires {
+    { T::strict_integer_decode } -> std::convertible_to<bool>;
+};
+
+template <typename T, bool HasOption = HasStrictIntegerDecodeOption<T>> struct strict_integer_decode_option : std::false_type {};
+
+template <typename T> struct strict_integer_decode_option<T, true> : std::bool_constant<static_cast<bool>(T::strict_integer_decode)> {};
+
+template <typename T> inline constexpr bool strict_integer_decode_option_v = strict_integer_decode_option<T>::value;
+
+} // namespace detail
+
 template <typename T>
 concept IsCborBufferByte =
     std::same_as<std::remove_cvref_t<T>, std::byte> ||
     (std::integral<std::remove_cvref_t<T>> && sizeof(std::remove_cvref_t<T>) == 1 && !std::same_as<std::remove_cvref_t<T>, bool>);
 
 template <typename T>
-concept ValidCborBuffer =
-    requires {
-        typename std::remove_cvref_t<T>::value_type;
-        typename std::remove_cvref_t<T>::size_type;
-        typename std::remove_cvref_t<T>::iterator;
-    } && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
-    std::convertible_to<typename std::remove_cvref_t<T>::size_type, std::size_t> &&
-    std::input_or_output_iterator<typename std::remove_cvref_t<T>::iterator> &&
-    (std::ranges::contiguous_range<std::remove_cvref_t<T>> || std::ranges::bidirectional_range<std::remove_cvref_t<T>>);
+concept CborInputBuffer =
+    std::ranges::range<std::remove_cvref_t<T>> && std::ranges::range<const std::remove_cvref_t<T>> &&
+    std::ranges::common_range<const std::remove_cvref_t<T>> && IsCborBufferByte<std::ranges::range_value_t<std::remove_cvref_t<T>>> &&
+    (std::ranges::contiguous_range<const std::remove_cvref_t<T>> || std::ranges::bidirectional_range<const std::remove_cvref_t<T>>);
+
+template <typename T>
+concept ValidCborBuffer = CborInputBuffer<T>;
 
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {
@@ -259,31 +276,87 @@ concept IsBinaryStringBase = IsBinaryHeader<std::remove_cvref_t<T>> ||
 template <typename T>
 concept IsStringBase = IsTextStringBase<T> || IsBinaryStringBase<T>;
 
-template <class T> constexpr bool is_optional_v                   = false;
-template <class T> constexpr bool is_optional_v<std::optional<T>> = true;
+template <typename T>
+concept IsByteLike = detail::RangeByteLike<T>;
 
 template <typename T>
-concept IsRangeOfCborValuesBase = std::ranges::range<std::remove_cvref_t<T>> && std::is_class_v<std::remove_cvref_t<T>> &&
-                                  (!IsStringBase<std::remove_cvref_t<T>>) && (!is_optional_v<std::remove_cvref_t<T>>);
+concept IsByteLikeRange = detail::ByteLikeRange<T>;
+
+template <typename T>
+concept IsTuplePairLike = detail::TuplePairLike<T>;
+
+template <typename T>
+concept IsMemberPairLike = detail::MemberPairLike<T>;
+
+template <typename T>
+concept IsPairLike = detail::PairLike<T>;
+
+template <typename T>
+concept IsPairLikeRange = detail::PairLikeRange<T>;
+
+template <class T> constexpr bool is_optional_v = detail::is_optional_v<T>;
+
+namespace detail {
+
+template <typename T> struct is_fixed_array_span : std::false_type {};
+template <typename T, std::size_t Extent> struct is_fixed_array_span<std::span<T, Extent>> : std::bool_constant<!std::is_const_v<T>> {};
+template <typename T> constexpr bool is_fixed_array_span_v = is_fixed_array_span<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct is_static_extent_span : std::false_type {};
+template <typename T, std::size_t Extent>
+struct is_static_extent_span<std::span<T, Extent>> : std::bool_constant<Extent != std::dynamic_extent> {};
+template <typename T> constexpr bool is_static_extent_span_v = is_static_extent_span<std::remove_cvref_t<T>>::value;
+
+} // namespace detail
+
+template <typename T>
+concept IsRangeOfCborValuesBase =
+    detail::RangeOfCborValuesBase<T, IsStringBase<std::remove_cvref_t<T>>, is_optional_v<std::remove_cvref_t<T>>>;
 
 template <typename T>
 concept IsFixedArray =
     requires {
         typename T::value_type;
         typename T::size_type;
-    } && (std::is_same_v<T, std::span<typename T::value_type>> ||
+    } && (detail::is_fixed_array_span_v<T> ||
           (requires { typename std::tuple_size<T>::type; } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size_v<T>>>));
 
 template <typename T>
-concept IsMapBase =
-    IsMapHeader<std::remove_cvref_t<T>> || (IsRangeOfCborValuesBase<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> t) {
-        typename std::remove_cvref_t<T>::key_type;
-        typename std::remove_cvref_t<T>::mapped_type;
+concept CborFixedOutputBuffer = IsFixedArray<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> buffer) {
+    { buffer[typename std::remove_cvref_t<T>::size_type{}] } -> std::assignable_from<typename std::remove_cvref_t<T>::value_type>;
+};
+
+template <typename T>
+concept CborAppendOutputBuffer = requires(std::remove_cvref_t<T> &buffer, typename std::remove_cvref_t<T>::value_type byte) {
+    buffer.push_back(byte);
+    buffer.insert(buffer.end(), &byte, &byte + 1);
+};
+
+namespace detail {
+template <typename T> struct is_segment_output_buffer : std::false_type {};
+} // namespace detail
+
+template <typename T>
+concept CborByteOutputBuffer =
+    requires {
         typename std::remove_cvref_t<T>::value_type;
-        requires std::same_as<typename std::remove_cvref_t<T>::value_type,
-                              std::pair<const typename std::remove_cvref_t<T>::key_type, typename std::remove_cvref_t<T>::mapped_type>>;
-        { t.find(std::declval<typename std::remove_cvref_t<T>::key_type>()) } -> std::same_as<typename std::remove_cvref_t<T>::iterator>;
-    });
+        typename std::remove_cvref_t<T>::size_type;
+    } && (!std::is_const_v<std::remove_reference_t<T>>) && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
+    (CborFixedOutputBuffer<T> || CborAppendOutputBuffer<T>);
+
+template <typename T>
+concept CborSegmentOutputBuffer =
+    requires {
+        typename std::remove_cvref_t<T>::value_type;
+        typename std::remove_cvref_t<T>::size_type;
+    } && (!std::is_const_v<std::remove_reference_t<T>>) && IsCborBufferByte<typename std::remove_cvref_t<T>::value_type> &&
+    detail::is_segment_output_buffer<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept CborOutputBuffer = CborByteOutputBuffer<T> || CborSegmentOutputBuffer<T>;
+
+template <typename T>
+concept IsMapBase = IsMapHeader<std::remove_cvref_t<T>> || detail::MapLikeContainer<T, IsRangeOfCborValuesBase<std::remove_cvref_t<T>>>;
 
 template <typename T>
 concept IsArrayBase =
@@ -600,10 +673,10 @@ struct ContainsCborMajor<T, true> {
 };
 
 template <typename Buffer>
-    requires ValidCborBuffer<Buffer>
+    requires CborInputBuffer<Buffer> && requires { typename std::remove_cvref_t<Buffer>::size_type; }
 struct CborStream {
-    Buffer           &buffer;
-    Buffer::size_type head{};
+    Buffer                                         &buffer;
+    typename std::remove_cvref_t<Buffer>::size_type head{};
 
     constexpr explicit CborStream(Buffer &buffer) : buffer(buffer) {}
     template <typename... Args> void operator()(const Args &...) { /* (de)serialize cbor onto buffer */ }
@@ -656,11 +729,7 @@ namespace detail {
 
 // requires(!std::same_as<T, std::span<typename T::value_type>>)
 template <typename T> struct iterator_type {
-    using type = typename T::const_iterator;
-};
-
-template <typename T> struct iterator_type<std::span<T>> {
-    using type = typename std::span<T>::iterator;
+    using type = std::ranges::iterator_t<const std::remove_cvref_t<T>>;
 };
 
 // Helper for decimal parsing

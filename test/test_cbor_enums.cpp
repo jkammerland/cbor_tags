@@ -83,13 +83,39 @@ TEST_CASE("CBOR - optional enum") {
     CHECK_EQ(g, g2);
 }
 
-TEST_CASE("CBOR - enum decode rejects out-of-range underlying values") {
+TEST_CASE("CBOR - enum decode slices through the underlying type") {
     {
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
         REQUIRE(enc(static_cast<std::uint16_t>(std::numeric_limits<std::uint8_t>::max()) + 1U));
 
         auto dec = make_decoder(data);
+        G    value{};
+        auto result = dec(value);
+
+        REQUIRE(result);
+        CHECK_EQ(static_cast<std::uint8_t>(value), 0U);
+    }
+
+    {
+        std::vector<std::byte> data{std::byte{0x38}, std::byte{0x80}}; // -129
+
+        auto dec = make_decoder(data);
+        H    value{};
+        auto result = dec(value);
+
+        REQUIRE(result);
+        CHECK_EQ(static_cast<std::int8_t>(value), std::numeric_limits<std::int8_t>::max());
+    }
+}
+
+TEST_CASE("CBOR - strict integer decoder option rejects enum values outside the underlying type") {
+    {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(static_cast<std::uint16_t>(std::numeric_limits<std::uint8_t>::max()) + 1U));
+
+        auto dec = make_decoder_with_options<strict_integer_decoder_options>(data);
         G    value{};
         auto result = dec(value);
 
@@ -100,7 +126,7 @@ TEST_CASE("CBOR - enum decode rejects out-of-range underlying values") {
     {
         std::vector<std::byte> data{std::byte{0x38}, std::byte{0x80}}; // -129
 
-        auto dec = make_decoder(data);
+        auto dec = make_decoder_with_options<strict_integer_decoder_options>(data);
         H    value{};
         auto result = dec(value);
 

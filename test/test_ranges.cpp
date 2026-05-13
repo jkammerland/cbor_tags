@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cbor_tags/cbor.h>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_ranges.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -10,13 +13,61 @@
 #include <fmt/base.h>
 #include <functional>
 #include <iomanip>
+#include <memory>
 #include <ranges>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#if __has_include(<boost/container/flat_map.hpp>) && __has_include(<boost/container/list.hpp>) && __has_include(<boost/container/small_vector.hpp>) && \
+    __has_include(<boost/container/static_vector.hpp>) && __has_include(<boost/container/string.hpp>) && __has_include(<boost/container/vector.hpp>)
+#include <boost/container/flat_map.hpp>
+#include <boost/container/list.hpp>
+#include <boost/container/small_vector.hpp>
+#include <boost/container/static_vector.hpp>
+#include <boost/container/string.hpp>
+#include <boost/container/vector.hpp>
+#define CBOR_TAGS_HAS_BOOST_CONTAINER_RANGES 1
+#endif
+
+#if __has_include(<boost/container/flat_map.hpp>) && __has_include(<boost/container/map.hpp>) && \
+    __has_include(<boost/unordered/unordered_map.hpp>)
+#include <boost/container/flat_map.hpp>
+#include <boost/container/map.hpp>
+#include <boost/unordered/unordered_map.hpp>
+#define CBOR_TAGS_HAS_BOOST_MAPS 1
+#endif
+
 using namespace cbor::tags;
+
+namespace {
+
+struct member_pair_entry {
+    int first;
+    int second;
+};
+
+struct range_not_cbor {};
+
+template <typename R>
+concept CanMakeMapRange = requires(R &&range) { cbor::tags::as_map_range(std::forward<R>(range)); };
+
+} // namespace
+
+static_assert(IsPairLike<std::pair<int, int>>);
+static_assert(IsPairLike<std::tuple<int, int>>);
+static_assert(IsPairLike<std::array<int, 2>>);
+static_assert(IsPairLike<member_pair_entry>);
+static_assert(!IsPairLike<std::tuple<int>>);
+static_assert(!IsPairLike<std::tuple<int, int, int>>);
+static_assert(!IsPairLike<std::array<int, 3>>);
+static_assert(!CanMakeMapRange<std::array<std::tuple<int, int, int>, 1> &>);
+static_assert(!CanMakeMapRange<std::array<std::pair<int, range_not_cbor>, 1> &>);
+static_assert(!CanMakeMapRange<std::array<std::pair<range_not_cbor, int>, 1> &>);
+static_assert(std::is_same_v<decltype(cbor::tags::detail::pair_first(std::declval<member_pair_entry &>())), int &>);
+static_assert(std::is_same_v<decltype(cbor::tags::detail::pair_second(std::declval<const member_pair_entry &>())), const int &>);
 
 TEST_CASE("Test ranges 1") {
     // Create a deque of chars (non-contiguous in memory)
@@ -252,3 +303,150 @@ TEST_CASE("joining views of different types") {
     CHECK_NE(joined_hex, "01020348656c6c6f576f726c0102"); // Should be different after modification
     CHECK_EQ(joined_hex, "ff020368656c6c6f576f726c0102");
 }
+
+TEST_CASE("explicit array range wrappers encode sized and non-sized views") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    auto sized = std::views::iota(1, 4);
+    REQUIRE(enc(as_array_range(sized)));
+    CHECK_EQ(to_hex(buffer), "83010203");
+
+    buffer.clear();
+    auto evens = std::views::iota(0, 6) | std::views::filter([](int value) { return value % 2 == 0; });
+    REQUIRE(enc(as_array_range(evens)));
+    CHECK_EQ(to_hex(buffer), "9f000204ff");
+
+    buffer.clear();
+    REQUIRE(enc(as_array_range(std::vector<int>{1, 2, 3})));
+    CHECK_EQ(to_hex(buffer), "83010203");
+
+    buffer.clear();
+    auto wrapped = as_array_range(std::vector<int>{4, 5});
+    REQUIRE(enc(wrapped));
+    CHECK_EQ(to_hex(buffer), "820405");
+}
+
+TEST_CASE("manual encoder aliases retain range wrapper support") {
+    std::vector<std::byte> buffer;
+    cbor::tags::encoder<std::vector<std::byte>, cbor::tags::Options<cbor::tags::default_expected, cbor::tags::default_wrapping>,
+                        cbor::tags::cbor_header_encoder, cbor::tags::cbor_indefinite_encoder, cbor::tags::cbor_optional_encoder,
+                        cbor::tags::cbor_variant_encoder>
+        enc{buffer};
+
+    auto values = std::views::iota(1, 4);
+    REQUIRE(enc(as_array_range(values)));
+    CHECK_EQ(to_hex(buffer), "83010203");
+}
+
+TEST_CASE("explicit map range wrappers encode transformed pair views") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    auto sized_pairs = std::views::iota(1, 4) | std::views::transform([](int value) { return std::pair{value, value + 10}; });
+    REQUIRE(enc(as_map_range(sized_pairs)));
+    CHECK_EQ(to_hex(buffer), "a3010b020c030d");
+
+    buffer.clear();
+    auto odd_pairs = std::views::iota(0, 5) | std::views::filter([](int value) { return value % 2 == 1; }) |
+                     std::views::transform([](int value) { return std::pair{value, value * 10}; });
+    REQUIRE(enc(as_map_range(odd_pairs)));
+    CHECK_EQ(to_hex(buffer), "bf010a03181eff");
+
+    buffer.clear();
+    REQUIRE(enc(as_map_range(std::vector<std::pair<int, int>>{{1, 2}, {3, 4}})));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    auto tuple_pairs = std::array{std::tuple{1, 2}, std::tuple{3, 4}};
+    REQUIRE(enc(as_map_range(tuple_pairs)));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    auto member_pairs = std::array{member_pair_entry{1, 2}, member_pair_entry{3, 4}};
+    REQUIRE(enc(as_map_range(member_pairs)));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    std::vector<int> nested_values{1, 2};
+    auto             nested_entries = std::array{std::pair{1, as_array_range(nested_values)}};
+    static_assert(CanMakeMapRange<decltype(nested_entries) &>);
+    REQUIRE(enc(as_map_range(nested_entries)));
+    CHECK_EQ(to_hex(buffer), "a101820102");
+}
+
+TEST_CASE("explicit byte string range wrappers encode byte-like views") {
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    auto sized_bytes = std::views::iota(1, 4) | std::views::transform([](int value) { return static_cast<std::uint8_t>(value); });
+    REQUIRE(enc(as_bstr_range(sized_bytes)));
+    CHECK_EQ(to_hex(buffer), "43010203");
+
+    buffer.clear();
+    REQUIRE(enc(as_bstr_range(std::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}}, 2)));
+    CHECK_EQ(to_hex(buffer), "43010203");
+
+    buffer.clear();
+    auto chunked_bytes = std::views::iota(0, 5) | std::views::filter([](int) { return true; }) |
+                         std::views::transform([](int value) { return static_cast<std::byte>(value); });
+    REQUIRE(enc(as_bstr_range(chunked_bytes, 2)));
+    CHECK_EQ(to_hex(buffer), "5f4200014202034104ff");
+}
+
+#ifdef CBOR_TAGS_HAS_BOOST_CONTAINER_RANGES
+TEST_CASE("boost containers classify as maps, arrays, text, and explicit bstr ranges") {
+    static_assert(IsMap<boost::container::flat_map<int, int>>);
+    static_assert(!IsArray<boost::container::flat_map<int, int>>);
+    static_assert(IsArray<boost::container::vector<int>>);
+    static_assert(IsArray<boost::container::list<int>>);
+    static_assert(IsArray<boost::container::small_vector<int, 4>>);
+    static_assert(IsArray<boost::container::static_vector<int, 4>>);
+    static_assert(IsTextString<boost::container::string>);
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    boost::container::flat_map<int, int> flat_map{{1, 2}, {3, 4}};
+    REQUIRE(enc(flat_map));
+    CHECK_EQ(to_hex(buffer), "a201020304");
+
+    buffer.clear();
+    boost::container::vector<std::uint8_t> bytes{1, 2, 3};
+    REQUIRE(enc(as_bstr_range(bytes)));
+    CHECK_EQ(to_hex(buffer), "43010203");
+}
+#endif
+
+#ifdef CBOR_TAGS_HAS_BOOST_MAPS
+TEST_CASE("boost map containers decode from cbor maps") {
+    auto bytes = to_bytes("a201020304");
+
+    {
+        auto                            dec = make_decoder(bytes);
+        boost::container::map<int, int> decoded;
+        auto                            result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+
+    {
+        auto                                 dec = make_decoder(bytes);
+        boost::container::flat_map<int, int> decoded;
+        auto                                 result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+
+    {
+        auto                           dec = make_decoder(bytes);
+        boost::unordered_map<int, int> decoded;
+        auto                           result = dec(decoded);
+        REQUIRE(result);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+}
+#endif

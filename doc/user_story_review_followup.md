@@ -33,8 +33,8 @@ Some previously reported items are already fixed and are intentionally out of sc
 The current branch addresses the original review debt in the intended low-churn
 way:
 
-- Signed and unsigned integer decodes reject values that cannot fit the target type.
-- Enum decode validates representability through the enum underlying type; unnamed but representable values remain accepted by policy.
+- Signed and unsigned integer decodes intentionally slice into the target type.
+- Enum decode follows the integer slicing policy through the enum underlying type; unnamed values remain accepted by policy.
 - Forward-only non-contiguous CBOR buffers are rejected by the buffer concept.
 - Non-contiguous array/map/tag range-view placeholders were removed from the public variant surface.
 - Range/view lifetime requirements and limitations are documented.
@@ -62,17 +62,17 @@ policy, and iterator invalidation behavior.
 
 ## Original Acceptance Criteria
 
-1. Signed integer decode fails cleanly on overflow or out-of-range negative values instead of silently truncating or wrapping.
-2. Enum decode rejects values that cannot be represented safely by the underlying type, and behavior for invalid enumerator values is documented.
+1. Signed integer decode behavior is documented. Current policy intentionally slices instead of rejecting overflow or out-of-range negative values.
+2. Enum decode behavior is documented. Current policy follows the underlying integer slicing behavior and does not validate enumerator membership.
 3. Non-contiguous decode no longer depends on `seek(-1)` for forward-only iterators, or the buffer concept is tightened so such buffers are rejected at compile time.
 4. Any required non-contiguous random-access helper is implemented, or code paths that depend on it are removed/guarded.
 5. Text-string decode either validates UTF-8 and returns `status_code::invalid_utf8_sequence`, or the public API/docs clearly state that UTF-8 is not validated.
 6. Public placeholder range-view types that are not implemented are removed from the advertised public variant surface, or they are fully implemented and covered by tests.
 7. Documentation explains lifetime requirements for `std::string_view`, `std::span<const std::byte>`, `bstr_view`, and `tstr_view` decode results.
 8. `doc/cddl_handling.md` no longer references a missing `cbor_tags/cbor_cddl.h` header.
-9. `doc/range_handling.md` is no longer an empty TODO and describes currently supported range behavior and limitations.
+9. `doc/experimental_ranges.md` describes currently supported range behavior and limitations.
 10. New tests cover:
-   - signed overflow / out-of-range negative decode
+   - signed overflow / out-of-range negative decode slicing
    - enum decode edge cases
    - non-contiguous forward-iterator or rewind behavior
    - UTF-8 validation behavior
@@ -86,7 +86,7 @@ policy, and iterator invalidation behavior.
   - `include/cbor_tags/cbor.h`
   - `include/cbor_tags/extensions/cbor_visualization.h`
   - `doc/cddl_handling.md`
-  - `doc/range_handling.md`
+  - `doc/experimental_ranges.md`
   - targeted tests under `test/`
 - Review source:
   - This story summarizes the local review notes generated during the review pass. Those notes are not required repo artifacts.

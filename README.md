@@ -19,7 +19,6 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 # Index
 
 - [🎯 Key Features](#-key-features)
-- [Decode Policy Notes](#decode-policy-notes)
 - [🔧 Quick Start](#-quick-start)
   - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
   - [Tagged Struct Example](#tagged-struct-example)
@@ -35,6 +34,8 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [✅ Requirements](#-requirements)
 - [📦 Installation](#-installation)
 - [💡 CMake Integration](#-cmake-integration)
+- [Limiting Decode Allocation With `std::pmr`](#limiting-decode-allocation-with-stdpmr)
+- [✨ WIP Features](#-wip-features)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
 - [🌟 Practical Use Cases](#-practical-use-cases)
@@ -47,9 +48,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 ## 🎯 Key Features
 
 - Support for both contiguous and non-contiguous buffers.
-- Ranges support.
-- Potential for zero-copy encoding by joining multiple buffers.
-- Potential for zero-copy decoding using views and spans.
+- Buffer-backed decode views for contiguous and non-contiguous inputs.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), return value defaults to `tl::expected<void, status_code>` in the absence of C++23's `std::expected` 
@@ -469,6 +468,7 @@ private:
 // This is used when you cannot modify the class itself
 
 // Tag function (optional) - defines a tag for this type when used in a variant
+// Without the cbor_tag(), it will be encoded as an array item only
 constexpr auto cbor_tag(const ExternalClass&) { return static_tag<54321>{}; }
 
 // Encode function - converts the object to CBOR
@@ -579,7 +579,8 @@ struct DynamicTagged {
 
 ## 🔄 Automatic Reflection
 
-Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24).
+Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24), with no upper limit.
+Any level of nesting will work, it's only the individual struct sizes that are limited pre-C++26.
 
 The API is the same in both modes:
 
@@ -803,7 +804,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.14.0 # or specify a particular commit/tag
+  GIT_TAG v0.15.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -834,10 +835,75 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 > [!NOTE]
 > This library requires C++20 features. However, you can isolate that requirement by wrapping this library and exposing an API compatible with your target C++ version.
 
+## Limiting Decode Allocation With `std::pmr`
+
+When decoding untrusted CBOR into owning containers, an input can declare very
+large array, map, text-string, or byte-string sizes. The decoder does not impose
+schema or application size limits for you. If you need allocation containment,
+decode into allocator-aware types backed by a bounded `std::pmr::memory_resource`.
+
+This assumes the input byte buffer itself is already bounded by your transport,
+framing layer, file-size limit, request-body cap, or another application-level
+guard. A PMR arena limits allocations made while materializing decoded C++
+values; it does not limit how much CBOR input you accept.
+
+```cpp
+#include <array>
+#include <cstddef>
+#include <memory_resource>
+#include <string>
+#include <vector>
+
+#include <cbor_tags/cbor.h>
+
+// Example input: ["a", "b"].
+// In production, populate this from a size-capped input path.
+std::vector<std::byte> input{
+    std::byte{0x82}, std::byte{0x61}, std::byte{'a'}, std::byte{0x61}, std::byte{'b'},
+};
+
+std::array<std::byte, 4096> arena_storage{};
+std::pmr::monotonic_buffer_resource arena(
+    arena_storage.data(),
+    arena_storage.size(),
+    std::pmr::null_memory_resource());
+
+std::pmr::vector<std::pmr::string> values{&arena};
+
+auto dec = cbor::tags::make_decoder(input);
+auto result = dec(values);
+
+if (!result && result.error() == cbor::tags::status_code::out_of_memory) {
+    // The bounded arena was exhausted.
+}
+```
+
+This can limit allocation injection for PMR-aware layouts such as:
+
+```cpp
+std::pmr::vector<std::pmr::string>
+std::pmr::vector<std::pmr::vector<int>>
+std::pmr::map<std::pmr::string, std::pmr::string>
+std::pmr::vector<std::optional<std::pmr::string>>
+```
+
+Important limitations:
+
+- This is allocation containment, not schema validation.
+- Use an external scan or application policy when you need max array, map, or string sizes.
+- Non-PMR members, `std::vector`, `std::string`, and other default-allocator containers are not contained by a PMR arena.
+- `std::variant` alternatives do not currently receive parent PMR allocator context.
+- A bounded arena must use a bounded upstream resource, commonly `std::pmr::null_memory_resource()`.
+
+A future scanning pass is planned for policy checks before materializing values.
+That pass should be the right place to reject messages by declared array, map,
+or string sizes, nesting depth, or other schema/application limits without
+allocating the target object graph first.
+
 ## ✨ WIP Features
 
 - Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
-- WIP: Complete ranges support
+- WIP / experimental: range wrappers, raw encoded views, lazy tag scanning, and segmented output for zero-copy-oriented encoding. See [Experimental Range And Segment APIs](doc/experimental_ranges.md).
 - TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
 - TODO: Options for encoder/decoder, such as (un)expected type tuning
 - TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
@@ -845,6 +911,11 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 - TODO: `shared_ptr` support.
 
 ## 📚 Documentation
+
+User-facing docs:
+
+- [Encoder And Decoder Options](doc/options.md)
+- [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:
 

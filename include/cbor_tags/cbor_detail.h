@@ -1,23 +1,23 @@
 #pragma once
 
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_reflection_config.h"
+#include "cbor_tags/cbor_reflection_count.h"
 
 #include <concepts>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <limits>
+#include <memory>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
-
-#if defined(__cpp_impl_reflection) && __cpp_impl_reflection >= 202506L
-#include <meta>
-#define CBOR_TAGS_HAS_STD_REFLECTION 1
-#else
-#define CBOR_TAGS_HAS_STD_REFLECTION 0
-#endif
+#include <utility>
 
 namespace cbor::tags::detail {
 
@@ -31,20 +31,77 @@ template <typename T, bool IsArray = IsFixedArray<T>>
     requires AppendableContainer<T>
 struct appender;
 
+template <typename Value, typename Container> constexpr bool uses_container_allocator_for() {
+    if constexpr (requires(Container &container) { container.get_allocator(); }) {
+        using allocator_type = decltype(std::declval<Container &>().get_allocator());
+        return std::uses_allocator_v<Value, allocator_type>;
+    } else {
+        return false;
+    }
+}
+
+template <typename Value, typename Container> constexpr bool uses_optional_value_container_allocator_for() {
+    using value_type = std::remove_cvref_t<Value>;
+    if constexpr (is_optional_v<value_type>) {
+        return uses_container_allocator_for<typename value_type::value_type, Container>();
+    } else {
+        return false;
+    }
+}
+
+template <typename Value, typename Container> constexpr bool can_propagate_container_allocator_for() {
+    return uses_container_allocator_for<Value, Container>() || uses_optional_value_container_allocator_for<Value, Container>();
+}
+
+template <typename Value, typename Container> constexpr Value make_decode_value_for(Container &container) {
+    if constexpr (uses_container_allocator_for<Value, Container>()) {
+        return std::make_from_tuple<Value>(std::uses_allocator_construction_args<Value>(container.get_allocator()));
+    } else if constexpr (uses_optional_value_container_allocator_for<Value, Container>()) {
+        using value_type = std::remove_cvref_t<Value>;
+        return std::make_from_tuple<Value>(std::tuple_cat(
+            std::tuple{std::in_place}, std::uses_allocator_construction_args<typename value_type::value_type>(container.get_allocator())));
+    } else {
+        return Value{};
+    }
+}
+
+template <typename Value, typename Optional> constexpr Value make_decode_value_for_optional(Optional &optional) {
+    if constexpr (requires(Value &value) { value.get_allocator(); }) {
+        if (optional) {
+            return std::make_from_tuple<Value>(std::uses_allocator_construction_args<Value>(optional->get_allocator()));
+        }
+    }
+    return Value{};
+}
+
+template <typename Container, typename Pair>
+concept AssignableInsertOrAssignMap = IsMap<Container> && IsPairLike<Pair> && requires(Container &container, Pair &&value) {
+    requires std::assignable_from<typename Container::mapped_type &, decltype(pair_second(std::forward<Pair>(value)))>;
+    container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
+};
+
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
 
-    constexpr void operator()(T &container, const value_type &value) {
-        if constexpr (IsMap<T>) {
-            const auto &[key, mapped_value] = value;
+    constexpr void operator()(T &container, const value_type &value)
+        requires(!IsMap<T>)
+    {
+        container.push_back(value);
+    }
 
-            if constexpr (IsMultiMap<T>) {
-                container.insert({key, mapped_value});
-            } else {
-                container.insert_or_assign(key, mapped_value);
-            }
+    constexpr void operator()(T &container, value_type &&value)
+        requires(!IsMap<T>)
+    {
+        container.push_back(std::move(value));
+    }
+
+    template <typename Pair>
+        requires IsMap<T> && IsPairLike<Pair>
+    constexpr void operator()(T &container, Pair &&value) {
+        if constexpr (AssignableInsertOrAssignMap<T, Pair>) {
+            container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
         } else {
-            container.push_back(value);
+            container.insert(std::forward<Pair>(value));
         }
     }
 
@@ -104,42 +161,132 @@ template <typename T> struct appender<T, true> {
     }
 };
 
+template <typename OutputBuffer, typename R>
+concept DirectlyInsertableByteRange =
+    (!IsFixedArray<std::remove_cvref_t<OutputBuffer>>) && std::ranges::common_range<R> &&
+    std::same_as<std::remove_cvref_t<std::ranges::range_reference_t<R>>, typename std::remove_cvref_t<OutputBuffer>::value_type> &&
+    requires(OutputBuffer &output, R &&range) { output.insert(output.end(), std::ranges::begin(range), std::ranges::end(range)); };
+
+template <std::ranges::contiguous_range R>
+    requires std::ranges::sized_range<R> && ByteLikeRange<R>
+[[nodiscard]] constexpr std::span<const std::byte> as_byte_span(R &&range) {
+    auto values = std::span{std::ranges::data(range), static_cast<std::size_t>(std::ranges::size(range))};
+    return std::as_bytes(values);
+}
+
+template <typename Appender, typename OutputBuffer, typename R>
+    requires ByteLikeRange<R>
+constexpr void append_byte_range(Appender &appender, OutputBuffer &output, R &&range) {
+    using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
+
+    if constexpr (requires {
+                      { range.span() } -> std::same_as<std::span<const std::byte>>;
+                  }) {
+        appender(output, range.span());
+    } else if constexpr (std::ranges::contiguous_range<R> && std::ranges::sized_range<R>) {
+        appender(output, as_byte_span(std::forward<R>(range)));
+    } else if constexpr (DirectlyInsertableByteRange<OutputBuffer, R>) {
+        output.insert(output.end(), std::ranges::begin(range), std::ranges::end(range));
+    } else {
+        for (auto &&byte : range) {
+            appender(output, static_cast<output_byte>(byte));
+        }
+    }
+}
+
 template <typename T, bool IsContiguous = IsContiguous<T>>
-    requires ValidCborBuffer<T>
+    requires CborInputBuffer<T>
 struct reader;
 
+template <typename T, bool HasNestedSize = requires { typename std::remove_cvref_t<T>::size_type; },
+          bool IsSizedRange = std::ranges::sized_range<const std::remove_cvref_t<T>>>
+struct reader_size_type {
+    using type = std::size_t;
+};
+
+template <typename T, bool IsSizedRange> struct reader_size_type<T, true, IsSizedRange> {
+    using type = typename std::remove_cvref_t<T>::size_type;
+};
+
+template <typename T> struct reader_size_type<T, false, true> {
+    using type = std::ranges::range_size_t<const std::remove_cvref_t<T>>;
+};
+
+[[nodiscard]] constexpr auto negative_seek_magnitude(std::ptrdiff_t value) noexcept {
+    using magnitude_type = std::make_unsigned_t<std::ptrdiff_t>;
+    if (value == std::numeric_limits<std::ptrdiff_t>::min()) {
+        return static_cast<magnitude_type>(std::numeric_limits<std::ptrdiff_t>::max()) + magnitude_type{1};
+    }
+    return static_cast<magnitude_type>(-value);
+}
+
 template <typename T> struct reader<T, true> {
-    using size_type  = T::size_type;
+    using size_type  = typename reader_size_type<T>::type;
     using value_type = std::byte;
-    using iterator   = typename T::iterator;
-    size_type position_;
+    using iterator   = std::ranges::iterator_t<const T>;
+    size_type position_{0};
 
-    constexpr reader(const T &) : position_(0) {}
+    constexpr reader(const T &) {}
 
-    constexpr bool empty(const T &container) const noexcept { return position_ >= container.size(); }
+    constexpr size_type size(const T &container) const noexcept {
+        if constexpr (std::ranges::sized_range<const T>) {
+            return static_cast<size_type>(std::ranges::size(container));
+        } else {
+            return static_cast<size_type>(std::ranges::distance(container));
+        }
+    }
+
+    constexpr bool empty(const T &container) const noexcept { return position_ >= size(container); }
     constexpr bool empty(const T &container, size_type offset) const noexcept {
-        return position_ >= container.size() || offset >= (container.size() - position_);
+        const auto range_size = size(container);
+        return position_ >= range_size || offset >= (range_size - position_);
     }
-    constexpr value_type read(const T &container) noexcept { return static_cast<value_type>(container[position_++]); }
+    constexpr value_type read(const T &container) noexcept {
+        auto result = static_cast<value_type>(std::ranges::data(container)[position_]);
+        ++position_;
+        return result;
+    }
     constexpr value_type read(const T &container, size_type offset) noexcept {
-        return static_cast<value_type>(container[position_ + offset]);
+        return static_cast<value_type>(std::ranges::data(container)[position_ + offset]);
     }
 
-    constexpr void seek(int i) { position_ += i; }
+    constexpr void seek(std::ptrdiff_t i) {
+        if (i >= 0) {
+            position_ += static_cast<size_type>(i);
+        } else {
+            const auto amount = negative_seek_magnitude(i);
+            if (std::cmp_greater(amount, position_)) {
+                throw std::runtime_error("CBOR input seek before begin");
+            }
+            position_ -= static_cast<size_type>(amount);
+        }
+    }
 };
 
 template <typename T> struct reader<T, false> {
-    using size_type  = T::size_type;
+    using size_type  = typename reader_size_type<T>::type;
     using value_type = std::byte;
-    using iterator   = typename T::const_iterator;
+    using iterator   = std::ranges::iterator_t<const T>;
     iterator  position_;
     size_type current_offset_{0};
-    constexpr reader(const T &container) : position_(container.cbegin()) {}
+    constexpr reader(const T &container) : position_(std::ranges::begin(container)) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool empty(const T &container) const noexcept { return position_ == container.cend(); }
+    constexpr bool empty(const T &container) const noexcept { return position_ == std::ranges::end(container); }
     constexpr bool empty(const T &container, size_type offset) const noexcept {
-        return current_offset_ >= container.size() || offset >= (container.size() - current_offset_);
+        if constexpr (std::ranges::sized_range<const T>) {
+            const auto range_size = static_cast<size_type>(std::ranges::size(container));
+            return current_offset_ >= range_size || offset >= (range_size - current_offset_);
+        }
+
+        auto it = position_;
+        for (size_type i = 0; i <= offset; ++i) {
+            if (it == std::ranges::end(container)) {
+                return true;
+            }
+            ++it;
+        }
+        return false;
     }
     constexpr value_type read(const T &) noexcept {
         auto result = static_cast<value_type>(*position_);
@@ -150,13 +297,23 @@ template <typename T> struct reader<T, false> {
 
     constexpr value_type read(const T &, size_type offset) noexcept {
         auto it = position_;
-        std::advance(it, offset);
+        std::advance(it, static_cast<std::ptrdiff_t>(offset));
         return static_cast<value_type>(*it);
     }
 
-    constexpr void seek(int i) {
+    constexpr void seek(std::ptrdiff_t i) {
+        if (i < 0) {
+            const auto amount = negative_seek_magnitude(i);
+            if (std::cmp_greater(amount, current_offset_)) {
+                throw std::runtime_error("CBOR input seek before begin");
+            }
+        }
         position_ = std::next(position_, i);
-        current_offset_ += i;
+        if (i >= 0) {
+            current_offset_ += static_cast<size_type>(i);
+        } else {
+            current_offset_ -= static_cast<size_type>(negative_seek_magnitude(i));
+        }
     }
 };
 
@@ -164,37 +321,6 @@ template <typename Tuple> constexpr auto tuple_tail(Tuple &&tuple) {
     return std::apply([](auto &&, auto &&...tail) { return std::forward_as_tuple(std::forward<decltype(tail)>(tail)...); },
                       std::forward<Tuple>(tuple));
 }
-
-#if CBOR_TAGS_HAS_STD_REFLECTION
-
-template <typename T>
-    requires IsAggregate<T> || IsTuple<T>
-constexpr auto aggregate_binding_count = [] consteval {
-    using type = std::remove_cvref_t<T>;
-    if constexpr (IsTuple<type>) {
-        return std::tuple_size_v<type>;
-    } else {
-        return std::meta::nonstatic_data_members_of(^^type, std::meta::access_context::current()).size();
-    }
-}();
-
-#else
-
-template <typename T, typename... TArgs>
-    requires IsAggregate<T> || IsTuple<T>
-constexpr std::size_t num_bindings_impl() {
-    if constexpr (requires { T{std::declval<TArgs>()...}; }) {
-        return num_bindings_impl<T, any, TArgs...>();
-    } else {
-        return sizeof...(TArgs) - 1;
-    }
-}
-
-template <typename T>
-    requires IsAggregate<T> || IsTuple<T>
-constexpr auto aggregate_binding_count = detail::num_bindings_impl<T, any>();
-
-#endif
 
 template <typename T, typename ThisPtr> constexpr T &underlying(ThisPtr this_ptr) { return static_cast<T &>(*this_ptr); }
 
