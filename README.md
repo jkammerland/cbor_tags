@@ -467,6 +467,7 @@ private:
 // This is used when you cannot modify the class itself
 
 // Tag function (optional) - defines a tag for this type when used in a variant
+// Without the cbor_tag(), it will be encoded as an array item only
 constexpr auto cbor_tag(const ExternalClass&) { return static_tag<54321>{}; }
 
 // Encode function - converts the object to CBOR
@@ -577,7 +578,8 @@ struct DynamicTagged {
 
 ## 🔄 Automatic Reflection
 
-Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24).
+Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24), with no upper limit.
+Any level of nesting will work, it's only the individual struct sizes that are limited pre-C++26.
 
 The API is the same in both modes:
 
