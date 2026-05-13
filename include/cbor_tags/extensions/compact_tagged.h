@@ -2,8 +2,8 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
-#include "cbor_tags/detail/compact_serialization.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/compact_serialization.h"
 
 #include <cstddef>
 #include <limits>
@@ -76,8 +76,7 @@ template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mi
         return decode(value, major, additional_info);
     }
 
-    template <typename T>
-    [[nodiscard]] constexpr status_code decode(compact_ref<T> value, major_type major, std::byte additional_info) {
+    template <typename T> [[nodiscard]] constexpr status_code decode(compact_ref<T> value, major_type major, std::byte additional_info) {
         return decode_tagged(cbor::tags::detail::compact::tag_for(*value.value_), *value.value_, major, additional_info);
     }
 
@@ -144,7 +143,8 @@ template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mi
                 return status_code::contiguous_view_on_non_contiguous_data;
             }
             std::vector<std::byte> payload_bytes(payload.begin(), payload.end());
-            return cbor::tags::detail::compact::decode_payload(std::span<const std::byte>(payload_bytes.data(), payload_bytes.size()), value);
+            return cbor::tags::detail::compact::decode_payload(std::span<const std::byte>(payload_bytes.data(), payload_bytes.size()),
+                                                               value);
         }
     }
 

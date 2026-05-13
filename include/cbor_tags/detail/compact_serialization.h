@@ -46,7 +46,7 @@ class span_reader {
   public:
     explicit constexpr span_reader(std::span<const std::byte> input) noexcept : input_(input) {}
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return position_ == input_.size(); }
+    [[nodiscard]] constexpr bool        empty() const noexcept { return position_ == input_.size(); }
     [[nodiscard]] constexpr std::size_t remaining() const noexcept { return input_.size() - position_; }
 
     constexpr status_code read_byte(std::byte &out) noexcept {
@@ -202,8 +202,7 @@ template <typename T> constexpr std::uint64_t tag_for(const T &value) {
 
 template <typename T> constexpr bool first_tuple_field_is_tag_v = false;
 
-template <typename T>
-constexpr bool tuple_first_field_is_tag() {
+template <typename T> constexpr bool tuple_first_field_is_tag() {
     using tuple_type = std::remove_cvref_t<T>;
     if constexpr (std::tuple_size_v<tuple_type> == 0) {
         return false;
@@ -216,9 +215,7 @@ constexpr bool tuple_first_field_is_tag() {
 template <typename Tuple, typename Fn> constexpr decltype(auto) visit_tuple_payload(Tuple &&tuple, Fn &&fn) {
     if constexpr (tuple_first_field_is_tag<Tuple>()) {
         return std::apply(
-            [&fn](auto &&, auto &&...tail) -> decltype(auto) {
-                return std::forward<Fn>(fn)(std::forward<decltype(tail)>(tail)...);
-            },
+            [&fn](auto &&, auto &&...tail) -> decltype(auto) { return std::forward<Fn>(fn)(std::forward<decltype(tail)>(tail)...); },
             std::forward<Tuple>(tuple));
     } else {
         return std::apply(std::forward<Fn>(fn), std::forward<Tuple>(tuple));
@@ -226,7 +223,7 @@ template <typename Tuple, typename Fn> constexpr decltype(auto) visit_tuple_payl
 }
 
 template <typename Writer, typename T> constexpr void encode_value(Writer &writer, const T &value);
-template <typename T> constexpr status_code decode_value(span_reader &reader, T &value);
+template <typename T> constexpr status_code           decode_value(span_reader &reader, T &value);
 
 template <typename Writer, typename Tuple> constexpr void encode_tuple_fields(Writer &writer, const Tuple &tuple) {
     visit_tuple_payload(tuple, [&writer](const auto &...fields) { (encode_value(writer, fields), ...); });
@@ -363,7 +360,8 @@ template <typename T> constexpr status_code decode_scalar(span_reader &reader, T
 template <typename Writer, typename T> constexpr void encode_byte_string(Writer &writer, const T &value) {
     write_varuint(writer, static_cast<std::uint64_t>(std::ranges::size(value)));
     if constexpr (std::ranges::contiguous_range<const T>) {
-        writer.write_bytes(std::span<const std::byte>(reinterpret_cast<const std::byte *>(std::ranges::data(value)), std::ranges::size(value)));
+        writer.write_bytes(
+            std::span<const std::byte>(reinterpret_cast<const std::byte *>(std::ranges::data(value)), std::ranges::size(value)));
     } else {
         for (auto byte : value) {
             writer.write_byte(static_cast<std::byte>(byte));
@@ -607,7 +605,11 @@ template <typename T> constexpr status_code decode_range(span_reader &reader, T 
             if (status != status_code::success) {
                 return status;
             }
-            appender(value, std::move(element));
+            if constexpr (requires { value.push_back(std::move(element)); }) {
+                value.push_back(std::move(element));
+            } else {
+                appender(value, std::move(element));
+            }
         }
         return status_code::success;
     }
@@ -634,10 +636,9 @@ template <typename T> constexpr status_code decode_aggregate(span_reader &reader
 template <typename Writer, typename T> constexpr void encode_value(Writer &writer, const T &value) {
     using type = std::remove_cvref_t<T>;
     if constexpr (std::is_same_v<type, std::byte> || std::is_same_v<type, bool> ||
-                  (std::is_integral_v<type> && !std::is_same_v<type, bool>) || std::is_enum_v<type> ||
-                  std::is_same_v<type, float16_t> || std::is_same_v<type, float> || std::is_same_v<type, double> ||
-                  std::is_same_v<type, negative> || std::is_same_v<type, integer> || std::is_same_v<type, simple> ||
-                  std::is_same_v<type, std::nullptr_t>) {
+                  (std::is_integral_v<type> && !std::is_same_v<type, bool>) || std::is_enum_v<type> || std::is_same_v<type, float16_t> ||
+                  std::is_same_v<type, float> || std::is_same_v<type, double> || std::is_same_v<type, negative> ||
+                  std::is_same_v<type, integer> || std::is_same_v<type, simple> || std::is_same_v<type, std::nullptr_t>) {
         encode_scalar(writer, value);
     } else if constexpr (is_std_array_v<type>) {
         encode_std_array(writer, value);
@@ -665,10 +666,9 @@ template <typename Writer, typename T> constexpr void encode_value(Writer &write
 template <typename T> constexpr status_code decode_value(span_reader &reader, T &value) {
     using type = std::remove_cvref_t<T>;
     if constexpr (std::is_same_v<type, std::byte> || std::is_same_v<type, bool> ||
-                  (std::is_integral_v<type> && !std::is_same_v<type, bool>) || std::is_enum_v<type> ||
-                  std::is_same_v<type, float16_t> || std::is_same_v<type, float> || std::is_same_v<type, double> ||
-                  std::is_same_v<type, negative> || std::is_same_v<type, integer> || std::is_same_v<type, simple> ||
-                  std::is_same_v<type, std::nullptr_t>) {
+                  (std::is_integral_v<type> && !std::is_same_v<type, bool>) || std::is_enum_v<type> || std::is_same_v<type, float16_t> ||
+                  std::is_same_v<type, float> || std::is_same_v<type, double> || std::is_same_v<type, negative> ||
+                  std::is_same_v<type, integer> || std::is_same_v<type, simple> || std::is_same_v<type, std::nullptr_t>) {
         return decode_scalar(reader, value);
     } else if constexpr (is_std_array_v<type>) {
         return decode_std_array(reader, value);
@@ -716,8 +716,7 @@ namespace borrowed {
 
 template <typename T> struct has_borrowed_decode_refs;
 
-template <typename Tuple, std::size_t... Indices>
-consteval bool tuple_has_borrowed_decode_refs_impl(std::index_sequence<Indices...>) {
+template <typename Tuple, std::size_t... Indices> consteval bool tuple_has_borrowed_decode_refs_impl(std::index_sequence<Indices...>) {
     return (has_borrowed_decode_refs<std::remove_cvref_t<std::tuple_element_t<Indices, Tuple>>>::value || ...);
 }
 
@@ -743,8 +742,7 @@ template <typename T> struct has_borrowed_decode_refs {
                 return (has_borrowed_decode_refs<std::remove_cvref_t<Ts>>::value || ...);
             }(static_cast<type *>(nullptr));
         } else if constexpr (IsMap<type>) {
-            return has_borrowed_decode_refs<typename type::key_type>::value ||
-                   has_borrowed_decode_refs<typename type::mapped_type>::value;
+            return has_borrowed_decode_refs<typename type::key_type>::value || has_borrowed_decode_refs<typename type::mapped_type>::value;
         } else if constexpr (IsRangeOfCborValues<type>) {
             return has_borrowed_decode_refs<typename type::value_type>::value;
         } else if constexpr (IsUntaggedTuple<type> || IsTaggedTuple<type>) {
@@ -779,6 +777,18 @@ template <typename T> [[nodiscard]] constexpr status_code decode_payload(std::sp
         value = std::move(decoded);
         return status_code::success;
     } else {
+        if constexpr (std::copy_constructible<T> && std::assignable_from<T &, T>) {
+            T    decoded{value};
+            auto status = decode_value(reader, decoded);
+            if (status != status_code::success) {
+                return status;
+            }
+            if (!reader.empty()) {
+                return status_code::error;
+            }
+            value = std::move(decoded);
+            return status_code::success;
+        }
         auto status = decode_value(reader, value);
         if (status != status_code::success) {
             return status;
