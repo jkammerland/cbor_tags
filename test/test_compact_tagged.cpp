@@ -4,7 +4,7 @@
 #include <bit>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
-#include <cbor_tags/extensions/compact_tagged.h>
+#include <cbor_tags/extensions/custom_codec_1.h>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -100,11 +100,11 @@ template <typename T> void check_compact_wire(const T &in, T out, std::string_vi
     using namespace cbor::tags::ext::compact;
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<1>{}, in)));
     CHECK_EQ(to_hex(compact), expected_hex);
 
-    auto dec = make_decoder<compact_tagged_codec>(compact);
+    auto dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<1>{}, out)));
     CHECK(out == in);
 }
@@ -114,7 +114,7 @@ template <typename T> auto decode_compact_hex(std::string_view hex, T &&value) {
     using namespace cbor::tags::ext::compact;
 
     auto bytes = to_bytes(hex);
-    auto dec   = make_decoder<compact_tagged_codec>(bytes);
+    auto dec   = make_decoder<custom_codec_1>(bytes);
     return dec(std::forward<T>(value));
 }
 
@@ -156,7 +156,7 @@ TEST_CASE("compact tagged roundtrips aggregate payload without CBOR field wrappe
     };
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(in)));
 
     const auto hex = to_hex(compact);
@@ -164,7 +164,7 @@ TEST_CASE("compact tagged roundtrips aggregate payload without CBOR field wrappe
     CHECK(hex.find("84") == std::string::npos);
 
     compact_payload out{};
-    auto            dec = make_decoder<compact_tagged_codec>(compact);
+    auto            dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(out)));
     CHECK(out == in);
 }
@@ -199,12 +199,12 @@ TEST_CASE("compact tagged roundtrips deep nested aggregate schemas") {
     };
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<222>{}, in)));
     CHECK(to_hex(compact).starts_with("d8de58"));
 
     compact_deep_payload out{};
-    auto                 dec = make_decoder<compact_tagged_codec>(compact);
+    auto                 dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<222>{}, out)));
     CHECK(out == in);
 }
@@ -233,7 +233,7 @@ TEST_CASE("compact tagged explicit tag encodes typed arrays without per-element 
     const std::vector<double> values{1.0, 2.0, 4.0};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<77>{}, values)));
 
     const auto hex = to_hex(compact);
@@ -241,7 +241,7 @@ TEST_CASE("compact tagged explicit tag encodes typed arrays without per-element 
     CHECK(hex.find("fb") == std::string::npos);
 
     std::vector<double> decoded;
-    auto                dec = make_decoder<compact_tagged_codec>(compact);
+    auto                dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<77>{}, decoded)));
     CHECK(decoded == values);
 }
@@ -262,11 +262,11 @@ TEST_CASE("compact tagged scalar payloads have stable minimal wire shapes") {
     float16_t              in{std::uint16_t{0x3C00}};
     float16_t              out{};
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<1>{}, in)));
     CHECK_EQ(to_hex(compact), "c142003c");
 
-    auto dec = make_decoder<compact_tagged_codec>(compact);
+    auto dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<1>{}, out)));
     CHECK(out.value == in.value);
 }
@@ -282,12 +282,12 @@ TEST_CASE("compact tagged scalar extremes are bit exact") {
     const auto in       = std::bit_cast<double>(nan_bits);
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<1>{}, in)));
     CHECK_EQ(to_hex(compact), "c148785634120000f87f");
 
     double out{};
-    auto   dec = make_decoder<compact_tagged_codec>(compact);
+    auto   dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<1>{}, out)));
     CHECK(std::bit_cast<std::uint64_t>(out) == nan_bits);
 }
@@ -319,12 +319,12 @@ TEST_CASE("compact tagged dynamic tags use the same compact payload core") {
     const std::uint8_t value{7};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(dynamic_tag<std::uint16_t>{300}, value)));
     CHECK_EQ(to_hex(compact), "d9012c4107");
 
     std::uint8_t decoded{};
-    auto         dec = make_decoder<compact_tagged_codec>(compact);
+    auto         dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(dynamic_tag<std::uint16_t>{300}, decoded)));
     CHECK(decoded == value);
 }
@@ -336,36 +336,36 @@ TEST_CASE("compact tagged long tag and length boundaries stay compact") {
     {
         const bool             value{true};
         std::vector<std::byte> compact;
-        auto                   enc = make_encoder<compact_tagged_codec>(compact);
+        auto                   enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<0x100000000ULL>{}, value)));
         CHECK_EQ(to_hex(compact), "db00000001000000004101");
 
         bool decoded{};
-        auto dec = make_decoder<compact_tagged_codec>(compact);
+        auto dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<0x100000000ULL>{}, decoded)));
         CHECK(decoded == value);
     }
     {
         const std::string      text(127, 'a');
         std::vector<std::byte> compact;
-        auto                   enc = make_encoder<compact_tagged_codec>(compact);
+        auto                   enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<1>{}, text)));
         CHECK_EQ(to_hex(compact), std::string{"c158807f"} + repeat_hex("61", 127));
 
         std::string decoded;
-        auto        dec = make_decoder<compact_tagged_codec>(compact);
+        auto        dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<1>{}, decoded)));
         CHECK(decoded == text);
     }
     {
         const std::string      text(128, 'x');
         std::vector<std::byte> compact;
-        auto                   enc = make_encoder<compact_tagged_codec>(compact);
+        auto                   enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<1>{}, text)));
         CHECK_EQ(to_hex(compact), std::string{"c158828001"} + repeat_hex("78", 128));
 
         std::string decoded;
-        auto        dec = make_decoder<compact_tagged_codec>(compact);
+        auto        dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<1>{}, decoded)));
         CHECK(decoded == text);
     }
@@ -376,36 +376,36 @@ TEST_CASE("compact tagged long tag and length boundaries stay compact") {
         }
 
         std::vector<std::byte> compact;
-        auto                   enc = make_encoder<compact_tagged_codec>(compact);
+        auto                   enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<1>{}, values)));
         CHECK(to_hex(compact).starts_with("c158828001"));
 
         std::vector<std::uint8_t> decoded;
-        auto                      dec = make_decoder<compact_tagged_codec>(compact);
+        auto                      dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<1>{}, decoded)));
         CHECK(decoded == values);
     }
     {
         const std::vector<std::uint16_t> values(127, 0x1234);
         std::vector<std::byte>           compact;
-        auto                             enc = make_encoder<compact_tagged_codec>(compact);
+        auto                             enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<1>{}, values)));
         CHECK_EQ(to_hex(compact), std::string{"c158ff7f"} + repeat_hex("3412", 127));
 
         std::vector<std::uint16_t> decoded;
-        auto                       dec = make_decoder<compact_tagged_codec>(compact);
+        auto                       dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<1>{}, decoded)));
         CHECK(decoded == values);
     }
     {
         const std::vector<std::uint16_t> values(128, 0x1234);
         std::vector<std::byte>           compact;
-        auto                             enc = make_encoder<compact_tagged_codec>(compact);
+        auto                             enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<1>{}, values)));
         CHECK_EQ(to_hex(compact), std::string{"c15901028001"} + repeat_hex("3412", 128));
 
         std::vector<std::uint16_t> decoded;
-        auto                       dec = make_decoder<compact_tagged_codec>(compact);
+        auto                       dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<1>{}, decoded)));
         CHECK(decoded == values);
     }
@@ -418,12 +418,12 @@ TEST_CASE("compact tagged supports existing tag pair idiom") {
     auto tagged = make_tag_pair(static_tag<123>{}, std::vector<std::uint16_t>{0x1234, 0xABCD});
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(tagged)));
     CHECK_EQ(to_hex(compact), "d87b45023412cdab");
 
     tagged_object<static_tag<123>, std::vector<std::uint16_t>> decoded{};
-    auto                                                       dec = make_decoder<compact_tagged_codec>(compact);
+    auto                                                       dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(decoded)));
     CHECK(decoded.second == tagged.second);
 }
@@ -436,12 +436,12 @@ TEST_CASE("compact tagged supports plain and tagged tuple payloads") {
 
     const auto             tagged = std::tuple{static_tag<31>{}, std::uint8_t{7}, true};
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(tagged)));
     CHECK_EQ(to_hex(compact), "d81f420701");
 
     std::tuple<static_tag<31>, std::uint8_t, bool> decoded{};
-    auto                                           dec = make_decoder<compact_tagged_codec>(compact);
+    auto                                           dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(decoded)));
     CHECK(std::get<1>(decoded) == 7);
     CHECK(std::get<2>(decoded));
@@ -454,12 +454,12 @@ TEST_CASE("compact tagged infers inline aggregate tags") {
     const compact_inline_tag_payload in{.value = 7, .ok = true};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(in)));
     CHECK_EQ(to_hex(compact), "d821420701");
 
     compact_inline_tag_payload out{};
-    auto                       dec = make_decoder<compact_tagged_codec>(compact);
+    auto                       dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(out)));
     CHECK(out == in);
 }
@@ -471,11 +471,11 @@ TEST_CASE("compact tagged decode composes after the initial byte is already cons
     const std::uint16_t value{0x1234};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<1>{}, value)));
 
     std::uint16_t decoded{};
-    auto          dec             = make_decoder<compact_tagged_codec>(compact);
+    auto          dec             = make_decoder<custom_codec_1>(compact);
     auto [major, additional_info] = dec.read_initial_byte();
     auto result                   = dec.decode(as_compact(static_tag<1>{}, decoded), major, additional_info);
     CHECK(result == status_code::success);
@@ -489,7 +489,7 @@ TEST_CASE("compact tagged consumed-initial-byte decode reports malformed envelop
     {
         auto          compact = to_bytes("d9");
         std::uint16_t decoded{};
-        auto          dec             = make_decoder<compact_tagged_codec>(compact);
+        auto          dec             = make_decoder<custom_codec_1>(compact);
         auto [major, additional_info] = dec.read_initial_byte();
         status_code status{status_code::success};
         CHECK_NOTHROW(status = dec.decode(as_compact(static_tag<1>{}, decoded), major, additional_info));
@@ -498,7 +498,7 @@ TEST_CASE("compact tagged consumed-initial-byte decode reports malformed envelop
     {
         auto          compact = to_bytes("c15802aa");
         std::uint16_t decoded{};
-        auto          dec             = make_decoder<compact_tagged_codec>(compact);
+        auto          dec             = make_decoder<custom_codec_1>(compact);
         auto [major, additional_info] = dec.read_initial_byte();
         status_code status{status_code::success};
         CHECK_NOTHROW(status = dec.decode(as_compact(static_tag<1>{}, decoded), major, additional_info));
@@ -512,11 +512,11 @@ TEST_CASE("compact tagged wrong tag rejects before payload decode") {
 
     const std::vector<std::uint16_t> values{1, 2, 3};
     std::vector<std::byte>           compact;
-    auto                             enc = make_encoder<compact_tagged_codec>(compact);
+    auto                             enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<44>{}, values)));
 
     std::vector<std::uint16_t> decoded;
-    auto                       dec    = make_decoder<compact_tagged_codec>(compact);
+    auto                       dec    = make_decoder<custom_codec_1>(compact);
     auto                       result = dec(as_compact(static_tag<45>{}, decoded));
     REQUIRE_FALSE(result);
     CHECK(result.error() == status_code::no_match_for_tag);
@@ -592,7 +592,7 @@ TEST_CASE("compact tagged malformed bool is rejected") {
     };
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     const bool_payload     in{.value = true};
     REQUIRE(enc(as_compact(static_tag<9>{}, in)));
 
@@ -600,7 +600,7 @@ TEST_CASE("compact tagged malformed bool is rejected") {
     compact.back() = std::byte{0x02};
 
     bool_payload out{};
-    auto         dec    = make_decoder<compact_tagged_codec>(compact);
+    auto         dec    = make_decoder<custom_codec_1>(compact);
     auto         result = dec(as_compact(static_tag<9>{}, out));
     REQUIRE_FALSE(result);
     CHECK(result.error() == status_code::error);
@@ -737,11 +737,11 @@ TEST_CASE("compact tagged byte-like strings use binary compact dispatch") {
     std::basic_string<std::byte>       out;
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<1>{}, in)));
     CHECK_EQ(to_hex(compact), "c14302aabb");
 
-    auto dec = make_decoder<compact_tagged_codec>(compact);
+    auto dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<1>{}, out)));
     CHECK(out == in);
 }
@@ -753,12 +753,12 @@ TEST_CASE("compact tagged materializes unsized input views before encoding") {
     const compact_unsized_even_view evens;
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<1>{}, evens)));
     CHECK_EQ(to_hex(compact), "c14d03000000000200000004000000");
 
     std::vector<int> decoded;
-    auto             dec = make_decoder<compact_tagged_codec>(compact);
+    auto             dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<1>{}, decoded)));
     CHECK(decoded == std::vector<int>{0, 2, 4});
 }
@@ -774,12 +774,12 @@ TEST_CASE("compact tagged rejects borrowed views from non-contiguous payload sto
     const view_payload in{.label = "borrowed"};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<12>{}, in)));
 
     const std::deque<std::byte> non_contiguous(compact.begin(), compact.end());
     view_payload                out{};
-    auto                        dec    = make_decoder<compact_tagged_codec>(non_contiguous);
+    auto                        dec    = make_decoder<custom_codec_1>(non_contiguous);
     auto                        result = dec(as_compact(static_tag<12>{}, out));
     REQUIRE_FALSE(result);
     CHECK(result.error() == status_code::contiguous_view_on_non_contiguous_data);
@@ -792,12 +792,12 @@ TEST_CASE("compact tagged borrowed views inside containers decode only from cont
     const std::vector<std::string_view> in{"a", "bb"};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<19>{}, in)));
     CHECK_EQ(to_hex(compact), "d346020161026262");
 
     std::vector<std::string_view> decoded;
-    auto                          dec = make_decoder<compact_tagged_codec>(compact);
+    auto                          dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<19>{}, decoded)));
     CHECK(decoded == in);
     for (const auto view : decoded) {
@@ -807,19 +807,19 @@ TEST_CASE("compact tagged borrowed views inside containers decode only from cont
 
     const std::deque<std::byte> non_contiguous(compact.begin(), compact.end());
     decoded.clear();
-    auto non_contiguous_dec = make_decoder<compact_tagged_codec>(non_contiguous);
+    auto non_contiguous_dec = make_decoder<custom_codec_1>(non_contiguous);
     auto result             = non_contiguous_dec(as_compact(static_tag<19>{}, decoded));
     REQUIRE_FALSE(result);
     CHECK(result.error() == status_code::contiguous_view_on_non_contiguous_data);
 
     const std::map<std::string_view, std::uint8_t> map_in{{"k", 7}};
     compact.clear();
-    auto map_enc = make_encoder<compact_tagged_codec>(compact);
+    auto map_enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(map_enc(as_compact(static_tag<1>{}, map_in)));
     CHECK_EQ(to_hex(compact), "c14401016b07");
 
     std::map<std::string_view, std::uint8_t> map_decoded;
-    auto                                     map_dec = make_decoder<compact_tagged_codec>(compact);
+    auto                                     map_dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(map_dec(as_compact(static_tag<1>{}, map_decoded)));
     REQUIRE(map_decoded.size() == 1);
     CHECK(map_decoded.begin()->first == "k");
@@ -830,7 +830,7 @@ TEST_CASE("compact tagged borrowed views inside containers decode only from cont
 
     const std::deque<std::byte> non_contiguous_map(compact.begin(), compact.end());
     map_decoded.clear();
-    auto non_contiguous_map_dec = make_decoder<compact_tagged_codec>(non_contiguous_map);
+    auto non_contiguous_map_dec = make_decoder<custom_codec_1>(non_contiguous_map);
     result                      = non_contiguous_map_dec(as_compact(static_tag<1>{}, map_decoded));
     REQUIRE_FALSE(result);
     CHECK(result.error() == status_code::contiguous_view_on_non_contiguous_data);
@@ -843,11 +843,11 @@ TEST_CASE("compact tagged borrowed views decode from contiguous payload storage"
     {
         const std::string_view in{"borrowed"};
         std::vector<std::byte> compact;
-        auto                   enc = make_encoder<compact_tagged_codec>(compact);
+        auto                   enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<16>{}, in)));
 
         std::string_view out;
-        auto             dec = make_decoder<compact_tagged_codec>(compact);
+        auto             dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<16>{}, out)));
         CHECK(out == in);
         CHECK(out.data() >= reinterpret_cast<const char *>(compact.data()));
@@ -857,11 +857,11 @@ TEST_CASE("compact tagged borrowed views decode from contiguous payload storage"
         const std::vector<std::byte> in{std::byte{0xAA}, std::byte{0xBB}};
         std::span<const std::byte>   in_view{in};
         std::vector<std::byte>       compact;
-        auto                         enc = make_encoder<compact_tagged_codec>(compact);
+        auto                         enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<17>{}, in_view)));
 
         std::span<const std::byte> out;
-        auto                       dec = make_decoder<compact_tagged_codec>(compact);
+        auto                       dec = make_decoder<custom_codec_1>(compact);
         REQUIRE(dec(as_compact(static_tag<17>{}, out)));
         CHECK(to_hex(out) == "aabb");
         CHECK(out.data() >= compact.data());
@@ -876,12 +876,12 @@ TEST_CASE("compact tagged borrowed view detection handles nested and non-default
     {
         const std::optional<std::string_view> in{"borrowed"};
         std::vector<std::byte>                compact;
-        auto                                  enc = make_encoder<compact_tagged_codec>(compact);
+        auto                                  enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<13>{}, in)));
 
         const std::deque<std::byte>     non_contiguous(compact.begin(), compact.end());
         std::optional<std::string_view> out{};
-        auto                            dec    = make_decoder<compact_tagged_codec>(non_contiguous);
+        auto                            dec    = make_decoder<custom_codec_1>(non_contiguous);
         auto                            result = dec(as_compact(static_tag<13>{}, out));
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::contiguous_view_on_non_contiguous_data);
@@ -890,13 +890,13 @@ TEST_CASE("compact tagged borrowed view detection handles nested and non-default
         std::array<std::byte, 2>               in_bytes{std::byte{0x12}, std::byte{0x34}};
         const compact_non_default_view_payload in{.bytes = std::span<const std::byte, 2>{in_bytes}, .label = "borrowed"};
         std::vector<std::byte>                 compact;
-        auto                                   enc = make_encoder<compact_tagged_codec>(compact);
+        auto                                   enc = make_encoder<custom_codec_1>(compact);
         REQUIRE(enc(as_compact(static_tag<14>{}, in)));
 
         const std::deque<std::byte>      non_contiguous(compact.begin(), compact.end());
         std::array<std::byte, 2>         out_bytes{};
         compact_non_default_view_payload out{.bytes = std::span<const std::byte, 2>{out_bytes}, .label = {}};
-        auto                             dec    = make_decoder<compact_tagged_codec>(non_contiguous);
+        auto                             dec    = make_decoder<custom_codec_1>(non_contiguous);
         auto                             result = dec(as_compact(static_tag<14>{}, out));
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::contiguous_view_on_non_contiguous_data);
@@ -919,12 +919,12 @@ TEST_CASE("compact tagged owning values decode from non-contiguous payload stora
 
     const std::vector<std::uint16_t> values{0x1234, 0xABCD};
     std::vector<std::byte>           compact;
-    auto                             enc = make_encoder<compact_tagged_codec>(compact);
+    auto                             enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<15>{}, values)));
 
     const std::deque<std::byte> non_contiguous(compact.begin(), compact.end());
     std::vector<std::uint16_t>  decoded;
-    auto                        dec = make_decoder<compact_tagged_codec>(non_contiguous);
+    auto                        dec = make_decoder<custom_codec_1>(non_contiguous);
     REQUIRE(dec(as_compact(static_tag<15>{}, decoded)));
     CHECK(decoded == values);
 }
@@ -936,12 +936,12 @@ TEST_CASE("compact tagged non-contiguous containers roundtrip through compact ra
     const std::deque<std::uint16_t> values{0x1234, 0xABCD};
 
     std::vector<std::byte> compact;
-    auto                   enc = make_encoder<compact_tagged_codec>(compact);
+    auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<18>{}, values)));
     CHECK_EQ(to_hex(compact), "d245023412cdab");
 
     std::deque<std::uint16_t> decoded;
-    auto                      dec = make_decoder<compact_tagged_codec>(compact);
+    auto                      dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_compact(static_tag<18>{}, decoded)));
     CHECK(decoded == values);
 }
@@ -964,13 +964,13 @@ TEST_CASE("compact tagged truncated payload reports incomplete") {
 
     const std::vector<std::uint32_t> values{1, 2, 3};
     std::vector<std::byte>           compact;
-    auto                             enc = make_encoder<compact_tagged_codec>(compact);
+    auto                             enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_compact(static_tag<11>{}, values)));
 
     compact.pop_back();
 
     std::vector<std::uint32_t> decoded;
-    auto                       dec    = make_decoder<compact_tagged_codec>(compact);
+    auto                       dec    = make_decoder<custom_codec_1>(compact);
     auto                       result = dec(as_compact(static_tag<11>{}, decoded));
     REQUIRE_FALSE(result);
     CHECK(result.error() == status_code::incomplete);

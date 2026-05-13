@@ -3,7 +3,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
-#include <cbor_tags/extensions/compact_tagged.h>
+#include <cbor_tags/extensions/custom_codec_1.h>
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <concepts>
 #include <cstddef>
@@ -302,7 +302,7 @@ TEST_CASE("lazy tag payload decoder accepts compact tagged payloads") {
     const lazy_compact_payload payload{.id = 7, .label = "ready", .values = {1, -2, 3}};
 
     std::vector<std::byte> buffer;
-    auto                   enc = make_encoder<compact_tagged_codec>(buffer);
+    auto                   enc = make_encoder<custom_codec_1>(buffer);
     REQUIRE(enc(as_compact(static_tag<1001>{}, payload)));
 
     auto view = find_tags<1001>(buffer);
@@ -312,18 +312,18 @@ TEST_CASE("lazy tag payload decoder accepts compact tagged payloads") {
     CHECK_EQ(it->tag(), 1001);
 
     lazy_compact_payload decoded_via_decoder{};
-    auto                 payload_decoder = it->make_decoder<compact_tagged_codec>();
+    auto                 payload_decoder = it->make_decoder<custom_codec_1>();
     REQUIRE(payload_decoder(as_compact_payload(decoded_via_decoder)));
     CHECK(decoded_via_decoder == payload);
 
     lazy_compact_payload decoded_via_match{};
     auto                 payload_ref = as_compact_payload(decoded_via_match);
-    REQUIRE(it->decode<compact_tagged_codec>(payload_ref));
+    REQUIRE(it->decode<custom_codec_1>(payload_ref));
     CHECK(decoded_via_match == payload);
 
     lazy_compact_payload full_envelope_decoded{};
     auto                 full_envelope_ref    = as_compact(static_tag<1001>{}, full_envelope_decoded);
-    auto                 full_envelope_result = it->decode<compact_tagged_codec>(full_envelope_ref);
+    auto                 full_envelope_result = it->decode<custom_codec_1>(full_envelope_ref);
     REQUIRE_FALSE(full_envelope_result);
     CHECK_EQ(full_envelope_result.error(), status_code::no_match_for_tag_on_buffer);
 }

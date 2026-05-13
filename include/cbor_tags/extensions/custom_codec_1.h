@@ -60,7 +60,7 @@ template <typename Tag, typename T>
     requires(!std::is_lvalue_reference_v<T>)
 void as_compact(Tag &&, T &&) = delete;
 
-template <typename Self> struct compact_tagged_codec : cbor::tags::cbor_codec_mixin_base<Self> {
+template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_base<Self> {
     using cbor::tags::cbor_codec_mixin_base<Self>::decode;
     using cbor::tags::cbor_codec_mixin_base<Self>::encode;
 

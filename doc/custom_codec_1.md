@@ -1,6 +1,6 @@
-# Compact Tagged Codec
+# Custom Codec 1
 
-`compact_tagged_codec` is an opt-in codec for cases where both sides already
+`custom_codec_1` is an opt-in codec for cases where both sides already
 share the C++ schema and want a smaller payload than normal self-describing
 CBOR fields.
 
@@ -24,7 +24,7 @@ generic field inspection.
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
-#include <cbor_tags/extensions/compact_tagged.h>
+#include <cbor_tags/extensions/custom_codec_1.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -44,11 +44,11 @@ using namespace cbor::tags;
 using namespace cbor::tags::ext::compact;
 
 Message message{.id = 7, .label = "ready"};
-auto    enc     = make_encoder<compact_tagged_codec>(out);
+auto    enc     = make_encoder<custom_codec_1>(out);
 auto    encoded = enc(as_compact(message));
 
 Message decoded{};
-auto    dec        = make_decoder<compact_tagged_codec>(out);
+auto    dec        = make_decoder<custom_codec_1>(out);
 auto    decoded_ok = dec(as_compact(decoded));
 ```
 
@@ -72,14 +72,14 @@ auto it      = matches.begin();
 
 Message decoded_from_match{};
 auto    payload_ref = as_compact_payload(decoded_from_match);
-auto    ok          = it->decode<compact_tagged_codec>(payload_ref);
+auto    ok          = it->decode<custom_codec_1>(payload_ref);
 ```
 
 The payload decoder object also accepts the wrapper directly:
 
 ```cpp
 Message decoded_from_payload{};
-auto    payload_decoder = it->make_decoder<compact_tagged_codec>();
+auto    payload_decoder = it->make_decoder<custom_codec_1>();
 auto    ok = payload_decoder(as_compact_payload(decoded_from_payload));
 ```
 
@@ -119,24 +119,24 @@ that buffer invalidates the decoded views.
 
 ## Segmented Encoding Direction
 
-The current compact encoder has to know the byte-string payload length before it
-can write the payload header. That is why it measures the compact payload before
-writing it.
+The current `custom_codec_1` encoder has to know the byte-string payload length
+before it can write the payload header. That is why it measures the payload
+before writing it.
 
 `cbor_segments` is the right direction for removing that repeated walk without
-forcing one contiguous temporary buffer. The compact payload can be encoded once
-into replayable segments, then the outer tag and byte-string header can be
+forcing one contiguous temporary buffer. The payload can be encoded once into
+replayable segments, then the outer tag and byte-string header can be
 prepended after the payload size is known.
 
-This is the intended implementation shape; `encode_compact_payload_segments` is
-not currently a public API.
+This is the intended implementation shape;
+`encode_custom_codec_1_payload_segments` is not currently a public API.
 
 ```cpp
 #include <cbor_tags/cbor_segments.h>
 
 template <typename T>
-cbor_segments encode_compact_tagged_segments(std::uint64_t tag, const T& value) {
-    cbor_segments payload = encode_compact_payload_segments(value);
+cbor_segments encode_custom_codec_1_segments(std::uint64_t tag, const T& value) {
+    cbor_segments payload = encode_custom_codec_1_payload_segments(value);
 
     cbor_segments out;
     out.reserve_segments(payload.size() + 2);
@@ -177,24 +177,23 @@ ranges can be borrowed when their source storage outlives the write operation.
 
 ## Known Limitations
 
-- Compact payload encoding measures the payload and then writes it. Do not pass
+- `custom_codec_1` payload encoding measures the payload and then writes it. Do not pass
   one-shot or stateful input ranges to `as_compact(...)`; materialize them into a
   stable container first.
 - Malformed compact payloads can currently declare very large variable-size
   container lengths before the decoder proves the payload is incomplete. Decode
   compact tagged data only from inputs that are already bounded by your
   transport, file-size limit, or application framing.
-- Additional opt-in codecs passed beside `compact_tagged_codec` compose at the
-  outer CBOR level. Compact payload fields use this codec's schema-bound payload
+- Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
+  CBOR level. Payload fields use this codec's schema-bound payload
   rules, not the normal extension dispatch path.
 
 ## Name
 
-`compact_tagged_codec` is deliberately explicit: the public CBOR shape is a tag
-whose content is a byte string containing compact payload bytes.
+`custom_codec_1` is intentionally neutral. The important API contract is the
+wire shape and schema-bound payload rules above, not a promise that integers,
+floats, or other scalar values are minimized.
 
-`plain_codec` describes the payload style, but hides the fact that the wire
-value is still tagged CBOR. `zppbits_codec` would imply wire compatibility with
-zpp_bits, which this format does not promise. If a shorter public spelling is
-needed later, prefer a name that still keeps the compact/tagged distinction
-clear.
+`plain_codec` would hide that the wire value is still tagged CBOR. `zppbits_codec`
+would imply wire compatibility with zpp_bits, which this format does not
+promise.
