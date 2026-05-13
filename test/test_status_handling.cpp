@@ -59,6 +59,38 @@ struct throwing_memory_resource : std::pmr::memory_resource {
     bool  do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
 };
 
+struct fail_after_construction_memory_resource : std::pmr::memory_resource {
+    std::pmr::memory_resource *upstream;
+    bool                       fail_allocations{};
+
+    explicit fail_after_construction_memory_resource(std::pmr::memory_resource *resource = std::pmr::new_delete_resource())
+        : upstream(resource) {}
+
+  private:
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        if (fail_allocations) {
+            throw std::bad_alloc{};
+        }
+        return upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *ptr, std::size_t bytes, std::size_t alignment) override { upstream->deallocate(ptr, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
+
+template <typename T> void check_decode_out_of_memory_after_construction(const std::vector<std::byte> &data) {
+    fail_after_construction_memory_resource resource;
+    T                                       decoded(&resource);
+    resource.fail_allocations = true;
+
+    auto dec    = make_decoder(data);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+}
+
 struct default_memory_resource_guard {
     std::pmr::memory_resource *previous;
 
@@ -210,21 +242,21 @@ TEST_SUITE("Decoding the wrong thing") {
         check_decode_out_of_memory<std::pmr::vector<int>>(uint64_max_array_header());
     }
 
-    TEST_CASE("Decode bounded pmr array append failure returns out_of_memory") {
+    TEST_CASE("Decode pmr array append failure returns out_of_memory") {
         const auto definite_array   = std::vector<std::byte>{std::byte{0x81}, std::byte{0x01}};
         const auto indefinite_array = std::vector<std::byte>{std::byte{0x9F}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}};
 
-        check_decode_out_of_memory<std::pmr::list<int>, 1>(definite_array);
-        check_decode_out_of_memory<std::pmr::vector<int>, 1>(indefinite_array);
+        check_decode_out_of_memory_after_construction<std::pmr::list<int>>(definite_array);
+        check_decode_out_of_memory_after_construction<std::pmr::vector<int>>(indefinite_array);
     }
 
-    TEST_CASE("Decode bounded pmr map insert failure returns out_of_memory") {
+    TEST_CASE("Decode pmr map insert failure returns out_of_memory") {
         const auto definite_map   = std::vector<std::byte>{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
         const auto indefinite_map = std::vector<std::byte>{std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}};
 
-        check_decode_out_of_memory<std::pmr::map<int, int>, 1>(definite_map);
-        check_decode_out_of_memory<std::pmr::map<int, int>, 1>(indefinite_map);
-        check_decode_out_of_memory<std::pmr::map<int, int>, 1>(uint64_max_map_header_with_one_pair());
+        check_decode_out_of_memory_after_construction<std::pmr::map<int, int>>(definite_map);
+        check_decode_out_of_memory_after_construction<std::pmr::map<int, int>>(indefinite_map);
+        check_decode_out_of_memory_after_construction<std::pmr::map<int, int>>(uint64_max_map_header_with_one_pair());
     }
 
     TEST_CASE("Decode bounded pmr strings return out_of_memory") {
