@@ -34,6 +34,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [✅ Requirements](#-requirements)
 - [📦 Installation](#-installation)
 - [💡 CMake Integration](#-cmake-integration)
+- [Limiting Decode Allocation With `std::pmr`](#limiting-decode-allocation-with-stdpmr)
 - [✨ WIP Features](#-wip-features)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
@@ -833,6 +834,71 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 
 > [!NOTE]
 > This library requires C++20 features. However, you can isolate that requirement by wrapping this library and exposing an API compatible with your target C++ version.
+
+## Limiting Decode Allocation With `std::pmr`
+
+When decoding untrusted CBOR into owning containers, an input can declare very
+large array, map, text-string, or byte-string sizes. The decoder does not impose
+schema or application size limits for you. If you need allocation containment,
+decode into allocator-aware types backed by a bounded `std::pmr::memory_resource`.
+
+This assumes the input byte buffer itself is already bounded by your transport,
+framing layer, file-size limit, request-body cap, or another application-level
+guard. A PMR arena limits allocations made while materializing decoded C++
+values; it does not limit how much CBOR input you accept.
+
+```cpp
+#include <array>
+#include <cstddef>
+#include <memory_resource>
+#include <string>
+#include <vector>
+
+#include <cbor_tags/cbor.h>
+
+// Example input: ["a", "b"].
+// In production, populate this from a size-capped input path.
+std::vector<std::byte> input{
+    std::byte{0x82}, std::byte{0x61}, std::byte{'a'}, std::byte{0x61}, std::byte{'b'},
+};
+
+std::array<std::byte, 4096> arena_storage{};
+std::pmr::monotonic_buffer_resource arena(
+    arena_storage.data(),
+    arena_storage.size(),
+    std::pmr::null_memory_resource());
+
+std::pmr::vector<std::pmr::string> values{&arena};
+
+auto dec = cbor::tags::make_decoder(input);
+auto result = dec(values);
+
+if (!result && result.error() == cbor::tags::status_code::out_of_memory) {
+    // The bounded arena was exhausted.
+}
+```
+
+This can limit allocation injection for PMR-aware layouts such as:
+
+```cpp
+std::pmr::vector<std::pmr::string>
+std::pmr::vector<std::pmr::vector<int>>
+std::pmr::map<std::pmr::string, std::pmr::string>
+std::pmr::vector<std::optional<std::pmr::string>>
+```
+
+Important limitations:
+
+- This is allocation containment, not schema validation.
+- Use an external scan or application policy when you need max array, map, or string sizes.
+- Non-PMR members, `std::vector`, `std::string`, and other default-allocator containers are not contained by a PMR arena.
+- `std::variant` alternatives do not currently receive parent PMR allocator context.
+- A bounded arena must use a bounded upstream resource, commonly `std::pmr::null_memory_resource()`.
+
+A future scanning pass is planned for policy checks before materializing values.
+That pass should be the right place to reject messages by declared array, map,
+or string sizes, nesting depth, or other schema/application limits without
+allocating the target object graph first.
 
 ## ✨ WIP Features
 
