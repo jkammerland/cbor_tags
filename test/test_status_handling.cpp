@@ -16,6 +16,7 @@
 #include <list>
 #include <map>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -460,6 +461,62 @@ TEST_SUITE("Decoding the wrong thing") {
         const auto &entry = *decoded.begin();
         CHECK_EQ(std::string_view(entry.first.data(), entry.first.size()), std::string_view(long_key));
         CHECK_EQ(std::string_view(entry.second.data(), entry.second.size()), std::string_view(long_value));
+    }
+
+    TEST_CASE("Decode optional pmr values use parent resource instead of default resource") {
+        const auto long_value = std::string(64, 'o');
+
+        {
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(std::vector<std::optional<std::string>>{long_value, std::nullopt}));
+
+            std::array<std::byte, 4096>                       storage{};
+            std::pmr::monotonic_buffer_resource               resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+            std::pmr::vector<std::optional<std::pmr::string>> decoded(&resource);
+            throwing_memory_resource                          throwing_default;
+
+            {
+                default_memory_resource_guard guard(&throwing_default);
+                auto                          dec    = make_decoder(data);
+                auto                          result = dec(decoded);
+                if (!result) {
+                    CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+                }
+                REQUIRE(result);
+            }
+
+            REQUIRE_EQ(decoded.size(), 2);
+            REQUIRE(decoded[0].has_value());
+            CHECK_EQ(std::string_view(decoded[0]->data(), decoded[0]->size()), std::string_view(long_value));
+            CHECK_FALSE(decoded[1].has_value());
+        }
+
+        {
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(std::map<int, std::optional<std::string>>{{1, long_value}, {2, std::nullopt}}));
+
+            std::array<std::byte, 4096>                         storage{};
+            std::pmr::monotonic_buffer_resource                 resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+            std::pmr::map<int, std::optional<std::pmr::string>> decoded(&resource);
+            throwing_memory_resource                            throwing_default;
+
+            {
+                default_memory_resource_guard guard(&throwing_default);
+                auto                          dec    = make_decoder(data);
+                auto                          result = dec(decoded);
+                if (!result) {
+                    CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+                }
+                REQUIRE(result);
+            }
+
+            REQUIRE_EQ(decoded.size(), 2);
+            REQUIRE(decoded.at(1).has_value());
+            CHECK_EQ(std::string_view(decoded.at(1)->data(), decoded.at(1)->size()), std::string_view(long_value));
+            CHECK_FALSE(decoded.at(2).has_value());
+        }
     }
 
     TEST_CASE("Decode wrong major type in variant") {

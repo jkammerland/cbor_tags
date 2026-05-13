@@ -380,8 +380,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 using key_type    = typename T::key_type;
                 using mapped_type = typename T::mapped_type;
                 using value_type  = std::pair<key_type, mapped_type>;
-                if constexpr (detail::uses_container_allocator_for<key_type, T>() ||
-                              detail::uses_container_allocator_for<mapped_type, T>()) {
+                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
+                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
                     auto key          = detail::make_decode_value_for<key_type>(value);
                     auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
                     auto status       = decode(key);
@@ -715,8 +715,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::success;
         } else {
             using value_type = std::remove_cvref_t<T>;
-            value_type t;
-            auto       result = decode(t, major, additionalInfo);
+            auto t           = detail::make_decode_value_for_optional<value_type>(value);
+            auto result      = decode(t, major, additionalInfo);
             if (result == status_code::success) {
                 value = std::move(t);
             }
@@ -1182,8 +1182,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 using key_type    = typename T::key_type;
                 using mapped_type = typename T::mapped_type;
                 using value_type  = std::pair<key_type, mapped_type>;
-                if constexpr (detail::uses_container_allocator_for<key_type, T>() ||
-                              detail::uses_container_allocator_for<mapped_type, T>()) {
+                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
+                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
                     auto key          = detail::make_decode_value_for<key_type>(value);
                     auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
                     auto status       = decode(key, major, additionalInfo);

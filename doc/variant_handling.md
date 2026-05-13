@@ -1,4 +1,6 @@
-Below is "psuedo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows of you can optimize away unused codepaths with "if constexpr", in this case the codepaths are constrained by the variant type. 
+Below is "psuedo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows of you can optimize away unused codepaths with "if constexpr", in this case the codepaths are constrained by the variant type.
+
+Allocator note: `std::variant` does not carry a parent container allocator. Decoding `std::pmr` alternatives inside a variant nested in a PMR container is a known allocator-containment gap until variant alternative construction gets an explicit parent allocator context.
 
 ```cpp
 
