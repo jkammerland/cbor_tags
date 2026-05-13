@@ -36,6 +36,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -146,7 +147,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return unexpected<decltype(collect_status.result)>(collect_status.result);
             }
             return expected_type{};
-        } catch (const std::bad_alloc &) {
+        } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch (const parse_incomplete_exception &) {
             return unexpected<status_code>(status_code::incomplete);
@@ -290,8 +291,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            // Standard case - construct from iterators
-            t = T(bstring.begin(), bstring.end());
+            if constexpr (requires { t.clear(); }) {
+                t.clear();
+            }
+            if constexpr (HasReserve<T>) {
+                if (std::cmp_greater(bstring_size, std::numeric_limits<typename T::size_type>::max())) {
+                    throw std::length_error("CBOR byte string length exceeds target container size_type");
+                }
+                t.reserve(static_cast<typename T::size_type>(bstring_size));
+            }
+            detail::appender<T> appender_;
+            if constexpr (IsContiguous<decltype(bstring)>) {
+                appender_(t, bstring);
+            } else {
+                for (auto byte_value : bstring) {
+                    appender_(t, static_cast<typename T::value_type>(byte_value));
+                }
+            }
         }
 
         return status_code::success;
@@ -354,24 +370,42 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
         if constexpr (HasReserve<T>) {
-            value.reserve(length);
+            if (std::cmp_greater(length, std::numeric_limits<typename T::size_type>::max())) {
+                throw std::length_error("CBOR array length exceeds target container size_type");
+            }
+            value.reserve(static_cast<typename T::size_type>(length));
         }
         detail::appender<T> appender_;
         for (auto i = length; i > 0; --i) {
             if constexpr (IsMap<T>) {
-                using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
-                value_type result;
-                auto &[key, mapped_value] = result;
-                auto status               = decode(key);
-                status                    = status == status_code::success ? decode(mapped_value) : status;
-                if (status != status_code::success) {
-                    return status;
+                using key_type    = typename T::key_type;
+                using mapped_type = typename T::mapped_type;
+                using value_type  = std::pair<key_type, mapped_type>;
+                if constexpr (detail::uses_container_allocator_for<key_type, T>() ||
+                              detail::uses_container_allocator_for<mapped_type, T>()) {
+                    auto key          = detail::make_decode_value_for<key_type>(value);
+                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
+                    auto status       = decode(key);
+                    status            = status == status_code::success ? decode(mapped_value) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    value_type result{std::move(key), std::move(mapped_value)};
+                    appender_(value, std::move(result));
+                } else {
+                    value_type result;
+                    auto &[key, mapped_value] = result;
+                    auto status               = decode(key);
+                    status                    = status == status_code::success ? decode(mapped_value) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    appender_(value, std::move(result));
                 }
-                appender_(value, std::move(result));
             } else {
                 using value_type = typename T::value_type;
-                value_type result;
-                auto       status = decode(result);
+                auto result      = detail::make_decode_value_for<value_type>(value);
+                auto status      = decode(result);
                 if (status != status_code::success) {
                     return status;
                 }
@@ -1115,8 +1149,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 }
 
                 using value_type = typename T::value_type;
-                value_type result{};
-                auto       status = decode(result, major, additionalInfo);
+                auto result      = detail::make_decode_value_for<value_type>(value);
+                auto status      = decode(result, major, additionalInfo);
                 if (status != status_code::success) {
                     return status;
                 }
@@ -1146,14 +1180,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     return status_code::success;
                 }
 
-                using value_type = std::pair<typename T::key_type, typename T::mapped_type>;
-                value_type result{};
-                auto       status = decode(result.first, major, additionalInfo);
-                status            = (status == status_code::success) ? decode(result.second) : status;
-                if (status != status_code::success) {
-                    return status;
+                using key_type    = typename T::key_type;
+                using mapped_type = typename T::mapped_type;
+                using value_type  = std::pair<key_type, mapped_type>;
+                if constexpr (detail::uses_container_allocator_for<key_type, T>() ||
+                              detail::uses_container_allocator_for<mapped_type, T>()) {
+                    auto key          = detail::make_decode_value_for<key_type>(value);
+                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
+                    auto status       = decode(key, major, additionalInfo);
+                    status            = (status == status_code::success) ? decode(mapped_value) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    value_type result{std::move(key), std::move(mapped_value)};
+                    appender_(value, std::move(result));
+                } else {
+                    value_type result{};
+                    auto       status = decode(result.first, major, additionalInfo);
+                    status            = (status == status_code::success) ? decode(result.second) : status;
+                    if (status != status_code::success) {
+                        return status;
+                    }
+                    appender_(value, std::move(result));
                 }
-                appender_(value, std::move(result));
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {

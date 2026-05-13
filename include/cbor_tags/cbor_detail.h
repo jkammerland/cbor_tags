@@ -10,6 +10,7 @@
 #include <cstring>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -28,6 +29,23 @@ concept AppendableContainer = requires {
 template <typename T, bool IsArray = IsFixedArray<T>>
     requires AppendableContainer<T>
 struct appender;
+
+template <typename Value, typename Container> constexpr bool uses_container_allocator_for() {
+    if constexpr (requires(Container &container) { container.get_allocator(); }) {
+        using allocator_type = decltype(std::declval<Container &>().get_allocator());
+        return std::uses_allocator_v<Value, allocator_type>;
+    } else {
+        return false;
+    }
+}
+
+template <typename Value, typename Container> constexpr Value make_decode_value_for(Container &container) {
+    if constexpr (uses_container_allocator_for<Value, Container>()) {
+        return std::make_from_tuple<Value>(std::uses_allocator_construction_args<Value>(container.get_allocator()));
+    } else {
+        return Value{};
+    }
+}
 
 template <typename Container, typename Pair>
 concept AssignableInsertOrAssignMap = IsMap<Container> && IsPairLike<Pair> && requires(Container &container, Pair &&value) {

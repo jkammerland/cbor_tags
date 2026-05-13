@@ -6,18 +6,67 @@
 #include "magic_enum/magic_enum.hpp"
 #include "test_util.h"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/base.h>
+#include <list>
 #include <map>
 #include <memory_resource>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 using namespace cbor::tags;
 using namespace cbor::tags::literals;
 using namespace std::string_view_literals;
+
+namespace {
+
+std::vector<std::byte> uint64_max_array_header() {
+    return {std::byte{0x9B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
+            std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+}
+
+std::vector<std::byte> uint64_max_map_header_with_one_pair() {
+    auto buffer = std::vector<std::byte>{std::byte{0xBB}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
+                                         std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+    buffer.push_back(std::byte{0x01});
+    buffer.push_back(std::byte{0x02});
+    return buffer;
+}
+
+template <typename T, std::size_t StorageSize = 16> void check_decode_out_of_memory(const std::vector<std::byte> &data) {
+    std::array<std::byte, StorageSize>  storage{};
+    std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+    T                                   decoded(&resource);
+
+    auto dec    = make_decoder(data);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+}
+
+struct throwing_memory_resource : std::pmr::memory_resource {
+  private:
+    void *do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc{}; }
+    void  do_deallocate(void *, std::size_t, std::size_t) override {}
+    bool  do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
+
+struct default_memory_resource_guard {
+    std::pmr::memory_resource *previous;
+
+    explicit default_memory_resource_guard(std::pmr::memory_resource *resource) : previous(std::pmr::set_default_resource(resource)) {}
+    ~default_memory_resource_guard() { std::pmr::set_default_resource(previous); }
+};
+
+} // namespace
 
 TEST_CASE("status messages cover every declared status code") {
     constexpr status_code statuses[] = {
@@ -147,6 +196,219 @@ TEST_SUITE("Decoding the wrong thing") {
         auto result = dec(our_decoded_array);
         REQUIRE(!result);
         CHECK_EQ(result.error(), status_code::out_of_memory);
+    }
+
+    TEST_CASE("Decode bounded pmr array reserve failure returns out_of_memory") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8}));
+
+        check_decode_out_of_memory<std::pmr::vector<int>>(data);
+    }
+
+    TEST_CASE("Decode bounded pmr array length_error returns out_of_memory") {
+        check_decode_out_of_memory<std::pmr::vector<int>>(uint64_max_array_header());
+    }
+
+    TEST_CASE("Decode bounded pmr array append failure returns out_of_memory") {
+        const auto definite_array   = std::vector<std::byte>{std::byte{0x81}, std::byte{0x01}};
+        const auto indefinite_array = std::vector<std::byte>{std::byte{0x9F}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}};
+
+        check_decode_out_of_memory<std::pmr::list<int>, 1>(definite_array);
+        check_decode_out_of_memory<std::pmr::vector<int>, 1>(indefinite_array);
+    }
+
+    TEST_CASE("Decode bounded pmr map insert failure returns out_of_memory") {
+        const auto definite_map   = std::vector<std::byte>{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
+        const auto indefinite_map = std::vector<std::byte>{std::byte{0xBF}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}};
+
+        check_decode_out_of_memory<std::pmr::map<int, int>, 1>(definite_map);
+        check_decode_out_of_memory<std::pmr::map<int, int>, 1>(indefinite_map);
+        check_decode_out_of_memory<std::pmr::map<int, int>, 1>(uint64_max_map_header_with_one_pair());
+    }
+
+    TEST_CASE("Decode bounded pmr strings return out_of_memory") {
+        {
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(std::string(64, 'x')));
+
+            check_decode_out_of_memory<std::pmr::string>(data);
+        }
+
+        {
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(std::vector<std::byte>(64, std::byte{0xAB})));
+
+            check_decode_out_of_memory<std::pmr::vector<std::byte>>(data);
+        }
+    }
+
+    TEST_CASE("Decode pmr strings use target resource instead of default resource") {
+        {
+            const auto             source = std::string(64, 'x');
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(source));
+
+            std::array<std::byte, 4096>         storage{};
+            std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+            std::pmr::string                    decoded(&resource);
+            throwing_memory_resource            throwing_default;
+
+            {
+                default_memory_resource_guard guard(&throwing_default);
+                auto                          dec    = make_decoder(data);
+                auto                          result = dec(decoded);
+                if (!result) {
+                    CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+                }
+                REQUIRE(result);
+            }
+
+            CHECK_EQ(std::string_view(decoded.data(), decoded.size()), std::string_view(source));
+        }
+
+        {
+            const auto             source = std::vector<std::byte>(64, std::byte{0xAB});
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(source));
+
+            std::array<std::byte, 4096>         storage{};
+            std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+            std::pmr::vector<std::byte>         decoded(&resource);
+            throwing_memory_resource            throwing_default;
+
+            {
+                default_memory_resource_guard guard(&throwing_default);
+                auto                          dec    = make_decoder(data);
+                auto                          result = dec(decoded);
+                if (!result) {
+                    CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+                }
+                REQUIRE(result);
+            }
+
+            CHECK_EQ(decoded.size(), source.size());
+            CHECK(std::ranges::equal(decoded, source));
+        }
+    }
+
+    TEST_CASE("Decode nested pmr arrays use parent resource instead of default resource") {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(std::vector<std::vector<int>>{{1, 2, 3}, {4, 5}}));
+
+        std::array<std::byte, 4096>             storage{};
+        std::pmr::monotonic_buffer_resource     resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+        std::pmr::vector<std::pmr::vector<int>> decoded(&resource);
+        throwing_memory_resource                throwing_default;
+
+        {
+            default_memory_resource_guard guard(&throwing_default);
+            auto                          dec    = make_decoder(data);
+            auto                          result = dec(decoded);
+            if (!result) {
+                CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+            }
+            REQUIRE(result);
+        }
+
+        REQUIRE_EQ(decoded.size(), 2);
+        REQUIRE_EQ(decoded[0].size(), 3);
+        CHECK_EQ(decoded[0][0], 1);
+        CHECK_EQ(decoded[0][1], 2);
+        CHECK_EQ(decoded[0][2], 3);
+        REQUIRE_EQ(decoded[1].size(), 2);
+        CHECK_EQ(decoded[1][0], 4);
+        CHECK_EQ(decoded[1][1], 5);
+    }
+
+    TEST_CASE("Decode nested pmr maps and mapped arrays use parent resource instead of default resource") {
+        {
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(std::vector<std::map<int, int>>{{{1, 2}}}));
+
+            std::array<std::byte, 4096>               storage{};
+            std::pmr::monotonic_buffer_resource       resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+            std::pmr::vector<std::pmr::map<int, int>> decoded(&resource);
+            throwing_memory_resource                  throwing_default;
+
+            {
+                default_memory_resource_guard guard(&throwing_default);
+                auto                          dec    = make_decoder(data);
+                auto                          result = dec(decoded);
+                if (!result) {
+                    CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+                }
+                REQUIRE(result);
+            }
+
+            REQUIRE_EQ(decoded.size(), 1);
+            CHECK_EQ(decoded[0].size(), 1);
+            CHECK_EQ(decoded[0].begin()->first, 1);
+            CHECK_EQ(decoded[0].begin()->second, 2);
+        }
+
+        {
+            std::vector<std::byte> data;
+            auto                   enc = make_encoder(data);
+            REQUIRE(enc(std::map<int, std::vector<int>>{{1, {2, 3, 4}}}));
+
+            std::array<std::byte, 4096>               storage{};
+            std::pmr::monotonic_buffer_resource       resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+            std::pmr::map<int, std::pmr::vector<int>> decoded(&resource);
+            throwing_memory_resource                  throwing_default;
+
+            {
+                default_memory_resource_guard guard(&throwing_default);
+                auto                          dec    = make_decoder(data);
+                auto                          result = dec(decoded);
+                if (!result) {
+                    CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+                }
+                REQUIRE(result);
+            }
+
+            REQUIRE_EQ(decoded.size(), 1);
+            CHECK_EQ(decoded.begin()->first, 1);
+            REQUIRE_EQ(decoded.begin()->second.size(), 3);
+            CHECK_EQ(decoded.begin()->second[0], 2);
+            CHECK_EQ(decoded.begin()->second[1], 3);
+            CHECK_EQ(decoded.begin()->second[2], 4);
+        }
+    }
+
+    TEST_CASE("Decode pmr map string keys and values use parent resource instead of default resource") {
+        const auto long_key   = std::string(64, 'k');
+        const auto long_value = std::string(64, 'v');
+
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(std::map<std::string, std::string>{{long_key, long_value}}));
+
+        std::array<std::byte, 4096>                       storage{};
+        std::pmr::monotonic_buffer_resource               resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+        std::pmr::map<std::pmr::string, std::pmr::string> decoded(&resource);
+        throwing_memory_resource                          throwing_default;
+
+        {
+            default_memory_resource_guard guard(&throwing_default);
+            auto                          dec    = make_decoder(data);
+            auto                          result = dec(decoded);
+            if (!result) {
+                CBOR_TAGS_TEST_LOG("Error: {}\n", status_message(result.error()));
+            }
+            REQUIRE(result);
+        }
+
+        REQUIRE_EQ(decoded.size(), 1);
+        const auto &entry = *decoded.begin();
+        CHECK_EQ(std::string_view(entry.first.data(), entry.first.size()), std::string_view(long_key));
+        CHECK_EQ(std::string_view(entry.second.data(), entry.second.size()), std::string_view(long_value));
     }
 
     TEST_CASE("Decode wrong major type in variant") {
