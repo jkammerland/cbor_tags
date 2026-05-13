@@ -4,7 +4,7 @@
   "description": "RFC 8949 implementation with automatic reflection",
   "homepage": "https://github.com/jkammerland/cbor_tags",
   "license": "MIT",
-  "builtin-baseline": "7476f0d4e77d3333fbb249657df8251c28c4faae",
+  "builtin-baseline": "8f7641a3f5bb68d1d1b9f367039dcb08ac77671d",
   "dependencies": [
     {
       "name": "tl-expected",
@@ -15,6 +15,18 @@
     "boost-pfr-names": {
       "description": "Install Boost.PFR dependencies for the optional C++20 named-map reflection backend.",
       "dependencies": [
+        {
+          "name": "boost-cmake",
+          "version>=": "1.84.0"
+        },
+        {
+          "name": "boost-config",
+          "version>=": "1.84.0"
+        },
+        {
+          "name": "boost-headers",
+          "version>=": "1.84.0"
+        },
         {
           "name": "boost-pfr",
           "version>=": "1.84.0"
