@@ -1,8 +1,8 @@
 # Custom Codec 1
 
 `custom_codec_1` is an opt-in codec for cases where both sides already
-share the C++ schema and want a smaller payload than normal self-describing
-CBOR fields.
+share the C++ schema and do not need normal self-describing CBOR fields inside
+the tagged payload.
 
 The outer value is still CBOR:
 
@@ -10,13 +10,13 @@ The outer value is still CBOR:
 #6.<tag>(bstr)
 ```
 
-The byte-string payload is a compact schema-bound format. It is not standalone
-CBOR, and a generic CBOR decoder can only see the tag and opaque definite-length
-byte string.
+The byte-string payload is a schema-bound format. It is not standalone CBOR, and
+a generic CBOR decoder can only see the tag and opaque definite-length byte
+string.
 
 Use the normal CBOR codec when data should remain self-describing. Use this
-codec when the tag identifies the schema and compactness matters more than
-generic field inspection.
+codec when the tag identifies the schema and generic field inspection is not
+required.
 
 ## Usage
 
@@ -41,50 +41,50 @@ struct Message {
 std::vector<std::byte> out;
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::compact;
+namespace cc1 = cbor::tags::ext::custom_codec_1;
 
 Message message{.id = 7, .label = "ready"};
-auto    enc     = make_encoder<custom_codec_1>(out);
-auto    encoded = enc(as_compact(message));
+auto    enc     = make_encoder<cc1::custom_codec_1>(out);
+auto    encoded = enc(cc1::as_custom_codec_1(message));
 
 Message decoded{};
-auto    dec        = make_decoder<custom_codec_1>(out);
-auto    decoded_ok = dec(as_compact(decoded));
+auto    dec        = make_decoder<cc1::custom_codec_1>(out);
+auto    decoded_ok = dec(cc1::as_custom_codec_1(decoded));
 ```
 
-`as_compact(value)` requires the type to provide a CBOR tag, using the same tag
+`as_custom_codec_1(value)` requires the type to provide a CBOR tag, using the same tag
 mechanisms as normal tagged values. If the tag should be supplied at the call
 site, pass it explicitly:
 
 ```cpp
-auto result = enc(as_compact(static_tag<1001>{}, message));
+auto result = enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
 ```
 
 ## Lazy Tag Payloads
 
 `find_tags` matches the outer CBOR tag and exposes only the tag payload. For
-compact tagged values, that payload is the definite-length byte string, not the
-whole `#6.<tag>(bstr)` envelope. Decode it with `as_compact_payload`.
+`custom_codec_1` values, that payload is the definite-length byte string, not the
+whole `#6.<tag>(bstr)` envelope. Decode it with `as_custom_codec_1_payload`.
 
 ```cpp
 auto matches = find_tags<1001>(out);
 auto it      = matches.begin();
 
 Message decoded_from_match{};
-auto    payload_ref = as_compact_payload(decoded_from_match);
-auto    ok          = it->decode<custom_codec_1>(payload_ref);
+auto    payload_ref = cc1::as_custom_codec_1_payload(decoded_from_match);
+auto    ok          = it->decode<cc1::custom_codec_1>(payload_ref);
 ```
 
 The payload decoder object also accepts the wrapper directly:
 
 ```cpp
 Message decoded_from_payload{};
-auto    payload_decoder = it->make_decoder<custom_codec_1>();
-auto    ok = payload_decoder(as_compact_payload(decoded_from_payload));
+auto    payload_decoder = it->make_decoder<cc1::custom_codec_1>();
+auto    ok = payload_decoder(cc1::as_custom_codec_1_payload(decoded_from_payload));
 ```
 
-Use `as_compact(...)` for full buffers that still contain the outer tag. Use
-`as_compact_payload(...)` only when the decoder starts at the tag payload bstr,
+Use `as_custom_codec_1(...)` for full buffers that still contain the outer tag. Use
+`as_custom_codec_1_payload(...)` only when the decoder starts at the tag payload bstr,
 as lazy tag matches do.
 
 ## Payload Rules
@@ -92,8 +92,10 @@ as lazy tag matches do.
 - Integral values, enums, and floats are encoded in fixed-width little-endian
   form.
 - `bool` uses one byte: `0` or `1`.
-- Text strings, byte strings, variable-size ranges, and maps use a compact
-  varuint length followed by their elements or bytes.
+- Text strings, byte strings, variable-size ranges, and maps use a varuint
+  length followed by their elements or bytes.
+- Text strings include `std::basic_string` and `std::basic_string_view` with
+  char-like value types, including `std::pmr::string`.
 - `std::array` stores its elements directly; its length is part of the C++
   schema, not the payload.
 - `std::optional<T>` uses a one-byte presence marker followed by `T` when set.
@@ -103,7 +105,7 @@ as lazy tag matches do.
   no field names or CBOR array wrapper inside the payload.
 
 This means the decoded C++ type must match the schema used for encoding. The
-codec validates the outer tag, the byte-string wrapper, malformed compact
+codec validates the outer tag, the byte-string wrapper, malformed
 payloads, trailing payload bytes, and incomplete input, but it does not carry
 field names or generic type descriptors inside the payload.
 
@@ -178,11 +180,11 @@ ranges can be borrowed when their source storage outlives the write operation.
 ## Known Limitations
 
 - `custom_codec_1` payload encoding measures the payload and then writes it. Do not pass
-  one-shot or stateful input ranges to `as_compact(...)`; materialize them into a
+  one-shot or stateful input ranges to `as_custom_codec_1(...)`; materialize them into a
   stable container first.
-- Malformed compact payloads can currently declare very large variable-size
+- Malformed payloads can currently declare very large variable-size
   container lengths before the decoder proves the payload is incomplete. Decode
-  compact tagged data only from inputs that are already bounded by your
+  `custom_codec_1` data only from inputs that are already bounded by your
   transport, file-size limit, or application framing.
 - Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
   CBOR level. Payload fields use this codec's schema-bound payload

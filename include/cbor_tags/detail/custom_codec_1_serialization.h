@@ -26,19 +26,23 @@
 #include <variant>
 #include <vector>
 
-namespace cbor::tags::detail::compact {
+namespace cbor::tags::detail::custom_codec_1 {
 
 template <typename T> struct is_std_array : std::false_type {};
 template <typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std::true_type {};
 template <typename T> inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
 
 template <typename T> struct is_basic_string_view : std::false_type {};
-template <typename Char, typename Traits> struct is_basic_string_view<std::basic_string_view<Char, Traits>> : std::true_type {};
+template <typename Char, typename Traits>
+struct is_basic_string_view<std::basic_string_view<Char, Traits>> : std::bool_constant<IsTextChar<Char>> {};
 template <typename T> inline constexpr bool is_basic_string_view_v = is_basic_string_view<std::remove_cvref_t<T>>::value;
 
-template <typename T>
-inline constexpr bool is_text_string_v =
-    std::is_same_v<std::remove_cvref_t<T>, std::string> || std::is_same_v<std::remove_cvref_t<T>, std::string_view>;
+template <typename T> struct is_basic_string : std::false_type {};
+template <typename Char, typename Traits, typename Allocator>
+struct is_basic_string<std::basic_string<Char, Traits, Allocator>> : std::bool_constant<IsTextChar<Char>> {};
+template <typename T> inline constexpr bool is_basic_string_v = is_basic_string<std::remove_cvref_t<T>>::value;
+
+template <typename T> inline constexpr bool is_text_string_v = is_basic_string_v<T> || is_basic_string_view_v<T>;
 
 template <typename T> struct dependent_false : std::false_type {};
 
@@ -179,7 +183,7 @@ template <typename T> constexpr std::uint64_t tag_to_uint64(const T &tag) {
     } else if constexpr (std::is_integral_v<type> && std::is_unsigned_v<type>) {
         return static_cast<std::uint64_t>(tag);
     } else {
-        static_assert(dependent_false<T>::value, "compact tagged serialization requires an unsigned CBOR tag");
+        static_assert(dependent_false<T>::value, "custom_codec_1 requires an unsigned CBOR tag");
     }
 }
 
@@ -196,7 +200,22 @@ template <typename T> constexpr std::uint64_t tag_for(const T &value) {
     } else if constexpr (HasTagFreeFunction<type>) {
         return tag_to_uint64(cbor_tag(value));
     } else {
-        static_assert(dependent_false<T>::value, "as_compact(value) requires a CBOR tag; use as_compact(tag, value) for explicit tags");
+        static_assert(dependent_false<T>::value,
+                      "as_custom_codec_1(value) requires a CBOR tag; use as_custom_codec_1(tag, value) for explicit tags");
+    }
+}
+
+template <typename T> constexpr std::remove_cvref_t<T> make_decode_value_for_existing(T &value) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (IsOptional<type>) {
+        if (value.has_value()) {
+            return type{std::in_place, cbor::tags::detail::make_decode_value_for_optional<typename type::value_type>(value)};
+        }
+        return type{};
+    } else if constexpr (requires { value.get_allocator(); }) {
+        return std::make_from_tuple<type>(std::uses_allocator_construction_args<type>(value.get_allocator()));
+    } else {
+        return type{};
     }
 }
 
@@ -270,7 +289,7 @@ template <typename Writer, typename T> constexpr void encode_scalar(Writer &writ
         writer.write_byte(static_cast<std::byte>(value.value));
     } else if constexpr (std::is_same_v<type, std::nullptr_t>) {
     } else {
-        static_assert(dependent_false<T>::value, "unsupported compact scalar type");
+        static_assert(dependent_false<T>::value, "unsupported custom_codec_1 scalar type");
     }
 }
 
@@ -353,7 +372,7 @@ template <typename T> constexpr status_code decode_scalar(span_reader &reader, T
         value = nullptr;
         return status_code::success;
     } else {
-        static_assert(dependent_false<T>::value, "unsupported compact scalar type");
+        static_assert(dependent_false<T>::value, "unsupported custom_codec_1 scalar type");
     }
 }
 
@@ -398,12 +417,15 @@ template <typename T> constexpr status_code decode_byte_string(span_reader &read
 }
 
 template <typename Writer, typename T> constexpr void encode_text_string(Writer &writer, const T &value) {
-    const std::string_view text{value.data(), value.size()};
+    const auto text = std::string_view(reinterpret_cast<const char *>(value.data()), value.size());
     write_varuint(writer, static_cast<std::uint64_t>(text.size()));
     writer.write_bytes(text);
 }
 
 template <typename T> constexpr status_code decode_text_string(span_reader &reader, T &value) {
+    using type      = std::remove_cvref_t<T>;
+    using char_type = typename type::value_type;
+
     std::uint64_t length{};
     auto          status = read_varuint(reader, length);
     if (status != status_code::success) {
@@ -417,11 +439,11 @@ template <typename T> constexpr status_code decode_text_string(span_reader &read
     if (status != status_code::success) {
         return status;
     }
-    const auto text = std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-    if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::string_view>) {
-        value = text;
+    const auto text = reinterpret_cast<const char_type *>(bytes.data());
+    if constexpr (is_basic_string_view_v<type>) {
+        value = type{text, bytes.size()};
     } else {
-        value.assign(text.data(), text.size());
+        value.assign(text, bytes.size());
     }
     return status_code::success;
 }
@@ -541,7 +563,9 @@ template <typename T> constexpr status_code decode_map(span_reader &reader, T &v
     }
     detail::appender<T> appender;
     for (std::uint64_t i = 0; i < length; ++i) {
-        std::pair<typename T::key_type, typename T::mapped_type> entry{};
+        std::pair<typename T::key_type, typename T::mapped_type> entry{
+            cbor::tags::detail::make_decode_value_for<typename T::key_type>(value),
+            cbor::tags::detail::make_decode_value_for<typename T::mapped_type>(value)};
         status = decode_value(reader, entry.first);
         if (status != status_code::success) {
             return status;
@@ -600,8 +624,8 @@ template <typename T> constexpr status_code decode_range(span_reader &reader, T 
         }
         detail::appender<T> appender;
         for (std::uint64_t i = 0; i < length; ++i) {
-            typename T::value_type element{};
-            status = decode_value(reader, element);
+            auto element = cbor::tags::detail::make_decode_value_for<typename T::value_type>(value);
+            status       = decode_value(reader, element);
             if (status != status_code::success) {
                 return status;
             }
@@ -659,7 +683,7 @@ template <typename Writer, typename T> constexpr void encode_value(Writer &write
     } else if constexpr (std::is_aggregate_v<type>) {
         encode_aggregate(writer, value);
     } else {
-        static_assert(dependent_false<T>::value, "unsupported compact serialization type");
+        static_assert(dependent_false<T>::value, "unsupported custom_codec_1 type");
     }
 }
 
@@ -689,7 +713,7 @@ template <typename T> constexpr status_code decode_value(span_reader &reader, T 
     } else if constexpr (std::is_aggregate_v<type>) {
         return decode_aggregate(reader, value);
     } else {
-        static_assert(dependent_false<T>::value, "unsupported compact deserialization type");
+        static_assert(dependent_false<T>::value, "unsupported custom_codec_1 type");
     }
 }
 
@@ -766,8 +790,8 @@ template <typename T> inline constexpr bool has_borrowed_decode_refs_v = borrowe
 template <typename T> [[nodiscard]] constexpr status_code decode_payload(std::span<const std::byte> payload, T &value) {
     span_reader reader{payload};
     if constexpr (std::default_initializable<T> && std::assignable_from<T &, T>) {
-        T    decoded{};
-        auto status = decode_value(reader, decoded);
+        auto decoded = make_decode_value_for_existing(value);
+        auto status  = decode_value(reader, decoded);
         if (status != status_code::success) {
             return status;
         }
@@ -797,4 +821,4 @@ template <typename T> [[nodiscard]] constexpr status_code decode_payload(std::sp
     }
 }
 
-} // namespace cbor::tags::detail::compact
+} // namespace cbor::tags::detail::custom_codec_1
