@@ -614,14 +614,11 @@ TEST_CASE("named-map codec roundtrips and accepts unordered maps") {
     CHECK_EQ(indefinite_decoded.employer, "AcmeCo");
 }
 
-TEST_CASE("named-map codec accepts contiguous indefinite text-string keys") {
+TEST_CASE("named-map codec rejects chunked indefinite text-string keys") {
     auto            input = to_bytes("a37f63616765ff182a7f646e616d65ff634164617f68656d706c6f796572ff6641636d65436f");
     CDDLNamedPerson decoded{};
     auto            dec = make_decoder(input);
-    REQUIRE(dec(as_named_map{decoded}));
-    CHECK_EQ(decoded.age, 42);
-    CHECK_EQ(decoded.name, "Ada");
-    CHECK_EQ(decoded.employer, "AcmeCo");
+    CHECK_FALSE(dec(as_named_map{decoded}));
 }
 
 TEST_CASE("named-map codec rejects flattened fixed-field name collisions") {
