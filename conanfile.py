@@ -1,5 +1,7 @@
 from conan import ConanFile
+from conan.tools.build import check_min_cppstd
 from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
+
 
 class CborTagsConan(ConanFile):
     name = "cbor-tags"
@@ -9,8 +11,8 @@ class CborTagsConan(ConanFile):
     homepage = "https://github.com/jkammerland/cbor_tags"
     topics = ("cbor", "serialization", "reflection", "tags")
     settings = "os", "compiler", "build_type", "arch"
-    options = {"boost_pfr_names": [True, False], "magic_enum_names": [True, False]}
-    default_options = {"boost_pfr_names": False, "magic_enum_names": False}
+    options = {"boost_pfr_names": [True, False], "magic_enum_names": [True, False], "std_expected": [True, False]}
+    default_options = {"boost_pfr_names": False, "magic_enum_names": False, "std_expected": False}
     generators = "CMakeDeps", "CMakeToolchain"
     exports_sources = (
         "CMakeLists.txt",
@@ -22,7 +24,8 @@ class CborTagsConan(ConanFile):
     )
 
     def requirements(self):
-        self.requires("tl-expected/1.1.0")
+        if not self.options.std_expected:
+            self.requires("tl-expected/1.1.0")
         if self.options.boost_pfr_names:
             self.requires("boost/[>=1.84.0 <2]")
         if self.options.magic_enum_names:
@@ -31,6 +34,10 @@ class CborTagsConan(ConanFile):
     def configure(self):
         # Header-only library
         self.package_type = "header-library"
+
+    def validate(self):
+        if self.options.std_expected:
+            check_min_cppstd(self, "23")
 
     def layout(self):
         # Use the default layout
@@ -42,7 +49,8 @@ class CborTagsConan(ConanFile):
         tc = CMakeToolchain(self)
         tc.variables["CBOR_TAGS_BUILD_TESTS"] = "OFF"
         tc.variables["CBOR_TAGS_INSTALL"] = "ON"
-        tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "ON"
+        tc.variables["CBOR_TAGS_USE_STD_EXPECTED"] = "ON" if self.options.std_expected else "OFF"
+        tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "OFF" if self.options.std_expected else "ON"
         tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.variables["CBOR_TAGS_USE_MAGIC_ENUM_NAMES"] = "ON" if self.options.magic_enum_names else "OFF"
         tc.generate()
@@ -68,6 +76,8 @@ class CborTagsConan(ConanFile):
             self.cpp_info.defines.append("CBOR_TAGS_USE_BOOST_PFR_NAMES=1")
         if self.options.magic_enum_names:
             self.cpp_info.defines.append("CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1")
+        if self.options.std_expected:
+            self.cpp_info.defines.append("CBOR_TAGS_USE_STD_EXPECTED=1")
 
         # Header-only library
         self.cpp_info.header_only = True

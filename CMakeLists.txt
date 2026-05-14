@@ -12,6 +12,7 @@ option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
 option(CBOR_TAGS_USE_STD_REFLECTION "Build cbor_tags tests with GCC C++26 std::meta reflection" OFF)
 option(CBOR_TAGS_USE_BOOST_PFR_NAMES "Enable C++20 named-map reflection via Boost.PFR field names" OFF)
 option(CBOR_TAGS_USE_MAGIC_ENUM_NAMES "Enable CDDL enum-name definitions via magic_enum" OFF)
+option(CBOR_TAGS_USE_STD_EXPECTED "Use C++23 std::expected for public return values instead of tl::expected" OFF)
 
 # Configure a header file to pass the CMake setting to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cbor_tags_config.h.in" "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
@@ -149,13 +150,40 @@ if(CBOR_TAGS_INSTALL AND CMAKE_VERSION VERSION_LESS 3.25)
   message(FATAL_ERROR "CBOR_TAGS_INSTALL requires CMake 3.25 or newer because target_install_package.cmake v7 requires it.")
 endif()
 
-# Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
+# Expected return backend
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
-if(CBOR_TAGS_INSTALL AND NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
-  message(FATAL_ERROR "CBOR_TAGS_INSTALL requires -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON")
+if(CBOR_TAGS_USE_STD_EXPECTED)
+  if(CMAKE_CXX_STANDARD LESS 23)
+    message(FATAL_ERROR "CBOR_TAGS_USE_STD_EXPECTED requires CMAKE_CXX_STANDARD=23 or newer.")
+  endif()
+
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles(
+    [=[
+#include <expected>
+#include <version>
+#ifndef __cpp_lib_expected
+#error "__cpp_lib_expected is not defined"
+#endif
+#if __cpp_lib_expected < 202202L
+#error "__cpp_lib_expected is too old"
+#endif
+int main() {
+  std::expected<void, int> value{};
+  return value.has_value() ? 0 : 1;
+}
+]=]
+    CBOR_TAGS_COMPILER_HAS_STD_EXPECTED)
+  if(NOT CBOR_TAGS_COMPILER_HAS_STD_EXPECTED)
+    message(FATAL_ERROR "CBOR_TAGS_USE_STD_EXPECTED requires C++23 <expected> with __cpp_lib_expected >= 202202L.")
+  endif()
+  target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_STD_EXPECTED=1)
+  target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_23)
+elseif(CBOR_TAGS_INSTALL AND NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
+  message(FATAL_ERROR "CBOR_TAGS_INSTALL requires -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON or -DCBOR_TAGS_USE_STD_EXPECTED=ON")
 endif()
 
-if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
+if(NOT CBOR_TAGS_USE_STD_EXPECTED AND NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
   set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
   cpmaddpackage(
@@ -170,7 +198,7 @@ if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
     OPTIONS
     "EXPECTED_BUILD_TESTS OFF"
     "EXPECTED_BUILD_PACKAGE OFF")
-else()
+elseif(NOT CBOR_TAGS_USE_STD_EXPECTED)
   find_package(tl-expected REQUIRED)
 endif()
 
@@ -207,7 +235,7 @@ endif()
 # Define public dependencies (if any)
 set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
 # If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
-if(CBOR_TAGS_USE_SYSTEM_EXPECTED)
+if(CBOR_TAGS_USE_SYSTEM_EXPECTED AND NOT CBOR_TAGS_USE_STD_EXPECTED)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "tl-expected REQUIRED")
 endif()
 list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "fmt REQUIRED CONFIG")
@@ -220,7 +248,13 @@ if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
 endif()
 
 # Link dependencies
-target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected> fmt::fmt nameof::nameof)
+if(CBOR_TAGS_USE_STD_EXPECTED)
+  target_link_libraries(${PROJECT_NAME} INTERFACE fmt::fmt nameof::nameof)
+elseif(CBOR_TAGS_USE_SYSTEM_EXPECTED)
+  target_link_libraries(${PROJECT_NAME} INTERFACE tl::expected fmt::fmt nameof::nameof)
+else()
+  target_link_libraries(${PROJECT_NAME} INTERFACE expected fmt::fmt nameof::nameof)
+endif()
 
 # Make ${PROJECT_NAME} depend on the generated header add tools - reflection module generator - makes cbor_reflection_impl.h
 if(CBOR_TAGS_BUILD_CLI OR CBOR_TAGS_BUILD_TOOLS)

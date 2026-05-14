@@ -11,7 +11,6 @@
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/float16_ieee754.h"
 #include "test_util.h"
-#include "tl/expected.hpp"
 
 #include <array>
 #include <cstddef>

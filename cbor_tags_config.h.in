@@ -16,6 +16,10 @@
 #cmakedefine01 CBOR_TAGS_USE_MAGIC_ENUM_NAMES
 #endif
 
+#ifndef CBOR_TAGS_USE_STD_EXPECTED
+#cmakedefine01 CBOR_TAGS_USE_STD_EXPECTED
+#endif
+
 #include <string_view>
 
 #if CBOR_TAGS_DEBUG == 1

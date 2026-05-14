@@ -51,7 +51,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Buffer-backed decode views for contiguous and non-contiguous inputs.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
-- noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>`.
+- noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
 - CDDL support for schema and custom data definitions.
 - Upcoming: resumable encoding and decoding (useful for streaming usecases).
 
@@ -788,7 +788,7 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 
 ## ✅ Requirements
 
-- tl::expected
+- tl::expected by default, or C++23 `<expected>` when `CBOR_TAGS_USE_STD_EXPECTED=ON`.
 - fmt (optional, but required for CDDL)
 - nameof (optional, but required for CDDL)
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
@@ -830,11 +830,25 @@ cmake --install build
 ```
 
 `CBOR_TAGS_INSTALL=ON` requires CMake 3.25 or newer because the install package
-helper is target_install_package.cmake v7.
+helper is target_install_package.cmake v7. Installed CMake packages also need a
+non-FetchContent expected backend: use `CBOR_TAGS_USE_SYSTEM_EXPECTED=ON` for
+`tl::expected`, or C++23 with `CBOR_TAGS_USE_STD_EXPECTED=ON` for
+`std::expected` return values.
 
-Package-manager opt-in for optional reflection backends:
+C++23 `std::expected` return backend:
 
 ```bash
+cmake -B build \
+  -DCMAKE_CXX_STANDARD=23 \
+  -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+  -DCBOR_TAGS_INSTALL=ON \
+  -DCBOR_TAGS_USE_STD_EXPECTED=ON
+```
+
+Package-manager opt-in examples:
+
+```bash
+conan install . -o cbor-tags/*:std_expected=True -s compiler.cppstd=23
 conan install . -o cbor-tags/*:boost_pfr_names=True
 conan install . -o cbor-tags/*:magic_enum_names=True
 vcpkg install --x-feature=boost-pfr-names
