@@ -72,10 +72,47 @@ struct CDDLRecursiveNode {
 
 enum class CDDLUnsignedEnum : std::uint8_t {};
 enum class CDDLSignedEnum : std::int8_t {};
+enum class CDDLTrafficLight : std::uint8_t { red = 1, yellow = 2, green = 4 };
+enum class CDDLSignedChoice : std::int8_t { negative = -2, zero = 0, positive = 3 };
+enum class CDDLUnorderedChoice : std::int8_t { high = 5, low = 1, negative = -1 };
+enum class CDDLWideMagicEnum : std::uint16_t { low = 1, high = 1000 };
+
+#if CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+} // namespace
+
+template <> struct magic_enum::customize::enum_range<CDDLWideMagicEnum> {
+    static constexpr int min = 0;
+    static constexpr int max = 1000;
+};
+
+namespace {
+#endif
 
 struct CDDLEnums {
     CDDLUnsignedEnum unsigned_enum;
     CDDLSignedEnum   signed_enum;
+};
+
+struct CDDLEnumNames {
+    CDDLTrafficLight                        light;
+    std::optional<CDDLSignedChoice>         maybe_choice;
+    std::variant<CDDLTrafficLight, int>     either_light_or_number;
+    std::map<CDDLTrafficLight, std::string> labels;
+    CDDLUnsignedEnum                        empty_enum;
+};
+
+struct CDDLEnumNestedLeaf {
+    CDDLTrafficLight light;
+};
+
+struct CDDLEnumNestedMiddle {
+    CDDLEnumNestedLeaf              leaf;
+    std::optional<CDDLSignedChoice> maybe_choice;
+};
+
+struct CDDLEnumNestedRoot {
+    CDDLEnumNestedMiddle          middle;
+    std::vector<CDDLTrafficLight> history;
 };
 
 struct CDDLNestedLeaf {
@@ -112,7 +149,7 @@ struct CDDLNameCollisionRoot {
 
 struct CDDLEmpty {};
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
 struct CDDLNamedPerson {
     int         age;
     std::string name;
@@ -182,6 +219,102 @@ struct CDDLAccountProfile {
     std::optional<bool>                                    active;
     as_named_extension<std::map<std::string, std::string>> metadata;
 };
+
+struct CDDLNamedEnumChildMap {
+    CDDLTrafficLight light;
+};
+
+struct CDDLNamedEnumInlineGroup {
+    CDDLTrafficLight                light;
+    std::optional<CDDLSignedChoice> maybe_choice;
+};
+
+struct CDDLNamedEnumRoot {
+    as_named_group<CDDLNamedEnumInlineGroup> group;
+    as_named_map<CDDLNamedEnumChildMap>      child;
+    std::optional<CDDLTrafficLight>          status;
+};
+
+struct CDDLNestedInlineLeaf {
+    std::optional<std::string> one;
+    std::optional<std::string> two;
+};
+
+struct CDDLNestedInlineMiddle {
+    as_named_group<CDDLNestedInlineLeaf> leaf;
+    std::string                          middle;
+};
+
+struct CDDLNestedInlineRoot {
+    as_named_group<CDDLNestedInlineMiddle> middle;
+    std::string                            root;
+};
+
+struct CDDLNestedMapWithRepeatedLocalName {
+    int value;
+};
+
+struct CDDLRootWithNestedMapRepeatedLocalName {
+    int                                              value;
+    as_named_map<CDDLNestedMapWithRepeatedLocalName> child;
+};
+
+struct CDDLNamedCollisionGroup {
+    int value;
+};
+
+struct CDDLNamedCollisionRoot {
+    as_named_group<CDDLNamedCollisionGroup> group;
+    int                                     value;
+};
+
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLNamedPerson>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLPersonalDataExtensible>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLAccountProfile>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLNestedInlineRoot>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLRootWithNestedMapRepeatedLocalName>());
+static_assert(!detail::named_fixed_member_keys_are_unique<CDDLNamedCollisionRoot>());
+
+struct CDDLBorrowedExtensionRoot {
+    int                                                         id;
+    as_named_extension<std::map<std::string_view, std::string>> extensions;
+};
+
+struct CDDLOwningExtensionRoot {
+    int                                                    id;
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLGroupedExtension {
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLGroupedExtensionRoot {
+    int                                  id;
+    as_named_group<CDDLGroupedExtension> group;
+};
+
+struct CDDLNestedMapScopedExtensionChild {
+    int                                                    childId;
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLNestedMapScopedExtensionRoot {
+    int                                                    rootId;
+    as_named_map<CDDLNestedMapScopedExtensionChild>        child;
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLRootWithTwoExtensions {
+    as_named_extension<std::map<std::string, std::string>> first;
+    as_named_extension<std::map<std::string, std::string>> second;
+};
+
+static_assert(detail::named_flattened_extension_count<CDDLOwningExtensionRoot>() == 1U);
+static_assert(detail::named_flattened_extension_count<CDDLGroupedExtensionRoot>() == 1U);
+static_assert(detail::named_flattened_extension_count<CDDLNestedMapScopedExtensionRoot>() == 1U);
+static_assert(detail::named_flattened_extension_count<CDDLRootWithTwoExtensions>() == 2U);
+
 #endif
 } // namespace
 
@@ -327,8 +460,74 @@ TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
     CHECK_EQ(cddl_schema_inline<CDDLEnums>(), "CDDLEnums = [uint, int]");
 }
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
-TEST_CASE("C++26 named-map CDDL covers RFC 8610 map and group examples") {
+#if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+TEST_CASE("CDDL can emit named enum choices") {
+    fmt::memory_buffer root;
+    cddl_schema_to<CDDLTrafficLight>(
+        root, {.row_options = {.format_by_rows = false}, .root_name = "traffic-light", .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(root), "traffic_light = &(red: 1, yellow: 2, green: 4)");
+
+    fmt::memory_buffer inline_root;
+    cddl_schema_to<CDDLTrafficLight>(
+        inline_root, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(inline_root), "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)");
+
+    fmt::memory_buffer unordered;
+    cddl_schema_to<CDDLUnorderedChoice>(
+        unordered, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(unordered), "CDDLUnorderedChoice = &(negative: -1, low: 1, high: 5)");
+}
+
+TEST_CASE("CDDL reuses named enum definitions inside aggregate schemas") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLEnumNames>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    const auto schema = fmt::to_string(buffer);
+
+    CHECK_EQ(schema, "CDDLEnumNames = [CDDLTrafficLight, CDDLSignedChoice / null, CDDLTrafficLight / int, "
+                     "{* CDDLTrafficLight => tstr}, uint]\n"
+                     "CDDLSignedChoice = &(negative: -2, zero: 0, positive: 3)\n"
+                     "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)");
+    CHECK_EQ(count_occurrences(schema, "\nCDDLTrafficLight ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLSignedChoice ="), 1);
+}
+
+TEST_CASE("CDDL reuses named enum definitions through nested aggregate schemas") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLEnumNestedRoot>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    const auto schema = fmt::to_string(buffer);
+
+    CHECK(substrings_in(schema, "CDDLEnumNestedRoot = [CDDLEnumNestedMiddle, [* CDDLTrafficLight]]",
+                        "CDDLEnumNestedMiddle = [CDDLEnumNestedLeaf, CDDLSignedChoice / null]", "CDDLEnumNestedLeaf = CDDLTrafficLight",
+                        "CDDLSignedChoice = &(negative: -2, zero: 0, positive: 3)", "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)"));
+    CHECK_EQ(count_occurrences(schema, "\nCDDLTrafficLight ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLSignedChoice ="), 1);
+}
+
+TEST_CASE("CDDL keeps enum underlying shapes unless named enum mode is requested") {
+    CHECK_EQ(cddl_schema_inline<CDDLTrafficLight>(), "root = uint");
+
+    fmt::memory_buffer empty_enum;
+    cddl_schema_to<CDDLUnsignedEnum>(empty_enum, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(empty_enum), "root = uint");
+}
+
+TEST_CASE("CDDL named enum backend emits all enumerators outside the magic_enum default range") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLWideMagicEnum>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(buffer), "CDDLWideMagicEnum = &(low: 1, high: 1000)");
+}
+#endif
+
+#if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+TEST_CASE("CDDL named enum mode falls back without enum-name backend") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLTrafficLight>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    CHECK_EQ(fmt::to_string(buffer), "root = uint");
+}
+#endif
+
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+TEST_CASE("named-map CDDL covers RFC 8610 map and group examples") {
     fmt::memory_buffer direct_map;
     cddl_schema_to<as_named_map<CDDLNamedPerson>>(direct_map, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(direct_map), "person = {age: int, name: tstr, employer: tstr}");
@@ -351,7 +550,7 @@ TEST_CASE("C++26 named-map CDDL covers RFC 8610 map and group examples") {
     CHECK_EQ(fmt::to_string(parenthesized_group), "person = {(age: int, name: tstr, employer: tstr)}");
 }
 
-TEST_CASE("C++26 named-map CDDL covers RFC 8610 group factorization and personal data examples") {
+TEST_CASE("named-map CDDL covers RFC 8610 group factorization and personal data examples") {
     fmt::memory_buffer person;
     cddl_schema_to<as_named_map<CDDLNamedPersonWithIdentity>>(person, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(person), "person = {identity, employer: tstr}\nidentity = (age: int, name: tstr)");
@@ -372,7 +571,7 @@ TEST_CASE("C++26 named-map CDDL covers RFC 8610 group factorization and personal
                                          "NameComponents = (? firstName: tstr, ? familyName: tstr)");
 }
 
-TEST_CASE("C++26 named-map CDDL covers a larger grouped profile") {
+TEST_CASE("named-map CDDL covers a larger grouped profile") {
     fmt::memory_buffer account;
     cddl_schema_to<as_named_map<CDDLAccountProfile>>(account, {.row_options = {.format_by_rows = false}, .root_name = "AccountProfile"});
     CHECK_EQ(fmt::to_string(account),
@@ -382,7 +581,71 @@ TEST_CASE("C++26 named-map CDDL covers a larger grouped profile") {
              "owner = (? givenName: tstr, ? familyName: tstr)");
 }
 
-TEST_CASE("C++26 named-map CDDL keeps table examples typed") {
+TEST_CASE("named-map CDDL indents nested inline named groups by depth") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLNestedInlineRoot>>(
+        buffer, {.row_options = {.format_by_rows = true}, .always_inline = true, .root_name = "Root"});
+    CHECK_EQ(fmt::to_string(buffer), "Root = {\n"
+                                     "  (\n"
+                                     "    (\n"
+                                     "      ? one: tstr,\n"
+                                     "      ? two: tstr\n"
+                                     "    ),\n"
+                                     "    middle: tstr\n"
+                                     "  ),\n"
+                                     "  root: tstr\n"
+                                     "}");
+}
+
+TEST_CASE("named-map CDDL scopes repeated local names inside nested named maps") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLRootWithNestedMapRepeatedLocalName>>(buffer,
+                                                                         {.row_options = {.format_by_rows = false}, .root_name = "Root"});
+    CHECK_EQ(fmt::to_string(buffer), "Root = {value: int, child: CDDLNestedMapWithRepeatedLocalName}\n"
+                                     "CDDLNestedMapWithRepeatedLocalName = {value: int}");
+}
+
+#if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+TEST_CASE("named-map CDDL reuses named enum definitions through nested named maps and groups") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLNamedEnumRoot>>(buffer,
+                                                    {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    const auto schema = fmt::to_string(buffer);
+
+    CHECK(substrings_in(schema, "CDDLNamedEnumRoot = {group, child: CDDLNamedEnumChildMap, ? status: CDDLTrafficLight}",
+                        "group = (light: CDDLTrafficLight, ? maybe_choice: CDDLSignedChoice)",
+                        "CDDLNamedEnumChildMap = {light: CDDLTrafficLight}", "CDDLSignedChoice = &(negative: -2, zero: 0, positive: 3)",
+                        "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)"));
+    CHECK_EQ(count_occurrences(schema, "\nCDDLTrafficLight ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLSignedChoice ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLNamedEnumChildMap ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\ngroup ="), 1);
+}
+#endif
+
+TEST_CASE("nested named groups roundtrip with the C++20 named reflection backend") {
+    CDDLNestedInlineRoot input{
+        .middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
+            .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{.one = std::string{"a"}, .two = std::string{"b"}}},
+            .middle = "m"}},
+        .root   = "r"};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedInlineRoot decoded{};
+    auto                 dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    REQUIRE(decoded.middle.value_.leaf.value_.one.has_value());
+    REQUIRE(decoded.middle.value_.leaf.value_.two.has_value());
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.one, "a");
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.two, "b");
+    CHECK_EQ(decoded.middle.value_.middle, "m");
+    CHECK_EQ(decoded.root, "r");
+}
+
+TEST_CASE("named-map CDDL keeps table examples typed") {
     fmt::memory_buffer square_roots;
     cddl_schema_to<std::map<int, float>>(square_roots, {.row_options = {.format_by_rows = false}, .root_name = "square_roots"});
     CHECK_EQ(fmt::to_string(square_roots), "square_roots = {* int => float32}");
@@ -393,7 +656,7 @@ TEST_CASE("C++26 named-map CDDL keeps table examples typed") {
     CHECK_EQ(fmt::to_string(to_string_table), "tostring = {* (int / float32) => tstr}");
 }
 
-TEST_CASE("C++26 named-map codec roundtrips and accepts unordered maps") {
+TEST_CASE("named-map codec roundtrips and accepts unordered maps") {
     CDDLNamedPerson        input{.age = 42, .name = "Ada", .employer = "AcmeCo"};
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -417,7 +680,153 @@ TEST_CASE("C++26 named-map codec roundtrips and accepts unordered maps") {
     CHECK_EQ(indefinite_decoded.employer, "AcmeCo");
 }
 
-TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys") {
+TEST_CASE("named-map codec rejects chunked indefinite text-string keys") {
+    auto            input = to_bytes("a37f63616765ff182a7f646e616d65ff634164617f68656d706c6f796572ff6641636d65436f");
+    CDDLNamedPerson decoded{};
+    auto            dec = make_decoder(input);
+    CHECK_FALSE(dec(as_named_map{decoded}));
+}
+
+TEST_CASE("named-map codec rejects borrowed extension keys from non-contiguous inputs") {
+    auto input_vector = to_bytes("a262696401686e69636b6e616d6563616365");
+    auto input        = std::deque<std::byte>(input_vector.begin(), input_vector.end());
+
+    CDDLBorrowedExtensionRoot decoded{};
+    auto                      dec    = make_decoder(input);
+    auto                      result = dec(as_named_map{decoded});
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
+}
+
+TEST_CASE("named-map codec copies owning extension keys from non-contiguous inputs") {
+    auto input_vector = to_bytes("a262696401686e69636b6e616d6563616365");
+    auto input        = std::deque<std::byte>(input_vector.begin(), input_vector.end());
+
+    CDDLOwningExtensionRoot decoded{};
+    auto                    dec    = make_decoder(input);
+    auto                    result = dec(as_named_map{decoded});
+    REQUIRE(result);
+    CHECK_EQ(decoded.id, 1);
+    REQUIRE(decoded.extensions.value_.contains("nickname"));
+    CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
+}
+
+TEST_CASE("named-map codec supports one root extension field") {
+    CDDLOwningExtensionRoot input{.id = 7, .extensions = as_named_extension<std::map<std::string, std::string>>{{{"nickname", "ace"}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLOwningExtensionRoot decoded{};
+    auto                    dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.id, 7);
+    REQUIRE(decoded.extensions.value_.contains("nickname"));
+    CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
+
+    fmt::memory_buffer schema;
+    cddl_schema_to<as_named_map<CDDLOwningExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "root_ext"});
+    CHECK_NE(fmt::to_string(schema).find("root_ext = {id: int, * tstr => tstr}"), std::string::npos);
+}
+
+TEST_CASE("named-map codec supports one grouped extension field") {
+    CDDLGroupedExtensionRoot input{.id    = 11,
+                                   .group = as_named_group<CDDLGroupedExtension>{CDDLGroupedExtension{
+                                       .extensions = as_named_extension<std::map<std::string, std::string>>{{{"nickname", "ace"}}}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLGroupedExtensionRoot decoded{};
+    auto                     dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.id, 11);
+    REQUIRE(decoded.group.value_.extensions.value_.contains("nickname"));
+    CHECK_EQ(decoded.group.value_.extensions.value_.at("nickname"), "ace");
+
+    fmt::memory_buffer schema;
+    cddl_schema_to<as_named_map<CDDLGroupedExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "group_ext"});
+    const auto schema_text = fmt::to_string(schema);
+    CHECK_NE(schema_text.find("group_ext = {id: int,"), std::string::npos);
+    CHECK_NE(schema_text.find("* tstr => tstr"), std::string::npos);
+}
+
+TEST_CASE("named-map codec scopes nested map extensions") {
+    CDDLNestedMapScopedExtensionChild child{.childId = 2,
+                                            .extensions =
+                                                as_named_extension<std::map<std::string, std::string>>{{{"childExtra", "inside"}}}};
+    CDDLNestedMapScopedExtensionRoot  input{.rootId = 1,
+                                            .child  = as_named_map{child},
+                                            .extensions =
+                                               as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedMapScopedExtensionChild decoded_child{};
+    CDDLNestedMapScopedExtensionRoot  decoded{.rootId = 0, .child = as_named_map{decoded_child}};
+    auto                              dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.rootId, 1);
+    CHECK_EQ(decoded_child.childId, 2);
+    REQUIRE(decoded.extensions.value_.contains("rootExtra"));
+    CHECK_EQ(decoded.extensions.value_.at("rootExtra"), "outside");
+    REQUIRE(decoded_child.extensions.value_.contains("childExtra"));
+    CHECK_EQ(decoded_child.extensions.value_.at("childExtra"), "inside");
+
+    fmt::memory_buffer schema;
+    cddl_schema_to<as_named_map<CDDLNestedMapScopedExtensionRoot>>(
+        schema, {.row_options = {.format_by_rows = false}, .root_name = "nested_scoped"});
+    const auto schema_text = fmt::to_string(schema);
+    CHECK_NE(schema_text.find("nested_scoped = {rootId: int, child:"), std::string::npos);
+    CHECK_NE(schema_text.find("* tstr => tstr"), std::string::npos);
+}
+
+TEST_CASE("named-map codec handles nested named groups with unique flattened keys") {
+    CDDLNestedInlineRoot input{.middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
+                                   .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{
+                                         .one = std::string{"first"},
+                                         .two = std::string{"second"},
+                                   }},
+                                   .middle = std::string{"middle"},
+                               }},
+                               .root   = std::string{"root"}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedInlineRoot decoded{};
+    auto                 dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    REQUIRE(decoded.middle.value_.leaf.value_.one.has_value());
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.one, "first");
+    REQUIRE(decoded.middle.value_.leaf.value_.two.has_value());
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.two, "second");
+    CHECK_EQ(decoded.middle.value_.middle, "middle");
+    CHECK_EQ(decoded.root, "root");
+}
+
+TEST_CASE("named-map codec allows repeated local names inside nested named maps") {
+    CDDLNestedMapWithRepeatedLocalName     child{.value = 9};
+    CDDLRootWithNestedMapRepeatedLocalName input{.value = 7, .child = as_named_map{child}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedMapWithRepeatedLocalName     decoded_child{};
+    CDDLRootWithNestedMapRepeatedLocalName decoded{.value = 0, .child = as_named_map{decoded_child}};
+    auto                                   dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.value, 7);
+    CHECK_EQ(decoded_child.value, 9);
+}
+
+TEST_CASE("named-map codec enforces required, duplicate, and unknown keys") {
     auto            missing_required = to_bytes("a2646e616d656341646168656d706c6f7965726641636d65436f");
     CDDLNamedPerson missing{};
     auto            missing_dec = make_decoder(missing_required);
@@ -434,7 +843,7 @@ TEST_CASE("C++26 named-map codec enforces required, duplicate, and unknown keys"
     CHECK_FALSE(unknown_dec(as_named_map{unknown}));
 }
 
-TEST_CASE("C++26 named-map codec rejects malformed named-map shapes") {
+TEST_CASE("named-map codec rejects malformed named-map shapes") {
     auto            non_text_key = to_bytes("a10102");
     CDDLNamedPerson non_text{};
     auto            non_text_dec = make_decoder(non_text_key);
@@ -456,14 +865,14 @@ TEST_CASE("C++26 named-map codec rejects malformed named-map shapes") {
     CHECK_FALSE(null_value_dec(as_named_map{null_value}));
 }
 
-TEST_CASE("C++26 named-map codec validates required fields inside named groups") {
+TEST_CASE("named-map codec validates required fields inside named groups") {
     auto                        missing_group_member = to_bytes("a263616765182a68656d706c6f7965726641636d65436f");
     CDDLNamedPersonWithIdentity missing{};
     auto                        missing_dec = make_decoder(missing_group_member);
     CHECK_FALSE(missing_dec(as_named_map{missing}));
 }
 
-TEST_CASE("C++26 named-map codec resets optionals and extensions before decode") {
+TEST_CASE("named-map codec resets optionals and extensions before decode") {
     CDDLPersonalDataExtensible decoded{
         .displayName = std::string{"old"},
         .NameComponents =
@@ -483,7 +892,7 @@ TEST_CASE("C++26 named-map codec resets optionals and extensions before decode")
     CHECK(decoded.extensions.value_.empty());
 }
 
-TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions") {
+TEST_CASE("named-map codec handles optionals, groups, and typed extensions") {
     CDDLPersonalDataExtensible input{
         .NameComponents =
             as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}, .familyName = std::nullopt}},
@@ -508,7 +917,7 @@ TEST_CASE("C++26 named-map codec handles optionals, groups, and typed extensions
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
 }
 
-TEST_CASE("C++26 named-map codec handles a larger grouped profile") {
+TEST_CASE("named-map codec handles a larger grouped profile") {
     CDDLAccountProfile input{
         .accountId = "acct-7",
         .owner = as_named_group<CDDLAccountOwner>{CDDLAccountOwner{.givenName = std::string{"Ada"}, .familyName = std::string{"Lovelace"}}},
@@ -549,7 +958,7 @@ TEST_CASE("C++26 named-map codec handles a larger grouped profile") {
     CHECK_EQ(decoded.metadata.value_.at("team"), "compiler");
 }
 
-TEST_CASE("C++26 named-map codec rejects extension keys that shadow named fields") {
+TEST_CASE("named-map codec rejects extension keys that shadow named fields") {
     CDDLPersonalDataExtensible input{.NameComponents =
                                          as_named_group<CDDLNameComponents>{CDDLNameComponents{.firstName = std::string{"Ada"}}},
                                      .age        = 42,

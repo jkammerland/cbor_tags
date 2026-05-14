@@ -5,11 +5,27 @@
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/detail/cbor_item.h"
 
+#ifndef CBOR_TAGS_USE_MAGIC_ENUM_NAMES
+#define CBOR_TAGS_USE_MAGIC_ENUM_NAMES 0
+#endif
+
+#if CBOR_TAGS_USE_MAGIC_ENUM_NAMES
+#if !__has_include(<magic_enum/magic_enum.hpp>)
+#error "CBOR_TAGS_USE_MAGIC_ENUM_NAMES requires magic_enum with <magic_enum/magic_enum.hpp>"
+#endif
+#include <magic_enum/magic_enum.hpp>
+#define CBOR_TAGS_HAS_MAGIC_ENUM_NAMES 1
+#else
+#define CBOR_TAGS_HAS_MAGIC_ENUM_NAMES 0
+#endif
+
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cbor_tags/cbor_concepts.h>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -35,6 +51,8 @@ namespace cbor::tags {
 
 enum class AnnotationMode { no_annotation, smart };
 
+enum class CDDLEnumMode { underlying_integer, named_values };
+
 struct AnnotationOptions {
     bool           diagnostic_data{false};
     size_t         current_indent{0};
@@ -53,9 +71,11 @@ struct CDDLOptions {
     struct RowOptions {
         bool   format_by_rows{true};
         size_t offset{2};
+        size_t current_indent{0};
     } row_options;
     bool             always_inline{false};
     std::string_view root_name{};
+    CDDLEnumMode     enum_mode{CDDLEnumMode::underlying_integer};
 };
 
 struct DiagnosticOptions {
@@ -428,6 +448,8 @@ template <typename T> std::string cddl_named_map_key() { return "__cddl_named_ma
 
 template <typename T> std::string cddl_named_group_key() { return "__cddl_named_group:" + cddl_type_key<T>(); }
 
+template <typename T> std::string cddl_enum_key() { return "__cddl_enum:" + cddl_type_key<T>(); }
+
 inline std::string unique_cddl_name(CDDLContext &context, std::string_view key, std::string_view preferred_name) {
     auto preferred = sanitize_cddl_id(preferred_name.empty() ? key : preferred_name);
     if (!context.contains_name(preferred)) {
@@ -463,6 +485,170 @@ template <std::size_t N> std::string join_cddl(const std::array<std::string, N> 
         result += items[i];
     }
     return result;
+}
+
+inline std::string join_cddl(const std::vector<std::string> &items, std::string_view separator) {
+    std::string result;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i != 0) {
+            result += separator;
+        }
+        result += items[i];
+    }
+    return result;
+}
+
+template <typename T> consteval std::size_t cddl_std_enum_entry_count() {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    using value_type = std::remove_cvref_t<T>;
+    return std::meta::enumerators_of(^^value_type).size();
+#else
+    return 0;
+#endif
+}
+
+template <typename T> std::string cddl_enum_value_literal(T value);
+
+template <typename T> struct cddl_enum_item {
+    T                value;
+    std::string_view name;
+};
+
+template <typename T> bool cddl_enum_value_less(T lhs, T rhs) {
+    using underlying_type = std::underlying_type_t<std::remove_cvref_t<T>>;
+    if constexpr (std::is_signed_v<underlying_type>) {
+        return static_cast<std::intmax_t>(static_cast<underlying_type>(lhs)) <
+               static_cast<std::intmax_t>(static_cast<underlying_type>(rhs));
+    } else {
+        return static_cast<std::uintmax_t>(static_cast<underlying_type>(lhs)) <
+               static_cast<std::uintmax_t>(static_cast<underlying_type>(rhs));
+    }
+}
+
+template <typename T> std::vector<std::string> cddl_enum_items_to_cddl(std::vector<cddl_enum_item<T>> items) {
+    std::stable_sort(items.begin(), items.end(),
+                     [](const auto &lhs, const auto &rhs) { return cddl_enum_value_less(lhs.value, rhs.value); });
+
+    std::vector<std::string> cddl_items;
+    cddl_items.reserve(items.size());
+    for (const auto &[value, name] : items) {
+        cddl_items.push_back(fmt::format("{}: {}", cddl_member_key(name), cddl_enum_value_literal(value)));
+    }
+    return cddl_items;
+}
+
+#if CBOR_TAGS_HAS_STD_REFLECTION
+template <typename T, std::size_t I> consteval std::meta::info cddl_std_enum_entry() {
+    using value_type = std::remove_cvref_t<T>;
+    return std::meta::enumerators_of(^^value_type)[I];
+}
+
+template <typename T, std::size_t I> consteval std::string_view cddl_std_enum_entry_name() {
+    return std::meta::identifier_of(cddl_std_enum_entry<T, I>());
+}
+
+template <typename T, std::size_t I> consteval std::remove_cvref_t<T> cddl_std_enum_entry_value() {
+    return std::meta::extract<std::remove_cvref_t<T>>(cddl_std_enum_entry<T, I>());
+}
+
+template <typename T, std::size_t... Is>
+std::vector<cddl_enum_item<std::remove_cvref_t<T>>> cddl_std_enum_items(std::index_sequence<Is...>) {
+    using value_type = std::remove_cvref_t<T>;
+    std::vector<cddl_enum_item<value_type>> items;
+    items.reserve(sizeof...(Is));
+    (items.push_back({cddl_std_enum_entry_value<T, Is>(), cddl_std_enum_entry_name<T, Is>()}), ...);
+    return items;
+}
+#endif
+
+template <typename T> constexpr std::size_t cddl_enum_entry_count() {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    return cddl_std_enum_entry_count<std::remove_cvref_t<T>>();
+#elif CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+    return magic_enum::enum_count<std::remove_cvref_t<T>>();
+#else
+    return 0;
+#endif
+}
+
+template <typename T> std::string cddl_enum_value_literal(T value) {
+    using underlying_type = std::underlying_type_t<std::remove_cvref_t<T>>;
+    const auto underlying = static_cast<underlying_type>(value);
+    if constexpr (std::is_signed_v<underlying_type>) {
+        return fmt::format("{}", static_cast<std::intmax_t>(underlying));
+    } else {
+        return fmt::format("{}", static_cast<std::uintmax_t>(underlying));
+    }
+}
+
+template <typename T> std::vector<std::string> cddl_enum_items() {
+#if CBOR_TAGS_HAS_STD_REFLECTION
+    return cddl_enum_items_to_cddl(
+        cddl_std_enum_items<std::remove_cvref_t<T>>(std::make_index_sequence<cddl_enum_entry_count<std::remove_cvref_t<T>>()>{}));
+#elif CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+    using value_type = std::remove_cvref_t<T>;
+    std::vector<cddl_enum_item<value_type>> items;
+    if constexpr (cddl_enum_entry_count<value_type>() != 0) {
+        constexpr auto entries = magic_enum::enum_entries<value_type>();
+        items.reserve(entries.size());
+        for (const auto &[value, name] : entries) {
+            items.push_back({value, name});
+        }
+    }
+    return cddl_enum_items_to_cddl(std::move(items));
+#else
+    return {};
+#endif
+}
+
+template <typename T> bool cddl_use_named_enum(CDDLOptions options) {
+    return options.enum_mode == CDDLEnumMode::named_values && cddl_enum_entry_count<T>() != 0;
+}
+
+template <typename T> std::string cddl_enum_underlying_expr() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsEnumUnsigned<value_type>) {
+        return "uint";
+    } else {
+        return "int";
+    }
+}
+
+template <typename T> std::string cddl_enum_expr(CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    auto items       = cddl_enum_items<value_type>();
+
+    if (items.empty()) {
+        return cddl_enum_underlying_expr<value_type>();
+    }
+    if (!options.row_options.format_by_rows) {
+        return "&(" + join_cddl(items, ", ") + ")";
+    }
+
+    auto       result = std::string("&(\n");
+    const auto indent = std::string(options.row_options.offset, ' ');
+    result += indent;
+    result += join_cddl(items, ",\n" + indent);
+    result += "\n)";
+    return result;
+}
+
+template <typename T>
+std::string ensure_cddl_enum_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {}) {
+    using value_type = std::remove_cvref_t<T>;
+    static_assert(IsEnum<value_type>, "CDDL enum definitions require an enum type");
+
+    const auto key = cddl_enum_key<value_type>();
+    if (auto *def = context.find_by_key(key)) {
+        return std::string(def->name);
+    }
+
+    auto  name = unique_cddl_name(context, key, preferred_name.empty() ? cddl_type_name<value_type>() : preferred_name);
+    auto &def  = context.reserve(key, name);
+    auto  cddl = fmt::format("{} = {}", name, cddl_enum_expr<value_type>(options));
+    def.cddl   = std::pmr::string(cddl, &context.memory_resource);
+    def.state  = CDDLContext::DefinitionState::done;
+    return std::string(def.name);
 }
 
 template <typename... Ts> std::string cddl_fixed_array_expr(CDDLContext &context, CDDLOptions options) {
@@ -596,7 +782,16 @@ template <typename T> std::string cddl_map_expr(CDDLContext &context, CDDLOption
     return fmt::format("{{* {} => {}}}", key, value);
 }
 
-#if CBOR_TAGS_HAS_STD_REFLECTION
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+inline std::string cddl_row_indent(CDDLOptions options, std::size_t extra_indent = 0) {
+    return std::string((options.row_options.current_indent + extra_indent) * options.row_options.offset, ' ');
+}
+
+inline CDDLOptions cddl_nested_row_options(CDDLOptions options) {
+    ++options.row_options.current_indent;
+    return options;
+}
+
 template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using tuple_type = aggregate_tuple_t<value_type>;
@@ -605,7 +800,7 @@ template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLCon
     constexpr auto raw_name = detail::aggregate_member_name<value_type, I>();
     if constexpr (IsNamedGroupWrapper<field_type>) {
         if (options.always_inline) {
-            return cddl_named_group_expr<named_group_value_t<field_type>>(context, options);
+            return cddl_named_group_expr<named_group_value_t<field_type>>(context, cddl_nested_row_options(options));
         }
         return ensure_cddl_named_group_definition<named_group_value_t<field_type>>(context, options, raw_name);
     } else if constexpr (IsNamedExtensionWrapper<field_type>) {
@@ -623,12 +818,16 @@ template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLCon
 template <typename T, std::size_t... Is>
 std::string cddl_named_entries(CDDLContext &context, CDDLOptions options, std::index_sequence<Is...>) {
     std::array<std::string, sizeof...(Is)> items{cddl_named_member_entry<T, Is>(context, options)...};
-    return join_cddl(items, options.row_options.format_by_rows ? ",\n" + std::string(options.row_options.offset, ' ') : ", ");
+    return join_cddl(items, options.row_options.format_by_rows ? ",\n" + cddl_row_indent(options, 1) : ", ");
 }
 
 template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open, char close) {
     using value_type            = std::remove_cvref_t<T>;
     constexpr auto member_count = detail::aggregate_member_count<value_type>();
+    static_assert(detail::named_fixed_member_keys_are_unique<value_type>(),
+                  "as_named_map/as_named_group fixed field names must be unique after flattening as_named_group members");
+    static_assert(detail::named_flattened_extension_count<value_type>() <= 1U,
+                  "as_named_map/as_named_group may contain at most one as_named_extension field after flattening as_named_group members");
     if (!options.row_options.format_by_rows) {
         return fmt::format("{}{}{}", open, cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{}),
                            close);
@@ -636,9 +835,9 @@ template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOpti
 
     auto entries = cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{});
     if (!entries.empty()) {
-        entries = std::string(options.row_options.offset, ' ') + entries;
+        entries = cddl_row_indent(options, 1) + entries;
     }
-    return fmt::format("{}\n{}\n{}", open, entries, close);
+    return fmt::format("{}\n{}\n{}{}", open, entries, cddl_row_indent(options), close);
 }
 
 template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options) {
@@ -686,12 +885,14 @@ std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions
 }
 #else
 template <typename T> std::string ensure_cddl_named_map_definition(CDDLContext &, CDDLOptions, std::string_view) {
-    static_assert(always_false<std::remove_cvref_t<T>>::value, "as_named_map requires C++26 static reflection");
+    static_assert(always_false<std::remove_cvref_t<T>>::value,
+                  "as_named_map requires named reflection (C++26 std::meta or Boost.PFR field names)");
     return {};
 }
 
 template <typename T> std::string ensure_cddl_named_group_definition(CDDLContext &, CDDLOptions, std::string_view) {
-    static_assert(always_false<std::remove_cvref_t<T>>::value, "as_named_group requires C++26 static reflection");
+    static_assert(always_false<std::remove_cvref_t<T>>::value,
+                  "as_named_group requires named reflection (C++26 std::meta or Boost.PFR field names)");
     return {};
 }
 #endif
@@ -730,11 +931,21 @@ template <typename T> std::string ensure_cddl_definition(CDDLContext &context, C
 
 template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsUnsigned<value_type> || IsEnumUnsigned<value_type>) {
+    if constexpr (IsEnum<value_type>) {
+        if constexpr (cddl_enum_entry_count<value_type>() != 0) {
+            if (cddl_use_named_enum<value_type>(options)) {
+                if (options.always_inline) {
+                    return cddl_enum_expr<value_type>(options);
+                }
+                return ensure_cddl_enum_definition<value_type>(context, options);
+            }
+        }
+        return cddl_enum_underlying_expr<value_type>();
+    } else if constexpr (IsUnsigned<value_type>) {
         return "uint";
     } else if constexpr (IsNegative<value_type>) {
         return "nint";
-    } else if constexpr (IsSigned<value_type> || IsEnumSigned<value_type>) {
+    } else if constexpr (IsSigned<value_type>) {
         return "int";
     } else if constexpr (IsTextString<value_type>) {
         return "tstr";
@@ -805,6 +1016,11 @@ template <typename T> std::string root_rule_name(CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     if (!options.root_name.empty()) {
         return sanitize_cddl_id(options.root_name);
+    } else if constexpr (IsEnum<value_type>) {
+        if (cddl_use_named_enum<value_type>(options)) {
+            return cddl_type_name<value_type>();
+        }
+        return "root";
     } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
         return cddl_type_name<value_type>();
     } else {
@@ -816,6 +1032,29 @@ template <typename T> std::string tag_marker_root_expr(CDDLContext &context, CDD
     (void)context;
     (void)options;
     return fmt::format("{}(any)", cddl_tag_prefix<std::remove_cvref_t<T>>());
+}
+
+template <typename T, typename OutputBuffer>
+void cddl_schema_root_expr_to(OutputBuffer &output_buffer, CDDLContext &cddl_context, CDDLOptions options) {
+    using value_type       = std::remove_cvref_t<T>;
+    auto root_name         = root_rule_name<value_type>(options);
+    auto root_key          = fmt::format("__cddl_root:{}", root_name);
+    bool reserved_root_key = false;
+    if (!options.root_name.empty()) {
+        reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = root_name});
+    } else if (cddl_context.contains_name(root_name)) {
+        root_name = unique_cddl_name(cddl_context, root_key, root_name);
+        root_key  = fmt::format("__cddl_root:{}", root_name);
+    }
+    if (!cddl_context.contains_name(root_name)) {
+        (void)cddl_context.reserve(root_key, root_name);
+        reserved_root_key = true;
+    }
+    auto root_expr = cddl_type_expr<value_type>(cddl_context, options);
+    if (reserved_root_key) {
+        cddl_context.erase_by_key(root_key);
+    }
+    fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, root_expr);
 }
 
 } // namespace detail
@@ -850,6 +1089,25 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         }
+    } else if constexpr (IsEnum<value_type>) {
+        if constexpr (detail::cddl_enum_entry_count<value_type>() != 0) {
+            if (detail::cddl_use_named_enum<value_type>(options) && !options.always_inline) {
+                const auto requested_root_name =
+                    options.root_name.empty() ? detail::cddl_type_name<value_type>() : detail::sanitize_cddl_id(options.root_name);
+                const auto root_key = detail::cddl_enum_key<value_type>();
+                if (!options.root_name.empty()) {
+                    detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+                }
+                (void)detail::ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
+                if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
+                    fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+                }
+            } else {
+                detail::cddl_schema_root_expr_to<value_type>(output_buffer, cddl_context, options);
+            }
+        } else {
+            detail::cddl_schema_root_expr_to<value_type>(output_buffer, cddl_context, options);
+        }
     } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
         static_assert(!detail::is_empty_cddl_aggregate_v<value_type>,
                       "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
@@ -870,32 +1128,20 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
         fmt::format_to(std::back_inserter(output_buffer), "{} = {}", detail::root_rule_name<value_type>(options),
                        detail::tag_marker_root_expr<value_type>(cddl_context, options));
     } else {
-        auto root_name          = detail::root_rule_name<value_type>(options);
-        auto root_key           = fmt::format("__cddl_root:{}", root_name);
-        bool reserved_root_name = false;
-        if (!options.root_name.empty()) {
-            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = root_name});
-        } else if (cddl_context.contains_name(root_name)) {
-            root_name = detail::unique_cddl_name(cddl_context, root_key, root_name);
-            root_key  = fmt::format("__cddl_root:{}", root_name);
-        }
-        if (!cddl_context.contains_name(root_name)) {
-            (void)cddl_context.reserve(root_key, root_name);
-            reserved_root_name = true;
-        }
-        auto root_expr = detail::cddl_type_expr<value_type>(cddl_context, options);
-        if (reserved_root_name) {
-            cddl_context.erase_by_key(root_key);
-        }
-        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, root_expr);
+        detail::cddl_schema_root_expr_to<value_type>(output_buffer, cddl_context, options);
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
-        const auto root_key = [] {
+        const auto root_key = [&options] {
             if constexpr (IsNamedMapWrapper<value_type>) {
                 return detail::cddl_named_map_key<named_map_value_t<value_type>>();
             } else if constexpr (IsNamedGroupWrapper<value_type>) {
                 return detail::cddl_named_group_key<named_group_value_t<value_type>>();
+            } else if constexpr (IsEnum<value_type>) {
+                if (detail::cddl_use_named_enum<value_type>(options) && !options.always_inline) {
+                    return detail::cddl_enum_key<value_type>();
+                }
+                return std::string{};
             } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
                 return detail::cddl_type_key<value_type>();
             } else {

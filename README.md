@@ -604,6 +604,10 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 
 Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
+Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer). CMake builds with this option require a Boost package config that exports `Boost::headers`; installed packages export the compile definition and Boost dependency only when they were built with the Boost.PFR names option enabled.
+
+CDDL enum value names use native C++26 reflection when `CBOR_TAGS_USE_STD_REFLECTION=ON`, or magic_enum in C++20 builds. For C++20, configure with `-DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, or define `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1` before including `cbor_tags/extensions/cbor_visualization.h`. This requires a `magic_enum` package config that exports `magic_enum::magic_enum`; installed packages export the compile definition and dependency only when they were built with the magic_enum names option enabled. Existing schemas keep rendering enums as `uint` or `int` unless `CDDLOptions::enum_mode` is set to `CDDLEnumMode::named_values`.
+
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
 
@@ -776,7 +780,7 @@ For example, a `Person` struct can be encoded as:
 {"age": 42, "name": "Ada", "employer": "Coretura"}
 ```
 
-See [C++26 named maps](doc/cxx26_named_maps.md) for serialization,
+See [named maps](doc/cxx26_named_maps.md) for serialization,
 deserialization, CDDL, and exact output examples.
 
 Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_standard_coverage.md).
@@ -789,7 +793,9 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 - nameof (optional, but required for CDDL)
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
-- CMake 3.20+.
+- Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
+- Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.8 or newer.
+- CMake 3.20+, or 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`.
 
 ## 📦 Installation
 
@@ -804,7 +810,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.15.0 # or specify a particular commit/tag
+  GIT_TAG v0.16.0 # or specify a particular commit/tag
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -822,6 +828,21 @@ cmake -B build -DCBOR_TAGS_INSTALL=ON -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
 cmake --build build
 cmake --install build
 ```
+
+`CBOR_TAGS_INSTALL=ON` requires CMake 3.25 or newer because the install package
+helper is target_install_package.cmake v7.
+
+Package-manager opt-in for optional reflection backends:
+
+```bash
+conan install . -o cbor-tags/*:boost_pfr_names=True
+conan install . -o cbor-tags/*:magic_enum_names=True
+vcpkg install --x-feature=boost-pfr-names
+vcpkg install --x-feature=magic-enum-names
+```
+
+The package features install the optional dependencies; still configure
+`cbor_tags` with the matching CMake option when building an enabled install.
 
 ## 💡 CMake Integration
 
@@ -887,13 +908,12 @@ std::pmr::map<std::pmr::string, std::pmr::string>
 std::pmr::vector<std::optional<std::pmr::string>>
 ```
 
-Important limitations:
+Important limitations(TODO):
 
 - This is allocation containment, not schema validation.
 - Use an external scan or application policy when you need max array, map, or string sizes.
-- Non-PMR members, `std::vector`, `std::string`, and other default-allocator containers are not contained by a PMR arena.
 - `std::variant` alternatives do not currently receive parent PMR allocator context.
-- A bounded arena must use a bounded upstream resource, commonly `std::pmr::null_memory_resource()`.
+- A bounded arena must use a bounded upstream resource, e.g `std::pmr::null_memory_resource()`.
 
 A future scanning pass is planned for policy checks before materializing values.
 That pass should be the right place to reject messages by declared array, map,
@@ -904,9 +924,9 @@ allocating the target object graph first.
 
 - Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
 - WIP / experimental: range wrappers, raw encoded views, lazy tag scanning, and segmented output for zero-copy-oriented encoding. See [Experimental Range And Segment APIs](doc/experimental_ranges.md).
-- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
-- TODO: Options for encoder/decoder, such as (un)expected type tuning
-- TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
+- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming.
+- TODO: Options for encoder/decoder, such as (un)expected type tuning.
+- TODO: Performance tuning options, such as disabling some checks/safety and non-standard encodings.
 - TODO: `unique_ptr` support.
 - TODO: `shared_ptr` support.
 
@@ -950,13 +970,6 @@ Please see the public online database of [tags](https://www.iana.org/assignments
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
 
 For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
-
-## 🌟 Practical Use Cases
-
-- **IoT Communication**: Efficiently encode sensor data in memory-constrained environments
-- **Configuration Serialization**: Save and load application settings with schema validation
-- **Cross-Platform Communication**: Exchange data between different systems with a well-defined standard
-- **Storage**: Store structured data in a compact binary format
 
 ## Testing Performance and Benchmarks
 

@@ -179,3 +179,91 @@ jobs:
             cmake --build /tmp/build --parallel
             ctest --test-dir /tmp/build -C Release --output-on-failure
           '
+
+  boost-pfr-names:
+    name: Ubuntu Boost.PFR named reflection tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache curl g++ gcc ninja-build tar unzip zip
+
+    - name: Bootstrap vcpkg
+      shell: bash
+      run: |
+        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
+        git init "${RUNNER_TEMP}/vcpkg"
+        git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
+        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
+        git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
+        "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
+
+    - name: Configure CMake with Boost.PFR names
+      shell: bash
+      run: |
+        cmake --preset=boost-pfr-names \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DVCPKG_MANIFEST_FEATURES=boost-pfr-names
+
+    - name: Build
+      shell: bash
+      run: cmake --build --preset=boost-pfr-names
+
+    - name: Test
+      shell: bash
+      run: ctest --preset=boost-pfr-names
+
+  magic-enum-names:
+    name: Ubuntu magic_enum CDDL enum-name tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache curl g++ gcc ninja-build tar unzip zip
+
+    - name: Bootstrap vcpkg
+      shell: bash
+      run: |
+        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
+        git init "${RUNNER_TEMP}/vcpkg"
+        git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
+        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
+        git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
+        "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
+
+    - name: Configure CMake with magic_enum names
+      shell: bash
+      run: |
+        cmake --preset=magic-enum-names \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DVCPKG_MANIFEST_FEATURES=magic-enum-names
+
+    - name: Build
+      shell: bash
+      run: cmake --build --preset=magic-enum-names
+
+    - name: Test
+      shell: bash
+      run: ctest --preset=magic-enum-names

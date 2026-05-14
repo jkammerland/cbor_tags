@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.15.0)
+project(cbor_tags VERSION 0.16.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
@@ -10,6 +10,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add option for debug mode
 option(CBOR_TAGS_DEBUG "Enable debug mode" OFF)
 option(CBOR_TAGS_USE_STD_REFLECTION "Build cbor_tags tests with GCC C++26 std::meta reflection" OFF)
+option(CBOR_TAGS_USE_BOOST_PFR_NAMES "Enable C++20 named-map reflection via Boost.PFR field names" OFF)
+option(CBOR_TAGS_USE_MAGIC_ENUM_NAMES "Enable CDDL enum-name definitions via magic_enum" OFF)
 
 # Configure a header file to pass the CMake setting to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cbor_tags_config.h.in" "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
@@ -53,12 +55,17 @@ if(CBOR_TAGS_USE_STD_REFLECTION)
     check_cxx_source_compiles(
       [=[
 #include <meta>
+#include <string_view>
 #ifndef __cpp_impl_reflection
 #error "__cpp_impl_reflection is not defined"
 #endif
 struct S { int a; };
+enum class Color : unsigned char { red = 1, green = 2 };
 static_assert(__cpp_impl_reflection >= 202506L);
 static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
+static_assert(std::meta::enumerators_of(^^Color).size() == 2);
+static_assert(std::meta::identifier_of(std::meta::enumerators_of(^^Color)[0]) == std::string_view{"red"});
+static_assert(std::meta::extract<Color>(std::meta::enumerators_of(^^Color)[1]) == Color::green);
 int main() { return 0; }
 ]=]
       CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
@@ -76,12 +83,71 @@ int main() { return 0; }
   endif()
 endif()
 
+if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  find_package(Boost 1.84 REQUIRED CONFIG)
+  if(NOT TARGET Boost::headers)
+    message(FATAL_ERROR "CBOR_TAGS_USE_BOOST_PFR_NAMES requires a Boost CMake config package that exports Boost::headers.")
+  endif()
+
+  include(CheckCXXSourceCompiles)
+  set(_CBOR_TAGS_CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}")
+  set(_CBOR_TAGS_BOOST_INCLUDE_DIRS ${Boost_INCLUDE_DIRS})
+  get_target_property(_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS Boost::headers INTERFACE_INCLUDE_DIRECTORIES)
+  if(_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS)
+    list(APPEND _CBOR_TAGS_BOOST_INCLUDE_DIRS ${_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS})
+  endif()
+  list(REMOVE_DUPLICATES _CBOR_TAGS_BOOST_INCLUDE_DIRS)
+  set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${_CBOR_TAGS_BOOST_INCLUDE_DIRS})
+  check_cxx_source_compiles(
+    [=[
+#include <boost/pfr/core.hpp>
+#include <boost/pfr/core_name.hpp>
+#include <string_view>
+#ifndef BOOST_PFR_CORE_NAME_ENABLED
+#error "BOOST_PFR_CORE_NAME_ENABLED is not defined"
+#endif
+#if !BOOST_PFR_CORE_NAME_ENABLED
+#error "BOOST_PFR_CORE_NAME_ENABLED is disabled"
+#endif
+struct S { int field_name; };
+static_assert(boost::pfr::tuple_size_v<S> == 1);
+static_assert(boost::pfr::get_name<0, S>() == std::string_view{"field_name"});
+int main() { return 0; }
+]=]
+    CBOR_TAGS_COMPILER_HAS_BOOST_PFR_NAMES)
+  set(CMAKE_REQUIRED_INCLUDES "${_CBOR_TAGS_CMAKE_REQUIRED_INCLUDES}")
+  unset(_CBOR_TAGS_CMAKE_REQUIRED_INCLUDES)
+  unset(_CBOR_TAGS_BOOST_INCLUDE_DIRS)
+  unset(_CBOR_TAGS_BOOST_HEADERS_INCLUDE_DIRS)
+
+  if(NOT CBOR_TAGS_COMPILER_HAS_BOOST_PFR_NAMES)
+    message(FATAL_ERROR "CBOR_TAGS_USE_BOOST_PFR_NAMES requires Boost.PFR field names "
+                        "(<boost/pfr/core_name.hpp>, Boost 1.84 or newer, BOOST_PFR_CORE_NAME_ENABLED).")
+  endif()
+
+  target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_BOOST_PFR_NAMES=1)
+  target_link_libraries(${PROJECT_NAME} INTERFACE Boost::headers)
+endif()
+
+if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
+  find_package(magic_enum 0.9.8 REQUIRED CONFIG)
+  if(NOT TARGET magic_enum::magic_enum)
+    message(FATAL_ERROR "CBOR_TAGS_USE_MAGIC_ENUM_NAMES requires a magic_enum CMake config that exports magic_enum::magic_enum.")
+  endif()
+
+  target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1)
+  target_link_libraries(${PROJECT_NAME} INTERFACE magic_enum::magic_enum)
+endif()
+
 # Build options
 option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
 option(CBOR_TAGS_BUILD_CLI "Build cbor_tags_cli" ${CBOR_TAGS_BUILD_TESTS})
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
+if(CBOR_TAGS_INSTALL AND CMAKE_VERSION VERSION_LESS 3.25)
+  message(FATAL_ERROR "CBOR_TAGS_INSTALL requires CMake 3.25 or newer because target_install_package.cmake v7 requires it.")
+endif()
 
 # Add tl::expected - the only dependency if not using compiler supporting c++23 std::expected
 option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
@@ -98,9 +164,9 @@ if(NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
     GITHUB_REPOSITORY
     TartanLlama/expected
     VERSION
-    1.2.0
+    1.3.1
     GIT_TAG
-    v1.2.0
+    v1.3.1
     OPTIONS
     "EXPECTED_BUILD_TESTS OFF"
     "EXPECTED_BUILD_PACKAGE OFF")
@@ -108,15 +174,53 @@ else()
   find_package(tl-expected REQUIRED)
 endif()
 
+if(CBOR_TAGS_INSTALL)
+  find_package(fmt REQUIRED CONFIG)
+else()
+  find_package(fmt CONFIG QUIET)
+  if(NOT TARGET fmt::fmt)
+    cpmaddpackage("gh:fmtlib/fmt#11.1.2")
+  endif()
+endif()
+if(NOT TARGET fmt::fmt)
+  message(FATAL_ERROR "cbor_tags requires a fmt CMake config that exports fmt::fmt.")
+endif()
+if(DEFINED fmt_VERSION AND fmt_VERSION VERSION_LESS 11.0.2)
+  message(FATAL_ERROR "cbor_tags requires fmt 11.0.2 or newer.")
+endif()
+
+if(CBOR_TAGS_INSTALL)
+  find_package(nameof REQUIRED CONFIG)
+else()
+  find_package(nameof CONFIG QUIET)
+  if(NOT TARGET nameof::nameof)
+    cpmaddpackage("gh:Neargye/nameof@0.10.4")
+  endif()
+endif()
+if(NOT TARGET nameof::nameof)
+  message(FATAL_ERROR "cbor_tags requires a nameof CMake config that exports nameof::nameof.")
+endif()
+if(DEFINED nameof_VERSION AND nameof_VERSION VERSION_LESS 0.10.4)
+  message(FATAL_ERROR "cbor_tags requires nameof 0.10.4 or newer.")
+endif()
+
 # Define public dependencies (if any)
 set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
 # If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
 if(CBOR_TAGS_USE_SYSTEM_EXPECTED)
-  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(tl-expected)")
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "tl-expected REQUIRED")
+endif()
+list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "fmt REQUIRED CONFIG")
+list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "nameof REQUIRED CONFIG")
+if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "Boost 1.84 REQUIRED CONFIG")
+endif()
+if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.8 REQUIRED CONFIG")
 endif()
 
 # Link dependencies
-target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected>)
+target_link_libraries(${PROJECT_NAME} INTERFACE $<IF:$<BOOL:${CBOR_TAGS_USE_SYSTEM_EXPECTED}>,tl::expected,expected> fmt::fmt nameof::nameof)
 
 # Make ${PROJECT_NAME} depend on the generated header add tools - reflection module generator - makes cbor_reflection_impl.h
 if(CBOR_TAGS_BUILD_CLI OR CBOR_TAGS_BUILD_TOOLS)
@@ -145,8 +249,6 @@ option(CBOR_TAGS_TIDY_TARGET "Enable clang-tidy target" OFF)
 option(CBOR_TAGS_TIDY_TESTS "Run clang-tidy on test sources" OFF)
 option(CBOR_TAGS_TIDY_BENCHMARKS "Deprecated/no-op: benchmark sources are excluded from clang-tidy" OFF)
 if(CBOR_TAGS_TIDY_TARGET)
-  cpmaddpackage("gh:fmtlib/fmt#11.1.2")
-  cpmaddpackage("gh:Neargye/nameof@0.10.4")
   cpmaddpackage("gh:jkammerland/clang-tidy.cmake@1.2.0")
   add_library(cbor_tags_tidy OBJECT EXCLUDE_FROM_ALL tools/cbor_tags_tidy.cpp)
   target_link_libraries(cbor_tags_tidy PRIVATE cbor::tags fmt::fmt nameof::nameof)
@@ -164,8 +266,12 @@ if(CBOR_TAGS_BUILD_BENCHMARKS)
 endif()
 
 if(CBOR_TAGS_INSTALL)
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@6.0.1)
-  target_install_package(${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
+  cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.6)
+  set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
+  if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
+    list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
+  endif()
+  target_install_package(${CBOR_TAGS_INSTALL_PACKAGE_ARGS})
 endif()
 
 # CMake Presets are available for this project

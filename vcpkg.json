@@ -1,18 +1,54 @@
 {
-    "name": "cbor-tags",
-    "version": "0.15.0",
-    "description": "RFC 8949 implementation with automatic reflection",
-    "homepage": "https://github.com/jkammerland/cbor_tags",
-    "license": "MIT",
-    "dependencies": [
+  "name": "cbor-tags",
+  "version": "0.16.0",
+  "description": "RFC 8949 implementation with automatic reflection",
+  "homepage": "https://github.com/jkammerland/cbor_tags",
+  "license": "MIT",
+  "builtin-baseline": "a7f2963aed6b381ce54c0803330bb4de36cd3241",
+  "dependencies": [
+    {
+      "name": "tl-expected",
+      "version>=": "1.1.0"
+    },
+    {
+      "name": "nameof",
+      "version>=": "0.10.4"
+    },
+    {
+      "name": "fmt",
+      "version>=": "11.0.2"
+    }
+  ],
+  "features": {
+    "boost-pfr-names": {
+      "description": "Install Boost.PFR dependencies for the optional C++20 named-map reflection backend.",
+      "dependencies": [
         {
-            "name": "tl-expected",
-            "version>=": "1.1.0"
+          "name": "boost-cmake",
+          "version>=": "1.84.0"
+        },
+        {
+          "name": "boost-config",
+          "version>=": "1.84.0"
+        },
+        {
+          "name": "boost-headers",
+          "version>=": "1.84.0"
+        },
+        {
+          "name": "boost-pfr",
+          "version>=": "1.84.0"
         }
-    ],
-    "builtin-baseline": "7476f0d4e77d3333fbb249657df8251c28c4faae",
-    "configureArgs": [
-        "-DCBOR_TAGS_INSTALL=ON",
-        "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON"
-    ]
+      ]
+    },
+    "magic-enum-names": {
+      "description": "Install magic_enum dependencies for optional CDDL enum-name definitions.",
+      "dependencies": [
+        {
+          "name": "magic-enum",
+          "version>=": "0.9.8"
+        }
+      ]
+    }
+  }
 }

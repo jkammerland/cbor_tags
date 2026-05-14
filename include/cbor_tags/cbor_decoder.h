@@ -726,10 +726,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename U> constexpr status_code decode([[maybe_unused]] as_named_map<U> value) {
-#if CBOR_TAGS_HAS_STD_REFLECTION
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
         return detail::decode_named_map(*this, value.value_);
 #else
-        static_assert(always_false<std::remove_cvref_t<U>>::value, "as_named_map requires C++26 static reflection");
+        static_assert(always_false<std::remove_cvref_t<U>>::value,
+                      "as_named_map requires named reflection (C++26 std::meta or Boost.PFR field names)");
         return status_code::error;
 #endif
     }

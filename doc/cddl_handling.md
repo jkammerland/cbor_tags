@@ -94,6 +94,7 @@ Generates CDDL schema for the given type into output buffer
 - `row_options.format_by_rows`: Format multi-field aggregate payload arrays across multiple lines
 - `always_inline`: Inline nested aggregate definitions when possible; recursive references stay named
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
+- `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`
 
 Generated aggregate schemas mirror the default encoder shape. Multi-field
 aggregates are arrays, single-field aggregates are the single payload value,
@@ -101,6 +102,42 @@ maps are rendered as `{* key => value}`, and sequence containers are rendered
 as `[* value]`. Static tags render as `#6.n(payload)`. Dynamic tag values are
 not available from the type alone, so dynamic tags render as `#6(payload)`.
 Recursive aggregate types are emitted as named CDDL rules.
+
+### Enum Names
+
+By default, C++ enum types render as their CBOR integer shape because the
+decoder accepts any value representable by the enum's underlying type:
+
+```cpp
+enum class Color : std::uint8_t { red = 1, green = 2, blue = 4 };
+
+fmt::memory_buffer schema;
+cbor::tags::cddl_schema_to<Color>(schema, {.row_options = {.format_by_rows = false}});
+// root = uint
+```
+
+When the library is built with `CBOR_TAGS_USE_STD_REFLECTION=ON` or
+`CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, CDDL output can opt into declared
+enumerator values:
+
+```cpp
+fmt::memory_buffer named_schema;
+cbor::tags::cddl_schema_to<Color>(
+    named_schema,
+    {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::CDDLEnumMode::named_values});
+// Color = &(red: 1, green: 2, blue: 4)
+```
+
+This schema is stricter than the default decoder policy: unnamed but
+underlying-representable enum values still decode, while the generated named
+CDDL choice only accepts the declared enumerators reported by native reflection
+or magic_enum.
+
+With `magic_enum`, declared enumerators are discovered from its configured scan
+range. The default range is `[-128, 127]`; values outside that range are not
+reported unless the application widens the range, for example with a
+`magic_enum::customize::enum_range<T>` specialization defined before schema
+generation.
 
 ### C++26 Named Maps
 
@@ -130,7 +167,12 @@ cbor::tags::cddl_schema_to<cbor::tags::as_named_map<Person>>(
 group into the surrounding map, and use
 `as_named_extension<std::map<std::string, T>>` to capture unmatched text keys
 and render `* tstr => T`. Unknown keys are rejected unless such an extension
-field is present.
+field is present. Use only one flattened `as_named_extension` field per named
+map shape; multiple extension fields are rejected at compile time because an
+unknown key would not have a unique owner. Nested `as_named_map` members are
+scoped maps and may have their own extension field. Fixed field names must also
+be unique after flattening all `as_named_group` members; duplicate fixed names
+are rejected at compile time.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data
@@ -171,6 +213,7 @@ and invalid text strings render as `non-utf8(N)`, where `N` is byte length.
 - C++20 compiler
 - [fmtlib](https://github.com/fmtlib/fmt)
 - [nameof](https://github.com/Neargye/nameof)
+- [magic_enum](https://github.com/Neargye/magic_enum), optional for named enum CDDL in C++20 builds
 
 ## Documentation
 

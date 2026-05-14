@@ -1,7 +1,18 @@
-# C++26 Named Maps
+# Named Maps
 
 Named maps encode a struct as a CBOR map using reflected C++ member names as
-text-string keys. This requires C++26 static reflection.
+text-string keys. This requires named reflection, either C++26 static reflection
+or the C++20 Boost.PFR field-name backend.
+
+Enable one of the named-reflection backends:
+
+```bash
+cmake -B build -DCBOR_TAGS_USE_STD_REFLECTION=ON
+cmake -B build -DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON
+```
+
+The Boost.PFR backend requires Boost 1.84 or newer, `<boost/pfr/core_name.hpp>`,
+and `BOOST_PFR_CORE_NAME_ENABLED`.
 
 All examples below assume:
 
@@ -89,11 +100,31 @@ dec(as_named_map{decoded});
 // Required fields:
 //   Missing required keys are rejected.
 //
+// Optional fields:
+//   Missing optional keys decode as std::nullopt.
+//   Explicit CBOR null values are rejected for optional named-map fields.
+//
 // Duplicate fields:
 //   Duplicate known keys are rejected.
 //
 // Unknown fields:
 //   Unknown keys are rejected unless the struct has an extension field.
+//
+// Extension key storage:
+//   Owning key types such as std::string work with contiguous and
+//   non-contiguous decoder inputs. Borrowed key types such as
+//   std::string_view require contiguous input and must not outlive it.
+//
+// Extension fields:
+//   A flattened named-map shape may contain at most one extension field.
+//   Multiple as_named_extension members in the root or nested named groups are
+//   rejected at compile time because ownership of an unknown key would be
+//   ambiguous. Nested as_named_map members are scoped maps and may have their
+//   own extension field.
+//
+// Flattened fixed keys:
+//   Fixed field names must be unique after flattening all as_named_group
+//   members. Duplicate fixed names are rejected at compile time.
 ```
 
 ## Optional Fields, Groups, And Extension Keys

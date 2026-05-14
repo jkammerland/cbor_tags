@@ -25,6 +25,7 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <memory>
 #include <nameof.hpp>
 #include <optional>
 #include <ranges>
@@ -50,9 +51,42 @@ concept CanInstantiateBinaryView = requires { typename bstr_view<R>; };
 TEST_CASE("CMake std reflection option enables native reflection") {
 #if CBOR_TAGS_USE_STD_REFLECTION == 1
     static_assert(CBOR_TAGS_HAS_STD_REFLECTION == 1);
+    static_assert(CBOR_TAGS_HAS_NAMED_REFLECTION == 1);
 #endif
     CHECK(true);
 }
+
+TEST_CASE("CMake Boost.PFR names option enables named reflection") {
+#if CBOR_TAGS_USE_BOOST_PFR_NAMES == 1
+    static_assert(CBOR_TAGS_HAS_BOOST_PFR_NAMES == 1);
+    static_assert(CBOR_TAGS_HAS_NAMED_REFLECTION == 1);
+#endif
+    CHECK(true);
+}
+
+#if CBOR_TAGS_USE_BOOST_PFR_NAMES == 1
+TEST_CASE("Boost.PFR rvalue to_tuple moves aggregate fields") {
+    struct MoveOnlyAggregate {
+        std::unique_ptr<int> value;
+    };
+    struct ThrowingMove {
+        ThrowingMove() = default;
+        ThrowingMove(ThrowingMove &&) noexcept(false) {}
+        ThrowingMove(const ThrowingMove &)                                = delete;
+        auto operator=(ThrowingMove &&) noexcept(false) -> ThrowingMove & = default;
+        auto operator=(const ThrowingMove &) -> ThrowingMove &            = delete;
+    };
+    struct ThrowingMoveAggregate {
+        ThrowingMove value;
+    };
+
+    static_assert(!noexcept(to_tuple(ThrowingMoveAggregate{})));
+
+    auto tuple = to_tuple(MoveOnlyAggregate{.value = std::make_unique<int>(42)});
+    REQUIRE(std::get<0>(tuple) != nullptr);
+    CHECK_EQ(*std::get<0>(tuple), 42);
+}
+#endif
 
 TEST_CASE("Test IsUnsigned concept") {
     static_assert(IsUnsigned<std::uint8_t>);
