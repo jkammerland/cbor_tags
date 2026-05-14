@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -32,6 +33,10 @@ namespace cbor::tags::detail::custom_codec_1 {
 template <typename T> struct is_std_array : std::false_type {};
 template <typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std::true_type {};
 template <typename T> inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct is_mutable_byte_span : std::false_type {};
+template <std::size_t Extent> struct is_mutable_byte_span<std::span<std::byte, Extent>> : std::true_type {};
+template <typename T> inline constexpr bool is_mutable_byte_span_v = is_mutable_byte_span<std::remove_cvref_t<T>>::value;
 
 template <typename T> struct is_basic_string_view : std::false_type {};
 template <typename Char, typename Traits>
@@ -191,16 +196,93 @@ template <typename T> constexpr std::uint64_t tag_for(const T &value) {
 
 template <typename T> constexpr std::remove_cvref_t<T> make_decode_value_for_existing(T &value) {
     using type = std::remove_cvref_t<T>;
-    if constexpr (IsOptional<type>) {
+    if constexpr (is_static_tag_t<type>::value || is_dynamic_tag_t<type>) {
+        return value;
+    } else if constexpr (IsOptional<type>) {
         if (value.has_value()) {
-            return type{std::in_place, cbor::tags::detail::make_decode_value_for_optional<typename type::value_type>(value)};
+            return type{std::in_place, make_decode_value_for_existing(*value)};
         }
         return type{};
+    } else if constexpr (is_mutable_byte_span_v<type>) {
+        return value;
     } else if constexpr (requires { value.get_allocator(); }) {
         return std::make_from_tuple<type>(std::uses_allocator_construction_args<type>(value.get_allocator()));
+    } else if constexpr (is_std_array_v<type>) {
+        return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+            return type{make_decode_value_for_existing(std::get<Indices>(value))...};
+        }(std::make_index_sequence<std::tuple_size_v<type>>{});
+    } else if constexpr (IsUntaggedTuple<type> || IsTaggedTuple<type>) {
+        return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+            return type{make_decode_value_for_existing(std::get<Indices>(value))...};
+        }(std::make_index_sequence<std::tuple_size_v<type>>{});
+    } else if constexpr (std::is_aggregate_v<type> && !is_std_array_v<type> && !IsMap<type> && !IsRangeOfCborValues<type> &&
+                         !IsVariant<type> && !is_text_string_v<type> && !IsBinaryString<type>) {
+        auto tuple       = cbor::tags::to_tuple(value);
+        using tuple_type = std::remove_cvref_t<decltype(tuple)>;
+        return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+            return type{make_decode_value_for_existing(std::get<Indices>(tuple))...};
+        }(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
     } else {
         return type{};
     }
+}
+
+template <typename T> constexpr T make_decode_value_for_existing_optional(std::optional<T> &value) {
+    if (value.has_value()) {
+        return make_decode_value_for_existing(*value);
+    }
+    return cbor::tags::detail::make_decode_value_for_optional<T>(value);
+}
+
+template <typename T, typename Allocator> constexpr std::remove_cvref_t<T> make_decode_value_with_allocator(const Allocator &allocator) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (IsOptional<type>) {
+        return type{std::in_place, make_decode_value_with_allocator<typename type::value_type>(allocator)};
+    } else if constexpr (std::uses_allocator_v<type, Allocator>) {
+        return std::make_from_tuple<type>(std::uses_allocator_construction_args<type>(allocator));
+    } else if constexpr (is_std_array_v<type>) {
+        return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+            return type{((void)Indices, make_decode_value_with_allocator<typename type::value_type>(allocator))...};
+        }(std::make_index_sequence<std::tuple_size_v<type>>{});
+    } else if constexpr (IsUntaggedTuple<type> || IsTaggedTuple<type>) {
+        return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+            return type{make_decode_value_with_allocator<std::remove_cvref_t<std::tuple_element_t<Indices, type>>>(allocator)...};
+        }(std::make_index_sequence<std::tuple_size_v<type>>{});
+    } else if constexpr (std::is_aggregate_v<type> && !is_std_array_v<type> && !IsMap<type> && !IsRangeOfCborValues<type> &&
+                         !IsVariant<type> && !is_text_string_v<type> && !IsBinaryString<type>) {
+        using tuple_type = std::remove_cvref_t<decltype(cbor::tags::to_tuple(std::declval<type &>()))>;
+        return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+            return type{make_decode_value_with_allocator<std::remove_cvref_t<std::tuple_element_t<Indices, tuple_type>>>(allocator)...};
+        }(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+    } else {
+        return type{};
+    }
+}
+
+template <typename Value, typename Container> constexpr Value make_decode_value_for_container(Container &container) {
+    if constexpr (requires { container.get_allocator(); }) {
+        return make_decode_value_with_allocator<Value>(container.get_allocator());
+    } else {
+        return Value{};
+    }
+}
+
+template <typename T> constexpr status_code reserve_decoded_container(T &value, std::uint64_t length) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (requires { typename type::size_type; }) {
+        if (length > static_cast<std::uint64_t>(std::numeric_limits<typename type::size_type>::max())) {
+            return status_code::error;
+        }
+    }
+    if constexpr (requires { value.max_size(); }) {
+        if (length > static_cast<std::uint64_t>(value.max_size())) {
+            return status_code::error;
+        }
+    }
+    if constexpr (HasReserve<type>) {
+        value.reserve(static_cast<typename type::size_type>(length));
+    }
+    return status_code::success;
 }
 
 template <typename T> constexpr bool first_tuple_field_is_tag_v = false;
@@ -387,6 +469,11 @@ template <typename T> constexpr status_code decode_byte_string(span_reader &read
             return status_code::unexpected_group_size;
         }
     }
+    if constexpr (is_mutable_byte_span_v<type>) {
+        if (length != static_cast<std::uint64_t>(value.size())) {
+            return status_code::unexpected_group_size;
+        }
+    }
     std::span<const std::byte> bytes{};
     status = reader.read_bytes(static_cast<std::size_t>(length), bytes);
     if (status != status_code::success) {
@@ -394,8 +481,19 @@ template <typename T> constexpr status_code decode_byte_string(span_reader &read
     }
     if constexpr (IsConstBinaryView<type>) {
         value = T(bytes.data(), bytes.size());
+    } else if constexpr (is_mutable_byte_span_v<type>) {
+        for (std::size_t i = 0; i < bytes.size(); ++i) {
+            value[i] = bytes[i];
+        }
     } else {
-        value = T(bytes.begin(), bytes.end());
+        auto decoded = make_decode_value_for_existing(value);
+        status       = reserve_decoded_container(decoded, length);
+        if (status != status_code::success) {
+            return status;
+        }
+        detail::appender<type> appender;
+        appender(decoded, bytes);
+        value = std::move(decoded);
     }
     return status_code::success;
 }
@@ -483,8 +581,8 @@ template <typename T> constexpr status_code decode_optional(span_reader &reader,
     if (raw != 1U) {
         return status_code::error;
     }
-    T decoded{};
-    status = decode_value(reader, decoded);
+    auto decoded = make_decode_value_for_existing_optional(value);
+    status       = decode_value(reader, decoded);
     if (status != status_code::success) {
         return status;
     }
@@ -545,11 +643,14 @@ template <typename T> constexpr status_code decode_map(span_reader &reader, T &v
     if constexpr (requires { value.clear(); }) {
         value.clear();
     }
+    status = reserve_decoded_container(value, length);
+    if (status != status_code::success) {
+        return status;
+    }
     detail::appender<T> appender;
     for (std::uint64_t i = 0; i < length; ++i) {
-        std::pair<typename T::key_type, typename T::mapped_type> entry{
-            cbor::tags::detail::make_decode_value_for<typename T::key_type>(value),
-            cbor::tags::detail::make_decode_value_for<typename T::mapped_type>(value)};
+        std::pair<typename T::key_type, typename T::mapped_type> entry{make_decode_value_for_container<typename T::key_type>(value),
+                                                                       make_decode_value_for_container<typename T::mapped_type>(value)};
         status = decode_value(reader, entry.first);
         if (status != status_code::success) {
             return status;
@@ -603,12 +704,13 @@ template <typename T> constexpr status_code decode_range(span_reader &reader, T 
         if constexpr (requires { value.clear(); }) {
             value.clear();
         }
-        if constexpr (HasReserve<std::remove_cvref_t<T>>) {
-            value.reserve(static_cast<typename T::size_type>(length));
+        status = reserve_decoded_container(value, length);
+        if (status != status_code::success) {
+            return status;
         }
         detail::appender<T> appender;
         for (std::uint64_t i = 0; i < length; ++i) {
-            auto element = cbor::tags::detail::make_decode_value_for<typename T::value_type>(value);
+            auto element = make_decode_value_for_container<typename T::value_type>(value);
             status       = decode_value(reader, element);
             if (status != status_code::success) {
                 return status;

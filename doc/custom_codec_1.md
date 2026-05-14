@@ -113,8 +113,8 @@ as lazy tag matches do.
   no field names or CBOR array wrapper inside the payload.
 
 This means the decoded C++ type must match the schema used for encoding. The
-codec validates the outer tag, the byte-string wrapper, malformed
-payloads, trailing payload bytes, and incomplete input, but it does not carry
+codec validates the outer tag, the byte-string wrapper, trailing payload bytes,
+incomplete input, and malformed scalar/schema markers, but it does not carry
 field names or generic type descriptors inside the payload.
 
 ## Borrowed Views
@@ -187,6 +187,18 @@ again for writing.
   allocator for that scratch storage when possible; fixed-size and custom
   segment outputs may still allocate through the library's default segment
   storage.
+- Decoding from non-contiguous CBOR input copies the byte-string payload into a
+  temporary `std::vector<std::byte>` before payload decoding. That scratch
+  allocation is bounded by the outer byte-string payload size, but it is not
+  allocated from the target object's PMR resource.
+- Leading `dynamic_tag` fields are tag metadata and are not stored again inside
+  payload fields. Decoding preserves them when the destination object already
+  carries the expected tag, but newly materialized range or map elements cannot
+  infer per-element dynamic tag values from the payload.
+- `std::variant` alternatives do not currently receive parent PMR allocator
+  context. This matches the main decoder limitation; avoid PMR alternatives
+  inside variants when allocator containment matters, or decode that branch
+  explicitly.
 - Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
   CBOR level. Payload fields use this codec's schema-bound payload
   rules, not the normal extension dispatch path.

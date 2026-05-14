@@ -1,5 +1,6 @@
 #include "test_util.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cbor_tags/cbor_decoder.h>
@@ -73,6 +74,16 @@ struct compact_deep_payload {
     bool operator==(const compact_deep_payload &) const = default;
 };
 
+struct custom_codec_1_pmr_aggregate_payload {
+    std::pmr::string            label;
+    std::pmr::vector<std::byte> bytes;
+};
+
+struct custom_codec_1_dynamic_tag_payload {
+    cbor::tags::dynamic_tag<std::uint16_t> cbor_tag;
+    std::uint8_t                           value{};
+};
+
 struct compact_unsized_even_view {
     struct iterator {
         using iterator_concept = std::input_iterator_tag;
@@ -131,6 +142,23 @@ struct custom_codec_1_single_pass_view {
     [[nodiscard]] constexpr std::default_sentinel_t end() const noexcept { return {}; }
 };
 
+struct custom_codec_1_small_size_vector {
+    using value_type = std::uint8_t;
+    using size_type  = std::uint8_t;
+
+    std::vector<value_type> values;
+
+    void clear() { values.clear(); }
+    void reserve(size_type count) { values.reserve(count); }
+    void push_back(value_type value) { values.push_back(value); }
+
+    [[nodiscard]] auto      begin() noexcept { return values.begin(); }
+    [[nodiscard]] auto      end() noexcept { return values.end(); }
+    [[nodiscard]] auto      begin() const noexcept { return values.begin(); }
+    [[nodiscard]] auto      end() const noexcept { return values.end(); }
+    [[nodiscard]] size_type size() const noexcept { return static_cast<size_type>(values.size()); }
+};
+
 template <typename T> void check_compact_wire(const T &in, T out, std::string_view expected_hex) {
     using namespace cbor::tags;
     using namespace cbor::tags::ext::custom_codec_1;
@@ -185,6 +213,7 @@ static_assert(std::ranges::range<compact_unsized_even_view>);
 static_assert(!std::ranges::sized_range<compact_unsized_even_view>);
 static_assert(std::ranges::range<custom_codec_1_single_pass_view>);
 static_assert(!std::ranges::sized_range<custom_codec_1_single_pass_view>);
+static_assert(std::ranges::range<custom_codec_1_small_size_vector>);
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag<::compact_payload>() { return static_tag<1000>{}; }
@@ -390,6 +419,84 @@ TEST_CASE("custom_codec_1 handles pmr text strings without the default resource"
     CHECK(decoded.get_allocator().resource() == &decode_resource);
 }
 
+TEST_CASE("custom_codec_1 handles pmr byte strings without the default resource") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto source = std::vector<std::byte>(64, std::byte{0xAB});
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    std::array<std::byte, 256>          decode_storage{};
+    std::pmr::monotonic_buffer_resource decode_resource(decode_storage.data(), decode_storage.size(), std::pmr::null_memory_resource());
+    std::pmr::vector<std::byte>         decoded{&decode_resource};
+
+    throwing_memory_resource      throwing_default;
+    default_memory_resource_guard guard{&throwing_default};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+    CHECK(std::ranges::equal(decoded, source));
+    CHECK(decoded.get_allocator().resource() == &decode_resource);
+}
+
+TEST_CASE("custom_codec_1 decodes mutable byte spans into existing storage") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto source = std::vector{std::byte{0xAA}, std::byte{0xBB}};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    auto                    storage = std::array<std::byte, 2>{};
+    std::span<std::byte, 2> decoded{storage};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+    CHECK(std::ranges::equal(storage, source));
+}
+
+TEST_CASE("custom_codec_1 decodes dynamic mutable byte spans into existing storage") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto source = std::vector{std::byte{0xCA}, std::byte{0xFE}, std::byte{0x01}};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    auto                 storage = std::array<std::byte, 3>{};
+    std::span<std::byte> decoded{storage};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+    CHECK(std::ranges::equal(storage, source));
+}
+
+TEST_CASE("custom_codec_1 rejects mutable byte span size mismatches") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto source = std::vector{std::byte{0xAA}, std::byte{0xBB}};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    auto                    storage = std::array<std::byte, 1>{};
+    std::span<std::byte, 1> decoded{storage};
+
+    auto dec    = make_decoder<custom_codec_1>(encoded);
+    auto result = dec(as_custom_codec_1(static_tag<1>{}, decoded));
+    REQUIRE_FALSE(result);
+    CHECK(result.error() == status_code::unexpected_group_size);
+}
+
 TEST_CASE("custom_codec_1 propagates pmr allocators to nested text strings") {
     using namespace cbor::tags;
     using namespace cbor::tags::ext::custom_codec_1;
@@ -414,6 +521,139 @@ TEST_CASE("custom_codec_1 propagates pmr allocators to nested text strings") {
         CHECK(std::string_view(decoded[i].data(), decoded[i].size()) == std::string_view(source[i].data(), source[i].size()));
         CHECK(decoded[i].get_allocator().resource() == &decode_resource);
     }
+}
+
+TEST_CASE("custom_codec_1 propagates pmr allocators to nested optional text strings") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto source = std::vector<std::optional<std::string>>{std::string(64, 'o'), std::nullopt};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    std::array<std::byte, 1024>         decode_storage{};
+    std::pmr::monotonic_buffer_resource decode_resource(decode_storage.data(), decode_storage.size(), std::pmr::null_memory_resource());
+    std::pmr::vector<std::optional<std::pmr::string>> decoded{&decode_resource};
+
+    throwing_memory_resource      throwing_default;
+    default_memory_resource_guard guard{&throwing_default};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+
+    REQUIRE(decoded.size() == source.size());
+    REQUIRE(decoded[0].has_value());
+    CHECK(std::string_view(decoded[0]->data(), decoded[0]->size()) == std::string_view(source[0]->data(), source[0]->size()));
+    CHECK(decoded[0]->get_allocator().resource() == &decode_resource);
+    CHECK_FALSE(decoded[1].has_value());
+}
+
+TEST_CASE("custom_codec_1 preserves pmr allocators in aggregate fields") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    std::array<std::byte, 512>           source_storage{};
+    std::pmr::monotonic_buffer_resource  source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
+    custom_codec_1_pmr_aggregate_payload source{
+        .label = std::pmr::string(64, 'a', &source_resource),
+        .bytes = std::pmr::vector<std::byte>(64, std::byte{0xAB}, &source_resource),
+    };
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    std::array<std::byte, 1024>          decode_storage{};
+    std::pmr::monotonic_buffer_resource  decode_resource(decode_storage.data(), decode_storage.size(), std::pmr::null_memory_resource());
+    custom_codec_1_pmr_aggregate_payload decoded{
+        .label = std::pmr::string{&decode_resource},
+        .bytes = std::pmr::vector<std::byte>{&decode_resource},
+    };
+
+    throwing_memory_resource      throwing_default;
+    default_memory_resource_guard guard{&throwing_default};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+
+    CHECK(std::string_view(decoded.label.data(), decoded.label.size()) == std::string_view(source.label.data(), source.label.size()));
+    CHECK(std::ranges::equal(decoded.bytes, source.bytes));
+    CHECK(decoded.label.get_allocator().resource() == &decode_resource);
+    CHECK(decoded.bytes.get_allocator().resource() == &decode_resource);
+}
+
+TEST_CASE("custom_codec_1 preserves pmr allocators in engaged optional aggregate fields") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    std::array<std::byte, 512>          source_storage{};
+    std::pmr::monotonic_buffer_resource source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
+    std::optional<custom_codec_1_pmr_aggregate_payload> source{custom_codec_1_pmr_aggregate_payload{
+        .label = std::pmr::string(64, 'q', &source_resource),
+        .bytes = std::pmr::vector<std::byte>(64, std::byte{0xBC}, &source_resource),
+    }};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    std::array<std::byte, 1024>         decode_storage{};
+    std::pmr::monotonic_buffer_resource decode_resource(decode_storage.data(), decode_storage.size(), std::pmr::null_memory_resource());
+    std::optional<custom_codec_1_pmr_aggregate_payload> decoded{custom_codec_1_pmr_aggregate_payload{
+        .label = std::pmr::string{&decode_resource},
+        .bytes = std::pmr::vector<std::byte>{&decode_resource},
+    }};
+
+    throwing_memory_resource      throwing_default;
+    default_memory_resource_guard guard{&throwing_default};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+
+    REQUIRE(decoded.has_value());
+    CHECK(std::string_view(decoded->label.data(), decoded->label.size()) == std::string_view(source->label.data(), source->label.size()));
+    CHECK(std::ranges::equal(decoded->bytes, source->bytes));
+    CHECK(decoded->label.get_allocator().resource() == &decode_resource);
+    CHECK(decoded->bytes.get_allocator().resource() == &decode_resource);
+}
+
+TEST_CASE("custom_codec_1 propagates pmr allocators to optional aggregate range elements") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    std::array<std::byte, 512>          source_storage{};
+    std::pmr::monotonic_buffer_resource source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
+    std::vector<std::optional<custom_codec_1_pmr_aggregate_payload>> source;
+    source.emplace_back(custom_codec_1_pmr_aggregate_payload{
+        .label = std::pmr::string(64, 'r', &source_resource),
+        .bytes = std::pmr::vector<std::byte>(64, std::byte{0xCD}, &source_resource),
+    });
+    source.emplace_back(std::nullopt);
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, source)));
+
+    std::array<std::byte, 2048>         decode_storage{};
+    std::pmr::monotonic_buffer_resource decode_resource(decode_storage.data(), decode_storage.size(), std::pmr::null_memory_resource());
+    std::pmr::vector<std::optional<custom_codec_1_pmr_aggregate_payload>> decoded{&decode_resource};
+
+    throwing_memory_resource      throwing_default;
+    default_memory_resource_guard guard{&throwing_default};
+
+    auto dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+
+    REQUIRE(decoded.size() == source.size());
+    REQUIRE(decoded[0].has_value());
+    CHECK(std::string_view(decoded[0]->label.data(), decoded[0]->label.size()) ==
+          std::string_view(source[0]->label.data(), source[0]->label.size()));
+    CHECK(std::ranges::equal(decoded[0]->bytes, source[0]->bytes));
+    CHECK(decoded[0]->label.get_allocator().resource() == &decode_resource);
+    CHECK(decoded[0]->bytes.get_allocator().resource() == &decode_resource);
+    CHECK_FALSE(decoded[1].has_value());
 }
 
 TEST_CASE("custom_codec_1 propagates pmr allocators to map text strings") {
@@ -465,6 +705,48 @@ TEST_CASE("compact tagged dynamic tags use the same compact payload core") {
     auto         dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_custom_codec_1(dynamic_tag<std::uint16_t>{300}, decoded)));
     CHECK(decoded == value);
+}
+
+TEST_CASE("compact tagged preserves embedded dynamic tag fields while decoding") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto value = custom_codec_1_dynamic_tag_payload{
+        .cbor_tag = dynamic_tag<std::uint16_t>{300},
+        .value    = 7,
+    };
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(value)));
+    CHECK_EQ(to_hex(compact), "d9012c4107");
+
+    auto decoded = custom_codec_1_dynamic_tag_payload{
+        .cbor_tag = dynamic_tag<std::uint16_t>{300},
+        .value    = 0,
+    };
+    auto dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(decoded)));
+    CHECK(decoded.cbor_tag.cbor_tag == 300);
+    CHECK(decoded.value == value.value);
+}
+
+TEST_CASE("compact tagged preserves dynamic tagged tuple fields while decoding") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const auto tagged = std::tuple{dynamic_tag<std::uint16_t>{301}, std::uint8_t{8}};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(tagged)));
+    CHECK_EQ(to_hex(compact), "d9012d4108");
+
+    auto decoded = std::tuple{dynamic_tag<std::uint16_t>{301}, std::uint8_t{}};
+    auto dec     = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(decoded)));
+    CHECK(std::get<0>(decoded).cbor_tag == 301);
+    CHECK(std::get<1>(decoded) == 8);
 }
 
 TEST_CASE("compact tagged long tag and length boundaries stay compact") {
@@ -793,6 +1075,12 @@ TEST_CASE("compact tagged rejects malformed compact lengths and variant indexes"
     {
         std::vector<std::uint16_t> decoded;
         auto                       result = decode_compact_hex("c14a80808080808080808002", as_custom_codec_1(static_tag<1>{}, decoded));
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == status_code::error);
+    }
+    {
+        custom_codec_1_small_size_vector decoded;
+        auto                             result = decode_compact_hex("c142ac02", as_custom_codec_1(static_tag<1>{}, decoded));
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::error);
     }
