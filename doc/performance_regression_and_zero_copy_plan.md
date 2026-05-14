@@ -27,7 +27,7 @@ C++26 named maps, CDDL coverage, range wrappers, lazy tag scanning, benchmark
 work, and performance recovery commits. Those changes should be measured as
 separate buckets instead of treated as one large regression.
 
-The current `as_bstr_range` implementation has a generic byte-wise path for
+An earlier `as_bstr_range` implementation exposed a generic byte-wise path for
 sized ranges:
 
 ```cpp
@@ -38,9 +38,9 @@ for (auto byte : range) {
 ```
 
 This is correct for arbitrary views, but it is unnecessarily slow for sized
-contiguous byte ranges. Direct binary-string encode still has access to
-`appender_(data_, value)`, which can use bulk insert or `memcpy` for supported
-destinations.
+contiguous byte ranges. Current public headers route sized contiguous byte ranges
+through bulk append helpers where possible; keep this historical path in mind
+when comparing older benchmark baselines.
 
 Recent benchmark rows show three useful levels for RFC 8746 typed arrays:
 
@@ -181,9 +181,10 @@ Indefinite handling:
 
 Encode behavior:
 
-- `as_encoded_item(view)` appends the borrowed encoded bytes directly
+- raw encoded views append borrowed encoded bytes directly with `enc(view)`
 - `encoded_array_view` and `encoded_map_view` encode through the same raw item
   mechanism
+- segmented helpers use the `encode_encoded_segments*` API family
 - output uses the efficient append strategy
 - no normalization from indefinite to definite is performed
 

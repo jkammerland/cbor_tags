@@ -64,7 +64,10 @@ Basic example of encoding and decoding a single cbor items:
 #include "cbor_tags/cbor_encoder.h"
 
 #include <cassert>
+#include <cstddef>
 #include <iostream>
+#include <string>
+#include <string_view>
 #include <vector>
 
 using namespace cbor::tags;
@@ -114,7 +117,7 @@ struct Tagged {
     std::string    c;
 };
 
-Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"}
+Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
 enc(tagged);
 ```
 
@@ -124,9 +127,9 @@ enc(tagged);
 Equivalent to manually encoding the struct in the following example:
 ```cpp
 Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(tagged.cbor_tag, as_array{3}, tagged.a, tagged.b, tagged.c); // same as enc(a);
+enc(static_tag<Tagged::cbor_tag>{}, as_array{3}, tagged.a, tagged.b, tagged.c); // same as enc(tagged);
 // Also equivalent to:
-// enc(a.cbor_tag, wrap_as_array{a.a, a.b, a.c});
+// enc(static_tag<Tagged::cbor_tag>{}, wrap_as_array{tagged.a, tagged.b, tagged.c});
 // Now the buffer contains the tag(321) followed by a single array with 3 elements
 
 ```
@@ -138,8 +141,11 @@ This can be taken further to any number of members or nesting, e.g a struct with
 #include "cbor_tags/cbor_encoder.h"
 
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -153,8 +159,8 @@ struct AllCborMajorsExample {
     positive                   a0; // Major type 0 (unsigned integer)
     negative                   a1; // Major type 1 (negative integer)
     int                        a;  // Major type 0 or 1 (unsigned or negative integer)
-    std::string                b;  // Major type 2 (text string)
-    std::vector<std::byte>     c;  // Major type 3 (byte string)
+    std::string                b;  // Major type 3 (text string)
+    std::vector<std::byte>     c;  // Major type 2 (byte string)
     std::vector<int>           d;  // Major type 4 (array)
     std::map<int, std::string> e;  // Major type 5 (map)
     struct B {
@@ -164,7 +170,7 @@ struct AllCborMajorsExample {
     double g;                      // Major type 7 (float)
 
     // More advanced types
-    std::variant<int, std::string, std::vector<int>> h; // Major type 0, 1, 2 or 4 (array can take major type 0 or 1)
+    std::variant<int, std::string, std::vector<int>> h; // Major type 0, 1, 3 or 4
     std::unordered_multimap<std::string, std::variant<int, std::map<std::string, double>, std::vector<float>>> i; // Major type 5 (map) ...
     std::optional<std::map<int, std::string>> j; // Major type 5 (map) or 7 (simple value std::nullopt)
 };
@@ -271,9 +277,12 @@ The example below show how cbor tags can be utilized for version handling. There
 #include "cbor_tags/cbor_encoder.h"
 
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <variant>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 enum class roles : std::uint8_t {
@@ -354,13 +363,13 @@ int main() {
     auto enc = make_encoder(data);
 
     // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
-    enc(make_tag_pair(0x10, Api1{.a = 42, .b = 43}));
+    enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}));
 
     // Encode a 0 length binary string in the middle of the buffer
     enc(std::vector<std::byte>{});
 
     // Encode Api2 with a tag of 0x20
-    enc(make_tag_pair(0x20, Api2{"hello", "world"})); 
+    enc(make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}));
 
     // Decoding - accept bstr and any tagged value
     auto dec = make_decoder(data);
@@ -1008,6 +1017,9 @@ There are many types of cbor objects defined, the major types are:
 | 5          | map 2N data items       | key/value pairs       |
 | 6          | tag of number N         | 1 data item           |
 | 7          | simple/float            | -                     |
+
+The core decoder preserves text-string bytes and does not validate UTF-8 unless
+you explicitly request diagnostic UTF-8 checking in tooling.
 
 The library name cbor_tags refers to the focus on handling tagged types(6) in a user friendly way. 
 

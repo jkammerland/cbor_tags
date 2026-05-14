@@ -70,17 +70,25 @@ whole `#6.<tag>(bstr)` envelope. Decode it with `as_custom_codec_1_payload`.
 auto matches = find_tags<1001>(out);
 auto it      = matches.begin();
 
-Message decoded_from_match{};
-auto    payload_ref = cc1::as_custom_codec_1_payload(decoded_from_match);
-auto    ok          = it->decode<cc1::custom_codec_1>(payload_ref);
+if (it != matches.end()) {
+    Message decoded_from_match{};
+    auto    payload_ref = cc1::as_custom_codec_1_payload(decoded_from_match);
+    auto    ok          = it->decode<cc1::custom_codec_1>(payload_ref);
+}
+
+if (matches.failed()) {
+    auto status = matches.status();
+}
 ```
 
 The payload decoder object also accepts the wrapper directly:
 
 ```cpp
-Message decoded_from_payload{};
-auto    payload_decoder = it->make_decoder<cc1::custom_codec_1>();
-auto    ok = payload_decoder(cc1::as_custom_codec_1_payload(decoded_from_payload));
+if (it != matches.end()) {
+    Message decoded_from_payload{};
+    auto    payload_decoder = it->make_decoder<cc1::custom_codec_1>();
+    auto    ok = payload_decoder(cc1::as_custom_codec_1_payload(decoded_from_payload));
+}
 ```
 
 Use `as_custom_codec_1(...)` for full buffers that still contain the outer tag. Use
@@ -140,6 +148,8 @@ to vectored I/O without first flattening them into one contiguous buffer:
 
 ```cpp
 #include <cbor_tags/cbor_segments.h>
+
+#include <sys/uio.h> // POSIX iovec
 
 cbor_segments segments;
 auto enc = make_encoder<cc1::custom_codec_1>(segments);
