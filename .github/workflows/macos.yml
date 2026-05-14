@@ -1,4 +1,4 @@
-name: MacOS Tests (AppleClang 26/16)
+name: macOS Tests (AppleClang C++20/26)
 
 on:
   push:
@@ -8,11 +8,12 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.config.name }}
+    name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }}
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
+        cxx_standard: [20, 26]
         config:
           - {
               name: "macOS AppleClang 26",
@@ -43,15 +44,129 @@ jobs:
     - name: Configure CMake
       shell: bash
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_TESTS=ON \
+        cxx_standard_args=(
+          -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DCMAKE_CXX_EXTENSIONS=OFF
+        )
+        if [[ "${{ matrix.cxx_standard }}" == "26" ]]; then
+          # CMake 3.31 does not model AppleClang CXX26 yet; -std=c++2c is AppleClang's C++26-preview mode.
+          preview_flags="${RUNNER_TEMP}/cbor-tags-cxx26-preview.cmake"
+          printf '%s\n' 'add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-std=c++2c>")' > "${preview_flags}"
+          cxx_standard_args=(
+            -DCMAKE_CXX_STANDARD=23
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON
+            -DCMAKE_CXX_EXTENSIONS=OFF
+            -DCMAKE_PROJECT_INCLUDE="${preview_flags}"
+          )
+        fi
+        cmake -B build-cxx${{ matrix.cxx_standard }} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
+          "${cxx_standard_args[@]}" \
           -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }}
 
     - name: Build
       shell: bash
-      run: cmake --build build --config Release
+      run: cmake --build build-cxx${{ matrix.cxx_standard }} --config Release --parallel
 
     - name: Test
-      working-directory: build
       shell: bash
-      run: ctest -C Release --output-on-failure
+      run: ctest --test-dir build-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
+
+  optional-backends:
+    name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }} ${{ matrix.backend.name }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx_standard: [20, 26]
+        config:
+          - {
+              name: "macOS AppleClang 26",
+              cc: "clang",
+              cxx: "clang++",
+              xcode_version: "^26.0.0"
+            }
+          - {
+              name: "macOS AppleClang 16",
+              cc: "clang",
+              cxx: "clang++",
+              xcode_version: "^16.2.0"
+            }
+        backend:
+          - {
+              name: "Boost.PFR names",
+              id: "boost-pfr-names",
+              option: "CBOR_TAGS_USE_BOOST_PFR_NAMES",
+              feature: "boost-pfr-names"
+            }
+          - {
+              name: "magic_enum names",
+              id: "magic-enum-names",
+              option: "CBOR_TAGS_USE_MAGIC_ENUM_NAMES",
+              feature: "magic-enum-names"
+            }
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Setup Xcode (macOS)
+      uses: maxim-lobanov/setup-xcode@v1.7.0
+      with:
+        xcode-version: ${{ matrix.config.xcode_version }}
+
+    - name: Bootstrap vcpkg
+      shell: bash
+      run: |
+        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
+        git init "${RUNNER_TEMP}/vcpkg"
+        git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
+        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
+        git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
+        "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
+
+    - name: Configure CMake with ${{ matrix.backend.name }}
+      shell: bash
+      run: |
+        build_dir="build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }}"
+        cxx_standard_args=(
+          -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DCMAKE_CXX_EXTENSIONS=OFF
+        )
+        if [[ "${{ matrix.cxx_standard }}" == "26" ]]; then
+          # CMake 3.31 does not model AppleClang CXX26 yet; -std=c++2c is AppleClang's C++26-preview mode.
+          preview_flags="${RUNNER_TEMP}/cbor-tags-cxx26-preview.cmake"
+          printf '%s\n' 'add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-std=c++2c>")' > "${preview_flags}"
+          cxx_standard_args=(
+            -DCMAKE_CXX_STANDARD=23
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON
+            -DCMAKE_CXX_EXTENSIONS=OFF
+            -DCMAKE_PROJECT_INCLUDE="${preview_flags}"
+          )
+        fi
+        cmake -B "${build_dir}" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
+          -D${{ matrix.backend.option }}=ON \
+          "${cxx_standard_args[@]}" \
+          -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }} \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DVCPKG_MANIFEST_FEATURES=${{ matrix.backend.feature }}
+
+    - name: Build
+      shell: bash
+      run: cmake --build build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} --config Release --parallel
+
+    - name: Test
+      shell: bash
+      run: ctest --test-dir build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure

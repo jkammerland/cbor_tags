@@ -21,7 +21,7 @@
 
 using namespace cbor::tags;
 
-namespace {
+namespace cbor_tags_test_cddl {
 template <typename T> std::string cddl_schema_inline() {
     fmt::memory_buffer buffer;
     cddl_schema_to<T>(buffer, {.row_options = {.format_by_rows = false}});
@@ -78,14 +78,14 @@ enum class CDDLUnorderedChoice : std::int8_t { high = 5, low = 1, negative = -1 
 enum class CDDLWideMagicEnum : std::uint16_t { low = 1, high = 1000 };
 
 #if CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
-} // namespace
+} // namespace cbor_tags_test_cddl
 
-template <> struct magic_enum::customize::enum_range<CDDLWideMagicEnum> {
+template <> struct magic_enum::customize::enum_range<cbor_tags_test_cddl::CDDLWideMagicEnum> {
     static constexpr int min = 0;
     static constexpr int max = 1000;
 };
 
-namespace {
+namespace cbor_tags_test_cddl {
 #endif
 
 struct CDDLEnums {
@@ -316,7 +316,9 @@ static_assert(detail::named_flattened_extension_count<CDDLNestedMapScopedExtensi
 static_assert(detail::named_flattened_extension_count<CDDLRootWithTwoExtensions>() == 2U);
 
 #endif
-} // namespace
+} // namespace cbor_tags_test_cddl
+
+using namespace cbor_tags_test_cddl;
 
 struct B129058 {
     static constexpr std::uint64_t cbor_tag = 140;

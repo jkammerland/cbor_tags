@@ -1,4 +1,4 @@
-name: Windows Tests (MSVC, Clang-CL)
+name: Windows Tests (MSVC/Clang-CL C++20/26)
 
 on:
   push:
@@ -8,11 +8,12 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.config.name }}
+    name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }}
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
+        cxx_standard: [20, 26]
         config:
           - {
               name: "Windows MSVC",
@@ -35,22 +36,131 @@ jobs:
     - name: Configure CMake (Windows)
       shell: pwsh
       run: |
+        $buildDir = "build-cxx${{ matrix.cxx_standard }}"
         $arguments = @(
-          "-B", "build",
+          "-B", $buildDir,
           "-G", "Visual Studio 17 2022",
           "-A", "x64",
           "-DCBOR_TAGS_BUILD_TESTS=ON"
         )
+        if ("${{ matrix.cxx_standard }}" -eq "26") {
+          # CMake does not model MSVC CXX26 yet; /std:c++latest is MSVC's C++26-preview mode.
+          $arguments += @(
+            "-DCMAKE_CXX_STANDARD=23",
+            "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+            "-DCMAKE_CXX_EXTENSIONS=OFF",
+            "-DCMAKE_CXX_FLAGS_INIT=/std:c++latest"
+          )
+        } else {
+          $arguments += @(
+            "-DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}",
+            "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+            "-DCMAKE_CXX_EXTENSIONS=OFF"
+          )
+        }
         if ("${{ matrix.config.toolset }}" -ne "") {
           $arguments += @("-T", "${{ matrix.config.toolset }}")
         }
         cmake @arguments
 
     - name: Build
-      shell: bash
-      run: cmake --build build --config Release
+      shell: pwsh
+      run: cmake --build build-cxx${{ matrix.cxx_standard }} --config Release --parallel
 
     - name: Test
-      working-directory: build
-      shell: bash
-      run: ctest -C Release --output-on-failure
+      shell: pwsh
+      run: ctest --test-dir build-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
+
+  optional-backends:
+    name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }} ${{ matrix.backend.name }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx_standard: [20, 26]
+        config:
+          - {
+              name: "Windows MSVC",
+              toolset: ""
+            }
+          - {
+              name: "Windows Clang-CL",
+              toolset: "ClangCL"
+            }
+        backend:
+          - {
+              name: "Boost.PFR names",
+              id: "boost-pfr-names",
+              option: "CBOR_TAGS_USE_BOOST_PFR_NAMES",
+              feature: "boost-pfr-names"
+            }
+          - {
+              name: "magic_enum names",
+              id: "magic-enum-names",
+              option: "CBOR_TAGS_USE_MAGIC_ENUM_NAMES",
+              feature: "magic-enum-names"
+            }
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+        useCloudCache: false
+
+    - name: Bootstrap vcpkg
+      shell: pwsh
+      run: |
+        $match = Select-String -Path vcpkg.json -Pattern '"builtin-baseline": "([^"]+)"'
+        $baseline = $match.Matches[0].Groups[1].Value
+        $vcpkgRoot = Join-Path $env:RUNNER_TEMP "vcpkg"
+        git init $vcpkgRoot
+        git -C $vcpkgRoot remote add origin https://github.com/microsoft/vcpkg.git
+        git -C $vcpkgRoot fetch origin $baseline
+        git -C $vcpkgRoot checkout --detach FETCH_HEAD
+        & (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") -disableMetrics
+        "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+    - name: Configure CMake with ${{ matrix.backend.name }}
+      shell: pwsh
+      run: |
+        $buildDir = "build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }}"
+        $toolchainFile = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
+        $arguments = @(
+          "-B", $buildDir,
+          "-G", "Visual Studio 17 2022",
+          "-A", "x64",
+          "-DCBOR_TAGS_BUILD_TESTS=ON",
+          "-D${{ matrix.backend.option }}=ON",
+          "-DCMAKE_TOOLCHAIN_FILE=$toolchainFile",
+          "-DVCPKG_MANIFEST_FEATURES=${{ matrix.backend.feature }}"
+        )
+        if ("${{ matrix.cxx_standard }}" -eq "26") {
+          # CMake does not model MSVC CXX26 yet; /std:c++latest is MSVC's C++26-preview mode.
+          $arguments += @(
+            "-DCMAKE_CXX_STANDARD=23",
+            "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+            "-DCMAKE_CXX_EXTENSIONS=OFF",
+            "-DCMAKE_CXX_FLAGS_INIT=/std:c++latest"
+          )
+        } else {
+          $arguments += @(
+            "-DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}",
+            "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+            "-DCMAKE_CXX_EXTENSIONS=OFF"
+          )
+        }
+        if ("${{ matrix.config.toolset }}" -ne "") {
+          $arguments += @("-T", "${{ matrix.config.toolset }}")
+        }
+        cmake @arguments
+
+    - name: Build
+      shell: pwsh
+      run: cmake --build build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} --config Release --parallel
+
+    - name: Test
+      shell: pwsh
+      run: ctest --test-dir build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
