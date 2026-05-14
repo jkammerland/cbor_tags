@@ -65,6 +65,37 @@ if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
   add_named_map_duplicate_keys_compile_fail_test(named_map_duplicate_keys_encode_compile_fails CBOR_TAGS_DUPLICATE_KEYS_ENCODE)
   add_named_map_duplicate_keys_compile_fail_test(named_map_duplicate_keys_decode_compile_fails CBOR_TAGS_DUPLICATE_KEYS_DECODE)
   add_named_map_duplicate_keys_compile_fail_test(named_map_duplicate_keys_cddl_compile_fails CBOR_TAGS_DUPLICATE_KEYS_CDDL)
+
+  function(add_named_map_extension_fields_compile_fail_test TEST_NAME SHAPE_DEFINITION COMPILE_DEFINITION)
+    add_executable(${TEST_NAME} EXCLUDE_FROM_ALL named_map_extension_fields_compile_fail.cc)
+    target_compile_definitions(${TEST_NAME} PRIVATE ${SHAPE_DEFINITION} ${COMPILE_DEFINITION})
+    target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+    add_test(
+      NAME ${TEST_NAME}
+      COMMAND
+        ${CMAKE_COMMAND}
+        "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DTEST_TARGET=${TEST_NAME}"
+        "-DPASS_REGEX=at most one as_named_extension field after flattening as_named_group members"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  endfunction()
+
+  foreach(SHAPE ROOT_ROOT ROOT_GROUP GROUP_GROUP)
+    string(TOLOWER "${SHAPE}" SHAPE_NAME)
+    add_named_map_extension_fields_compile_fail_test(
+      named_map_extension_fields_${SHAPE_NAME}_encode_compile_fails
+      CBOR_TAGS_EXTENSION_FIELDS_${SHAPE}
+      CBOR_TAGS_EXTENSION_FIELDS_ENCODE)
+    add_named_map_extension_fields_compile_fail_test(
+      named_map_extension_fields_${SHAPE_NAME}_decode_compile_fails
+      CBOR_TAGS_EXTENSION_FIELDS_${SHAPE}
+      CBOR_TAGS_EXTENSION_FIELDS_DECODE)
+    add_named_map_extension_fields_compile_fail_test(
+      named_map_extension_fields_${SHAPE_NAME}_cddl_compile_fails
+      CBOR_TAGS_EXTENSION_FIELDS_${SHAPE}
+      CBOR_TAGS_EXTENSION_FIELDS_CDDL)
+  endforeach()
 endif()
 
 check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)

@@ -285,6 +285,36 @@ struct CDDLOwningExtensionRoot {
     as_named_extension<std::map<std::string, std::string>> extensions;
 };
 
+struct CDDLGroupedExtension {
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLGroupedExtensionRoot {
+    int                                  id;
+    as_named_group<CDDLGroupedExtension> group;
+};
+
+struct CDDLNestedMapScopedExtensionChild {
+    int                                                    childId;
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLNestedMapScopedExtensionRoot {
+    int                                                    rootId;
+    as_named_map<CDDLNestedMapScopedExtensionChild>        child;
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
+struct CDDLRootWithTwoExtensions {
+    as_named_extension<std::map<std::string, std::string>> first;
+    as_named_extension<std::map<std::string, std::string>> second;
+};
+
+static_assert(detail::named_flattened_extension_count<CDDLOwningExtensionRoot>() == 1U);
+static_assert(detail::named_flattened_extension_count<CDDLGroupedExtensionRoot>() == 1U);
+static_assert(detail::named_flattened_extension_count<CDDLNestedMapScopedExtensionRoot>() == 1U);
+static_assert(detail::named_flattened_extension_count<CDDLRootWithTwoExtensions>() == 2U);
+
 #endif
 } // namespace
 
@@ -679,6 +709,80 @@ TEST_CASE("named-map codec copies owning extension keys from non-contiguous inpu
     CHECK_EQ(decoded.id, 1);
     REQUIRE(decoded.extensions.value_.contains("nickname"));
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
+}
+
+TEST_CASE("named-map codec supports one root extension field") {
+    CDDLOwningExtensionRoot input{.id = 7, .extensions = as_named_extension<std::map<std::string, std::string>>{{{"nickname", "ace"}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLOwningExtensionRoot decoded{};
+    auto                    dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.id, 7);
+    REQUIRE(decoded.extensions.value_.contains("nickname"));
+    CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
+
+    fmt::memory_buffer schema;
+    cddl_schema_to<as_named_map<CDDLOwningExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "root_ext"});
+    CHECK_NE(fmt::to_string(schema).find("root_ext = {id: int, * tstr => tstr}"), std::string::npos);
+}
+
+TEST_CASE("named-map codec supports one grouped extension field") {
+    CDDLGroupedExtensionRoot input{.id    = 11,
+                                   .group = as_named_group<CDDLGroupedExtension>{CDDLGroupedExtension{
+                                       .extensions = as_named_extension<std::map<std::string, std::string>>{{{"nickname", "ace"}}}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLGroupedExtensionRoot decoded{};
+    auto                     dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.id, 11);
+    REQUIRE(decoded.group.value_.extensions.value_.contains("nickname"));
+    CHECK_EQ(decoded.group.value_.extensions.value_.at("nickname"), "ace");
+
+    fmt::memory_buffer schema;
+    cddl_schema_to<as_named_map<CDDLGroupedExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "group_ext"});
+    const auto schema_text = fmt::to_string(schema);
+    CHECK_NE(schema_text.find("group_ext = {id: int,"), std::string::npos);
+    CHECK_NE(schema_text.find("* tstr => tstr"), std::string::npos);
+}
+
+TEST_CASE("named-map codec scopes nested map extensions") {
+    CDDLNestedMapScopedExtensionChild child{.childId = 2,
+                                            .extensions =
+                                                as_named_extension<std::map<std::string, std::string>>{{{"childExtra", "inside"}}}};
+    CDDLNestedMapScopedExtensionRoot  input{.rootId = 1,
+                                            .child  = as_named_map{child},
+                                            .extensions =
+                                               as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedMapScopedExtensionChild decoded_child{};
+    CDDLNestedMapScopedExtensionRoot  decoded{.rootId = 0, .child = as_named_map{decoded_child}};
+    auto                              dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.rootId, 1);
+    CHECK_EQ(decoded_child.childId, 2);
+    REQUIRE(decoded.extensions.value_.contains("rootExtra"));
+    CHECK_EQ(decoded.extensions.value_.at("rootExtra"), "outside");
+    REQUIRE(decoded_child.extensions.value_.contains("childExtra"));
+    CHECK_EQ(decoded_child.extensions.value_.at("childExtra"), "inside");
+
+    fmt::memory_buffer schema;
+    cddl_schema_to<as_named_map<CDDLNestedMapScopedExtensionRoot>>(
+        schema, {.row_options = {.format_by_rows = false}, .root_name = "nested_scoped"});
+    const auto schema_text = fmt::to_string(schema);
+    CHECK_NE(schema_text.find("nested_scoped = {rootId: int, child:"), std::string::npos);
+    CHECK_NE(schema_text.find("* tstr => tstr"), std::string::npos);
 }
 
 TEST_CASE("named-map codec handles nested named groups with unique flattened keys") {

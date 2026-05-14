@@ -66,6 +66,8 @@ template <typename Object, std::size_t I> constexpr bool        named_key_matche
 template <typename Object> constexpr std::size_t                named_fixed_member_count();
 template <typename Object, std::size_t I> constexpr std::size_t named_fixed_member_count();
 template <typename Object> consteval bool                       named_fixed_member_keys_are_unique();
+template <typename Object> consteval std::size_t                named_flattened_extension_count();
+template <typename Object, std::size_t I> consteval std::size_t named_flattened_extension_count();
 
 template <typename Object, std::size_t... Is>
 constexpr bool named_key_matches_fixed_member_impl(std::string_view key, std::index_sequence<Is...>) {
@@ -138,6 +140,8 @@ constexpr void encode_named_entries_for_root(Encoder &enc, const Object &object)
 template <typename Encoder, typename Object> constexpr void encode_named_map(Encoder &enc, const Object &object) {
     static_assert(named_fixed_member_keys_are_unique<std::remove_cvref_t<Object>>(),
                   "as_named_map fixed field names must be unique after flattening as_named_group members");
+    static_assert(named_flattened_extension_count<std::remove_cvref_t<Object>>() <= 1U,
+                  "as_named_map may contain at most one as_named_extension field after flattening as_named_group members");
     enc.encode_major_and_size(named_map_pair_count(object), static_cast<typename Encoder::byte_type>(0xA0));
     encode_named_entries_for_root<Object>(enc, object);
 }
@@ -214,6 +218,29 @@ template <typename Object> consteval bool named_fixed_member_keys_are_unique() {
     return true;
 }
 
+template <typename Object, std::size_t... Is> consteval std::size_t named_flattened_extension_count_impl(std::index_sequence<Is...>) {
+    return (std::size_t{} + ... + named_flattened_extension_count<Object, Is>());
+}
+
+template <typename Object> consteval std::size_t named_flattened_extension_count() {
+    using value_type = std::remove_cvref_t<Object>;
+    return named_flattened_extension_count_impl<value_type>(std::make_index_sequence<aggregate_member_count<value_type>()>{});
+}
+
+template <typename Object, std::size_t I> consteval std::size_t named_flattened_extension_count() {
+    using value_type = std::remove_cvref_t<Object>;
+    using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<value_type &>()))>;
+    using field_type = std::remove_cvref_t<std::tuple_element_t<I, tuple_type>>;
+
+    if constexpr (IsNamedGroupWrapper<field_type>) {
+        return named_flattened_extension_count<named_group_value_t<field_type>>();
+    } else if constexpr (IsNamedExtensionWrapper<field_type>) {
+        return 1U;
+    } else {
+        return 0U;
+    }
+}
+
 template <typename Object> struct named_decode_seen {
     std::array<std::string_view, named_fixed_member_count<Object>()> keys{};
     std::size_t                                                      count{};
@@ -272,6 +299,8 @@ constexpr status_code decode_named_map_entry(Decoder &dec, Object &object, major
 template <typename Decoder, typename Object> constexpr status_code decode_named_map(Decoder &dec, Object &object) {
     static_assert(named_fixed_member_keys_are_unique<std::remove_cvref_t<Object>>(),
                   "as_named_map fixed field names must be unique after flattening as_named_group members");
+    static_assert(named_flattened_extension_count<std::remove_cvref_t<Object>>() <= 1U,
+                  "as_named_map may contain at most one as_named_extension field after flattening as_named_group members");
     auto [major, additionalInfo] = dec.read_initial_byte();
     if (major != major_type::Map) {
         return status_code::no_match_for_map_on_buffer;

@@ -168,10 +168,11 @@ group into the surrounding map, and use
 `as_named_extension<std::map<std::string, T>>` to capture unmatched text keys
 and render `* tstr => T`. Unknown keys are rejected unless such an extension
 field is present. Use only one flattened `as_named_extension` field per named
-map shape; multiple extension fields are unsupported because an unknown key
-would not have a unique owner. Fixed field names must also be unique after
-flattening all `as_named_group` members; duplicate fixed names are rejected at
-compile time.
+map shape; multiple extension fields are rejected at compile time because an
+unknown key would not have a unique owner. Nested `as_named_map` members are
+scoped maps and may have their own extension field. Fixed field names must also
+be unique after flattening all `as_named_group` members; duplicate fixed names
+are rejected at compile time.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data
