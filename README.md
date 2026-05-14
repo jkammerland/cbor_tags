@@ -908,13 +908,12 @@ std::pmr::map<std::pmr::string, std::pmr::string>
 std::pmr::vector<std::optional<std::pmr::string>>
 ```
 
-Important limitations:
+Important limitations(TODO):
 
 - This is allocation containment, not schema validation.
 - Use an external scan or application policy when you need max array, map, or string sizes.
-- Non-PMR members, `std::vector`, `std::string`, and other default-allocator containers are not contained by a PMR arena.
 - `std::variant` alternatives do not currently receive parent PMR allocator context.
-- A bounded arena must use a bounded upstream resource, commonly `std::pmr::null_memory_resource()`.
+- A bounded arena must use a bounded upstream resource, e.g `std::pmr::null_memory_resource()`.
 
 A future scanning pass is planned for policy checks before materializing values.
 That pass should be the right place to reject messages by declared array, map,
@@ -925,9 +924,9 @@ allocating the target object graph first.
 
 - Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
 - WIP / experimental: range wrappers, raw encoded views, lazy tag scanning, and segmented output for zero-copy-oriented encoding. See [Experimental Range And Segment APIs](doc/experimental_ranges.md).
-- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming 
-- TODO: Options for encoder/decoder, such as (un)expected type tuning
-- TODO: Performance tuning options, such as disabling some checks and non-standard encodings.
+- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming.
+- TODO: Options for encoder/decoder, such as (un)expected type tuning.
+- TODO: Performance tuning options, such as disabling some checks/safety and non-standard encodings.
 - TODO: `unique_ptr` support.
 - TODO: `shared_ptr` support.
 
@@ -971,13 +970,6 @@ Please see the public online database of [tags](https://www.iana.org/assignments
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
 
 For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
-
-## 🌟 Practical Use Cases
-
-- **IoT Communication**: Efficiently encode sensor data in memory-constrained environments
-- **Configuration Serialization**: Save and load application settings with schema validation
-- **Cross-Platform Communication**: Exchange data between different systems with a well-defined standard
-- **Storage**: Store structured data in a compact binary format
 
 ## Testing Performance and Benchmarks
 
