@@ -128,7 +128,15 @@ jobs:
         vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
         git init "${RUNNER_TEMP}/vcpkg"
         git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
-        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
+        for attempt in 1 2 3; do
+          if git -C "${RUNNER_TEMP}/vcpkg" fetch --depth=1 origin "${vcpkg_baseline}"; then
+            break
+          fi
+          if [[ "${attempt}" == "3" ]]; then
+            exit 1
+          fi
+          sleep "$((attempt * 10))"
+        done
         git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
         "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
         echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
