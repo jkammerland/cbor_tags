@@ -540,7 +540,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a nullptr", [&gen]() {
+    bench.run("Decoding a nullptr", []() {
         Buffer data;
         auto   enc  = make_encoder(data);
         std::ignore = enc(std::nullptr_t{});

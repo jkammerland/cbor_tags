@@ -1,9 +1,8 @@
-#if __has_include(<expected>)
-#include <expected>
+#if __has_include(<version>)
+#include <version>
 #endif
 
-#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
-
+#if __has_include(<expected>) && defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
 #include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
@@ -13,6 +12,7 @@
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <expected>
 #include <optional>
 #include <string>
 #include <type_traits>

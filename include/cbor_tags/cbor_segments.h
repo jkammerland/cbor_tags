@@ -11,6 +11,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <ranges>
 #include <span>
@@ -37,10 +38,10 @@ template <std::size_t InlineOwnedCapacity = 32> class basic_byte_segment {
         basic_byte_segment segment;
         segment.kind_ = byte_segment_kind::owned;
         if (bytes.size() <= inline_owned_capacity) {
-            std::ranges::copy(bytes, segment.inline_owned_.begin());
+            copy_bytes(segment.inline_owned_.data(), bytes);
             segment.inline_owned_size_ = bytes.size();
         } else {
-            segment.owned_.assign(bytes.begin(), bytes.end());
+            assign_owned_bytes(segment.owned_, bytes);
         }
         return segment;
     }
@@ -67,18 +68,23 @@ template <std::size_t InlineOwnedCapacity = 32> class basic_byte_segment {
             return false;
         }
         if (!owned_.empty()) {
-            owned_.insert(owned_.end(), bytes.begin(), bytes.end());
+            append_owned_bytes(owned_, bytes);
             return true;
         }
-        if ((inline_owned_size_ + bytes.size()) <= inline_owned_capacity) {
-            std::ranges::copy(bytes, inline_owned_.begin() + static_cast<std::ptrdiff_t>(inline_owned_size_));
+        if (bytes.size() <= (inline_owned_capacity - inline_owned_size_)) {
+            if (!bytes.empty()) {
+                copy_bytes(inline_owned_.data() + inline_owned_size_, bytes);
+            }
             inline_owned_size_ += bytes.size();
             return true;
         }
 
-        owned_.reserve(inline_owned_size_ + bytes.size());
-        owned_.insert(owned_.end(), inline_owned_.begin(), inline_owned_.begin() + static_cast<std::ptrdiff_t>(inline_owned_size_));
-        owned_.insert(owned_.end(), bytes.begin(), bytes.end());
+        const auto inline_size = inline_owned_size_;
+        owned_.resize(inline_size + bytes.size());
+        if (inline_size != 0) {
+            std::memcpy(owned_.data(), inline_owned_.data(), inline_size);
+        }
+        copy_bytes(owned_.data() + inline_size, bytes);
         inline_owned_size_ = 0;
         return true;
     }
@@ -103,6 +109,26 @@ template <std::size_t InlineOwnedCapacity = 32> class basic_byte_segment {
     std::size_t                                inline_owned_size_{};
     std::vector<std::byte>                     owned_{};
     std::span<const std::byte>                 borrowed_{};
+
+    static void copy_bytes(std::byte *destination, std::span<const std::byte> bytes) noexcept {
+        if (!bytes.empty()) {
+            std::memcpy(destination, bytes.data(), bytes.size());
+        }
+    }
+
+    static void assign_owned_bytes(std::vector<std::byte> &destination, std::span<const std::byte> bytes) {
+        destination.resize(bytes.size());
+        copy_bytes(destination.data(), bytes);
+    }
+
+    static void append_owned_bytes(std::vector<std::byte> &destination, std::span<const std::byte> bytes) {
+        if (bytes.empty()) {
+            return;
+        }
+        const auto offset = destination.size();
+        destination.resize(offset + bytes.size());
+        copy_bytes(destination.data() + offset, bytes);
+    }
 };
 
 using byte_segment = basic_byte_segment<>;

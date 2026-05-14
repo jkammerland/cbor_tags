@@ -71,10 +71,21 @@ struct allocation_failure_guard {
 
 inline bool logs_always_enabled() {
     static const bool enabled = [] {
+#if defined(_WIN32)
+        char  *env{};
+        size_t env_size{};
+        if (_dupenv_s(&env, &env_size, "CBOR_TAGS_TEST_LOGS") != 0 || env == nullptr) {
+            return false;
+        }
+        const auto result = env[0] != '\0' && env[0] != '0';
+        std::free(env);
+        return result;
+#else
         if (const char *env = std::getenv("CBOR_TAGS_TEST_LOGS")) {
             return env[0] != '\0' && env[0] != '0';
         }
         return false;
+#endif
     }();
     return enabled;
 }

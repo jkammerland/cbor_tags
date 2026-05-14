@@ -16,11 +16,15 @@
 #error "cbor_tags std::expected support requires C++23 <expected>"
 #endif
 
-#include <expected>
+#if __has_include(<version>)
+#include <version>
+#endif
 
 #if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202202L
 #error "cbor_tags std::expected support requires C++23 std::expected"
 #endif
+
+#include <expected>
 
 namespace cbor::tags::ext::std_expected {
 

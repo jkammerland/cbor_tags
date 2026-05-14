@@ -38,7 +38,10 @@ struct cbor_argument_header {
     std::array<std::byte, 9> bytes{};
     std::size_t              size{};
 
-    [[nodiscard]] std::span<const std::byte> span() const noexcept { return {bytes.data(), size}; }
+    [[nodiscard]] std::span<const std::byte> span() const noexcept {
+        const auto bounded_size = size <= bytes.size() ? size : bytes.size();
+        return {bytes.data(), bounded_size};
+    }
 };
 
 template <typename EmitByte> constexpr void emit_cbor_major_argument(std::uint64_t value, std::uint8_t major_type, EmitByte &&emit_byte) {
