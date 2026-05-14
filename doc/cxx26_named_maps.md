@@ -114,6 +114,11 @@ dec(as_named_map{decoded});
 //   Owning key types such as std::string work with contiguous and
 //   non-contiguous decoder inputs. Borrowed key types such as
 //   std::string_view require contiguous input and must not outlive it.
+//
+// Extension fields:
+//   A flattened named-map shape may contain at most one extension field.
+//   Multiple as_named_extension members in the root or nested named groups are
+//   unsupported because ownership of an unknown key would be ambiguous.
 ```
 
 ## Optional Fields, Groups, And Extension Keys

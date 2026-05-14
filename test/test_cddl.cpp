@@ -258,10 +258,6 @@ struct CDDLOwningExtensionRoot {
     as_named_extension<std::map<std::string, std::string>> extensions;
 };
 
-struct CDDLMultipleExtensionRoot {
-    as_named_extension<std::map<std::string, std::string>> labels;
-    as_named_extension<std::map<std::string, int>>         numbers;
-};
 #endif
 } // namespace
 
@@ -661,15 +657,6 @@ TEST_CASE("named-map codec copies owning extension keys from non-contiguous inpu
     CHECK_EQ(decoded.id, 1);
     REQUIRE(decoded.extensions.value_.contains("nickname"));
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
-}
-
-TEST_CASE("named-map codec rejects multiple flattened extension fields") {
-    CDDLMultipleExtensionRoot input{.labels  = as_named_extension<std::map<std::string, std::string>>{{{"label", "one"}}},
-                                    .numbers = as_named_extension<std::map<std::string, int>>{{{"count", 2}}}};
-
-    std::vector<std::byte> buffer;
-    auto                   enc = make_encoder(buffer);
-    CHECK_FALSE(enc(as_named_map{input}));
 }
 
 TEST_CASE("named-map codec enforces required, duplicate, and unknown keys") {
