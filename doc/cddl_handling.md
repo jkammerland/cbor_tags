@@ -169,7 +169,9 @@ group into the surrounding map, and use
 and render `* tstr => T`. Unknown keys are rejected unless such an extension
 field is present. Use only one flattened `as_named_extension` field per named
 map shape; multiple extension fields are unsupported because an unknown key
-would not have a unique owner.
+would not have a unique owner. Fixed field names must also be unique after
+flattening all `as_named_group` members; duplicate fixed names are rejected at
+compile time.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

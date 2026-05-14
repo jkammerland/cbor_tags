@@ -119,6 +119,10 @@ dec(as_named_map{decoded});
 //   A flattened named-map shape may contain at most one extension field.
 //   Multiple as_named_extension members in the root or nested named groups are
 //   unsupported because ownership of an unknown key would be ambiguous.
+//
+// Flattened fixed keys:
+//   Fixed field names must be unique after flattening all as_named_group
+//   members. Duplicate fixed names are rejected at compile time.
 ```
 
 ## Optional Fields, Groups, And Extension Keys

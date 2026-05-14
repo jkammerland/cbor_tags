@@ -824,6 +824,8 @@ std::string cddl_named_entries(CDDLContext &context, CDDLOptions options, std::i
 template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open, char close) {
     using value_type            = std::remove_cvref_t<T>;
     constexpr auto member_count = detail::aggregate_member_count<value_type>();
+    static_assert(detail::named_fixed_member_keys_are_unique<value_type>(),
+                  "as_named_map/as_named_group fixed field names must be unique after flattening as_named_group members");
     if (!options.row_options.format_by_rows) {
         return fmt::format("{}{}{}", open, cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{}),
                            close);

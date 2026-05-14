@@ -45,6 +45,27 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  function(add_named_map_duplicate_keys_compile_fail_test TEST_NAME COMPILE_DEFINITION)
+    add_executable(${TEST_NAME} EXCLUDE_FROM_ALL named_map_duplicate_keys_compile_fail.cc)
+    target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
+    target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+    add_test(
+      NAME ${TEST_NAME}
+      COMMAND
+        ${CMAKE_COMMAND}
+        "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DTEST_TARGET=${TEST_NAME}"
+        "-DPASS_REGEX=fixed field names must be unique after flattening as_named_group members"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  endfunction()
+
+  add_named_map_duplicate_keys_compile_fail_test(named_map_duplicate_keys_encode_compile_fails CBOR_TAGS_DUPLICATE_KEYS_ENCODE)
+  add_named_map_duplicate_keys_compile_fail_test(named_map_duplicate_keys_decode_compile_fails CBOR_TAGS_DUPLICATE_KEYS_DECODE)
+  add_named_map_duplicate_keys_compile_fail_test(named_map_duplicate_keys_cddl_compile_fails CBOR_TAGS_DUPLICATE_KEYS_CDDL)
+endif()
+
 check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   add_executable(test_unsigned_char test_unsigned_char.cc)

@@ -250,6 +250,15 @@ struct CDDLNestedInlineRoot {
     std::string                            root;
 };
 
+struct CDDLNestedMapWithRepeatedLocalName {
+    int value;
+};
+
+struct CDDLRootWithNestedMapRepeatedLocalName {
+    int                                              value;
+    as_named_map<CDDLNestedMapWithRepeatedLocalName> child;
+};
+
 struct CDDLNamedCollisionGroup {
     int value;
 };
@@ -258,6 +267,13 @@ struct CDDLNamedCollisionRoot {
     as_named_group<CDDLNamedCollisionGroup> group;
     int                                     value;
 };
+
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLNamedPerson>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLPersonalDataExtensible>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLAccountProfile>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLNestedInlineRoot>());
+static_assert(detail::named_fixed_member_keys_are_unique<CDDLRootWithNestedMapRepeatedLocalName>());
+static_assert(!detail::named_fixed_member_keys_are_unique<CDDLNamedCollisionRoot>());
 
 struct CDDLBorrowedExtensionRoot {
     int                                                         id;
@@ -551,6 +567,14 @@ TEST_CASE("named-map CDDL indents nested inline named groups by depth") {
                                      "}");
 }
 
+TEST_CASE("named-map CDDL scopes repeated local names inside nested named maps") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLRootWithNestedMapRepeatedLocalName>>(buffer,
+                                                                         {.row_options = {.format_by_rows = false}, .root_name = "Root"});
+    CHECK_EQ(fmt::to_string(buffer), "Root = {value: int, child: CDDLNestedMapWithRepeatedLocalName}\n"
+                                     "CDDLNestedMapWithRepeatedLocalName = {value: int}");
+}
+
 #if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
 TEST_CASE("named-map CDDL reuses named enum definitions through nested named maps and groups") {
     fmt::memory_buffer buffer;
@@ -633,19 +657,6 @@ TEST_CASE("named-map codec rejects chunked indefinite text-string keys") {
     CHECK_FALSE(dec(as_named_map{decoded}));
 }
 
-TEST_CASE("named-map codec rejects flattened fixed-field name collisions") {
-    CDDLNamedCollisionRoot input{.group = as_named_group<CDDLNamedCollisionGroup>{CDDLNamedCollisionGroup{.value = 7}}, .value = 9};
-
-    std::vector<std::byte> buffer;
-    auto                   enc = make_encoder(buffer);
-    CHECK_FALSE(enc(as_named_map{input}));
-
-    auto                   encoded_one_value = to_bytes("a16576616c756507");
-    CDDLNamedCollisionRoot decoded{};
-    auto                   dec = make_decoder(encoded_one_value);
-    CHECK_FALSE(dec(as_named_map{decoded}));
-}
-
 TEST_CASE("named-map codec rejects borrowed extension keys from non-contiguous inputs") {
     auto input_vector = to_bytes("a262696401686e69636b6e616d6563616365");
     auto input        = std::deque<std::byte>(input_vector.begin(), input_vector.end());
@@ -668,6 +679,47 @@ TEST_CASE("named-map codec copies owning extension keys from non-contiguous inpu
     CHECK_EQ(decoded.id, 1);
     REQUIRE(decoded.extensions.value_.contains("nickname"));
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
+}
+
+TEST_CASE("named-map codec handles nested named groups with unique flattened keys") {
+    CDDLNestedInlineRoot input{.middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
+                                   .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{
+                                         .one = std::string{"first"},
+                                         .two = std::string{"second"},
+                                   }},
+                                   .middle = std::string{"middle"},
+                               }},
+                               .root   = std::string{"root"}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedInlineRoot decoded{};
+    auto                 dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    REQUIRE(decoded.middle.value_.leaf.value_.one.has_value());
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.one, "first");
+    REQUIRE(decoded.middle.value_.leaf.value_.two.has_value());
+    CHECK_EQ(*decoded.middle.value_.leaf.value_.two, "second");
+    CHECK_EQ(decoded.middle.value_.middle, "middle");
+    CHECK_EQ(decoded.root, "root");
+}
+
+TEST_CASE("named-map codec allows repeated local names inside nested named maps") {
+    CDDLNestedMapWithRepeatedLocalName     child{.value = 9};
+    CDDLRootWithNestedMapRepeatedLocalName input{.value = 7, .child = as_named_map{child}};
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_named_map{input}));
+
+    CDDLNestedMapWithRepeatedLocalName     decoded_child{};
+    CDDLRootWithNestedMapRepeatedLocalName decoded{.value = 0, .child = as_named_map{decoded_child}};
+    auto                                   dec = make_decoder(buffer);
+    REQUIRE(dec(as_named_map{decoded}));
+    CHECK_EQ(decoded.value, 7);
+    CHECK_EQ(decoded_child.value, 9);
 }
 
 TEST_CASE("named-map codec enforces required, duplicate, and unknown keys") {
