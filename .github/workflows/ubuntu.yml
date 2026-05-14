@@ -152,6 +152,41 @@ jobs:
             ctest --test-dir /tmp/build -C Release --output-on-failure
           '
 
+  std-expected-cxx23:
+    name: Ubuntu GCC 15 C++23 std::expected tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Build and test std::expected extension in C++23
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "${{ github.workspace }}:/work:ro,z" \
+          -w /work \
+          ubuntu:26.04 \
+          bash -euxo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates \
+              cmake \
+              git \
+              ninja-build \
+              gcc-15 \
+              g++-15
+            cmake -S /work -B /tmp/build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCBOR_TAGS_BUILD_TESTS=ON \
+              -DCMAKE_CXX_STANDARD=23 \
+              -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+              -DCMAKE_C_COMPILER=gcc-15 \
+              -DCMAKE_CXX_COMPILER=g++-15
+            cmake --build /tmp/build --parallel
+            ctest --test-dir /tmp/build -C Release --output-on-failure
+          '
+
   gcc-std-reflection:
     name: Fedora 44 GCC C++26 reflection tests
     runs-on: ubuntu-latest
@@ -199,15 +234,7 @@ jobs:
         sudo apt-get install -y ccache curl g++ gcc ninja-build tar unzip zip
 
     - name: Bootstrap vcpkg
-      shell: bash
-      run: |
-        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
-        git init "${RUNNER_TEMP}/vcpkg"
-        git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
-        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
-        git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
-        "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-        echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
+      uses: ./.github/actions/bootstrap-vcpkg
 
     - name: Configure CMake with Boost.PFR names
       shell: bash
@@ -243,15 +270,7 @@ jobs:
         sudo apt-get install -y ccache curl g++ gcc ninja-build tar unzip zip
 
     - name: Bootstrap vcpkg
-      shell: bash
-      run: |
-        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
-        git init "${RUNNER_TEMP}/vcpkg"
-        git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
-        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
-        git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
-        "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-        echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
+      uses: ./.github/actions/bootstrap-vcpkg
 
     - name: Configure CMake with magic_enum names
       shell: bash

@@ -221,6 +221,32 @@ int main() {
 > [!NOTE]
 > The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". The primary decoder is still a one-shot API: retry/resume after incomplete input is reserved for a future explicit resumable decoder entry point.
 
+### C++23 `std::expected` Extension
+`std::expected<T, E>` support is available in C++23 and newer through an explicit codec extension:
+
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/extensions/std_expected.h"
+
+#include <expected>
+#include <string>
+#include <vector>
+
+using namespace cbor::tags;
+using namespace cbor::tags::ext::std_expected;
+
+std::vector<std::byte> buffer;
+auto enc = make_encoder<std_expected_codec>(buffer);
+enc(std::expected<int, std::string>{42});
+
+std::expected<int, std::string> decoded;
+auto dec = make_decoder<std_expected_codec>(buffer);
+dec(decoded);
+```
+
+The extension encodes expected values as `[true, value]` and errors as `[false, error]`. `std::expected<void, E>` uses `[true, null]` for success.
+
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
 ```cpp

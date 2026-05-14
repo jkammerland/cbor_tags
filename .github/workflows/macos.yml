@@ -123,15 +123,7 @@ jobs:
         xcode-version: ${{ matrix.config.xcode_version }}
 
     - name: Bootstrap vcpkg
-      shell: bash
-      run: |
-        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' vcpkg.json)"
-        git init "${RUNNER_TEMP}/vcpkg"
-        git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
-        git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"
-        git -C "${RUNNER_TEMP}/vcpkg" checkout --detach FETCH_HEAD
-        "${RUNNER_TEMP}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-        echo "VCPKG_ROOT=${RUNNER_TEMP}/vcpkg" >> "${GITHUB_ENV}"
+      uses: ./.github/actions/bootstrap-vcpkg
 
     - name: Configure CMake with ${{ matrix.backend.name }}
       shell: bash

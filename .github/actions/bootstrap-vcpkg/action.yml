@@ -1,0 +1,78 @@
+name: Bootstrap vcpkg
+description: Fetch the manifest baseline, bootstrap vcpkg, and export VCPKG_ROOT.
+
+inputs:
+  baseline_file:
+    description: File containing the vcpkg builtin-baseline.
+    default: vcpkg.json
+  fetch_attempts:
+    description: Number of git fetch attempts before failing.
+    default: "3"
+  retry_delay_seconds:
+    description: Base delay between retries. The delay is multiplied by the attempt number.
+    default: "10"
+
+runs:
+  using: composite
+  steps:
+    - name: Bootstrap vcpkg (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        baseline_file="${{ inputs.baseline_file }}"
+        fetch_attempts="${{ inputs.fetch_attempts }}"
+        retry_delay_seconds="${{ inputs.retry_delay_seconds }}"
+        vcpkg_root="${RUNNER_TEMP}/vcpkg"
+        vcpkg_baseline="$(sed -n 's/.*"builtin-baseline": "\([^"]*\)".*/\1/p' "${baseline_file}" | head -n 1)"
+        if [[ -z "${vcpkg_baseline}" ]]; then
+          echo "::error::Could not find builtin-baseline in ${baseline_file}"
+          exit 1
+        fi
+
+        rm -rf "${vcpkg_root}"
+        git init "${vcpkg_root}"
+        git -C "${vcpkg_root}" remote add origin https://github.com/microsoft/vcpkg.git
+        for ((attempt = 1; attempt <= fetch_attempts; attempt++)); do
+          if git -C "${vcpkg_root}" fetch origin "${vcpkg_baseline}"; then
+            break
+          fi
+          if (( attempt == fetch_attempts )); then
+            exit 1
+          fi
+          sleep "$((attempt * retry_delay_seconds))"
+        done
+        git -C "${vcpkg_root}" checkout --detach FETCH_HEAD
+        "${vcpkg_root}/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=${vcpkg_root}" >> "${GITHUB_ENV}"
+
+    - name: Bootstrap vcpkg (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $baselineFile = "${{ inputs.baseline_file }}"
+        $fetchAttempts = [int]"${{ inputs.fetch_attempts }}"
+        $retryDelaySeconds = [int]"${{ inputs.retry_delay_seconds }}"
+        $match = Select-String -Path $baselineFile -Pattern '"builtin-baseline": "([^"]+)"'
+        if ($null -eq $match) {
+          Write-Error "Could not find builtin-baseline in $baselineFile"
+          exit 1
+        }
+
+        $baseline = $match.Matches[0].Groups[1].Value
+        $vcpkgRoot = Join-Path $env:RUNNER_TEMP "vcpkg"
+        Remove-Item -Recurse -Force $vcpkgRoot -ErrorAction SilentlyContinue
+        git init $vcpkgRoot
+        git -C $vcpkgRoot remote add origin https://github.com/microsoft/vcpkg.git
+        for ($attempt = 1; $attempt -le $fetchAttempts; $attempt++) {
+          git -C $vcpkgRoot fetch origin $baseline
+          if ($LASTEXITCODE -eq 0) {
+            break
+          }
+          if ($attempt -eq $fetchAttempts) {
+            exit $LASTEXITCODE
+          }
+          Start-Sleep -Seconds ($attempt * $retryDelaySeconds)
+        }
+        git -C $vcpkgRoot checkout --detach FETCH_HEAD
+        & (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") -disableMetrics
+        "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

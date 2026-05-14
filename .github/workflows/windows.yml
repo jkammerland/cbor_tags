@@ -111,17 +111,7 @@ jobs:
         useCloudCache: false
 
     - name: Bootstrap vcpkg
-      shell: pwsh
-      run: |
-        $match = Select-String -Path vcpkg.json -Pattern '"builtin-baseline": "([^"]+)"'
-        $baseline = $match.Matches[0].Groups[1].Value
-        $vcpkgRoot = Join-Path $env:RUNNER_TEMP "vcpkg"
-        git init $vcpkgRoot
-        git -C $vcpkgRoot remote add origin https://github.com/microsoft/vcpkg.git
-        git -C $vcpkgRoot fetch origin $baseline
-        git -C $vcpkgRoot checkout --detach FETCH_HEAD
-        & (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") -disableMetrics
-        "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      uses: ./.github/actions/bootstrap-vcpkg
 
     - name: Configure CMake with ${{ matrix.backend.name }}
       shell: pwsh
