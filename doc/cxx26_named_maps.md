@@ -109,6 +109,11 @@ dec(as_named_map{decoded});
 //
 // Unknown fields:
 //   Unknown keys are rejected unless the struct has an extension field.
+//
+// Extension key storage:
+//   Owning key types such as std::string work with contiguous and
+//   non-contiguous decoder inputs. Borrowed key types such as
+//   std::string_view require contiguous input and must not outlive it.
 ```
 
 ## Optional Fields, Groups, And Extension Keys

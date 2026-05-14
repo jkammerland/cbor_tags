@@ -253,6 +253,11 @@ struct CDDLBorrowedExtensionRoot {
     as_named_extension<std::map<std::string_view, std::string>> extensions;
 };
 
+struct CDDLOwningExtensionRoot {
+    int                                                    id;
+    as_named_extension<std::map<std::string, std::string>> extensions;
+};
+
 struct CDDLMultipleExtensionRoot {
     as_named_extension<std::map<std::string, std::string>> labels;
     as_named_extension<std::map<std::string, int>>         numbers;
@@ -639,8 +644,23 @@ TEST_CASE("named-map codec rejects borrowed extension keys from non-contiguous i
     auto input        = std::deque<std::byte>(input_vector.begin(), input_vector.end());
 
     CDDLBorrowedExtensionRoot decoded{};
-    auto                      dec = make_decoder(input);
-    CHECK_FALSE(dec(as_named_map{decoded}));
+    auto                      dec    = make_decoder(input);
+    auto                      result = dec(as_named_map{decoded});
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
+}
+
+TEST_CASE("named-map codec copies owning extension keys from non-contiguous inputs") {
+    auto input_vector = to_bytes("a262696401686e69636b6e616d6563616365");
+    auto input        = std::deque<std::byte>(input_vector.begin(), input_vector.end());
+
+    CDDLOwningExtensionRoot decoded{};
+    auto                    dec    = make_decoder(input);
+    auto                    result = dec(as_named_map{decoded});
+    REQUIRE(result);
+    CHECK_EQ(decoded.id, 1);
+    REQUIRE(decoded.extensions.value_.contains("nickname"));
+    CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
 }
 
 TEST_CASE("named-map codec rejects multiple flattened extension fields") {

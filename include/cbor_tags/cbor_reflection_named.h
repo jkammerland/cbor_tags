@@ -23,6 +23,12 @@
 
 namespace cbor::tags::detail {
 
+template <typename T> struct is_basic_string_view : std::false_type {};
+
+template <typename CharT, typename Traits> struct is_basic_string_view<std::basic_string_view<CharT, Traits>> : std::true_type {};
+
+template <typename T> inline constexpr bool is_basic_string_view_v = is_basic_string_view<std::remove_cvref_t<T>>::value;
+
 template <typename Object> constexpr std::uint64_t                named_map_pair_count(const Object &object);
 template <typename Object, std::size_t I> constexpr std::uint64_t named_member_pair_count(const Object &object);
 template <typename RootObject, typename Object, typename Encoder>
@@ -380,8 +386,12 @@ constexpr bool decode_named_extension_member(Decoder &dec, Object &object, std::
                       "as_named_extension requires a map with text-string keys");
         static_assert(std::constructible_from<typename extension_type::key_type, std::string_view>,
                       "as_named_extension key type must be constructible from std::string_view");
-        using key_type     = typename extension_type::key_type;
-        using mapped_type  = typename extension_type::mapped_type;
+        using key_type    = typename extension_type::key_type;
+        using mapped_type = typename extension_type::mapped_type;
+        if constexpr (!IsContiguous<typename Decoder::input_buffer_type> && is_basic_string_view_v<key_type>) {
+            status = status_code::contiguous_view_on_non_contiguous_data;
+            return true;
+        }
         auto extension_key = make_decode_value_for<key_type>(field.value_);
         if constexpr (requires { extension_key.assign(key.data(), key.size()); }) {
             extension_key.assign(key.data(), key.size());
