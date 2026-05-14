@@ -44,12 +44,17 @@ jobs:
           "-DCBOR_TAGS_BUILD_TESTS=ON"
         )
         if ("${{ matrix.cxx_standard }}" -eq "26") {
-          # CMake does not model MSVC CXX26 yet; /std:c++latest is MSVC's C++26-preview mode.
+          # CMake 3.31 does not know how to enable CXX26 for current MSVC/Clang-CL toolsets.
+          # Use the vendor preview flag while keeping CMake's modeled standard at C++23.
+          $cxxFlags = "/std:c++latest"
+          if ("${{ matrix.config.toolset }}" -eq "ClangCL") {
+            $cxxFlags += " -Wno-unused-command-line-argument"
+          }
           $arguments += @(
             "-DCMAKE_CXX_STANDARD=23",
             "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
             "-DCMAKE_CXX_EXTENSIONS=OFF",
-            "-DCMAKE_CXX_FLAGS_INIT=/std:c++latest"
+            "-DCMAKE_CXX_FLAGS_INIT=$cxxFlags"
           )
         } else {
           $arguments += @(
@@ -128,12 +133,17 @@ jobs:
           "-DVCPKG_MANIFEST_FEATURES=${{ matrix.backend.feature }}"
         )
         if ("${{ matrix.cxx_standard }}" -eq "26") {
-          # CMake does not model MSVC CXX26 yet; /std:c++latest is MSVC's C++26-preview mode.
+          # CMake 3.31 does not know how to enable CXX26 for current MSVC/Clang-CL toolsets.
+          # Use the vendor preview flag while keeping CMake's modeled standard at C++23.
+          $cxxFlags = "/std:c++latest"
+          if ("${{ matrix.config.toolset }}" -eq "ClangCL") {
+            $cxxFlags += " -Wno-unused-command-line-argument"
+          }
           $arguments += @(
             "-DCMAKE_CXX_STANDARD=23",
             "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
             "-DCMAKE_CXX_EXTENSIONS=OFF",
-            "-DCMAKE_CXX_FLAGS_INIT=/std:c++latest"
+            "-DCMAKE_CXX_FLAGS_INIT=$cxxFlags"
           )
         } else {
           $arguments += @(

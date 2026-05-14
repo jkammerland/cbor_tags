@@ -331,7 +331,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+        return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type, std::byte payload_info) {
             if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
                 return status_code::contiguous_view_on_non_contiguous_data;
             } else {

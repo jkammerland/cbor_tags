@@ -107,20 +107,20 @@ struct counting_random_access_bytes {
             return *this;
         }
 
-        friend iterator operator+(iterator it, difference_type offset) {
+        [[maybe_unused]] friend iterator operator+(iterator it, difference_type offset) {
             it += offset;
             return it;
         }
-        friend iterator operator+(difference_type offset, iterator it) { return it + offset; }
-        friend iterator operator-(iterator it, difference_type offset) {
+        [[maybe_unused]] friend iterator operator+(difference_type offset, iterator it) { return it + offset; }
+        [[maybe_unused]] friend iterator operator-(iterator it, difference_type offset) {
             it -= offset;
             return it;
         }
         friend difference_type operator-(iterator lhs, iterator rhs) {
             return static_cast<difference_type>(lhs.index) - static_cast<difference_type>(rhs.index);
         }
-        friend bool operator==(iterator lhs, iterator rhs) { return lhs.owner == rhs.owner && lhs.index == rhs.index; }
-        friend auto operator<=>(iterator lhs, iterator rhs) { return lhs.index <=> rhs.index; }
+        friend bool                  operator==(iterator lhs, iterator rhs) { return lhs.owner == rhs.owner && lhs.index == rhs.index; }
+        [[maybe_unused]] friend auto operator<=>(iterator lhs, iterator rhs) { return lhs.index <=> rhs.index; }
     };
 
     std::vector<std::byte> bytes;

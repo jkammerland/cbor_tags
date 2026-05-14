@@ -1139,22 +1139,18 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
-        const auto root_key = [&options] {
-            if constexpr (IsNamedMapWrapper<value_type>) {
-                return detail::cddl_named_map_key<named_map_value_t<value_type>>();
-            } else if constexpr (IsNamedGroupWrapper<value_type>) {
-                return detail::cddl_named_group_key<named_group_value_t<value_type>>();
-            } else if constexpr (IsEnum<value_type>) {
-                if (detail::cddl_use_named_enum<value_type>(options) && !options.always_inline) {
-                    return detail::cddl_enum_key<value_type>();
-                }
-                return std::string{};
-            } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
-                return detail::cddl_type_key<value_type>();
-            } else {
-                return std::string{};
+        std::string root_key;
+        if constexpr (IsNamedMapWrapper<value_type>) {
+            root_key = detail::cddl_named_map_key<named_map_value_t<value_type>>();
+        } else if constexpr (IsNamedGroupWrapper<value_type>) {
+            root_key = detail::cddl_named_group_key<named_group_value_t<value_type>>();
+        } else if constexpr (IsEnum<value_type>) {
+            if (detail::cddl_use_named_enum<value_type>(options) && !options.always_inline) {
+                root_key = detail::cddl_enum_key<value_type>();
             }
-        }();
+        } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+            root_key = detail::cddl_type_key<value_type>();
+        }
 
         for (const auto &def : cddl_context.definitions | std::views::reverse) {
             const std::string_view key{def.key.data(), def.key.size()};

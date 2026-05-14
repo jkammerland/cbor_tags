@@ -543,7 +543,7 @@ TEST_CASE("buffer diagnostic validates UTF-8 text when requested") {
         {"64f08f8080", "[non-utf8(4)]"}, // overlong four-byte sequence
         {"64f4908080", "[non-utf8(4)]"}, // scalar above U+10FFFF
     };
-    for (const auto [hex, expected] : invalid_cases) {
+    for (const auto &[hex, expected] : invalid_cases) {
         std::string diagnostic;
         buffer_diagnostic(to_bytes(hex), diagnostic, options);
         CHECK_EQ(diagnostic, expected);
