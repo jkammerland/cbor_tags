@@ -119,49 +119,33 @@ owning types such as `std::string` and `std::vector<std::byte>` instead.
 Borrowed views point into the input buffer. Destroying, mutating, or reallocating
 that buffer invalidates the decoded views.
 
-## Segmented Encoding Direction
+## Segmented Encoding
 
-The current `custom_codec_1` encoder has to know the byte-string payload length
-before it can write the payload header. That is why it measures the payload
-before writing it.
+`custom_codec_1` has to know the byte-string payload length before it can write
+the payload header. The encoder now writes the payload once into scratch storage,
+computes that size, then writes the outer tag and byte-string headers before
+replaying the payload.
 
-`cbor_segments` is the right direction for removing that repeated walk without
-forcing one contiguous temporary buffer. The payload can be encoded once into
-replayable segments, then the outer tag and byte-string header can be
-prepended after the payload size is known.
+The normal user-facing API stays the same:
 
-This is the intended implementation shape;
-`encode_custom_codec_1_payload_segments` is not currently a public API.
+```cpp
+std::vector<std::byte> out;
+auto enc = make_encoder<cc1::custom_codec_1>(out);
+
+enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
+```
+
+Using `cbor_segments` as the output buffer lets callers replay the encoded bytes
+to vectored I/O without first flattening them into one contiguous buffer:
 
 ```cpp
 #include <cbor_tags/cbor_segments.h>
 
-template <typename T>
-cbor_segments encode_custom_codec_1_segments(std::uint64_t tag, const T& value) {
-    cbor_segments payload = encode_custom_codec_1_payload_segments(value);
+cbor_segments segments;
+auto enc = make_encoder<cc1::custom_codec_1>(segments);
 
-    cbor_segments out;
-    out.reserve_segments(payload.size() + 2);
+enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
 
-    out.append_owned(detail::encode_cbor_major_argument_header(tag, std::byte{0xc0}).span());
-    out.append_owned(detail::encode_cbor_major_argument_header(payload.total_size(), std::byte{0x40}).span());
-
-    for (const auto& segment : payload) {
-        if (segment.is_borrowed()) {
-            out.append_borrowed(segment.bytes());
-        } else {
-            out.append_owned(segment.bytes());
-        }
-    }
-
-    return out;
-}
-```
-
-The caller can then replay the segments directly to a vectored I/O interface
-without flattening:
-
-```cpp
 std::vector<iovec> iovecs;
 iovecs.reserve(segments.size());
 
@@ -174,18 +158,25 @@ for (const auto& segment : segments) {
 }
 ```
 
-Small generated headers remain owned by the segment container. Large payload
-ranges can be borrowed when their source storage outlives the write operation.
+The wire format is unchanged. For input ranges that the codec already accepts,
+encoding now performs one payload pass instead of walking once for sizing and
+again for writing.
 
 ## Known Limitations
 
-- `custom_codec_1` payload encoding measures the payload and then writes it. Do not pass
-  one-shot or stateful input ranges to `as_custom_codec_1(...)`; materialize them into a
-  stable container first.
 - Malformed payloads can currently declare very large variable-size
   container lengths before the decoder proves the payload is incomplete. Decode
   `custom_codec_1` data only from inputs that are already bounded by your
   transport, file-size limit, or application framing.
+- `as_custom_codec_1(...)` stores a reference and encoding observes the value
+  through a `const` view. Input ranges that can only be iterated through a
+  non-`const` `begin()` still need to be materialized or wrapped before
+  encoding.
+- Encoding needs scratch storage for the payload before the outer byte-string
+  header can be written. Appendable allocator-aware output buffers use the same
+  allocator for that scratch storage when possible; fixed-size and custom
+  segment outputs may still allocate through the library's default segment
+  storage.
 - Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
   CBOR level. Payload fields use this codec's schema-bound payload
   rules, not the normal extension dispatch path.

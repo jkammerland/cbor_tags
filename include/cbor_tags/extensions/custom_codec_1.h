@@ -117,12 +117,66 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
 
   private:
     template <typename T> constexpr void encode_tagged(std::uint64_t tag, const T &value) {
-        auto &enc          = static_cast<Self &>(*this);
-        auto  payload_size = cbor::tags::detail::custom_codec_1::encoded_size(value);
+        auto &enc     = static_cast<Self &>(*this);
+        auto  payload = encode_payload_for_output(enc.data_, value);
 
         enc.encode_major_and_size(tag, static_cast<typename Self::byte_type>(0xC0));
-        enc.encode_major_and_size(static_cast<std::uint64_t>(payload_size), static_cast<typename Self::byte_type>(0x40));
-        cbor::tags::detail::custom_codec_1::encode_payload_to(enc.appender_, enc.data_, value);
+        enc.encode_major_and_size(static_cast<std::uint64_t>(payload_size(payload)), static_cast<typename Self::byte_type>(0x40));
+        append_payload(enc, payload);
+    }
+
+    template <typename Output, typename T> [[nodiscard]] static auto encode_payload_for_output(Output &output, const T &value) {
+        using output_type = std::remove_cvref_t<Output>;
+        if constexpr (CborAppendOutputBuffer<output_type> && requires { output_type{output.get_allocator()}; }) {
+            output_type                               payload{output.get_allocator()};
+            cbor::tags::detail::appender<output_type> appender;
+            cbor::tags::detail::custom_codec_1::encode_payload_to(appender, payload, value);
+            return payload;
+        } else {
+            return cbor::tags::detail::custom_codec_1::encode_payload_segments(value);
+        }
+    }
+
+    template <typename Payload> [[nodiscard]] static constexpr std::size_t payload_size(const Payload &payload) noexcept {
+        if constexpr (CborSegmentOutputBuffer<std::remove_cvref_t<Payload>>) {
+            std::size_t result{};
+            for (const auto &segment : payload) {
+                result += segment.size();
+            }
+            return result;
+        } else {
+            return payload.size();
+        }
+    }
+
+    template <typename Payload> static constexpr void append_payload(Self &enc, const Payload &payload) {
+        if constexpr (CborSegmentOutputBuffer<std::remove_cvref_t<Payload>>) {
+            append_payload_segments(enc, payload);
+        } else {
+            cbor::tags::detail::append_byte_range(enc.appender_, enc.data_, payload);
+        }
+    }
+
+    template <typename Segments> static constexpr void append_payload_segments(Self &enc, const Segments &payload) {
+        for (const auto &segment : payload) {
+            append_payload_segment(enc, segment);
+        }
+    }
+
+    template <typename Segment> static constexpr void append_payload_segment(Self &enc, const Segment &segment) {
+        const auto bytes = segment.bytes();
+        if constexpr (requires {
+                          enc.data_.append_borrowed(bytes);
+                          cbor::tags::detail::append_owned_segment(enc.data_, bytes);
+                      }) {
+            if (segment.is_borrowed()) {
+                enc.data_.append_borrowed(bytes);
+            } else {
+                cbor::tags::detail::append_owned_segment(enc.data_, bytes);
+            }
+        } else {
+            cbor::tags::detail::append_segment_to_encoder(enc, segment);
+        }
     }
 
     template <typename T>

@@ -5,6 +5,7 @@
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
@@ -73,23 +74,6 @@ class span_reader {
   private:
     std::span<const std::byte> input_;
     std::size_t                position_{};
-};
-
-class vector_writer {
-  public:
-    explicit vector_writer(std::vector<std::byte> &output) noexcept : output_(&output) {}
-
-    void write_byte(std::byte value) { output_->push_back(value); }
-
-    void write_bytes(std::span<const std::byte> bytes) { output_->insert(output_->end(), bytes.begin(), bytes.end()); }
-
-    void write_bytes(std::string_view bytes) {
-        const auto view = std::span<const std::byte>(reinterpret_cast<const std::byte *>(bytes.data()), bytes.size());
-        write_bytes(view);
-    }
-
-  private:
-    std::vector<std::byte> *output_{};
 };
 
 class size_writer {
@@ -717,11 +701,10 @@ template <typename T> constexpr status_code decode_value(span_reader &reader, T 
     }
 }
 
-template <typename T> [[nodiscard]] inline std::vector<std::byte> encode_payload(const T &value) {
-    std::vector<std::byte> payload;
-    vector_writer          writer{payload};
+template <typename Appender, typename Output, typename T>
+constexpr void encode_payload_to(Appender &appender, Output &output, const T &value) {
+    appender_writer writer{appender, output};
     encode_value(writer, value);
-    return payload;
 }
 
 template <typename T> [[nodiscard]] constexpr std::size_t encoded_size(const T &value) {
@@ -730,10 +713,20 @@ template <typename T> [[nodiscard]] constexpr std::size_t encoded_size(const T &
     return writer.size();
 }
 
-template <typename Appender, typename Output, typename T>
-constexpr void encode_payload_to(Appender &appender, Output &output, const T &value) {
-    appender_writer writer{appender, output};
-    encode_value(writer, value);
+template <typename Segments, typename T> [[nodiscard]] inline Segments encode_payload_segments_as(const T &value) {
+    Segments                               payload;
+    cbor::tags::detail::appender<Segments> appender;
+    encode_payload_to(appender, payload, value);
+    return payload;
+}
+
+template <typename T> [[nodiscard]] inline cbor_segments encode_payload_segments(const T &value) {
+    return encode_payload_segments_as<cbor_segments>(value);
+}
+
+template <typename T> [[nodiscard]] inline std::vector<std::byte> encode_payload(const T &value) {
+    auto payload = encode_payload_segments(value);
+    return payload.flatten();
 }
 
 namespace borrowed {

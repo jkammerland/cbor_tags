@@ -4,6 +4,7 @@
 #include <bit>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_segments.h>
 #include <cbor_tags/extensions/custom_codec_1.h>
 #include <concepts>
 #include <cstddef>
@@ -97,6 +98,39 @@ struct compact_unsized_even_view {
     [[nodiscard]] constexpr std::default_sentinel_t end() const noexcept { return {}; }
 };
 
+struct custom_codec_1_single_pass_view {
+    mutable int begin_calls{};
+
+    struct iterator {
+        using iterator_concept = std::input_iterator_tag;
+        using value_type       = int;
+        using difference_type  = std::ptrdiff_t;
+
+        int value{};
+        int stop{};
+
+        [[nodiscard]] constexpr int operator*() const noexcept { return value; }
+
+        constexpr iterator &operator++() noexcept {
+            ++value;
+            return *this;
+        }
+
+        constexpr void operator++(int) noexcept { ++(*this); }
+
+        friend constexpr bool operator==(iterator it, std::default_sentinel_t) noexcept { return it.value >= it.stop; }
+        friend constexpr bool operator==(std::default_sentinel_t sentinel, iterator it) noexcept { return it == sentinel; }
+    };
+
+    [[nodiscard]] constexpr iterator begin() const noexcept {
+        ++begin_calls;
+        const auto start = begin_calls == 1 ? 0 : 100;
+        return {.value = start, .stop = start + 3};
+    }
+
+    [[nodiscard]] constexpr std::default_sentinel_t end() const noexcept { return {}; }
+};
+
 template <typename T> void check_compact_wire(const T &in, T out, std::string_view expected_hex) {
     using namespace cbor::tags;
     using namespace cbor::tags::ext::custom_codec_1;
@@ -149,6 +183,8 @@ static_assert(!std::default_initializable<compact_non_default_view_payload>);
 static_assert(cbor::tags::detail::custom_codec_1::has_borrowed_decode_refs_v<compact_non_default_view_payload>);
 static_assert(std::ranges::range<compact_unsized_even_view>);
 static_assert(!std::ranges::sized_range<compact_unsized_even_view>);
+static_assert(std::ranges::range<custom_codec_1_single_pass_view>);
+static_assert(!std::ranges::sized_range<custom_codec_1_single_pass_view>);
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag<::compact_payload>() { return static_tag<1000>{}; }
@@ -863,6 +899,70 @@ TEST_CASE("compact tagged materializes unsized input views before encoding") {
     auto             dec = make_decoder<custom_codec_1>(compact);
     REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
     CHECK(decoded == std::vector<int>{0, 2, 4});
+}
+
+TEST_CASE("custom_codec_1 encodes input ranges with one payload pass") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const custom_codec_1_single_pass_view values;
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, values)));
+
+    CHECK(values.begin_calls == 1);
+    CHECK_EQ(to_hex(encoded), "c14d03000000000100000002000000");
+
+    std::vector<int> decoded;
+    auto             dec = make_decoder<custom_codec_1>(encoded);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, decoded)));
+    CHECK(decoded == std::vector<int>{0, 1, 2});
+}
+
+TEST_CASE("custom_codec_1 encodes fixed output buffers with one payload pass") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const custom_codec_1_single_pass_view values;
+
+    std::array<std::byte, 15> encoded{};
+    auto                      enc = make_encoder<custom_codec_1>(encoded);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, values)));
+
+    CHECK(values.begin_calls == 1);
+    CHECK_EQ(to_hex(encoded), "c14d03000000000100000002000000");
+}
+
+TEST_CASE("custom_codec_1 segmented output preserves wire format without flattening first") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const std::vector<std::uint16_t> values{0x1234, 0xABCD};
+
+    std::vector<std::byte> contiguous;
+    auto                   contiguous_encoder = make_encoder<custom_codec_1>(contiguous);
+    REQUIRE(contiguous_encoder(as_custom_codec_1(static_tag<15>{}, values)));
+
+    cbor_segments segmented;
+    auto          segment_encoder = make_encoder<custom_codec_1>(segmented);
+    REQUIRE(segment_encoder(as_custom_codec_1(static_tag<15>{}, values)));
+
+    REQUIRE_EQ(to_hex(contiguous), "cf45023412cdab");
+    REQUIRE_GE(segmented.size(), 2U);
+    CHECK_EQ(segmented.total_size(), contiguous.size());
+
+    std::vector<std::byte> replayed;
+    for (const auto &segment : segmented) {
+        const auto bytes = segment.bytes();
+        replayed.insert(replayed.end(), bytes.begin(), bytes.end());
+    }
+    CHECK_EQ(to_hex(replayed), to_hex(contiguous));
+
+    std::vector<std::uint16_t> decoded;
+    auto                       dec = make_decoder<custom_codec_1>(replayed);
+    REQUIRE(dec(as_custom_codec_1(static_tag<15>{}, decoded)));
+    CHECK(decoded == values);
 }
 
 TEST_CASE("compact tagged rejects borrowed views from non-contiguous payload storage") {
