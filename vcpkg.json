@@ -9,6 +9,14 @@
     {
       "name": "tl-expected",
       "version>=": "1.1.0"
+    },
+    {
+      "name": "nameof",
+      "version>=": "0.10.4"
+    },
+    {
+      "name": "fmt",
+      "version>=": "11.0.2"
     }
   ],
   "features": {
