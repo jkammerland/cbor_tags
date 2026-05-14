@@ -77,6 +77,17 @@ enum class CDDLSignedChoice : std::int8_t { negative = -2, zero = 0, positive = 
 enum class CDDLUnorderedChoice : std::int8_t { high = 5, low = 1, negative = -1 };
 enum class CDDLWideMagicEnum : std::uint16_t { low = 1, high = 1000 };
 
+#if CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+} // namespace
+
+template <> struct magic_enum::customize::enum_range<CDDLWideMagicEnum> {
+    static constexpr int min = 0;
+    static constexpr int max = 1000;
+};
+
+namespace {
+#endif
+
 struct CDDLEnums {
     CDDLUnsignedEnum unsigned_enum;
     CDDLSignedEnum   signed_enum;

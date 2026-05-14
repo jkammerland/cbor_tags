@@ -133,6 +133,12 @@ underlying-representable enum values still decode, while the generated named
 CDDL choice only accepts the declared enumerators reported by native reflection
 or magic_enum.
 
+With `magic_enum`, declared enumerators are discovered from its configured scan
+range. The default range is `[-128, 127]`; values outside that range are not
+reported unless the application widens the range, for example with a
+`magic_enum::customize::enum_range<T>` specialization defined before schema
+generation.
+
 ### C++26 Named Maps
 
 When `CBOR_TAGS_USE_STD_REFLECTION=ON`, reflected member names can be used as
