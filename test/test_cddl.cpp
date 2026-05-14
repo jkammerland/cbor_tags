@@ -90,6 +90,20 @@ struct CDDLEnumNames {
     CDDLUnsignedEnum                        empty_enum;
 };
 
+struct CDDLEnumNestedLeaf {
+    CDDLTrafficLight light;
+};
+
+struct CDDLEnumNestedMiddle {
+    CDDLEnumNestedLeaf              leaf;
+    std::optional<CDDLSignedChoice> maybe_choice;
+};
+
+struct CDDLEnumNestedRoot {
+    CDDLEnumNestedMiddle          middle;
+    std::vector<CDDLTrafficLight> history;
+};
+
 struct CDDLNestedLeaf {
     int         id;
     std::string name;
@@ -193,6 +207,21 @@ struct CDDLAccountProfile {
     std::map<std::string, std::uint32_t>                   counters;
     std::optional<bool>                                    active;
     as_named_extension<std::map<std::string, std::string>> metadata;
+};
+
+struct CDDLNamedEnumChildMap {
+    CDDLTrafficLight light;
+};
+
+struct CDDLNamedEnumInlineGroup {
+    CDDLTrafficLight                light;
+    std::optional<CDDLSignedChoice> maybe_choice;
+};
+
+struct CDDLNamedEnumRoot {
+    as_named_group<CDDLNamedEnumInlineGroup> group;
+    as_named_map<CDDLNamedEnumChildMap>      child;
+    std::optional<CDDLTrafficLight>          status;
 };
 
 struct CDDLNestedInlineLeaf {
@@ -404,6 +433,18 @@ TEST_CASE("CDDL reuses named enum definitions inside aggregate schemas") {
     CHECK_EQ(count_occurrences(schema, "\nCDDLSignedChoice ="), 1);
 }
 
+TEST_CASE("CDDL reuses named enum definitions through nested aggregate schemas") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<CDDLEnumNestedRoot>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    const auto schema = fmt::to_string(buffer);
+
+    CHECK(substrings_in(schema, "CDDLEnumNestedRoot = [CDDLEnumNestedMiddle, [* CDDLTrafficLight]]",
+                        "CDDLEnumNestedMiddle = [CDDLEnumNestedLeaf, CDDLSignedChoice / null]", "CDDLEnumNestedLeaf = CDDLTrafficLight",
+                        "CDDLSignedChoice = &(negative: -2, zero: 0, positive: 3)", "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)"));
+    CHECK_EQ(count_occurrences(schema, "\nCDDLTrafficLight ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLSignedChoice ="), 1);
+}
+
 TEST_CASE("CDDL keeps enum underlying shapes unless named enum mode is requested") {
     CHECK_EQ(cddl_schema_inline<CDDLTrafficLight>(), "root = uint");
 
@@ -497,6 +538,24 @@ TEST_CASE("named-map CDDL indents nested inline named groups by depth") {
                                      "  root: tstr\n"
                                      "}");
 }
+
+#if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
+TEST_CASE("named-map CDDL reuses named enum definitions through nested named maps and groups") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLNamedEnumRoot>>(buffer,
+                                                    {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    const auto schema = fmt::to_string(buffer);
+
+    CHECK(substrings_in(schema, "CDDLNamedEnumRoot = {group, child: CDDLNamedEnumChildMap, ? status: CDDLTrafficLight}",
+                        "group = (light: CDDLTrafficLight, ? maybe_choice: CDDLSignedChoice)",
+                        "CDDLNamedEnumChildMap = {light: CDDLTrafficLight}", "CDDLSignedChoice = &(negative: -2, zero: 0, positive: 3)",
+                        "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)"));
+    CHECK_EQ(count_occurrences(schema, "\nCDDLTrafficLight ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLSignedChoice ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\nCDDLNamedEnumChildMap ="), 1);
+    CHECK_EQ(count_occurrences(schema, "\ngroup ="), 1);
+}
+#endif
 
 TEST_CASE("nested named groups roundtrip with the C++20 named reflection backend") {
     CDDLNestedInlineRoot input{
