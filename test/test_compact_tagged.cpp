@@ -208,6 +208,7 @@ struct default_memory_resource_guard {
 } // namespace
 
 static_assert(!std::default_initializable<compact_non_default_view_payload>);
+static_assert(cbor::tags::detail::aggregate_binding_count<compact_non_default_view_payload> == 2);
 static_assert(cbor::tags::detail::custom_codec_1::has_borrowed_decode_refs_v<compact_non_default_view_payload>);
 static_assert(std::ranges::range<compact_unsized_even_view>);
 static_assert(!std::ranges::sized_range<compact_unsized_even_view>);

@@ -686,13 +686,19 @@ template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
 struct any {
-    template <class T> constexpr operator T() const {
+    template <class T>
+        requires(is_optional_v<T> || std::default_initializable<T>)
+    constexpr operator T() const {
         if constexpr (is_optional_v<T>) {
             return T{typename T::value_type{}};
         } else {
             return T{};
         }
     }
+
+    template <class T>
+        requires(!is_optional_v<T> && !std::default_initializable<T>)
+    operator T() const;
 };
 
 template <std::uint64_t N> struct static_tag {
