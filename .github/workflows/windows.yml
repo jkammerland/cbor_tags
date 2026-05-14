@@ -119,7 +119,7 @@ jobs:
         git init $vcpkgRoot
         git -C $vcpkgRoot remote add origin https://github.com/microsoft/vcpkg.git
         for ($attempt = 1; $attempt -le 3; $attempt++) {
-          git -C $vcpkgRoot fetch --depth=1 origin $baseline
+          git -C $vcpkgRoot fetch origin $baseline
           if ($LASTEXITCODE -eq 0) {
             break
           }

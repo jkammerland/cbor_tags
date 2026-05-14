@@ -240,7 +240,7 @@ jobs:
         git init "${RUNNER_TEMP}/vcpkg"
         git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
         for attempt in 1 2 3; do
-          if git -C "${RUNNER_TEMP}/vcpkg" fetch --depth=1 origin "${vcpkg_baseline}"; then
+          if git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"; then
             break
           fi
           if [[ "${attempt}" == "3" ]]; then
@@ -292,7 +292,7 @@ jobs:
         git init "${RUNNER_TEMP}/vcpkg"
         git -C "${RUNNER_TEMP}/vcpkg" remote add origin https://github.com/microsoft/vcpkg.git
         for attempt in 1 2 3; do
-          if git -C "${RUNNER_TEMP}/vcpkg" fetch --depth=1 origin "${vcpkg_baseline}"; then
+          if git -C "${RUNNER_TEMP}/vcpkg" fetch origin "${vcpkg_baseline}"; then
             break
           fi
           if [[ "${attempt}" == "3" ]]; then
