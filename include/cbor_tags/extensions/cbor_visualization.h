@@ -109,6 +109,13 @@ struct CDDLContext {
         std::pmr::string cddl;
         DefinitionState  state{DefinitionState::visiting};
         bool             recursive_reference{false};
+
+        definition_cddl_pair() = default;
+
+        definition_cddl_pair(std::pmr::string key_, std::pmr::string name_, std::pmr::string cddl_,
+                             DefinitionState state_ = DefinitionState::visiting, bool recursive_reference_ = false)
+            : key(std::move(key_)), name(std::move(name_)), cddl(std::move(cddl_)), state(state_),
+              recursive_reference(recursive_reference_) {}
     };
 
     std::array<std::byte, 2000>           buffer;
