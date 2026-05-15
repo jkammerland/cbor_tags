@@ -15,7 +15,7 @@ TEST_CASE("smart pointer split header is directly usable") {
     std::unique_ptr<int> decoded;
     auto                 dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::nullable_ptr_codec>(encoded);
     REQUIRE(dec(decoded));
-    REQUIRE(decoded);
+    REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, 42);
 }
 
@@ -30,6 +30,6 @@ TEST_CASE("shared graph split header is directly usable") {
     auto                 dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::shared_graph_codec>(encoded);
     cbor::tags::ext::smart_ptr::shared_graph_decode_session decode_graph;
     REQUIRE(dec(cbor::tags::ext::smart_ptr::as_shared_graph(decode_graph, decoded)));
-    REQUIRE(decoded);
+    REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, 42);
 }

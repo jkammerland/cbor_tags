@@ -73,7 +73,7 @@ TEST_CASE("nullable pointer codec roundtrips unique_ptr null and value") {
         std::unique_ptr<std::uint64_t> decoded = std::make_unique<std::uint64_t>(7U);
         auto                           dec     = make_decoder<nullable_ptr_codec>(encoded);
         REQUIRE(dec(decoded));
-        CHECK_FALSE(decoded);
+        CHECK_FALSE(static_cast<bool>(decoded));
     }
 
     {
@@ -83,7 +83,7 @@ TEST_CASE("nullable pointer codec roundtrips unique_ptr null and value") {
         std::unique_ptr<std::uint64_t> decoded;
         auto                           dec = make_decoder<nullable_ptr_codec>(encoded);
         REQUIRE(dec(decoded));
-        REQUIRE(decoded);
+        REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 42U);
     }
 }
@@ -131,8 +131,8 @@ TEST_CASE("shared graph codec preserves shared_ptr identity across multiple root
 
     REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
     REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
-    REQUIRE(decoded_first);
-    REQUIRE(decoded_second);
+    REQUIRE(static_cast<bool>(decoded_first));
+    REQUIRE(static_cast<bool>(decoded_second));
     CHECK_EQ(*decoded_first, 42U);
     CHECK(decoded_first.get() == decoded_second.get());
 }
@@ -157,8 +157,8 @@ TEST_CASE("shared graph codec reset starts an independent graph") {
     REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
     decode_graph.reset();
     REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
-    REQUIRE(decoded_first);
-    REQUIRE(decoded_second);
+    REQUIRE(static_cast<bool>(decoded_first));
+    REQUIRE(static_cast<bool>(decoded_second));
     CHECK_EQ(*decoded_first, 42U);
     CHECK_EQ(*decoded_second, 42U);
     CHECK(decoded_first.get() != decoded_second.get());
@@ -242,7 +242,7 @@ TEST_CASE("nullable pointer codec roundtrips shared_ptr null and value") {
         std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
         auto                           dec     = make_decoder<nullable_ptr_codec>(encoded);
         REQUIRE(dec(decoded));
-        CHECK_FALSE(decoded);
+        CHECK_FALSE(static_cast<bool>(decoded));
     }
 
     {
@@ -252,7 +252,7 @@ TEST_CASE("nullable pointer codec roundtrips shared_ptr null and value") {
         std::shared_ptr<std::uint64_t> decoded;
         auto                           dec = make_decoder<nullable_ptr_codec>(encoded);
         REQUIRE(dec(decoded));
-        REQUIRE(decoded);
+        REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 42U);
     }
 }
@@ -268,8 +268,8 @@ TEST_CASE("nullable pointer codec does not preserve repeated shared_ptr identity
     auto                                        dec = make_decoder<nullable_ptr_codec>(encoded);
     REQUIRE(dec(decoded));
     REQUIRE_EQ(decoded.size(), 2U);
-    REQUIRE(decoded[0]);
-    REQUIRE(decoded[1]);
+    REQUIRE(static_cast<bool>(decoded[0]));
+    REQUIRE(static_cast<bool>(decoded[1]));
     CHECK_EQ(*decoded[0], 42U);
     CHECK_EQ(*decoded[1], 42U);
     CHECK(decoded[0].get() != decoded[1].get());
@@ -283,8 +283,8 @@ TEST_CASE("nullable pointer codec supports aggregate fields") {
     smart_ptr_test::nullable_holder decoded;
     auto                            dec = make_decoder<nullable_ptr_codec>(encoded);
     REQUIRE(dec(decoded));
-    REQUIRE(decoded.count);
-    REQUIRE(decoded.name);
+    REQUIRE(static_cast<bool>(decoded.count));
+    REQUIRE(static_cast<bool>(decoded.name));
     CHECK_EQ(*decoded.count, 42U);
     CHECK_EQ(*decoded.name, "Ada");
 }
@@ -296,9 +296,9 @@ TEST_CASE("nullable pointer codec supports pointer to aggregate value") {
     std::unique_ptr<smart_ptr_test::nullable_holder> decoded;
     auto                                             dec = make_decoder<nullable_ptr_codec>(encoded);
     REQUIRE(dec(decoded));
-    REQUIRE(decoded);
-    REQUIRE(decoded->count);
-    REQUIRE(decoded->name);
+    REQUIRE(static_cast<bool>(decoded));
+    REQUIRE(static_cast<bool>(decoded->count));
+    REQUIRE(static_cast<bool>(decoded->name));
     CHECK_EQ(*decoded->count, 42U);
     CHECK_EQ(*decoded->name, "Ada");
 }
@@ -310,7 +310,7 @@ TEST_CASE("nullable pointer codec decodes from non-contiguous input") {
 
     auto dec = make_decoder<nullable_ptr_codec>(input);
     REQUIRE(dec(decoded));
-    REQUIRE(decoded);
+    REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, "ok");
 }
 
@@ -323,7 +323,7 @@ TEST_CASE("nullable pointer codec keeps existing value on payload decode failure
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
-        REQUIRE(decoded);
+        REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 7U);
     }
 
@@ -335,7 +335,7 @@ TEST_CASE("nullable pointer codec keeps existing value on payload decode failure
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
-        REQUIRE(decoded);
+        REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 7U);
     }
 }
