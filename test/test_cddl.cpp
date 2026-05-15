@@ -10,6 +10,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -65,6 +66,31 @@ struct CDDLContainers {
     std::optional<CDDLPlainTwo>     maybe_plain;
     std::variant<int, CDDLPlainTwo> either_plain;
 };
+
+struct CDDLNullablePointers {
+    std::unique_ptr<std::uint64_t>             count;
+    std::shared_ptr<std::string>               name;
+    std::vector<std::shared_ptr<CDDLPlainTwo>> history;
+};
+
+struct CDDLNullablePointerRecursiveNode {
+    std::uint64_t                                     id;
+    std::shared_ptr<CDDLNullablePointerRecursiveNode> next;
+};
+
+struct CDDLCustomDeleter {
+    void operator()(int *) const noexcept {}
+};
+
+static_assert(detail::IsNullablePointer<std::unique_ptr<int>>);
+static_assert(detail::IsNullablePointer<std::unique_ptr<int, CDDLCustomDeleter>>);
+static_assert(detail::IsNullablePointer<std::shared_ptr<int>>);
+static_assert(detail::is_supported_nullable_pointer_v<std::unique_ptr<int>>);
+static_assert(detail::is_supported_nullable_pointer_v<std::shared_ptr<int>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::unique_ptr<int, CDDLCustomDeleter>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<void>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<const int>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<int[]>>);
 
 struct CDDLRecursiveNode {
     std::vector<CDDLRecursiveNode> children;
@@ -218,6 +244,12 @@ struct CDDLAccountProfile {
     std::map<std::string, std::uint32_t>                   counters;
     std::optional<bool>                                    active;
     as_named_extension<std::map<std::string, std::string>> metadata;
+};
+
+struct CDDLNamedNullablePointers {
+    std::unique_ptr<std::uint64_t>      count;
+    std::shared_ptr<std::string>        name;
+    std::optional<std::shared_ptr<int>> maybe_count;
 };
 
 struct CDDLNamedEnumChildMap {
@@ -403,8 +435,22 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
     CHECK_EQ(schema.find("map"), std::string::npos);
 }
 
+TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
+    CHECK_EQ(cddl_schema_inline<std::unique_ptr<int>>(), "root = int / null");
+    CHECK_EQ(cddl_schema_inline<std::shared_ptr<std::string>>(), "root = tstr / null");
+
+    const auto schema = cddl_schema_inline<CDDLNullablePointers>();
+    CBOR_TAGS_TEST_LOG("CDDL nullable pointers: \n{}\n", schema);
+
+    CHECK(substrings_in(schema, "CDDLNullablePointers = [uint / null, tstr / null, [* (CDDLPlainTwo / null)]]",
+                        "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
+}
+
 TEST_CASE("CDDL supports recursive aggregate containers") {
     CHECK_EQ(cddl_schema_inline<CDDLRecursiveNode>(), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
+    CHECK_EQ(cddl_schema_inline<CDDLNullablePointerRecursiveNode>(),
+             "CDDLNullablePointerRecursiveNode = [uint, CDDLNullablePointerRecursiveNode / null]");
 
     fmt::memory_buffer inline_buffer;
     cddl_schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
@@ -581,6 +627,12 @@ TEST_CASE("named-map CDDL covers a larger grouped profile") {
              "* tstr => tstr}\n"
              "location = (office: tstr, country: tstr, ? timezone: tstr)\n"
              "owner = (? givenName: tstr, ? familyName: tstr)");
+}
+
+TEST_CASE("named-map CDDL keeps nullable pointer fields required unless optional") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
+    CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: uint / null, name: tstr / null, ? maybe_count: int / null}");
 }
 
 TEST_CASE("named-map CDDL indents nested inline named groups by depth") {

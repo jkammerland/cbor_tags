@@ -174,6 +174,13 @@ scoped maps and may have their own extension field. Fixed field names must also
 be unique after flattening all `as_named_group` members; duplicate fixed names
 are rejected at compile time.
 
+`std::unique_ptr<T>` and `std::shared_ptr<T>` render as `T / null`, matching
+the opt-in `cbor::tags::ext::smart_ptr::nullable_ptr_codec` wire shape. Pointer
+fields remain required in named maps unless the field type itself is
+`std::optional`; a null pointer is an explicit CBOR `null`, not an omitted
+member. Shared pointer identity and `shared_graph_codec` reference-table
+semantics are runtime codec rules and are not fully expressible in CDDL.
+
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data
 

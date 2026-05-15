@@ -243,6 +243,41 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 
 template <typename CborBuffer, typename OutputBuffer>
 void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options);
+
+template <typename T> struct is_std_unique_ptr : std::false_type {};
+template <typename T, typename Deleter> struct is_std_unique_ptr<std::unique_ptr<T, Deleter>> : std::true_type {
+    using element_type = T;
+};
+
+template <typename T> struct is_std_shared_ptr : std::false_type {};
+template <typename T> struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_type {
+    using element_type = T;
+};
+
+template <typename T>
+concept IsNullablePointer = is_std_unique_ptr<std::remove_cvref_t<T>>::value || is_std_shared_ptr<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct nullable_pointer_element;
+template <typename T, typename Deleter> struct nullable_pointer_element<std::unique_ptr<T, Deleter>> {
+    using type = T;
+};
+template <typename T> struct nullable_pointer_element<std::shared_ptr<T>> {
+    using type = T;
+};
+
+template <typename T> using nullable_pointer_element_t = typename nullable_pointer_element<std::remove_cvref_t<T>>::type;
+
+template <typename T> constexpr bool is_nullable_pointer_value_v = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
+
+template <typename T> struct is_supported_nullable_pointer_owner : std::false_type {};
+template <typename T, typename Deleter>
+struct is_supported_nullable_pointer_owner<std::unique_ptr<T, Deleter>>
+    : std::bool_constant<std::is_same_v<Deleter, std::default_delete<T>>> {};
+template <typename T> struct is_supported_nullable_pointer_owner<std::shared_ptr<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_supported_nullable_pointer_v =
+    is_nullable_pointer_value_v<nullable_pointer_element_t<T>> && is_supported_nullable_pointer_owner<std::remove_cvref_t<T>>::value;
 } // namespace detail
 
 template <typename T> constexpr auto getName(const T &);
@@ -309,6 +344,13 @@ template <typename T> constexpr auto getName(const T &) {
             using value_type = typename T::value_type;
             auto name        = getName<value_type>();
             return std::string(name) + " / null";
+        } else if constexpr (detail::IsNullablePointer<T>) {
+            using element_type = detail::nullable_pointer_element_t<T>;
+            static_assert(detail::is_supported_nullable_pointer_v<T>,
+                          "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
+                          "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+            auto name = getName<element_type>();
+            return std::string(name) + " / null";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
@@ -352,6 +394,13 @@ template <typename T> constexpr auto getName() {
         if constexpr (IsOptional<T>) {
             using value_type = typename T::value_type;
             auto name        = getName<value_type>();
+            return std::string(name) + " / null";
+        } else if constexpr (detail::IsNullablePointer<T>) {
+            using element_type = detail::nullable_pointer_element_t<T>;
+            static_assert(detail::is_supported_nullable_pointer_v<T>,
+                          "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
+                          "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+            auto name = getName<element_type>();
             return std::string(name) + " / null";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
@@ -962,6 +1011,12 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         return cddl_type_expr<indefinite_value_t<value_type>>(context, options);
     } else if constexpr (IsOptional<value_type>) {
         return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type>(context, options));
+    } else if constexpr (IsNullablePointer<value_type>) {
+        using element_type = nullable_pointer_element_t<value_type>;
+        static_assert(is_supported_nullable_pointer_v<value_type>,
+                      "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or std::shared_ptr<T>, and "
+                      "T must be non-const, non-void, and non-array");
+        return fmt::format("{} / null", cddl_type_expr<element_type>(context, options));
     } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
             return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts>(variant_context, variant_options)...}, " / ");
