@@ -37,7 +37,7 @@ template <typename E> inline constexpr bool             is_configured_unexpected
 TEST_CASE("default return type uses configured expected backend") {
     static_assert(is_configured_expected_v<expected<void, status_code>>);
     static_assert(is_configured_expected_v<default_options::return_type>);
-    static_assert(is_configured_unexpected_v<unexpected<status_code>>);
+    static_assert(is_configured_unexpected_v<cbor::tags::unexpected<status_code>>);
 
     std::vector<std::byte> buffer;
     auto                   enc    = make_encoder(buffer);
