@@ -1,6 +1,24 @@
 #pragma once
 
+#if __has_include("cbor_tags/cbor_tags_config.h")
+#include "cbor_tags/cbor_tags_config.h"
+#endif
+
+#ifndef CBOR_TAGS_USE_STD_EXPECTED
+#define CBOR_TAGS_USE_STD_EXPECTED 0
+#endif
+
+#if CBOR_TAGS_USE_STD_EXPECTED
+#include <expected>
+#if __has_include(<version>)
+#include <version>
+#endif
+#if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202202L
+#error "CBOR_TAGS_USE_STD_EXPECTED requires C++23 <expected> with __cpp_lib_expected >= 202202L"
+#endif
+#else
 #include <tl/expected.hpp>
+#endif
 
 // Float 16, c++23 has std::float16_t from <stdfloat> maybe, for now use float16_t below
 #include "cbor_tags/cbor_concepts.h"
@@ -88,10 +106,14 @@ template <typename T> struct Option {
     using type       = T;
 };
 
-// TODO: use std::expected when available
+#if CBOR_TAGS_USE_STD_EXPECTED
+template <typename T, typename E> using expected = std::expected<T, status_code>;
+template <typename E> using unexpected           = std::unexpected<E>;
+#else
 template <typename T, typename E> using expected = tl::expected<T, status_code>;
 template <typename E> using unexpected           = tl::unexpected<E>;
-using default_expected                           = Option<expected<void, status_code>>;
+#endif
+using default_expected = Option<expected<void, status_code>>;
 
 namespace detail {
 struct wrap_groups {};

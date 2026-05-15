@@ -12,7 +12,7 @@ Rows such as `Decoding a uint with check` use doctest assertions:
 CHECK(dec(value));
 ```
 
-Those rows measure doctest assertion machinery plus `tl::expected` truth
+Those rows measure doctest assertion machinery plus expected-result truth
 checking in addition to decode work. They are useful as a test-like smoke path,
 but they should not be used as raw codec performance evidence.
 

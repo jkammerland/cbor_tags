@@ -7,7 +7,14 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
-#include <tl/expected.hpp>
+#include <iterator>
+#include <ranges>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 template <typename T> inline std::string to_hex(const T &bytes) {
     std::string hex;
@@ -103,8 +110,15 @@ inline bool logs_always_enabled() {
     } while (false)
 #endif
 
-template <std::ranges::range Buffer, typename... Strings>
-tl::expected<void, std::vector<std::string>> substrings_in(const Buffer &buffer, Strings &&...strings) {
+struct substring_check_result {
+    std::vector<std::string> not_found;
+
+    [[nodiscard]] bool                            has_value() const noexcept { return not_found.empty(); }
+    [[nodiscard]] explicit                        operator bool() const noexcept { return has_value(); }
+    [[nodiscard]] const std::vector<std::string> &error() const noexcept { return not_found; }
+};
+
+template <std::ranges::range Buffer, typename... Strings> substring_check_result substrings_in(const Buffer &buffer, Strings &&...strings) {
     // Convert buffer to string for non-contiguous ranges support
     using buffer_type = std::conditional_t<std::ranges::contiguous_range<Buffer>, std::string_view, std::string>;
     buffer_type buffer_str;
@@ -139,13 +153,13 @@ tl::expected<void, std::vector<std::string>> substrings_in(const Buffer &buffer,
     if (not_found.empty()) {
         return {}; // All strings found
     } else {
-        return tl::unexpected(std::move(not_found));
+        return substring_check_result{std::move(not_found)};
     }
 }
 
 namespace doctest {
-template <typename T> struct StringMaker<tl::expected<T, std::vector<std::string>>> {
-    static String convert(const tl::expected<T, std::vector<std::string>> &value) {
+template <> struct StringMaker<substring_check_result> {
+    static String convert(const substring_check_result &value) {
         if (value.has_value()) {
             return "expected(has_value)";
         } else {
@@ -163,8 +177,8 @@ template <typename T> struct StringMaker<tl::expected<T, std::vector<std::string
     }
 };
 
-template <typename T> struct StringMaker<tl::expected<T, cbor::tags::status_code>> {
-    static String convert(const tl::expected<T, cbor::tags::status_code> &value) {
+template <typename T> struct StringMaker<cbor::tags::expected<T, cbor::tags::status_code>> {
+    static String convert(const cbor::tags::expected<T, cbor::tags::status_code> &value) {
         if (value.has_value()) {
             return "expected(has_value)";
         } else {
