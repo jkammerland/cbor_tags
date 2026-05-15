@@ -24,6 +24,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
   - [Tagged Struct Example](#tagged-struct-example)
   - [Advanced Type Support](#advanced-type-support)
   - [Nullable Smart Pointer Codec](#nullable-smart-pointer-codec)
+  - [Shared Pointer Graph Codec](#shared-pointer-graph-codec)
   - [Version Handling with Variants](#version-handling-with-variants)
   - [Manual Tag Parsing](#manual-tag-parsing)
   - [Private class members or explicit overloading](#private-class-members-or-explicit-overloading)
@@ -250,6 +251,49 @@ Null smart pointers encode as CBOR `null`. Non-null `unique_ptr<T>` values encod
 as the pointed-to value. Non-null `shared_ptr<T>` values also encode as the
 pointed-to value; shared ownership identity is not preserved by this codec.
 Decode requires a default-initializable non-const object type.
+
+### Shared Pointer Graph Codec
+Use `shared_graph_codec` when repeated `shared_ptr<T>` identity must survive
+encoding. Graph state is explicit and reusable across multiple roots:
+
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/extensions/smart_ptr.h"
+
+#include <memory>
+
+using namespace cbor::tags;
+using namespace cbor::tags::ext::smart_ptr;
+
+std::vector<std::byte> buffer;
+auto enc = make_encoder<shared_graph_codec>(buffer);
+
+auto shared = std::make_shared<int>(42);
+shared_graph_encode_session encode_graph;
+
+enc(as_shared_graph(encode_graph, shared));
+enc(as_shared_graph(encode_graph, shared));
+
+std::shared_ptr<int> first;
+std::shared_ptr<int> second;
+
+auto dec = make_decoder<shared_graph_codec>(buffer);
+shared_graph_decode_session decode_graph;
+
+dec(as_shared_graph(decode_graph, first));
+dec(as_shared_graph(decode_graph, second));
+```
+
+Inside a shared graph session, null `shared_ptr<T>` values encode as CBOR
+`null`, first-seen non-null values encode as `[0, id, value]`, and later
+references encode as `[1, id]`. Reuse the same session to share identities
+across multiple roots; call `reset()` to start an independent graph. Decoding
+must use the same root order as encoding.
+
+Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
+object. Cross-static-type identity, aliasing-pointer identity, and cycles are
+not supported in this codec.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -971,7 +1015,7 @@ allocating the target object graph first.
 - TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming.
 - TODO: Options for encoder/decoder, such as (un)expected type tuning.
 - TODO: Performance tuning options, such as disabling some checks/safety and non-standard encodings.
-- Done: opt-in nullable `unique_ptr` and `shared_ptr` codec extension.
+- Done: opt-in nullable `unique_ptr`/`shared_ptr` codec and explicit `shared_ptr` graph codec extensions.
 
 ## 📚 Documentation
 
