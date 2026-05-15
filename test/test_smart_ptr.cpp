@@ -35,6 +35,22 @@ struct graph_link {
     std::shared_ptr<graph_link> next;
 };
 
+struct graph_decode_consumes_then_fails {
+    std::uint64_t value{};
+
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Decoder> constexpr auto decode(Decoder &dec) {
+        auto result = dec(value);
+        if (!result) {
+            return result;
+        }
+        return cbor::tags::expected<void, cbor::tags::status_code>{
+            cbor::tags::unexpected<cbor::tags::status_code>{cbor::tags::status_code::error}};
+    }
+};
+
 template <typename T> std::vector<std::byte> encode_nullable_ptr(const T &value) {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder<nullable_ptr_codec>(buffer);
@@ -68,7 +84,7 @@ TEST_CASE("nullable pointer codec roundtrips unique_ptr null and value") {
     {
         const std::unique_ptr<std::uint64_t> value;
         const auto                           encoded = smart_ptr_test::encode_nullable_ptr(value);
-        CHECK_EQ(to_hex(encoded), "f6");
+        CHECK_EQ(to_hex(encoded), "8100");
 
         std::unique_ptr<std::uint64_t> decoded = std::make_unique<std::uint64_t>(7U);
         auto                           dec     = make_decoder<nullable_ptr_codec>(encoded);
@@ -78,7 +94,7 @@ TEST_CASE("nullable pointer codec roundtrips unique_ptr null and value") {
 
     {
         const auto encoded = smart_ptr_test::encode_nullable_ptr(std::make_unique<std::uint64_t>(42U));
-        CHECK_EQ(to_hex(encoded), "182a");
+        CHECK_EQ(to_hex(encoded), "8201182a");
 
         std::unique_ptr<std::uint64_t> decoded;
         auto                           dec = make_decoder<nullable_ptr_codec>(encoded);
@@ -164,6 +180,24 @@ TEST_CASE("shared graph codec reset starts an independent graph") {
     CHECK(decoded_first.get() != decoded_second.get());
 }
 
+TEST_CASE("shared graph codec keeps encoded roots alive until session reset") {
+    std::weak_ptr<std::uint64_t> weak;
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    {
+        auto shared = std::make_shared<std::uint64_t>(42U);
+        weak        = shared;
+        REQUIRE(enc(as_shared_graph(encode_graph, shared)));
+    }
+
+    CHECK_FALSE(weak.expired());
+    encode_graph.reset();
+    CHECK(weak.expired());
+}
+
 TEST_CASE("shared graph codec reports unknown and duplicate references") {
     {
         const auto                     bytes = to_bytes("820101");
@@ -233,11 +267,33 @@ TEST_CASE("shared graph codec rejects malformed wrappers before consuming follow
     CHECK_EQ(following, 42U);
 }
 
+TEST_CASE("shared graph codec decode failure only removes the failed graph id") {
+    const auto bytes = to_bytes("830001182a8300020d820101");
+
+    std::shared_ptr<std::uint64_t>                                    first;
+    std::shared_ptr<smart_ptr_test::graph_decode_consumes_then_fails> failed;
+    std::shared_ptr<std::uint64_t>                                    reference;
+    auto                                                              dec = make_decoder<shared_graph_codec>(bytes);
+    shared_graph_decode_session                                       decode_graph;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, first)));
+
+    const auto failed_result = dec(as_shared_graph(decode_graph, failed));
+    REQUIRE_FALSE(failed_result);
+    CHECK_EQ(failed_result.error(), status_code::error);
+
+    REQUIRE(dec(as_shared_graph(decode_graph, reference)));
+    REQUIRE(static_cast<bool>(first));
+    REQUIRE(static_cast<bool>(reference));
+    CHECK(first.get() == reference.get());
+    CHECK_EQ(*reference, 42U);
+}
+
 TEST_CASE("nullable pointer codec roundtrips shared_ptr null and value") {
     {
         const std::shared_ptr<std::uint64_t> value;
         const auto                           encoded = smart_ptr_test::encode_nullable_ptr(value);
-        CHECK_EQ(to_hex(encoded), "f6");
+        CHECK_EQ(to_hex(encoded), "8100");
 
         std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
         auto                           dec     = make_decoder<nullable_ptr_codec>(encoded);
@@ -247,7 +303,7 @@ TEST_CASE("nullable pointer codec roundtrips shared_ptr null and value") {
 
     {
         const auto encoded = smart_ptr_test::encode_nullable_ptr(std::make_shared<std::uint64_t>(42U));
-        CHECK_EQ(to_hex(encoded), "182a");
+        CHECK_EQ(to_hex(encoded), "8201182a");
 
         std::shared_ptr<std::uint64_t> decoded;
         auto                           dec = make_decoder<nullable_ptr_codec>(encoded);
@@ -262,7 +318,7 @@ TEST_CASE("nullable pointer codec does not preserve repeated shared_ptr identity
 
     std::vector<std::shared_ptr<std::uint64_t>> values{shared, shared};
     const auto                                  encoded = smart_ptr_test::encode_nullable_ptr(values);
-    CHECK_EQ(to_hex(encoded), "82182a182a");
+    CHECK_EQ(to_hex(encoded), "828201182a8201182a");
 
     std::vector<std::shared_ptr<std::uint64_t>> decoded;
     auto                                        dec = make_decoder<nullable_ptr_codec>(encoded);
@@ -278,7 +334,7 @@ TEST_CASE("nullable pointer codec does not preserve repeated shared_ptr identity
 TEST_CASE("nullable pointer codec supports aggregate fields") {
     const smart_ptr_test::nullable_holder value{std::make_unique<std::uint64_t>(42U), std::make_shared<std::string>("Ada")};
     const auto                            encoded = smart_ptr_test::encode_nullable_ptr(value);
-    CHECK_EQ(to_hex(encoded), "82182a63416461");
+    CHECK_EQ(to_hex(encoded), "828201182a820163416461");
 
     smart_ptr_test::nullable_holder decoded;
     auto                            dec = make_decoder<nullable_ptr_codec>(encoded);
@@ -292,6 +348,7 @@ TEST_CASE("nullable pointer codec supports aggregate fields") {
 TEST_CASE("nullable pointer codec supports pointer to aggregate value") {
     const auto encoded = smart_ptr_test::encode_nullable_ptr(
         std::make_unique<smart_ptr_test::nullable_holder>(std::make_unique<std::uint64_t>(42U), std::make_shared<std::string>("Ada")));
+    CHECK_EQ(to_hex(encoded), "8201828201182a820163416461");
 
     std::unique_ptr<smart_ptr_test::nullable_holder> decoded;
     auto                                             dec = make_decoder<nullable_ptr_codec>(encoded);
@@ -316,7 +373,7 @@ TEST_CASE("nullable pointer codec decodes from non-contiguous input") {
 
 TEST_CASE("nullable pointer codec keeps existing value on payload decode failure") {
     {
-        const auto                     bytes   = to_bytes("6178");
+        const auto                     bytes   = to_bytes("82016178");
         std::unique_ptr<std::uint64_t> decoded = std::make_unique<std::uint64_t>(7U);
         auto                           dec     = make_decoder<nullable_ptr_codec>(bytes);
         const auto                     result  = dec(decoded);
@@ -328,7 +385,7 @@ TEST_CASE("nullable pointer codec keeps existing value on payload decode failure
     }
 
     {
-        const auto                     bytes   = to_bytes("6178");
+        const auto                     bytes   = to_bytes("82016178");
         std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
         auto                           dec     = make_decoder<nullable_ptr_codec>(bytes);
         const auto                     result  = dec(decoded);
@@ -338,4 +395,145 @@ TEST_CASE("nullable pointer codec keeps existing value on payload decode failure
         REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 7U);
     }
+}
+
+TEST_CASE("nullable pointer codec distinguishes optional null states") {
+    {
+        const std::optional<std::shared_ptr<std::uint64_t>> value;
+        const auto                                          encoded = smart_ptr_test::encode_nullable_ptr(value);
+        CHECK_EQ(to_hex(encoded), "f6");
+
+        std::optional<std::shared_ptr<std::uint64_t>> decoded = std::make_shared<std::uint64_t>(7U);
+        auto                                          dec     = make_decoder<nullable_ptr_codec>(encoded);
+        REQUIRE(dec(decoded));
+        CHECK_FALSE(decoded.has_value());
+    }
+
+    {
+        const std::optional<std::shared_ptr<std::uint64_t>> value{std::shared_ptr<std::uint64_t>{}};
+        const auto                                          encoded = smart_ptr_test::encode_nullable_ptr(value);
+        CHECK_EQ(to_hex(encoded), "8100");
+
+        std::optional<std::shared_ptr<std::uint64_t>> decoded = std::make_shared<std::uint64_t>(7U);
+        auto                                          dec     = make_decoder<nullable_ptr_codec>(encoded);
+        REQUIRE(dec(decoded));
+        REQUIRE(decoded.has_value());
+        CHECK_FALSE(static_cast<bool>(*decoded));
+    }
+
+    {
+        const std::optional<std::shared_ptr<std::uint64_t>> value{std::make_shared<std::uint64_t>(42U)};
+        const auto                                          encoded = smart_ptr_test::encode_nullable_ptr(value);
+        CHECK_EQ(to_hex(encoded), "8201182a");
+
+        std::optional<std::shared_ptr<std::uint64_t>> decoded;
+        auto                                          dec = make_decoder<nullable_ptr_codec>(encoded);
+        REQUIRE(dec(decoded));
+        REQUIRE(decoded.has_value());
+        REQUIRE(static_cast<bool>(*decoded));
+        CHECK_EQ(**decoded, 42U);
+    }
+}
+
+TEST_CASE("nullable pointer codec rejects malformed wrappers") {
+    {
+        const auto                     bytes   = to_bytes("f6");
+        std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
+        auto                           dec     = make_decoder<nullable_ptr_codec>(bytes);
+        const auto                     result  = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
+        REQUIRE(static_cast<bool>(decoded));
+        CHECK_EQ(*decoded, 7U);
+    }
+
+    {
+        const auto                     bytes = to_bytes("8200182a");
+        std::shared_ptr<std::uint64_t> decoded;
+        auto                           dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    }
+
+    {
+        const auto                     bytes = to_bytes("8101");
+        std::shared_ptr<std::uint64_t> decoded;
+        auto                           dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    }
+
+    {
+        const auto                     bytes = to_bytes("8102");
+        std::shared_ptr<std::uint64_t> decoded;
+        auto                           dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+}
+
+TEST_CASE("nullable and shared graph codecs compose") {
+    using combined_encoder = decltype(make_encoder<nullable_ptr_codec, shared_graph_codec>(std::declval<std::vector<std::byte> &>()));
+    using combined_decoder = decltype(make_decoder<nullable_ptr_codec, shared_graph_codec>(std::declval<std::vector<std::byte> &>()));
+    using reversed_encoder = decltype(make_encoder<shared_graph_codec, nullable_ptr_codec>(std::declval<std::vector<std::byte> &>()));
+    using reversed_decoder = decltype(make_decoder<shared_graph_codec, nullable_ptr_codec>(std::declval<std::vector<std::byte> &>()));
+
+    static_assert(smart_ptr_test::CanEncode<combined_encoder, std::unique_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanEncode<combined_encoder, std::shared_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanDecode<combined_decoder, std::unique_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanDecode<combined_decoder, std::shared_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanEncode<reversed_encoder, std::unique_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanEncode<reversed_encoder, std::shared_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanDecode<reversed_decoder, std::unique_ptr<std::uint64_t>>);
+    static_assert(smart_ptr_test::CanDecode<reversed_decoder, std::shared_ptr<std::uint64_t>>);
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder<nullable_ptr_codec, shared_graph_codec>(buffer);
+    REQUIRE(enc(std::shared_ptr<std::uint64_t>{}));
+    REQUIRE(enc(std::make_shared<std::uint64_t>(42U)));
+    CHECK_EQ(to_hex(buffer), "81008201182a");
+
+    std::shared_ptr<std::uint64_t> decoded_null = std::make_shared<std::uint64_t>(7U);
+    std::shared_ptr<std::uint64_t> decoded_value;
+    auto                           dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(buffer);
+    REQUIRE(dec(decoded_null));
+    REQUIRE(dec(decoded_value));
+    CHECK_FALSE(static_cast<bool>(decoded_null));
+    REQUIRE(static_cast<bool>(decoded_value));
+    CHECK_EQ(*decoded_value, 42U);
+
+    std::vector<std::byte> reversed_buffer;
+    auto                   reversed_enc = make_encoder<shared_graph_codec, nullable_ptr_codec>(reversed_buffer);
+    REQUIRE(reversed_enc(std::make_shared<std::uint64_t>(13U)));
+    CHECK_EQ(to_hex(reversed_buffer), "82010d");
+}
+
+TEST_CASE("nullable and shared graph codecs use graph identity inside graph wrappers") {
+    auto shared = std::make_shared<std::uint64_t>(42U);
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<nullable_ptr_codec, shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, shared)));
+    REQUIRE(enc(as_shared_graph(encode_graph, shared)));
+    CHECK_EQ(to_hex(buffer), "830001182a820101");
+
+    std::shared_ptr<std::uint64_t> decoded_first;
+    std::shared_ptr<std::uint64_t> decoded_second;
+    auto                           dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(buffer);
+    shared_graph_decode_session    decode_graph;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
+    REQUIRE(static_cast<bool>(decoded_first));
+    REQUIRE(static_cast<bool>(decoded_second));
+    CHECK(decoded_first.get() == decoded_second.get());
 }

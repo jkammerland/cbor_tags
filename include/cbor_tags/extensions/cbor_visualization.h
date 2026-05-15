@@ -349,8 +349,10 @@ template <typename T> constexpr auto getName(const T &) {
             static_assert(detail::is_supported_nullable_pointer_v<T>,
                           "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
                           "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+            static_assert(std::default_initializable<element_type>,
+                          "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
             auto name = getName<element_type>();
-            return std::string(name) + " / null";
+            return std::string("[0] / [1, ") + std::string(name) + "]";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
@@ -400,8 +402,10 @@ template <typename T> constexpr auto getName() {
             static_assert(detail::is_supported_nullable_pointer_v<T>,
                           "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
                           "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+            static_assert(std::default_initializable<element_type>,
+                          "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
             auto name = getName<element_type>();
-            return std::string(name) + " / null";
+            return std::string("[0] / [1, ") + std::string(name) + "]";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
@@ -442,6 +446,48 @@ template <typename T>
 std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
 template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
 template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
+
+template <typename T, std::size_t Depth = 0> consteval bool cddl_contains_nullable_pointer();
+
+template <typename Tuple, std::size_t Depth, std::size_t... Is>
+consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) {
+    return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Depth + 1>() || ...);
+}
+
+template <typename T, std::size_t Depth> consteval bool cddl_contains_nullable_pointer() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (Depth > 8U) {
+        return false;
+    } else {
+        if constexpr (IsNullablePointer<value_type>) {
+            return true;
+        } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
+            return cddl_contains_nullable_pointer<typename value_type::value_type, Depth + 1>();
+        } else if constexpr (IsVariant<value_type>) {
+            return []<typename... Ts>(std::variant<Ts...> *) consteval {
+                return (cddl_contains_nullable_pointer<Ts, Depth + 1>() || ...);
+            }(static_cast<value_type *>(nullptr));
+        } else if constexpr (IsNamedMapWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<named_map_value_t<value_type>, Depth + 1>();
+        } else if constexpr (IsNamedGroupWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<named_group_value_t<value_type>, Depth + 1>();
+        } else if constexpr (IsNamedExtensionWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, Depth + 1>();
+        } else if constexpr (IsIndefiniteWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, Depth + 1>();
+        } else if constexpr (IsMap<value_type>) {
+            return cddl_contains_nullable_pointer<typename value_type::key_type, Depth + 1>() ||
+                   cddl_contains_nullable_pointer<typename value_type::mapped_type, Depth + 1>();
+        } else if constexpr (IsTuple<value_type>) {
+            return cddl_tuple_contains_nullable_pointer<value_type, Depth>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
+        } else if constexpr (IsAggregate<value_type>) {
+            using tuple_type = aggregate_tuple_t<value_type>;
+            return cddl_tuple_contains_nullable_pointer<tuple_type, Depth>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+        } else {
+            return false;
+        }
+    }
+}
 
 constexpr bool is_cddl_id_start(char value) {
     return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') || value == '_' || value == '$' || value == '@';
@@ -1016,9 +1062,14 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         static_assert(is_supported_nullable_pointer_v<value_type>,
                       "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or std::shared_ptr<T>, and "
                       "T must be non-const, non-void, and non-array");
-        return fmt::format("{} / null", cddl_type_expr<element_type>(context, options));
+        static_assert(std::default_initializable<element_type>,
+                      "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
+        return fmt::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type>(context, options)));
     } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
+            static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
+                          "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
+                          "decode is not extension-codec aware");
             return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts>(variant_context, variant_options)...}, " / ");
         }(static_cast<value_type *>(nullptr), context, options);
     } else if constexpr (IsArrayHeader<value_type>) {

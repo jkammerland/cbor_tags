@@ -9,7 +9,6 @@
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
-#include <typeindex>
 #include <unordered_map>
 #include <utility>
 
@@ -32,6 +31,8 @@ template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_e
     return {session, value};
 }
 
+template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &, const T &&) = delete;
+
 template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value) {
     return {session, value};
 }
@@ -45,10 +46,12 @@ constexpr bool is_null(major_type major, std::byte additional_info) {
 template <typename T>
 concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
 
-template <typename Decoder, typename T> [[nodiscard]] status_code decode_from_consumed_initial_byte(Decoder &dec, T &value) {
-    dec.reader_.seek(-1);
-    return dec.decode(value);
-}
+struct nullable_ptr_codec_marker {};
+struct shared_graph_codec_marker {};
+
+template <typename T> constexpr bool has_nullable_ptr_codec_v = std::is_base_of_v<nullable_ptr_codec_marker, std::remove_cvref_t<T>>;
+
+template <typename T> constexpr bool has_shared_graph_codec_v = std::is_base_of_v<shared_graph_codec_marker, std::remove_cvref_t<T>>;
 
 template <typename Decoder>
 [[nodiscard]] status_code decode_definite_array_size(Decoder &dec, major_type major, std::byte additional_info, std::uint64_t &size) {
@@ -60,6 +63,94 @@ template <typename Decoder>
     }
     size = dec.decode_unsigned(additional_info);
     return status_code::success;
+}
+
+template <typename T> inline constexpr char graph_type_token{};
+
+template <typename T> constexpr const void *graph_type_id() noexcept { return &graph_type_token<std::remove_cvref_t<T>>; }
+
+template <typename Encoder, typename Pointer> void encode_nullable_pointer(Encoder &enc, const Pointer &value) {
+    if (!value) {
+        enc.encode(as_array{1});
+        enc.encode(std::uint64_t{0});
+        return;
+    }
+
+    enc.encode(as_array{2});
+    enc.encode(std::uint64_t{1});
+    enc.encode(*value);
+}
+
+template <typename Decoder, NullablePointerValue T>
+[[nodiscard]] status_code decode_nullable_pointer(Decoder &dec, std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
+    std::uint64_t size{};
+    auto          status = decode_definite_array_size(dec, major, additional_info, size);
+    if (status != status_code::success) {
+        return status;
+    }
+
+    std::uint64_t kind{};
+    status = dec.decode(kind);
+    if (status != status_code::success) {
+        return status;
+    }
+
+    if (kind == 0U) {
+        if (size != 1U) {
+            return status_code::unexpected_group_size;
+        }
+        value.reset();
+        return status_code::success;
+    }
+    if (kind != 1U) {
+        return status_code::error;
+    }
+    if (size != 2U) {
+        return status_code::unexpected_group_size;
+    }
+
+    auto decoded = std::make_unique<T>();
+    status       = dec.decode(*decoded);
+    if (status == status_code::success) {
+        value = std::move(decoded);
+    }
+    return status;
+}
+
+template <typename Decoder, NullablePointerValue T>
+[[nodiscard]] status_code decode_nullable_pointer(Decoder &dec, std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
+    std::uint64_t size{};
+    auto          status = decode_definite_array_size(dec, major, additional_info, size);
+    if (status != status_code::success) {
+        return status;
+    }
+
+    std::uint64_t kind{};
+    status = dec.decode(kind);
+    if (status != status_code::success) {
+        return status;
+    }
+
+    if (kind == 0U) {
+        if (size != 1U) {
+            return status_code::unexpected_group_size;
+        }
+        value.reset();
+        return status_code::success;
+    }
+    if (kind != 1U) {
+        return status_code::error;
+    }
+    if (size != 2U) {
+        return status_code::unexpected_group_size;
+    }
+
+    auto decoded = std::make_shared<T>();
+    status       = dec.decode(*decoded);
+    if (status == status_code::success) {
+        value = std::move(decoded);
+    }
+    return status;
 }
 
 enum class graph_entry_state { encoding, complete };
@@ -94,9 +185,10 @@ class shared_graph_encode_session {
 
   private:
     struct encoded_shared_object {
-        std::uint64_t             id{};
-        std::type_index           type{typeid(void)};
-        detail::graph_entry_state state{detail::graph_entry_state::encoding};
+        std::uint64_t               id{};
+        const void                 *type{};
+        detail::graph_entry_state   state{detail::graph_entry_state::encoding};
+        std::shared_ptr<const void> keepalive{};
     };
 
     std::unordered_map<const void *, encoded_shared_object> encoded_shared_ids_{};
@@ -112,7 +204,7 @@ class shared_graph_decode_session {
   private:
     struct decoded_shared_object {
         std::shared_ptr<void>     value{};
-        std::type_index           type{typeid(void)};
+        const void               *type{};
         detail::graph_entry_state state{detail::graph_entry_state::encoding};
     };
 
@@ -121,64 +213,36 @@ class shared_graph_decode_session {
     template <typename Self> friend struct shared_graph_codec;
 };
 
-template <typename Self> struct nullable_ptr_codec : cbor_codec_mixin_base<Self> {
+template <typename Self> struct nullable_ptr_codec : detail::nullable_ptr_codec_marker, cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <detail::NullablePointerValue T> void encode(const std::unique_ptr<T> &value) {
-        auto &enc = static_cast<Self &>(*this);
-        if (!value) {
-            enc.encode(nullptr);
-            return;
-        }
-
-        enc.encode(*value);
-    }
-
-    template <detail::NullablePointerValue T> void encode(const std::shared_ptr<T> &value) {
-        auto &enc = static_cast<Self &>(*this);
-        if (!value) {
-            enc.encode(nullptr);
-            return;
-        }
-
-        enc.encode(*value);
+    template <detail::NullablePointerValue T>
+        requires(!detail::has_shared_graph_codec_v<Self>)
+    void encode(const std::unique_ptr<T> &value) {
+        detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
     }
 
     template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
+        requires(!detail::has_shared_graph_codec_v<Self>)
+    void encode(const std::shared_ptr<T> &value) {
+        detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
+    }
+
+    template <detail::NullablePointerValue T>
+        requires(std::default_initializable<T> && !detail::has_shared_graph_codec_v<Self>)
     [[nodiscard]] status_code decode(std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
-        if (detail::is_null(major, additional_info)) {
-            value.reset();
-            return status_code::success;
-        }
-
-        auto decoded = std::make_unique<T>();
-        auto status  = detail::decode_from_consumed_initial_byte(static_cast<Self &>(*this), *decoded);
-        if (status == status_code::success) {
-            value = std::move(decoded);
-        }
-        return status;
+        return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
 
     template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
+        requires(std::default_initializable<T> && !detail::has_shared_graph_codec_v<Self>)
     [[nodiscard]] status_code decode(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
-        if (detail::is_null(major, additional_info)) {
-            value.reset();
-            return status_code::success;
-        }
-
-        auto decoded = std::make_shared<T>();
-        auto status  = detail::decode_from_consumed_initial_byte(static_cast<Self &>(*this), *decoded);
-        if (status == status_code::success) {
-            value = std::move(decoded);
-        }
-        return status;
+        return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
 };
 
-template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self> {
+template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_marker, cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
@@ -193,18 +257,17 @@ template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self>
     }
 
     template <detail::NullablePointerValue T> void encode(const std::unique_ptr<T> &value) {
-        auto &enc = static_cast<Self &>(*this);
-        if (!value) {
-            enc.encode(nullptr);
-            return;
-        }
-
-        enc.encode(*value);
+        detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
     }
 
     template <detail::NullablePointerValue T> void encode(const std::shared_ptr<T> &value) {
         if (active_encode_session_ == nullptr) {
-            throw std::runtime_error("shared_ptr graph encoding requires as_shared_graph(...)");
+            if constexpr (detail::has_nullable_ptr_codec_v<Self>) {
+                detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
+                return;
+            } else {
+                throw std::runtime_error("shared_ptr graph encoding requires as_shared_graph(...)");
+            }
         }
 
         auto &enc = static_cast<Self &>(*this);
@@ -216,7 +279,7 @@ template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self>
         auto       &session = *active_encode_session_;
         const auto *address = static_cast<const void *>(value.get());
         if (const auto existing = session.encoded_shared_ids_.find(address); existing != session.encoded_shared_ids_.end()) {
-            if (existing->second.type != std::type_index(typeid(T))) {
+            if (existing->second.type != detail::graph_type_id<T>()) {
                 throw std::runtime_error("shared_ptr graph references must use one static pointer type per object");
             }
             if (existing->second.state == detail::graph_entry_state::encoding) {
@@ -230,9 +293,10 @@ template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self>
         }
 
         const auto id          = session.next_shared_id_++;
+        auto       keepalive   = std::shared_ptr<const void>{value, static_cast<const void *>(value.get())};
         auto [entry, inserted] = session.encoded_shared_ids_.emplace(
-            address,
-            shared_graph_encode_session::encoded_shared_object{id, std::type_index(typeid(T)), detail::graph_entry_state::encoding});
+            address, shared_graph_encode_session::encoded_shared_object{id, detail::graph_type_id<T>(), detail::graph_entry_state::encoding,
+                                                                        std::move(keepalive)});
         static_cast<void>(inserted);
 
         try {
@@ -250,24 +314,18 @@ template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self>
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>
     [[nodiscard]] status_code decode(std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
-        if (detail::is_null(major, additional_info)) {
-            value.reset();
-            return status_code::success;
-        }
-
-        auto decoded = std::make_unique<T>();
-        auto status  = detail::decode_from_consumed_initial_byte(static_cast<Self &>(*this), *decoded);
-        if (status == status_code::success) {
-            value = std::move(decoded);
-        }
-        return status;
+        return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
 
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>
     [[nodiscard]] status_code decode(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
         if (active_decode_session_ == nullptr) {
-            return status_code::error;
+            if constexpr (detail::has_nullable_ptr_codec_v<Self>) {
+                return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
+            } else {
+                return status_code::error;
+            }
         }
 
         if (detail::is_null(major, additional_info)) {
@@ -321,20 +379,25 @@ template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self>
         }
 
         auto [entry, inserted] = active_decode_session_->decoded_shared_objects_.emplace(
-            id, shared_graph_decode_session::decoded_shared_object{{}, std::type_index(typeid(T)), detail::graph_entry_state::encoding});
+            id, shared_graph_decode_session::decoded_shared_object{{}, detail::graph_type_id<T>(), detail::graph_entry_state::encoding});
         static_cast<void>(inserted);
 
-        auto decoded = std::make_shared<T>();
-        status       = dec.decode(*decoded);
-        if (status != status_code::success) {
-            active_decode_session_->reset();
-            return status;
-        }
+        try {
+            auto decoded = std::make_shared<T>();
+            status       = dec.decode(*decoded);
+            if (status != status_code::success) {
+                active_decode_session_->decoded_shared_objects_.erase(id);
+                return status;
+            }
 
-        entry->second.value = std::shared_ptr<void>{decoded};
-        entry->second.state = detail::graph_entry_state::complete;
-        value               = std::move(decoded);
-        return status_code::success;
+            entry->second.value = std::shared_ptr<void>{decoded};
+            entry->second.state = detail::graph_entry_state::complete;
+            value               = std::move(decoded);
+            return status_code::success;
+        } catch (...) {
+            active_decode_session_->decoded_shared_objects_.erase(id);
+            throw;
+        }
     }
 
     template <detail::NullablePointerValue T>
@@ -354,7 +417,7 @@ template <typename Self> struct shared_graph_codec : cbor_codec_mixin_base<Self>
 
         const auto existing = active_decode_session_->decoded_shared_objects_.find(id);
         if (existing == active_decode_session_->decoded_shared_objects_.end() ||
-            existing->second.state != detail::graph_entry_state::complete || existing->second.type != std::type_index(typeid(T))) {
+            existing->second.state != detail::graph_entry_state::complete || existing->second.type != detail::graph_type_id<T>()) {
             return status_code::error;
         }
 

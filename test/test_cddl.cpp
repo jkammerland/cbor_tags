@@ -73,6 +73,9 @@ struct CDDLNullablePointers {
     std::vector<std::shared_ptr<CDDLPlainTwo>> history;
 };
 
+using CDDLVariantWithSmartPointer       = std::variant<std::shared_ptr<int>, std::string>;
+using CDDLVariantWithNestedSmartPointer = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+
 struct CDDLNullablePointerRecursiveNode {
     std::uint64_t                                     id;
     std::shared_ptr<CDDLNullablePointerRecursiveNode> next;
@@ -91,6 +94,9 @@ static_assert(!detail::is_supported_nullable_pointer_v<std::unique_ptr<int, CDDL
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<void>>);
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<const int>>);
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<int[]>>);
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithNestedSmartPointer>());
+static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
 
 struct CDDLRecursiveNode {
     std::vector<CDDLRecursiveNode> children;
@@ -436,13 +442,14 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
 }
 
 TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
-    CHECK_EQ(cddl_schema_inline<std::unique_ptr<int>>(), "root = int / null");
-    CHECK_EQ(cddl_schema_inline<std::shared_ptr<std::string>>(), "root = tstr / null");
+    CHECK_EQ(cddl_schema_inline<std::unique_ptr<int>>(), "root = [0] / [1, int]");
+    CHECK_EQ(cddl_schema_inline<std::shared_ptr<std::string>>(), "root = [0] / [1, tstr]");
+    CHECK_EQ(cddl_schema_inline<std::optional<std::shared_ptr<int>>>(), "root = [0] / [1, int] / null");
 
     const auto schema = cddl_schema_inline<CDDLNullablePointers>();
     CBOR_TAGS_TEST_LOG("CDDL nullable pointers: \n{}\n", schema);
 
-    CHECK(substrings_in(schema, "CDDLNullablePointers = [uint / null, tstr / null, [* (CDDLPlainTwo / null)]]",
+    CHECK(substrings_in(schema, "CDDLNullablePointers = [[0] / [1, uint], [0] / [1, tstr], [* ([0] / [1, CDDLPlainTwo])]]",
                         "CDDLPlainTwo = [int, tstr]"));
     CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
 }
@@ -450,7 +457,7 @@ TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
 TEST_CASE("CDDL supports recursive aggregate containers") {
     CHECK_EQ(cddl_schema_inline<CDDLRecursiveNode>(), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
     CHECK_EQ(cddl_schema_inline<CDDLNullablePointerRecursiveNode>(),
-             "CDDLNullablePointerRecursiveNode = [uint, CDDLNullablePointerRecursiveNode / null]");
+             "CDDLNullablePointerRecursiveNode = [uint, [0] / [1, CDDLNullablePointerRecursiveNode]]");
 
     fmt::memory_buffer inline_buffer;
     cddl_schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
@@ -632,7 +639,7 @@ TEST_CASE("named-map CDDL covers a larger grouped profile") {
 TEST_CASE("named-map CDDL keeps nullable pointer fields required unless optional") {
     fmt::memory_buffer buffer;
     cddl_schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
-    CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: uint / null, name: tstr / null, ? maybe_count: int / null}");
+    CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: [0] / [1, uint], name: [0] / [1, tstr], ? maybe_count: [0] / [1, int]}");
 }
 
 TEST_CASE("named-map CDDL indents nested inline named groups by depth") {

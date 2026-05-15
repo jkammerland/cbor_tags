@@ -247,10 +247,10 @@ auto dec = make_decoder<nullable_ptr_codec>(buffer);
 dec(decoded);
 ```
 
-Null smart pointers encode as CBOR `null`. Non-null `unique_ptr<T>` values encode
-as the pointed-to value. Non-null `shared_ptr<T>` values also encode as the
-pointed-to value; shared ownership identity is not preserved by this codec.
-Decode requires a default-initializable non-const object type.
+Null smart pointers encode as `[0]`. Non-null smart pointers encode as
+`[1, value]`, where `value` is the pointed-to object. Shared ownership identity
+is not preserved by this codec. Decode requires a default-initializable
+non-const object type.
 
 ### Shared Pointer Graph Codec
 Use `shared_graph_codec` when repeated `shared_ptr<T>` identity must survive
@@ -294,6 +294,11 @@ must use the same root order as encoding.
 Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
 object. Cross-static-type identity, aliasing-pointer identity, and cycles are
 not supported in this codec.
+
+`nullable_ptr_codec` and `shared_graph_codec` can be installed together. Outside
+`as_shared_graph(...)`, `shared_ptr<T>` uses the nullable `[0]` / `[1, value]`
+shape. Inside `as_shared_graph(...)`, `shared_ptr<T>` uses graph identity
+encoding.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
