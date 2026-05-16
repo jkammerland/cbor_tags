@@ -4,12 +4,10 @@
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_extensions.h"
 
-#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <new>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
@@ -20,17 +18,14 @@
 
 namespace cbor::tags::ext::smart_ptr {
 
-class shared_graph_encode_session_base;
 class shared_graph_encode_session;
-template <std::size_t Capacity> class shared_graph_encode_array_session;
 class shared_graph_decode_session;
-template <typename Self> struct shared_graph_codec;
 
 enum class shared_graph_encode_lookup { unordered_map, linear_scan };
 
 template <typename T> struct shared_graph_encode_root {
-    shared_graph_encode_session_base &session;
-    const T                          &value;
+    shared_graph_encode_session &session;
+    const T                     &value;
 };
 
 template <typename T> struct shared_graph_decode_root {
@@ -38,11 +33,11 @@ template <typename T> struct shared_graph_decode_root {
     T                           &value;
 };
 
-template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session_base &session, const T &value) {
+template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &session, const T &value) {
     return {session, value};
 }
 
-template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session_base &, const T &&) = delete;
+template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &, const T &&) = delete;
 
 template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value) {
     return {session, value};
@@ -351,17 +346,21 @@ template <typename Session> class scoped_graph_session {
 
 } // namespace detail
 
-class shared_graph_encode_session_base {
+class shared_graph_encode_session {
   public:
-    virtual ~shared_graph_encode_session_base() = default;
+    explicit shared_graph_encode_session(shared_graph_encode_lookup lookup = shared_graph_encode_lookup::unordered_map) noexcept
+        : lookup_(lookup) {}
 
-    [[nodiscard]] virtual shared_graph_encode_lookup lookup() const noexcept = 0;
+    [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept { return lookup_; }
 
     void reserve_unique(std::size_t unique_count) {
         if (active_depth_ != 0U) {
             throw std::runtime_error("shared graph sessions cannot reserve while an encode operation is active");
         }
-        reserve_unique_impl(unique_count);
+        encoded_shared_objects_.reserve(unique_count);
+        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
+            encoded_shared_ids_.reserve(unique_count);
+        }
     }
 
     void reset() {
@@ -372,57 +371,20 @@ class shared_graph_encode_session_base {
     }
 
   private:
-    std::size_t active_depth_{0};
-
-    void begin_use() { ++active_depth_; }
-    void end_use() { --active_depth_; }
-
-    virtual void                                         reserve_unique_impl(std::size_t unique_count)                 = 0;
-    virtual void                                         reset_unchecked()                                             = 0;
-    [[nodiscard]] virtual std::size_t                    encoded_size() const noexcept                                 = 0;
-    [[nodiscard]] virtual std::optional<std::size_t>     find_encoded_index(const void *) const                        = 0;
-    [[nodiscard]] virtual detail::encoded_shared_object &encoded_object(std::size_t index)                             = 0;
-    virtual void                                         push_encoded_object(detail::encoded_shared_object object)     = 0;
-    virtual void                                         pop_encoded_object()                                          = 0;
-    virtual void                                         index_encoded_address(const void *address, std::size_t index) = 0;
-
-    template <typename Self> friend struct shared_graph_codec;
-    template <typename Session> friend class detail::scoped_graph_session;
-};
-
-class shared_graph_encode_session : public shared_graph_encode_session_base {
-  public:
-    explicit shared_graph_encode_session(shared_graph_encode_lookup lookup = shared_graph_encode_lookup::unordered_map) noexcept
-        : lookup_(lookup) {}
-
-    [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept override { return lookup_; }
-
-  private:
-    void reserve_unique_impl(std::size_t unique_count) override {
-        encoded_shared_objects_.reserve(unique_count);
-        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
-            encoded_shared_ids_.reserve(unique_count);
-        }
-    }
-
-    void reset_unchecked() override {
+    void reset_unchecked() {
         encoded_shared_ids_.clear();
         encoded_shared_objects_.clear();
     }
 
-    [[nodiscard]] std::size_t encoded_size() const noexcept override { return encoded_shared_objects_.size(); }
-
-    [[nodiscard]] detail::encoded_shared_object &encoded_object(std::size_t index) override { return encoded_shared_objects_[index]; }
-
-    void push_encoded_object(detail::encoded_shared_object object) override { encoded_shared_objects_.push_back(std::move(object)); }
-
-    void pop_encoded_object() override { encoded_shared_objects_.pop_back(); }
-
     std::vector<detail::encoded_shared_object>    encoded_shared_objects_{};
     std::unordered_map<const void *, std::size_t> encoded_shared_ids_{};
     shared_graph_encode_lookup                    lookup_{shared_graph_encode_lookup::unordered_map};
+    std::size_t                                   active_depth_{0};
 
-    [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const override {
+    void begin_use() { ++active_depth_; }
+    void end_use() { --active_depth_; }
+
+    [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const {
         if (lookup_ == shared_graph_encode_lookup::unordered_map) {
             if (const auto existing = encoded_shared_ids_.find(address); existing != encoded_shared_ids_.end()) {
                 return existing->second;
@@ -438,80 +400,14 @@ class shared_graph_encode_session : public shared_graph_encode_session_base {
         return std::nullopt;
     }
 
-    void index_encoded_address(const void *address, std::size_t index) override {
+    void index_encoded_address(const void *address, std::size_t index) {
         if (lookup_ == shared_graph_encode_lookup::unordered_map) {
             encoded_shared_ids_.emplace(address, index);
         }
     }
-};
 
-template <std::size_t Capacity> class shared_graph_encode_array_session : public shared_graph_encode_session_base {
-  public:
-    shared_graph_encode_array_session() = default;
-    ~shared_graph_encode_array_session() override { reset_unchecked(); }
-
-    shared_graph_encode_array_session(const shared_graph_encode_array_session &)            = delete;
-    shared_graph_encode_array_session &operator=(const shared_graph_encode_array_session &) = delete;
-    shared_graph_encode_array_session(shared_graph_encode_array_session &&)                 = delete;
-    shared_graph_encode_array_session &operator=(shared_graph_encode_array_session &&)      = delete;
-
-    [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept override { return shared_graph_encode_lookup::linear_scan; }
-
-    static constexpr std::size_t capacity() noexcept { return Capacity; }
-
-  private:
-    void reserve_unique_impl(std::size_t unique_count) override {
-        if (unique_count > Capacity) {
-            throw std::out_of_range("shared graph fixed encode session capacity exceeded");
-        }
-    }
-
-    void reset_unchecked() override {
-        while (size_ > 0U) {
-            pop_encoded_object();
-        }
-    }
-
-    [[nodiscard]] std::size_t encoded_size() const noexcept override { return size_; }
-
-    [[nodiscard]] detail::encoded_shared_object &encoded_object(std::size_t index) override { return *object_at(index); }
-
-    void push_encoded_object(detail::encoded_shared_object object) override {
-        if (size_ >= Capacity) {
-            throw std::out_of_range("shared graph fixed encode session capacity exceeded");
-        }
-        std::construct_at(object_at(size_), std::move(object));
-        ++size_;
-    }
-
-    void pop_encoded_object() override {
-        --size_;
-        std::destroy_at(object_at(size_));
-    }
-
-    [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const override {
-        for (std::size_t index = 0; index < size_; ++index) {
-            if (object_at(index)->address == address) {
-                return index;
-            }
-        }
-        return std::nullopt;
-    }
-
-    void index_encoded_address(const void *, std::size_t) override {}
-
-    [[nodiscard]] detail::encoded_shared_object *object_at(std::size_t index) noexcept {
-        return std::launder(
-            reinterpret_cast<detail::encoded_shared_object *>(storage_.data() + index * sizeof(detail::encoded_shared_object)));
-    }
-
-    [[nodiscard]] const detail::encoded_shared_object *object_at(std::size_t index) const noexcept {
-        return std::launder(
-            reinterpret_cast<const detail::encoded_shared_object *>(storage_.data() + index * sizeof(detail::encoded_shared_object)));
-    }
-
-    alignas(detail::encoded_shared_object) std::array<std::byte, sizeof(detail::encoded_shared_object) * Capacity> storage_{};
-    std::size_t size_{0};
+    template <typename Self> friend struct shared_graph_codec;
+    template <typename Session> friend class detail::scoped_graph_session;
 };
 
 class shared_graph_decode_session {
@@ -617,7 +513,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         auto       &session = *active_encode_session_;
         const auto *address = static_cast<const void *>(value.get());
         if (const auto existing = session.find_encoded_index(address)) {
-            auto &entry = session.encoded_object(*existing);
+            auto &entry = session.encoded_shared_objects_[*existing];
             if (entry.type != detail::graph_type_id<T>()) {
                 throw std::runtime_error("shared_ptr graph references must use one static pointer type per object");
             }
@@ -630,22 +526,22 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             return;
         }
 
-        const auto id        = static_cast<std::uint64_t>(session.encoded_size());
+        const auto id        = static_cast<std::uint64_t>(session.encoded_shared_objects_.size());
         auto       keepalive = std::shared_ptr<const void>{value, static_cast<const void *>(value.get())};
 
+        session.encoded_shared_objects_.push_back(detail::encoded_shared_object{address, id, detail::graph_type_id<T>(),
+                                                                                detail::graph_entry_state::encoding, std::move(keepalive)});
         try {
-            session.push_encoded_object(detail::encoded_shared_object{address, id, detail::graph_type_id<T>(),
-                                                                      detail::graph_entry_state::encoding, std::move(keepalive)});
-            session.index_encoded_address(address, session.encoded_size() - 1U);
+            session.index_encoded_address(address, session.encoded_shared_objects_.size() - 1U);
         } catch (...) {
-            session.reset_unchecked();
+            session.encoded_shared_objects_.pop_back();
             throw;
         }
 
         try {
             enc.encode(static_tag<detail::shareable_tag>{});
             enc.encode(*value);
-            session.encoded_object(id).state = detail::graph_entry_state::complete;
+            session.encoded_shared_objects_[id].state = detail::graph_entry_state::complete;
         } catch (...) {
             session.reset_unchecked();
             throw;
@@ -777,8 +673,8 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         return status_code::success;
     }
 
-    shared_graph_encode_session_base *active_encode_session_{};
-    shared_graph_decode_session      *active_decode_session_{};
+    shared_graph_encode_session *active_encode_session_{};
+    shared_graph_decode_session *active_decode_session_{};
 };
 
 } // namespace cbor::tags::ext::smart_ptr

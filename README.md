@@ -313,15 +313,6 @@ encode_graph.reserve_unique(32);
 enc(as_shared_graph(encode_graph, shared));
 ```
 
-For a hard fixed-capacity small graph, use the array-backed session. It scans
-only the active `[0, size)` entries and reports an encode error if the graph
-exceeds `N` unique non-null shared objects:
-
-```cpp
-shared_graph_encode_array_session<32> encode_graph;
-enc(as_shared_graph(encode_graph, shared));
-```
-
 `nullable_ptr_codec` and `shared_graph_codec` can be installed together. Outside
 `as_shared_graph(...)`, `shared_ptr<T>` uses the nullable `[0]` / `[1, value]`
 shape. Inside `as_shared_graph(...)`, `shared_ptr<T>` uses graph identity

@@ -32,21 +32,26 @@ widths and container contents.
 ## Shared Graph Encode Lookup Rows
 
 The encoder suite includes `shared_graph encode N unique x2 unordered_map`,
-`unordered_map_reserved`, `vector_scan_o_n`, `vector_scan_o_n_reserved`,
-`array_scan_fixed`, `array_scan_unsafe_fixed`, and
-`array_scan_typed_unsafe` rows. They encode the same
-`std::vector<std::shared_ptr<std::uint64_t>>`: `N` first-seen pointers followed
-by a second pass of references to the same pointers. Reserved rows call
-`shared_graph_encode_session::reserve_unique(N)` before encoding so table
-growth is separated from lookup cost. The array rows use
-`shared_graph_encode_array_session<N>`, which scans only the active entries and
-throws if the graph exceeds `N` unique objects. The unsafe rows are
-benchmark-only upper-bound probes; `array_scan_unsafe_fixed` drops capacity
-checks from the type-erased session, while `array_scan_typed_unsafe` uses a
-typed fixed array and drops capacity, keepalive, type, and cycle checks. These
-rows isolate the encode-side identity lookup tradeoff: hash lookup is the
-default for large graphs, while linear scan variants avoid the hash table for
-small or allocation-sensitive graph scopes.
+`unordered_map_reserved`, `vector_scan_o_n`, and `vector_scan_o_n_reserved`
+rows. They encode the same `std::vector<std::shared_ptr<std::uint64_t>>`: `N`
+first-seen pointers followed by a second pass of references to the same
+pointers. Reserved rows call `shared_graph_encode_session::reserve_unique(N)`
+before encoding so table growth is separated from lookup cost. These rows
+isolate the encode-side identity lookup tradeoff: hash lookup is the default for
+large graphs, while `linear_scan` avoids the hash table for small or
+allocation-sensitive graph scopes.
+
+Historical fixed-array lookup experiments were removed from the public API and
+benchmark target. The directional numbers below were captured with CPU governor
+warnings enabled, so they should be treated as design evidence rather than
+release performance data:
+
+| unique | unordered reserved | vector reserved | safe array | typed unsafe array |
+|-------:|-------------------:|----------------:|-----------:|-------------------:|
+|      4 |          148.08 ns |       100.84 ns |  104.34 ns |           62.69 ns |
+|     16 |          606.52 ns |       442.95 ns |  505.33 ns |          287.79 ns |
+|     64 |         3326.37 ns |      2665.20 ns | 3038.04 ns |         2596.25 ns |
+|    256 |        14721.68 ns |     23152.88 ns | 24786.15 ns |        18851.49 ns |
 
 ## Serialization Comparison Suite
 

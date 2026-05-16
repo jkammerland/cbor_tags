@@ -246,51 +246,6 @@ TEST_CASE("shared graph codec can use linear encode lookup") {
     CHECK(decoded_first.get() == decoded_second.get());
 }
 
-TEST_CASE("shared graph codec can use fixed array encode lookup") {
-    auto shared = std::make_shared<std::uint64_t>(42U);
-
-    std::vector<std::byte>                buffer;
-    auto                                  enc = make_encoder<shared_graph_codec>(buffer);
-    shared_graph_encode_array_session<1U> encode_graph;
-
-    REQUIRE_EQ(encode_graph.lookup(), shared_graph_encode_lookup::linear_scan);
-    REQUIRE_EQ(encode_graph.capacity(), 1U);
-    encode_graph.reserve_unique(1U);
-    REQUIRE(enc(as_shared_graph(encode_graph, shared)));
-    REQUIRE(enc(as_shared_graph(encode_graph, shared)));
-    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
-
-    auto                           dec = make_decoder<shared_graph_codec>(buffer);
-    shared_graph_decode_session    decode_graph;
-    std::shared_ptr<std::uint64_t> decoded_first;
-    std::shared_ptr<std::uint64_t> decoded_second;
-
-    REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
-    REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
-    REQUIRE(static_cast<bool>(decoded_first));
-    REQUIRE(static_cast<bool>(decoded_second));
-    CHECK(decoded_first.get() == decoded_second.get());
-
-    CHECK_THROWS_AS(encode_graph.reserve_unique(2U), std::out_of_range);
-}
-
-TEST_CASE("shared graph fixed array encode lookup rejects capacity overflow") {
-    std::vector<std::byte>                      buffer;
-    auto                                        enc = make_encoder<shared_graph_codec>(buffer);
-    shared_graph_encode_array_session<1U>       encode_graph;
-    std::vector<std::shared_ptr<std::uint64_t>> values{std::make_shared<std::uint64_t>(1U), std::make_shared<std::uint64_t>(2U)};
-
-    const auto result = enc(as_shared_graph(encode_graph, values));
-
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
-
-    buffer.clear();
-    auto recovered = std::make_shared<std::uint64_t>(42U);
-    REQUIRE(enc(as_shared_graph(encode_graph, recovered)));
-    CHECK_EQ(to_hex(buffer), "d81c182a");
-}
-
 TEST_CASE("shared graph reference shape is rejected by nullable pointer codec") {
     const auto                     bytes   = to_bytes("d81d00");
     std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
