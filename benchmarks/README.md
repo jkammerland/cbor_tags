@@ -71,15 +71,29 @@ user values and captures the encoded byte sizes.
 The suite also includes wire-throughput rows with `unit("byte")` and
 `batch(encoded_size)`. Those rows report absolute encoded-byte throughput for
 the tagged record and for tagged `std::vector<double>` and `std::vector<float>`
-fixtures with 16, 1024, and 65536 elements. For same-value comparisons, read
-these together with the latency rows because default CBOR and `custom_codec_1`
-do not always emit the same number of bytes.
+fixtures with 16, 1024, and 65536 elements. The same vector fixtures also
+include RFC 8746 typed-array rows, which encode homogeneous numeric values as
+standard CBOR typed-array tags over a byte-string payload. For same-value
+comparisons, read these together with the latency rows because default CBOR,
+RFC 8746 typed arrays, and `custom_codec_1` do not always emit the same number
+of bytes.
 
 Rows named `custom_codec_1 zc ... encode segments` use
 `encode_borrowed_segments(...)`. They assemble the same outer `tag(bstr)` wire
 shape as normal `custom_codec_1` encoding, but the numeric payload bytes are
 borrowed from the source vector instead of copied into an owned destination.
 Those rows measure segment assembly throughput, not final flattening.
+
+Rows named `rfc8746 typed array ... encode` use the public
+`rfc8746::typed_array_codec` with an owned byte-vector destination. On
+little-endian hosts the typed-array payload is appended from the native
+contiguous vector bytes, so the hot path is header work plus one payload append.
+Rows named `rfc8746 typed array zc ... encode segments` use
+`rfc8746::encode_typed_array_segments(...)`; on little-endian hosts the payload
+segment is borrowed from the source vector. Decode rows are split between
+`decode owning`, which materializes a `std::vector<T>`, and `decode borrowed`,
+which decodes a `typed_array_view<T>` over the input payload without copying the
+values.
 
 ## Serialization Comparison Suite
 
