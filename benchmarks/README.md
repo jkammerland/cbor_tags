@@ -70,10 +70,10 @@ user values and captures the encoded byte sizes.
 
 The suite also includes wire-throughput rows with `unit("byte")` and
 `batch(encoded_size)`. Those rows report absolute encoded-byte throughput for
-the tagged record and for tagged `std::vector<double>` fixtures with 16, 1024,
-and 65536 elements. For same-value comparisons, read these together with the
-latency rows because default CBOR and `custom_codec_1` do not always emit the
-same number of bytes.
+the tagged record and for tagged `std::vector<double>` and `std::vector<float>`
+fixtures with 16, 1024, and 65536 elements. For same-value comparisons, read
+these together with the latency rows because default CBOR and `custom_codec_1`
+do not always emit the same number of bytes.
 
 ## Serialization Comparison Suite
 

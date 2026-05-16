@@ -20,8 +20,9 @@ namespace cc1 = cbor::tags::ext::custom_codec_1;
 
 using byte_buffer = std::vector<std::byte>;
 
-constexpr std::uint64_t record_tag = 60001U;
-constexpr std::uint64_t vector_tag = 60002U;
+constexpr std::uint64_t record_tag       = 60001U;
+constexpr std::uint64_t vector_tag       = 60002U;
+constexpr std::uint64_t float_vector_tag = 60003U;
 
 struct tagged_record {
     static constexpr std::uint64_t cbor_tag = record_tag;
@@ -85,6 +86,26 @@ auto make_vector_values(std::size_t count) -> std::vector<double> {
     values.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
         values.push_back(static_cast<double>(index + 1U) * 1024.0 + static_cast<double>((index % 7U) + 1U) * 0.125);
+    }
+    return values;
+}
+
+auto make_float_vector_values() -> std::vector<float> {
+    return {
+        1024.125F,  2048.25F,    4096.5F,      8192.75F,    16384.875F, 32768.125F,  65536.25F,   131072.5F,
+        262144.75F, 524288.875F, 1048576.125F, 2097152.25F, 4194304.5F, 8388608.75F, 16777216.0F, 33554432.0F,
+    };
+}
+
+auto make_float_vector_values(std::size_t count) -> std::vector<float> {
+    if (count == 16U) {
+        return make_float_vector_values();
+    }
+
+    std::vector<float> values;
+    values.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        values.push_back(static_cast<float>(index + 1U) * 1024.0F + static_cast<float>((index % 7U) + 1U) * 0.125F);
     }
     return values;
 }
@@ -174,36 +195,47 @@ template <std::uint64_t Tag, typename Value> auto decode_custom_tagged(byte_buff
 } // namespace
 
 TEST_CASE("custom_codec_1 comparison fixtures roundtrip") {
-    auto const record        = make_record();
-    auto const vector_values = make_vector_values();
+    auto const record              = make_record();
+    auto const vector_values       = make_vector_values();
+    auto const float_vector_values = make_float_vector_values();
 
-    auto const default_record = encode_default(record);
-    auto const custom_record  = encode_custom(record);
-    auto const default_vector = encode_default_tagged<vector_tag>(vector_values);
-    auto const custom_vector  = encode_custom_tagged<vector_tag>(vector_values);
+    auto const default_record       = encode_default(record);
+    auto const custom_record        = encode_custom(record);
+    auto const default_vector       = encode_default_tagged<vector_tag>(vector_values);
+    auto const custom_vector        = encode_custom_tagged<vector_tag>(vector_values);
+    auto const default_float_vector = encode_default_tagged<float_vector_tag>(float_vector_values);
+    auto const custom_float_vector  = encode_custom_tagged<float_vector_tag>(float_vector_values);
 
     CHECK(decode_default<tagged_record>(default_record) == record);
     CHECK(decode_custom<tagged_record>(custom_record) == record);
     CHECK(decode_default_tagged<vector_tag, std::vector<double>>(default_vector) == vector_values);
     CHECK(decode_custom_tagged<vector_tag, std::vector<double>>(custom_vector) == vector_values);
+    CHECK(decode_default_tagged<float_vector_tag, std::vector<float>>(default_float_vector) == float_vector_values);
+    CHECK(decode_custom_tagged<float_vector_tag, std::vector<float>>(custom_float_vector) == float_vector_values);
 
     CAPTURE(default_record.size());
     CAPTURE(custom_record.size());
     CAPTURE(default_vector.size());
     CAPTURE(custom_vector.size());
+    CAPTURE(default_float_vector.size());
+    CAPTURE(custom_float_vector.size());
 
     CHECK(custom_record.size() < default_record.size());
     CHECK(custom_vector.size() < default_vector.size());
+    CHECK(custom_float_vector.size() < default_float_vector.size());
 }
 
 TEST_CASE("custom_codec_1 encode comparison benchmarks") {
-    auto const record        = make_record();
-    auto const vector_values = make_vector_values();
+    auto const record              = make_record();
+    auto const vector_values       = make_vector_values();
+    auto const float_vector_values = make_float_vector_values();
 
-    auto const default_record = encode_default(record);
-    auto const custom_record  = encode_custom(record);
-    auto const default_vector = encode_default_tagged<vector_tag>(vector_values);
-    auto const custom_vector  = encode_custom_tagged<vector_tag>(vector_values);
+    auto const default_record       = encode_default(record);
+    auto const custom_record        = encode_custom(record);
+    auto const default_vector       = encode_default_tagged<vector_tag>(vector_values);
+    auto const custom_vector        = encode_custom_tagged<vector_tag>(vector_values);
+    auto const default_float_vector = encode_default_tagged<float_vector_tag>(float_vector_values);
+    auto const custom_float_vector  = encode_custom_tagged<float_vector_tag>(float_vector_values);
 
     ankerl::nanobench::Bench bench;
     configure_bench(bench, "custom_codec_1 encode vs default CBOR");
@@ -244,16 +276,38 @@ TEST_CASE("custom_codec_1 encode comparison benchmarks") {
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(encoded);
     });
+
+    bench.run("default tagged vector<float> encode", [&] {
+        byte_buffer encoded;
+        encoded.reserve(default_float_vector.size());
+        auto encoder = cbor::tags::make_encoder(encoded);
+        auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<float_vector_tag>{}, float_vector_values);
+        auto result  = encoder(tagged);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(encoded);
+    });
+
+    bench.run("custom_codec_1 tagged vector<float> encode", [&] {
+        byte_buffer encoded;
+        encoded.reserve(custom_float_vector.size());
+        auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
+        auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_vector_values));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(encoded);
+    });
 }
 
 TEST_CASE("custom_codec_1 decode comparison benchmarks") {
-    auto const record        = make_record();
-    auto const vector_values = make_vector_values();
+    auto const record              = make_record();
+    auto const vector_values       = make_vector_values();
+    auto const float_vector_values = make_float_vector_values();
 
-    auto const default_record = encode_default(record);
-    auto const custom_record  = encode_custom(record);
-    auto const default_vector = encode_default_tagged<vector_tag>(vector_values);
-    auto const custom_vector  = encode_custom_tagged<vector_tag>(vector_values);
+    auto const default_record       = encode_default(record);
+    auto const custom_record        = encode_custom(record);
+    auto const default_vector       = encode_default_tagged<vector_tag>(vector_values);
+    auto const custom_vector        = encode_custom_tagged<vector_tag>(vector_values);
+    auto const default_float_vector = encode_default_tagged<float_vector_tag>(float_vector_values);
+    auto const custom_float_vector  = encode_custom_tagged<float_vector_tag>(float_vector_values);
 
     ankerl::nanobench::Bench bench;
     configure_bench(bench, "custom_codec_1 decode vs default CBOR");
@@ -287,6 +341,23 @@ TEST_CASE("custom_codec_1 decode comparison benchmarks") {
         std::vector<double> decoded;
         auto                decoder = cbor::tags::make_decoder<cc1::custom_codec_1>(custom_vector);
         auto                result  = decoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, decoded));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(decoded);
+    });
+
+    bench.run("default tagged vector<float> decode", [&] {
+        std::vector<float> decoded;
+        auto               decoder = cbor::tags::make_decoder(default_float_vector);
+        auto               tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<float_vector_tag>{}, decoded);
+        auto               result  = decoder(tagged);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(decoded);
+    });
+
+    bench.run("custom_codec_1 tagged vector<float> decode", [&] {
+        std::vector<float> decoded;
+        auto               decoder = cbor::tags::make_decoder<cc1::custom_codec_1>(custom_float_vector);
+        auto               result  = decoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, decoded));
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(decoded);
     });
@@ -345,6 +416,31 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
             ankerl::nanobench::doNotOptimizeAway(result);
             ankerl::nanobench::doNotOptimizeAway(encoded);
         });
+
+        auto const float_values         = make_float_vector_values(count);
+        auto const default_float_vector = encode_default_tagged<float_vector_tag>(float_values);
+        auto const custom_float_vector  = encode_custom_tagged<float_vector_tag>(float_values);
+
+        auto const default_float_name = std::string{"default tagged vector<float>["} + std::to_string(count) + "] encode";
+        bench.batch(default_float_vector.size()).run(default_float_name, [&] {
+            byte_buffer encoded;
+            encoded.reserve(default_float_vector.size());
+            auto encoder = cbor::tags::make_encoder(encoded);
+            auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<float_vector_tag>{}, float_values);
+            auto result  = encoder(tagged);
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(encoded);
+        });
+
+        auto const custom_float_name = std::string{"custom_codec_1 tagged vector<float>["} + std::to_string(count) + "] encode";
+        bench.batch(custom_float_vector.size()).run(custom_float_name, [&] {
+            byte_buffer encoded;
+            encoded.reserve(custom_float_vector.size());
+            auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
+            auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_values));
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(encoded);
+        });
     }
 }
 
@@ -397,6 +493,32 @@ TEST_CASE("custom_codec_1 decode wire throughput benchmarks") {
             std::vector<double> decoded;
             auto                decoder = cbor::tags::make_decoder<cc1::custom_codec_1>(custom_vector);
             auto                result  = decoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, decoded));
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+
+        auto const float_values         = make_float_vector_values(count);
+        auto const default_float_vector = encode_default_tagged<float_vector_tag>(float_values);
+        auto const custom_float_vector  = encode_custom_tagged<float_vector_tag>(float_values);
+
+        CHECK(decode_default_tagged<float_vector_tag, std::vector<float>>(default_float_vector) == float_values);
+        CHECK(decode_custom_tagged<float_vector_tag, std::vector<float>>(custom_float_vector) == float_values);
+
+        auto const default_float_name = std::string{"default tagged vector<float>["} + std::to_string(count) + "] decode";
+        bench.batch(default_float_vector.size()).run(default_float_name, [&] {
+            std::vector<float> decoded;
+            auto               decoder = cbor::tags::make_decoder(default_float_vector);
+            auto               tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<float_vector_tag>{}, decoded);
+            auto               result  = decoder(tagged);
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+
+        auto const custom_float_name = std::string{"custom_codec_1 tagged vector<float>["} + std::to_string(count) + "] decode";
+        bench.batch(custom_float_vector.size()).run(custom_float_name, [&] {
+            std::vector<float> decoded;
+            auto               decoder = cbor::tags::make_decoder<cc1::custom_codec_1>(custom_float_vector);
+            auto               result  = decoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, decoded));
             ankerl::nanobench::doNotOptimizeAway(result);
             ankerl::nanobench::doNotOptimizeAway(decoded);
         });
