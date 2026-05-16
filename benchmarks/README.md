@@ -32,13 +32,16 @@ widths and container contents.
 ## Shared Graph Encode Lookup Rows
 
 The encoder suite includes `shared_graph encode N unique x2 unordered_map`,
-`unordered_map_reserved`, `vector_scan_o_n`, and `vector_scan_o_n_reserved`
-rows. They encode the same `std::vector<std::shared_ptr<std::uint64_t>>`: `N`
-first-seen pointers followed by a second pass of references to the same
-pointers. Reserved rows call `shared_graph_encode_session::reserve_unique(N)`
-before encoding so table growth is separated from lookup cost. These rows
-isolate the encode-side identity lookup tradeoff: hash lookup is the default for
-large graphs, while `linear_scan` avoids the hash table for small or
+`unordered_map_reserved`, `vector_scan_o_n`, `vector_scan_o_n_reserved`, and
+`array_scan_fixed` rows. They encode the same
+`std::vector<std::shared_ptr<std::uint64_t>>`: `N` first-seen pointers followed
+by a second pass of references to the same pointers. Reserved rows call
+`shared_graph_encode_session::reserve_unique(N)` before encoding so table
+growth is separated from lookup cost. The array rows use
+`shared_graph_encode_array_session<N>`, which scans only the active entries and
+throws if the graph exceeds `N` unique objects. These rows isolate the
+encode-side identity lookup tradeoff: hash lookup is the default for large
+graphs, while linear scan variants avoid the hash table for small or
 allocation-sensitive graph scopes.
 
 ## Serialization Comparison Suite
