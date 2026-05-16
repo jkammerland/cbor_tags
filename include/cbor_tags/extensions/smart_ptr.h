@@ -21,6 +21,8 @@ namespace cbor::tags::ext::smart_ptr {
 class shared_graph_encode_session;
 class shared_graph_decode_session;
 
+enum class shared_graph_encode_lookup { unordered_map, linear_scan };
+
 template <typename T> struct shared_graph_encode_root {
     shared_graph_encode_session &session;
     const T                     &value;
@@ -338,6 +340,11 @@ template <typename Session> class scoped_graph_session {
 
 class shared_graph_encode_session {
   public:
+    explicit shared_graph_encode_session(shared_graph_encode_lookup lookup = shared_graph_encode_lookup::unordered_map) noexcept
+        : lookup_(lookup) {}
+
+    [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept { return lookup_; }
+
     void reset() {
         if (active_depth_ != 0U) {
             throw std::runtime_error("shared graph sessions cannot reset while an encode operation is active");
@@ -361,10 +368,33 @@ class shared_graph_encode_session {
 
     std::vector<encoded_shared_object>            encoded_shared_objects_{};
     std::unordered_map<const void *, std::size_t> encoded_shared_ids_{};
+    shared_graph_encode_lookup                    lookup_{shared_graph_encode_lookup::unordered_map};
     std::size_t                                   active_depth_{0};
 
     void begin_use() { ++active_depth_; }
     void end_use() { --active_depth_; }
+
+    [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const {
+        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
+            if (const auto existing = encoded_shared_ids_.find(address); existing != encoded_shared_ids_.end()) {
+                return existing->second;
+            }
+            return std::nullopt;
+        }
+
+        for (std::size_t index = 0; index < encoded_shared_objects_.size(); ++index) {
+            if (encoded_shared_objects_[index].address == address) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void index_encoded_address(const void *address, std::size_t index) {
+        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
+            encoded_shared_ids_.emplace(address, index);
+        }
+    }
 
     template <typename Self> friend struct shared_graph_codec;
     template <typename Session> friend class detail::scoped_graph_session;
@@ -472,8 +502,8 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
 
         auto       &session = *active_encode_session_;
         const auto *address = static_cast<const void *>(value.get());
-        if (const auto existing = session.encoded_shared_ids_.find(address); existing != session.encoded_shared_ids_.end()) {
-            auto &entry = session.encoded_shared_objects_[existing->second];
+        if (const auto existing = session.find_encoded_index(address)) {
+            auto &entry = session.encoded_shared_objects_[*existing];
             if (entry.type != detail::graph_type_id<T>()) {
                 throw std::runtime_error("shared_ptr graph references must use one static pointer type per object");
             }
@@ -492,7 +522,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         session.encoded_shared_objects_.push_back(shared_graph_encode_session::encoded_shared_object{
             address, id, detail::graph_type_id<T>(), detail::graph_entry_state::encoding, std::move(keepalive)});
         try {
-            session.encoded_shared_ids_.emplace(address, session.encoded_shared_objects_.size() - 1U);
+            session.index_encoded_address(address, session.encoded_shared_objects_.size() - 1U);
         } catch (...) {
             session.encoded_shared_objects_.pop_back();
             throw;

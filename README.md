@@ -302,6 +302,16 @@ Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
 object. Cross-static-type identity, aliasing-pointer identity, and cycles are
 not supported in this codec.
 
+Encode-side lookup defaults to `shared_graph_encode_lookup::unordered_map` for
+large graphs. For small graphs or allocation-sensitive paths, construct the
+session with `shared_graph_encode_lookup::linear_scan` to use an O(n) scan over
+the session's object table instead of a hash table:
+
+```cpp
+shared_graph_encode_session encode_graph{shared_graph_encode_lookup::linear_scan};
+enc(as_shared_graph(encode_graph, shared));
+```
+
 `nullable_ptr_codec` and `shared_graph_codec` can be installed together. Outside
 `as_shared_graph(...)`, `shared_ptr<T>` uses the nullable `[0]` / `[1, value]`
 shape. Inside `as_shared_graph(...)`, `shared_ptr<T>` uses graph identity

@@ -29,6 +29,16 @@ The existing decoder benchmarks also prepare some payloads from
 or use fixed-payload benchmarks so each version decodes the same CBOR integer
 widths and container contents.
 
+## Shared Graph Encode Lookup Rows
+
+The encoder suite includes `shared_graph encode N unique x2 unordered_map` and
+`shared_graph encode N unique x2 vector_scan_o_n` rows. They encode the same
+`std::vector<std::shared_ptr<std::uint64_t>>`: `N` first-seen pointers followed
+by a second pass of references to the same pointers. These rows isolate the
+encode-side identity lookup tradeoff used by `shared_graph_encode_session`:
+hash lookup is the default for large graphs, while `linear_scan` avoids the hash
+table for small or allocation-sensitive graph scopes.
+
 ## Serialization Comparison Suite
 
 The cross-library comparison suite is opt-in because it fetches and builds extra

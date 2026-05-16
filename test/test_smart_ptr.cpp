@@ -221,6 +221,30 @@ TEST_CASE("shared graph codec preserves shared_ptr identity across multiple root
     CHECK(decoded_first.get() == decoded_second.get());
 }
 
+TEST_CASE("shared graph codec can use linear encode lookup") {
+    auto shared = std::make_shared<std::uint64_t>(42U);
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph{shared_graph_encode_lookup::linear_scan};
+
+    REQUIRE_EQ(encode_graph.lookup(), shared_graph_encode_lookup::linear_scan);
+    REQUIRE(enc(as_shared_graph(encode_graph, shared)));
+    REQUIRE(enc(as_shared_graph(encode_graph, shared)));
+    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
+
+    auto                           dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session    decode_graph;
+    std::shared_ptr<std::uint64_t> decoded_first;
+    std::shared_ptr<std::uint64_t> decoded_second;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
+    REQUIRE(static_cast<bool>(decoded_first));
+    REQUIRE(static_cast<bool>(decoded_second));
+    CHECK(decoded_first.get() == decoded_second.get());
+}
+
 TEST_CASE("shared graph reference shape is rejected by nullable pointer codec") {
     const auto                     bytes   = to_bytes("d81d00");
     std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
