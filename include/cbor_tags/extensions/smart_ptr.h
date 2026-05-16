@@ -39,10 +39,6 @@ template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_d
 
 namespace detail {
 
-constexpr bool is_null(major_type major, std::byte additional_info) {
-    return major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null);
-}
-
 template <typename T>
 concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
 
@@ -88,6 +84,9 @@ template <typename Decoder, NullablePointerValue T>
     if (status != status_code::success) {
         return status;
     }
+    if (size != 1U && size != 2U) {
+        return status_code::unexpected_group_size;
+    }
 
     std::uint64_t kind{};
     status = dec.decode(kind);
@@ -123,6 +122,9 @@ template <typename Decoder, NullablePointerValue T>
     auto          status = decode_definite_array_size(dec, major, additional_info, size);
     if (status != status_code::success) {
         return status;
+    }
+    if (size != 1U && size != 2U) {
+        return status_code::unexpected_group_size;
     }
 
     std::uint64_t kind{};
@@ -272,7 +274,8 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
 
         auto &enc = static_cast<Self &>(*this);
         if (!value) {
-            enc.encode(nullptr);
+            enc.encode(as_array{1});
+            enc.encode(std::uint64_t{2});
             return;
         }
 
@@ -328,11 +331,6 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             }
         }
 
-        if (detail::is_null(major, additional_info)) {
-            value.reset();
-            return status_code::success;
-        }
-
         auto &dec = static_cast<Self &>(*this);
 
         std::uint64_t size{};
@@ -340,7 +338,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         if (status != status_code::success) {
             return status;
         }
-        if (size != 2U && size != 3U) {
+        if (size != 1U && size != 2U && size != 3U) {
             return status_code::unexpected_group_size;
         }
 
@@ -356,10 +354,21 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         if (kind == 1U) {
             return decode_reference(value, size);
         }
+        if (kind == 2U) {
+            return decode_null(value, size);
+        }
         return status_code::error;
     }
 
   private:
+    template <detail::NullablePointerValue T> [[nodiscard]] status_code decode_null(std::shared_ptr<T> &value, std::uint64_t size) {
+        if (size != 1U) {
+            return status_code::unexpected_group_size;
+        }
+        value.reset();
+        return status_code::success;
+    }
+
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>
     [[nodiscard]] status_code decode_definition(std::shared_ptr<T> &value, std::uint64_t size) {

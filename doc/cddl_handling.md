@@ -96,12 +96,13 @@ Generates CDDL schema for the given type into output buffer
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
 - `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`
 
-Generated aggregate schemas mirror the default encoder shape. Multi-field
-aggregates are arrays, single-field aggregates are the single payload value,
-maps are rendered as `{* key => value}`, and sequence containers are rendered
-as `[* value]`. Static tags render as `#6.n(payload)`. Dynamic tag values are
-not available from the type alone, so dynamic tags render as `#6(payload)`.
-Recursive aggregate types are emitted as named CDDL rules.
+Generated schemas mirror the default encoder shape plus explicitly documented
+transform/extension shapes. Multi-field aggregates are arrays, single-field
+aggregates are the single payload value, maps are rendered as
+`{* key => value}`, and sequence containers are rendered as `[* value]`.
+Static tags render as `#6.n(payload)`. Dynamic tag values are not available
+from the type alone, so dynamic tags render as `#6(payload)`. Recursive
+aggregate types are emitted as named CDDL rules.
 
 ### Enum Names
 

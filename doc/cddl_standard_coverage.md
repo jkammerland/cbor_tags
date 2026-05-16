@@ -7,8 +7,9 @@ line-coverage report.
 ## Scope
 
 `cddl_schema_to` generates CDDL for the CBOR shapes emitted by the default
-encoder. Named-reflection builds can also generate and validate schemas for
-explicit named-map transforms such as `as_named_map<T>`.
+encoder and for explicitly documented transform/extension shapes. Named
+reflection builds can also generate and validate schemas for explicit named-map
+transforms such as `as_named_map<T>`.
 
 Generated schemas intentionally describe type shapes, not value refinements.
 For example, a dynamic tag field can be rendered as `#6(payload)` because the

@@ -456,12 +456,10 @@ consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) 
 
 template <typename T, std::size_t Depth> consteval bool cddl_contains_nullable_pointer() {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (Depth > 8U) {
-        return false;
+    if constexpr (IsNullablePointer<value_type> || Depth > 8U) {
+        return true;
     } else {
-        if constexpr (IsNullablePointer<value_type>) {
-            return true;
-        } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
+        if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, Depth + 1>();
         } else if constexpr (IsVariant<value_type>) {
             return []<typename... Ts>(std::variant<Ts...> *) consteval {

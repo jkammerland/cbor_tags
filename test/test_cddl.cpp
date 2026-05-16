@@ -76,6 +76,23 @@ struct CDDLNullablePointers {
 using CDDLVariantWithSmartPointer       = std::variant<std::shared_ptr<int>, std::string>;
 using CDDLVariantWithNestedSmartPointer = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
 
+template <typename T, std::size_t Depth> struct CDDLDeepVector {
+    using type = std::vector<typename CDDLDeepVector<T, Depth - 1U>::type>;
+};
+
+template <typename T> struct CDDLDeepVector<T, 0U> {
+    using type = T;
+};
+
+using CDDLVariantWithDeepSmartPointer = std::variant<typename CDDLDeepVector<std::shared_ptr<int>, 10U>::type, std::string>;
+
+struct CDDLTaggedNullablePointerAlternative {
+    static_tag<7>        cbor_tag;
+    std::shared_ptr<int> value;
+};
+
+using CDDLVariantWithTaggedSmartPointer = std::variant<CDDLTaggedNullablePointerAlternative, std::string>;
+
 struct CDDLNullablePointerRecursiveNode {
     std::uint64_t                                     id;
     std::shared_ptr<CDDLNullablePointerRecursiveNode> next;
@@ -96,6 +113,8 @@ static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<const int
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<int[]>>);
 static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithSmartPointer>());
 static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithNestedSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithTaggedSmartPointer>());
 static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
 
 struct CDDLRecursiveNode {
@@ -444,6 +463,7 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
 TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
     CHECK_EQ(cddl_schema_inline<std::unique_ptr<int>>(), "root = [0] / [1, int]");
     CHECK_EQ(cddl_schema_inline<std::shared_ptr<std::string>>(), "root = [0] / [1, tstr]");
+    CHECK_EQ(cddl_schema_inline<std::unique_ptr<std::variant<int, std::string>>>(), "root = [0] / [1, (int / tstr)]");
     CHECK_EQ(cddl_schema_inline<std::optional<std::shared_ptr<int>>>(), "root = [0] / [1, int] / null");
 
     const auto schema = cddl_schema_inline<CDDLNullablePointers>();
