@@ -52,6 +52,20 @@ template <typename T> inline constexpr bool is_text_string_v = is_basic_string_v
 
 template <typename T> struct dependent_false : std::false_type {};
 
+template <typename T>
+inline constexpr bool is_bulk_little_endian_scalar_v =
+    (std::is_unsigned_v<std::remove_cvref_t<T>> && std::is_integral_v<std::remove_cvref_t<T>>) ||
+    std::is_floating_point_v<std::remove_cvref_t<T>>;
+
+template <typename T>
+concept ResizableRange = requires(T value, typename std::remove_cvref_t<T>::size_type size) { value.resize(size); };
+
+template <typename T>
+inline constexpr bool is_bulk_little_endian_contiguous_range_v =
+    std::ranges::contiguous_range<T> && std::ranges::sized_range<T> && is_bulk_little_endian_scalar_v<std::ranges::range_value_t<T>>;
+
+template <typename Writer, typename T> constexpr void encode_value(Writer &writer, const T &value);
+
 class span_reader {
   public:
     explicit constexpr span_reader(std::span<const std::byte> input) noexcept : input_(input) {}
@@ -111,6 +125,22 @@ template <typename Appender, typename Output> class appender_writer {
     Output   *output_{};
 };
 
+template <typename Segments> class borrowed_segment_writer {
+  public:
+    explicit constexpr borrowed_segment_writer(Segments &output) noexcept : output_(&output) {}
+
+    constexpr void write_byte(std::byte value) { output_->append_owned(std::span<const std::byte>{&value, 1}); }
+
+    constexpr void write_bytes(std::span<const std::byte> bytes) { output_->append_owned(bytes); }
+
+    constexpr void write_bytes(std::string_view bytes) { output_->append_owned(std::as_bytes(std::span{bytes.data(), bytes.size()})); }
+
+    constexpr void write_borrowed_bytes(std::span<const std::byte> bytes) { output_->append_borrowed(bytes); }
+
+  private:
+    Segments *output_{};
+};
+
 template <typename Writer> constexpr void write_varuint(Writer &writer, std::uint64_t value) {
     do {
         auto byte = static_cast<std::uint8_t>(value & 0x7FU);
@@ -163,6 +193,33 @@ constexpr status_code read_little_endian(span_reader &reader, U &value) noexcept
         value |= static_cast<U>(std::to_integer<std::uint8_t>(byte)) << (byte_index * 8U);
     }
     return status_code::success;
+}
+
+template <typename T> [[nodiscard]] constexpr std::span<const std::byte> as_const_bytes(const T &value) noexcept {
+    return std::as_bytes(std::span{std::ranges::data(value), std::ranges::size(value)});
+}
+
+template <typename T> [[nodiscard]] constexpr std::span<std::byte> as_writable_bytes(T &value) noexcept {
+    return std::as_writable_bytes(std::span{std::ranges::data(value), std::ranges::size(value)});
+}
+
+template <typename T> [[nodiscard]] constexpr bool byte_size_overflows(std::uint64_t length) noexcept {
+    return length > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max() / sizeof(T));
+}
+
+template <typename Writer, typename T> constexpr void encode_bulk_little_endian_range(Writer &writer, const T &value) {
+    if constexpr (std::endian::native == std::endian::little) {
+        const auto bytes = as_const_bytes(value);
+        if constexpr (requires { writer.write_borrowed_bytes(bytes); }) {
+            writer.write_borrowed_bytes(bytes);
+        } else {
+            writer.write_bytes(bytes);
+        }
+    } else {
+        for (const auto &element : value) {
+            encode_value(writer, element);
+        }
+    }
 }
 
 template <typename T> constexpr std::uint64_t tag_to_uint64(const T &tag) {
@@ -445,8 +502,13 @@ template <typename T> constexpr status_code decode_scalar(span_reader &reader, T
 template <typename Writer, typename T> constexpr void encode_byte_string(Writer &writer, const T &value) {
     write_varuint(writer, static_cast<std::uint64_t>(std::ranges::size(value)));
     if constexpr (std::ranges::contiguous_range<const T>) {
-        writer.write_bytes(
-            std::span<const std::byte>(reinterpret_cast<const std::byte *>(std::ranges::data(value)), std::ranges::size(value)));
+        const auto bytes =
+            std::span<const std::byte>(reinterpret_cast<const std::byte *>(std::ranges::data(value)), std::ranges::size(value));
+        if constexpr (requires { writer.write_borrowed_bytes(bytes); }) {
+            writer.write_borrowed_bytes(bytes);
+        } else {
+            writer.write_bytes(bytes);
+        }
     } else {
         for (auto byte : value) {
             writer.write_byte(static_cast<std::byte>(byte));
@@ -501,7 +563,11 @@ template <typename T> constexpr status_code decode_byte_string(span_reader &read
 template <typename Writer, typename T> constexpr void encode_text_string(Writer &writer, const T &value) {
     const auto text = std::string_view(reinterpret_cast<const char *>(value.data()), value.size());
     write_varuint(writer, static_cast<std::uint64_t>(text.size()));
-    writer.write_bytes(text);
+    if constexpr (requires { writer.write_borrowed_bytes(std::as_bytes(std::span{text.data(), text.size()})); }) {
+        writer.write_borrowed_bytes(std::as_bytes(std::span{text.data(), text.size()}));
+    } else {
+        writer.write_bytes(text);
+    }
 }
 
 template <typename T> constexpr status_code decode_text_string(span_reader &reader, T &value) {
@@ -533,6 +599,8 @@ template <typename T> constexpr status_code decode_text_string(span_reader &read
 template <typename Writer, typename T, std::size_t N> constexpr void encode_std_array(Writer &writer, const std::array<T, N> &value) {
     if constexpr (std::is_same_v<T, std::byte>) {
         writer.write_bytes(std::span<const std::byte>(value.data(), value.size()));
+    } else if constexpr (is_bulk_little_endian_scalar_v<T>) {
+        encode_bulk_little_endian_range(writer, value);
     } else {
         for (const auto &element : value) {
             encode_value(writer, element);
@@ -547,7 +615,20 @@ template <typename T, std::size_t N> constexpr status_code decode_std_array(span
         if (status != status_code::success) {
             return status;
         }
-        std::memcpy(value.data(), bytes.data(), N);
+        if constexpr (N != 0U) {
+            std::memcpy(value.data(), bytes.data(), N);
+        }
+        return status_code::success;
+    } else if constexpr (is_bulk_little_endian_scalar_v<T> && std::endian::native == std::endian::little) {
+        constexpr auto             byte_count = N * sizeof(T);
+        std::span<const std::byte> bytes{};
+        auto                       status = reader.read_bytes(byte_count, bytes);
+        if (status != status_code::success) {
+            return status;
+        }
+        if constexpr (byte_count != 0U) {
+            std::memcpy(value.data(), bytes.data(), byte_count);
+        }
         return status_code::success;
     } else {
         for (auto &element : value) {
@@ -667,8 +748,12 @@ template <typename T> constexpr status_code decode_map(span_reader &reader, T &v
 template <typename Writer, typename T> constexpr void encode_range(Writer &writer, const T &value) {
     if constexpr (std::ranges::sized_range<const T>) {
         write_varuint(writer, static_cast<std::uint64_t>(std::ranges::size(value)));
-        for (const auto &element : value) {
-            encode_value(writer, element);
+        if constexpr (is_bulk_little_endian_contiguous_range_v<const T>) {
+            encode_bulk_little_endian_range(writer, value);
+        } else {
+            for (const auto &element : value) {
+                encode_value(writer, element);
+            }
         }
     } else {
         using value_type = std::ranges::range_value_t<T>;
@@ -681,6 +766,70 @@ template <typename Writer, typename T> constexpr void encode_range(Writer &write
             encode_value(writer, element);
         }
     }
+}
+
+template <typename T> constexpr status_code resize_decoded_range(T &value, std::uint64_t length) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (requires { typename type::size_type; }) {
+        if (length > static_cast<std::uint64_t>(std::numeric_limits<typename type::size_type>::max())) {
+            return status_code::error;
+        }
+    }
+    if constexpr (requires { value.max_size(); }) {
+        if (length > static_cast<std::uint64_t>(value.max_size())) {
+            return status_code::error;
+        }
+    }
+    value.resize(static_cast<typename type::size_type>(length));
+    return status_code::success;
+}
+
+template <typename T> constexpr status_code decode_contiguous_bulk_range(span_reader &reader, T &value, std::uint64_t length) {
+    using element_type = std::ranges::range_value_t<T>;
+    if (byte_size_overflows<element_type>(length)) {
+        return status_code::error;
+    }
+    const auto byte_count = static_cast<std::size_t>(length) * sizeof(element_type);
+    if (byte_count > reader.remaining()) {
+        return status_code::incomplete;
+    }
+    auto status = resize_decoded_range(value, length);
+    if (status != status_code::success) {
+        return status;
+    }
+    if constexpr (std::endian::native == std::endian::little) {
+        std::span<const std::byte> bytes{};
+        status = reader.read_bytes(byte_count, bytes);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (byte_count != 0U) {
+            std::memcpy(std::ranges::data(value), bytes.data(), byte_count);
+        }
+        return status_code::success;
+    } else {
+        for (auto &element : value) {
+            status = decode_value(reader, element);
+            if (status != status_code::success) {
+                return status;
+            }
+        }
+        return status_code::success;
+    }
+}
+
+template <typename T> constexpr status_code decode_resizable_bulk_range(span_reader &reader, T &value, std::uint64_t length) {
+    auto status = resize_decoded_range(value, length);
+    if (status != status_code::success) {
+        return status;
+    }
+    for (auto &element : value) {
+        status = decode_value(reader, element);
+        if (status != status_code::success) {
+            return status;
+        }
+    }
+    return status_code::success;
 }
 
 template <typename T> constexpr status_code decode_range(span_reader &reader, T &value) {
@@ -703,6 +852,11 @@ template <typename T> constexpr status_code decode_range(span_reader &reader, T 
     } else {
         if constexpr (requires { value.clear(); }) {
             value.clear();
+        }
+        if constexpr (ResizableRange<T> && is_bulk_little_endian_contiguous_range_v<T>) {
+            return decode_contiguous_bulk_range(reader, value, length);
+        } else if constexpr (ResizableRange<T> && is_bulk_little_endian_scalar_v<std::ranges::range_value_t<T>>) {
+            return decode_resizable_bulk_range(reader, value, length);
         }
         status = reserve_decoded_container(value, length);
         if (status != status_code::success) {
@@ -824,6 +978,17 @@ template <typename Segments, typename T> [[nodiscard]] inline Segments encode_pa
 
 template <typename T> [[nodiscard]] inline cbor_segments encode_payload_segments(const T &value) {
     return encode_payload_segments_as<cbor_segments>(value);
+}
+
+template <typename Segments, typename T> [[nodiscard]] inline Segments encode_payload_borrowed_segments_as(const T &value) {
+    Segments                          payload;
+    borrowed_segment_writer<Segments> writer{payload};
+    encode_value(writer, value);
+    return payload;
+}
+
+template <typename T> [[nodiscard]] inline cbor_segments encode_payload_borrowed_segments(const T &value) {
+    return encode_payload_borrowed_segments_as<cbor_segments>(value);
 }
 
 template <typename T> [[nodiscard]] inline std::vector<std::byte> encode_payload(const T &value) {

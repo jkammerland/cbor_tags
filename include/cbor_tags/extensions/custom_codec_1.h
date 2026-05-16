@@ -61,6 +61,39 @@ template <typename Tag, typename T>
     requires(!std::is_lvalue_reference_v<T>)
 void as_custom_codec_1(Tag &&, T &&) = delete;
 
+template <typename Tag, typename T> [[nodiscard]] inline cbor_segments encode_borrowed_segments(Tag &&tag, const T &value) {
+    auto payload = cbor::tags::detail::custom_codec_1::encode_payload_borrowed_segments(value);
+
+    cbor_segments segments;
+    segments.reserve_segments(payload.size() + 2U);
+    segments.append_owned(
+        cbor::tags::detail::encode_cbor_major_argument_header(cbor::tags::detail::custom_codec_1::tag_to_uint64(tag), std::byte{0xC0})
+            .span());
+    segments.append_owned(cbor::tags::detail::encode_cbor_major_argument_header(payload.total_size(), std::byte{0x40}).span());
+
+    for (const auto &segment : payload) {
+        const auto bytes = segment.bytes();
+        if (segment.is_borrowed()) {
+            segments.append_borrowed(bytes);
+        } else {
+            segments.append_owned(bytes);
+        }
+    }
+    return segments;
+}
+
+template <typename T> [[nodiscard]] inline cbor_segments encode_borrowed_segments(const T &value) {
+    return encode_borrowed_segments(cbor::tags::detail::custom_codec_1::tag_for(value), value);
+}
+
+template <typename T>
+    requires(!std::is_lvalue_reference_v<T>)
+void encode_borrowed_segments(T &&) = delete;
+
+template <typename Tag, typename T>
+    requires(!std::is_lvalue_reference_v<T>)
+void encode_borrowed_segments(Tag &&, T &&) = delete;
+
 template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_base<Self> {
     using cbor::tags::cbor_codec_mixin_base<Self>::decode;
     using cbor::tags::cbor_codec_mixin_base<Self>::encode;

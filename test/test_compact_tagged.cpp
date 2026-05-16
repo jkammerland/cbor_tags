@@ -328,6 +328,84 @@ TEST_CASE("compact tagged explicit tag encodes typed arrays without per-element 
     CHECK(decoded == values);
 }
 
+TEST_CASE("compact tagged float32 ranges use raw little-endian payload bytes") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const std::vector<float> values{1.0F, -2.5F, 4.0F};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<78>{}, values)));
+    CHECK_EQ(to_hex(compact), "d84e4d030000803f000020c000008040");
+
+    std::vector<float> decoded;
+    auto               dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<78>{}, decoded)));
+    CHECK(decoded == values);
+}
+
+TEST_CASE("custom_codec_1 explicit borrowed segments borrow contiguous float32 payload bytes") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const std::vector<float> values{1.0F, -2.5F, 4.0F};
+
+    const auto segments = encode_borrowed_segments(static_tag<78>{}, values);
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<78>{}, values)));
+
+    CHECK(segments.flatten() == compact);
+
+    if constexpr (std::endian::native == std::endian::little) {
+        const auto raw_payload      = std::as_bytes(std::span{values});
+        const auto borrowed_payload = std::ranges::any_of(
+            segments, [raw_payload](const auto &segment) { return segment.is_borrowed() && segment.bytes().data() == raw_payload.data(); });
+        CHECK(borrowed_payload);
+    }
+
+    std::vector<float> decoded;
+    auto               dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<78>{}, decoded)));
+    CHECK(decoded == values);
+}
+
+TEST_CASE("compact tagged fixed float32 arrays omit compact length prefixes") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const std::array<float, 3> values{1.0F, -2.5F, 4.0F};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<79>{}, values)));
+    CHECK_EQ(to_hex(compact), "d84f4c0000803f000020c000008040");
+
+    std::array<float, 3> decoded{};
+    auto                 dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<79>{}, decoded)));
+    CHECK(decoded == values);
+}
+
+TEST_CASE("compact tagged non-contiguous float32 ranges keep the same wire shape") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    const std::deque<float> values{1.0F, -2.5F, 4.0F};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<80>{}, values)));
+    CHECK_EQ(to_hex(compact), "d8504d030000803f000020c000008040");
+
+    std::deque<float> decoded;
+    auto              dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<80>{}, decoded)));
+    CHECK(decoded == values);
+}
+
 TEST_CASE("compact tagged scalar payloads have stable minimal wire shapes") {
     using namespace cbor::tags;
     using namespace cbor::tags::ext::custom_codec_1;

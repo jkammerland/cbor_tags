@@ -102,6 +102,9 @@ as lazy tag matches do.
 - `bool` uses one byte: `0` or `1`.
 - Text strings, byte strings, variable-size ranges, and maps use a varuint
   length followed by their elements or bytes.
+- Contiguous ranges and fixed arrays of unsigned integers and floating-point
+  values are bulk-copied on little-endian hosts. The wire shape is the same as
+  the element-by-element encoding.
 - Text strings include `std::basic_string` and `std::basic_string_view` with
   char-like value types, including `std::pmr::string`.
 - `std::array` stores its elements directly; its length is part of the C++
@@ -171,6 +174,20 @@ for (const auto& segment : segments) {
 The wire format is unchanged. For input ranges that the codec already accepts,
 encoding now performs one payload pass instead of walking once for sizing and
 again for writing.
+
+The normal encoder keeps segment storage owned by the output, so it is safe to
+use after the source object goes out of scope. When the source object is known
+to outlive the I/O operation, use `encode_borrowed_segments(...)` to let
+contiguous payload fields become borrowed segments:
+
+```cpp
+std::vector<float> samples = load_samples();
+
+auto segments = cc1::encode_borrowed_segments(static_tag<1001>{}, samples);
+
+// segments may contain borrowed spans into samples; keep samples alive until
+// the write operation has consumed the segments.
+```
 
 ## Known Limitations
 
