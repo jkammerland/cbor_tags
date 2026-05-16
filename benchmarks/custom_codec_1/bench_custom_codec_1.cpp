@@ -76,12 +76,33 @@ auto make_vector_values() -> std::vector<double> {
     };
 }
 
+auto make_vector_values(std::size_t count) -> std::vector<double> {
+    if (count == 16U) {
+        return make_vector_values();
+    }
+
+    std::vector<double> values;
+    values.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        values.push_back(static_cast<double>(index + 1U) * 1024.0 + static_cast<double>((index % 7U) + 1U) * 0.125);
+    }
+    return values;
+}
+
 void configure_bench(ankerl::nanobench::Bench &bench, std::string_view title) {
     bench.title(std::string{title});
     bench.unit("Ops");
     bench.relative(true);
     bench.performanceCounters(true);
     bench.minEpochIterations(100);
+}
+
+void configure_throughput_bench(ankerl::nanobench::Bench &bench, std::string_view title) {
+    bench.title(std::string{title});
+    bench.unit("byte");
+    bench.relative(true);
+    bench.performanceCounters(false);
+    bench.minEpochIterations(20);
 }
 
 template <typename Value> auto encode_default(Value const &value) -> byte_buffer {
@@ -269,6 +290,117 @@ TEST_CASE("custom_codec_1 decode comparison benchmarks") {
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(decoded);
     });
+}
+
+TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
+    constexpr auto vector_counts = std::array<std::size_t, 3>{16U, 1024U, 65536U};
+
+    auto const record         = make_record();
+    auto const default_record = encode_default(record);
+    auto const custom_record  = encode_custom(record);
+
+    ankerl::nanobench::Bench bench;
+    configure_throughput_bench(bench, "custom_codec_1 encode wire throughput");
+
+    bench.batch(default_record.size()).run("default tagged record encode", [&] {
+        byte_buffer encoded;
+        encoded.reserve(default_record.size());
+        auto encoder = cbor::tags::make_encoder(encoded);
+        auto result  = encoder(record);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(encoded);
+    });
+
+    bench.batch(custom_record.size()).run("custom_codec_1 tagged record encode", [&] {
+        byte_buffer encoded;
+        encoded.reserve(custom_record.size());
+        auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
+        auto result  = encoder(cc1::as_custom_codec_1(record));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(encoded);
+    });
+
+    for (auto count : vector_counts) {
+        auto const values         = make_vector_values(count);
+        auto const default_vector = encode_default_tagged<vector_tag>(values);
+        auto const custom_vector  = encode_custom_tagged<vector_tag>(values);
+
+        auto const default_name = std::string{"default tagged vector<double>["} + std::to_string(count) + "] encode";
+        bench.batch(default_vector.size()).run(default_name, [&] {
+            byte_buffer encoded;
+            encoded.reserve(default_vector.size());
+            auto encoder = cbor::tags::make_encoder(encoded);
+            auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<vector_tag>{}, values);
+            auto result  = encoder(tagged);
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(encoded);
+        });
+
+        auto const custom_name = std::string{"custom_codec_1 tagged vector<double>["} + std::to_string(count) + "] encode";
+        bench.batch(custom_vector.size()).run(custom_name, [&] {
+            byte_buffer encoded;
+            encoded.reserve(custom_vector.size());
+            auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
+            auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, values));
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(encoded);
+        });
+    }
+}
+
+TEST_CASE("custom_codec_1 decode wire throughput benchmarks") {
+    constexpr auto vector_counts = std::array<std::size_t, 3>{16U, 1024U, 65536U};
+
+    auto const record         = make_record();
+    auto const default_record = encode_default(record);
+    auto const custom_record  = encode_custom(record);
+
+    ankerl::nanobench::Bench bench;
+    configure_throughput_bench(bench, "custom_codec_1 decode wire throughput");
+
+    bench.batch(default_record.size()).run("default tagged record decode", [&] {
+        tagged_record decoded{};
+        auto          decoder = cbor::tags::make_decoder(default_record);
+        auto          result  = decoder(decoded);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(decoded);
+    });
+
+    bench.batch(custom_record.size()).run("custom_codec_1 tagged record decode", [&] {
+        tagged_record decoded{};
+        auto          decoder = cbor::tags::make_decoder<cc1::custom_codec_1>(custom_record);
+        auto          result  = decoder(cc1::as_custom_codec_1(decoded));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(decoded);
+    });
+
+    for (auto count : vector_counts) {
+        auto const values         = make_vector_values(count);
+        auto const default_vector = encode_default_tagged<vector_tag>(values);
+        auto const custom_vector  = encode_custom_tagged<vector_tag>(values);
+
+        CHECK(decode_default_tagged<vector_tag, std::vector<double>>(default_vector) == values);
+        CHECK(decode_custom_tagged<vector_tag, std::vector<double>>(custom_vector) == values);
+
+        auto const default_name = std::string{"default tagged vector<double>["} + std::to_string(count) + "] decode";
+        bench.batch(default_vector.size()).run(default_name, [&] {
+            std::vector<double> decoded;
+            auto                decoder = cbor::tags::make_decoder(default_vector);
+            auto                tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<vector_tag>{}, decoded);
+            auto                result  = decoder(tagged);
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+
+        auto const custom_name = std::string{"custom_codec_1 tagged vector<double>["} + std::to_string(count) + "] decode";
+        bench.batch(custom_vector.size()).run(custom_name, [&] {
+            std::vector<double> decoded;
+            auto                decoder = cbor::tags::make_decoder<cc1::custom_codec_1>(custom_vector);
+            auto                result  = decoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, decoded));
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+    }
 }
 
 int main(int argc, char **argv) { return doctest::Context(argc, argv).run(); }
