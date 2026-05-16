@@ -30,7 +30,7 @@ runtime tag number is not available from the static C++ type alone.
 | Sequence containers | RFC 8610/RFC 9682 occurrence `*` in array groups | Yes | `CDDL emits typed containers and registers nested definitions once` | Variable sequences render as `[* value]`; fixed-size `std::array`/static `std::span` render as `[N*N value]`. |
 | Maps | RFC 8610/RFC 9682 `{ group }`, `memberkey =>` | Yes | `CDDL emits typed containers and registers nested definitions once`; `CDDL groups choices in map keys and repeated item positions` | Map keys and values are typed. Choice keys are parenthesized so they fit `memberkey = type1 =>`. |
 | Typed extension entries | RFC 8610 §3.5.1 Figure 7 | Named reflection | `named-map CDDL covers RFC 8610 group factorization and personal data examples`; `named-map codec handles optionals, groups, and typed extensions` | `as_named_extension<std::map<std::string, T>>` renders as `* tstr => T` and captures unmatched text keys during decode. Exact arbitrary `any` values are not modeled yet. |
-| Type choices | RFC 8610/RFC 9682 `type = type1 *( "/" type1 )` | Yes | `CDDL groups choices in map keys and repeated item positions` | `std::variant` renders as `A / B`; `std::optional<T>` renders as `T / null`. Choices are grouped when embedded in positions that require `type1`. |
+| Type choices | RFC 8610/RFC 9682 `type = type1 *( "/" type1 )` | Yes | `CDDL groups choices in map keys and repeated item positions` | `std::variant` renders as `A / B`; `std::optional<T>` renders as `T / null`. Choices are grouped when embedded in positions that require `type1`. Variants whose alternatives contain nullable smart pointers are intentionally rejected as a conservative generator limitation. |
 | Nullable smart pointers | Extension shape using RFC 8610/RFC 9682 type choices | Yes | `CDDL emits nullable pointer shapes for the smart pointer codec` | `std::unique_ptr<T>` and `std::shared_ptr<T>` render as `[0] / [1, T]`, matching the opt-in `nullable_ptr_codec` wire shape. Pointer identity and shared graph semantics are not expressed in CDDL. |
 | Named enum choices | RFC 8610/RFC 9682 `&(...)` enumeration expressions | Optional | `CDDL can emit named enum choices`; `CDDL reuses named enum definitions inside aggregate schemas` | Requires `CBOR_TAGS_USE_STD_REFLECTION=ON` or `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, plus `CDDLOptions::enum_mode = CDDLEnumMode::named_values`. Output is stricter than the decoder's current underlying-integer enum policy. |
 | Static tags | RFC 8610/RFC 9682 `#6.n(type)` | Yes | `CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads`; `cddl helpers cover tuple and tagged tuple schemas` | Static tag members and tagged tuples render exact tag numbers. |
@@ -51,6 +51,7 @@ The current standard-sensitive regression tests live primarily in
 - `CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads`
 - `CDDL emits typed containers and registers nested definitions once`
 - `CDDL emits nullable pointer shapes for the smart pointer codec`
+- `cddl_variant_nullable_pointer_compile_fails`
 - `CDDL supports recursive aggregate containers`
 - `CDDL gives colliding C++ short names distinct rule names`
 - `CDDL groups choices in map keys and repeated item positions`

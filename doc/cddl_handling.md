@@ -180,9 +180,10 @@ the opt-in `cbor::tags::ext::smart_ptr::nullable_ptr_codec` wire shape. Pointer
 fields remain required in named maps unless the field type itself is
 `std::optional`; a null pointer is an explicit `[0]`, not an omitted member.
 Shared pointer identity and `shared_graph_codec` reference-table semantics are
-runtime codec rules and are not expressed in CDDL. `std::variant` alternatives
-that contain nullable smart pointers are rejected by the CDDL generator because
-variant decode is not extension-codec aware.
+runtime codec rules and are not expressed in CDDL. As a conservative generator
+limitation, `std::variant` alternatives that contain nullable smart pointers are
+rejected by the CDDL generator, including tagged alternatives that may be
+runtime-decodable through an opt-in codec.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

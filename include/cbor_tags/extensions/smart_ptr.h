@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace cbor::tags::ext::smart_ptr {
 
@@ -201,7 +202,10 @@ class shared_graph_encode_session {
 
 class shared_graph_decode_session {
   public:
-    void reset() { decoded_shared_objects_.clear(); }
+    void reset() {
+        decoded_shared_objects_.clear();
+        decoded_shared_id_order_.clear();
+    }
 
   private:
     struct decoded_shared_object {
@@ -211,6 +215,14 @@ class shared_graph_decode_session {
     };
 
     std::unordered_map<std::uint64_t, decoded_shared_object> decoded_shared_objects_{};
+    std::vector<std::uint64_t>                               decoded_shared_id_order_{};
+
+    void rollback_to(std::size_t checkpoint) {
+        while (decoded_shared_id_order_.size() > checkpoint) {
+            decoded_shared_objects_.erase(decoded_shared_id_order_.back());
+            decoded_shared_id_order_.pop_back();
+        }
+    }
 
     template <typename Self> friend struct shared_graph_codec;
 };
@@ -290,7 +302,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             }
 
             enc.encode(as_array{2});
-            enc.encode(std::uint64_t{1});
+            enc.encode(std::uint64_t{3});
             enc.encode(existing->second.id);
             return;
         }
@@ -351,7 +363,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         if (kind == 0U) {
             return decode_definition(value, size);
         }
-        if (kind == 1U) {
+        if (kind == 3U) {
             return decode_reference(value, size);
         }
         if (kind == 2U) {
@@ -387,15 +399,20 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             return status_code::error;
         }
 
-        auto [entry, inserted] = active_decode_session_->decoded_shared_objects_.emplace(
-            id, shared_graph_decode_session::decoded_shared_object{{}, detail::graph_type_id<T>(), detail::graph_entry_state::encoding});
-        static_cast<void>(inserted);
+        auto      &session    = *active_decode_session_;
+        const auto checkpoint = session.decoded_shared_id_order_.size();
 
         try {
+            session.decoded_shared_id_order_.push_back(id);
+            auto [entry, inserted] = session.decoded_shared_objects_.emplace(
+                id,
+                shared_graph_decode_session::decoded_shared_object{{}, detail::graph_type_id<T>(), detail::graph_entry_state::encoding});
+            static_cast<void>(inserted);
+
             auto decoded = std::make_shared<T>();
             status       = dec.decode(*decoded);
             if (status != status_code::success) {
-                active_decode_session_->decoded_shared_objects_.erase(id);
+                session.rollback_to(checkpoint);
                 return status;
             }
 
@@ -404,7 +421,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             value               = std::move(decoded);
             return status_code::success;
         } catch (...) {
-            active_decode_session_->decoded_shared_objects_.erase(id);
+            session.rollback_to(checkpoint);
             throw;
         }
     }
