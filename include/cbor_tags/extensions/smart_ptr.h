@@ -78,6 +78,14 @@ constexpr std::size_t decodable_nullable_pointer_count_v =
 
 template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = decodable_nullable_pointer_count_v<Ts...> > 0U;
 
+template <typename... Ts>
+constexpr bool variant_has_shared_graph_tag_ambiguity_v = [] {
+    using variant_type          = std::variant<Ts...>;
+    using major_index           = cbor::tags::detail::MajorIndex;
+    constexpr auto core_mapping = valid_concept_mapping_array_v<variant_type>;
+    return (decodable_shared_pointer_v<Ts> || ...) && core_mapping[major_index::Tag] != 0U;
+}();
+
 struct nullable_ptr_codec_marker {};
 struct shared_graph_codec_marker {};
 
@@ -241,8 +249,10 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
 
     std::optional<std::uint64_t> tag;
     bool                         saw_incomplete = false;
+    std::optional<status_code>   pointer_error;
 
-    auto try_decode = [&dec, major, additional_info, &value, &tag, &saw_incomplete]<bool CatchAllPass, typename U>() -> bool {
+    auto try_decode = [&dec, major, additional_info, &value, &tag, &saw_incomplete,
+                       &pointer_error]<bool CatchAllPass, typename U>() -> bool {
         using raw_type = std::remove_cvref_t<U>;
 
         if constexpr (decodable_nullable_pointer_v<raw_type>) {
@@ -260,6 +270,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
             if (result == status_code::incomplete) {
                 saw_incomplete = true;
+            } else {
+                pointer_error = result;
             }
             return false;
         } else {
@@ -302,6 +314,9 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
         found = (try_decode.template operator()<false, Ts>() || ...);
     }
     if (!found) {
+        if (pointer_error.has_value()) {
+            return *pointer_error;
+        }
         if (saw_incomplete) {
             return status_code::incomplete;
         }
@@ -350,6 +365,11 @@ class shared_graph_encode_session {
   public:
     explicit shared_graph_encode_session(shared_graph_encode_lookup lookup = shared_graph_encode_lookup::unordered_map) noexcept
         : lookup_(lookup) {}
+
+    shared_graph_encode_session(const shared_graph_encode_session &)            = delete;
+    shared_graph_encode_session &operator=(const shared_graph_encode_session &) = delete;
+    shared_graph_encode_session(shared_graph_encode_session &&)                 = delete;
+    shared_graph_encode_session &operator=(shared_graph_encode_session &&)      = delete;
 
     [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept { return lookup_; }
 
@@ -412,6 +432,13 @@ class shared_graph_encode_session {
 
 class shared_graph_decode_session {
   public:
+    shared_graph_decode_session() = default;
+
+    shared_graph_decode_session(const shared_graph_decode_session &)            = delete;
+    shared_graph_decode_session &operator=(const shared_graph_decode_session &) = delete;
+    shared_graph_decode_session(shared_graph_decode_session &&)                 = delete;
+    shared_graph_decode_session &operator=(shared_graph_decode_session &&)      = delete;
+
     void reset() {
         if (active_depth_ != 0U) {
             throw std::runtime_error("shared graph sessions cannot reset while a decode operation is active");
@@ -587,7 +614,14 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
     template <typename... Ts>
         requires detail::has_decodable_nullable_pointer_v<Ts...>
     [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
-        return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);
+        if (active_decode_session_ == nullptr) {
+            return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
+        }
+        if constexpr (detail::variant_has_shared_graph_tag_ambiguity_v<Ts...>) {
+            return status_code::error;
+        } else {
+            return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);
+        }
     }
 
   private:

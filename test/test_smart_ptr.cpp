@@ -146,6 +146,15 @@ TEST_CASE("nullable pointer codec is explicit opt in") {
     static_assert(!smart_ptr_test::CanDecode<extension_decoder, const_pointer>);
     static_assert(!smart_ptr_test::CanEncode<extension_encoder, void_pointer>);
     static_assert(!smart_ptr_test::CanDecode<extension_decoder, void_pointer>);
+
+    static_assert(!std::is_copy_constructible_v<shared_graph_encode_session>);
+    static_assert(!std::is_copy_assignable_v<shared_graph_encode_session>);
+    static_assert(!std::is_move_constructible_v<shared_graph_encode_session>);
+    static_assert(!std::is_move_assignable_v<shared_graph_encode_session>);
+    static_assert(!std::is_copy_constructible_v<shared_graph_decode_session>);
+    static_assert(!std::is_copy_assignable_v<shared_graph_decode_session>);
+    static_assert(!std::is_move_constructible_v<shared_graph_decode_session>);
+    static_assert(!std::is_move_assignable_v<shared_graph_decode_session>);
 }
 
 TEST_CASE("nullable pointer codec roundtrips unique_ptr null and value") {
@@ -854,6 +863,34 @@ TEST_CASE("nullable pointer codec decodes unambiguous smart pointer variants") {
     }
 }
 
+TEST_CASE("nullable pointer variants preserve malformed pointer errors") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+    {
+        const auto bytes = to_bytes("8102");
+        value_type value{std::string{"before"}};
+        auto       dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+
+    {
+        const auto bytes = to_bytes("80");
+        value_type value{std::string{"before"}};
+        auto       dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+}
+
 TEST_CASE("shared graph codec decodes unambiguous smart pointer variants inside graph roots") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
 
@@ -884,6 +921,36 @@ TEST_CASE("shared graph codec decodes unambiguous smart pointer variants inside 
     REQUIRE(static_cast<bool>(second_ptr));
     CHECK_EQ(*first_ptr, 42U);
     CHECK(first_ptr.get() == second_ptr.get());
+}
+
+TEST_CASE("shared graph variants preserve malformed pointer errors") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+    {
+        const auto                  bytes = to_bytes("d81d00");
+        auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+
+    {
+        const auto                  bytes = to_bytes("d81c6161");
+        auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
 }
 
 TEST_CASE("nullable pointer codec rejects malformed wrappers") {
@@ -1022,6 +1089,42 @@ TEST_CASE("nullable and shared graph codecs compose") {
     auto                   reversed_enc = make_encoder<shared_graph_codec, nullable_ptr_codec>(reversed_buffer);
     REQUIRE(reversed_enc(std::make_shared<std::uint64_t>(13U)));
     CHECK_EQ(to_hex(reversed_buffer), "82010d");
+}
+
+TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>>;
+
+    {
+        const auto bytes = to_bytes("d82a");
+        auto       dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        value_type value{std::shared_ptr<std::uint64_t>{}};
+
+        REQUIRE(dec(value));
+        CHECK(std::holds_alternative<static_tag<42>>(value));
+    }
+
+    {
+        const auto bytes = to_bytes("8100");
+        auto       dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        value_type value{static_tag<42>{}};
+
+        REQUIRE(dec(value));
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+        CHECK_FALSE(static_cast<bool>(std::get<std::shared_ptr<std::uint64_t>>(value)));
+    }
+}
+
+TEST_CASE("shared graph rejects variants with smart pointers and tag alternatives") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>>;
+
+    const auto                  bytes = to_bytes("d82a");
+    auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+    shared_graph_decode_session decode_graph;
+    value_type                  value{std::shared_ptr<std::uint64_t>{}};
+    const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
 }
 
 TEST_CASE("nullable and shared graph codecs use graph identity inside graph wrappers") {
