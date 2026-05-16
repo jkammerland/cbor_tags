@@ -395,6 +395,10 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
         auto const values         = make_vector_values(count);
         auto const default_vector = encode_default_tagged<vector_tag>(values);
         auto const custom_vector  = encode_custom_tagged<vector_tag>(values);
+        auto const zc_vector      = cc1::encode_borrowed_segments(cbor::tags::static_tag<vector_tag>{}, values);
+
+        CHECK(zc_vector.total_size() == custom_vector.size());
+        CHECK(zc_vector.flatten() == custom_vector);
 
         auto const default_name = std::string{"default tagged vector<double>["} + std::to_string(count) + "] encode";
         bench.batch(default_vector.size()).run(default_name, [&] {
@@ -417,9 +421,19 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
             ankerl::nanobench::doNotOptimizeAway(encoded);
         });
 
+        auto const zc_name = std::string{"custom_codec_1 zc vector<double>["} + std::to_string(count) + "] encode segments";
+        bench.batch(zc_vector.total_size()).run(zc_name, [&] {
+            auto segments = cc1::encode_borrowed_segments(cbor::tags::static_tag<vector_tag>{}, values);
+            ankerl::nanobench::doNotOptimizeAway(segments);
+        });
+
         auto const float_values         = make_float_vector_values(count);
         auto const default_float_vector = encode_default_tagged<float_vector_tag>(float_values);
         auto const custom_float_vector  = encode_custom_tagged<float_vector_tag>(float_values);
+        auto const zc_float_vector      = cc1::encode_borrowed_segments(cbor::tags::static_tag<float_vector_tag>{}, float_values);
+
+        CHECK(zc_float_vector.total_size() == custom_float_vector.size());
+        CHECK(zc_float_vector.flatten() == custom_float_vector);
 
         auto const default_float_name = std::string{"default tagged vector<float>["} + std::to_string(count) + "] encode";
         bench.batch(default_float_vector.size()).run(default_float_name, [&] {
@@ -440,6 +454,12 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
             auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_values));
             ankerl::nanobench::doNotOptimizeAway(result);
             ankerl::nanobench::doNotOptimizeAway(encoded);
+        });
+
+        auto const zc_float_name = std::string{"custom_codec_1 zc vector<float>["} + std::to_string(count) + "] encode segments";
+        bench.batch(zc_float_vector.total_size()).run(zc_float_name, [&] {
+            auto segments = cc1::encode_borrowed_segments(cbor::tags::static_tag<float_vector_tag>{}, float_values);
+            ankerl::nanobench::doNotOptimizeAway(segments);
         });
     }
 }

@@ -75,6 +75,12 @@ fixtures with 16, 1024, and 65536 elements. For same-value comparisons, read
 these together with the latency rows because default CBOR and `custom_codec_1`
 do not always emit the same number of bytes.
 
+Rows named `custom_codec_1 zc ... encode segments` use
+`encode_borrowed_segments(...)`. They assemble the same outer `tag(bstr)` wire
+shape as normal `custom_codec_1` encoding, but the numeric payload bytes are
+borrowed from the source vector instead of copied into an owned destination.
+Those rows measure segment assembly throughput, not final flattening.
+
 ## Serialization Comparison Suite
 
 The cross-library comparison suite is opt-in because it fetches and builds extra
