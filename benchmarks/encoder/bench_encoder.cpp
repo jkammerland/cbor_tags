@@ -254,6 +254,19 @@ void run_shared_graph_encode_lookup_benchmarks(ankerl::nanobench::Bench &bench) 
             ankerl::nanobench::doNotOptimizeAway(data);
         });
 
+        bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map_reserved", unique_count), [&values, unique_count]() {
+            std::vector<std::uint8_t> data;
+            data.reserve(values.size() * 8U);
+
+            auto                        enc = make_encoder<shared_graph_codec>(data);
+            shared_graph_encode_session graph{shared_graph_encode_lookup::unordered_map};
+            graph.reserve_unique(unique_count);
+            auto result = enc(as_shared_graph(graph, values));
+
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(data);
+        });
+
         bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n", unique_count), [&values]() {
             std::vector<std::uint8_t> data;
             data.reserve(values.size() * 8U);
@@ -261,6 +274,19 @@ void run_shared_graph_encode_lookup_benchmarks(ankerl::nanobench::Bench &bench) 
             auto                        enc = make_encoder<shared_graph_codec>(data);
             shared_graph_encode_session graph{shared_graph_encode_lookup::linear_scan};
             auto                        result = enc(as_shared_graph(graph, values));
+
+            ankerl::nanobench::doNotOptimizeAway(result);
+            ankerl::nanobench::doNotOptimizeAway(data);
+        });
+
+        bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n_reserved", unique_count), [&values, unique_count]() {
+            std::vector<std::uint8_t> data;
+            data.reserve(values.size() * 8U);
+
+            auto                        enc = make_encoder<shared_graph_codec>(data);
+            shared_graph_encode_session graph{shared_graph_encode_lookup::linear_scan};
+            graph.reserve_unique(unique_count);
+            auto result = enc(as_shared_graph(graph, values));
 
             ankerl::nanobench::doNotOptimizeAway(result);
             ankerl::nanobench::doNotOptimizeAway(data);

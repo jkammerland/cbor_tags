@@ -345,6 +345,16 @@ class shared_graph_encode_session {
 
     [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept { return lookup_; }
 
+    void reserve_unique(std::size_t unique_count) {
+        if (active_depth_ != 0U) {
+            throw std::runtime_error("shared graph sessions cannot reserve while an encode operation is active");
+        }
+        encoded_shared_objects_.reserve(unique_count);
+        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
+            encoded_shared_ids_.reserve(unique_count);
+        }
+    }
+
     void reset() {
         if (active_depth_ != 0U) {
             throw std::runtime_error("shared graph sessions cannot reset while an encode operation is active");

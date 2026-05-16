@@ -229,6 +229,7 @@ TEST_CASE("shared graph codec can use linear encode lookup") {
     shared_graph_encode_session encode_graph{shared_graph_encode_lookup::linear_scan};
 
     REQUIRE_EQ(encode_graph.lookup(), shared_graph_encode_lookup::linear_scan);
+    encode_graph.reserve_unique(1U);
     REQUIRE(enc(as_shared_graph(encode_graph, shared)));
     REQUIRE(enc(as_shared_graph(encode_graph, shared)));
     CHECK_EQ(to_hex(buffer), "d81c182ad81d00");

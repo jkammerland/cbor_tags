@@ -309,6 +309,7 @@ the session's object table instead of a hash table:
 
 ```cpp
 shared_graph_encode_session encode_graph{shared_graph_encode_lookup::linear_scan};
+encode_graph.reserve_unique(32);
 enc(as_shared_graph(encode_graph, shared));
 ```
 
