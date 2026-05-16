@@ -54,7 +54,8 @@ template <typename T> struct dependent_false : std::false_type {};
 
 template <typename T>
 inline constexpr bool is_bulk_little_endian_scalar_v =
-    (std::is_unsigned_v<std::remove_cvref_t<T>> && std::is_integral_v<std::remove_cvref_t<T>>) ||
+    (!std::is_same_v<std::remove_cvref_t<T>, bool> && std::is_unsigned_v<std::remove_cvref_t<T>> &&
+     std::is_integral_v<std::remove_cvref_t<T>>) ||
     std::is_floating_point_v<std::remove_cvref_t<T>>;
 
 template <typename T>
@@ -272,6 +273,8 @@ template <typename T> constexpr std::remove_cvref_t<T> make_decode_value_for_exi
         return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
             return type{make_decode_value_for_existing(std::get<Indices>(value))...};
         }(std::make_index_sequence<std::tuple_size_v<type>>{});
+    } else if constexpr (IsVariant<type> && std::copy_constructible<type>) {
+        return value;
     } else if constexpr (std::is_aggregate_v<type> && !is_std_array_v<type> && !IsMap<type> && !IsRangeOfCborValues<type> &&
                          !IsVariant<type> && !is_text_string_v<type> && !IsBinaryString<type>) {
         auto tuple       = cbor::tags::to_tuple(value);
@@ -686,12 +689,27 @@ constexpr status_code decode_variant_alternative(std::uint64_t index, span_reade
     } else {
         if (index == I) {
             using alternative_type = std::variant_alternative_t<I, std::variant<Ts...>>;
-            alternative_type alternative{};
-            auto             status = decode_value(reader, alternative);
+            auto make_alternative  = [&value]() -> alternative_type {
+                if constexpr (std::default_initializable<alternative_type>) {
+                    return alternative_type{};
+                } else if constexpr (std::copy_constructible<alternative_type>) {
+                    return alternative_type{std::get<I>(value)};
+                } else {
+                    static_assert(dependent_false<alternative_type>::value,
+                                  "custom_codec_1 variant alternatives must be default-initializable or copy-constructible");
+                }
+            };
+            if constexpr (!std::default_initializable<alternative_type>) {
+                if (value.index() != I) {
+                    return status_code::error;
+                }
+            }
+            auto alternative = make_alternative();
+            auto status      = decode_value(reader, alternative);
             if (status != status_code::success) {
                 return status;
             }
-            value = std::move(alternative);
+            value.template emplace<I>(std::move(alternative));
             return status_code::success;
         }
         return decode_variant_alternative<I + 1>(index, reader, value);

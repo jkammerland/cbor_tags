@@ -210,6 +210,44 @@ TEST_CASE("Range decoding benchmarks") {
     });
 }
 
+TEST_CASE("String payload throughput fixtures roundtrip") {
+    constexpr auto payload_sizes = std::array<std::size_t, 3>{256U, 4096U, 65536U};
+
+    for (auto size : payload_sizes) {
+        auto bytes = make_bytes(size);
+        auto text  = make_text(size);
+
+        auto bstr_encoded = encode_to_vector(bytes);
+        auto tstr_encoded = encode_to_vector(text);
+
+        {
+            std::vector<std::byte> decoded;
+            auto                   dec = make_decoder(bstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == bytes);
+        }
+        {
+            std::span<const std::byte> decoded;
+            auto                       dec = make_decoder(bstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded.size() == bytes.size());
+            CHECK(std::equal(decoded.begin(), decoded.end(), bytes.begin(), bytes.end()));
+        }
+        {
+            std::string decoded;
+            auto        dec = make_decoder(tstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == text);
+        }
+        {
+            std::string_view decoded;
+            auto             dec = make_decoder(tstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == text);
+        }
+    }
+}
+
 TEST_CASE("String payload throughput benchmarks") {
     constexpr auto payload_sizes = std::array<std::size_t, 3>{256U, 4096U, 65536U};
 
@@ -278,7 +316,7 @@ TEST_CASE("String payload throughput benchmarks") {
             ankerl::nanobench::doNotOptimizeAway(decoded);
         });
 
-        auto const bstr_view_decode_name = std::string{"bstr["} + std::to_string(size) + "] decode borrowed span";
+        auto const bstr_view_decode_name = std::string{"bstr["} + std::to_string(size) + "] decode borrowed span bind (represented bytes)";
         bench.batch(bstr_encoded.size()).run(bstr_view_decode_name, [&] {
             std::span<const std::byte> decoded;
             auto                       dec = make_decoder(bstr_encoded);
@@ -294,7 +332,8 @@ TEST_CASE("String payload throughput benchmarks") {
             ankerl::nanobench::doNotOptimizeAway(decoded);
         });
 
-        auto const tstr_view_decode_name = std::string{"tstr["} + std::to_string(size) + "] decode borrowed string_view";
+        auto const tstr_view_decode_name =
+            std::string{"tstr["} + std::to_string(size) + "] decode borrowed string_view bind (represented bytes)";
         bench.batch(tstr_encoded.size()).run(tstr_view_decode_name, [&] {
             std::string_view decoded;
             auto             dec = make_decoder(tstr_encoded);

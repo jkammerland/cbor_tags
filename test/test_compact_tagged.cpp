@@ -1105,6 +1105,26 @@ TEST_CASE("compact tagged malformed bool is rejected") {
     CHECK(result.error() == status_code::error);
 }
 
+TEST_CASE("compact tagged malformed bool arrays and vectors are rejected") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    {
+        std::array<bool, 2> out{true, true};
+        auto                result = decode_compact_hex("c1420201", as_custom_codec_1(static_tag<1>{}, out));
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == status_code::error);
+        CHECK(out == std::array<bool, 2>{true, true});
+    }
+    {
+        std::vector<bool> out{true};
+        auto              result = decode_compact_hex("c143020201", as_custom_codec_1(static_tag<1>{}, out));
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == status_code::error);
+        CHECK(out == std::vector<bool>{true});
+    }
+}
+
 TEST_CASE("compact tagged malformed optional payload leaves destination unchanged") {
     using namespace cbor::tags;
     using namespace cbor::tags::ext::custom_codec_1;
@@ -1232,6 +1252,45 @@ TEST_CASE("compact tagged variants roundtrip primitive alternatives by index") {
     check_compact_wire(payload{std::uint8_t{7}}, payload{}, "c1420007");
     check_compact_wire(payload{double{1.0}}, payload{}, "c14901000000000000f03f");
     check_compact_wire(payload{std::string{"hi"}}, payload{}, "c14402026869");
+}
+
+TEST_CASE("compact tagged variants preserve duplicate alternative indexes") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    using payload = std::variant<std::uint8_t, std::uint8_t, std::string>;
+
+    const payload in{std::in_place_index<1>, std::uint8_t{9}};
+    payload       out{std::in_place_index<0>, std::uint8_t{}};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, in)));
+
+    auto dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, out)));
+    CHECK(out.index() == 1U);
+    CHECK(std::get<1>(out) == 9U);
+}
+
+TEST_CASE("compact tagged variants decode non-default alternatives when the destination is seeded with the same index") {
+    using namespace cbor::tags;
+    using namespace cbor::tags::ext::custom_codec_1;
+
+    using payload = std::variant<std::uint8_t, std::span<const std::byte, 2>>;
+
+    const std::array<std::byte, 2> bytes{std::byte{0xAA}, std::byte{0x55}};
+    const payload                  in{std::in_place_index<1>, std::span<const std::byte, 2>{bytes}};
+    payload                        out{std::in_place_index<1>, std::span<const std::byte, 2>{bytes}};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, in)));
+
+    auto dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<1>{}, out)));
+    REQUIRE(out.index() == 1U);
+    CHECK(std::ranges::equal(std::get<1>(out), bytes));
 }
 
 TEST_CASE("compact tagged byte-like strings use binary compact dispatch") {

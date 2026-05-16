@@ -224,6 +224,30 @@ template <typename Value> auto decode_typed_array_view_copy(byte_buffer const &e
     return decoded.copy_values();
 }
 
+template <typename Encode>
+void run_encode_reused(ankerl::nanobench::Bench &bench, std::string_view name, std::size_t size, Encode &&encode) {
+    byte_buffer encoded;
+    encoded.reserve(size);
+    bench.run(std::string{name}, [&] {
+        encoded.clear();
+        auto result = encode(encoded);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(encoded);
+    });
+}
+
+template <typename Encode>
+void run_encode_reused_throughput(ankerl::nanobench::Bench &bench, std::string_view name, std::size_t size, Encode &&encode) {
+    byte_buffer encoded;
+    encoded.reserve(size);
+    bench.batch(size).run(std::string{name}, [&] {
+        encoded.clear();
+        auto result = encode(encoded);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(encoded);
+    });
+}
+
 } // namespace
 
 TEST_CASE("custom_codec_1 comparison fixtures roundtrip") {
@@ -284,78 +308,46 @@ TEST_CASE("custom_codec_1 encode comparison benchmarks") {
     ankerl::nanobench::Bench bench;
     configure_bench(bench, "custom_codec_1 encode vs default CBOR");
 
-    bench.run("default tagged record encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(default_record.size());
+    run_encode_reused(bench, "default tagged record encode", default_record.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder(encoded);
-        auto result  = encoder(record);
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(record);
     });
 
-    bench.run("custom_codec_1 tagged record encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(custom_record.size());
+    run_encode_reused(bench, "custom_codec_1 tagged record encode", custom_record.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
-        auto result  = encoder(cc1::as_custom_codec_1(record));
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(cc1::as_custom_codec_1(record));
     });
 
-    bench.run("default tagged vector<double> encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(default_vector.size());
+    run_encode_reused(bench, "default tagged vector<double> encode", default_vector.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder(encoded);
         auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<vector_tag>{}, vector_values);
-        auto result  = encoder(tagged);
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(tagged);
     });
 
-    bench.run("custom_codec_1 tagged vector<double> encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(custom_vector.size());
+    run_encode_reused(bench, "custom_codec_1 tagged vector<double> encode", custom_vector.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
-        auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, vector_values));
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, vector_values));
     });
 
-    bench.run("rfc8746 typed array vector<double> encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(typed_vector.size());
+    run_encode_reused(bench, "rfc8746 typed array vector<double> encode", typed_vector.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
-        auto result  = encoder(rfc8746::as_typed_array(vector_values));
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(rfc8746::as_typed_array(vector_values));
     });
 
-    bench.run("default tagged vector<float> encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(default_float_vector.size());
+    run_encode_reused(bench, "default tagged vector<float> encode", default_float_vector.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder(encoded);
         auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<float_vector_tag>{}, float_vector_values);
-        auto result  = encoder(tagged);
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(tagged);
     });
 
-    bench.run("custom_codec_1 tagged vector<float> encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(custom_float_vector.size());
+    run_encode_reused(bench, "custom_codec_1 tagged vector<float> encode", custom_float_vector.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
-        auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_vector_values));
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_vector_values));
     });
 
-    bench.run("rfc8746 typed array vector<float> encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(typed_float_vector.size());
+    run_encode_reused(bench, "rfc8746 typed array vector<float> encode", typed_float_vector.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
-        auto result  = encoder(rfc8746::as_typed_array(float_vector_values));
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(rfc8746::as_typed_array(float_vector_values));
     });
 }
 
@@ -417,7 +409,7 @@ TEST_CASE("custom_codec_1 decode comparison benchmarks") {
         ankerl::nanobench::doNotOptimizeAway(decoded);
     });
 
-    bench.run("rfc8746 typed array view<double> decode borrowed", [&] {
+    bench.run("rfc8746 typed array view<double> decode borrowed view bind", [&] {
         rfc8746::typed_array_view<double> decoded;
         auto                              decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(typed_vector);
         auto                              result  = decoder(decoded);
@@ -450,7 +442,7 @@ TEST_CASE("custom_codec_1 decode comparison benchmarks") {
         ankerl::nanobench::doNotOptimizeAway(decoded);
     });
 
-    bench.run("rfc8746 typed array view<float> decode borrowed", [&] {
+    bench.run("rfc8746 typed array view<float> decode borrowed view bind", [&] {
         rfc8746::typed_array_view<float> decoded;
         auto                             decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(typed_float_vector);
         auto                             result  = decoder(decoded);
@@ -469,22 +461,14 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
     ankerl::nanobench::Bench bench;
     configure_throughput_bench(bench, "custom_codec_1 encode wire throughput");
 
-    bench.batch(default_record.size()).run("default tagged record encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(default_record.size());
+    run_encode_reused_throughput(bench, "default tagged record encode", default_record.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder(encoded);
-        auto result  = encoder(record);
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(record);
     });
 
-    bench.batch(custom_record.size()).run("custom_codec_1 tagged record encode", [&] {
-        byte_buffer encoded;
-        encoded.reserve(custom_record.size());
+    run_encode_reused_throughput(bench, "custom_codec_1 tagged record encode", custom_record.size(), [&](byte_buffer &encoded) {
         auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
-        auto result  = encoder(cc1::as_custom_codec_1(record));
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(encoded);
+        return encoder(cc1::as_custom_codec_1(record));
     });
 
     for (auto count : vector_counts) {
@@ -504,45 +488,35 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
         }
 
         auto const default_name = std::string{"default tagged vector<double>["} + std::to_string(count) + "] encode";
-        bench.batch(default_vector.size()).run(default_name, [&] {
-            byte_buffer encoded;
-            encoded.reserve(default_vector.size());
+        run_encode_reused_throughput(bench, default_name, default_vector.size(), [&](byte_buffer &encoded) {
             auto encoder = cbor::tags::make_encoder(encoded);
             auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<vector_tag>{}, values);
-            auto result  = encoder(tagged);
-            ankerl::nanobench::doNotOptimizeAway(result);
-            ankerl::nanobench::doNotOptimizeAway(encoded);
+            return encoder(tagged);
         });
 
         auto const custom_name = std::string{"custom_codec_1 tagged vector<double>["} + std::to_string(count) + "] encode";
-        bench.batch(custom_vector.size()).run(custom_name, [&] {
-            byte_buffer encoded;
-            encoded.reserve(custom_vector.size());
+        run_encode_reused_throughput(bench, custom_name, custom_vector.size(), [&](byte_buffer &encoded) {
             auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
-            auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, values));
-            ankerl::nanobench::doNotOptimizeAway(result);
-            ankerl::nanobench::doNotOptimizeAway(encoded);
+            return encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<vector_tag>{}, values));
         });
 
-        auto const zc_name = std::string{"custom_codec_1 zc vector<double>["} + std::to_string(count) + "] encode segments";
+        auto const zc_name =
+            std::string{"custom_codec_1 zc vector<double>["} + std::to_string(count) + "] encode segment assembly (represented bytes)";
         bench.batch(zc_vector.total_size()).run(zc_name, [&] {
             auto segments = cc1::encode_borrowed_segments(cbor::tags::static_tag<vector_tag>{}, values);
             ankerl::nanobench::doNotOptimizeAway(segments);
         });
 
         auto const typed_name = std::string{"rfc8746 typed array vector<double>["} + std::to_string(count) + "] encode";
-        bench.batch(typed_vector.size()).run(typed_name, [&] {
-            byte_buffer encoded;
-            encoded.reserve(typed_vector.size());
+        run_encode_reused_throughput(bench, typed_name, typed_vector.size(), [&](byte_buffer &encoded) {
             auto encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
-            auto result  = encoder(rfc8746::as_typed_array(values));
-            ankerl::nanobench::doNotOptimizeAway(result);
-            ankerl::nanobench::doNotOptimizeAway(encoded);
+            return encoder(rfc8746::as_typed_array(values));
         });
 
         if constexpr (std::endian::native == std::endian::little) {
             auto const typed_zc_vector = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
-            auto const typed_zc_name = std::string{"rfc8746 typed array zc vector<double>["} + std::to_string(count) + "] encode segments";
+            auto const typed_zc_name   = std::string{"rfc8746 typed array zc vector<double>["} + std::to_string(count) +
+                                       "] encode segment assembly (represented bytes)";
             bench.batch(typed_zc_vector.total_size()).run(typed_zc_name, [&] {
                 auto segments = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
                 ankerl::nanobench::doNotOptimizeAway(segments);
@@ -566,47 +540,36 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
         }
 
         auto const default_float_name = std::string{"default tagged vector<float>["} + std::to_string(count) + "] encode";
-        bench.batch(default_float_vector.size()).run(default_float_name, [&] {
-            byte_buffer encoded;
-            encoded.reserve(default_float_vector.size());
+        run_encode_reused_throughput(bench, default_float_name, default_float_vector.size(), [&](byte_buffer &encoded) {
             auto encoder = cbor::tags::make_encoder(encoded);
             auto tagged  = cbor::tags::make_tag_pair(cbor::tags::static_tag<float_vector_tag>{}, float_values);
-            auto result  = encoder(tagged);
-            ankerl::nanobench::doNotOptimizeAway(result);
-            ankerl::nanobench::doNotOptimizeAway(encoded);
+            return encoder(tagged);
         });
 
         auto const custom_float_name = std::string{"custom_codec_1 tagged vector<float>["} + std::to_string(count) + "] encode";
-        bench.batch(custom_float_vector.size()).run(custom_float_name, [&] {
-            byte_buffer encoded;
-            encoded.reserve(custom_float_vector.size());
+        run_encode_reused_throughput(bench, custom_float_name, custom_float_vector.size(), [&](byte_buffer &encoded) {
             auto encoder = cbor::tags::make_encoder<cc1::custom_codec_1>(encoded);
-            auto result  = encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_values));
-            ankerl::nanobench::doNotOptimizeAway(result);
-            ankerl::nanobench::doNotOptimizeAway(encoded);
+            return encoder(cc1::as_custom_codec_1(cbor::tags::static_tag<float_vector_tag>{}, float_values));
         });
 
-        auto const zc_float_name = std::string{"custom_codec_1 zc vector<float>["} + std::to_string(count) + "] encode segments";
+        auto const zc_float_name =
+            std::string{"custom_codec_1 zc vector<float>["} + std::to_string(count) + "] encode segment assembly (represented bytes)";
         bench.batch(zc_float_vector.total_size()).run(zc_float_name, [&] {
             auto segments = cc1::encode_borrowed_segments(cbor::tags::static_tag<float_vector_tag>{}, float_values);
             ankerl::nanobench::doNotOptimizeAway(segments);
         });
 
         auto const typed_float_name = std::string{"rfc8746 typed array vector<float>["} + std::to_string(count) + "] encode";
-        bench.batch(typed_float_vector.size()).run(typed_float_name, [&] {
-            byte_buffer encoded;
-            encoded.reserve(typed_float_vector.size());
+        run_encode_reused_throughput(bench, typed_float_name, typed_float_vector.size(), [&](byte_buffer &encoded) {
             auto encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
-            auto result  = encoder(rfc8746::as_typed_array(float_values));
-            ankerl::nanobench::doNotOptimizeAway(result);
-            ankerl::nanobench::doNotOptimizeAway(encoded);
+            return encoder(rfc8746::as_typed_array(float_values));
         });
 
         if constexpr (std::endian::native == std::endian::little) {
             auto const typed_zc_float_vector =
                 rfc8746::encode_typed_array_segments(std::span<const float>{float_values.data(), float_values.size()});
-            auto const typed_zc_float_name =
-                std::string{"rfc8746 typed array zc vector<float>["} + std::to_string(count) + "] encode segments";
+            auto const typed_zc_float_name = std::string{"rfc8746 typed array zc vector<float>["} + std::to_string(count) +
+                                             "] encode segment assembly (represented bytes)";
             bench.batch(typed_zc_float_vector.total_size()).run(typed_zc_float_name, [&] {
                 auto segments = rfc8746::encode_typed_array_segments(std::span<const float>{float_values.data(), float_values.size()});
                 ankerl::nanobench::doNotOptimizeAway(segments);
@@ -680,7 +643,8 @@ TEST_CASE("custom_codec_1 decode wire throughput benchmarks") {
             ankerl::nanobench::doNotOptimizeAway(decoded);
         });
 
-        auto const typed_view_name = std::string{"rfc8746 typed array view<double>["} + std::to_string(count) + "] decode borrowed";
+        auto const typed_view_name =
+            std::string{"rfc8746 typed array view<double>["} + std::to_string(count) + "] decode borrowed view bind (represented bytes)";
         bench.batch(typed_vector.size()).run(typed_view_name, [&] {
             rfc8746::typed_array_view<double> decoded;
             auto                              decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(typed_vector);
@@ -727,7 +691,8 @@ TEST_CASE("custom_codec_1 decode wire throughput benchmarks") {
             ankerl::nanobench::doNotOptimizeAway(decoded);
         });
 
-        auto const typed_float_view_name = std::string{"rfc8746 typed array view<float>["} + std::to_string(count) + "] decode borrowed";
+        auto const typed_float_view_name =
+            std::string{"rfc8746 typed array view<float>["} + std::to_string(count) + "] decode borrowed view bind (represented bytes)";
         bench.batch(typed_float_vector.size()).run(typed_float_view_name, [&] {
             rfc8746::typed_array_view<float> decoded;
             auto                             decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(typed_float_vector);

@@ -8,4 +8,4 @@ target_link_libraries(${PROJECT_NAME} PRIVATE cbor_tags doctest nanobench benchm
 
 cbor_tags_configure_benchmark_target(${PROJECT_NAME})
 
-add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
+add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME} "--test-case=custom_codec_1 comparison fixtures roundtrip")

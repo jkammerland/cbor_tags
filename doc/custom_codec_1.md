@@ -103,8 +103,9 @@ as lazy tag matches do.
 - Text strings, byte strings, variable-size ranges, and maps use a varuint
   length followed by their elements or bytes.
 - Contiguous ranges and fixed arrays of unsigned integers and floating-point
-  values are bulk-copied on little-endian hosts. The wire shape is the same as
-  the element-by-element encoding.
+  values are bulk-copied on little-endian hosts. `bool` is intentionally
+  excluded so decode still rejects bytes other than `0` and `1`. The wire shape
+  is the same as the element-by-element encoding.
 - Text strings include `std::basic_string` and `std::basic_string_view` with
   char-like value types, including `std::pmr::string`.
 - `std::array` stores its elements directly; its length is part of the C++
@@ -216,6 +217,10 @@ auto segments = cc1::encode_borrowed_segments(static_tag<1001>{}, samples);
   context. This matches the main decoder limitation; avoid PMR alternatives
   inside variants when allocator containment matters, or decode that branch
   explicitly.
+- Non-default-constructible `std::variant` alternatives can be decoded only when
+  the destination variant is already seeded with the same selected index, giving
+  the codec an existing value to copy and update. Duplicate alternative types
+  are supported because decode emplaces by stored index.
 - Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
   CBOR level. Payload fields use this codec's schema-bound payload
   rules, not the normal extension dispatch path.

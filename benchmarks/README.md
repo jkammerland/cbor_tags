@@ -63,8 +63,8 @@ extension on fixed tagged payloads:
 - explicitly tagged `std::vector<double>` and `std::vector<float>` fixtures;
 - RFC 8746 typed-array encodings of the same homogeneous numeric fixtures.
 
-The encode rows reserve the output buffer to the known encoded size before each
-iteration, so they focus on codec work instead of output growth policy. The
+The encode rows reuse an output buffer reserved to the known encoded size, so
+they focus on codec work instead of allocation or output growth policy. The
 decode rows use pre-encoded default-CBOR and `custom_codec_1` payloads. A
 non-benchmark fixture test also verifies that both codecs round-trip the same
 user values and captures the encoded byte sizes.
@@ -88,22 +88,26 @@ default-CBOR cost that `custom_codec_1` and RFC 8746 typed arrays avoid for
 homogeneous numeric vectors is the per-element array item encoding, not byte or
 text string payload movement.
 
-Rows named `custom_codec_1 zc ... encode segments` use
+Rows named `custom_codec_1 zc ... encode segment assembly (represented bytes)` use
 `encode_borrowed_segments(...)`. They assemble the same outer `tag(bstr)` wire
 shape as normal `custom_codec_1` encoding, but the numeric payload bytes are
 borrowed from the source vector instead of copied into an owned destination.
-Those rows measure segment assembly throughput, not final flattening.
+Those rows measure segment assembly throughput. The `byte/s` number is based on
+represented wire bytes and does not include payload flattening or a final write
+to a contiguous destination.
 
 Rows named `rfc8746 typed array ... encode` use the public
 `rfc8746::typed_array_codec` with an owned byte-vector destination. On
 little-endian hosts the typed-array payload is appended from the native
 contiguous vector bytes, so the hot path is header work plus one payload append.
-Rows named `rfc8746 typed array zc ... encode segments` use
+Rows named `rfc8746 typed array zc ... encode segment assembly (represented bytes)` use
 `rfc8746::encode_typed_array_segments(...)`; on little-endian hosts the payload
 segment is borrowed from the source vector. Decode rows are split between
 `decode owning`, which materializes a `std::vector<T>`, and `decode borrowed`,
 which decodes a `typed_array_view<T>` over the input payload without copying the
-values.
+values. Borrowed decode row names include `view bind (represented bytes)` when
+the measured work only parses the header and binds a view over the original
+payload.
 
 ## Serialization Comparison Suite
 
