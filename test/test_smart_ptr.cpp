@@ -1094,6 +1094,14 @@ TEST_CASE("nullable and shared graph codecs compose") {
 TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>>;
 
+    static_assert(
+        !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<42>>);
+    static_assert(
+        cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<28>>);
+    static_assert(
+        cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<29>>);
+    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, as_tag_any>);
+
     {
         const auto bytes = to_bytes("d82a");
         auto       dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
@@ -1112,19 +1120,113 @@ TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers"
         REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
         CHECK_FALSE(static_cast<bool>(std::get<std::shared_ptr<std::uint64_t>>(value)));
     }
+
+    {
+        using graph_tag_value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<28>>;
+
+        const auto           bytes = to_bytes("d81c");
+        auto                 dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        graph_tag_value_type value{std::shared_ptr<std::uint64_t>{}};
+
+        REQUIRE(dec(value));
+        CHECK(std::holds_alternative<static_tag<28>>(value));
+    }
 }
 
-TEST_CASE("shared graph rejects variants with smart pointers and tag alternatives") {
-    using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>>;
+TEST_CASE("shared graph variants allow non-colliding tag alternatives") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>, std::string>;
 
-    const auto                  bytes = to_bytes("d82a");
-    auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
-    shared_graph_decode_session decode_graph;
-    value_type                  value{std::shared_ptr<std::uint64_t>{}};
-    const auto                  result = dec(as_shared_graph(decode_graph, value));
+    {
+        const auto                  bytes = to_bytes("626f6b");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
 
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(dec(as_shared_graph(decode_graph, value)));
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "ok");
+    }
+
+    {
+        const auto                  bytes = to_bytes("d82a");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
+
+        REQUIRE(dec(as_shared_graph(decode_graph, value)));
+        CHECK(std::holds_alternative<static_tag<42>>(value));
+    }
+
+    {
+        const auto                  bytes = to_bytes("8100");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+
+        REQUIRE(dec(as_shared_graph(decode_graph, value)));
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+        CHECK_FALSE(static_cast<bool>(std::get<std::shared_ptr<std::uint64_t>>(value)));
+    }
+
+    {
+        const auto                  bytes = to_bytes("d81c182ad81d00");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  first{std::string{"first"}};
+        value_type                  second{std::string{"second"}};
+
+        REQUIRE(dec(as_shared_graph(decode_graph, first)));
+        REQUIRE(dec(as_shared_graph(decode_graph, second)));
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(first));
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(second));
+        const auto &first_ptr  = std::get<std::shared_ptr<std::uint64_t>>(first);
+        const auto &second_ptr = std::get<std::shared_ptr<std::uint64_t>>(second);
+        REQUIRE(static_cast<bool>(first_ptr));
+        REQUIRE(static_cast<bool>(second_ptr));
+        CHECK_EQ(*first_ptr, 42U);
+        CHECK(first_ptr.get() == second_ptr.get());
+    }
+}
+
+TEST_CASE("shared graph rejects variants with graph tag collisions") {
+    {
+        using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<28>>;
+
+        const auto                  bytes = to_bytes("d81c182a");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+
+    {
+        using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<29>>;
+
+        const auto                  bytes = to_bytes("d81d00");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+
+    {
+        using value_type = std::variant<std::shared_ptr<std::uint64_t>, as_tag_any>;
+
+        const auto                  bytes = to_bytes("d82a");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
 }
 
 TEST_CASE("nullable and shared graph codecs use graph identity inside graph wrappers") {

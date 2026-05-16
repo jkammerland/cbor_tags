@@ -78,12 +78,31 @@ constexpr std::size_t decodable_nullable_pointer_count_v =
 
 template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = decodable_nullable_pointer_count_v<Ts...> > 0U;
 
-template <typename... Ts>
-constexpr bool variant_has_shared_graph_tag_ambiguity_v = [] {
-    using variant_type          = std::variant<Ts...>;
+template <typename Variant, std::uint64_t Tag>
+constexpr bool variant_contains_static_tag_v = [] {
+    constexpr auto tags      = ValidConceptMapping<Variant>::tags;
+    constexpr auto tags_size = ValidConceptMapping<Variant>::number_of_tags;
+    for (std::uint64_t index = 0; index < tags_size; ++index) {
+        if (tags[index] == Tag) {
+            return true;
+        }
+    }
+    return false;
+}();
+
+template <typename Variant>
+constexpr bool variant_has_any_tag_header_v = [] {
     using major_index           = cbor::tags::detail::MajorIndex;
-    constexpr auto core_mapping = valid_concept_mapping_array_v<variant_type>;
-    return (decodable_shared_pointer_v<Ts> || ...) && core_mapping[major_index::Tag] != 0U;
+    constexpr auto core_mapping = valid_concept_mapping_array_v<Variant>;
+    return core_mapping[major_index::AnyTagHeader] != 0U;
+}();
+
+template <typename... Ts>
+constexpr bool variant_has_shared_graph_tag_collision_v = [] {
+    using variant_type = std::variant<Ts...>;
+    return (decodable_shared_pointer_v<Ts> || ...) &&
+           (variant_has_any_tag_header_v<variant_type> || variant_contains_static_tag_v<variant_type, shareable_tag> ||
+            variant_contains_static_tag_v<variant_type, sharedref_tag>);
 }();
 
 struct nullable_ptr_codec_marker {};
@@ -228,14 +247,13 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
     static_assert(decodable_nullable_pointer_count_v<Ts...> <= 1U,
                   "Variant nullable smart pointer alternatives are ambiguous because they share the same [0] / [1, value] shape.");
 
-    using variant_type                   = std::variant<Ts...>;
-    using major_index                    = cbor::tags::detail::MajorIndex;
-    constexpr auto core_mapping          = valid_concept_mapping_array_v<variant_type>;
-    constexpr bool has_shared_ptr_member = (decodable_shared_pointer_v<Ts> || ...);
+    using variant_type          = std::variant<Ts...>;
+    using major_index           = cbor::tags::detail::MajorIndex;
+    constexpr auto core_mapping = valid_concept_mapping_array_v<variant_type>;
     static_assert(core_mapping[major_index::Array] == 0,
                   "Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives.");
-    static_assert(!GraphTagsPossible || !has_shared_ptr_member || core_mapping[major_index::Tag] == 0,
-                  "Variant shared_ptr alternatives in a shared graph are ambiguous with other tag-shaped alternatives.");
+    static_assert(!GraphTagsPossible || !variant_has_shared_graph_tag_collision_v<Ts...>,
+                  "Variant shared_ptr alternatives in a shared graph collide with tags 28/29 or a catch-all tag alternative.");
     static_assert(core_mapping[major_index::Unsigned] <= 1, "Multiple types match against major type 0 (unsigned integer)");
     static_assert(core_mapping[major_index::Negative] <= 1, "Multiple types match against major type 1 (negative integer)");
     static_assert(core_mapping[major_index::BStr] <= 1, "Multiple types match against major type 2 (byte string)");
@@ -255,6 +273,17 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                        &pointer_error]<bool CatchAllPass, typename U>() -> bool {
         using raw_type = std::remove_cvref_t<U>;
 
+        if (pointer_error.has_value()) {
+            return false;
+        }
+
+        auto read_tag_once = [&dec, additional_info, &tag] {
+            if (!tag.has_value()) {
+                tag = dec.decode_unsigned(additional_info);
+            }
+            return *tag;
+        };
+
         if constexpr (decodable_nullable_pointer_v<raw_type>) {
             const auto pointer_major =
                 major == major_type::Array || (GraphTagsPossible && decodable_shared_pointer_v<raw_type> && major == major_type::Tag);
@@ -262,8 +291,21 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                 return false;
             }
 
-            raw_type   decoded_value{};
-            const auto result = dec.decode(decoded_value, major, additional_info);
+            raw_type    decoded_value{};
+            status_code result;
+            if constexpr (GraphTagsPossible && decodable_shared_pointer_v<raw_type>) {
+                if (major == major_type::Tag) {
+                    const auto tag_value = read_tag_once();
+                    if (tag_value != shareable_tag && tag_value != sharedref_tag) {
+                        return false;
+                    }
+                    result = dec.decode_shared_graph_pointer(decoded_value, tag_value);
+                } else {
+                    result = dec.decode(decoded_value, major, additional_info);
+                }
+            } else {
+                result = dec.decode(decoded_value, major, additional_info);
+            }
             if (result == status_code::success) {
                 value = std::move(decoded_value);
                 return true;
@@ -285,10 +327,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             raw_type    decoded_value{};
             status_code result;
             if constexpr (IsTag<raw_type>) {
-                if (!tag) {
-                    tag = dec.decode_unsigned(additional_info);
-                }
-                result = dec.decode(decoded_value, *tag);
+                result = dec.decode(decoded_value, read_tag_once());
             } else {
                 result = dec.decode(decoded_value, major, additional_info);
             }
@@ -602,6 +641,15 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         }
 
         const auto tag = dec.decode_unsigned(additional_info);
+        return decode_shared_graph_pointer(value, tag);
+    }
+
+    template <detail::NullablePointerValue T>
+        requires std::default_initializable<T>
+    [[nodiscard]] status_code decode_shared_graph_pointer(std::shared_ptr<T> &value, std::uint64_t tag) {
+        if (active_decode_session_ == nullptr) {
+            return status_code::error;
+        }
         if (tag == detail::shareable_tag) {
             return decode_shareable(value);
         }
@@ -617,7 +665,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         if (active_decode_session_ == nullptr) {
             return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
         }
-        if constexpr (detail::variant_has_shared_graph_tag_ambiguity_v<Ts...>) {
+        if constexpr (detail::variant_has_shared_graph_tag_collision_v<Ts...>) {
             return status_code::error;
         } else {
             return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);

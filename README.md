@@ -321,9 +321,9 @@ enc(as_shared_graph(encode_graph, shared));
 `nullable_ptr_codec` and `shared_graph_codec` can be installed together. Outside
 `as_shared_graph(...)`, `shared_ptr<T>` uses the nullable `[0]` / `[1, value]`
 shape. Inside `as_shared_graph(...)`, `shared_ptr<T>` uses graph identity
-encoding. Variants that combine a `shared_ptr<T>` alternative with tag-shaped
-alternatives can use nullable dispatch outside `as_shared_graph(...)`, but are
-rejected inside graph wrappers because graph references also use CBOR tags.
+encoding. In graph wrappers, `shared_ptr<T>` contributes virtual variant tags
+28 and 29; non-colliding static tag alternatives can coexist, while tag 28,
+tag 29, and catch-all tag alternatives are rejected as ambiguous.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
