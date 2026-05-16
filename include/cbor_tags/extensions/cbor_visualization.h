@@ -447,40 +447,58 @@ std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions
 template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
 template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
 
-template <typename T, std::size_t Depth = 0> consteval bool cddl_contains_nullable_pointer();
+template <typename... Ts> struct cddl_seen_types {};
 
-template <typename Tuple, std::size_t Depth, std::size_t... Is>
+template <typename T, typename Seen> struct cddl_seen_contains;
+
+template <typename T, typename... Seen>
+struct cddl_seen_contains<T, cddl_seen_types<Seen...>> : std::bool_constant<(std::same_as<std::remove_cvref_t<T>, Seen> || ...)> {};
+
+template <typename Seen, typename T> struct cddl_seen_append;
+
+template <typename... Seen, typename T> struct cddl_seen_append<cddl_seen_types<Seen...>, T> {
+    using type = cddl_seen_types<Seen..., std::remove_cvref_t<T>>;
+};
+
+template <typename Seen, typename T> using cddl_seen_append_t = typename cddl_seen_append<Seen, T>::type;
+
+template <typename T, typename Seen = cddl_seen_types<>> consteval bool cddl_contains_nullable_pointer();
+
+template <typename Tuple, typename Seen, std::size_t... Is>
 consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) {
-    return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Depth + 1>() || ...);
+    return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
 }
 
-template <typename T, std::size_t Depth> consteval bool cddl_contains_nullable_pointer() {
+template <typename T, typename Seen> consteval bool cddl_contains_nullable_pointer() {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsNullablePointer<value_type> || Depth > 8U) {
+    if constexpr (IsNullablePointer<value_type>) {
         return true;
+    } else if constexpr (cddl_seen_contains<value_type, Seen>::value) {
+        return false;
     } else {
+        using next_seen = cddl_seen_append_t<Seen, value_type>;
         if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
-            return cddl_contains_nullable_pointer<typename value_type::value_type, Depth + 1>();
+            return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
             return []<typename... Ts>(std::variant<Ts...> *) consteval {
-                return (cddl_contains_nullable_pointer<Ts, Depth + 1>() || ...);
+                return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...);
             }(static_cast<value_type *>(nullptr));
         } else if constexpr (IsNamedMapWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_map_value_t<value_type>, Depth + 1>();
+            return cddl_contains_nullable_pointer<named_map_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedGroupWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_group_value_t<value_type>, Depth + 1>();
+            return cddl_contains_nullable_pointer<named_group_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedExtensionWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, Depth + 1>();
+            return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, next_seen>();
         } else if constexpr (IsIndefiniteWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, Depth + 1>();
+            return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, next_seen>();
         } else if constexpr (IsMap<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::key_type, Depth + 1>() ||
-                   cddl_contains_nullable_pointer<typename value_type::mapped_type, Depth + 1>();
+            return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
+                   cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
         } else if constexpr (IsTuple<value_type>) {
-            return cddl_tuple_contains_nullable_pointer<value_type, Depth>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
+            return cddl_tuple_contains_nullable_pointer<value_type, next_seen>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
         } else if constexpr (IsAggregate<value_type>) {
             using tuple_type = aggregate_tuple_t<value_type>;
-            return cddl_tuple_contains_nullable_pointer<tuple_type, Depth>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+            return cddl_tuple_contains_nullable_pointer<tuple_type, next_seen>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
         } else {
             return false;
         }
