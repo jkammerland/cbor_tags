@@ -7,7 +7,6 @@
 
 int main() {
     fmt::memory_buffer buffer;
-    cbor::tags::cddl_schema_to<std::variant<std::shared_ptr<int>, std::string>>(
-        buffer, {.row_options = {.format_by_rows = false}});
+    cbor::tags::cddl_schema_to<std::variant<std::shared_ptr<int>, std::string>>(buffer, {.row_options = {.format_by_rows = false}});
     return 0;
 }

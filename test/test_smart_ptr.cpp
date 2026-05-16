@@ -178,7 +178,7 @@ TEST_CASE("shared graph codec preserves shared_ptr identity across multiple root
 
     REQUIRE(enc(as_shared_graph(encode_graph, first)));
     REQUIRE(enc(as_shared_graph(encode_graph, second)));
-    CHECK_EQ(to_hex(buffer), "830001182a820301");
+    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
 
     auto                           dec = make_decoder<shared_graph_codec>(buffer);
     shared_graph_decode_session    decode_graph;
@@ -194,22 +194,18 @@ TEST_CASE("shared graph codec preserves shared_ptr identity across multiple root
 }
 
 TEST_CASE("shared graph reference shape is rejected by nullable pointer codec") {
-    const auto                     bytes   = to_bytes("820301");
+    const auto                     bytes   = to_bytes("d81d00");
     std::shared_ptr<std::uint64_t> decoded = std::make_shared<std::uint64_t>(7U);
     auto                           dec     = make_decoder<nullable_ptr_codec>(bytes);
     const auto                     result  = dec(decoded);
 
     REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, 7U);
-
-    std::uint64_t following{};
-    REQUIRE(dec(following));
-    CHECK_EQ(following, 1U);
 }
 
-TEST_CASE("shared graph codec roundtrips null shared_ptr with explicit graph null marker") {
+TEST_CASE("shared graph codec roundtrips null shared_ptr with nullable null marker") {
     {
         const std::shared_ptr<std::uint64_t> value;
 
@@ -218,7 +214,7 @@ TEST_CASE("shared graph codec roundtrips null shared_ptr with explicit graph nul
         shared_graph_encode_session encode_graph;
 
         REQUIRE(enc(as_shared_graph(encode_graph, value)));
-        CHECK_EQ(to_hex(buffer), "8102");
+        CHECK_EQ(to_hex(buffer), "8100");
 
         auto                           dec     = make_decoder<shared_graph_codec>(buffer);
         shared_graph_decode_session    graph   = {};
@@ -236,7 +232,7 @@ TEST_CASE("shared graph codec roundtrips null shared_ptr with explicit graph nul
         const auto                     result  = dec(as_shared_graph(graph, decoded));
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag_on_buffer);
         REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 7U);
     }
@@ -254,7 +250,7 @@ TEST_CASE("shared graph codec distinguishes optional null states") {
     REQUIRE(enc(as_shared_graph(encode_graph, missing)));
     REQUIRE(enc(as_shared_graph(encode_graph, null_pointer)));
     REQUIRE(enc(as_shared_graph(encode_graph, value)));
-    CHECK_EQ(to_hex(buffer), "f68102830001182a");
+    CHECK_EQ(to_hex(buffer), "f68100d81c182a");
 
     auto                                          dec = make_decoder<shared_graph_codec>(buffer);
     shared_graph_decode_session                   decode_graph;
@@ -283,7 +279,7 @@ TEST_CASE("shared graph codec reset starts an independent graph") {
     REQUIRE(enc(as_shared_graph(encode_graph, shared)));
     encode_graph.reset();
     REQUIRE(enc(as_shared_graph(encode_graph, shared)));
-    CHECK_EQ(to_hex(buffer), "830001182a830001182a");
+    CHECK_EQ(to_hex(buffer), "d81c182ad81c182a");
 
     auto                           dec = make_decoder<shared_graph_codec>(buffer);
     shared_graph_decode_session    decode_graph;
@@ -318,27 +314,13 @@ TEST_CASE("shared graph codec keeps encoded roots alive until session reset") {
     CHECK(weak.expired());
 }
 
-TEST_CASE("shared graph codec reports unknown and duplicate references") {
+TEST_CASE("shared graph codec reports unknown references") {
     {
-        const auto                     bytes = to_bytes("820301");
+        const auto                     bytes = to_bytes("d81d00");
         std::shared_ptr<std::uint64_t> decoded;
         auto                           dec = make_decoder<shared_graph_codec>(bytes);
         shared_graph_decode_session    decode_graph;
         const auto                     result = dec(as_shared_graph(decode_graph, decoded));
-
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
-    }
-
-    {
-        const auto                     bytes = to_bytes("8300010183000102");
-        std::shared_ptr<std::uint64_t> first;
-        std::shared_ptr<std::uint64_t> second;
-        auto                           dec = make_decoder<shared_graph_codec>(bytes);
-        shared_graph_decode_session    decode_graph;
-
-        REQUIRE(dec(as_shared_graph(decode_graph, first)));
-        const auto result = dec(as_shared_graph(decode_graph, second));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
@@ -362,11 +344,11 @@ TEST_CASE("shared graph codec rejects static pointer type mismatches") {
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
-        CHECK_EQ(to_hex(buffer), "830001182a");
+        CHECK_EQ(to_hex(buffer), "d81c182a");
     }
 
     {
-        const auto bytes = to_bytes("830001182a820301");
+        const auto bytes = to_bytes("d81c182ad81d00");
 
         std::shared_ptr<std::uint64_t> first;
         std::shared_ptr<std::int64_t>  second;
@@ -396,9 +378,9 @@ TEST_CASE("shared graph codec rejects cycles") {
     buffer.clear();
     auto recovered = std::make_shared<std::uint64_t>(42U);
     REQUIRE(enc(as_shared_graph(encode_graph, recovered)));
-    CHECK_EQ(to_hex(buffer), "830001182a");
+    CHECK_EQ(to_hex(buffer), "d81c182a");
 
-    const auto                                  cycle_bytes = to_bytes("830001820301");
+    const auto                                  cycle_bytes = to_bytes("d81cd81d00");
     std::shared_ptr<smart_ptr_test::graph_link> decoded;
     auto                                        dec = make_decoder<shared_graph_codec>(cycle_bytes);
     shared_graph_decode_session                 decode_graph;
@@ -431,15 +413,14 @@ TEST_CASE("shared graph codec rejects malformed graph wrappers") {
     };
 
     const malformed_case cases[]{
-        {"8100", status_code::unexpected_group_size, std::nullopt}, // [0]
-        {"830000182a", status_code::error, 42U},                    // [0, 0, 42]
-        {"820001", status_code::unexpected_group_size, 1U},         // [0, 1]
-        {"830001", status_code::incomplete, std::nullopt},          // [0, 1, <missing>]
-        {"820101", status_code::error, 1U},                         // legacy/nullable [1, 1]
-        {"8103", status_code::unexpected_group_size, std::nullopt}, // [3]
-        {"830301182a", status_code::unexpected_group_size, 1U},     // [3, 1, 42]
-        {"8202182a", status_code::unexpected_group_size, 42U},      // [2, 42]
-        {"8109", status_code::error, std::nullopt},                 // [9]
+        {"8101", status_code::error, std::nullopt},                           // [1]
+        {"8201182a", status_code::unexpected_group_size, 1U},                 // [1, 42]
+        {"d81c", status_code::incomplete, std::nullopt},                      // #6.28(<missing>)
+        {"d81c6161", status_code::no_match_for_uint_on_buffer, std::nullopt}, // #6.28("a")
+        {"d81d", status_code::incomplete, std::nullopt},                      // #6.29(<missing>)
+        {"d81d6161", status_code::no_match_for_uint_on_buffer, std::nullopt}, // #6.29("a")
+        {"d81d00", status_code::error, std::nullopt},                         // unknown ref 0
+        {"d81e00", status_code::no_match_for_tag, 0U},                        // unknown tag 30
     };
 
     for (const auto &test_case : cases) {
@@ -472,7 +453,7 @@ TEST_CASE("shared graph codec rejects nested wrappers with different graph sessi
         smart_ptr_test::graph_nested_encode_session_mismatch root{.value = std::make_shared<std::uint64_t>(42U), .other = &graph};
 
         REQUIRE(enc(as_shared_graph(graph, root)));
-        CHECK_EQ(to_hex(buffer), "830001182a");
+        CHECK_EQ(to_hex(buffer), "d81c182a");
     }
 
     {
@@ -490,7 +471,7 @@ TEST_CASE("shared graph codec rejects nested wrappers with different graph sessi
     }
 
     {
-        const auto                                           bytes = to_bytes("830001182a");
+        const auto                                           bytes = to_bytes("d81c182a");
         auto                                                 dec   = make_decoder<shared_graph_codec>(bytes);
         shared_graph_decode_session                          graph;
         smart_ptr_test::graph_nested_decode_session_mismatch root{.value = {}, .other = &graph};
@@ -501,7 +482,7 @@ TEST_CASE("shared graph codec rejects nested wrappers with different graph sessi
     }
 
     {
-        const auto                                           bytes = to_bytes("830001182a");
+        const auto                                           bytes = to_bytes("d81c182a");
         auto                                                 dec   = make_decoder<shared_graph_codec>(bytes);
         shared_graph_decode_session                          outer;
         shared_graph_decode_session                          inner;
@@ -515,7 +496,7 @@ TEST_CASE("shared graph codec rejects nested wrappers with different graph sessi
 }
 
 TEST_CASE("shared graph codec decode failure only removes the failed graph id") {
-    const auto bytes = to_bytes("830001182a8300020d820301");
+    const auto bytes = to_bytes("d81c182ad81c0dd81d00");
 
     std::shared_ptr<std::uint64_t>                                    first;
     std::shared_ptr<smart_ptr_test::graph_decode_consumes_then_fails> failed;
@@ -537,7 +518,7 @@ TEST_CASE("shared graph codec decode failure only removes the failed graph id") 
 }
 
 TEST_CASE("shared graph codec rolls back nested definitions from failed roots") {
-    const auto bytes = to_bytes("83000182830002182a0d820302");
+    const auto bytes = to_bytes("d81c82d81c182a0dd81d01");
 
     std::shared_ptr<smart_ptr_test::graph_decode_nested_then_fails> failed;
     std::shared_ptr<std::uint64_t>                                  leaked = std::make_shared<std::uint64_t>(7U);
@@ -848,7 +829,7 @@ TEST_CASE("nullable and shared graph codecs use graph identity inside graph wrap
 
     REQUIRE(enc(as_shared_graph(encode_graph, shared)));
     REQUIRE(enc(as_shared_graph(encode_graph, shared)));
-    CHECK_EQ(to_hex(buffer), "830001182a820301");
+    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
 
     std::shared_ptr<std::uint64_t> decoded_first;
     std::shared_ptr<std::uint64_t> decoded_second;

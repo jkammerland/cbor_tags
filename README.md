@@ -285,13 +285,15 @@ dec(as_shared_graph(decode_graph, first));
 dec(as_shared_graph(decode_graph, second));
 ```
 
-Inside a shared graph session, null `shared_ptr<T>` values encode as `[2]`,
-first-seen non-null values encode as `[0, id, value]`, and later references
-encode as `[3, id]`. This keeps graph references distinct from nullable
-`[1, value]` pointers, and keeps a null pointer distinct from an outer
-`std::optional` null. Reuse the same session to share identities across
-multiple roots; call `reset()` to start an independent graph. Decoding must use
-the same root order as encoding.
+Inside a shared graph session, null `shared_ptr<T>` values encode as nullable
+`[0]`, first-seen non-null values encode as CBOR tag 28 `#6.28(value)`, and
+later references encode as CBOR tag 29 `#6.29(id)`. The reference id is the
+zero-based index of the previously decoded tag-28 shareable value in that
+session. This keeps graph references distinct from nullable `[1, value]`
+pointers, and keeps a null pointer distinct from an outer `std::optional` null.
+Reuse the same session to share identities across multiple roots; call
+`reset()` to start an independent graph. Decoding must use the same root order
+as encoding.
 
 Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
 object. Cross-static-type identity, aliasing-pointer identity, and cycles are

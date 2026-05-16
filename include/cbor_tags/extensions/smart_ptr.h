@@ -40,6 +40,9 @@ template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_d
 
 namespace detail {
 
+inline constexpr std::uint64_t shareable_tag = 28U;
+inline constexpr std::uint64_t sharedref_tag = 29U;
+
 template <typename T>
 concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
 
@@ -183,7 +186,7 @@ class shared_graph_encode_session {
   public:
     void reset() {
         encoded_shared_ids_.clear();
-        next_shared_id_ = 1;
+        next_shared_id_ = 0;
     }
 
   private:
@@ -195,7 +198,7 @@ class shared_graph_encode_session {
     };
 
     std::unordered_map<const void *, encoded_shared_object> encoded_shared_ids_{};
-    std::uint64_t                                           next_shared_id_{1};
+    std::uint64_t                                           next_shared_id_{0};
 
     template <typename Self> friend struct shared_graph_codec;
 };
@@ -205,6 +208,7 @@ class shared_graph_decode_session {
     void reset() {
         decoded_shared_objects_.clear();
         decoded_shared_id_order_.clear();
+        next_shared_id_ = 0;
     }
 
   private:
@@ -216,12 +220,14 @@ class shared_graph_decode_session {
 
     std::unordered_map<std::uint64_t, decoded_shared_object> decoded_shared_objects_{};
     std::vector<std::uint64_t>                               decoded_shared_id_order_{};
+    std::uint64_t                                            next_shared_id_{0};
 
     void rollback_to(std::size_t checkpoint) {
         while (decoded_shared_id_order_.size() > checkpoint) {
             decoded_shared_objects_.erase(decoded_shared_id_order_.back());
             decoded_shared_id_order_.pop_back();
         }
+        next_shared_id_ = static_cast<std::uint64_t>(decoded_shared_id_order_.size());
     }
 
     template <typename Self> friend struct shared_graph_codec;
@@ -287,7 +293,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         auto &enc = static_cast<Self &>(*this);
         if (!value) {
             enc.encode(as_array{1});
-            enc.encode(std::uint64_t{2});
+            enc.encode(std::uint64_t{0});
             return;
         }
 
@@ -301,8 +307,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
                 throw std::runtime_error("shared_ptr graph cycles are unsupported");
             }
 
-            enc.encode(as_array{2});
-            enc.encode(std::uint64_t{3});
+            enc.encode(static_tag<detail::sharedref_tag>{});
             enc.encode(existing->second.id);
             return;
         }
@@ -315,9 +320,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         static_cast<void>(inserted);
 
         try {
-            enc.encode(as_array{3});
-            enc.encode(std::uint64_t{0});
-            enc.encode(id);
+            enc.encode(static_tag<detail::shareable_tag>{});
             enc.encode(*value);
             entry->second.state = detail::graph_entry_state::complete;
         } catch (...) {
@@ -345,12 +348,34 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
 
         auto &dec = static_cast<Self &>(*this);
 
+        if (major == major_type::Array) {
+            return decode_null(value, major, additional_info);
+        }
+        if (major != major_type::Tag) {
+            return status_code::no_match_for_tag_on_buffer;
+        }
+
+        const auto tag = dec.decode_unsigned(additional_info);
+        if (tag == detail::shareable_tag) {
+            return decode_shareable(value);
+        }
+        if (tag == detail::sharedref_tag) {
+            return decode_sharedref(value);
+        }
+        return status_code::no_match_for_tag;
+    }
+
+  private:
+    template <detail::NullablePointerValue T>
+    [[nodiscard]] status_code decode_null(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
+        auto &dec = static_cast<Self &>(*this);
+
         std::uint64_t size{};
         auto          status = detail::decode_definite_array_size(dec, major, additional_info, size);
         if (status != status_code::success) {
             return status;
         }
-        if (size != 1U && size != 2U && size != 3U) {
+        if (size != 1U) {
             return status_code::unexpected_group_size;
         }
 
@@ -359,48 +384,22 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         if (status != status_code::success) {
             return status;
         }
+        if (kind != 0U) {
+            return status_code::error;
+        }
 
-        if (kind == 0U) {
-            return decode_definition(value, size);
-        }
-        if (kind == 3U) {
-            return decode_reference(value, size);
-        }
-        if (kind == 2U) {
-            return decode_null(value, size);
-        }
-        return status_code::error;
-    }
-
-  private:
-    template <detail::NullablePointerValue T> [[nodiscard]] status_code decode_null(std::shared_ptr<T> &value, std::uint64_t size) {
-        if (size != 1U) {
-            return status_code::unexpected_group_size;
-        }
         value.reset();
         return status_code::success;
     }
 
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_definition(std::shared_ptr<T> &value, std::uint64_t size) {
-        if (size != 3U) {
-            return status_code::unexpected_group_size;
-        }
-
+    [[nodiscard]] status_code decode_shareable(std::shared_ptr<T> &value) {
         auto &dec = static_cast<Self &>(*this);
-
-        std::uint64_t id{};
-        auto          status = dec.decode(id);
-        if (status != status_code::success) {
-            return status;
-        }
-        if (id == 0U || active_decode_session_->decoded_shared_objects_.contains(id)) {
-            return status_code::error;
-        }
 
         auto      &session    = *active_decode_session_;
         const auto checkpoint = session.decoded_shared_id_order_.size();
+        const auto id         = session.next_shared_id_++;
 
         try {
             session.decoded_shared_id_order_.push_back(id);
@@ -410,7 +409,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             static_cast<void>(inserted);
 
             auto decoded = std::make_shared<T>();
-            status       = dec.decode(*decoded);
+            auto status  = dec.decode(*decoded);
             if (status != status_code::success) {
                 session.rollback_to(checkpoint);
                 return status;
@@ -428,11 +427,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
 
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_reference(std::shared_ptr<T> &value, std::uint64_t size) {
-        if (size != 2U) {
-            return status_code::unexpected_group_size;
-        }
-
+    [[nodiscard]] status_code decode_sharedref(std::shared_ptr<T> &value) {
         auto &dec = static_cast<Self &>(*this);
 
         std::uint64_t id{};
