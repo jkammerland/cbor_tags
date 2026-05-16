@@ -60,7 +60,8 @@ extension on fixed tagged payloads:
 
 - an inline-tagged aggregate record with integers, floats, bytes, text, and a
   numeric sample vector;
-- an explicitly tagged `std::vector<double>`.
+- explicitly tagged `std::vector<double>` and `std::vector<float>` fixtures;
+- RFC 8746 typed-array encodings of the same homogeneous numeric fixtures.
 
 The encode rows reserve the output buffer to the known encoded size before each
 iteration, so they focus on codec work instead of output growth policy. The
@@ -77,6 +78,15 @@ standard CBOR typed-array tags over a byte-string payload. For same-value
 comparisons, read these together with the latency rows because default CBOR,
 RFC 8746 typed arrays, and `custom_codec_1` do not always emit the same number
 of bytes.
+
+Do not read these rows as evidence that the default codec is slow for every
+large payload. Definite `bstr` and `tstr` values are already favorable in the
+default codec: they encode as a CBOR length header plus one payload append for
+contiguous byte/text inputs, and contiguous-input decode can either bulk-copy
+into an owning container or bind a view over the original input. The main
+default-CBOR cost that `custom_codec_1` and RFC 8746 typed arrays avoid for
+homogeneous numeric vectors is the per-element array item encoding, not byte or
+text string payload movement.
 
 Rows named `custom_codec_1 zc ... encode segments` use
 `encode_borrowed_segments(...)`. They assemble the same outer `tag(bstr)` wire

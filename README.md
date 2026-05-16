@@ -1060,7 +1060,9 @@ cmake --build build-bench --target bench_custom_codec_1
 ```
 
 `bench_custom_codec_1` compares the extension against the default CBOR codec for
-fixed tagged aggregate and numeric-vector payloads.
+fixed tagged aggregate and numeric-vector payloads. It also includes RFC 8746
+typed-array rows for the same homogeneous numeric vectors, including borrowed
+segment encode and borrowed-view decode paths.
 
 Use release builds for timing numbers and run benchmark executables directly
 when collecting results. The regular CI test path still builds and runs the
