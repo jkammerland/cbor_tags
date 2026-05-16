@@ -1046,9 +1046,25 @@ For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
 
 Tests can be built after configuring with `-DCBOR_TAGS_BUILD_TESTS=ON`, which will create a target called `tests`. This is what the CI currently runs for all supported compilers/platforms.
 
-Numbers with comparisons are coming soon. The current benchmarks can be run by configuring with `-DCBOR_TAGS_BUILD_BENCHMARKS=ON`. It creates two targets, `bench_encoder` and `bench_decoder`.
+The benchmarks can be run by configuring with `-DCBOR_TAGS_BUILD_BENCHMARKS=ON`.
+This creates targets for the encoder, decoder, ranges, and the
+`custom_codec_1` comparison suite.
 
-These can all be collectively run with `make/ninja test`, ctest will only run `tests`.
+```bash
+cmake -S . -B build-bench -G Ninja -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_BENCHMARKS=ON
+cmake --build build-bench --target bench_encoder
+cmake --build build-bench --target bench_decoder
+cmake --build build-bench --target bench_ranges
+cmake --build build-bench --target bench_custom_codec_1
+./build-bench/benchmarks/custom_codec_1/bench_custom_codec_1
+```
+
+`bench_custom_codec_1` compares the extension against the default CBOR codec for
+fixed tagged aggregate and numeric-vector payloads.
+
+Use release builds for timing numbers and run benchmark executables directly
+when collecting results. The regular CI test path still builds and runs the
+unit test target.
 
 ### Test Logging
 

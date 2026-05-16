@@ -53,6 +53,21 @@ release performance data:
 |     64 |         3326.37 ns |      2665.20 ns | 3038.04 ns |         2596.25 ns |
 |    256 |        14721.68 ns |     23152.88 ns | 24786.15 ns |        18851.49 ns |
 
+## Custom Codec 1 vs Default CBOR
+
+`bench_custom_codec_1` compares the default CBOR codec with the `custom_codec_1`
+extension on fixed tagged payloads:
+
+- an inline-tagged aggregate record with integers, floats, bytes, text, and a
+  numeric sample vector;
+- an explicitly tagged `std::vector<double>`.
+
+The encode rows reserve the output buffer to the known encoded size before each
+iteration, so they focus on codec work instead of output growth policy. The
+decode rows use pre-encoded default-CBOR and `custom_codec_1` payloads. A
+non-benchmark fixture test also verifies that both codecs round-trip the same
+user values and captures the encoded byte sizes.
+
 ## Serialization Comparison Suite
 
 The cross-library comparison suite is opt-in because it fetches and builds extra
