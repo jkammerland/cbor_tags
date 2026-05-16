@@ -291,9 +291,12 @@ later references encode as CBOR tag 29 `#6.29(id)`. The reference id is the
 zero-based index of the previously decoded tag-28 shareable value in that
 session. This keeps graph references distinct from nullable `[1, value]`
 pointers, and keeps a null pointer distinct from an outer `std::optional` null.
-Reuse the same session to share identities across multiple roots; call
-`reset()` to start an independent graph. Decoding must use the same root order
-as encoding.
+Reuse the same session to share identities across multiple roots in one logical
+message; call `reset()` only between independently decoded messages/streams to
+start an independent graph. Tags 28/29 do not carry an in-band reset marker, so
+encoding post-reset references into the same logical CBOR stream requires the
+decoder to perform the same out-of-band reset at the same boundary. Decoding
+must use the same root order and graph boundaries as encoding.
 
 Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
 object. Cross-static-type identity, aliasing-pointer identity, and cycles are

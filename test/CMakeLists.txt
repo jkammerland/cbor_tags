@@ -58,6 +58,18 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+add_executable(smart_ptr_variant_ambiguous_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_ambiguous_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_ambiguous_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_ambiguous_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_ambiguous_compile_fails"
+    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
   function(add_named_map_duplicate_keys_compile_fail_test TEST_NAME COMPILE_DEFINITION)
     add_executable(${TEST_NAME} EXCLUDE_FROM_ALL named_map_duplicate_keys_compile_fail.cc)

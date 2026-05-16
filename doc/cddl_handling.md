@@ -175,7 +175,8 @@ scoped maps and may have their own extension field. Fixed field names must also
 be unique after flattening all `as_named_group` members; duplicate fixed names
 are rejected at compile time.
 
-`std::unique_ptr<T>` and `std::shared_ptr<T>` render as `[0] / [1, T]`, matching
+`std::unique_ptr<T>` and `std::shared_ptr<T>` with default-initializable,
+non-const, non-void, non-array pointee types render as `[0] / [1, T]`, matching
 the opt-in `cbor::tags::ext::smart_ptr::nullable_ptr_codec` wire shape. Pointer
 fields remain required in named maps unless the field type itself is
 `std::optional`; a null pointer is an explicit `[0]`, not an omitted member.

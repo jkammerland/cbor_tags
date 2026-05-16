@@ -14,6 +14,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -89,6 +90,33 @@ struct graph_nested_decode_session_mismatch {
     friend cbor::tags::Access;
 
     template <typename Decoder> auto decode(Decoder &dec) { return dec(cbor::tags::ext::smart_ptr::as_shared_graph(*other, value)); }
+};
+
+struct graph_reset_during_encode {
+    std::uint64_t                value{};
+    shared_graph_encode_session *graph{};
+
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Encoder> auto encode(Encoder &enc) const {
+        graph->reset();
+        return enc(value);
+    }
+};
+
+inline shared_graph_decode_session *decode_reset_session{};
+
+struct graph_reset_during_decode {
+    std::uint64_t value{};
+
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Decoder> auto decode(Decoder &dec) {
+        decode_reset_session->reset();
+        return dec(value);
+    }
 };
 
 template <typename T> std::vector<std::byte> encode_nullable_ptr(const T &value) {
@@ -294,6 +322,74 @@ TEST_CASE("shared graph codec reset starts an independent graph") {
     CHECK_EQ(*decoded_first, 42U);
     CHECK_EQ(*decoded_second, 42U);
     CHECK(decoded_first.get() != decoded_second.get());
+}
+
+TEST_CASE("shared graph codec decodes nested shareables after table growth") {
+    auto root = std::make_shared<std::vector<std::shared_ptr<std::uint64_t>>>();
+    root->reserve(130U);
+    for (std::uint64_t i = 0; i < 129U; ++i) {
+        root->push_back(std::make_shared<std::uint64_t>(i));
+    }
+    root->push_back((*root)[42U]);
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, root)));
+
+    auto                                                         dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session                                  decode_graph;
+    std::shared_ptr<std::vector<std::shared_ptr<std::uint64_t>>> decoded;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded)));
+    REQUIRE(static_cast<bool>(decoded));
+    REQUIRE_EQ(decoded->size(), 130U);
+    for (std::uint64_t i = 0; i < 129U; ++i) {
+        REQUIRE(static_cast<bool>((*decoded)[i]));
+        CHECK_EQ(*(*decoded)[i], i);
+    }
+    REQUIRE(static_cast<bool>((*decoded)[129U]));
+    CHECK((*decoded)[129U].get() == (*decoded)[42U].get());
+}
+
+TEST_CASE("shared graph codec rejects reset while a graph operation is active") {
+    {
+        std::vector<std::byte>      buffer;
+        auto                        enc = make_encoder<shared_graph_codec>(buffer);
+        shared_graph_encode_session graph;
+        auto                        value = std::make_shared<smart_ptr_test::graph_reset_during_encode>();
+        value->value                      = 42U;
+        value->graph                      = &graph;
+
+        const auto result = enc(as_shared_graph(graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+
+        buffer.clear();
+        auto recovered = std::make_shared<std::uint64_t>(42U);
+        REQUIRE(enc(as_shared_graph(graph, recovered)));
+        CHECK_EQ(to_hex(buffer), "d81c182a");
+    }
+
+    {
+        const auto bytes = to_bytes("d81c182a");
+        auto       dec   = make_decoder<shared_graph_codec>(bytes);
+
+        shared_graph_decode_session                                graph;
+        std::shared_ptr<smart_ptr_test::graph_reset_during_decode> decoded = std::make_shared<smart_ptr_test::graph_reset_during_decode>();
+        decoded->value                                                     = 7U;
+        smart_ptr_test::decode_reset_session                               = &graph;
+
+        const auto result                    = dec(as_shared_graph(graph, decoded));
+        smart_ptr_test::decode_reset_session = nullptr;
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(static_cast<bool>(decoded));
+        CHECK_EQ(decoded->value, 7U);
+    }
 }
 
 TEST_CASE("shared graph codec keeps encoded roots alive until session reset") {
@@ -680,6 +776,89 @@ TEST_CASE("nullable pointer codec distinguishes optional null states") {
         REQUIRE(static_cast<bool>(*decoded));
         CHECK_EQ(**decoded, 42U);
     }
+}
+
+TEST_CASE("nullable pointer codec decodes unambiguous smart pointer variants") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+    {
+        value_type value{std::make_shared<std::uint64_t>(42U)};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<nullable_ptr_codec>(buffer);
+        REQUIRE(enc(value));
+        CHECK_EQ(to_hex(buffer), "8201182a");
+
+        value_type decoded{std::string{"before"}};
+        auto       dec = make_decoder<nullable_ptr_codec>(buffer);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(decoded));
+        const auto &decoded_ptr = std::get<std::shared_ptr<std::uint64_t>>(decoded);
+        REQUIRE(static_cast<bool>(decoded_ptr));
+        CHECK_EQ(*decoded_ptr, 42U);
+    }
+
+    {
+        value_type value{std::shared_ptr<std::uint64_t>{}};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<nullable_ptr_codec>(buffer);
+        REQUIRE(enc(value));
+        CHECK_EQ(to_hex(buffer), "8100");
+
+        value_type decoded{std::string{"before"}};
+        auto       dec = make_decoder<nullable_ptr_codec>(buffer);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(decoded));
+        CHECK_FALSE(static_cast<bool>(std::get<std::shared_ptr<std::uint64_t>>(decoded)));
+    }
+
+    {
+        value_type value{std::string{"ok"}};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<nullable_ptr_codec>(buffer);
+        REQUIRE(enc(value));
+        CHECK_EQ(to_hex(buffer), "626f6b");
+
+        value_type decoded{std::shared_ptr<std::uint64_t>{}};
+        auto       dec = make_decoder<nullable_ptr_codec>(buffer);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<std::string>(decoded));
+        CHECK_EQ(std::get<std::string>(decoded), "ok");
+    }
+}
+
+TEST_CASE("shared graph codec decodes unambiguous smart pointer variants inside graph roots") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+    auto       shared = std::make_shared<std::uint64_t>(42U);
+    value_type first{shared};
+    value_type second{shared};
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, first)));
+    REQUIRE(enc(as_shared_graph(encode_graph, second)));
+    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
+
+    auto                        dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session decode_graph;
+    value_type                  decoded_first{std::string{"first"}};
+    value_type                  decoded_second{std::string{"second"}};
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
+    REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(decoded_first));
+    REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(decoded_second));
+    const auto &first_ptr  = std::get<std::shared_ptr<std::uint64_t>>(decoded_first);
+    const auto &second_ptr = std::get<std::shared_ptr<std::uint64_t>>(decoded_second);
+    REQUIRE(static_cast<bool>(first_ptr));
+    REQUIRE(static_cast<bool>(second_ptr));
+    CHECK_EQ(*first_ptr, 42U);
+    CHECK(first_ptr.get() == second_ptr.get());
 }
 
 TEST_CASE("nullable pointer codec rejects malformed wrappers") {
