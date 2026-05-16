@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
@@ -446,6 +447,14 @@ class shared_graph_encode_session : public shared_graph_encode_session_base {
 
 template <std::size_t Capacity> class shared_graph_encode_array_session : public shared_graph_encode_session_base {
   public:
+    shared_graph_encode_array_session() = default;
+    ~shared_graph_encode_array_session() override { reset_unchecked(); }
+
+    shared_graph_encode_array_session(const shared_graph_encode_array_session &)            = delete;
+    shared_graph_encode_array_session &operator=(const shared_graph_encode_array_session &) = delete;
+    shared_graph_encode_array_session(shared_graph_encode_array_session &&)                 = delete;
+    shared_graph_encode_array_session &operator=(shared_graph_encode_array_session &&)      = delete;
+
     [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept override { return shared_graph_encode_lookup::linear_scan; }
 
     static constexpr std::size_t capacity() noexcept { return Capacity; }
@@ -465,24 +474,24 @@ template <std::size_t Capacity> class shared_graph_encode_array_session : public
 
     [[nodiscard]] std::size_t encoded_size() const noexcept override { return size_; }
 
-    [[nodiscard]] detail::encoded_shared_object &encoded_object(std::size_t index) override { return encoded_shared_objects_[index]; }
+    [[nodiscard]] detail::encoded_shared_object &encoded_object(std::size_t index) override { return *object_at(index); }
 
     void push_encoded_object(detail::encoded_shared_object object) override {
         if (size_ >= Capacity) {
             throw std::out_of_range("shared graph fixed encode session capacity exceeded");
         }
-        encoded_shared_objects_[size_] = std::move(object);
+        std::construct_at(object_at(size_), std::move(object));
         ++size_;
     }
 
     void pop_encoded_object() override {
         --size_;
-        encoded_shared_objects_[size_] = {};
+        std::destroy_at(object_at(size_));
     }
 
     [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const override {
         for (std::size_t index = 0; index < size_; ++index) {
-            if (encoded_shared_objects_[index].address == address) {
+            if (object_at(index)->address == address) {
                 return index;
             }
         }
@@ -491,8 +500,18 @@ template <std::size_t Capacity> class shared_graph_encode_array_session : public
 
     void index_encoded_address(const void *, std::size_t) override {}
 
-    std::array<detail::encoded_shared_object, Capacity> encoded_shared_objects_{};
-    std::size_t                                         size_{0};
+    [[nodiscard]] detail::encoded_shared_object *object_at(std::size_t index) noexcept {
+        return std::launder(
+            reinterpret_cast<detail::encoded_shared_object *>(storage_.data() + index * sizeof(detail::encoded_shared_object)));
+    }
+
+    [[nodiscard]] const detail::encoded_shared_object *object_at(std::size_t index) const noexcept {
+        return std::launder(
+            reinterpret_cast<const detail::encoded_shared_object *>(storage_.data() + index * sizeof(detail::encoded_shared_object)));
+    }
+
+    alignas(detail::encoded_shared_object) std::array<std::byte, sizeof(detail::encoded_shared_object) * Capacity> storage_{};
+    std::size_t size_{0};
 };
 
 class shared_graph_decode_session {

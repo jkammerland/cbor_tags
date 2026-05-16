@@ -8,6 +8,8 @@
 #include <deque>
 #include <memory>
 #include <nameof.hpp>
+#include <new>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -23,6 +25,162 @@
 using namespace std::string_view_literals;
 using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
+namespace smart_ptr_detail = cbor::tags::ext::smart_ptr::detail;
+
+namespace {
+
+template <std::size_t Capacity> class unsafe_shared_graph_encode_array_session final : public shared_graph_encode_session_base {
+  public:
+    unsafe_shared_graph_encode_array_session() = default;
+    ~unsafe_shared_graph_encode_array_session() override { reset_unchecked(); }
+
+    unsafe_shared_graph_encode_array_session(const unsafe_shared_graph_encode_array_session &)            = delete;
+    unsafe_shared_graph_encode_array_session &operator=(const unsafe_shared_graph_encode_array_session &) = delete;
+    unsafe_shared_graph_encode_array_session(unsafe_shared_graph_encode_array_session &&)                 = delete;
+    unsafe_shared_graph_encode_array_session &operator=(unsafe_shared_graph_encode_array_session &&)      = delete;
+
+    [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept override { return shared_graph_encode_lookup::linear_scan; }
+
+  private:
+    void reserve_unique_impl(std::size_t) override {}
+
+    void reset_unchecked() override {
+        while (size_ > 0U) {
+            pop_encoded_object();
+        }
+    }
+
+    [[nodiscard]] std::size_t encoded_size() const noexcept override { return size_; }
+
+    [[nodiscard]] smart_ptr_detail::encoded_shared_object &encoded_object(std::size_t index) override { return *object_at(index); }
+
+    void push_encoded_object(smart_ptr_detail::encoded_shared_object object) override {
+        std::construct_at(object_at(size_), std::move(object));
+        ++size_;
+    }
+
+    void pop_encoded_object() override {
+        --size_;
+        std::destroy_at(object_at(size_));
+    }
+
+    [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const override {
+        for (std::size_t index = 0; index < size_; ++index) {
+            if (object_at(index)->address == address) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void index_encoded_address(const void *, std::size_t) override {}
+
+    [[nodiscard]] smart_ptr_detail::encoded_shared_object *object_at(std::size_t index) noexcept {
+        return std::launder(reinterpret_cast<smart_ptr_detail::encoded_shared_object *>(
+            storage_.data() + index * sizeof(smart_ptr_detail::encoded_shared_object)));
+    }
+
+    [[nodiscard]] const smart_ptr_detail::encoded_shared_object *object_at(std::size_t index) const noexcept {
+        return std::launder(reinterpret_cast<const smart_ptr_detail::encoded_shared_object *>(
+            storage_.data() + index * sizeof(smart_ptr_detail::encoded_shared_object)));
+    }
+
+    alignas(smart_ptr_detail::encoded_shared_object)
+        std::array<std::byte, sizeof(smart_ptr_detail::encoded_shared_object) * Capacity> storage_{};
+    std::size_t size_{0};
+};
+
+template <std::size_t Capacity> class unsafe_typed_shared_graph_encode_array_session {
+  private:
+    [[nodiscard]] std::size_t size() const noexcept { return size_; }
+
+    [[nodiscard]] std::optional<std::size_t> find(const void *address) const noexcept {
+        for (std::size_t index = 0; index < size_; ++index) {
+            if (addresses_[index] == address) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void push(const void *address) noexcept {
+        addresses_[size_] = address;
+        ++size_;
+    }
+
+    std::array<const void *, Capacity> addresses_{};
+    std::size_t                        size_{0};
+
+    template <typename Self, std::size_t CodecCapacity> friend struct unsafe_typed_shared_graph_codec_mixin;
+};
+
+template <std::size_t Capacity, typename T> struct unsafe_typed_shared_graph_encode_root {
+    unsafe_typed_shared_graph_encode_array_session<Capacity> &session;
+    const T                                                  &value;
+};
+
+template <std::size_t Capacity, typename T>
+unsafe_typed_shared_graph_encode_root<Capacity, T>
+as_unsafe_typed_shared_graph(unsafe_typed_shared_graph_encode_array_session<Capacity> &session, const T &value) {
+    return {session, value};
+}
+
+template <std::size_t Capacity, typename T>
+unsafe_typed_shared_graph_encode_root<Capacity, T> as_unsafe_typed_shared_graph(unsafe_typed_shared_graph_encode_array_session<Capacity> &,
+                                                                                const T &&) = delete;
+
+template <typename Self, std::size_t Capacity> struct unsafe_typed_shared_graph_codec_mixin : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::decode;
+    using cbor_codec_mixin_base<Self>::encode;
+
+    template <typename T> void encode(unsafe_typed_shared_graph_encode_root<Capacity, T> root) {
+        auto *previous = active_encode_session_;
+        if (previous != nullptr && previous != &root.session) {
+            throw std::runtime_error("nested unsafe shared graph sessions must use the same session object");
+        }
+        active_encode_session_ = &root.session;
+        try {
+            static_cast<Self &>(*this).encode(root.value);
+            active_encode_session_ = previous;
+        } catch (...) {
+            active_encode_session_ = previous;
+            throw;
+        }
+    }
+
+    template <smart_ptr_detail::NullablePointerValue T> void encode(const std::shared_ptr<T> &value) {
+        if (active_encode_session_ == nullptr) {
+            throw std::runtime_error("unsafe shared_ptr graph encoding requires as_unsafe_typed_shared_graph(...)");
+        }
+
+        auto &enc = static_cast<Self &>(*this);
+        if (!value) {
+            enc.encode(as_array{1});
+            enc.encode(std::uint64_t{0});
+            return;
+        }
+
+        const auto *address = static_cast<const void *>(value.get());
+        if (const auto existing = active_encode_session_->find(address)) {
+            enc.encode(static_tag<smart_ptr_detail::sharedref_tag>{});
+            enc.encode(static_cast<std::uint64_t>(*existing));
+            return;
+        }
+
+        active_encode_session_->push(address);
+        enc.encode(static_tag<smart_ptr_detail::shareable_tag>{});
+        enc.encode(*value);
+    }
+
+  private:
+    unsafe_typed_shared_graph_encode_array_session<Capacity> *active_encode_session_{};
+};
+
+template <std::size_t Capacity> struct unsafe_typed_shared_graph_codec {
+    template <typename Self> using mixin = unsafe_typed_shared_graph_codec_mixin<Self, Capacity>;
+};
+
+} // namespace
 
 struct benchmark_options {
     std::string_view unit{"Ops"};
@@ -296,6 +454,30 @@ template <std::size_t UniqueCount> void run_shared_graph_encode_lookup_benchmark
         auto                                           enc = make_encoder<shared_graph_codec>(data);
         shared_graph_encode_array_session<UniqueCount> graph;
         auto                                           result = enc(as_shared_graph(graph, values));
+
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(data);
+    });
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 array_scan_unsafe_fixed", UniqueCount), [&values]() {
+        std::vector<std::uint8_t> data;
+        data.reserve(values.size() * 8U);
+
+        auto                                                  enc = make_encoder<shared_graph_codec>(data);
+        unsafe_shared_graph_encode_array_session<UniqueCount> graph;
+        auto                                                  result = enc(as_shared_graph(graph, values));
+
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(data);
+    });
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 array_scan_typed_unsafe", UniqueCount), [&values]() {
+        std::vector<std::uint8_t> data;
+        data.reserve(values.size() * 8U);
+
+        auto enc = make_encoder<unsafe_typed_shared_graph_codec<UniqueCount>::template mixin>(data);
+        unsafe_typed_shared_graph_encode_array_session<UniqueCount> graph;
+        auto                                                        result = enc(as_unsafe_typed_shared_graph(graph, values));
 
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(data);
