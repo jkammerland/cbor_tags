@@ -721,27 +721,28 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload<value_type, ByteOrder>(dec, major, additional_info, [&](major_type, std::byte payload_info) {
-            if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
-                return status_code::contiguous_view_on_non_contiguous_data;
-            } else {
-                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                    if (payload_size_u64 > payload_size_limit) {
-                        return status_code::error;
+        return detail::decode_payload<value_type, ByteOrder>(
+            dec, major, additional_info, [&](major_type, [[maybe_unused]] std::byte payload_info) {
+                if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
+                    return status_code::contiguous_view_on_non_contiguous_data;
+                } else {
+                    const auto payload_size_u64 = dec.decode_unsigned(payload_info);
+                    if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                        const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+                        if (payload_size_u64 > payload_size_limit) {
+                            return status_code::error;
+                        }
                     }
-                }
 
-                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-                if ((payload_size % sizeof(value_type)) != 0U) {
-                    return status_code::unexpected_group_size;
+                    auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+                    const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+                    if ((payload_size % sizeof(value_type)) != 0U) {
+                        return status_code::unexpected_group_size;
+                    }
+                    view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
+                    return status_code::success;
                 }
-                view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
-                return status_code::success;
-            }
-        });
+            });
     }
 
     template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
@@ -750,7 +751,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type, std::byte payload_info) {
+        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type, [[maybe_unused]] std::byte payload_info) {
             if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
                 return status_code::contiguous_view_on_non_contiguous_data;
             } else {

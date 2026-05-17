@@ -576,10 +576,16 @@ TEST_CASE("rfc8746 typed array segmented into helper does not allocate after res
         cbor_segments segments;
         segments.reserve_segments(3);
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+        // MSVC's debug STL may allocate container-proxy state while constructing
+        // temporary segment objects, so the global allocation hook is too broad here.
+        encode_typed_array_segments_into(segments, span);
+#else
         {
             cbor::tags::test::detail::allocation_failure_guard guard;
             encode_typed_array_segments_into(segments, span);
         }
+#endif
 
         CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(encode_normal(std::span<const std::int32_t>{values})));
         CHECK(has_borrowed_segment(segments, original_bytes.data(), original_bytes.size()));
