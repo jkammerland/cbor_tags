@@ -251,14 +251,16 @@ template <std::size_t UniqueCount> void run_shared_graph_encode_lookup_benchmark
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
-    bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map_reserved", UniqueCount), [&values]() {
+    shared_graph_encode_session reserved_unordered_graph{shared_graph_encode_lookup::unordered_map};
+    reserved_unordered_graph.reserve_unique(UniqueCount);
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map_reserved", UniqueCount), [&values, &reserved_unordered_graph]() {
         std::vector<std::uint8_t> data;
         data.reserve(values.size() * 8U);
 
-        auto                        enc = make_encoder<shared_graph_codec>(data);
-        shared_graph_encode_session graph{shared_graph_encode_lookup::unordered_map};
-        graph.reserve_unique(UniqueCount);
-        auto result = enc(as_shared_graph(graph, values));
+        auto enc = make_encoder<shared_graph_codec>(data);
+        reserved_unordered_graph.reset();
+        auto result = enc(as_shared_graph(reserved_unordered_graph, values));
 
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(data);
@@ -276,14 +278,16 @@ template <std::size_t UniqueCount> void run_shared_graph_encode_lookup_benchmark
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 
-    bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n_reserved", UniqueCount), [&values]() {
+    shared_graph_encode_session reserved_linear_graph{shared_graph_encode_lookup::linear_scan};
+    reserved_linear_graph.reserve_unique(UniqueCount);
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n_reserved", UniqueCount), [&values, &reserved_linear_graph]() {
         std::vector<std::uint8_t> data;
         data.reserve(values.size() * 8U);
 
-        auto                        enc = make_encoder<shared_graph_codec>(data);
-        shared_graph_encode_session graph{shared_graph_encode_lookup::linear_scan};
-        graph.reserve_unique(UniqueCount);
-        auto result = enc(as_shared_graph(graph, values));
+        auto enc = make_encoder<shared_graph_codec>(data);
+        reserved_linear_graph.reset();
+        auto result = enc(as_shared_graph(reserved_linear_graph, values));
 
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(data);

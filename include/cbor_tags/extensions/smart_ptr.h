@@ -690,7 +690,11 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         requires detail::has_decodable_nullable_pointer_v<Ts...>
     [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
         if (active_decode_session_ == nullptr) {
-            return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
+            if constexpr (detail::has_nullable_ptr_codec_v<Self>) {
+                return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
+            } else {
+                return status_code::error;
+            }
         }
         if constexpr (detail::variant_has_shared_graph_tag_collision_v<Ts...>) {
             return status_code::error;

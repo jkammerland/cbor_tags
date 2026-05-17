@@ -58,15 +58,27 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
-add_executable(smart_ptr_variant_ambiguous_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_ambiguous_compile_fail.cc)
-target_link_libraries(smart_ptr_variant_ambiguous_compile_fails PRIVATE cbor::tags)
+add_executable(smart_ptr_variant_two_nullable_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_two_nullable_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_two_nullable_compile_fails PRIVATE cbor::tags)
 add_test(
-  NAME smart_ptr_variant_ambiguous_compile_fails
+  NAME smart_ptr_variant_two_nullable_compile_fails
   COMMAND
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-    "-DTEST_TARGET=smart_ptr_variant_ambiguous_compile_fails"
-    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous"
+    "-DTEST_TARGET=smart_ptr_variant_two_nullable_compile_fails"
+    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous because they share the same \\[0\\] / \\[1, value\\] shape\\."
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_variant_array_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_array_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_array_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_array_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_array_compile_fails"
+    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives\\."
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 

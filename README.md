@@ -23,8 +23,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
   - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
   - [Tagged Struct Example](#tagged-struct-example)
   - [Advanced Type Support](#advanced-type-support)
-  - [Nullable Smart Pointer Codec](#nullable-smart-pointer-codec)
-  - [Shared Pointer Graph Codec](#shared-pointer-graph-codec)
+  - [Smart Pointer Codecs](#smart-pointer-codecs)
   - [Version Handling with Variants](#version-handling-with-variants)
   - [Manual Tag Parsing](#manual-tag-parsing)
   - [Private class members or explicit overloading](#private-class-members-or-explicit-overloading)
@@ -223,8 +222,11 @@ int main() {
 > [!NOTE]
 > The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". The primary decoder is still a one-shot API: retry/resume after incomplete input is reserved for a future explicit resumable decoder entry point.
 
-### Nullable Smart Pointer Codec
-`std::unique_ptr<T>` and `std::shared_ptr<T>` support is available through an explicit codec extension:
+### Smart Pointer Codecs
+Smart pointer support is opt-in through `cbor_tags/extensions/smart_ptr.h`.
+Use `nullable_ptr_codec` for nullable ownership values, or `shared_graph_codec`
+when repeated `std::shared_ptr<T>` identity must be preserved across one logical
+graph session:
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
@@ -237,40 +239,10 @@ using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
 
 std::vector<std::byte> buffer;
-auto enc = make_encoder<nullable_ptr_codec>(buffer);
-
-auto value = std::make_unique<int>(42);
-enc(value);
-
-std::unique_ptr<int> decoded;
-auto dec = make_decoder<nullable_ptr_codec>(buffer);
-dec(decoded);
-```
-
-Null smart pointers encode as `[0]`. Non-null smart pointers encode as
-`[1, value]`, where `value` is the pointed-to object. Shared ownership identity
-is not preserved by this codec. Decode requires a default-initializable
-non-const object type.
-
-### Shared Pointer Graph Codec
-Use `shared_graph_codec` when repeated `shared_ptr<T>` identity must survive
-encoding. Graph state is explicit and reusable across multiple roots:
-
-```cpp
-#include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/smart_ptr.h"
-
-#include <memory>
-
-using namespace cbor::tags;
-using namespace cbor::tags::ext::smart_ptr;
-
-std::vector<std::byte> buffer;
-auto enc = make_encoder<shared_graph_codec>(buffer);
 
 auto shared = std::make_shared<int>(42);
 shared_graph_encode_session encode_graph;
+auto enc = make_encoder<shared_graph_codec>(buffer);
 
 enc(as_shared_graph(encode_graph, shared));
 enc(as_shared_graph(encode_graph, shared));
@@ -285,45 +257,12 @@ dec(as_shared_graph(decode_graph, first));
 dec(as_shared_graph(decode_graph, second));
 ```
 
-Inside a shared graph session, null `shared_ptr<T>` values encode as nullable
-`[0]`, first-seen non-null values encode as CBOR tag 28 `#6.28(value)`, and
-later references encode as CBOR tag 29 `#6.29(id)`. The reference id is the
-zero-based index of the previously decoded tag-28 shareable value in that
-session. This keeps graph references distinct from nullable `[1, value]`
-pointers, and keeps a null pointer distinct from an outer `std::optional` null.
-Reuse the same session to share identities across multiple roots in one logical
-message; call `reset()` only between independently decoded messages/streams to
-start an independent graph. Tags 28/29 do not carry an in-band reset marker, so
-encoding post-reset references into the same logical CBOR stream requires the
-decoder to perform the same out-of-band reset at the same boundary. Decoding
-must use the same root order and graph boundaries as encoding.
-
-Graph sessions are stream state, not transactional recovery checkpoints. If an
-`as_shared_graph(...)` encode or decode operation fails, discard or reset the
-session before continuing with another logical graph; fine-grained rollback is
-reserved for a future checkpoint-oriented API.
-
-Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
-object. Cross-static-type identity, aliasing-pointer identity, and cycles are
-not supported in this codec.
-
-Encode-side lookup defaults to `shared_graph_encode_lookup::unordered_map` for
-large graphs. For small graphs or allocation-sensitive paths, construct the
-session with `shared_graph_encode_lookup::linear_scan` to use an O(n) scan over
-the session's object table instead of a hash table:
-
-```cpp
-shared_graph_encode_session encode_graph{shared_graph_encode_lookup::linear_scan};
-encode_graph.reserve_unique(32);
-enc(as_shared_graph(encode_graph, shared));
-```
-
-`nullable_ptr_codec` and `shared_graph_codec` can be installed together. Outside
-`as_shared_graph(...)`, `shared_ptr<T>` uses the nullable `[0]` / `[1, value]`
-shape. Inside `as_shared_graph(...)`, `shared_ptr<T>` uses graph identity
-encoding. In graph wrappers, `shared_ptr<T>` contributes virtual variant tags
-28 and 29; non-colliding static tag alternatives can coexist, while tag 28,
-tag 29, and catch-all tag alternatives fail graph-mode decode as ambiguous.
+`nullable_ptr_codec` encodes null pointers as `[0]` and values as `[1, value]`.
+`shared_graph_codec` uses CBOR value-sharing tags 28/29 inside
+`as_shared_graph(...)` roots. See [Smart Pointer Codecs](doc/smart_pointers.md)
+for wire shapes, limitations, value-sharing spec links, and variant behavior.
+See [Codec Extensions](doc/codec_extensions.md) for the general opt-in extension
+pattern.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -1052,6 +991,8 @@ allocating the target object graph first.
 User-facing docs:
 
 - [Encoder And Decoder Options](doc/options.md)
+- [Codec Extensions](doc/codec_extensions.md)
+- [Smart Pointer Codecs](doc/smart_pointers.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:

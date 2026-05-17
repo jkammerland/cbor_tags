@@ -75,6 +75,20 @@ struct graph_decode_nested_then_fails {
     graph_decode_consumes_then_fails failing;
 };
 
+struct graph_shared_leaf {
+    std::uint64_t value{};
+};
+
+struct graph_shared_branch {
+    std::shared_ptr<graph_shared_leaf> primary;
+    std::shared_ptr<graph_shared_leaf> secondary;
+};
+
+struct graph_shared_root {
+    graph_shared_branch left;
+    graph_shared_branch right;
+};
+
 struct graph_nested_encode_session_mismatch {
     std::shared_ptr<std::uint64_t> value;
     shared_graph_encode_session   *other{};
@@ -367,6 +381,81 @@ TEST_CASE("shared graph codec reset starts an independent graph") {
     CHECK(decoded_first.get() != decoded_second.get());
 }
 
+TEST_CASE("shared graph codec preserves nested aggregate sharing") {
+    auto shared = std::make_shared<smart_ptr_test::graph_shared_leaf>(42U);
+    auto other  = std::make_shared<smart_ptr_test::graph_shared_leaf>(7U);
+
+    smart_ptr_test::graph_shared_root root{
+        .left  = {.primary = shared, .secondary = other},
+        .right = {.primary = shared, .secondary = other},
+    };
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, root)));
+
+    auto                              dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session       decode_graph;
+    smart_ptr_test::graph_shared_root decoded;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded)));
+    REQUIRE(static_cast<bool>(decoded.left.primary));
+    REQUIRE(static_cast<bool>(decoded.left.secondary));
+    REQUIRE(static_cast<bool>(decoded.right.primary));
+    REQUIRE(static_cast<bool>(decoded.right.secondary));
+    CHECK_EQ(decoded.left.primary->value, 42U);
+    CHECK_EQ(decoded.left.secondary->value, 7U);
+    CHECK(decoded.left.primary.get() == decoded.right.primary.get());
+    CHECK(decoded.left.secondary.get() == decoded.right.secondary.get());
+    CHECK(decoded.left.primary.get() != decoded.left.secondary.get());
+}
+
+TEST_CASE("shared graph codec preserves nested aggregate sharing across roots") {
+    auto shared        = std::make_shared<smart_ptr_test::graph_shared_leaf>(42U);
+    auto first_unique  = std::make_shared<smart_ptr_test::graph_shared_leaf>(1U);
+    auto second_unique = std::make_shared<smart_ptr_test::graph_shared_leaf>(2U);
+
+    smart_ptr_test::graph_shared_root first{
+        .left  = {.primary = shared, .secondary = first_unique},
+        .right = {.primary = first_unique, .secondary = shared},
+    };
+    smart_ptr_test::graph_shared_root second{
+        .left  = {.primary = second_unique, .secondary = shared},
+        .right = {.primary = shared, .secondary = second_unique},
+    };
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, first)));
+    REQUIRE(enc(as_shared_graph(encode_graph, second)));
+
+    auto                              dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session       decode_graph;
+    smart_ptr_test::graph_shared_root decoded_first;
+    smart_ptr_test::graph_shared_root decoded_second;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_first)));
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_second)));
+    REQUIRE(static_cast<bool>(decoded_first.left.primary));
+    REQUIRE(static_cast<bool>(decoded_first.left.secondary));
+    REQUIRE(static_cast<bool>(decoded_second.left.primary));
+    REQUIRE(static_cast<bool>(decoded_second.left.secondary));
+    CHECK(decoded_first.left.primary.get() == decoded_first.right.secondary.get());
+    CHECK(decoded_first.left.primary.get() == decoded_second.left.secondary.get());
+    CHECK(decoded_first.left.primary.get() == decoded_second.right.primary.get());
+    CHECK(decoded_first.left.secondary.get() == decoded_first.right.primary.get());
+    CHECK(decoded_second.left.primary.get() == decoded_second.right.secondary.get());
+    CHECK(decoded_first.left.primary.get() != decoded_first.left.secondary.get());
+    CHECK(decoded_first.left.primary.get() != decoded_second.left.primary.get());
+    CHECK_EQ(decoded_first.left.primary->value, 42U);
+    CHECK_EQ(decoded_first.left.secondary->value, 1U);
+    CHECK_EQ(decoded_second.left.primary->value, 2U);
+}
+
 TEST_CASE("shared graph codec decodes nested shareables after table growth") {
     auto root = std::make_shared<std::vector<std::shared_ptr<std::uint64_t>>>();
     root->reserve(130U);
@@ -464,6 +553,44 @@ TEST_CASE("shared graph codec reports unknown references") {
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
     }
+}
+
+TEST_CASE("shared graph codec does not register null pointers as references") {
+    const auto bytes = to_bytes("8100d81d00");
+    auto       dec   = make_decoder<shared_graph_codec>(bytes);
+
+    shared_graph_decode_session    decode_graph;
+    std::shared_ptr<std::uint64_t> decoded_null = std::make_shared<std::uint64_t>(7U);
+    std::shared_ptr<std::uint64_t> decoded_ref  = std::make_shared<std::uint64_t>(13U);
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded_null)));
+    CHECK_FALSE(static_cast<bool>(decoded_null));
+
+    const auto result = dec(as_shared_graph(decode_graph, decoded_ref));
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+    REQUIRE(static_cast<bool>(decoded_ref));
+    CHECK_EQ(*decoded_ref, 13U);
+}
+
+TEST_CASE("shared graph codec decodes duplicate references to the same object") {
+    const auto bytes = to_bytes("d81c182ad81d00d81d00");
+    auto       dec   = make_decoder<shared_graph_codec>(bytes);
+
+    shared_graph_decode_session    decode_graph;
+    std::shared_ptr<std::uint64_t> first;
+    std::shared_ptr<std::uint64_t> second;
+    std::shared_ptr<std::uint64_t> third;
+
+    REQUIRE(dec(as_shared_graph(decode_graph, first)));
+    REQUIRE(dec(as_shared_graph(decode_graph, second)));
+    REQUIRE(dec(as_shared_graph(decode_graph, third)));
+    REQUIRE(static_cast<bool>(first));
+    REQUIRE(static_cast<bool>(second));
+    REQUIRE(static_cast<bool>(third));
+    CHECK_EQ(*first, 42U);
+    CHECK(first.get() == second.get());
+    CHECK(first.get() == third.get());
 }
 
 TEST_CASE("shared graph codec rejects static pointer type mismatches") {
@@ -755,6 +882,36 @@ TEST_CASE("nullable pointer codec decodes from non-contiguous input") {
     REQUIRE(dec(decoded));
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, "ok");
+}
+
+TEST_CASE("shared graph codec decodes from non-contiguous input") {
+    {
+        const auto                     encoded = to_bytes("d81c182ad81d00");
+        std::deque<std::byte>          input(encoded.begin(), encoded.end());
+        auto                           dec = make_decoder<shared_graph_codec>(input);
+        shared_graph_decode_session    decode_graph;
+        std::shared_ptr<std::uint64_t> first;
+        std::shared_ptr<std::uint64_t> second;
+
+        REQUIRE(dec(as_shared_graph(decode_graph, first)));
+        REQUIRE(dec(as_shared_graph(decode_graph, second)));
+        REQUIRE(static_cast<bool>(first));
+        REQUIRE(static_cast<bool>(second));
+        CHECK_EQ(*first, 42U);
+        CHECK(first.get() == second.get());
+    }
+
+    {
+        const auto                     encoded = to_bytes("d81d00");
+        std::deque<std::byte>          input(encoded.begin(), encoded.end());
+        auto                           dec = make_decoder<shared_graph_codec>(input);
+        shared_graph_decode_session    decode_graph;
+        std::shared_ptr<std::uint64_t> decoded;
+        const auto                     result = dec(as_shared_graph(decode_graph, decoded));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
 }
 
 TEST_CASE("nullable pointer codec keeps existing value on payload decode failure") {
@@ -1167,6 +1324,35 @@ TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers"
     }
 }
 
+TEST_CASE("shared graph codec rejects inactive nullable variant dispatch without nullable codec") {
+    {
+        using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+        const auto bytes = to_bytes("8100");
+        auto       dec   = make_decoder<shared_graph_codec>(bytes);
+        value_type value{std::string{"before"}};
+        const auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+
+    {
+        using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>>;
+
+        const auto bytes = to_bytes("d82a");
+        auto       dec   = make_decoder<shared_graph_codec>(bytes);
+        value_type value{std::shared_ptr<std::uint64_t>{}};
+        const auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+    }
+}
+
 TEST_CASE("shared graph variants allow non-colliding tag alternatives") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>, std::string>;
 
@@ -1258,6 +1444,12 @@ TEST_CASE("shared graph variants dispatch nested non-colliding tag alternatives"
 
     static_assert(
         !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, nested_type>);
+    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                                               std::variant<std::string, static_tag<28>>>);
+    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                                               std::variant<std::string, static_tag<29>>>);
+    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                                               std::variant<std::string, as_tag_any>>);
 
     const auto                  bytes = to_bytes("d82a");
     auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
@@ -1268,6 +1460,59 @@ TEST_CASE("shared graph variants dispatch nested non-colliding tag alternatives"
     REQUIRE(std::holds_alternative<nested_type>(value));
     const auto &nested = std::get<nested_type>(value);
     CHECK(std::holds_alternative<static_tag<42>>(nested));
+}
+
+TEST_CASE("shared graph rejects variants with nested graph tag collisions") {
+    {
+        using nested_type = std::variant<std::string, static_tag<28>>;
+        using value_type  = std::variant<std::shared_ptr<std::uint64_t>, nested_type>;
+
+        const auto                  bytes = to_bytes("d81c182a");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+    }
+
+    {
+        using nested_type = std::variant<std::string, static_tag<29>>;
+        using value_type  = std::variant<std::shared_ptr<std::uint64_t>, nested_type>;
+
+        const auto                     bytes = to_bytes("d81c182ad81d00");
+        auto                           dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session    decode_graph;
+        std::shared_ptr<std::uint64_t> seeded;
+
+        REQUIRE(dec(as_shared_graph(decode_graph, seeded)));
+        REQUIRE(static_cast<bool>(seeded));
+        CHECK_EQ(*seeded, 42U);
+
+        value_type value{std::shared_ptr<std::uint64_t>{}};
+        const auto result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+    }
+
+    {
+        using nested_type = std::variant<std::string, as_tag_any>;
+        using value_type  = std::variant<std::shared_ptr<std::uint64_t>, nested_type>;
+
+        const auto                  bytes = to_bytes("d82a");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::shared_ptr<std::uint64_t>{}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+    }
 }
 
 TEST_CASE("shared graph rejects variants with graph tag collisions") {
