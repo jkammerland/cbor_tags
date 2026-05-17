@@ -34,6 +34,7 @@ endif()
 # THE LIBRARY
 file(GLOB_RECURSE CBOR_HEADERS CONFIGURE_DEPENDS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 target_sources(
   ${PROJECT_NAME}
   INTERFACE FILE_SET

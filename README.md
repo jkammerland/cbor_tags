@@ -843,8 +843,8 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 ## ✅ Requirements
 
 - tl::expected by default, or C++23 `<expected>` when `CBOR_TAGS_USE_STD_EXPECTED=ON`.
-- fmt (optional, but required for CDDL)
-- nameof (optional, but required for CDDL)
+- fmt 11.0.2 or newer.
+- nameof 0.10.4 or newer.
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.

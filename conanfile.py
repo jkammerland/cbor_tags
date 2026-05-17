@@ -1,6 +1,9 @@
+import os
+
 from conan import ConanFile
 from conan.tools.build import check_min_cppstd
 from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
+from conan.tools.files import copy
 
 
 class CborTagsConan(ConanFile):
@@ -13,9 +16,9 @@ class CborTagsConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = {"boost_pfr_names": [True, False], "magic_enum_names": [True, False], "std_expected": [True, False]}
     default_options = {"boost_pfr_names": False, "magic_enum_names": False, "std_expected": False}
-    generators = "CMakeDeps", "CMakeToolchain"
     exports_sources = (
         "CMakeLists.txt",
+        "cbor_tags_config.h.in",
         "include/*",
         "src/*",
         "cmake/*",
@@ -24,6 +27,8 @@ class CborTagsConan(ConanFile):
     )
 
     def requirements(self):
+        self.requires("fmt/[>=11.0.2 <12]")
+        self.requires("nameof/0.10.4")
         if not self.options.std_expected:
             self.requires("tl-expected/1.1.0")
         if self.options.boost_pfr_names:
@@ -36,8 +41,12 @@ class CborTagsConan(ConanFile):
         self.package_type = "header-library"
 
     def validate(self):
+        check_min_cppstd(self, "20")
         if self.options.std_expected:
             check_min_cppstd(self, "23")
+
+    def package_id(self):
+        self.info.settings.clear()
 
     def layout(self):
         # Use the default layout
@@ -65,11 +74,18 @@ class CborTagsConan(ConanFile):
     def package(self):
         cmake = CMake(self)
         cmake.install()
-        self.copy("LICENSE", dst="licenses")
+        copy(self, "LICENSE", src=self.source_folder, dst=os.path.join(self.package_folder, "licenses"))
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "cbor_tags")
-        self.cpp_info.set_property("cmake_target_name", "cbor_tags")
+        self.cpp_info.set_property("cmake_target_name", "cbor::tags")
+        self.cpp_info.requires = ["fmt::fmt", "nameof::nameof"]
+        if not self.options.std_expected:
+            self.cpp_info.requires.append("tl-expected::tl-expected")
+        if self.options.boost_pfr_names:
+            self.cpp_info.requires.append("boost::boost")
+        if self.options.magic_enum_names:
+            self.cpp_info.requires.append("magic_enum::magic_enum")
         self.cpp_info.bindirs = []
         self.cpp_info.libdirs = []
         if self.options.boost_pfr_names:
