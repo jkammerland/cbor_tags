@@ -447,6 +447,29 @@ std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions
 template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
 template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
 
+template <typename T>
+concept CDDLTaggedByteStringArray = requires {
+    typename std::remove_cvref_t<T>::value_type;
+    std::remove_cvref_t<T>::byte_order;
+    { std::remove_cvref_t<T>::cbor_array_tag } -> std::convertible_to<std::uint64_t>;
+};
+
+template <typename T>
+concept CDDLHomogeneousArray = requires(const std::remove_cvref_t<T> &value) {
+    typename std::remove_cvref_t<T>::array_type;
+    { std::remove_cvref_t<T>::cbor_array_tag } -> std::convertible_to<std::uint64_t>;
+    { value.values() } -> std::convertible_to<const typename std::remove_cvref_t<T>::array_type &>;
+} && (!requires { typename std::remove_cvref_t<T>::dimensions_type; });
+
+template <typename T>
+concept CDDLMultiDimensionalArray = requires(const std::remove_cvref_t<T> &value) {
+    typename std::remove_cvref_t<T>::dimensions_type;
+    typename std::remove_cvref_t<T>::array_type;
+    { std::remove_cvref_t<T>::cbor_array_tag } -> std::convertible_to<std::uint64_t>;
+    { value.dimensions() } -> std::convertible_to<const typename std::remove_cvref_t<T>::dimensions_type &>;
+    { value.values() } -> std::convertible_to<const typename std::remove_cvref_t<T>::array_type &>;
+};
+
 template <typename... Ts> struct cddl_seen_types {};
 
 template <typename T, typename Seen> struct cddl_seen_contains;
@@ -477,7 +500,14 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         return false;
     } else {
         using next_seen = cddl_seen_append_t<Seen, value_type>;
-        if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
+        if constexpr (CDDLTaggedByteStringArray<value_type>) {
+            return false;
+        } else if constexpr (CDDLHomogeneousArray<value_type>) {
+            return cddl_contains_nullable_pointer<typename value_type::array_type, next_seen>();
+        } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
+            return cddl_contains_nullable_pointer<typename value_type::dimensions_type, next_seen>() ||
+                   cddl_contains_nullable_pointer<typename value_type::array_type, next_seen>();
+        } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
             return []<typename... Ts>(std::variant<Ts...> *) consteval {
@@ -592,6 +622,23 @@ inline std::string parenthesize_choice(std::string value) {
         return value;
     }
     return "(" + value + ")";
+}
+
+template <typename T> std::string cddl_tagged_bstr_array_expr() {
+    using value_type = std::remove_cvref_t<T>;
+    return fmt::format("#6.{}(bstr)", value_type::cbor_array_tag);
+}
+
+template <typename T> std::string cddl_homogeneous_array_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    return fmt::format("#6.{}({})", value_type::cbor_array_tag, cddl_type_expr<typename value_type::array_type>(context, options));
+}
+
+template <typename T> std::string cddl_multi_dimensional_array_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    auto dimensions  = parenthesize_choice(cddl_type_expr<typename value_type::dimensions_type>(context, options));
+    auto array       = parenthesize_choice(cddl_type_expr<typename value_type::array_type>(context, options));
+    return fmt::format("#6.{}([{}, {}])", value_type::cbor_array_tag, dimensions, array);
 }
 
 template <std::size_t N> std::string join_cddl(const std::array<std::string, N> &items, std::string_view separator) {
@@ -1081,6 +1128,12 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         static_assert(std::default_initializable<element_type>,
                       "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
         return fmt::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type>(context, options)));
+    } else if constexpr (CDDLTaggedByteStringArray<value_type>) {
+        return cddl_tagged_bstr_array_expr<value_type>();
+    } else if constexpr (CDDLHomogeneousArray<value_type>) {
+        return cddl_homogeneous_array_expr<value_type>(context, options);
+    } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
+        return cddl_multi_dimensional_array_expr<value_type>(context, options);
     } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
             static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),

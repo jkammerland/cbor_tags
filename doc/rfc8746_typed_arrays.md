@@ -156,6 +156,33 @@ dec(view);
 
 Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
 
+## CDDL Rendering
+
+`cddl_schema_to<T>` renders the RFC 8746 wrappers as semantic tags around their
+wire payload shape:
+
+```cpp
+fmt::memory_buffer schema;
+cddl_schema_to<typed_array<std::int32_t>>(schema);
+// root = #6.78(bstr)
+
+cddl_schema_to<typed_array_be<double>>(schema);
+// root = #6.82(bstr)
+```
+
+Structural wrappers render their actual encoded payload:
+
+```cpp
+cddl_schema_to<homogeneous_array<std::vector<int>>>(schema);
+// root = #6.41([* int])
+
+using matrix = multi_dimensional_array<
+    std::vector<std::uint64_t>,
+    typed_array<std::uint16_t>>;
+cddl_schema_to<matrix>(schema);
+// root = #6.40([[* uint], #6.69(bstr)])
+```
+
 ## Segmented Output
 
 For segmented output buffers, the extension can emit tag and payload segments
@@ -235,6 +262,19 @@ using duplicate_typed_array_tag = std::variant<typed_array<std::int32_t>, typed_
 
 `typed_array_ref<T>` is an encode wrapper and is not a variant decode target.
 
+## Support Checklist
+
+- all RFC scalar byte-string typed-array tags `64..87`, except reserved tag `76`,
+- `uint8_clamped` and opaque `float128_t`,
+- little-endian and big-endian integer and floating-point arrays,
+- owning typed arrays and borrowed typed-array views,
+- non-contiguous input view aliases,
+- borrowed encode wrappers,
+- segmented output helpers,
+- variant decode by fixed tag with compile-time collision checks,
+- structural tags `#6.40`, `#6.41`, and `#6.1040`,
+- CDDL rendering for scalar typed arrays and structural wrappers.
+
 ## Validation
 
 Decode rejects:
@@ -244,7 +284,3 @@ Decode rejects:
 - indefinite-length byte strings,
 - payload sizes that are not a multiple of `sizeof(T)`,
 - truncated byte-string headers or payloads.
-
-CDDL generation does not currently render RFC 8746 typed-array extension types
-as specialized schemas. Define the typed-array rules manually when documenting a
-schema that uses these wrappers.
