@@ -195,6 +195,13 @@ oriented. RFC 8746 typed arrays avoid that per-element scalar overhead. On
 little-endian hosts, the little-endian typed-array tags are the high-throughput
 choice.
 
+SIMD acceleration for the big-endian conversion path is intentionally left as
+future work. The current scalar byteswap path is portable and correct, and users
+who control both sides of a protocol should prefer the little-endian tags on
+little-endian hosts. If a workload genuinely needs high-throughput big-endian
+typed arrays, that SIMD path should be benchmark-driven and architecture-specific.
+See [issue #39](https://github.com/jkammerland/cbor_tags/issues/39).
+
 ## Variants
 
 `typed_array<T>` and `typed_array_view<T>` are fixed-tag decode targets, so they
