@@ -274,7 +274,9 @@ TEST_SUITE("Decoding the wrong thing") {
             auto                   enc = make_encoder(data);
             REQUIRE(enc(std::vector<std::byte>(64, std::byte{0xAB})));
 
-            check_decode_out_of_memory<std::pmr::vector<std::byte>>(data);
+            // MSVC's Debug STL allocates container proxy state for the temporary
+            // decode target; keep the resource failure on the payload reserve.
+            check_decode_out_of_memory<std::pmr::vector<std::byte>, 32>(data);
         }
     }
 
@@ -283,7 +285,9 @@ TEST_SUITE("Decoding the wrong thing") {
         auto                   enc = make_encoder(data);
         REQUIRE(enc(std::vector<std::byte>(64, std::byte{0xAB})));
 
-        std::array<std::byte, 32>           storage{};
+        // MSVC's Debug STL needs room for container proxy state before the
+        // intended payload allocation failure.
+        std::array<std::byte, 40>           storage{};
         std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
         const auto                          original = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
         std::pmr::vector<std::byte>         decoded(original.begin(), original.end(), &resource);
