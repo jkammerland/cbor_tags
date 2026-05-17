@@ -26,8 +26,8 @@ struct AllCborMajorsExample {
     positive                   a0; // Major type 0 (unsigned integer)
     negative                   a1; // Major type 1 (negative integer)
     int                        a;  // Major type 0 or 1 (unsigned or negative integer)
-    std::string                b;  // Major type 2 (text string)
-    std::vector<std::byte>     c;  // Major type 3 (byte string)
+    std::string                b;  // Major type 3 (text string)
+    std::vector<std::byte>     c;  // Major type 2 (byte string)
     std::vector<int>           d;  // Major type 4 (array)
     std::map<int, std::string> e;  // Major type 5 (map)
     struct B {
@@ -37,7 +37,7 @@ struct AllCborMajorsExample {
     double g; // Major type 7 (float)
 
     // More advanced types
-    std::variant<int, std::string, std::vector<int>> h; // Major type 0, 1, 2 or 4 (array can take major type 0 or 1)
+    std::variant<int, std::string, std::vector<int>>                                                           h; // Major type 0, 1, 3 or 4
     std::unordered_multimap<std::string, std::variant<int, std::map<std::string, double>, std::vector<float>>> i; // Major type 5 (map) ...
     std::optional<std::map<int, std::string>> j; // Major type 5 (map) or 7 (simple value std::nullopt)
 };

@@ -14,6 +14,8 @@
 #include <nanobench.h>
 #include <numeric>
 #include <ranges>
+#include <span>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -53,6 +55,22 @@ std::vector<std::byte> make_bytes() {
     return bytes;
 }
 
+std::vector<std::byte> make_bytes(std::size_t size) {
+    std::vector<std::byte> bytes(size);
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        bytes[index] = static_cast<std::byte>(index % 251U);
+    }
+    return bytes;
+}
+
+std::string make_text(std::size_t size) {
+    std::string text(size, '\0');
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        text[index] = static_cast<char>('a' + (index % 26U));
+    }
+    return text;
+}
+
 template <typename Value> std::vector<std::byte> encode_to_vector(Value &&value) {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -75,6 +93,14 @@ void configure(ankerl::nanobench::Bench &bench, std::string_view title) {
     bench.relative(options.relative);
     bench.unit(options.unit.data());
     bench.performanceCounters(true);
+}
+
+void configure_throughput(ankerl::nanobench::Bench &bench, std::string_view title) {
+    bench.title(std::string{title});
+    bench.minEpochIterations(20);
+    bench.relative(true);
+    bench.unit("byte");
+    bench.performanceCounters(false);
 }
 
 } // namespace
@@ -182,6 +208,139 @@ TEST_CASE("Range decoding benchmarks") {
         std::ignore                = dec(decoded);
         ankerl::nanobench::doNotOptimizeAway(decoded);
     });
+}
+
+TEST_CASE("String payload throughput fixtures roundtrip") {
+    constexpr auto payload_sizes = std::array<std::size_t, 3>{256U, 4096U, 65536U};
+
+    for (auto size : payload_sizes) {
+        auto bytes = make_bytes(size);
+        auto text  = make_text(size);
+
+        auto bstr_encoded = encode_to_vector(bytes);
+        auto tstr_encoded = encode_to_vector(text);
+
+        {
+            std::vector<std::byte> decoded;
+            auto                   dec = make_decoder(bstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == bytes);
+        }
+        {
+            std::span<const std::byte> decoded;
+            auto                       dec = make_decoder(bstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded.size() == bytes.size());
+            CHECK(std::equal(decoded.begin(), decoded.end(), bytes.begin(), bytes.end()));
+        }
+        {
+            std::string decoded;
+            auto        dec = make_decoder(tstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == text);
+        }
+        {
+            std::string_view decoded;
+            auto             dec = make_decoder(tstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == text);
+        }
+    }
+}
+
+TEST_CASE("String payload throughput benchmarks") {
+    constexpr auto payload_sizes = std::array<std::size_t, 3>{256U, 4096U, 65536U};
+
+    ankerl::nanobench::Bench bench;
+    configure_throughput(bench, "bstr/tstr throughput");
+
+    for (auto size : payload_sizes) {
+        auto bytes = make_bytes(size);
+        auto text  = make_text(size);
+
+        auto bstr_encoded = encode_to_vector(bytes);
+        auto tstr_encoded = encode_to_vector(text);
+
+        {
+            std::vector<std::byte> decoded;
+            auto                   dec = make_decoder(bstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == bytes);
+        }
+        {
+            std::span<const std::byte> decoded;
+            auto                       dec = make_decoder(bstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded.size() == bytes.size());
+            CHECK(std::equal(decoded.begin(), decoded.end(), bytes.begin(), bytes.end()));
+        }
+        {
+            std::string decoded;
+            auto        dec = make_decoder(tstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == text);
+        }
+        {
+            std::string_view decoded;
+            auto             dec = make_decoder(tstr_encoded);
+            CHECK(dec(decoded));
+            CHECK(decoded == text);
+        }
+
+        std::vector<std::byte> bstr_encode_buffer;
+        bstr_encode_buffer.reserve(bstr_encoded.size());
+        std::vector<std::byte> tstr_encode_buffer;
+        tstr_encode_buffer.reserve(tstr_encoded.size());
+
+        auto const bstr_encode_name = std::string{"bstr["} + std::to_string(size) + "] encode reused buffer";
+        bench.batch(bstr_encoded.size()).run(bstr_encode_name, [&] {
+            bstr_encode_buffer.clear();
+            auto enc    = make_encoder(bstr_encode_buffer);
+            std::ignore = enc(bytes);
+            ankerl::nanobench::doNotOptimizeAway(bstr_encode_buffer);
+        });
+
+        auto const tstr_encode_name = std::string{"tstr["} + std::to_string(size) + "] encode reused buffer";
+        bench.batch(tstr_encoded.size()).run(tstr_encode_name, [&] {
+            tstr_encode_buffer.clear();
+            auto enc    = make_encoder(tstr_encode_buffer);
+            std::ignore = enc(text);
+            ankerl::nanobench::doNotOptimizeAway(tstr_encode_buffer);
+        });
+
+        auto const bstr_decode_name = std::string{"bstr["} + std::to_string(size) + "] decode owning vector<byte>";
+        bench.batch(bstr_encoded.size()).run(bstr_decode_name, [&] {
+            std::vector<std::byte> decoded;
+            auto                   dec = make_decoder(bstr_encoded);
+            std::ignore                = dec(decoded);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+
+        auto const bstr_view_decode_name = std::string{"bstr["} + std::to_string(size) + "] decode borrowed span bind (represented bytes)";
+        bench.batch(bstr_encoded.size()).run(bstr_view_decode_name, [&] {
+            std::span<const std::byte> decoded;
+            auto                       dec = make_decoder(bstr_encoded);
+            std::ignore                    = dec(decoded);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+
+        auto const tstr_decode_name = std::string{"tstr["} + std::to_string(size) + "] decode owning string";
+        bench.batch(tstr_encoded.size()).run(tstr_decode_name, [&] {
+            std::string decoded;
+            auto        dec = make_decoder(tstr_encoded);
+            std::ignore     = dec(decoded);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+
+        auto const tstr_view_decode_name =
+            std::string{"tstr["} + std::to_string(size) + "] decode borrowed string_view bind (represented bytes)";
+        bench.batch(tstr_encoded.size()).run(tstr_view_decode_name, [&] {
+            std::string_view decoded;
+            auto             dec = make_decoder(tstr_encoded);
+            std::ignore          = dec(decoded);
+            ankerl::nanobench::doNotOptimizeAway(decoded);
+        });
+    }
 }
 
 TEST_CASE("Lazy tag range benchmarks") {

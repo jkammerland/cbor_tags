@@ -9,6 +9,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -130,6 +131,29 @@ template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::remove_cv_t<T>> 
         values.push_back(from_little_endian<value_type>(payload.subspan(offset, sizeof(value_type))));
     }
     return values;
+}
+
+template <IsTypedArrayElement T, typename PayloadRange>
+[[nodiscard]] std::vector<std::remove_cv_t<T>> materialize_values(PayloadRange &&payload, std::size_t payload_size) {
+    using value_type = std::remove_cv_t<T>;
+
+    if constexpr (std::endian::native == std::endian::little && std::ranges::contiguous_range<PayloadRange>) {
+        std::vector<value_type> values(payload_size / sizeof(value_type));
+        if (payload_size != 0U) {
+            std::memcpy(values.data(), std::ranges::data(payload), payload_size);
+        }
+        return values;
+    } else if constexpr (std::ranges::contiguous_range<PayloadRange>) {
+        return copy_values<value_type>(
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::ranges::data(payload)), payload_size});
+    } else {
+        std::vector<std::byte> payload_bytes;
+        payload_bytes.reserve(payload_size);
+        for (auto byte_value : payload) {
+            payload_bytes.push_back(static_cast<std::byte>(byte_value));
+        }
+        return copy_values<value_type>(std::span<const std::byte>{payload_bytes});
+    }
 }
 
 } // namespace detail
@@ -312,15 +336,23 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         auto &dec        = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
-            std::vector<std::byte> payload;
-            auto                   status = dec.decode(payload, payload_major, payload_info);
-            if (status != status_code::success) {
-                return status;
+            if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+                return status_code::no_match_for_bstr_on_buffer;
             }
-            if ((payload.size() % sizeof(value_type)) != 0U) {
+            const auto payload_size_u64 = dec.decode_unsigned(payload_info);
+            if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+                if (payload_size_u64 > payload_size_limit) {
+                    return status_code::error;
+                }
+            }
+
+            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+            if ((payload_size % sizeof(value_type)) != 0U) {
                 return status_code::unexpected_group_size;
             }
-            array.values() = detail::copy_values<value_type>(std::span<const std::byte>{payload});
+            array.values() = detail::materialize_values<value_type>(std::move(raw_payload), payload_size);
             return status_code::success;
         });
     }

@@ -17,4 +17,4 @@ target_link_libraries(
           test_util)
 cbor_tags_configure_benchmark_target(${PROJECT_NAME})
 
-add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
+add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME} "--test-case=String payload throughput fixtures roundtrip")

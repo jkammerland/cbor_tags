@@ -1,7 +1,7 @@
 # Experimental Range And Segment APIs
 
 > [!WARNING]
-> EXPERIMENTAL. These APIs are still WIP. Names and exact borrowing behavior may
+> EXPERIMENTAL. These APIs are still a WIP. Names and exact borrowing behavior may
 > change before they are treated as stable API.
 
 This page covers a few related APIs that are easy to confuse:
@@ -241,6 +241,10 @@ dec(text);
 `text` points into `data`. Keep `data` alive and do not invalidate it while
 using `text`.
 
+Borrowed text and byte-string views decode definite strings only. If the input
+may contain indefinite/chunked text or byte strings, decode into an owning
+`std::string` or byte container instead.
+
 For non-contiguous input buffers, use the decoder-provided aliases:
 
 ```cpp
@@ -446,6 +450,8 @@ payloads should not be copied into one contiguous output vector.
   chunks.
 - Borrowed decode views, raw encoded views, lazy tag matches, and borrowed
   segments reference the original buffer.
+- Borrowed decode views for text and byte strings require definite string
+  payloads; use owning strings or byte containers for indefinite strings.
 - Segment-backed encoders may borrow contiguous lvalue range payloads; keep the
   source alive and unchanged until the segments are flattened or written.
 - `payload_span()` and `borrow_segments()` require contiguous input.
