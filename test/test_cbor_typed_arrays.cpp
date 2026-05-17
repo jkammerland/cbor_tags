@@ -65,12 +65,36 @@ concept HasTypedArrayPayloadBytes = requires(const T &view) { view.payload_bytes
 
 static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::byte>>);
 static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
+static_assert(IsTag<homogeneous_array<std::vector<int>>>);
+static_assert(IsTag<multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>>>);
+static_assert(IsTag<multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>>>);
 static_assert(IsTag<typed_array<std::int32_t>>);
 static_assert(IsTag<typed_array_view<std::int32_t>>);
 static_assert(IsTag<typed_array_be<float>>);
 static_assert(IsTag<typed_array_view_be<double>>);
+static_assert(typed_array<std::uint8_t>::cbor_tag == 64U);
+static_assert(typed_array_be<std::uint16_t>::cbor_tag == 65U);
+static_assert(typed_array_be<std::uint32_t>::cbor_tag == 66U);
+static_assert(typed_array_be<std::uint64_t>::cbor_tag == 67U);
+static_assert(typed_array<uint8_clamped>::cbor_tag == 68U);
+static_assert(typed_array<std::uint16_t>::cbor_tag == 69U);
+static_assert(typed_array<std::uint32_t>::cbor_tag == 70U);
+static_assert(typed_array<std::uint64_t>::cbor_tag == 71U);
+static_assert(typed_array<std::int8_t>::cbor_tag == 72U);
+static_assert(typed_array_be<std::int16_t>::cbor_tag == 73U);
+static_assert(typed_array_be<std::int32_t>::cbor_tag == 74U);
+static_assert(typed_array_be<std::int64_t>::cbor_tag == 75U);
+static_assert(typed_array<std::int16_t>::cbor_tag == 77U);
+static_assert(typed_array<std::int32_t>::cbor_tag == 78U);
+static_assert(typed_array<std::int64_t>::cbor_tag == 79U);
+static_assert(typed_array_be<float16_t>::cbor_tag == 80U);
 static_assert(typed_array_be<float>::cbor_tag == 81U);
 static_assert(typed_array_be<double>::cbor_tag == 82U);
+static_assert(typed_array_be<float128_t>::cbor_tag == 83U);
+static_assert(typed_array<float16_t>::cbor_tag == 84U);
+static_assert(typed_array<float>::cbor_tag == 85U);
+static_assert(typed_array<double>::cbor_tag == 86U);
+static_assert(typed_array<float128_t>::cbor_tag == 87U);
 static_assert(!IsTag<typed_array_ref<std::int32_t>>);
 
 using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
@@ -139,7 +163,7 @@ template <typename T> void check_big_endian_roundtrip(const std::vector<T> &valu
         const auto        result = dec(decoded);
 
         REQUIRE(result);
-        CHECK_EQ(decoded.values(), values);
+        check_values_equal(decoded.values(), values);
     }
 
     {
@@ -150,7 +174,7 @@ template <typename T> void check_big_endian_roundtrip(const std::vector<T> &valu
         REQUIRE(result);
         CHECK_EQ(decoded.payload_bytes().size(), values.size() * sizeof(T));
         CHECK_EQ(decoded.size(), values.size());
-        CHECK_EQ(decoded.copy_values(), values);
+        check_values_equal(decoded.copy_values(), values);
     }
 }
 
@@ -194,13 +218,140 @@ TEST_CASE("codec extensions append user mixins to default encoder and decoder") 
 }
 
 TEST_CASE("rfc8746 typed arrays encode and decode supported element types through the opt-in codec") {
+    const auto float128_value =
+        float128_t{{std::byte{0x00}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05}, std::byte{0x06},
+                    std::byte{0x07}, std::byte{0x08}, std::byte{0x09}, std::byte{0x0A}, std::byte{0x0B}, std::byte{0x0C}, std::byte{0x0D},
+                    std::byte{0x0E}, std::byte{0x0F}}};
+
+    check_roundtrip<std::uint8_t>({0, 1, 255});
+    check_roundtrip<std::uint16_t>({0, 1, 0x0102, 0xFFFE});
+    check_roundtrip<std::uint32_t>({0, 1, 0x01020304U, 0xFFEEDDCCU});
+    check_roundtrip<std::uint64_t>({0, 1, 0x0102030405060708ULL, 0xFFEEDDCCBBAA9988ULL});
+    check_roundtrip<uint8_clamped>({uint8_clamped{static_cast<std::uint8_t>(0)}, uint8_clamped{static_cast<std::uint8_t>(128)},
+                                    uint8_clamped{static_cast<std::uint8_t>(255)}});
+    check_roundtrip<std::int8_t>({static_cast<std::int8_t>(-1), static_cast<std::int8_t>(0), static_cast<std::int8_t>(127)});
+    check_roundtrip<std::int16_t>({-1, 0, 1, 0x0102});
     check_roundtrip<std::int32_t>({-1, 0, 1, 123456});
     check_roundtrip<std::int64_t>({-1, 0, 1, 0x0102030405060708LL});
     check_roundtrip<float16_t>({float16_t{static_cast<std::uint16_t>(0x3C00)}, float16_t{static_cast<std::uint16_t>(0xC100)}});
     check_roundtrip<float>({-2.5F, 0.0F, 3.25F});
     check_roundtrip<double>({-2.5, 0.0, 3.25});
+    check_roundtrip<float128_t>({float128_value});
+    check_big_endian_roundtrip<std::uint16_t>({0, 1, 0x0102, 0xFFFE});
+    check_big_endian_roundtrip<std::uint32_t>({0, 1, 0x01020304U, 0xFFEEDDCCU});
+    check_big_endian_roundtrip<std::uint64_t>({0, 1, 0x0102030405060708ULL, 0xFFEEDDCCBBAA9988ULL});
+    check_big_endian_roundtrip<std::int16_t>({-1, 0, 1, 0x0102});
+    check_big_endian_roundtrip<std::int32_t>({-1, 0, 1, 123456});
+    check_big_endian_roundtrip<std::int64_t>({-1, 0, 1, 0x0102030405060708LL});
+    check_big_endian_roundtrip<float16_t>({float16_t{static_cast<std::uint16_t>(0x3C00)}, float16_t{static_cast<std::uint16_t>(0xC100)}});
     check_big_endian_roundtrip<float>({-2.5F, 0.0F, 3.25F});
     check_big_endian_roundtrip<double>({-2.5, 0.0, 3.25});
+    check_big_endian_roundtrip<float128_t>({float128_value});
+}
+
+TEST_CASE("rfc8746 typed arrays use exact wire bytes for all integer tags") {
+    const std::array<std::uint8_t, 3> u8_values{1, 2, 255};
+    CHECK_EQ(to_hex(encode_normal(std::span<const std::uint8_t>{u8_values})), "d840430102ff");
+
+    const std::array<uint8_clamped, 3> clamped_values{uint8_clamped{static_cast<std::uint8_t>(0)},
+                                                      uint8_clamped{static_cast<std::uint8_t>(128)},
+                                                      uint8_clamped{static_cast<std::uint8_t>(255)}};
+    CHECK_EQ(to_hex(encode_normal(std::span<const uint8_clamped>{clamped_values})), "d844430080ff");
+
+    const std::array<std::int8_t, 3> i8_values{static_cast<std::int8_t>(-1), static_cast<std::int8_t>(0), static_cast<std::int8_t>(127)};
+    CHECK_EQ(to_hex(encode_normal(std::span<const std::int8_t>{i8_values})), "d84843ff007f");
+
+    const std::array<std::uint16_t, 2> u16_values{0x0102, 0xFFFE};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const std::uint16_t>{u16_values})), "d841440102fffe");
+    CHECK_EQ(to_hex(encode_normal(std::span<const std::uint16_t>{u16_values})), "d845440201feff");
+
+    const std::array<std::int16_t, 2> i16_values{-2, 0x0102};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const std::int16_t>{i16_values})), "d84944fffe0102");
+    CHECK_EQ(to_hex(encode_normal(std::span<const std::int16_t>{i16_values})), "d84d44feff0201");
+
+    const std::array<std::uint32_t, 2> u32_values{0x01020304U, 0xFFEEDDCCU};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const std::uint32_t>{u32_values})), "d8424801020304ffeeddcc");
+    CHECK_EQ(to_hex(encode_normal(std::span<const std::uint32_t>{u32_values})), "d8464804030201ccddeeff");
+
+    const std::array<std::int32_t, 2> i32_values{-1, 0x01020304};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const std::int32_t>{i32_values})), "d84a48ffffffff01020304");
+
+    const std::array<std::uint64_t, 2> u64_values{0x0102030405060708ULL, 0xFFEEDDCCBBAA9988ULL};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const std::uint64_t>{u64_values})), "d843500102030405060708ffeeddccbbaa9988");
+    CHECK_EQ(to_hex(encode_normal(std::span<const std::uint64_t>{u64_values})), "d8475008070605040302018899aabbccddeeff");
+
+    const std::array<std::int64_t, 2> i64_values{-1, 0x0102030405060708LL};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const std::int64_t>{i64_values})), "d84b50ffffffffffffffff0102030405060708");
+}
+
+TEST_CASE("rfc8746 typed arrays use exact wire bytes for all float tags") {
+    const auto float128_value =
+        float128_t{{std::byte{0x00}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05}, std::byte{0x06},
+                    std::byte{0x07}, std::byte{0x08}, std::byte{0x09}, std::byte{0x0A}, std::byte{0x0B}, std::byte{0x0C}, std::byte{0x0D},
+                    std::byte{0x0E}, std::byte{0x0F}}};
+
+    const std::array<float16_t, 2> f16_values{float16_t{static_cast<std::uint16_t>(0x3C00)}, float16_t{static_cast<std::uint16_t>(0xC100)}};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const float16_t>{f16_values})), "d850443c00c100");
+
+    const std::array<float, 2> f32_values{1.0F, -2.5F};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const float>{f32_values})), "d851483f800000c0200000");
+
+    const std::array<double, 2> f64_values{1.0, -2.5};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const double>{f64_values})), "d852503ff0000000000000c004000000000000");
+
+    const std::array<float128_t, 1> f128_values{float128_value};
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const float128_t>{f128_values})), "d85350000102030405060708090a0b0c0d0e0f");
+    CHECK_EQ(to_hex(encode_normal(std::span<const float128_t>{f128_values})), "d85750000102030405060708090a0b0c0d0e0f");
+}
+
+TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") {
+    {
+        const std::vector<int> values{1, 2, 3};
+        std::vector<std::byte> bytes;
+        auto                   enc = make_encoder<typed_array_codec>(bytes);
+
+        REQUIRE(enc(as_homogeneous_array(values)));
+        CHECK_EQ(to_hex(bytes), "d82983010203");
+
+        homogeneous_array<std::vector<int>> decoded;
+        auto                                dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.values(), values);
+    }
+
+    {
+        const std::vector<std::uint64_t> dimensions{2, 2};
+        const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
+        std::vector<std::byte>           bytes;
+        auto                             enc = make_encoder<typed_array_codec>(bytes);
+
+        REQUIRE(enc(as_multi_dimensional_array(dimensions, values)));
+        CHECK_EQ(to_hex(bytes), "d82882820202d845480100020003000400");
+
+        multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
+        auto                                                                            dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.dimensions(), dimensions);
+        CHECK_EQ(decoded.values().values(), values.values());
+    }
+
+    {
+        const std::vector<std::uint64_t> dimensions{2, 2};
+        const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
+        std::vector<std::byte>           bytes;
+        auto                             enc = make_encoder<typed_array_codec>(bytes);
+
+        REQUIRE(enc(as_multi_dimensional_column_major_array(dimensions, values)));
+        CHECK_EQ(to_hex(bytes), "d9041082820202d845480100020003000400");
+
+        using column_major_type = multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>>;
+        std::variant<homogeneous_array<std::vector<int>>, column_major_type> decoded;
+        auto                                                                 dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<column_major_type>(decoded));
+        CHECK_EQ(std::get<column_major_type>(decoded).dimensions(), dimensions);
+        CHECK_EQ(std::get<column_major_type>(decoded).values().values(), values.values());
+    }
 }
 
 TEST_CASE("rfc8746 typed arrays decode unambiguous variants by tag") {

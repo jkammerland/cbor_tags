@@ -9,6 +9,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <iterator>
@@ -27,40 +28,164 @@ enum class typed_array_byte_order { little, big };
 
 template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little> struct typed_array_traits;
 
-template <> struct typed_array_traits<std::int32_t, typed_array_byte_order::little> {
-    using bit_type                     = std::uint32_t;
-    static constexpr std::uint64_t tag = 78;
+enum class uint8_clamped : std::uint8_t {};
+
+struct float128_t {
+    std::array<std::byte, 16> bytes{};
+
+    friend constexpr bool operator==(const float128_t &, const float128_t &) noexcept = default;
 };
 
-template <> struct typed_array_traits<std::int64_t, typed_array_byte_order::little> {
-    using bit_type                     = std::uint64_t;
-    static constexpr std::uint64_t tag = 79;
+static_assert(sizeof(float128_t) == 16U);
+
+template <std::uint64_t Tag, typename BitType> struct typed_array_traits_base {
+    using bit_type                     = BitType;
+    static constexpr std::uint64_t tag = Tag;
 };
 
-template <> struct typed_array_traits<float16_t, typed_array_byte_order::little> {
-    using bit_type                     = std::uint16_t;
-    static constexpr std::uint64_t tag = 84;
+template <> struct typed_array_traits<std::uint8_t, typed_array_byte_order::little> : typed_array_traits_base<64, std::uint8_t> {};
+template <> struct typed_array_traits<std::uint16_t, typed_array_byte_order::big> : typed_array_traits_base<65, std::uint16_t> {};
+template <> struct typed_array_traits<std::uint32_t, typed_array_byte_order::big> : typed_array_traits_base<66, std::uint32_t> {};
+template <> struct typed_array_traits<std::uint64_t, typed_array_byte_order::big> : typed_array_traits_base<67, std::uint64_t> {};
+template <> struct typed_array_traits<uint8_clamped, typed_array_byte_order::little> : typed_array_traits_base<68, std::uint8_t> {};
+template <> struct typed_array_traits<std::uint16_t, typed_array_byte_order::little> : typed_array_traits_base<69, std::uint16_t> {};
+template <> struct typed_array_traits<std::uint32_t, typed_array_byte_order::little> : typed_array_traits_base<70, std::uint32_t> {};
+template <> struct typed_array_traits<std::uint64_t, typed_array_byte_order::little> : typed_array_traits_base<71, std::uint64_t> {};
+
+template <> struct typed_array_traits<std::int8_t, typed_array_byte_order::little> : typed_array_traits_base<72, std::uint8_t> {};
+template <> struct typed_array_traits<std::int16_t, typed_array_byte_order::big> : typed_array_traits_base<73, std::uint16_t> {};
+template <> struct typed_array_traits<std::int32_t, typed_array_byte_order::big> : typed_array_traits_base<74, std::uint32_t> {};
+template <> struct typed_array_traits<std::int64_t, typed_array_byte_order::big> : typed_array_traits_base<75, std::uint64_t> {};
+template <> struct typed_array_traits<std::int16_t, typed_array_byte_order::little> : typed_array_traits_base<77, std::uint16_t> {};
+template <> struct typed_array_traits<std::int32_t, typed_array_byte_order::little> : typed_array_traits_base<78, std::uint32_t> {};
+template <> struct typed_array_traits<std::int64_t, typed_array_byte_order::little> : typed_array_traits_base<79, std::uint64_t> {};
+
+template <> struct typed_array_traits<float16_t, typed_array_byte_order::big> : typed_array_traits_base<80, std::uint16_t> {};
+template <> struct typed_array_traits<float, typed_array_byte_order::big> : typed_array_traits_base<81, std::uint32_t> {};
+template <> struct typed_array_traits<double, typed_array_byte_order::big> : typed_array_traits_base<82, std::uint64_t> {};
+template <> struct typed_array_traits<float128_t, typed_array_byte_order::big> : typed_array_traits_base<83, std::array<std::byte, 16>> {};
+template <> struct typed_array_traits<float16_t, typed_array_byte_order::little> : typed_array_traits_base<84, std::uint16_t> {};
+template <> struct typed_array_traits<float, typed_array_byte_order::little> : typed_array_traits_base<85, std::uint32_t> {};
+template <> struct typed_array_traits<double, typed_array_byte_order::little> : typed_array_traits_base<86, std::uint64_t> {};
+template <>
+struct typed_array_traits<float128_t, typed_array_byte_order::little> : typed_array_traits_base<87, std::array<std::byte, 16>> {};
+
+inline constexpr std::uint64_t multi_dimensional_array_tag              = 40;
+inline constexpr std::uint64_t homogeneous_array_tag                    = 41;
+inline constexpr std::uint64_t multi_dimensional_column_major_array_tag = 1040;
+
+enum class multi_dimensional_layout { row_major, column_major };
+
+template <typename Array> class homogeneous_array {
+  public:
+    using array_type                              = Array;
+    static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
+
+    homogeneous_array() = default;
+    explicit homogeneous_array(Array values) : values_(std::move(values)) {}
+
+    [[nodiscard]] Array       &values() noexcept { return values_; }
+    [[nodiscard]] const Array &values() const noexcept { return values_; }
+
+  private:
+    Array values_{};
 };
 
-template <> struct typed_array_traits<float, typed_array_byte_order::little> {
-    using bit_type                     = std::uint32_t;
-    static constexpr std::uint64_t tag = 85;
+template <typename Array> class homogeneous_array_ref {
+  public:
+    using array_type                              = std::remove_cvref_t<Array>;
+    static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
+
+    constexpr explicit homogeneous_array_ref(const array_type &values) noexcept : values_(&values) {}
+
+    [[nodiscard]] constexpr const array_type &values() const noexcept { return *values_; }
+
+  private:
+    const array_type *values_;
 };
 
-template <> struct typed_array_traits<double, typed_array_byte_order::little> {
-    using bit_type                     = std::uint64_t;
-    static constexpr std::uint64_t tag = 86;
+template <typename Array> [[nodiscard]] constexpr auto as_homogeneous_array(const Array &values) noexcept {
+    return homogeneous_array_ref<Array>{values};
+}
+
+template <typename Array>
+    requires(!std::is_lvalue_reference_v<Array &&>)
+void as_homogeneous_array(Array &&values) = delete;
+
+template <typename Dimensions, typename Array, multi_dimensional_layout Layout = multi_dimensional_layout::row_major>
+class multi_dimensional_array {
+  public:
+    using dimensions_type = Dimensions;
+    using array_type      = Array;
+
+    static constexpr std::uint64_t cbor_array_tag =
+        Layout == multi_dimensional_layout::row_major ? multi_dimensional_array_tag : multi_dimensional_column_major_array_tag;
+    static constexpr std::uint64_t cbor_tag = cbor_array_tag;
+
+    multi_dimensional_array() = default;
+    multi_dimensional_array(Dimensions dimensions, Array values) : dimensions_(std::move(dimensions)), values_(std::move(values)) {}
+
+    [[nodiscard]] Dimensions       &dimensions() noexcept { return dimensions_; }
+    [[nodiscard]] const Dimensions &dimensions() const noexcept { return dimensions_; }
+    [[nodiscard]] Array            &values() noexcept { return values_; }
+    [[nodiscard]] const Array      &values() const noexcept { return values_; }
+
+  private:
+    Dimensions dimensions_{};
+    Array      values_{};
 };
 
-template <> struct typed_array_traits<float, typed_array_byte_order::big> {
-    using bit_type                     = std::uint32_t;
-    static constexpr std::uint64_t tag = 81;
+template <typename Dimensions, typename Array>
+using multi_dimensional_column_major_array = multi_dimensional_array<Dimensions, Array, multi_dimensional_layout::column_major>;
+
+template <typename Dimensions, typename Array, multi_dimensional_layout Layout = multi_dimensional_layout::row_major>
+class multi_dimensional_array_ref {
+  public:
+    using dimensions_type = std::remove_cvref_t<Dimensions>;
+    using array_type      = std::remove_cvref_t<Array>;
+
+    static constexpr std::uint64_t cbor_array_tag =
+        Layout == multi_dimensional_layout::row_major ? multi_dimensional_array_tag : multi_dimensional_column_major_array_tag;
+    static constexpr std::uint64_t cbor_tag = cbor_array_tag;
+
+    constexpr multi_dimensional_array_ref(const dimensions_type &dimensions, const array_type &values) noexcept
+        : dimensions_(&dimensions), values_(&values) {}
+
+    [[nodiscard]] constexpr const dimensions_type &dimensions() const noexcept { return *dimensions_; }
+    [[nodiscard]] constexpr const array_type      &values() const noexcept { return *values_; }
+
+  private:
+    const dimensions_type *dimensions_;
+    const array_type      *values_;
 };
 
-template <> struct typed_array_traits<double, typed_array_byte_order::big> {
-    using bit_type                     = std::uint64_t;
-    static constexpr std::uint64_t tag = 82;
-};
+template <typename Dimensions, typename Array>
+[[nodiscard]] constexpr auto as_multi_dimensional_array(const Dimensions &dimensions, const Array &values) noexcept {
+    return multi_dimensional_array_ref<Dimensions, Array>{dimensions, values};
+}
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Dimensions &&>)
+void as_multi_dimensional_array(Dimensions &&dimensions, const Array &values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Array &&>)
+void as_multi_dimensional_array(const Dimensions &dimensions, Array &&values) = delete;
+
+template <typename Dimensions, typename Array>
+[[nodiscard]] constexpr auto as_multi_dimensional_column_major_array(const Dimensions &dimensions, const Array &values) noexcept {
+    return multi_dimensional_array_ref<Dimensions, Array, multi_dimensional_layout::column_major>{dimensions, values};
+}
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Dimensions &&>)
+void as_multi_dimensional_column_major_array(Dimensions &&dimensions, const Array &values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Array &&>)
+void as_multi_dimensional_column_major_array(const Dimensions &dimensions, Array &&values) = delete;
 
 template <typename T, typed_array_byte_order ByteOrder>
 concept IsTypedArrayElementFor = requires {
@@ -94,7 +219,7 @@ concept DirectResizableByteOutputBuffer = std::ranges::contiguous_range<T> && re
     std::ranges::data(buffer);
 } && sizeof(std::ranges::range_value_t<T>) == 1U;
 
-template <typename BitType> [[nodiscard]] constexpr BitType byteswap_bits(BitType value) noexcept {
+template <typename BitType> [[nodiscard]] BitType byteswap_bits(BitType value) noexcept {
     static_assert(std::is_unsigned_v<BitType>);
 #if defined(__GNUC__) || defined(__clang__)
     if constexpr (sizeof(BitType) == 2U) {
@@ -103,6 +228,16 @@ template <typename BitType> [[nodiscard]] constexpr BitType byteswap_bits(BitTyp
         return static_cast<BitType>(__builtin_bswap32(static_cast<std::uint32_t>(value)));
     } else if constexpr (sizeof(BitType) == 8U) {
         return static_cast<BitType>(__builtin_bswap64(static_cast<std::uint64_t>(value)));
+    } else {
+        return value;
+    }
+#elif defined(_MSC_VER)
+    if constexpr (sizeof(BitType) == 2U) {
+        return static_cast<BitType>(::_byteswap_ushort(static_cast<unsigned short>(value)));
+    } else if constexpr (sizeof(BitType) == 4U) {
+        return static_cast<BitType>(::_byteswap_ulong(static_cast<unsigned long>(value)));
+    } else if constexpr (sizeof(BitType) == 8U) {
+        return static_cast<BitType>(::_byteswap_uint64(static_cast<unsigned __int64>(value)));
     } else {
         return value;
     }
@@ -123,15 +258,15 @@ template <typename BitType> [[nodiscard]] constexpr BitType byteswap_bits(BitTyp
 #endif
 }
 
-template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] constexpr BitType native_to_wire_bits(BitType bits) noexcept {
-    if constexpr (native_matches_byte_order<ByteOrder>) {
+template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] BitType native_to_wire_bits(BitType bits) noexcept {
+    if constexpr (!std::is_unsigned_v<BitType> || sizeof(BitType) == 1U || native_matches_byte_order<ByteOrder>) {
         return bits;
     } else {
         return byteswap_bits(bits);
     }
 }
 
-template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] constexpr BitType wire_to_native_bits(BitType bits) noexcept {
+template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] BitType wire_to_native_bits(BitType bits) noexcept {
     return native_to_wire_bits<ByteOrder>(bits);
 }
 
@@ -146,17 +281,15 @@ template <typed_array_byte_order ByteOrder, typename T>
 
 template <typed_array_byte_order ByteOrder, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] constexpr T from_endian(std::span<const std::byte> bytes) noexcept {
+[[nodiscard]] T from_endian(std::span<const std::byte> bytes) noexcept {
     using value_type = std::remove_cv_t<T>;
     using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
     static_assert(sizeof(value_type) == sizeof(bit_type));
 
-    bit_type bits{};
-    for (std::size_t i = 0; i < sizeof(value_type); ++i) {
-        const auto shift = ByteOrder == typed_array_byte_order::little ? i * 8U : (sizeof(value_type) - 1U - i) * 8U;
-        bits |= static_cast<bit_type>(std::to_integer<std::uint8_t>(bytes[i])) << shift;
-    }
-    return std::bit_cast<value_type>(bits);
+    bit_type wire_bits{};
+    std::memcpy(&wire_bits, bytes.data(), sizeof(wire_bits));
+    const auto native_bits = wire_to_native_bits<ByteOrder>(wire_bits);
+    return std::bit_cast<value_type>(native_bits);
 }
 
 template <typed_array_byte_order ByteOrder, typename T>
@@ -511,6 +644,20 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         encode_borrowed_values<T, ByteOrder>(array.values());
     }
 
+    template <typename Array> void encode(const homogeneous_array<Array> &array) { encode_homogeneous_array_payload(array.values()); }
+
+    template <typename Array> void encode(const homogeneous_array_ref<Array> &array) { encode_homogeneous_array_payload(array.values()); }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    void encode(const multi_dimensional_array<Dimensions, Array, Layout> &array) {
+        encode_multi_dimensional_array_payload<Layout>(array.dimensions(), array.values());
+    }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    void encode(const multi_dimensional_array_ref<Dimensions, Array, Layout> &array) {
+        encode_multi_dimensional_array_payload<Layout>(array.dimensions(), array.values());
+    }
+
     template <typename T, typed_array_byte_order ByteOrder>
         requires IsTypedArrayElementFor<T, ByteOrder>
     [[nodiscard]] status_code decode(typed_array<T, ByteOrder> &array, major_type major, std::byte additional_info) {
@@ -626,7 +773,69 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         });
     }
 
+    template <typename Array>
+    [[nodiscard]] status_code decode(homogeneous_array<Array> &array, major_type major, std::byte additional_info) {
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(homogeneous_array<Array>::cbor_array_tag, major, additional_info,
+                                            [&] { return dec.decode(array.values()); });
+    }
+
+    template <typename Array> [[nodiscard]] status_code decode(homogeneous_array<Array> &array, std::uint64_t tag) {
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(homogeneous_array<Array>::cbor_array_tag, tag, [&] { return dec.decode(array.values()); });
+    }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    [[nodiscard]] status_code decode(multi_dimensional_array<Dimensions, Array, Layout> &array, major_type major,
+                                     std::byte additional_info) {
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, major, additional_info,
+                                            [&] { return dec.decode(wrap_as_array{array.dimensions(), array.values()}); });
+    }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    [[nodiscard]] status_code decode(multi_dimensional_array<Dimensions, Array, Layout> &array, std::uint64_t tag) {
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, tag,
+                                            [&] { return dec.decode(wrap_as_array{array.dimensions(), array.values()}); });
+    }
+
   private:
+    template <typename Payload> void encode_homogeneous_array_payload(const Payload &payload) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode(static_tag<homogeneous_array_tag>{});
+        enc.encode(payload);
+    }
+
+    template <multi_dimensional_layout Layout, typename Dimensions, typename Array>
+    void encode_multi_dimensional_array_payload(const Dimensions &dimensions, const Array &array) {
+        auto &enc = static_cast<Self &>(*this);
+        if constexpr (Layout == multi_dimensional_layout::row_major) {
+            enc.encode(static_tag<multi_dimensional_array_tag>{});
+        } else {
+            enc.encode(static_tag<multi_dimensional_column_major_array_tag>{});
+        }
+        enc.encode(wrap_as_array{dimensions, array});
+    }
+
+    template <typename Fn>
+    [[nodiscard]] status_code decode_extension_tag_payload(std::uint64_t expected_tag, major_type major, std::byte additional_info,
+                                                           Fn &&decode_payload) {
+        if (major != major_type::Tag) {
+            return status_code::no_match_for_tag_on_buffer;
+        }
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(expected_tag, dec.decode_unsigned(additional_info), std::forward<Fn>(decode_payload));
+    }
+
+    template <typename Fn>
+    [[nodiscard]] status_code decode_extension_tag_payload(std::uint64_t expected_tag, std::uint64_t tag, Fn &&decode_payload) {
+        if (tag != expected_tag) {
+            return status_code::no_match_for_tag;
+        }
+        return std::forward<Fn>(decode_payload)();
+    }
+
     void append_owned_payload_data(std::span<const std::byte> payload) {
         auto &enc = static_cast<Self &>(*this);
         if constexpr (requires { enc.appender_.append_owned(enc.data_, payload); }) {
