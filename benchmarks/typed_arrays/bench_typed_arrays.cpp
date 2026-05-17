@@ -83,8 +83,7 @@ template <typename T> auto decode_be_view_copy(byte_buffer const &encoded) -> st
     return decoded.copy_values();
 }
 
-template <typename Encode>
-void run_encode(ankerl::nanobench::Bench &bench, std::string_view name, std::size_t size, Encode &&encode) {
+template <typename Encode> void run_encode(ankerl::nanobench::Bench &bench, std::string_view name, std::size_t size, Encode &&encode) {
     byte_buffer encoded;
     encoded.reserve(size);
     bench.batch(size).run(std::string{name}, [&] {

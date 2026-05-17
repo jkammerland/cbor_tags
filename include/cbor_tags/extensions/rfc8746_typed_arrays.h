@@ -87,6 +87,54 @@ inline constexpr bool native_matches_byte_order =
     (std::endian::native == std::endian::little && ByteOrder == typed_array_byte_order::little) ||
     (std::endian::native == std::endian::big && ByteOrder == typed_array_byte_order::big);
 
+template <typename T>
+concept DirectResizableByteOutputBuffer = std::ranges::contiguous_range<T> && requires(T &buffer, std::size_t size) {
+    buffer.resize(size);
+    { buffer.size() } -> std::convertible_to<std::size_t>;
+    std::ranges::data(buffer);
+} && sizeof(std::ranges::range_value_t<T>) == 1U;
+
+template <typename BitType> [[nodiscard]] constexpr BitType byteswap_bits(BitType value) noexcept {
+    static_assert(std::is_unsigned_v<BitType>);
+#if defined(__GNUC__) || defined(__clang__)
+    if constexpr (sizeof(BitType) == 2U) {
+        return static_cast<BitType>(__builtin_bswap16(static_cast<std::uint16_t>(value)));
+    } else if constexpr (sizeof(BitType) == 4U) {
+        return static_cast<BitType>(__builtin_bswap32(static_cast<std::uint32_t>(value)));
+    } else if constexpr (sizeof(BitType) == 8U) {
+        return static_cast<BitType>(__builtin_bswap64(static_cast<std::uint64_t>(value)));
+    } else {
+        return value;
+    }
+#else
+    if constexpr (sizeof(BitType) == 2U) {
+        return static_cast<BitType>(((value & BitType{0x00FFU}) << 8U) | ((value & BitType{0xFF00U}) >> 8U));
+    } else if constexpr (sizeof(BitType) == 4U) {
+        return static_cast<BitType>(((value & BitType{0x000000FFU}) << 24U) | ((value & BitType{0x0000FF00U}) << 8U) |
+                                    ((value & BitType{0x00FF0000U}) >> 8U) | ((value & BitType{0xFF000000U}) >> 24U));
+    } else if constexpr (sizeof(BitType) == 8U) {
+        return static_cast<BitType>(((value & BitType{0x00000000000000FFULL}) << 56U) | ((value & BitType{0x000000000000FF00ULL}) << 40U) |
+                                    ((value & BitType{0x0000000000FF0000ULL}) << 24U) | ((value & BitType{0x00000000FF000000ULL}) << 8U) |
+                                    ((value & BitType{0x000000FF00000000ULL}) >> 8U) | ((value & BitType{0x0000FF0000000000ULL}) >> 24U) |
+                                    ((value & BitType{0x00FF000000000000ULL}) >> 40U) | ((value & BitType{0xFF00000000000000ULL}) >> 56U));
+    } else {
+        return value;
+    }
+#endif
+}
+
+template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] constexpr BitType native_to_wire_bits(BitType bits) noexcept {
+    if constexpr (native_matches_byte_order<ByteOrder>) {
+        return bits;
+    } else {
+        return byteswap_bits(bits);
+    }
+}
+
+template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] constexpr BitType wire_to_native_bits(BitType bits) noexcept {
+    return native_to_wire_bits<ByteOrder>(bits);
+}
+
 template <typed_array_byte_order ByteOrder, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] constexpr auto to_bits(T value) noexcept {
@@ -113,24 +161,43 @@ template <typed_array_byte_order ByteOrder, typename T>
 
 template <typed_array_byte_order ByteOrder, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
-void append_endian_bytes(std::vector<std::byte> &out, T value) {
+void write_endian_payload_to(std::span<std::byte> output, std::span<const T> values) {
     using value_type = std::remove_cv_t<T>;
-    auto bits        = to_bits<ByteOrder>(static_cast<value_type>(value));
-    for (std::size_t i = 0; i < sizeof(value_type); ++i) {
-        const auto shift = ByteOrder == typed_array_byte_order::little ? i * 8U : (sizeof(value_type) - 1U - i) * 8U;
-        out.push_back(static_cast<std::byte>((bits >> shift) & 0xFFU));
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
+    static_assert(sizeof(value_type) == sizeof(bit_type));
+
+    if (values.empty()) {
+        return;
+    }
+    if constexpr (native_matches_byte_order<ByteOrder>) {
+        std::memcpy(output.data(), values.data(), values.size_bytes());
+    } else {
+        auto *cursor = output.data();
+        for (const auto value : values) {
+            const auto native_bits = to_bits<ByteOrder>(static_cast<value_type>(value));
+            const auto wire_bits   = native_to_wire_bits<ByteOrder>(native_bits);
+            std::memcpy(cursor, &wire_bits, sizeof(wire_bits));
+            cursor += sizeof(wire_bits);
+        }
     }
 }
 
 template <typed_array_byte_order ByteOrder, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] std::vector<std::byte> endian_payload(std::span<const T> values) {
-    std::vector<std::byte> bytes;
-    bytes.reserve(values.size_bytes());
-    for (const auto value : values) {
-        append_endian_bytes<ByteOrder>(bytes, value);
-    }
+    std::vector<std::byte> bytes(values.size_bytes());
+    write_endian_payload_to<ByteOrder>(std::span<std::byte>{bytes.data(), bytes.size()}, values);
     return bytes;
+}
+
+template <typed_array_byte_order ByteOrder, DirectResizableByteOutputBuffer OutputBuffer, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+void append_endian_payload_to(OutputBuffer &output, std::span<const T> values) {
+    const auto start        = static_cast<std::size_t>(output.size());
+    const auto payload_size = static_cast<std::size_t>(values.size_bytes());
+    output.resize(start + payload_size);
+    auto *payload = reinterpret_cast<std::byte *>(std::ranges::data(output) + start);
+    write_endian_payload_to<ByteOrder>(std::span<std::byte>{payload, payload_size}, values);
 }
 
 template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
@@ -164,11 +231,23 @@ template <typename T, typed_array_byte_order ByteOrder>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] std::vector<std::remove_cv_t<T>> copy_values(std::span<const std::byte> payload) {
     using value_type = std::remove_cv_t<T>;
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
 
-    std::vector<value_type> values;
-    values.reserve(payload.size() / sizeof(value_type));
-    for (std::size_t offset = 0; offset < payload.size(); offset += sizeof(value_type)) {
-        values.push_back(from_endian<ByteOrder, value_type>(payload.subspan(offset, sizeof(value_type))));
+    std::vector<value_type> values(payload.size() / sizeof(value_type));
+    if (payload.empty()) {
+        return values;
+    }
+    if constexpr (native_matches_byte_order<ByteOrder>) {
+        std::memcpy(values.data(), payload.data(), payload.size());
+    } else {
+        auto *cursor = payload.data();
+        for (auto &value : values) {
+            bit_type wire_bits{};
+            std::memcpy(&wire_bits, cursor, sizeof(wire_bits));
+            const auto native_bits = wire_to_native_bits<ByteOrder>(wire_bits);
+            value                  = std::bit_cast<value_type>(native_bits);
+            cursor += sizeof(wire_bits);
+        }
     }
     return values;
 }
@@ -548,13 +627,33 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     }
 
   private:
-    void encode_owned_payload(std::span<const std::byte> payload) {
+    void append_owned_payload_data(std::span<const std::byte> payload) {
         auto &enc = static_cast<Self &>(*this);
-        enc.encode_major_and_size(static_cast<std::uint64_t>(payload.size()), static_cast<typename Self::byte_type>(0x40));
         if constexpr (requires { enc.appender_.append_owned(enc.data_, payload); }) {
             enc.appender_.append_owned(enc.data_, payload);
         } else {
             enc.appender_(enc.data_, payload);
+        }
+    }
+
+    void encode_owned_payload(std::span<const std::byte> payload) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode_major_and_size(static_cast<std::uint64_t>(payload.size()), static_cast<typename Self::byte_type>(0x40));
+        append_owned_payload_data(payload);
+    }
+
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode_converted_payload(std::span<const T> values) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode_major_and_size(static_cast<std::uint64_t>(values.size_bytes()), static_cast<typename Self::byte_type>(0x40));
+
+        using output_buffer_type = std::remove_reference_t<decltype(enc.data_)>;
+        if constexpr (detail::DirectResizableByteOutputBuffer<output_buffer_type>) {
+            detail::append_endian_payload_to<ByteOrder>(enc.data_, values);
+        } else {
+            auto payload = detail::endian_payload<ByteOrder>(values);
+            append_owned_payload_data(std::span<const std::byte>{payload});
         }
     }
 
@@ -568,9 +667,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
             enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             encode_owned_payload(std::as_bytes(values));
         } else {
-            auto payload = detail::endian_payload<ByteOrder>(values);
             enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
-            encode_owned_payload(std::span<const std::byte>{payload});
+            encode_converted_payload<T, ByteOrder>(values);
         }
     }
 
@@ -584,9 +682,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
             enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             enc.encode(as_bstr_range(std::as_bytes(values)));
         } else {
-            auto payload = detail::endian_payload<ByteOrder>(values);
             enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
-            encode_owned_payload(std::span<const std::byte>{payload});
+            encode_converted_payload<T, ByteOrder>(values);
         }
     }
 };
