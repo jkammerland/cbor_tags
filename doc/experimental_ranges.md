@@ -1,7 +1,7 @@
 # Experimental Range And Segment APIs
 
 > [!WARNING]
-> EXPERIMENTAL. These APIs are still WIP. Names and exact borrowing behavior may
+> EXPERIMENTAL. These APIs are still a WIP. Names and exact borrowing behavior may
 > change before they are treated as stable API.
 
 This page covers a few related APIs that are easy to confuse:

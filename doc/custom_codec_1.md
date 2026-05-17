@@ -2,7 +2,7 @@
 
 `custom_codec_1` is an opt-in codec for cases where both sides already
 share the C++ schema and do not need normal self-describing CBOR fields inside
-the tagged payload.
+the tagged payload. 
 
 The outer value is still CBOR:
 
@@ -17,6 +17,9 @@ string.
 Use the normal CBOR codec when data should remain self-describing. Use this
 codec when the tag identifies the schema and generic field inspection is not
 required.
+
+> [!TIP]
+> You may implement any codec in a similar way by making your own extension
 
 ## Usage
 
@@ -224,13 +227,3 @@ auto segments = cc1::encode_borrowed_segments(static_tag<1001>{}, samples);
 - Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
   CBOR level. Payload fields use this codec's schema-bound payload
   rules, not the normal extension dispatch path.
-
-## Name
-
-`custom_codec_1` is intentionally neutral. The important API contract is the
-wire shape and schema-bound payload rules above, not a promise that integers,
-floats, or other scalar values are minimized.
-
-`plain_codec` would hide that the wire value is still tagged CBOR. `zppbits_codec`
-would imply wire compatibility with zpp_bits, which this format does not
-promise.

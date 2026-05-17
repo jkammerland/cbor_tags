@@ -232,8 +232,3 @@ and invalid text strings render as `non-utf8(N)`, where `N` is byte length.
 
 For advanced usage and implementation details, see the header files and test cases. Reference the [CBOR RFC](https://tools.ietf.org/html/rfc8949) and [CDDL spec](https://tools.ietf.org/html/rfc8610) for schema conventions.
 For feature-by-feature standards coverage, see [CDDL Standard Coverage](cddl_standard_coverage.md).
-
----
-
-> **Note**  
-> This library is in active development. Report issues and contribute via GitHub.
