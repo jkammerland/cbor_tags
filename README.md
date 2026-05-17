@@ -23,6 +23,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
   - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
   - [Tagged Struct Example](#tagged-struct-example)
   - [Advanced Type Support](#advanced-type-support)
+  - [Smart Pointer Codecs](#smart-pointer-codecs)
   - [Version Handling with Variants](#version-handling-with-variants)
   - [Manual Tag Parsing](#manual-tag-parsing)
   - [Private class members or explicit overloading](#private-class-members-or-explicit-overloading)
@@ -220,6 +221,48 @@ int main() {
 ```
 > [!NOTE]
 > The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". The primary decoder is still a one-shot API: retry/resume after incomplete input is reserved for a future explicit resumable decoder entry point.
+
+### Smart Pointer Codecs
+Smart pointer support is opt-in through `cbor_tags/extensions/smart_ptr.h`.
+Use `nullable_ptr_codec` for nullable ownership values, or `shared_graph_codec`
+when repeated `std::shared_ptr<T>` identity must be preserved across one logical
+graph session:
+
+```cpp
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/extensions/smart_ptr.h"
+
+#include <memory>
+
+using namespace cbor::tags;
+using namespace cbor::tags::ext::smart_ptr;
+
+std::vector<std::byte> buffer;
+
+auto shared = std::make_shared<int>(42);
+shared_graph_encode_session encode_graph;
+auto enc = make_encoder<shared_graph_codec>(buffer);
+
+enc(as_shared_graph(encode_graph, shared));
+enc(as_shared_graph(encode_graph, shared));
+
+std::shared_ptr<int> first;
+std::shared_ptr<int> second;
+
+auto dec = make_decoder<shared_graph_codec>(buffer);
+shared_graph_decode_session decode_graph;
+
+dec(as_shared_graph(decode_graph, first));
+dec(as_shared_graph(decode_graph, second));
+```
+
+`nullable_ptr_codec` encodes null pointers as `[0]` and values as `[1, value]`.
+`shared_graph_codec` uses CBOR value-sharing tags 28/29 inside
+`as_shared_graph(...)` roots. See [Smart Pointer Codecs](doc/smart_pointers.md)
+for wire shapes, limitations, value-sharing spec links, and variant behavior.
+See [Codec Extensions](doc/codec_extensions.md) for the general opt-in extension
+pattern.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -941,14 +984,15 @@ allocating the target object graph first.
 - TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming.
 - TODO: Options for encoder/decoder, such as (un)expected type tuning.
 - TODO: Performance tuning options, such as disabling some checks/safety and non-standard encodings.
-- TODO: `unique_ptr` support.
-- TODO: `shared_ptr` support.
+- Done: opt-in nullable `unique_ptr`/`shared_ptr` codec and explicit `shared_ptr` graph codec extensions.
 
 ## 📚 Documentation
 
 User-facing docs:
 
 - [Encoder And Decoder Options](doc/options.md)
+- [Codec Extensions](doc/codec_extensions.md)
+- [Smart Pointer Codecs](doc/smart_pointers.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:

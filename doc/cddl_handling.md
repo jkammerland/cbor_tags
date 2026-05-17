@@ -96,12 +96,13 @@ Generates CDDL schema for the given type into output buffer
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
 - `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`
 
-Generated aggregate schemas mirror the default encoder shape. Multi-field
-aggregates are arrays, single-field aggregates are the single payload value,
-maps are rendered as `{* key => value}`, and sequence containers are rendered
-as `[* value]`. Static tags render as `#6.n(payload)`. Dynamic tag values are
-not available from the type alone, so dynamic tags render as `#6(payload)`.
-Recursive aggregate types are emitted as named CDDL rules.
+Generated schemas mirror the default encoder shape plus explicitly documented
+transform/extension shapes. Multi-field aggregates are arrays, single-field
+aggregates are the single payload value, maps are rendered as
+`{* key => value}`, and sequence containers are rendered as `[* value]`.
+Static tags render as `#6.n(payload)`. Dynamic tag values are not available
+from the type alone, so dynamic tags render as `#6(payload)`. Recursive
+aggregate types are emitted as named CDDL rules.
 
 ### Enum Names
 
@@ -173,6 +174,18 @@ unknown key would not have a unique owner. Nested `as_named_map` members are
 scoped maps and may have their own extension field. Fixed field names must also
 be unique after flattening all `as_named_group` members; duplicate fixed names
 are rejected at compile time.
+
+`std::unique_ptr<T>` and `std::shared_ptr<T>` with default-initializable,
+non-const, non-void, non-array pointee types render as `[0] / [1, T]`, matching
+the opt-in `cbor::tags::ext::smart_ptr::nullable_ptr_codec` wire shape. Pointer
+fields remain required in named maps unless the field type itself is
+`std::optional`; a null pointer is an explicit `[0]`, not an omitted member.
+Shared pointer identity and `shared_graph_codec` reference-table semantics are
+runtime codec rules and are not expressed in CDDL; the graph codec uses CBOR
+value-sharing tags 28 and 29 at runtime. As a conservative generator limitation,
+`std::variant` alternatives that contain nullable smart pointers are rejected by
+the CDDL generator, including tagged alternatives that may be runtime-decodable
+through an opt-in codec.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

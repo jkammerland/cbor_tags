@@ -10,6 +10,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,6 +37,14 @@ std::size_t count_occurrences(std::string_view haystack, std::string_view needle
         pos += needle.size();
     }
     return count;
+}
+
+std::string repeated_vector_cddl(std::string_view leaf, std::size_t depth) {
+    std::string result{leaf};
+    for (std::size_t i = 0; i < depth; ++i) {
+        result = "[* " + result + "]";
+    }
+    return result;
 }
 
 struct CDDLPlainTwo {
@@ -66,9 +75,66 @@ struct CDDLContainers {
     std::variant<int, CDDLPlainTwo> either_plain;
 };
 
+struct CDDLNullablePointers {
+    std::unique_ptr<std::uint64_t>             count;
+    std::shared_ptr<std::string>               name;
+    std::vector<std::shared_ptr<CDDLPlainTwo>> history;
+};
+
+using CDDLVariantWithSmartPointer       = std::variant<std::shared_ptr<int>, std::string>;
+using CDDLVariantWithNestedSmartPointer = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+
+template <typename T, std::size_t Depth> struct CDDLDeepVector {
+    using type = std::vector<typename CDDLDeepVector<T, Depth - 1U>::type>;
+};
+
+template <typename T> struct CDDLDeepVector<T, 0U> {
+    using type = T;
+};
+
+using CDDLVariantWithDeepSmartPointer = std::variant<typename CDDLDeepVector<std::shared_ptr<int>, 10U>::type, std::string>;
+using CDDLVariantWithDeepValue        = std::variant<typename CDDLDeepVector<int, 10U>::type, std::string>;
+
+struct CDDLTaggedNullablePointerAlternative {
+    static_tag<7>        cbor_tag;
+    std::shared_ptr<int> value;
+};
+
+using CDDLVariantWithTaggedSmartPointer = std::variant<CDDLTaggedNullablePointerAlternative, std::string>;
+
+struct CDDLNullablePointerRecursiveNode {
+    std::uint64_t                                     id;
+    std::shared_ptr<CDDLNullablePointerRecursiveNode> next;
+};
+
 struct CDDLRecursiveNode {
     std::vector<CDDLRecursiveNode> children;
 };
+
+using CDDLVariantWithRecursiveSmartPointer = std::variant<CDDLNullablePointerRecursiveNode, std::string>;
+using CDDLVariantWithRecursiveValue        = std::variant<CDDLRecursiveNode, std::string>;
+
+struct CDDLCustomDeleter {
+    void operator()(int *) const noexcept {}
+};
+
+static_assert(detail::IsNullablePointer<std::unique_ptr<int>>);
+static_assert(detail::IsNullablePointer<std::unique_ptr<int, CDDLCustomDeleter>>);
+static_assert(detail::IsNullablePointer<std::shared_ptr<int>>);
+static_assert(detail::is_supported_nullable_pointer_v<std::unique_ptr<int>>);
+static_assert(detail::is_supported_nullable_pointer_v<std::shared_ptr<int>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::unique_ptr<int, CDDLCustomDeleter>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<void>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<const int>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<int[]>>);
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithNestedSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithTaggedSmartPointer>());
+static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveSmartPointer>());
+static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepValue>());
+static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveValue>());
+static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
 
 enum class CDDLUnsignedEnum : std::uint8_t {};
 enum class CDDLSignedEnum : std::int8_t {};
@@ -218,6 +284,12 @@ struct CDDLAccountProfile {
     std::map<std::string, std::uint32_t>                   counters;
     std::optional<bool>                                    active;
     as_named_extension<std::map<std::string, std::string>> metadata;
+};
+
+struct CDDLNamedNullablePointers {
+    std::unique_ptr<std::uint64_t>      count;
+    std::shared_ptr<std::string>        name;
+    std::optional<std::shared_ptr<int>> maybe_count;
 };
 
 struct CDDLNamedEnumChildMap {
@@ -403,8 +475,29 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
     CHECK_EQ(schema.find("map"), std::string::npos);
 }
 
+TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
+    CHECK_EQ(cddl_schema_inline<std::unique_ptr<int>>(), "root = [0] / [1, int]");
+    CHECK_EQ(cddl_schema_inline<std::shared_ptr<std::string>>(), "root = [0] / [1, tstr]");
+    CHECK_EQ(cddl_schema_inline<std::unique_ptr<std::variant<int, std::string>>>(), "root = [0] / [1, (int / tstr)]");
+    CHECK_EQ(cddl_schema_inline<std::optional<std::shared_ptr<int>>>(), "root = [0] / [1, int] / null");
+    CHECK_EQ(cddl_schema_inline<CDDLVariantWithDeepValue>(), "root = " + repeated_vector_cddl("int", 10U) + " / tstr");
+
+    const auto schema = cddl_schema_inline<CDDLNullablePointers>();
+    CBOR_TAGS_TEST_LOG("CDDL nullable pointers: \n{}\n", schema);
+
+    CHECK(substrings_in(schema, "CDDLNullablePointers = [[0] / [1, uint], [0] / [1, tstr], [* ([0] / [1, CDDLPlainTwo])]]",
+                        "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
+}
+
 TEST_CASE("CDDL supports recursive aggregate containers") {
     CHECK_EQ(cddl_schema_inline<CDDLRecursiveNode>(), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
+    CHECK_EQ(cddl_schema_inline<CDDLNullablePointerRecursiveNode>(),
+             "CDDLNullablePointerRecursiveNode = [uint, [0] / [1, CDDLNullablePointerRecursiveNode]]");
+
+    const auto recursive_variant_schema = cddl_schema_inline<CDDLVariantWithRecursiveValue>();
+    CHECK(substrings_in(recursive_variant_schema, "root = CDDLRecursiveNode / tstr", "CDDLRecursiveNode = [* CDDLRecursiveNode]"));
+    CHECK_EQ(count_occurrences(recursive_variant_schema, "CDDLRecursiveNode = [* CDDLRecursiveNode]"), 1);
 
     fmt::memory_buffer inline_buffer;
     cddl_schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
@@ -581,6 +674,12 @@ TEST_CASE("named-map CDDL covers a larger grouped profile") {
              "* tstr => tstr}\n"
              "location = (office: tstr, country: tstr, ? timezone: tstr)\n"
              "owner = (? givenName: tstr, ? familyName: tstr)");
+}
+
+TEST_CASE("named-map CDDL keeps nullable pointer fields required unless optional") {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
+    CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: [0] / [1, uint], name: [0] / [1, tstr], ? maybe_count: [0] / [1, int]}");
 }
 
 TEST_CASE("named-map CDDL indents nested inline named groups by depth") {

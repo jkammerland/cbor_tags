@@ -7,6 +7,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <nameof.hpp>
 #include <stdexcept>
 #include <string>
@@ -83,6 +84,8 @@ TEST_CASE("visualization names cover primitive, optional, variant, and tag types
     CHECK_EQ(getName<bool>(), "bool"sv);
     CHECK_EQ(getName<std::nullptr_t>(), "null"sv);
     CHECK_EQ(getName<std::optional<int>>(), "int / null"s);
+    CHECK_EQ(getName<std::unique_ptr<int>>(), "[0] / [1, int]"s);
+    CHECK_EQ(getName<std::shared_ptr<std::string>>(), "[0] / [1, tstr]"s);
     CHECK_EQ(getTagDef(static_tag<777>{}), "#6.777"s);
 }
 

@@ -243,6 +243,41 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 
 template <typename CborBuffer, typename OutputBuffer>
 void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options);
+
+template <typename T> struct is_std_unique_ptr : std::false_type {};
+template <typename T, typename Deleter> struct is_std_unique_ptr<std::unique_ptr<T, Deleter>> : std::true_type {
+    using element_type = T;
+};
+
+template <typename T> struct is_std_shared_ptr : std::false_type {};
+template <typename T> struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_type {
+    using element_type = T;
+};
+
+template <typename T>
+concept IsNullablePointer = is_std_unique_ptr<std::remove_cvref_t<T>>::value || is_std_shared_ptr<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct nullable_pointer_element;
+template <typename T, typename Deleter> struct nullable_pointer_element<std::unique_ptr<T, Deleter>> {
+    using type = T;
+};
+template <typename T> struct nullable_pointer_element<std::shared_ptr<T>> {
+    using type = T;
+};
+
+template <typename T> using nullable_pointer_element_t = typename nullable_pointer_element<std::remove_cvref_t<T>>::type;
+
+template <typename T> constexpr bool is_nullable_pointer_value_v = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
+
+template <typename T> struct is_supported_nullable_pointer_owner : std::false_type {};
+template <typename T, typename Deleter>
+struct is_supported_nullable_pointer_owner<std::unique_ptr<T, Deleter>>
+    : std::bool_constant<std::is_same_v<Deleter, std::default_delete<T>>> {};
+template <typename T> struct is_supported_nullable_pointer_owner<std::shared_ptr<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_supported_nullable_pointer_v =
+    is_nullable_pointer_value_v<nullable_pointer_element_t<T>> && is_supported_nullable_pointer_owner<std::remove_cvref_t<T>>::value;
 } // namespace detail
 
 template <typename T> constexpr auto getName(const T &);
@@ -309,6 +344,15 @@ template <typename T> constexpr auto getName(const T &) {
             using value_type = typename T::value_type;
             auto name        = getName<value_type>();
             return std::string(name) + " / null";
+        } else if constexpr (detail::IsNullablePointer<T>) {
+            using element_type = detail::nullable_pointer_element_t<T>;
+            static_assert(detail::is_supported_nullable_pointer_v<T>,
+                          "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
+                          "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+            static_assert(std::default_initializable<element_type>,
+                          "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
+            auto name = getName<element_type>();
+            return std::string("[0] / [1, ") + std::string(name) + "]";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
@@ -353,6 +397,15 @@ template <typename T> constexpr auto getName() {
             using value_type = typename T::value_type;
             auto name        = getName<value_type>();
             return std::string(name) + " / null";
+        } else if constexpr (detail::IsNullablePointer<T>) {
+            using element_type = detail::nullable_pointer_element_t<T>;
+            static_assert(detail::is_supported_nullable_pointer_v<T>,
+                          "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
+                          "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+            static_assert(std::default_initializable<element_type>,
+                          "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
+            auto name = getName<element_type>();
+            return std::string("[0] / [1, ") + std::string(name) + "]";
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
@@ -393,6 +446,64 @@ template <typename T>
 std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
 template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
 template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
+
+template <typename... Ts> struct cddl_seen_types {};
+
+template <typename T, typename Seen> struct cddl_seen_contains;
+
+template <typename T, typename... Seen>
+struct cddl_seen_contains<T, cddl_seen_types<Seen...>> : std::bool_constant<(std::same_as<std::remove_cvref_t<T>, Seen> || ...)> {};
+
+template <typename Seen, typename T> struct cddl_seen_append;
+
+template <typename... Seen, typename T> struct cddl_seen_append<cddl_seen_types<Seen...>, T> {
+    using type = cddl_seen_types<Seen..., std::remove_cvref_t<T>>;
+};
+
+template <typename Seen, typename T> using cddl_seen_append_t = typename cddl_seen_append<Seen, T>::type;
+
+template <typename T, typename Seen = cddl_seen_types<>> consteval bool cddl_contains_nullable_pointer();
+
+template <typename Tuple, typename Seen, std::size_t... Is>
+consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) {
+    return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
+}
+
+template <typename T, typename Seen> consteval bool cddl_contains_nullable_pointer() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsNullablePointer<value_type>) {
+        return true;
+    } else if constexpr (cddl_seen_contains<value_type, Seen>::value) {
+        return false;
+    } else {
+        using next_seen = cddl_seen_append_t<Seen, value_type>;
+        if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
+            return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
+        } else if constexpr (IsVariant<value_type>) {
+            return []<typename... Ts>(std::variant<Ts...> *) consteval {
+                return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...);
+            }(static_cast<value_type *>(nullptr));
+        } else if constexpr (IsNamedMapWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<named_map_value_t<value_type>, next_seen>();
+        } else if constexpr (IsNamedGroupWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<named_group_value_t<value_type>, next_seen>();
+        } else if constexpr (IsNamedExtensionWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, next_seen>();
+        } else if constexpr (IsIndefiniteWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, next_seen>();
+        } else if constexpr (IsMap<value_type>) {
+            return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
+                   cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
+        } else if constexpr (IsTuple<value_type>) {
+            return cddl_tuple_contains_nullable_pointer<value_type, next_seen>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
+        } else if constexpr (IsAggregate<value_type>) {
+            using tuple_type = aggregate_tuple_t<value_type>;
+            return cddl_tuple_contains_nullable_pointer<tuple_type, next_seen>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+        } else {
+            return false;
+        }
+    }
+}
 
 constexpr bool is_cddl_id_start(char value) {
     return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') || value == '_' || value == '$' || value == '@';
@@ -962,8 +1073,19 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         return cddl_type_expr<indefinite_value_t<value_type>>(context, options);
     } else if constexpr (IsOptional<value_type>) {
         return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type>(context, options));
+    } else if constexpr (IsNullablePointer<value_type>) {
+        using element_type = nullable_pointer_element_t<value_type>;
+        static_assert(is_supported_nullable_pointer_v<value_type>,
+                      "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or std::shared_ptr<T>, and "
+                      "T must be non-const, non-void, and non-array");
+        static_assert(std::default_initializable<element_type>,
+                      "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
+        return fmt::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type>(context, options)));
     } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
+            static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
+                          "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
+                          "decode is not extension-codec aware");
             return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts>(variant_context, variant_options)...}, " / ");
         }(static_cast<value_type *>(nullptr), context, options);
     } else if constexpr (IsArrayHeader<value_type>) {

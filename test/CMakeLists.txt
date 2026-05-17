@@ -46,6 +46,42 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+add_executable(cddl_variant_nullable_pointer_compile_fails EXCLUDE_FROM_ALL cddl_variant_nullable_pointer_compile_fail.cc)
+target_link_libraries(cddl_variant_nullable_pointer_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
+add_test(
+  NAME cddl_variant_nullable_pointer_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_variant_nullable_pointer_compile_fails"
+    "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers is unsupported"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_variant_two_nullable_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_two_nullable_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_two_nullable_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_two_nullable_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_two_nullable_compile_fails"
+    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous because they share the same \\[0\\] / \\[1, value\\] shape\\."
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_variant_array_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_array_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_array_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_array_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_array_compile_fails"
+    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives\\."
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
   function(add_named_map_duplicate_keys_compile_fail_test TEST_NAME COMPILE_DEFINITION)
     add_executable(${TEST_NAME} EXCLUDE_FROM_ALL named_map_duplicate_keys_compile_fail.cc)

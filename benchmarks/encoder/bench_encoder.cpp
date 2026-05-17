@@ -2,21 +2,27 @@
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <nameof.hpp>
 #include <random>
+#include <string>
 #include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest/doctest.h"
 
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/extensions/smart_ptr.h>
+#include <fmt/format.h>
 #include <nanobench.h>
 #include <small_generator.h>
 
 using namespace std::string_view_literals;
 using namespace cbor::tags;
+using namespace cbor::tags::ext::smart_ptr;
 
 struct benchmark_options {
     std::string_view unit{"Ops"};
@@ -215,6 +221,86 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
     });
 }
 
+std::vector<std::shared_ptr<std::uint64_t>> make_shared_graph_values(std::size_t unique_count, std::size_t repeat_count) {
+    std::vector<std::shared_ptr<std::uint64_t>> unique_values;
+    unique_values.reserve(unique_count);
+    for (std::size_t index = 0; index < unique_count; ++index) {
+        unique_values.push_back(std::make_shared<std::uint64_t>(index));
+    }
+
+    std::vector<std::shared_ptr<std::uint64_t>> values;
+    values.reserve(unique_count * repeat_count);
+    for (std::size_t repeat = 0; repeat < repeat_count; ++repeat) {
+        values.insert(values.end(), unique_values.begin(), unique_values.end());
+    }
+    return values;
+}
+
+template <std::size_t UniqueCount> void run_shared_graph_encode_lookup_benchmarks_for_size(ankerl::nanobench::Bench &bench) {
+    const auto values = make_shared_graph_values(UniqueCount, 2U);
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map", UniqueCount), [&values]() {
+        std::vector<std::uint8_t> data;
+        data.reserve(values.size() * 8U);
+
+        auto                        enc = make_encoder<shared_graph_codec>(data);
+        shared_graph_encode_session graph{shared_graph_encode_lookup::unordered_map};
+        auto                        result = enc(as_shared_graph(graph, values));
+
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(data);
+    });
+
+    shared_graph_encode_session reserved_unordered_graph{shared_graph_encode_lookup::unordered_map};
+    reserved_unordered_graph.reserve_unique(UniqueCount);
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map_reserved", UniqueCount), [&values, &reserved_unordered_graph]() {
+        std::vector<std::uint8_t> data;
+        data.reserve(values.size() * 8U);
+
+        auto enc = make_encoder<shared_graph_codec>(data);
+        reserved_unordered_graph.reset();
+        auto result = enc(as_shared_graph(reserved_unordered_graph, values));
+
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(data);
+    });
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n", UniqueCount), [&values]() {
+        std::vector<std::uint8_t> data;
+        data.reserve(values.size() * 8U);
+
+        auto                        enc = make_encoder<shared_graph_codec>(data);
+        shared_graph_encode_session graph{shared_graph_encode_lookup::linear_scan};
+        auto                        result = enc(as_shared_graph(graph, values));
+
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(data);
+    });
+
+    shared_graph_encode_session reserved_linear_graph{shared_graph_encode_lookup::linear_scan};
+    reserved_linear_graph.reserve_unique(UniqueCount);
+
+    bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n_reserved", UniqueCount), [&values, &reserved_linear_graph]() {
+        std::vector<std::uint8_t> data;
+        data.reserve(values.size() * 8U);
+
+        auto enc = make_encoder<shared_graph_codec>(data);
+        reserved_linear_graph.reset();
+        auto result = enc(as_shared_graph(reserved_linear_graph, values));
+
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(data);
+    });
+}
+
+void run_shared_graph_encode_lookup_benchmarks(ankerl::nanobench::Bench &bench) {
+    run_shared_graph_encode_lookup_benchmarks_for_size<4U>(bench);
+    run_shared_graph_encode_lookup_benchmarks_for_size<16U>(bench);
+    run_shared_graph_encode_lookup_benchmarks_for_size<64U>(bench);
+    run_shared_graph_encode_lookup_benchmarks_for_size<256U>(bench);
+}
+
 template <typename ContainerType> void run_benchmark() {
     ankerl::nanobench::Bench bench;
     benchmark_options        options;
@@ -232,6 +318,19 @@ TEST_CASE("Encoding benchmarks") {
     run_benchmark<std::vector<uint8_t>>();
     run_benchmark<std::deque<uint8_t>>();
     run_benchmark<std::array<uint8_t, 20>>();
+}
+
+TEST_CASE("Shared graph encode lookup benchmarks") {
+    ankerl::nanobench::Bench bench;
+    benchmark_options        options;
+
+    bench.title("shared_graph encode lookup");
+    bench.minEpochIterations(20);
+    bench.unit(options.unit.data());
+    bench.performanceCounters(true);
+    bench.relative(options.relative);
+
+    run_shared_graph_encode_lookup_benchmarks(bench);
 }
 
 // Main function to run tests and benchmarks
