@@ -104,13 +104,10 @@ template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::byte> little_end
 }
 
 template <IsTypedArrayElement T, typename AssignPayload>
-[[nodiscard]] status_code decode_payload(auto &dec, major_type major, std::byte additional_info, AssignPayload &&assign_payload) {
+[[nodiscard]] status_code decode_payload_after_tag(auto &dec, std::uint64_t tag, AssignPayload &&assign_payload) {
     using value_type = std::remove_cv_t<T>;
 
-    if (major != major_type::Tag) {
-        return status_code::no_match_for_tag_on_buffer;
-    }
-    if (dec.decode_unsigned(additional_info) != typed_array_traits<value_type>::tag) {
+    if (tag != typed_array_traits<value_type>::tag) {
         return status_code::no_match_for_tag;
     }
 
@@ -120,6 +117,15 @@ template <IsTypedArrayElement T, typename AssignPayload>
     }
 
     return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+}
+
+template <IsTypedArrayElement T, typename AssignPayload>
+[[nodiscard]] status_code decode_payload(auto &dec, major_type major, std::byte additional_info, AssignPayload &&assign_payload) {
+    if (major != major_type::Tag) {
+        return status_code::no_match_for_tag_on_buffer;
+    }
+
+    return decode_payload_after_tag<T>(dec, dec.decode_unsigned(additional_info), std::forward<AssignPayload>(assign_payload));
 }
 
 template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::remove_cv_t<T>> copy_values(std::span<const std::byte> payload) {
@@ -163,6 +169,7 @@ template <IsTypedArrayElement T> class typed_array {
     using value_type                              = std::remove_cv_t<T>;
     using container_type                          = std::vector<value_type>;
     static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     typed_array() = default;
     explicit typed_array(container_type values) : values_(std::move(values)) {}
@@ -278,6 +285,7 @@ template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std:
     using value_type                              = std::remove_cv_t<T>;
     using payload_range_type                      = ByteRange;
     static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     constexpr typed_array_view() = default;
     constexpr explicit typed_array_view(ByteRange payload) : payload_(std::move(payload)), payload_size_(payload_size(payload_)) {}
@@ -357,6 +365,32 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         });
     }
 
+    template <IsTypedArrayElement T> [[nodiscard]] status_code decode(typed_array<T> &array, std::uint64_t tag) {
+        using value_type = std::remove_cv_t<T>;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
+            if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            const auto payload_size_u64 = dec.decode_unsigned(payload_info);
+            if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+                if (payload_size_u64 > payload_size_limit) {
+                    return status_code::error;
+                }
+            }
+
+            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+            if ((payload_size % sizeof(value_type)) != 0U) {
+                return status_code::unexpected_group_size;
+            }
+            array.values() = detail::materialize_values<value_type>(std::move(raw_payload), payload_size);
+            return status_code::success;
+        });
+    }
+
     template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
         requires detail::DecodableTypedArrayPayloadRange<Self, ByteRange>
     [[nodiscard]] status_code decode(typed_array_view<T, ByteRange> &view, major_type major, std::byte additional_info) {
@@ -364,6 +398,35 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         auto &dec        = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type, std::byte payload_info) {
+            if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
+                return status_code::contiguous_view_on_non_contiguous_data;
+            } else {
+                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
+                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+                    if (payload_size_u64 > payload_size_limit) {
+                        return status_code::error;
+                    }
+                }
+
+                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+                if ((payload_size % sizeof(value_type)) != 0U) {
+                    return status_code::unexpected_group_size;
+                }
+                view = typed_array_view<value_type, ByteRange>{ByteRange{std::move(raw_payload)}, payload_size};
+                return status_code::success;
+            }
+        });
+    }
+
+    template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
+        requires detail::DecodableTypedArrayPayloadRange<Self, ByteRange>
+    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange> &view, std::uint64_t tag) {
+        using value_type = std::remove_cv_t<T>;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type>(dec, tag, [&](major_type, std::byte payload_info) {
             if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
                 return status_code::contiguous_view_on_non_contiguous_data;
             } else {

@@ -82,6 +82,24 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+function(add_typed_array_variant_compile_fail_test TEST_NAME SOURCE_FILE)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DPASS_REGEX=Multiple types match against major type 6 \\(tag\\)"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_typed_array_variant_compile_fail_test(typed_array_variant_static_tag_compile_fails typed_array_variant_static_tag_compile_fail.cc)
+add_typed_array_variant_compile_fail_test(typed_array_variant_any_tag_compile_fails typed_array_variant_any_tag_compile_fail.cc)
+add_typed_array_variant_compile_fail_test(typed_array_variant_duplicate_tag_compile_fails typed_array_variant_duplicate_tag_compile_fail.cc)
+
 if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
   function(add_named_map_duplicate_keys_compile_fail_test TEST_NAME COMPILE_DEFINITION)
     add_executable(${TEST_NAME} EXCLUDE_FROM_ALL named_map_duplicate_keys_compile_fail.cc)

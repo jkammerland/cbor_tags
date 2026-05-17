@@ -82,5 +82,6 @@ Current public extension headers:
 - `cbor_tags/extensions/std_expected.h`: opt-in `std::expected` return type
   support in C++23 and newer builds.
 - `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.
+  See [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
 - `cbor_tags/extensions/cbor_visualization.h`: CDDL, annotation, and diagnostic
   rendering helpers.

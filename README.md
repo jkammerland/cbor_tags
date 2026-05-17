@@ -12,6 +12,7 @@ The primary advantage of using this library is the ability to define your own da
 See standard specifications for more information:
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) (Concise Data Definition Language)
 - CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
+- CBOR Typed Arrays [RFC8746](https://datatracker.ietf.org/doc/html/rfc8746)
 
 The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery), but uses the CBOR standard as binary format instead of a custom one. It also provides intuitive error handling and gives full control over memory layouts and buffer management. By supporting all standard containers and abstractions, the API for handling the data before/after encoding/decoding should be familiar without requiring detailed knowledge of the CBOR format.
 
@@ -53,6 +54,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
+- Opt-in [RFC 8746 typed-array](doc/rfc8746_typed_arrays.md) codec for homogeneous numeric payloads.
 - CDDL support for schema and custom data definitions.
 - Upcoming: resumable encoding and decoding (useful for streaming usecases).
 
@@ -1002,6 +1004,7 @@ User-facing docs:
 - [Custom Codec 1](doc/custom_codec_1.md)
 - [Encoder And Decoder Options](doc/options.md)
 - [Codec Extensions](doc/codec_extensions.md)
+- [RFC 8746 Typed Arrays](doc/rfc8746_typed_arrays.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 

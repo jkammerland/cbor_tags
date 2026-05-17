@@ -13,6 +13,7 @@
 #include <span>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -64,6 +65,9 @@ concept HasTypedArrayPayloadBytes = requires(const T &view) { view.payload_bytes
 
 static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::byte>>);
 static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
+static_assert(IsTag<typed_array<std::int32_t>>);
+static_assert(IsTag<typed_array_view<std::int32_t>>);
+static_assert(!IsTag<typed_array_ref<std::int32_t>>);
 
 using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
 using bad_payload_range = std::ranges::iota_view<unsigned char, unsigned char>;
@@ -160,6 +164,80 @@ TEST_CASE("rfc8746 typed arrays encode and decode supported element types throug
     check_roundtrip<float16_t>({float16_t{static_cast<std::uint16_t>(0x3C00)}, float16_t{static_cast<std::uint16_t>(0xC100)}});
     check_roundtrip<float>({-2.5F, 0.0F, 3.25F});
     check_roundtrip<double>({-2.5, 0.0, 3.25});
+}
+
+TEST_CASE("rfc8746 typed arrays decode unambiguous variants by tag") {
+    using value_type = std::variant<typed_array<std::int32_t>, typed_array<double>, static_tag<42>>;
+
+    {
+        value_type             encoded{typed_array<std::int32_t>{{1, -2, 3}}};
+        std::vector<std::byte> bytes;
+        auto                   enc = make_encoder<typed_array_codec>(bytes);
+
+        REQUIRE(enc(encoded));
+        CHECK_EQ(to_hex(bytes), "d84e4c01000000feffffff03000000");
+
+        value_type decoded{static_tag<42>{}};
+        auto       dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<typed_array<std::int32_t>>(decoded));
+        CHECK_EQ(std::get<typed_array<std::int32_t>>(decoded).values(), std::vector<std::int32_t>{1, -2, 3});
+    }
+
+    {
+        const std::vector<double> values{1.0, -2.5};
+        const auto                bytes = encode_normal(std::span<const double>{values});
+
+        value_type decoded{static_tag<42>{}};
+        auto       dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<typed_array<double>>(decoded));
+        CHECK_EQ(std::get<typed_array<double>>(decoded).values(), values);
+    }
+}
+
+TEST_CASE("rfc8746 typed array views decode unambiguous variants by tag") {
+    using value_type = std::variant<typed_array_view<std::int32_t>, static_tag<42>>;
+
+    const std::vector<std::int32_t> values{1, -2, 3};
+    const auto                      bytes = encode_normal(std::span<const std::int32_t>{values});
+
+    value_type decoded{static_tag<42>{}};
+    auto       dec = make_decoder<typed_array_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(std::holds_alternative<typed_array_view<std::int32_t>>(decoded));
+    CHECK_EQ(std::get<typed_array_view<std::int32_t>>(decoded).copy_values(), values);
+}
+
+TEST_CASE("rfc8746 typed arrays decode nested variants by tag") {
+    using nested_type = std::variant<static_tag<42>, typed_array<double>>;
+    using value_type  = std::variant<typed_array<std::int32_t>, nested_type>;
+
+    const std::vector<double> values{1.0, -2.5};
+    const auto                bytes = encode_normal(std::span<const double>{values});
+
+    value_type decoded{typed_array<std::int32_t>{}};
+    auto       dec = make_decoder<typed_array_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(std::holds_alternative<nested_type>(decoded));
+    const auto &nested = std::get<nested_type>(decoded);
+    REQUIRE(std::holds_alternative<typed_array<double>>(nested));
+    CHECK_EQ(std::get<typed_array<double>>(nested).values(), values);
+}
+
+TEST_CASE("rfc8746 typed array variant tag mismatches do not consume payload") {
+    using value_type = std::variant<typed_array<std::int32_t>, static_tag<42>>;
+
+    const auto bytes = to_bytes("d82a4401020304");
+    auto       dec   = make_decoder<typed_array_codec>(bytes);
+
+    value_type decoded{typed_array<std::int32_t>{}};
+    REQUIRE(dec(decoded));
+    CHECK(std::holds_alternative<static_tag<42>>(decoded));
+
+    std::vector<std::byte> payload;
+    REQUIRE(dec(payload));
+    CHECK_EQ(to_hex(payload), "01020304");
 }
 
 TEST_CASE("rfc8746 int32 typed array uses exact little-endian wire bytes") {
