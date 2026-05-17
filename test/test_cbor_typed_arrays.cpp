@@ -67,6 +67,10 @@ static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span
 static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
 static_assert(IsTag<typed_array<std::int32_t>>);
 static_assert(IsTag<typed_array_view<std::int32_t>>);
+static_assert(IsTag<typed_array_be<float>>);
+static_assert(IsTag<typed_array_view_be<double>>);
+static_assert(typed_array_be<float>::cbor_tag == 81U);
+static_assert(typed_array_be<double>::cbor_tag == 82U);
 static_assert(!IsTag<typed_array_ref<std::int32_t>>);
 
 using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
@@ -81,6 +85,13 @@ template <typename T> std::vector<std::byte> encode_normal(std::span<const T> va
     std::vector<std::byte> output;
     auto                   enc = make_encoder<typed_array_codec>(output);
     REQUIRE(enc(as_typed_array(values)));
+    return output;
+}
+
+template <typename T> std::vector<std::byte> encode_big_endian(std::span<const T> values) {
+    std::vector<std::byte> output;
+    auto                   enc = make_encoder<typed_array_codec>(output);
+    REQUIRE(enc(as_typed_array_be(values)));
     return output;
 }
 
@@ -116,6 +127,30 @@ template <typename T> void check_roundtrip(const std::vector<T> &values) {
         CHECK_EQ(decoded.payload_bytes().size(), values.size() * sizeof(T));
         CHECK_EQ(decoded.size(), values.size());
         check_values_equal(decoded.copy_values(), values);
+    }
+}
+
+template <typename T> void check_big_endian_roundtrip(const std::vector<T> &values) {
+    const auto encoded = encode_big_endian(std::span<const T>{values});
+
+    {
+        typed_array_be<T> decoded;
+        auto              dec    = make_decoder<typed_array_codec>(encoded);
+        const auto        result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.values(), values);
+    }
+
+    {
+        typed_array_view_be<T> decoded;
+        auto                   dec    = make_decoder<typed_array_codec>(encoded);
+        const auto             result = dec(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.payload_bytes().size(), values.size() * sizeof(T));
+        CHECK_EQ(decoded.size(), values.size());
+        CHECK_EQ(decoded.copy_values(), values);
     }
 }
 
@@ -164,6 +199,8 @@ TEST_CASE("rfc8746 typed arrays encode and decode supported element types throug
     check_roundtrip<float16_t>({float16_t{static_cast<std::uint16_t>(0x3C00)}, float16_t{static_cast<std::uint16_t>(0xC100)}});
     check_roundtrip<float>({-2.5F, 0.0F, 3.25F});
     check_roundtrip<double>({-2.5, 0.0, 3.25});
+    check_big_endian_roundtrip<float>({-2.5F, 0.0F, 3.25F});
+    check_big_endian_roundtrip<double>({-2.5, 0.0, 3.25});
 }
 
 TEST_CASE("rfc8746 typed arrays decode unambiguous variants by tag") {
@@ -207,6 +244,32 @@ TEST_CASE("rfc8746 typed array views decode unambiguous variants by tag") {
     REQUIRE(dec(decoded));
     REQUIRE(std::holds_alternative<typed_array_view<std::int32_t>>(decoded));
     CHECK_EQ(std::get<typed_array_view<std::int32_t>>(decoded).copy_values(), values);
+}
+
+TEST_CASE("rfc8746 big-endian typed arrays decode unambiguous variants by tag") {
+    using value_type = std::variant<typed_array<float>, typed_array_be<float>, typed_array_view_be<double>>;
+
+    {
+        const std::vector<float> values{1.0F, -2.5F};
+        const auto               bytes = encode_big_endian(std::span<const float>{values});
+
+        value_type decoded{typed_array<float>{}};
+        auto       dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<typed_array_be<float>>(decoded));
+        CHECK_EQ(std::get<typed_array_be<float>>(decoded).values(), values);
+    }
+
+    {
+        const std::vector<double> values{1.0, -2.5};
+        const auto                bytes = encode_big_endian(std::span<const double>{values});
+
+        value_type decoded{typed_array<float>{}};
+        auto       dec = make_decoder<typed_array_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<typed_array_view_be<double>>(decoded));
+        CHECK_EQ(std::get<typed_array_view_be<double>>(decoded).copy_values(), values);
+    }
 }
 
 TEST_CASE("rfc8746 typed arrays decode nested variants by tag") {
@@ -274,6 +337,24 @@ TEST_CASE("rfc8746 float typed arrays use exact little-endian wire bytes") {
     }
 }
 
+TEST_CASE("rfc8746 float typed arrays use exact big-endian wire bytes") {
+    {
+        const std::vector<float> values{1.0F, -2.5F};
+
+        const auto encoded = encode_big_endian(std::span<const float>{values});
+
+        CHECK_EQ(to_hex(encoded), "d851483f800000c0200000");
+    }
+
+    {
+        const std::vector<double> values{1.0, -2.5};
+
+        const auto encoded = encode_big_endian(std::span<const double>{values});
+
+        CHECK_EQ(to_hex(encoded), "d852503ff0000000000000c004000000000000");
+    }
+}
+
 TEST_CASE("rfc8746 int64 typed arrays use exact little-endian wire bytes") {
     const std::vector<std::int64_t> values{-1, 0x0102030405060708LL};
 
@@ -302,6 +383,17 @@ TEST_CASE("rfc8746 typed array owned segment fallback matches normal encoding") 
     const auto                      span     = std::span<const std::int64_t>{values};
     const auto                      normal   = encode_normal(span);
     const auto                      segments = encode_typed_array_segments_copy(span);
+
+    REQUIRE_EQ(segments.size(), 1U);
+    CHECK(segments[0].is_owned());
+    CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(normal));
+}
+
+TEST_CASE("rfc8746 big-endian typed array owned segment fallback matches normal encoding") {
+    const std::vector<double> values{1.0, -2.5};
+    const auto                span     = std::span<const double>{values};
+    const auto                normal   = encode_big_endian(span);
+    const auto                segments = encode_typed_array_segments_copy_be(span);
 
     REQUIRE_EQ(segments.size(), 1U);
     CHECK(segments[0].is_owned());

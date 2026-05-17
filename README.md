@@ -54,7 +54,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
-- Opt-in [RFC 8746 typed-array](doc/rfc8746_typed_arrays.md) codec for homogeneous numeric payloads.
+- Opt-in [selected RFC 8746 typed-array](doc/rfc8746_typed_arrays.md) codec for homogeneous numeric payloads.
 - CDDL support for schema and custom data definitions.
 - Upcoming: resumable encoding and decoding (useful for streaming usecases).
 
@@ -864,7 +864,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.16.0 # or specify a particular commit/tag
+  GIT_TAG v0.16.0 # or a newer release/commit for newer extension features
 )
 
 FetchContent_MakeAvailable(cbor_tags)

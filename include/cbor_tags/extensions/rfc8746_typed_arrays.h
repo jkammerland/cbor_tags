@@ -23,38 +23,53 @@
 
 namespace cbor::tags::ext::rfc8746 {
 
-template <typename T> struct typed_array_traits;
+enum class typed_array_byte_order { little, big };
 
-template <> struct typed_array_traits<std::int32_t> {
+template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little> struct typed_array_traits;
+
+template <> struct typed_array_traits<std::int32_t, typed_array_byte_order::little> {
     using bit_type                     = std::uint32_t;
     static constexpr std::uint64_t tag = 78;
 };
 
-template <> struct typed_array_traits<std::int64_t> {
+template <> struct typed_array_traits<std::int64_t, typed_array_byte_order::little> {
     using bit_type                     = std::uint64_t;
     static constexpr std::uint64_t tag = 79;
 };
 
-template <> struct typed_array_traits<float16_t> {
+template <> struct typed_array_traits<float16_t, typed_array_byte_order::little> {
     using bit_type                     = std::uint16_t;
     static constexpr std::uint64_t tag = 84;
 };
 
-template <> struct typed_array_traits<float> {
+template <> struct typed_array_traits<float, typed_array_byte_order::little> {
     using bit_type                     = std::uint32_t;
     static constexpr std::uint64_t tag = 85;
 };
 
-template <> struct typed_array_traits<double> {
+template <> struct typed_array_traits<double, typed_array_byte_order::little> {
     using bit_type                     = std::uint64_t;
     static constexpr std::uint64_t tag = 86;
 };
 
-template <typename T>
-concept IsTypedArrayElement = requires {
-    typename typed_array_traits<std::remove_cv_t<T>>::bit_type;
-    { typed_array_traits<std::remove_cv_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
+template <> struct typed_array_traits<float, typed_array_byte_order::big> {
+    using bit_type                     = std::uint32_t;
+    static constexpr std::uint64_t tag = 81;
 };
+
+template <> struct typed_array_traits<double, typed_array_byte_order::big> {
+    using bit_type                     = std::uint64_t;
+    static constexpr std::uint64_t tag = 82;
+};
+
+template <typename T, typed_array_byte_order ByteOrder>
+concept IsTypedArrayElementFor = requires {
+    typename typed_array_traits<std::remove_cv_t<T>, ByteOrder>::bit_type;
+    { typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag } -> std::convertible_to<std::uint64_t>;
+};
+
+template <typename T>
+concept IsTypedArrayElement = IsTypedArrayElementFor<T, typed_array_byte_order::little>;
 
 namespace detail {
 
@@ -67,47 +82,63 @@ concept DecodableTypedArrayPayloadRange =
     TypedArrayPayloadRange<R> && ((std::ranges::contiguous_range<const R> && !IsContiguous<typename Decoder::input_buffer_type>) ||
                                   requires(Decoder &dec, std::uint64_t length) { R{dec.decode_bstring_payload(length)}; });
 
-template <IsTypedArrayElement T> [[nodiscard]] constexpr auto to_bits(T value) noexcept {
+template <typed_array_byte_order ByteOrder>
+inline constexpr bool native_matches_byte_order =
+    (std::endian::native == std::endian::little && ByteOrder == typed_array_byte_order::little) ||
+    (std::endian::native == std::endian::big && ByteOrder == typed_array_byte_order::big);
+
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] constexpr auto to_bits(T value) noexcept {
     using value_type = std::remove_cv_t<T>;
-    using bit_type   = typename typed_array_traits<value_type>::bit_type;
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
     static_assert(sizeof(value_type) == sizeof(bit_type));
     return std::bit_cast<bit_type>(value);
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] constexpr T from_little_endian(std::span<const std::byte> bytes) noexcept {
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] constexpr T from_endian(std::span<const std::byte> bytes) noexcept {
     using value_type = std::remove_cv_t<T>;
-    using bit_type   = typename typed_array_traits<value_type>::bit_type;
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
     static_assert(sizeof(value_type) == sizeof(bit_type));
 
     bit_type bits{};
     for (std::size_t i = 0; i < sizeof(value_type); ++i) {
-        bits |= static_cast<bit_type>(std::to_integer<std::uint8_t>(bytes[i])) << (i * 8U);
+        const auto shift = ByteOrder == typed_array_byte_order::little ? i * 8U : (sizeof(value_type) - 1U - i) * 8U;
+        bits |= static_cast<bit_type>(std::to_integer<std::uint8_t>(bytes[i])) << shift;
     }
     return std::bit_cast<value_type>(bits);
 }
 
-template <IsTypedArrayElement T> void append_little_endian_bytes(std::vector<std::byte> &out, T value) {
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+void append_endian_bytes(std::vector<std::byte> &out, T value) {
     using value_type = std::remove_cv_t<T>;
-    auto bits        = to_bits(static_cast<value_type>(value));
+    auto bits        = to_bits<ByteOrder>(static_cast<value_type>(value));
     for (std::size_t i = 0; i < sizeof(value_type); ++i) {
-        out.push_back(static_cast<std::byte>((bits >> (i * 8U)) & 0xFFU));
+        const auto shift = ByteOrder == typed_array_byte_order::little ? i * 8U : (sizeof(value_type) - 1U - i) * 8U;
+        out.push_back(static_cast<std::byte>((bits >> shift) & 0xFFU));
     }
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::byte> little_endian_payload(std::span<const T> values) {
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] std::vector<std::byte> endian_payload(std::span<const T> values) {
     std::vector<std::byte> bytes;
     bytes.reserve(values.size_bytes());
     for (const auto value : values) {
-        append_little_endian_bytes(bytes, value);
+        append_endian_bytes<ByteOrder>(bytes, value);
     }
     return bytes;
 }
 
-template <IsTypedArrayElement T, typename AssignPayload>
+template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] status_code decode_payload_after_tag(auto &dec, std::uint64_t tag, AssignPayload &&assign_payload) {
     using value_type = std::remove_cv_t<T>;
 
-    if (tag != typed_array_traits<value_type>::tag) {
+    if (tag != typed_array_traits<value_type, ByteOrder>::tag) {
         return status_code::no_match_for_tag;
     }
 
@@ -119,38 +150,42 @@ template <IsTypedArrayElement T, typename AssignPayload>
     return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
 }
 
-template <IsTypedArrayElement T, typename AssignPayload>
+template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] status_code decode_payload(auto &dec, major_type major, std::byte additional_info, AssignPayload &&assign_payload) {
     if (major != major_type::Tag) {
         return status_code::no_match_for_tag_on_buffer;
     }
 
-    return decode_payload_after_tag<T>(dec, dec.decode_unsigned(additional_info), std::forward<AssignPayload>(assign_payload));
+    return decode_payload_after_tag<T, ByteOrder>(dec, dec.decode_unsigned(additional_info), std::forward<AssignPayload>(assign_payload));
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::remove_cv_t<T>> copy_values(std::span<const std::byte> payload) {
+template <typename T, typed_array_byte_order ByteOrder>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] std::vector<std::remove_cv_t<T>> copy_values(std::span<const std::byte> payload) {
     using value_type = std::remove_cv_t<T>;
 
     std::vector<value_type> values;
     values.reserve(payload.size() / sizeof(value_type));
     for (std::size_t offset = 0; offset < payload.size(); offset += sizeof(value_type)) {
-        values.push_back(from_little_endian<value_type>(payload.subspan(offset, sizeof(value_type))));
+        values.push_back(from_endian<ByteOrder, value_type>(payload.subspan(offset, sizeof(value_type))));
     }
     return values;
 }
 
-template <IsTypedArrayElement T, typename PayloadRange>
+template <typename T, typed_array_byte_order ByteOrder, typename PayloadRange>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] std::vector<std::remove_cv_t<T>> materialize_values(PayloadRange &&payload, std::size_t payload_size) {
     using value_type = std::remove_cv_t<T>;
 
-    if constexpr (std::endian::native == std::endian::little && std::ranges::contiguous_range<PayloadRange>) {
+    if constexpr (native_matches_byte_order<ByteOrder> && std::ranges::contiguous_range<PayloadRange>) {
         std::vector<value_type> values(payload_size / sizeof(value_type));
         if (payload_size != 0U) {
             std::memcpy(values.data(), std::ranges::data(payload), payload_size);
         }
         return values;
     } else if constexpr (std::ranges::contiguous_range<PayloadRange>) {
-        return copy_values<value_type>(
+        return copy_values<value_type, ByteOrder>(
             std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::ranges::data(payload)), payload_size});
     } else {
         std::vector<std::byte> payload_bytes;
@@ -158,17 +193,20 @@ template <IsTypedArrayElement T, typename PayloadRange>
         for (auto byte_value : payload) {
             payload_bytes.push_back(static_cast<std::byte>(byte_value));
         }
-        return copy_values<value_type>(std::span<const std::byte>{payload_bytes});
+        return copy_values<value_type, ByteOrder>(std::span<const std::byte>{payload_bytes});
     }
 }
 
 } // namespace detail
 
-template <IsTypedArrayElement T> class typed_array {
+template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array {
   public:
     using value_type                              = std::remove_cv_t<T>;
     using container_type                          = std::vector<value_type>;
-    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
     static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     typed_array() = default;
@@ -183,10 +221,13 @@ template <IsTypedArrayElement T> class typed_array {
     container_type values_{};
 };
 
-template <IsTypedArrayElement T> class typed_array_ref {
+template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array_ref {
   public:
     using value_type                              = std::remove_cv_t<T>;
-    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
 
     constexpr explicit typed_array_ref(std::span<const value_type> values) noexcept : values_(values) {}
 
@@ -213,7 +254,31 @@ template <IsTypedArrayElement T, typename Allocator>
 
 template <IsTypedArrayElement T, typename Allocator> void as_typed_array(std::vector<T, Allocator> &&values) = delete;
 
-template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] constexpr auto as_typed_array_be(std::span<const T> values) noexcept {
+    return typed_array_ref<std::remove_cv_t<T>, typed_array_byte_order::big>{
+        std::span<const std::remove_cv_t<T>>{values.data(), values.size()}};
+}
+
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] constexpr auto as_typed_array_be(std::span<T> values) noexcept {
+    return as_typed_array_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T, typename Allocator>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] constexpr auto as_typed_array_be(const std::vector<T, Allocator> &values) noexcept {
+    return as_typed_array_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T, typename Allocator>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+void as_typed_array_be(std::vector<T, Allocator> &&values) = delete;
+
+template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 class typed_array_values_view : public std::ranges::view_interface<typed_array_values_view<T, ByteRange>> {
   public:
     using value_type = std::remove_cv_t<T>;
@@ -236,7 +301,7 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
                 byte = static_cast<std::byte>(*it);
                 ++it;
             }
-            return detail::from_little_endian<value_type>(std::span<const std::byte>{bytes});
+            return detail::from_endian<ByteOrder, value_type>(std::span<const std::byte>{bytes});
         }
 
         constexpr iterator &operator++() {
@@ -280,11 +345,15 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
     std::size_t value_count_{};
 };
 
-template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>> class typed_array_view {
+template <typename T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>,
+          typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array_view {
   public:
     using value_type                              = std::remove_cv_t<T>;
     using payload_range_type                      = ByteRange;
-    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
     static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     constexpr typed_array_view() = default;
@@ -302,7 +371,7 @@ template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std:
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return payload_size_ / sizeof(value_type); }
 
-    [[nodiscard]] constexpr auto values() const { return typed_array_values_view<value_type, ByteRange>{payload_, size()}; }
+    [[nodiscard]] constexpr auto values() const { return typed_array_values_view<value_type, ByteRange, ByteOrder>{payload_, size()}; }
 
     [[nodiscard]] std::vector<value_type> copy_values() const {
         std::vector<value_type> output;
@@ -331,19 +400,74 @@ using typed_array_view_for =
     typed_array_view<T, std::conditional_t<IsContiguous<typename std::remove_cvref_t<Decoder>::input_buffer_type>,
                                            std::span<const std::byte>, typename std::remove_cvref_t<Decoder>::bstr_view_t>>;
 
+template <typename T, typename Decoder>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+using typed_array_view_be_for =
+    typed_array_view<T,
+                     std::conditional_t<IsContiguous<typename std::remove_cvref_t<Decoder>::input_buffer_type>, std::span<const std::byte>,
+                                        typename std::remove_cvref_t<Decoder>::bstr_view_t>,
+                     typed_array_byte_order::big>;
+
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+using typed_array_be = typed_array<T, typed_array_byte_order::big>;
+
+template <typename T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+using typed_array_view_be = typed_array_view<T, ByteRange, typed_array_byte_order::big>;
+
 template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <IsTypedArrayElement T> void encode(const typed_array<T> &array) { encode_owned_values(array.span()); }
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode(const typed_array<T, ByteOrder> &array) {
+        encode_owned_values<T, ByteOrder>(array.span());
+    }
 
-    template <IsTypedArrayElement T> void encode(const typed_array_ref<T> &array) { encode_borrowed_values(array.values()); }
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode(const typed_array_ref<T, ByteOrder> &array) {
+        encode_borrowed_values<T, ByteOrder>(array.values());
+    }
 
-    template <IsTypedArrayElement T> [[nodiscard]] status_code decode(typed_array<T> &array, major_type major, std::byte additional_info) {
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    [[nodiscard]] status_code decode(typed_array<T, ByteOrder> &array, major_type major, std::byte additional_info) {
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+        return detail::decode_payload<value_type, ByteOrder>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+                    return status_code::no_match_for_bstr_on_buffer;
+                }
+                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
+                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+                    if (payload_size_u64 > payload_size_limit) {
+                        return status_code::error;
+                    }
+                }
+
+                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+                if ((payload_size % sizeof(value_type)) != 0U) {
+                    return status_code::unexpected_group_size;
+                }
+                array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
+                return status_code::success;
+            });
+    }
+
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    [[nodiscard]] status_code decode(typed_array<T, ByteOrder> &array, std::uint64_t tag) {
+        using value_type = std::remove_cv_t<T>;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
             if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
@@ -360,44 +484,18 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
             if ((payload_size % sizeof(value_type)) != 0U) {
                 return status_code::unexpected_group_size;
             }
-            array.values() = detail::materialize_values<value_type>(std::move(raw_payload), payload_size);
+            array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
             return status_code::success;
         });
     }
 
-    template <IsTypedArrayElement T> [[nodiscard]] status_code decode(typed_array<T> &array, std::uint64_t tag) {
+    template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+        requires(IsTypedArrayElementFor<T, ByteOrder> && detail::DecodableTypedArrayPayloadRange<Self, ByteRange>)
+    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange, ByteOrder> &view, major_type major, std::byte additional_info) {
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload_after_tag<value_type>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
-            if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-            if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                if (payload_size_u64 > payload_size_limit) {
-                    return status_code::error;
-                }
-            }
-
-            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-            if ((payload_size % sizeof(value_type)) != 0U) {
-                return status_code::unexpected_group_size;
-            }
-            array.values() = detail::materialize_values<value_type>(std::move(raw_payload), payload_size);
-            return status_code::success;
-        });
-    }
-
-    template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
-        requires detail::DecodableTypedArrayPayloadRange<Self, ByteRange>
-    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange> &view, major_type major, std::byte additional_info) {
-        using value_type = std::remove_cv_t<T>;
-        auto &dec        = static_cast<Self &>(*this);
-
-        return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type, std::byte payload_info) {
+        return detail::decode_payload<value_type, ByteOrder>(dec, major, additional_info, [&](major_type, std::byte payload_info) {
             if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
                 return status_code::contiguous_view_on_non_contiguous_data;
             } else {
@@ -414,19 +512,19 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                 if ((payload_size % sizeof(value_type)) != 0U) {
                     return status_code::unexpected_group_size;
                 }
-                view = typed_array_view<value_type, ByteRange>{ByteRange{std::move(raw_payload)}, payload_size};
+                view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
                 return status_code::success;
             }
         });
     }
 
-    template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
-        requires detail::DecodableTypedArrayPayloadRange<Self, ByteRange>
-    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange> &view, std::uint64_t tag) {
+    template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+        requires(IsTypedArrayElementFor<T, ByteOrder> && detail::DecodableTypedArrayPayloadRange<Self, ByteRange>)
+    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange, ByteOrder> &view, std::uint64_t tag) {
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload_after_tag<value_type>(dec, tag, [&](major_type, std::byte payload_info) {
+        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type, std::byte payload_info) {
             if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
                 return status_code::contiguous_view_on_non_contiguous_data;
             } else {
@@ -443,7 +541,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                 if ((payload_size % sizeof(value_type)) != 0U) {
                     return status_code::unexpected_group_size;
                 }
-                view = typed_array_view<value_type, ByteRange>{ByteRange{std::move(raw_payload)}, payload_size};
+                view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
                 return status_code::success;
             }
         });
@@ -460,68 +558,79 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         }
     }
 
-    template <IsTypedArrayElement T> void encode_owned_values(std::span<const T> values) {
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode_owned_values(std::span<const T> values) {
         using value_type = std::remove_cv_t<T>;
         auto &enc        = static_cast<Self &>(*this);
 
-        if constexpr (std::endian::native == std::endian::little) {
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
+        if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             encode_owned_payload(std::as_bytes(values));
         } else {
-            auto payload = detail::little_endian_payload(values);
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
+            auto payload = detail::endian_payload<ByteOrder>(values);
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             encode_owned_payload(std::span<const std::byte>{payload});
         }
     }
 
-    template <IsTypedArrayElement T> void encode_borrowed_values(std::span<const T> values) {
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode_borrowed_values(std::span<const T> values) {
         using value_type = std::remove_cv_t<T>;
         auto &enc        = static_cast<Self &>(*this);
 
-        if constexpr (std::endian::native == std::endian::little) {
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
+        if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             enc.encode(as_bstr_range(std::as_bytes(values)));
         } else {
-            auto payload = detail::little_endian_payload(values);
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
+            auto payload = detail::endian_payload<ByteOrder>(values);
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             encode_owned_payload(std::span<const std::byte>{payload});
         }
     }
 };
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
-    if constexpr (std::endian::native == std::endian::little) {
-        return encode_tagged_bstr_segments(typed_array_traits<std::remove_cv_t<T>>::tag, std::as_bytes(values));
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
+    if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+        return encode_tagged_bstr_segments(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {
-        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires a little-endian native payload");
+        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires matching native byte order");
     }
 }
 
-template <cbor::tags::detail::ByteSegmentsOutputBuffer Segments, IsTypedArrayElement T>
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
-    if constexpr (std::endian::native == std::endian::little) {
-        encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>>::tag, std::as_bytes(values));
+    if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+        encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {
-        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires a little-endian native payload");
+        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires matching native byte order");
     }
 }
 
-template <IsTypedArrayElement T>
-    requires(!std::is_const_v<T>)
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<T> values) {
-    return encode_typed_array_segments(std::span<const T>{values.data(), values.size()});
+    return encode_typed_array_segments<ByteOrder>(std::span<const T>{values.data(), values.size()});
 }
 
-template <cbor::tags::detail::ByteSegmentsOutputBuffer Segments, IsTypedArrayElement T>
-    requires(!std::is_const_v<T>)
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 void encode_typed_array_segments_into(Segments &segments, std::span<T> values) {
-    encode_typed_array_segments_into(segments, std::span<const T>{values.data(), values.size()});
+    encode_typed_array_segments_into<ByteOrder>(segments, std::span<const T>{values.data(), values.size()});
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
     const auto tag_header =
-        cbor::tags::detail::encode_cbor_major_argument_header(typed_array_traits<std::remove_cv_t<T>>::tag, std::byte{0xC0});
-    auto       payload     = detail::little_endian_payload(values);
+        cbor::tags::detail::encode_cbor_major_argument_header(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::byte{0xC0});
+    auto       payload     = detail::endian_payload<ByteOrder>(values);
     const auto bstr_header = cbor::tags::detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
 
     cbor_segments segments;
@@ -532,18 +641,46 @@ template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_
     return segments;
 }
 
-template <IsTypedArrayElement T>
-    requires(!std::is_const_v<T>)
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<T> values) {
-    return encode_typed_array_segments_copy(std::span<const T>{values.data(), values.size()});
+    return encode_typed_array_segments_copy<ByteOrder>(std::span<const T>{values.data(), values.size()});
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_segments(const typed_array_ref<T> &array) {
-    return encode_typed_array_segments(array.values());
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<const T> values) {
+    return encode_typed_array_segments<typed_array_byte_order::big>(values);
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_segments(const typed_array<T> &array) {
-    return encode_typed_array_segments_copy(array.span());
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<T> values) {
+    return encode_typed_array_segments_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] cbor_segments encode_typed_array_segments_copy_be(std::span<const T> values) {
+    return encode_typed_array_segments_copy<typed_array_byte_order::big>(values);
+}
+
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] cbor_segments encode_typed_array_segments_copy_be(std::span<T> values) {
+    return encode_typed_array_segments_copy_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T, typed_array_byte_order ByteOrder>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_segments(const typed_array_ref<T, ByteOrder> &array) {
+    return encode_typed_array_segments<ByteOrder>(array.values());
+}
+
+template <typename T, typed_array_byte_order ByteOrder>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_segments(const typed_array<T, ByteOrder> &array) {
+    return encode_typed_array_segments_copy<ByteOrder>(array.span());
 }
 
 } // namespace cbor::tags::ext::rfc8746

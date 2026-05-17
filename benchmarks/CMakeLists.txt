@@ -40,6 +40,7 @@ add_subdirectory(encoder)
 add_subdirectory(decoder)
 add_subdirectory(ranges)
 add_subdirectory(custom_codec_1)
+add_subdirectory(typed_arrays)
 
 option(CBOR_TAGS_BUILD_COMPARISON_BENCHMARKS "Build serialization comparison benchmarks" OFF)
 if(CBOR_TAGS_BUILD_COMPARISON_BENCHMARKS)
