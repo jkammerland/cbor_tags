@@ -1,7 +1,7 @@
 # CDDL Standard Coverage
 
 This document tracks how `cddl_schema_to` maps C++ types to CDDL grammar from
-RFC 8610 and the RFC 9682 updated ABNF. 
+RFC 8610 and the RFC 9682 updated ABNF.
 
 ## Scope
 

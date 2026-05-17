@@ -2,7 +2,7 @@
 
 `custom_codec_1` is an opt-in codec for cases where both sides already
 share the C++ schema and do not need normal self-describing CBOR fields inside
-the tagged payload. 
+the tagged payload.
 
 The outer value is still CBOR:
 

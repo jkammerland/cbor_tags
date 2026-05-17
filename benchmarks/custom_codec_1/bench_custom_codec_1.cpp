@@ -117,7 +117,7 @@ auto make_float_vector_values(std::size_t count) -> std::vector<float> {
 void configure_bench(ankerl::nanobench::Bench &bench, std::string_view title) {
     bench.title(std::string{title});
     bench.unit("Ops");
-    bench.relative(true);
+    bench.relative(false);
     bench.performanceCounters(true);
     bench.minEpochIterations(100);
 }
@@ -125,7 +125,7 @@ void configure_bench(ankerl::nanobench::Bench &bench, std::string_view title) {
 void configure_throughput_bench(ankerl::nanobench::Bench &bench, std::string_view title) {
     bench.title(std::string{title});
     bench.unit("byte");
-    bench.relative(true);
+    bench.relative(false);
     bench.performanceCounters(false);
     bench.minEpochIterations(20);
 }
