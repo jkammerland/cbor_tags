@@ -34,6 +34,8 @@ template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order:
 enum class uint8_clamped : std::uint8_t {};
 
 struct float128_t {
+    // Native-endian IEEE 754 binary128 bits. Encoders convert this representation
+    // to the requested RFC 8746 wire byte order.
     std::array<std::byte, 16> bytes{};
 
     friend constexpr bool operator==(const float128_t &, const float128_t &) noexcept = default;
@@ -107,7 +109,6 @@ class homogeneous_array_ref {
   public:
     using array_type                              = std::remove_cvref_t<Array>;
     static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
-    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     constexpr explicit homogeneous_array_ref(const array_type &values) noexcept : values_(&values) {}
 
@@ -163,7 +164,6 @@ class multi_dimensional_array_ref {
 
     static constexpr std::uint64_t cbor_array_tag =
         Layout == multi_dimensional_layout::row_major ? multi_dimensional_array_tag : multi_dimensional_column_major_array_tag;
-    static constexpr std::uint64_t cbor_tag = cbor_array_tag;
 
     constexpr multi_dimensional_array_ref(const dimensions_type &dimensions, const array_type &values) noexcept
         : dimensions_(&dimensions), values_(&values) {}
@@ -631,6 +631,11 @@ template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wr
 template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
 struct is_typed_array_wrapper<typed_array_view<T, ByteRange, ByteOrder>> : std::true_type {};
 
+template <typename T> struct is_typed_array_encode_wrapper : std::false_type {};
+template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_encode_wrapper<typed_array<T, ByteOrder>> : std::true_type {};
+template <typename T, typed_array_byte_order ByteOrder>
+struct is_typed_array_encode_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
+
 template <typename T> struct is_homogeneous_array_wrapper : std::false_type {};
 template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array<Array>> : std::true_type {};
 template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array_ref<Array>> : std::true_type {};
@@ -639,36 +644,40 @@ template <typename T>
 concept IsRFC8746ArrayPayload = IsArray<std::remove_cvref_t<T>> || is_typed_array_wrapper<std::remove_cvref_t<T>>::value ||
                                 is_homogeneous_array_wrapper<std::remove_cvref_t<T>>::value;
 
+template <typename T>
+concept IsRFC8746EncodableArrayPayload = IsArray<std::remove_cvref_t<T>> || is_typed_array_encode_wrapper<std::remove_cvref_t<T>>::value ||
+                                         is_homogeneous_array_wrapper<std::remove_cvref_t<T>>::value;
+
 template <typename Dimensions, typename Array>
-    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746ArrayPayload<Array>)
+    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746EncodableArrayPayload<Array>)
 [[nodiscard]] constexpr auto as_multi_dimensional_array(const Dimensions &dimensions, const Array &values) noexcept {
     return multi_dimensional_array_ref<Dimensions, Array>{dimensions, values};
 }
 
 template <typename Dimensions, typename Array>
     requires(!std::is_lvalue_reference_v<Dimensions &&> && IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>> &&
-             IsRFC8746ArrayPayload<Array>)
+             IsRFC8746EncodableArrayPayload<Array>)
 void as_multi_dimensional_array(Dimensions &&dimensions, const Array &values) = delete;
 
 template <typename Dimensions, typename Array>
     requires(IsRFC8746DimensionArray<Dimensions> && !std::is_lvalue_reference_v<Array &&> &&
-             IsRFC8746ArrayPayload<std::remove_cvref_t<Array>>)
+             IsRFC8746EncodableArrayPayload<std::remove_cvref_t<Array>>)
 void as_multi_dimensional_array(const Dimensions &dimensions, Array &&values) = delete;
 
 template <typename Dimensions, typename Array>
-    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746ArrayPayload<Array>)
+    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746EncodableArrayPayload<Array>)
 [[nodiscard]] constexpr auto as_multi_dimensional_column_major_array(const Dimensions &dimensions, const Array &values) noexcept {
     return multi_dimensional_array_ref<Dimensions, Array, multi_dimensional_layout::column_major>{dimensions, values};
 }
 
 template <typename Dimensions, typename Array>
     requires(!std::is_lvalue_reference_v<Dimensions &&> && IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>> &&
-             IsRFC8746ArrayPayload<Array>)
+             IsRFC8746EncodableArrayPayload<Array>)
 void as_multi_dimensional_column_major_array(Dimensions &&dimensions, const Array &values) = delete;
 
 template <typename Dimensions, typename Array>
     requires(IsRFC8746DimensionArray<Dimensions> && !std::is_lvalue_reference_v<Array &&> &&
-             IsRFC8746ArrayPayload<std::remove_cvref_t<Array>>)
+             IsRFC8746EncodableArrayPayload<std::remove_cvref_t<Array>>)
 void as_multi_dimensional_column_major_array(const Dimensions &dimensions, Array &&values) = delete;
 
 namespace detail {
@@ -1004,7 +1013,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     void encode_multi_dimensional_array_payload(const Dimensions &dimensions, const Array &array) {
         static_assert(IsRFC8746DimensionArray<Dimensions>,
                       "RFC 8746 multi_dimensional_array dimensions must encode as a CBOR array of unsigned integers");
-        static_assert(IsRFC8746ArrayPayload<Array>,
+        static_assert(IsRFC8746EncodableArrayPayload<Array>,
                       "RFC 8746 multi_dimensional_array payload must encode as an array, typed_array, or homogeneous_array");
 
         detail::validate_multi_dimensional_shape_or_throw(dimensions, array);

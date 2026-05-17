@@ -533,14 +533,23 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
     check_cddl_typed_array_tag<rfc8746::typed_array<double>>(86);
     check_cddl_typed_array_tag<rfc8746::typed_array<rfc8746::float128_t>>(87);
 
+    CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_view<float>>(), "root = #6.85(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_view_be<float>>(), "root = #6.81(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_ref<std::int32_t>>(), "root = #6.78(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::homogeneous_array<std::vector<int>>>(), "root = #6.41([* int])");
 
-    using row_major    = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
-    using column_major = rfc8746::multi_dimensional_column_major_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
+    using row_major     = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
+    using column_major  = rfc8746::multi_dimensional_column_major_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
+    using fixed_rank    = rfc8746::multi_dimensional_array<std::array<std::uint64_t, 2>, rfc8746::typed_array<std::uint16_t>>;
+    using view_payload  = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array_view<std::uint16_t>>;
+    using plain_payload = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, std::vector<int>>;
+    using homogeneous_payload = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::homogeneous_array<std::vector<int>>>;
     CHECK_EQ(cddl_schema_inline<row_major>(), "root = #6.40([[* uint], #6.69(bstr)])");
     CHECK_EQ(cddl_schema_inline<column_major>(), "root = #6.1040([[* uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<fixed_rank>(), "root = #6.40([[2*2 uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<view_payload>(), "root = #6.40([[* uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<plain_payload>(), "root = #6.40([[* uint], [* int]])");
+    CHECK_EQ(cddl_schema_inline<homogeneous_payload>(), "root = #6.40([[* uint], #6.41([* int])])");
 
     CHECK_EQ(cddl_schema_inline<std::variant<rfc8746::typed_array<std::int32_t>, rfc8746::typed_array_be<double>>>(),
              "root = #6.78(bstr) / #6.82(bstr)");

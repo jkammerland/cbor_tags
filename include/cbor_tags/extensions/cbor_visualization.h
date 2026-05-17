@@ -497,9 +497,7 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         return false;
     } else {
         using next_seen = cddl_seen_append_t<Seen, value_type>;
-        if constexpr (CDDLTaggedByteStringArray<value_type>) {
-            return false;
-        } else if constexpr (CDDLHomogeneousArray<value_type>) {
+        if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
@@ -532,6 +530,93 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             return false;
         }
     }
+}
+
+template <typename T> consteval bool cddl_direct_fixed_tag_available() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsTagHeader<value_type> || is_dynamic_tag_t<value_type> || HasDynamicTag<value_type> ||
+                  is_dynamic_tagged_tuple_v<value_type>) {
+        return false;
+    } else {
+        return CDDLTaggedByteStringArray<value_type> || CDDLHomogeneousArray<value_type> || CDDLMultiDimensionalArray<value_type> ||
+               IsTag<value_type>;
+    }
+}
+
+template <typename T> consteval std::uint64_t cddl_direct_fixed_tag() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (CDDLTaggedByteStringArray<value_type>) {
+        return cddl_tagged_bstr_array_traits<value_type>::tag;
+    } else if constexpr (CDDLHomogeneousArray<value_type>) {
+        return cddl_homogeneous_array_traits<value_type>::tag;
+    } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
+        return cddl_multi_dimensional_array_traits<value_type>::tag;
+    } else {
+        return static_cast<std::uint64_t>(get_tag_from_any<value_type>());
+    }
+}
+
+template <typename T> consteval bool cddl_contains_tag_header() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsOptional<value_type>) {
+        return cddl_contains_tag_header<typename value_type::value_type>();
+    } else if constexpr (IsVariant<value_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (cddl_contains_tag_header<Ts>() || ...);
+        }(static_cast<value_type *>(nullptr));
+    } else {
+        return IsTagHeader<value_type>;
+    }
+}
+
+template <typename T> consteval bool cddl_contains_fixed_tag() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsOptional<value_type>) {
+        return cddl_contains_fixed_tag<typename value_type::value_type>();
+    } else if constexpr (IsVariant<value_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (cddl_contains_fixed_tag<Ts>() || ...);
+        }(static_cast<value_type *>(nullptr));
+    } else {
+        return cddl_direct_fixed_tag_available<value_type>();
+    }
+}
+
+template <typename A, typename B> consteval bool cddl_fixed_tags_overlap() {
+    using a_type = std::remove_cvref_t<A>;
+    using b_type = std::remove_cvref_t<B>;
+    if constexpr (IsOptional<a_type>) {
+        return cddl_fixed_tags_overlap<typename a_type::value_type, b_type>();
+    } else if constexpr (IsOptional<b_type>) {
+        return cddl_fixed_tags_overlap<a_type, typename b_type::value_type>();
+    } else if constexpr (IsVariant<a_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (cddl_fixed_tags_overlap<Ts, b_type>() || ...);
+        }(static_cast<a_type *>(nullptr));
+    } else if constexpr (IsVariant<b_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (cddl_fixed_tags_overlap<a_type, Ts>() || ...);
+        }(static_cast<b_type *>(nullptr));
+    } else if constexpr (cddl_direct_fixed_tag_available<a_type>() && cddl_direct_fixed_tag_available<b_type>()) {
+        return cddl_direct_fixed_tag<a_type>() == cddl_direct_fixed_tag<b_type>();
+    } else {
+        return false;
+    }
+}
+
+template <typename A, typename B> consteval bool cddl_tag_alternatives_overlap() {
+    return cddl_fixed_tags_overlap<A, B>() || (cddl_contains_tag_header<A>() && cddl_contains_fixed_tag<B>()) ||
+           (cddl_contains_tag_header<B>() && cddl_contains_fixed_tag<A>()) ||
+           (cddl_contains_tag_header<A>() && cddl_contains_tag_header<B>());
+}
+
+consteval bool cddl_variant_has_tag_overlap() { return false; }
+
+template <typename T> consteval bool cddl_variant_has_tag_overlap() { return false; }
+
+template <typename T, typename U, typename... Rest> consteval bool cddl_variant_has_tag_overlap() {
+    return cddl_tag_alternatives_overlap<T, U>() || (cddl_tag_alternatives_overlap<T, Rest>() || ...) ||
+           cddl_variant_has_tag_overlap<U, Rest...>();
 }
 
 constexpr bool is_cddl_id_start(char value) {
@@ -1139,6 +1224,8 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
             constexpr auto matching_major_types = valid_concept_mapping_array_v<std::variant<Ts...>>;
             static_assert(matching_major_types[MajorIndex::Tag] <= 1,
+                          "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
+            static_assert(!cddl_variant_has_tag_overlap<Ts...>(),
                           "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                           "CDDL for std::variant alternatives with dynamic CBOR tags is unsupported");

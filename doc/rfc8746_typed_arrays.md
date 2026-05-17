@@ -89,7 +89,11 @@ multi-dim-column-major<dim, array> = #6.1040([dim, array])
 
 The byte string contains tightly packed element payload bytes in the selected
 byte order. `float128_t` is an opaque 16-byte payload holder because C++20 has
-no portable IEEE 754 binary128 value type.
+no portable IEEE 754 binary128 value type. Its bytes are interpreted as a
+native-endian binary128 object representation; `as_typed_array_be()` and
+`as_typed_array()` convert that representation to the selected wire byte order.
+If you already have preformatted wire-order bytes, emit a tagged byte string
+directly instead of wrapping them in `float128_t`.
 
 The structural tags are exposed as fixed-tag wrappers:
 
@@ -286,6 +290,10 @@ using duplicate_typed_array_tag = std::variant<typed_array<std::int32_t>, typed_
 ```
 
 `typed_array_ref<T>` is an encode wrapper and is not a variant decode target.
+`typed_array_view<T>` is a decode/CDDL view; it can appear as a decoded
+multi-dimensional payload type, but encode factories require an encodable
+payload such as a CBOR array, `typed_array<T>`, `typed_array_ref<T>`, or
+homogeneous array wrapper.
 
 ## Support Checklist
 
