@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_segments.h"
+#include "cbor_tags/extensions/cbor_visualization_traits.h"
 
 #include <array>
 #include <bit>
@@ -491,7 +492,7 @@ void as_typed_array_be(std::vector<T, Allocator> &&values) = delete;
 
 template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
     requires IsTypedArrayElementFor<T, ByteOrder>
-class typed_array_values_view : public std::ranges::view_interface<typed_array_values_view<T, ByteRange>> {
+class typed_array_values_view : public std::ranges::view_interface<typed_array_values_view<T, ByteRange, ByteOrder>> {
   public:
     using value_type = std::remove_cv_t<T>;
 
@@ -627,6 +628,85 @@ using typed_array_be = typed_array<T, typed_array_byte_order::big>;
 template <typename T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
 using typed_array_view_be = typed_array_view<T, ByteRange, typed_array_byte_order::big>;
+
+template <typename T> struct is_typed_array_wrapper : std::false_type {};
+template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wrapper<typed_array<T, ByteOrder>> : std::true_type {};
+template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
+template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+struct is_typed_array_wrapper<typed_array_view<T, ByteRange, ByteOrder>> : std::true_type {};
+
+template <typename T> struct is_homogeneous_array_wrapper : std::false_type {};
+template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array<Array>> : std::true_type {};
+template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array_ref<Array>> : std::true_type {};
+
+template <typename T>
+concept IsRFC8746DimensionArray =
+    IsArray<std::remove_cvref_t<T>> && IsUnsigned<std::remove_cv_t<std::ranges::range_value_t<std::remove_cvref_t<T>>>>;
+
+template <typename T>
+concept IsRFC8746ArrayPayload = IsArray<std::remove_cvref_t<T>> || is_typed_array_wrapper<std::remove_cvref_t<T>>::value ||
+                                is_homogeneous_array_wrapper<std::remove_cvref_t<T>>::value;
+
+} // namespace cbor::tags::ext::rfc8746
+
+namespace cbor::tags::detail {
+
+template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
+struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
+    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+};
+
+template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
+struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_ref<T, ByteOrder>> {
+    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+};
+
+template <typename T, ext::rfc8746::detail::TypedArrayPayloadRange ByteRange, ext::rfc8746::typed_array_byte_order ByteOrder>
+struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_view<T, ByteRange, ByteOrder>> {
+    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+};
+
+template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::homogeneous_array<Array>> {
+    static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array CDDL requires a CBOR array payload type");
+
+    using array_type                   = Array;
+    static constexpr std::uint64_t tag = ext::rfc8746::homogeneous_array<Array>::cbor_array_tag;
+};
+
+template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::homogeneous_array_ref<Array>> {
+    static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array_ref CDDL requires a CBOR array payload type");
+
+    using array_type                   = typename ext::rfc8746::homogeneous_array_ref<Array>::array_type;
+    static constexpr std::uint64_t tag = ext::rfc8746::homogeneous_array_ref<Array>::cbor_array_tag;
+};
+
+template <typename Dimensions, typename Array, ext::rfc8746::multi_dimensional_layout Layout>
+struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array<Dimensions, Array, Layout>> {
+    static_assert(ext::rfc8746::IsRFC8746DimensionArray<Dimensions>,
+                  "RFC 8746 multi_dimensional_array CDDL requires dimensions to be a CBOR array of unsigned integers");
+    static_assert(ext::rfc8746::IsRFC8746ArrayPayload<Array>,
+                  "RFC 8746 multi_dimensional_array CDDL requires an array, typed_array, or homogeneous_array payload type");
+
+    using dimensions_type              = Dimensions;
+    using array_type                   = Array;
+    static constexpr std::uint64_t tag = ext::rfc8746::multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag;
+};
+
+template <typename Dimensions, typename Array, ext::rfc8746::multi_dimensional_layout Layout>
+struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>> {
+    static_assert(ext::rfc8746::IsRFC8746DimensionArray<Dimensions>,
+                  "RFC 8746 multi_dimensional_array_ref CDDL requires dimensions to be a CBOR array of unsigned integers");
+    static_assert(ext::rfc8746::IsRFC8746ArrayPayload<Array>,
+                  "RFC 8746 multi_dimensional_array_ref CDDL requires an array, typed_array, or homogeneous_array payload type");
+
+    using dimensions_type              = typename ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::dimensions_type;
+    using array_type                   = typename ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::array_type;
+    static constexpr std::uint64_t tag = ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::cbor_array_tag;
+};
+
+} // namespace cbor::tags::detail
+
+namespace cbor::tags::ext::rfc8746 {
 
 template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
@@ -776,12 +856,16 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
     template <typename Array>
     [[nodiscard]] status_code decode(homogeneous_array<Array> &array, major_type major, std::byte additional_info) {
+        static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array payload must decode as a CBOR array");
+
         auto &dec = static_cast<Self &>(*this);
         return decode_extension_tag_payload(homogeneous_array<Array>::cbor_array_tag, major, additional_info,
                                             [&] { return dec.decode(array.values()); });
     }
 
     template <typename Array> [[nodiscard]] status_code decode(homogeneous_array<Array> &array, std::uint64_t tag) {
+        static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array payload must decode as a CBOR array");
+
         auto &dec = static_cast<Self &>(*this);
         return decode_extension_tag_payload(homogeneous_array<Array>::cbor_array_tag, tag, [&] { return dec.decode(array.values()); });
     }
@@ -789,6 +873,11 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
     [[nodiscard]] status_code decode(multi_dimensional_array<Dimensions, Array, Layout> &array, major_type major,
                                      std::byte additional_info) {
+        static_assert(IsRFC8746DimensionArray<Dimensions>,
+                      "RFC 8746 multi_dimensional_array dimensions must decode as a CBOR array of unsigned integers");
+        static_assert(IsRFC8746ArrayPayload<Array>,
+                      "RFC 8746 multi_dimensional_array payload must decode as an array, typed_array, or homogeneous_array");
+
         auto &dec = static_cast<Self &>(*this);
         return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, major, additional_info,
                                             [&] { return dec.decode(wrap_as_array{array.dimensions(), array.values()}); });
@@ -796,6 +885,11 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
     template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
     [[nodiscard]] status_code decode(multi_dimensional_array<Dimensions, Array, Layout> &array, std::uint64_t tag) {
+        static_assert(IsRFC8746DimensionArray<Dimensions>,
+                      "RFC 8746 multi_dimensional_array dimensions must decode as a CBOR array of unsigned integers");
+        static_assert(IsRFC8746ArrayPayload<Array>,
+                      "RFC 8746 multi_dimensional_array payload must decode as an array, typed_array, or homogeneous_array");
+
         auto &dec = static_cast<Self &>(*this);
         return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, tag,
                                             [&] { return dec.decode(wrap_as_array{array.dimensions(), array.values()}); });
@@ -803,6 +897,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
   private:
     template <typename Payload> void encode_homogeneous_array_payload(const Payload &payload) {
+        static_assert(IsArray<std::remove_cvref_t<Payload>>, "RFC 8746 homogeneous_array payload must encode as a CBOR array");
+
         auto &enc = static_cast<Self &>(*this);
         enc.encode(static_tag<homogeneous_array_tag>{});
         enc.encode(payload);
@@ -810,6 +906,11 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
     template <multi_dimensional_layout Layout, typename Dimensions, typename Array>
     void encode_multi_dimensional_array_payload(const Dimensions &dimensions, const Array &array) {
+        static_assert(IsRFC8746DimensionArray<Dimensions>,
+                      "RFC 8746 multi_dimensional_array dimensions must encode as a CBOR array of unsigned integers");
+        static_assert(IsRFC8746ArrayPayload<Array>,
+                      "RFC 8746 multi_dimensional_array payload must encode as an array, typed_array, or homogeneous_array");
+
         auto &enc = static_cast<Self &>(*this);
         if constexpr (Layout == multi_dimensional_layout::row_major) {
             enc.encode(static_tag<multi_dimensional_array_tag>{});

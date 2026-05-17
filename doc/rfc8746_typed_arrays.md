@@ -9,6 +9,10 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/extensions/rfc8746_typed_arrays.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 using namespace cbor::tags;
 using namespace cbor::tags::ext::rfc8746;
 
@@ -162,26 +166,41 @@ Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
 wire payload shape:
 
 ```cpp
+#include "cbor_tags/extensions/cbor_visualization.h"
+
+#include <fmt/format.h>
+
 fmt::memory_buffer schema;
 cddl_schema_to<typed_array<std::int32_t>>(schema);
 // root = #6.78(bstr)
 
-cddl_schema_to<typed_array_be<double>>(schema);
+fmt::memory_buffer schema_be;
+cddl_schema_to<typed_array_be<double>>(schema_be);
 // root = #6.82(bstr)
 ```
 
 Structural wrappers render their actual encoded payload:
 
 ```cpp
-cddl_schema_to<homogeneous_array<std::vector<int>>>(schema);
+fmt::memory_buffer homogeneous_schema;
+cddl_schema_to<homogeneous_array<std::vector<int>>>(homogeneous_schema);
 // root = #6.41([* int])
 
 using matrix = multi_dimensional_array<
     std::vector<std::uint64_t>,
     typed_array<std::uint16_t>>;
-cddl_schema_to<matrix>(schema);
+
+fmt::memory_buffer matrix_schema;
+cddl_schema_to<matrix>(matrix_schema);
 // root = #6.40([[* uint], #6.69(bstr)])
 ```
+
+The structural wrappers are shape wrappers, not full semantic validators.
+`homogeneous_array<T>` requires `T` to encode as a CBOR array, and
+`multi_dimensional_array<Dimensions, T>` requires unsigned-integer array
+dimensions plus an array, typed-array, or homogeneous-array payload. Runtime
+properties such as nonzero dimensions and dimension/product consistency are the
+application's responsibility.
 
 ## Segmented Output
 

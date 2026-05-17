@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/extensions/cbor_visualization_traits.h"
 
 #ifndef CBOR_TAGS_USE_MAGIC_ENUM_NAMES
 #define CBOR_TAGS_USE_MAGIC_ENUM_NAMES 0
@@ -23,6 +24,7 @@
 #include <array>
 #include <bit>
 #include <cbor_tags/cbor_concepts.h>
+#include <cbor_tags/cbor_concepts_checking.h>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -449,25 +451,20 @@ template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CD
 
 template <typename T>
 concept CDDLTaggedByteStringArray = requires {
-    typename std::remove_cvref_t<T>::value_type;
-    std::remove_cvref_t<T>::byte_order;
-    { std::remove_cvref_t<T>::cbor_array_tag } -> std::convertible_to<std::uint64_t>;
+    { cddl_tagged_bstr_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T>
-concept CDDLHomogeneousArray = requires(const std::remove_cvref_t<T> &value) {
-    typename std::remove_cvref_t<T>::array_type;
-    { std::remove_cvref_t<T>::cbor_array_tag } -> std::convertible_to<std::uint64_t>;
-    { value.values() } -> std::convertible_to<const typename std::remove_cvref_t<T>::array_type &>;
-} && (!requires { typename std::remove_cvref_t<T>::dimensions_type; });
+concept CDDLHomogeneousArray = requires {
+    typename cddl_homogeneous_array_traits<std::remove_cvref_t<T>>::array_type;
+    { cddl_homogeneous_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
+};
 
 template <typename T>
-concept CDDLMultiDimensionalArray = requires(const std::remove_cvref_t<T> &value) {
-    typename std::remove_cvref_t<T>::dimensions_type;
-    typename std::remove_cvref_t<T>::array_type;
-    { std::remove_cvref_t<T>::cbor_array_tag } -> std::convertible_to<std::uint64_t>;
-    { value.dimensions() } -> std::convertible_to<const typename std::remove_cvref_t<T>::dimensions_type &>;
-    { value.values() } -> std::convertible_to<const typename std::remove_cvref_t<T>::array_type &>;
+concept CDDLMultiDimensionalArray = requires {
+    typename cddl_multi_dimensional_array_traits<std::remove_cvref_t<T>>::dimensions_type;
+    typename cddl_multi_dimensional_array_traits<std::remove_cvref_t<T>>::array_type;
+    { cddl_multi_dimensional_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename... Ts> struct cddl_seen_types {};
@@ -503,10 +500,12 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         if constexpr (CDDLTaggedByteStringArray<value_type>) {
             return false;
         } else if constexpr (CDDLHomogeneousArray<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::array_type, next_seen>();
+            using traits = cddl_homogeneous_array_traits<value_type>;
+            return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::dimensions_type, next_seen>() ||
-                   cddl_contains_nullable_pointer<typename value_type::array_type, next_seen>();
+            using traits = cddl_multi_dimensional_array_traits<value_type>;
+            return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
+                   cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
@@ -626,19 +625,21 @@ inline std::string parenthesize_choice(std::string value) {
 
 template <typename T> std::string cddl_tagged_bstr_array_expr() {
     using value_type = std::remove_cvref_t<T>;
-    return fmt::format("#6.{}(bstr)", value_type::cbor_array_tag);
+    return fmt::format("#6.{}(bstr)", cddl_tagged_bstr_array_traits<value_type>::tag);
 }
 
 template <typename T> std::string cddl_homogeneous_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    return fmt::format("#6.{}({})", value_type::cbor_array_tag, cddl_type_expr<typename value_type::array_type>(context, options));
+    using traits     = cddl_homogeneous_array_traits<value_type>;
+    return fmt::format("#6.{}({})", traits::tag, cddl_type_expr<typename traits::array_type>(context, options));
 }
 
 template <typename T> std::string cddl_multi_dimensional_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    auto dimensions  = parenthesize_choice(cddl_type_expr<typename value_type::dimensions_type>(context, options));
-    auto array       = parenthesize_choice(cddl_type_expr<typename value_type::array_type>(context, options));
-    return fmt::format("#6.{}([{}, {}])", value_type::cbor_array_tag, dimensions, array);
+    using traits     = cddl_multi_dimensional_array_traits<value_type>;
+    auto dimensions  = parenthesize_choice(cddl_type_expr<typename traits::dimensions_type>(context, options));
+    auto array       = parenthesize_choice(cddl_type_expr<typename traits::array_type>(context, options));
+    return fmt::format("#6.{}([{}, {}])", traits::tag, dimensions, array);
 }
 
 template <std::size_t N> std::string join_cddl(const std::array<std::string, N> &items, std::string_view separator) {
@@ -1136,6 +1137,11 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
         return cddl_multi_dimensional_array_expr<value_type>(context, options);
     } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
+            constexpr auto matching_major_types = valid_concept_mapping_array_v<std::variant<Ts...>>;
+            static_assert(matching_major_types[MajorIndex::Tag] <= 1,
+                          "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
+            static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
+                          "CDDL for std::variant alternatives with dynamic CBOR tags is unsupported");
             static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
                           "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
                           "decode is not extension-codec aware");

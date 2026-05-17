@@ -30,6 +30,10 @@ template <typename T> std::string cddl_schema_inline() {
     return fmt::to_string(buffer);
 }
 
+template <typename T> void check_cddl_typed_array_tag(std::uint64_t tag) {
+    CHECK_EQ(cddl_schema_inline<T>(), fmt::format("root = #6.{}(bstr)", tag));
+}
+
 std::size_t count_occurrences(std::string_view haystack, std::string_view needle) {
     std::size_t count = 0;
     std::size_t pos   = 0;
@@ -82,6 +86,18 @@ struct CDDLTypedArrays {
     cbor::tags::ext::rfc8746::homogeneous_array<std::vector<std::uint64_t>> homogeneous;
     cbor::tags::ext::rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, cbor::tags::ext::rfc8746::typed_array<std::uint16_t>>
         matrix;
+};
+
+struct CDDLLooksLikeTypedArray {
+    using value_type                              = int;
+    static constexpr auto          byte_order     = cbor::tags::ext::rfc8746::typed_array_byte_order::little;
+    static constexpr std::uint64_t cbor_array_tag = 999;
+    int                            value;
+};
+
+struct CDDLLooksLikeTypedArrayRoot {
+    CDDLLooksLikeTypedArray fake;
+    int                     other;
 };
 
 struct CDDLNullablePointers {
@@ -487,7 +503,30 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
 TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
     namespace rfc8746 = cbor::tags::ext::rfc8746;
 
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint8_t>>(64);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint16_t>>(65);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint32_t>>(66);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint64_t>>(67);
+    check_cddl_typed_array_tag<rfc8746::typed_array<rfc8746::uint8_clamped>>(68);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint16_t>>(69);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint32_t>>(70);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint64_t>>(71);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::int8_t>>(72);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int16_t>>(73);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int32_t>>(74);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int64_t>>(75);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::int16_t>>(77);
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array<std::int32_t>>(), "root = #6.78(bstr)");
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::int64_t>>(79);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<float16_t>>(80);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<float>>(81);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<double>>(82);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<rfc8746::float128_t>>(83);
+    check_cddl_typed_array_tag<rfc8746::typed_array<float16_t>>(84);
+    check_cddl_typed_array_tag<rfc8746::typed_array<float>>(85);
+    check_cddl_typed_array_tag<rfc8746::typed_array<double>>(86);
+    check_cddl_typed_array_tag<rfc8746::typed_array<rfc8746::float128_t>>(87);
+
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_view_be<float>>(), "root = #6.81(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_ref<std::int32_t>>(), "root = #6.78(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::homogeneous_array<std::vector<int>>>(), "root = #6.41([* int])");
@@ -501,6 +540,14 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
              "root = #6.78(bstr) / #6.82(bstr)");
     CHECK_EQ(cddl_schema_inline<CDDLTypedArrays>(),
              "CDDLTypedArrays = [#6.78(bstr), #6.82(bstr), #6.41([* uint]), #6.40([[* uint], #6.69(bstr)])]");
+}
+
+TEST_CASE("CDDL does not infer RFC 8746 wrappers by structural member names") {
+    const auto schema = cddl_schema_inline<CDDLLooksLikeTypedArrayRoot>();
+    CBOR_TAGS_TEST_LOG("CDDL structural lookalike: \n{}\n", schema);
+
+    CHECK(substrings_in(schema, "CDDLLooksLikeTypedArrayRoot = [CDDLLooksLikeTypedArray, int]", "CDDLLooksLikeTypedArray = int"));
+    CHECK_EQ(schema.find("#6.999"), std::string::npos);
 }
 
 TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
