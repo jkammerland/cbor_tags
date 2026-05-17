@@ -23,24 +23,40 @@ class shared_graph_decode_session;
 
 enum class shared_graph_encode_lookup { unordered_map, linear_scan };
 
+template <typename T> struct shared_graph_encode_root;
+template <typename T> struct shared_graph_decode_root;
+
+template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &session, const T &value);
+template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value);
+
 template <typename T> struct shared_graph_encode_root {
     shared_graph_encode_session &session;
     const T                     &value;
+
+  private:
+    shared_graph_encode_root(shared_graph_encode_session &session_, const T &value_) : session(session_), value(value_) {}
+
+    friend shared_graph_encode_root<T> as_shared_graph<T>(shared_graph_encode_session &, const T &);
 };
 
 template <typename T> struct shared_graph_decode_root {
     shared_graph_decode_session &session;
     T                           &value;
+
+  private:
+    shared_graph_decode_root(shared_graph_decode_session &session_, T &value_) : session(session_), value(value_) {}
+
+    friend shared_graph_decode_root<T> as_shared_graph<T>(shared_graph_decode_session &, T &);
 };
 
 template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &session, const T &value) {
-    return {session, value};
+    return shared_graph_encode_root<T>{session, value};
 }
 
 template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &, const T &&) = delete;
 
 template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value) {
-    return {session, value};
+    return shared_graph_decode_root<T>{session, value};
 }
 
 namespace detail {
@@ -239,9 +255,23 @@ template <bool CatchAllPass, typename U> constexpr bool matches_variant_simple_d
     }
 }
 
+template <typename U> constexpr bool matches_variant_major_dispatch(major_type major) {
+    using type = std::remove_cvref_t<U>;
+    if constexpr (IsOptional<type>) {
+        return major == major_type::Simple || matches_variant_major_dispatch<typename type::value_type>(major);
+    } else if constexpr (IsVariant<type>) {
+        return []<typename... Ts>(std::variant<Ts...> *, major_type m) {
+            return (matches_variant_major_dispatch<Ts>(m) || ...);
+        }(static_cast<type *>(nullptr), major);
+    } else {
+        return is_valid_major<major_type, type>(major);
+    }
+}
+
 template <bool GraphTagsPossible, typename Self, typename... Ts>
-[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers(Self &dec, std::variant<Ts...> &value, major_type major,
-                                                                          std::byte additional_info) {
+[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, std::variant<Ts...> &value, major_type major,
+                                                                               std::byte                     additional_info,
+                                                                               std::optional<std::uint64_t> &tag) {
     static_assert(((IsCborMajor<Ts> || decodable_nullable_pointer_v<Ts>) && ...),
                   "Variant alternatives must be core CBOR types or decodable nullable smart pointers for this codec.");
     static_assert(decodable_nullable_pointer_count_v<Ts...> <= 1U,
@@ -265,9 +295,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
     static_assert(valid_concept_mapping_v<variant_type>,
                   "Variant has ambiguous major types; only one alternative may match each core CBOR dispatch shape.");
 
-    std::optional<std::uint64_t> tag;
-    bool                         saw_incomplete = false;
-    std::optional<status_code>   pointer_error;
+    bool                       saw_incomplete = false;
+    std::optional<status_code> pointer_error;
 
     auto try_decode = [&dec, major, additional_info, &value, &tag, &saw_incomplete,
                        &pointer_error]<bool CatchAllPass, typename U>() -> bool {
@@ -293,13 +322,17 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
 
             raw_type    decoded_value{};
             status_code result;
-            if constexpr (GraphTagsPossible && decodable_shared_pointer_v<raw_type>) {
-                if (major == major_type::Tag) {
-                    const auto tag_value = read_tag_once();
-                    if (tag_value != shareable_tag && tag_value != sharedref_tag) {
-                        return false;
+            if constexpr (GraphTagsPossible) {
+                if constexpr (decodable_shared_pointer_v<raw_type>) {
+                    if (major == major_type::Tag) {
+                        const auto tag_value = read_tag_once();
+                        if (tag_value != shareable_tag && tag_value != sharedref_tag) {
+                            return false;
+                        }
+                        result = dec.decode_shared_graph_pointer(decoded_value, tag_value);
+                    } else {
+                        result = dec.decode(decoded_value, major, additional_info);
                     }
-                    result = dec.decode_shared_graph_pointer(decoded_value, tag_value);
                 } else {
                     result = dec.decode(decoded_value, major, additional_info);
                 }
@@ -317,7 +350,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
             return false;
         } else {
-            if (!is_valid_major<major_type, raw_type>(major)) {
+            if (!matches_variant_major_dispatch<raw_type>(major)) {
                 return false;
             }
             if (major == major_type::Simple && !matches_variant_simple_dispatch<CatchAllPass, raw_type>(additional_info)) {
@@ -326,7 +359,9 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
 
             raw_type    decoded_value{};
             status_code result;
-            if constexpr (IsTag<raw_type>) {
+            if constexpr (IsVariant<raw_type>) {
+                result = decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, decoded_value, major, additional_info, tag);
+            } else if constexpr (IsTag<raw_type>) {
                 result = dec.decode(decoded_value, read_tag_once());
             } else {
                 result = dec.decode(decoded_value, major, additional_info);
@@ -362,6 +397,13 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
         return status_code::no_match_in_variant_on_buffer;
     }
     return status_code::success;
+}
+
+template <bool GraphTagsPossible, typename Self, typename... Ts>
+[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers(Self &dec, std::variant<Ts...> &value, major_type major,
+                                                                          std::byte additional_info) {
+    std::optional<std::uint64_t> tag;
+    return decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, value, major, additional_info, tag);
 }
 
 enum class graph_entry_state { encoding, complete };
@@ -644,6 +686,24 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         return decode_shared_graph_pointer(value, tag);
     }
 
+    template <typename... Ts>
+        requires detail::has_decodable_nullable_pointer_v<Ts...>
+    [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
+        if (active_decode_session_ == nullptr) {
+            return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
+        }
+        if constexpr (detail::variant_has_shared_graph_tag_collision_v<Ts...>) {
+            return status_code::error;
+        } else {
+            return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);
+        }
+    }
+
+  private:
+    template <bool GraphTagsPossible, typename FriendSelf, typename... Ts>
+    friend constexpr status_code detail::decode_variant_with_nullable_pointers_impl(FriendSelf &, std::variant<Ts...> &, major_type,
+                                                                                    std::byte, std::optional<std::uint64_t> &);
+
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>
     [[nodiscard]] status_code decode_shared_graph_pointer(std::shared_ptr<T> &value, std::uint64_t tag) {
@@ -659,20 +719,6 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         return status_code::no_match_for_tag;
     }
 
-    template <typename... Ts>
-        requires detail::has_decodable_nullable_pointer_v<Ts...>
-    [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
-        if (active_decode_session_ == nullptr) {
-            return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
-        }
-        if constexpr (detail::variant_has_shared_graph_tag_collision_v<Ts...>) {
-            return status_code::error;
-        } else {
-            return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);
-        }
-    }
-
-  private:
     template <detail::NullablePointerValue T>
     [[nodiscard]] status_code decode_null(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
         auto &dec = static_cast<Self &>(*this);

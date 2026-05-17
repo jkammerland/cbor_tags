@@ -323,7 +323,7 @@ enc(as_shared_graph(encode_graph, shared));
 shape. Inside `as_shared_graph(...)`, `shared_ptr<T>` uses graph identity
 encoding. In graph wrappers, `shared_ptr<T>` contributes virtual variant tags
 28 and 29; non-colliding static tag alternatives can coexist, while tag 28,
-tag 29, and catch-all tag alternatives are rejected as ambiguous.
+tag 29, and catch-all tag alternatives fail graph-mode decode as ambiguous.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.

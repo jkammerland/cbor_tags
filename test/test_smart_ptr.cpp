@@ -1094,6 +1094,8 @@ TEST_CASE("nullable and shared graph codecs compose") {
 TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>>;
 
+    static_assert(!std::is_aggregate_v<shared_graph_encode_root<std::uint64_t>>);
+    static_assert(!std::is_aggregate_v<shared_graph_decode_root<std::uint64_t>>);
     static_assert(
         !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<42>>);
     static_assert(
@@ -1130,6 +1132,29 @@ TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers"
 
         REQUIRE(dec(value));
         CHECK(std::holds_alternative<static_tag<28>>(value));
+    }
+
+    {
+        using graph_ref_tag_value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<29>>;
+
+        const auto               bytes = to_bytes("d81d");
+        auto                     dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        graph_ref_tag_value_type value{std::shared_ptr<std::uint64_t>{}};
+
+        REQUIRE(dec(value));
+        CHECK(std::holds_alternative<static_tag<29>>(value));
+    }
+
+    {
+        using any_tag_value_type = std::variant<std::shared_ptr<std::uint64_t>, as_tag_any>;
+
+        const auto         bytes = to_bytes("d82a");
+        auto               dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        any_tag_value_type value{std::shared_ptr<std::uint64_t>{}};
+
+        REQUIRE(dec(value));
+        REQUIRE(std::holds_alternative<as_tag_any>(value));
+        CHECK_EQ(std::get<as_tag_any>(value).tag, 42U);
     }
 }
 
@@ -1188,6 +1213,54 @@ TEST_CASE("shared graph variants allow non-colliding tag alternatives") {
     }
 }
 
+TEST_CASE("shared graph variants reject malformed nullable arrays") {
+    using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<42>, std::string>;
+
+    {
+        const auto                  bytes = to_bytes("8201182a");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+
+    {
+        const auto                  bytes = to_bytes("8101");
+        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+}
+
+TEST_CASE("shared graph variants dispatch nested non-colliding tag alternatives") {
+    using nested_type = std::variant<std::string, static_tag<42>>;
+    using value_type  = std::variant<std::shared_ptr<std::uint64_t>, nested_type>;
+
+    static_assert(
+        !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, nested_type>);
+
+    const auto                  bytes = to_bytes("d82a");
+    auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+    shared_graph_decode_session decode_graph;
+    value_type                  value{std::shared_ptr<std::uint64_t>{}};
+
+    REQUIRE(dec(as_shared_graph(decode_graph, value)));
+    REQUIRE(std::holds_alternative<nested_type>(value));
+    const auto &nested = std::get<nested_type>(value);
+    CHECK(std::holds_alternative<static_tag<42>>(nested));
+}
+
 TEST_CASE("shared graph rejects variants with graph tag collisions") {
     {
         using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<28>>;
@@ -1200,19 +1273,27 @@ TEST_CASE("shared graph rejects variants with graph tag collisions") {
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
     }
 
     {
         using value_type = std::variant<std::shared_ptr<std::uint64_t>, static_tag<29>>;
 
-        const auto                  bytes = to_bytes("d81d00");
-        auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
-        shared_graph_decode_session decode_graph;
-        value_type                  value{std::shared_ptr<std::uint64_t>{}};
-        const auto                  result = dec(as_shared_graph(decode_graph, value));
+        const auto                     bytes = to_bytes("d81c182ad81d00");
+        auto                           dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+        shared_graph_decode_session    decode_graph;
+        std::shared_ptr<std::uint64_t> seeded;
+
+        REQUIRE(dec(as_shared_graph(decode_graph, seeded)));
+        REQUIRE(static_cast<bool>(seeded));
+        CHECK_EQ(*seeded, 42U);
+
+        value_type value{static_tag<29>{}};
+        const auto result = dec(as_shared_graph(decode_graph, value));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<static_tag<29>>(value));
     }
 
     {
@@ -1226,6 +1307,7 @@ TEST_CASE("shared graph rejects variants with graph tag collisions") {
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
+        CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
     }
 }
 
