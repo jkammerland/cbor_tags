@@ -213,6 +213,29 @@ template <typename T> void check_big_endian_decode_error(const char *hex, status
     CHECK_EQ(result.error(), expected);
 }
 
+template <typename T> void check_big_endian_owned_decode_error(const char *hex, status_code expected) {
+    const auto        bytes = to_bytes(hex);
+    typed_array_be<T> decoded;
+    auto              dec    = make_decoder<typed_array_codec>(bytes);
+    const auto        result = dec(decoded);
+
+    CAPTURE(hex);
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), expected);
+}
+
+template <typename T> void check_big_endian_non_contiguous_decode_error(const char *hex, status_code expected) {
+    const auto        bytes = to_bytes(hex);
+    const auto        input = std::deque<std::byte>{bytes.begin(), bytes.end()};
+    typed_array_be<T> decoded;
+    auto              dec    = make_decoder<typed_array_codec>(input);
+    const auto        result = dec(decoded);
+
+    CAPTURE(hex);
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), expected);
+}
+
 template <typename Segments> bool has_borrowed_segment(const Segments &segments, const std::byte *data, std::size_t size) {
     for (const auto &segment : segments) {
         if (segment.is_borrowed() && segment.data() == data && segment.size() == size) {
@@ -324,7 +347,7 @@ TEST_CASE("rfc8746 typed arrays use exact wire bytes for all float tags") {
     CHECK_EQ(to_hex(encode_big_endian(std::span<const double>{f64_values})), "d852503ff0000000000000c004000000000000");
 
     const std::array<float128_t, 1> f128_values{float128_value};
-    CHECK_EQ(to_hex(encode_big_endian(std::span<const float128_t>{f128_values})), "d85350000102030405060708090a0b0c0d0e0f");
+    CHECK_EQ(to_hex(encode_big_endian(std::span<const float128_t>{f128_values})), "d853500f0e0d0c0b0a09080706050403020100");
     CHECK_EQ(to_hex(encode_normal(std::span<const float128_t>{f128_values})), "d85750000102030405060708090a0b0c0d0e0f");
 }
 
@@ -375,6 +398,99 @@ TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") 
         REQUIRE(std::holds_alternative<column_major_type>(decoded));
         CHECK_EQ(std::get<column_major_type>(decoded).dimensions(), dimensions);
         CHECK_EQ(std::get<column_major_type>(decoded).values().values(), values.values());
+    }
+}
+
+TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes") {
+    {
+        const std::vector<std::uint64_t> dimensions{2, 0};
+        const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
+        std::vector<std::byte>           bytes;
+        auto                             enc = make_encoder<typed_array_codec>(bytes);
+
+        const auto result = enc(as_multi_dimensional_array(dimensions, values));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(bytes.empty());
+    }
+
+    {
+        const std::vector<std::uint64_t> dimensions{2, 3};
+        const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
+        std::vector<std::byte>           bytes;
+        auto                             enc = make_encoder<typed_array_codec>(bytes);
+
+        const auto result = enc(as_multi_dimensional_array(dimensions, values));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(bytes.empty());
+    }
+
+    {
+        multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
+        auto       input  = to_bytes("d82882820200d845480100020003000400");
+        auto       dec    = make_decoder<typed_array_codec>(input);
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    }
+
+    {
+        multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
+        auto       input  = to_bytes("d82882820203d845480100020003000400");
+        auto       dec    = make_decoder<typed_array_codec>(input);
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    }
+}
+
+TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
+    {
+        homogeneous_array<std::vector<int>> decoded;
+        auto                                input  = to_bytes("d82901");
+        auto                                dec    = make_decoder<typed_array_codec>(input);
+        const auto                          result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
+    }
+
+    {
+        multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
+        auto                                                                            input  = to_bytes("d82881820202");
+        auto                                                                            dec    = make_decoder<typed_array_codec>(input);
+        const auto                                                                      result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    }
+
+    {
+        multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
+        auto       input  = to_bytes("d82883820202d84548010002000300040080");
+        auto       dec    = make_decoder<typed_array_codec>(input);
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    }
+
+    {
+        const std::vector<std::uint64_t> dimensions{2, 2};
+        const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
+        std::vector<std::byte>           bytes;
+        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        REQUIRE(enc(as_multi_dimensional_array(dimensions, values)));
+
+        multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
+        auto       dec    = make_decoder<typed_array_codec>(bytes);
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag);
     }
 }
 
@@ -729,6 +845,16 @@ TEST_CASE("rfc8746 big-endian typed array view decodes non-contiguous byte strin
     const auto                encoded = encode_big_endian(std::span<const double>{values});
     const auto                input   = std::deque<std::byte>{encoded.begin(), encoded.end()};
 
+    {
+        typed_array_view_be<double> decoded;
+        auto                        dec    = make_decoder<typed_array_codec>(input);
+        const auto                  result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
+        CHECK_EQ(to_hex(std::ranges::subrange(dec.tell(), input.end())), "3ff0000000000000c004000000000000");
+    }
+
     auto dec                  = make_decoder<typed_array_codec>(input);
     using non_contiguous_view = typed_array_view_be_for<double, decltype(dec)>;
     static_assert(std::same_as<typename non_contiguous_view::payload_range_type, typename decltype(dec)::bstr_view_t>);
@@ -740,6 +866,7 @@ TEST_CASE("rfc8746 big-endian typed array view decodes non-contiguous byte strin
     REQUIRE(result);
     CHECK_EQ(decoded.size(), values.size());
     CHECK_EQ(decoded.copy_values(), values);
+    CHECK_EQ(to_hex(decoded.payload_range()), "3ff0000000000000c004000000000000");
 
     const auto values_view = decoded.values();
     CHECK(values_view);
@@ -755,7 +882,10 @@ TEST_CASE("rfc8746 typed array borrowed encode wrapper rejects rvalue containers
     using values_type     = std::vector<std::int32_t>;
     static_assert(CanWrapAsHomogeneousArray<const values_type &>);
     static_assert(!CanWrapAsHomogeneousArray<values_type &&>);
+    static_assert(!CanWrapAsHomogeneousArray<int &>);
     static_assert(CanWrapAsMultiDimensionalArray<const dimensions_type &, const typed_array<std::int32_t> &>);
+    static_assert(!CanWrapAsMultiDimensionalArray<const std::vector<int> &, const typed_array<std::int32_t> &>);
+    static_assert(!CanWrapAsMultiDimensionalArray<const dimensions_type &, const int &>);
     static_assert(!CanWrapAsMultiDimensionalArray<dimensions_type &&, const typed_array<std::int32_t> &>);
     static_assert(!CanWrapAsMultiDimensionalArray<const dimensions_type &, typed_array<std::int32_t> &&>);
     static_assert(CanWrapAsMultiDimensionalColumnMajorArray<const dimensions_type &, const typed_array<std::int32_t> &>);
@@ -783,6 +913,8 @@ TEST_CASE("rfc8746 typed array decode rejects invalid additional-info values") {
     check_big_endian_decode_error<double>("d856480000000000000000", status_code::no_match_for_tag);
     check_big_endian_decode_error<double>("d8524700000000000000", status_code::unexpected_group_size);
     check_big_endian_decode_error<double>("d8525f", status_code::no_match_for_bstr_on_buffer);
+    check_big_endian_owned_decode_error<double>("d8524700000000000000", status_code::unexpected_group_size);
+    check_big_endian_non_contiguous_decode_error<double>("d8524700000000000000", status_code::unexpected_group_size);
 }
 
 TEST_CASE("rfc8746 typed array decode rejects truncated extended headers and large claimed payloads") {

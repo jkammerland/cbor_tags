@@ -5,6 +5,7 @@
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/extensions/cbor_visualization_traits.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
@@ -15,6 +16,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -77,7 +79,13 @@ inline constexpr std::uint64_t multi_dimensional_column_major_array_tag = 1040;
 
 enum class multi_dimensional_layout { row_major, column_major };
 
-template <typename Array> class homogeneous_array {
+template <typename T>
+concept IsRFC8746DimensionArray =
+    IsArray<std::remove_cvref_t<T>> && IsUnsigned<std::remove_cv_t<std::ranges::range_value_t<std::remove_cvref_t<T>>>>;
+
+template <typename Array>
+    requires IsArray<std::remove_cvref_t<Array>>
+class homogeneous_array {
   public:
     using array_type                              = Array;
     static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
@@ -93,7 +101,9 @@ template <typename Array> class homogeneous_array {
     Array values_{};
 };
 
-template <typename Array> class homogeneous_array_ref {
+template <typename Array>
+    requires IsArray<std::remove_cvref_t<Array>>
+class homogeneous_array_ref {
   public:
     using array_type                              = std::remove_cvref_t<Array>;
     static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
@@ -107,15 +117,18 @@ template <typename Array> class homogeneous_array_ref {
     const array_type *values_;
 };
 
-template <typename Array> [[nodiscard]] constexpr auto as_homogeneous_array(const Array &values) noexcept {
+template <typename Array>
+    requires IsArray<std::remove_cvref_t<Array>>
+[[nodiscard]] constexpr auto as_homogeneous_array(const Array &values) noexcept {
     return homogeneous_array_ref<Array>{values};
 }
 
 template <typename Array>
-    requires(!std::is_lvalue_reference_v<Array &&>)
+    requires(!std::is_lvalue_reference_v<Array &&> && IsArray<std::remove_cvref_t<Array>>)
 void as_homogeneous_array(Array &&values) = delete;
 
 template <typename Dimensions, typename Array, multi_dimensional_layout Layout = multi_dimensional_layout::row_major>
+    requires IsRFC8746DimensionArray<Dimensions>
 class multi_dimensional_array {
   public:
     using dimensions_type = Dimensions;
@@ -142,6 +155,7 @@ template <typename Dimensions, typename Array>
 using multi_dimensional_column_major_array = multi_dimensional_array<Dimensions, Array, multi_dimensional_layout::column_major>;
 
 template <typename Dimensions, typename Array, multi_dimensional_layout Layout = multi_dimensional_layout::row_major>
+    requires IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>>
 class multi_dimensional_array_ref {
   public:
     using dimensions_type = std::remove_cvref_t<Dimensions>;
@@ -161,32 +175,6 @@ class multi_dimensional_array_ref {
     const dimensions_type *dimensions_;
     const array_type      *values_;
 };
-
-template <typename Dimensions, typename Array>
-[[nodiscard]] constexpr auto as_multi_dimensional_array(const Dimensions &dimensions, const Array &values) noexcept {
-    return multi_dimensional_array_ref<Dimensions, Array>{dimensions, values};
-}
-
-template <typename Dimensions, typename Array>
-    requires(!std::is_lvalue_reference_v<Dimensions &&>)
-void as_multi_dimensional_array(Dimensions &&dimensions, const Array &values) = delete;
-
-template <typename Dimensions, typename Array>
-    requires(!std::is_lvalue_reference_v<Array &&>)
-void as_multi_dimensional_array(const Dimensions &dimensions, Array &&values) = delete;
-
-template <typename Dimensions, typename Array>
-[[nodiscard]] constexpr auto as_multi_dimensional_column_major_array(const Dimensions &dimensions, const Array &values) noexcept {
-    return multi_dimensional_array_ref<Dimensions, Array, multi_dimensional_layout::column_major>{dimensions, values};
-}
-
-template <typename Dimensions, typename Array>
-    requires(!std::is_lvalue_reference_v<Dimensions &&>)
-void as_multi_dimensional_column_major_array(Dimensions &&dimensions, const Array &values) = delete;
-
-template <typename Dimensions, typename Array>
-    requires(!std::is_lvalue_reference_v<Array &&>)
-void as_multi_dimensional_column_major_array(const Dimensions &dimensions, Array &&values) = delete;
 
 template <typename T, typed_array_byte_order ByteOrder>
 concept IsTypedArrayElementFor = requires {
@@ -221,49 +209,57 @@ concept DirectResizableByteOutputBuffer = std::ranges::contiguous_range<T> && re
 } && sizeof(std::ranges::range_value_t<T>) == 1U;
 
 template <typename BitType> [[nodiscard]] BitType byteswap_bits(BitType value) noexcept {
-    static_assert(std::is_unsigned_v<BitType>);
+    static_assert(std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>);
+    if constexpr (std::same_as<BitType, std::array<std::byte, 16>>) {
+        std::ranges::reverse(value);
+        return value;
+    } else {
 #if defined(__GNUC__) || defined(__clang__)
-    if constexpr (sizeof(BitType) == 2U) {
-        return static_cast<BitType>(__builtin_bswap16(static_cast<std::uint16_t>(value)));
-    } else if constexpr (sizeof(BitType) == 4U) {
-        return static_cast<BitType>(__builtin_bswap32(static_cast<std::uint32_t>(value)));
-    } else if constexpr (sizeof(BitType) == 8U) {
-        return static_cast<BitType>(__builtin_bswap64(static_cast<std::uint64_t>(value)));
-    } else {
-        return value;
-    }
+        if constexpr (sizeof(BitType) == 2U) {
+            return static_cast<BitType>(__builtin_bswap16(static_cast<std::uint16_t>(value)));
+        } else if constexpr (sizeof(BitType) == 4U) {
+            return static_cast<BitType>(__builtin_bswap32(static_cast<std::uint32_t>(value)));
+        } else if constexpr (sizeof(BitType) == 8U) {
+            return static_cast<BitType>(__builtin_bswap64(static_cast<std::uint64_t>(value)));
+        } else {
+            return value;
+        }
 #elif defined(_MSC_VER)
-    if constexpr (sizeof(BitType) == 2U) {
-        return static_cast<BitType>(::_byteswap_ushort(static_cast<unsigned short>(value)));
-    } else if constexpr (sizeof(BitType) == 4U) {
-        return static_cast<BitType>(::_byteswap_ulong(static_cast<unsigned long>(value)));
-    } else if constexpr (sizeof(BitType) == 8U) {
-        return static_cast<BitType>(::_byteswap_uint64(static_cast<unsigned __int64>(value)));
-    } else {
-        return value;
-    }
+        if constexpr (sizeof(BitType) == 2U) {
+            return static_cast<BitType>(::_byteswap_ushort(static_cast<unsigned short>(value)));
+        } else if constexpr (sizeof(BitType) == 4U) {
+            return static_cast<BitType>(::_byteswap_ulong(static_cast<unsigned long>(value)));
+        } else if constexpr (sizeof(BitType) == 8U) {
+            return static_cast<BitType>(::_byteswap_uint64(static_cast<unsigned __int64>(value)));
+        } else {
+            return value;
+        }
 #else
-    if constexpr (sizeof(BitType) == 2U) {
-        return static_cast<BitType>(((value & BitType{0x00FFU}) << 8U) | ((value & BitType{0xFF00U}) >> 8U));
-    } else if constexpr (sizeof(BitType) == 4U) {
-        return static_cast<BitType>(((value & BitType{0x000000FFU}) << 24U) | ((value & BitType{0x0000FF00U}) << 8U) |
-                                    ((value & BitType{0x00FF0000U}) >> 8U) | ((value & BitType{0xFF000000U}) >> 24U));
-    } else if constexpr (sizeof(BitType) == 8U) {
-        return static_cast<BitType>(((value & BitType{0x00000000000000FFULL}) << 56U) | ((value & BitType{0x000000000000FF00ULL}) << 40U) |
-                                    ((value & BitType{0x0000000000FF0000ULL}) << 24U) | ((value & BitType{0x00000000FF000000ULL}) << 8U) |
-                                    ((value & BitType{0x000000FF00000000ULL}) >> 8U) | ((value & BitType{0x0000FF0000000000ULL}) >> 24U) |
-                                    ((value & BitType{0x00FF000000000000ULL}) >> 40U) | ((value & BitType{0xFF00000000000000ULL}) >> 56U));
-    } else {
-        return value;
-    }
+        if constexpr (sizeof(BitType) == 2U) {
+            return static_cast<BitType>(((value & BitType{0x00FFU}) << 8U) | ((value & BitType{0xFF00U}) >> 8U));
+        } else if constexpr (sizeof(BitType) == 4U) {
+            return static_cast<BitType>(((value & BitType{0x000000FFU}) << 24U) | ((value & BitType{0x0000FF00U}) << 8U) |
+                                        ((value & BitType{0x00FF0000U}) >> 8U) | ((value & BitType{0xFF000000U}) >> 24U));
+        } else if constexpr (sizeof(BitType) == 8U) {
+            return static_cast<BitType>(
+                ((value & BitType{0x00000000000000FFULL}) << 56U) | ((value & BitType{0x000000000000FF00ULL}) << 40U) |
+                ((value & BitType{0x0000000000FF0000ULL}) << 24U) | ((value & BitType{0x00000000FF000000ULL}) << 8U) |
+                ((value & BitType{0x000000FF00000000ULL}) >> 8U) | ((value & BitType{0x0000FF0000000000ULL}) >> 24U) |
+                ((value & BitType{0x00FF000000000000ULL}) >> 40U) | ((value & BitType{0xFF00000000000000ULL}) >> 56U));
+        } else {
+            return value;
+        }
 #endif
+    }
 }
 
 template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] BitType native_to_wire_bits(BitType bits) noexcept {
-    if constexpr (!std::is_unsigned_v<BitType> || sizeof(BitType) == 1U || native_matches_byte_order<ByteOrder>) {
+    if constexpr (sizeof(BitType) == 1U || native_matches_byte_order<ByteOrder>) {
         return bits;
-    } else {
+    } else if constexpr (std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>) {
         return byteswap_bits(bits);
+    } else {
+        return bits;
     }
 }
 
@@ -640,12 +636,101 @@ template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array<
 template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array_ref<Array>> : std::true_type {};
 
 template <typename T>
-concept IsRFC8746DimensionArray =
-    IsArray<std::remove_cvref_t<T>> && IsUnsigned<std::remove_cv_t<std::ranges::range_value_t<std::remove_cvref_t<T>>>>;
-
-template <typename T>
 concept IsRFC8746ArrayPayload = IsArray<std::remove_cvref_t<T>> || is_typed_array_wrapper<std::remove_cvref_t<T>>::value ||
                                 is_homogeneous_array_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746ArrayPayload<Array>)
+[[nodiscard]] constexpr auto as_multi_dimensional_array(const Dimensions &dimensions, const Array &values) noexcept {
+    return multi_dimensional_array_ref<Dimensions, Array>{dimensions, values};
+}
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Dimensions &&> && IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>> &&
+             IsRFC8746ArrayPayload<Array>)
+void as_multi_dimensional_array(Dimensions &&dimensions, const Array &values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && !std::is_lvalue_reference_v<Array &&> &&
+             IsRFC8746ArrayPayload<std::remove_cvref_t<Array>>)
+void as_multi_dimensional_array(const Dimensions &dimensions, Array &&values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746ArrayPayload<Array>)
+[[nodiscard]] constexpr auto as_multi_dimensional_column_major_array(const Dimensions &dimensions, const Array &values) noexcept {
+    return multi_dimensional_array_ref<Dimensions, Array, multi_dimensional_layout::column_major>{dimensions, values};
+}
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Dimensions &&> && IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>> &&
+             IsRFC8746ArrayPayload<Array>)
+void as_multi_dimensional_column_major_array(Dimensions &&dimensions, const Array &values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && !std::is_lvalue_reference_v<Array &&> &&
+             IsRFC8746ArrayPayload<std::remove_cvref_t<Array>>)
+void as_multi_dimensional_column_major_array(const Dimensions &dimensions, Array &&values) = delete;
+
+namespace detail {
+
+template <typename Dimensions> [[nodiscard]] bool dimension_product(const Dimensions &dimensions, std::size_t &product) {
+    product = 1U;
+    for (const auto dimension : dimensions) {
+        const auto value = static_cast<std::uintmax_t>(dimension);
+        if (value == 0U || value > static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+            return false;
+        }
+        const auto size_value = static_cast<std::size_t>(value);
+        if (product > (std::numeric_limits<std::size_t>::max() / size_value)) {
+            return false;
+        }
+        product *= size_value;
+    }
+    return true;
+}
+
+template <typename Payload> [[nodiscard]] std::optional<std::size_t> payload_element_count(const Payload &payload) {
+    using payload_type = std::remove_cvref_t<Payload>;
+    if constexpr (requires {
+                      { payload.size() } -> std::convertible_to<std::size_t>;
+                  }) {
+        return static_cast<std::size_t>(payload.size());
+    } else if constexpr (requires {
+                             { payload.values().size() } -> std::convertible_to<std::size_t>;
+                         }) {
+        return static_cast<std::size_t>(payload.values().size());
+    } else if constexpr (is_homogeneous_array_wrapper<payload_type>::value) {
+        return payload_element_count(payload.values());
+    } else if constexpr (std::ranges::sized_range<const payload_type>) {
+        return static_cast<std::size_t>(std::ranges::size(payload));
+    } else {
+        return std::nullopt;
+    }
+}
+
+template <typename Dimensions, typename Array>
+[[nodiscard]] bool valid_multi_dimensional_shape(const Dimensions &dimensions, const Array &array) {
+    std::size_t expected_count{};
+    if (!dimension_product(dimensions, expected_count)) {
+        return false;
+    }
+    const auto observed_count = payload_element_count(array);
+    return !observed_count || *observed_count == expected_count;
+}
+
+template <typename Dimensions, typename Array>
+void validate_multi_dimensional_shape_or_throw(const Dimensions &dimensions, const Array &array) {
+    if (!valid_multi_dimensional_shape(dimensions, array)) {
+        throw std::invalid_argument("RFC 8746 multi-dimensional array dimensions do not match payload element count");
+    }
+}
+
+template <typename Dimensions, typename Array>
+[[nodiscard]] status_code validate_multi_dimensional_shape_status(const Dimensions &dimensions, const Array &array) {
+    return valid_multi_dimensional_shape(dimensions, array) ? status_code::success : status_code::unexpected_group_size;
+}
+
+} // namespace detail
 
 } // namespace cbor::tags::ext::rfc8746
 
@@ -880,7 +965,13 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
         auto &dec = static_cast<Self &>(*this);
         return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, major, additional_info,
-                                            [&] { return dec.decode(wrap_as_array{array.dimensions(), array.values()}); });
+                                            [&] {
+                                                const auto status = dec.decode(wrap_as_array{array.dimensions(), array.values()});
+                                                if (status != status_code::success) {
+                                                    return status;
+                                                }
+                                                return detail::validate_multi_dimensional_shape_status(array.dimensions(), array.values());
+                                            });
     }
 
     template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
@@ -891,8 +982,13 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                       "RFC 8746 multi_dimensional_array payload must decode as an array, typed_array, or homogeneous_array");
 
         auto &dec = static_cast<Self &>(*this);
-        return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, tag,
-                                            [&] { return dec.decode(wrap_as_array{array.dimensions(), array.values()}); });
+        return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, tag, [&] {
+            const auto status = dec.decode(wrap_as_array{array.dimensions(), array.values()});
+            if (status != status_code::success) {
+                return status;
+            }
+            return detail::validate_multi_dimensional_shape_status(array.dimensions(), array.values());
+        });
     }
 
   private:
@@ -910,6 +1006,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                       "RFC 8746 multi_dimensional_array dimensions must encode as a CBOR array of unsigned integers");
         static_assert(IsRFC8746ArrayPayload<Array>,
                       "RFC 8746 multi_dimensional_array payload must encode as an array, typed_array, or homogeneous_array");
+
+        detail::validate_multi_dimensional_shape_or_throw(dimensions, array);
 
         auto &enc = static_cast<Self &>(*this);
         if constexpr (Layout == multi_dimensional_layout::row_major) {

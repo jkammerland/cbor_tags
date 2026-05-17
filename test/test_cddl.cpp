@@ -30,6 +30,12 @@ template <typename T> std::string cddl_schema_inline() {
     return fmt::to_string(buffer);
 }
 
+template <typename T> std::string cddl_schema_with_options(CDDLOptions options) {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<T>(buffer, options);
+    return fmt::to_string(buffer);
+}
+
 template <typename T> void check_cddl_typed_array_tag(std::uint64_t tag) {
     CHECK_EQ(cddl_schema_inline<T>(), fmt::format("root = #6.{}(bstr)", tag));
 }
@@ -540,6 +546,11 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
              "root = #6.78(bstr) / #6.82(bstr)");
     CHECK_EQ(cddl_schema_inline<CDDLTypedArrays>(),
              "CDDLTypedArrays = [#6.78(bstr), #6.82(bstr), #6.41([* uint]), #6.40([[* uint], #6.69(bstr)])]");
+    CHECK_EQ(cddl_schema_with_options<rfc8746::typed_array<std::int32_t>>(CDDLOptions{.row_options = {}, .root_name = "samples"}),
+             "samples = #6.78(bstr)");
+
+    const auto row_schema = cddl_schema_with_options<CDDLTypedArrays>({});
+    CHECK(substrings_in(row_schema, "#6.78(bstr)", "#6.82(bstr)", "#6.41([* uint])", "#6.40([[* uint], #6.69(bstr)])"));
 }
 
 TEST_CASE("CDDL does not infer RFC 8746 wrappers by structural member names") {

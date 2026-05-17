@@ -167,6 +167,7 @@ wire payload shape:
 
 ```cpp
 #include "cbor_tags/extensions/cbor_visualization.h"
+#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
 
 #include <fmt/format.h>
 
@@ -198,9 +199,14 @@ cddl_schema_to<matrix>(matrix_schema);
 The structural wrappers are shape wrappers, not full semantic validators.
 `homogeneous_array<T>` requires `T` to encode as a CBOR array, and
 `multi_dimensional_array<Dimensions, T>` requires unsigned-integer array
-dimensions plus an array, typed-array, or homogeneous-array payload. Runtime
-properties such as nonzero dimensions and dimension/product consistency are the
-application's responsibility.
+dimensions plus an array, typed-array, or homogeneous-array payload.
+Multi-dimensional encode/decode rejects zero dimensions and checks
+dimension/product consistency when the payload element count is available from
+the C++ type.
+
+The generated scalar typed-array CDDL uses the RFC data-model spelling
+`#6.N(bstr)`. The decoder accepts definite-length byte strings for typed-array
+payloads and rejects indefinite-length byte strings.
 
 ## Segmented Output
 
@@ -283,7 +289,7 @@ using duplicate_typed_array_tag = std::variant<typed_array<std::int32_t>, typed_
 
 ## Support Checklist
 
-- all RFC scalar byte-string typed-array tags `64..87`, except reserved tag `76`,
+- all RFC scalar definite-length byte-string typed-array tags `64..87`, except reserved tag `76`,
 - `uint8_clamped` and opaque `float128_t`,
 - little-endian and big-endian integer and floating-point arrays,
 - owning typed arrays and borrowed typed-array views,
