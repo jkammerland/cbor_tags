@@ -43,7 +43,16 @@ struct graph_base {
     std::uint64_t value{};
 };
 
-struct graph_derived : graph_base {};
+struct graph_derived : graph_base {
+#if CBOR_TAGS_HAS_BOOST_PFR_NAMES && !CBOR_TAGS_HAS_STD_REFLECTION
+    // Keep the inherited aggregate path under std reflection. Boost.PFR cannot
+    // reflect inherited aggregates, so the PFR backend uses an explicit codec.
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(value); }
+#endif
+};
 
 struct graph_decode_consumes_then_fails {
     std::uint64_t value{};
