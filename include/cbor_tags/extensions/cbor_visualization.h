@@ -257,6 +257,11 @@ template <typename T> struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_t
     using element_type = T;
 };
 
+template <typename T> struct is_std_vector_of_shared_ptr : std::false_type {};
+template <typename T, typename Allocator> struct is_std_vector_of_shared_ptr<std::vector<std::shared_ptr<T>, Allocator>> : std::true_type {
+    using element_type = T;
+};
+
 template <typename T>
 concept IsNullablePointer = is_std_unique_ptr<std::remove_cvref_t<T>>::value || is_std_shared_ptr<std::remove_cvref_t<T>>::value;
 
@@ -499,6 +504,12 @@ consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) 
     return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
 }
 
+template <typename T> consteval bool cddl_scoped_type_contains_nullable_pointer() {
+    // Scope wrappers are root-only. Treat nested wrappers as opaque here; rendering
+    // produces the user-facing diagnostic.
+    return false;
+}
+
 template <typename T, typename Seen> consteval bool cddl_contains_nullable_pointer() {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (IsNullablePointer<value_type>) {
@@ -508,8 +519,7 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
     } else {
         using next_seen = cddl_seen_append_t<Seen, value_type>;
         if constexpr (CDDLScopedType<value_type>) {
-            using traits = cddl_scope_traits<value_type>;
-            return cddl_contains_nullable_pointer<typename traits::value_type, next_seen>();
+            return cddl_scoped_type_contains_nullable_pointer<value_type>();
         } else if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
@@ -635,6 +645,21 @@ template <typename T> consteval std::size_t cddl_nullable_pointer_alternative_co
         }(static_cast<value_type *>(nullptr));
     } else {
         return cddl_contains_nullable_pointer<value_type>() ? std::size_t{1} : std::size_t{0};
+    }
+}
+
+template <typename T> consteval bool cddl_is_direct_nullable_pointer_alternative() { return IsNullablePointer<std::remove_cvref_t<T>>; }
+
+template <typename T> consteval bool cddl_is_shared_graph_vector_alternative() {
+    return is_std_vector_of_shared_ptr<std::remove_cvref_t<T>>::value;
+}
+
+template <typename T> consteval bool cddl_contains_unsupported_shared_graph_variant_pointer() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (cddl_is_direct_nullable_pointer_alternative<value_type>() || cddl_is_shared_graph_vector_alternative<value_type>()) {
+        return false;
+    } else {
+        return cddl_contains_nullable_pointer<value_type>();
     }
 }
 
@@ -1282,8 +1307,8 @@ std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, st
 template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (CDDLScopedType<value_type>) {
-        using traits = cddl_scope_traits<value_type>;
-        return cddl_type_expr<typename traits::value_type, traits::shared_pointer_mode>(context, options);
+        static_assert(always_false<value_type>::value, "CDDL scope wrappers are only valid as cddl_schema_to roots");
+        return {};
     } else if constexpr (IsEnum<value_type>) {
         if constexpr (cddl_enum_entry_count<value_type>() != 0) {
             if (cddl_use_named_enum<value_type>(options)) {
@@ -1337,12 +1362,20 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                           "CDDL for std::variant alternatives with dynamic CBOR tags is unsupported");
             if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
-                constexpr auto pointer_alternatives = (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>());
-                static_assert(pointer_alternatives <= 1U,
+                constexpr auto direct_pointer_alternatives =
+                    (std::size_t{0} + ... + (cddl_is_direct_nullable_pointer_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
+                constexpr auto graph_vector_alternatives =
+                    (std::size_t{0} + ... + (cddl_is_shared_graph_vector_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
+                static_assert((!cddl_contains_unsupported_shared_graph_variant_pointer<Ts>() && ...),
+                              "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported");
+                static_assert(direct_pointer_alternatives <= 1U,
                               "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported");
-                static_assert(pointer_alternatives == 0U || matching_major_types[MajorIndex::Array] == 0U,
+                static_assert(direct_pointer_alternatives == 0U || matching_major_types[MajorIndex::Array] == 0U,
                               "CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is "
                               "unsupported");
+                static_assert(graph_vector_alternatives == 0U || matching_major_types[MajorIndex::Array] == 1U,
+                              "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped "
+                              "alternatives is unsupported");
             } else {
                 static_assert(
                     (!cddl_contains_nullable_pointer<Ts>() && ...),

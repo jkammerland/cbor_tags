@@ -1089,6 +1089,49 @@ TEST_CASE("shared graph codec decodes unambiguous smart pointer variants inside 
     CHECK(first_ptr.get() == second_ptr.get());
 }
 
+TEST_CASE("shared graph codec decodes vector smart pointer variants inside graph roots") {
+    using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
+    using value_type  = std::variant<vector_type, std::string>;
+
+    static_assert(cbor::tags::ext::smart_ptr::detail::has_decodable_shared_graph_vector_v<vector_type, std::string>);
+    static_assert(!cbor::tags::ext::smart_ptr::detail::has_decodable_nullable_pointer_v<vector_type, std::string>);
+
+    auto       shared = std::make_shared<std::uint64_t>(42U);
+    value_type value{vector_type{shared, shared}};
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, value)));
+    CHECK_EQ(to_hex(buffer), "82d81c182ad81d00");
+
+    auto                        dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session decode_graph;
+    value_type                  decoded{std::string{"before"}};
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded)));
+    REQUIRE(std::holds_alternative<vector_type>(decoded));
+    const auto &decoded_vector = std::get<vector_type>(decoded);
+    REQUIRE_EQ(decoded_vector.size(), 2U);
+    REQUIRE(static_cast<bool>(decoded_vector[0]));
+    REQUIRE(static_cast<bool>(decoded_vector[1]));
+    CHECK_EQ(*decoded_vector[0], 42U);
+    CHECK(decoded_vector[0].get() == decoded_vector[1].get());
+
+    value_type             text{std::string{"ok"}};
+    std::vector<std::byte> text_buffer;
+    auto                   text_enc = make_encoder<shared_graph_codec>(text_buffer);
+    REQUIRE(text_enc(as_shared_graph(encode_graph, text)));
+    CHECK_EQ(to_hex(text_buffer), "626f6b");
+
+    auto       text_dec = make_decoder<shared_graph_codec>(text_buffer);
+    value_type decoded_text{vector_type{}};
+    REQUIRE(text_dec(as_shared_graph(decode_graph, decoded_text)));
+    REQUIRE(std::holds_alternative<std::string>(decoded_text));
+    CHECK_EQ(std::get<std::string>(decoded_text), "ok");
+}
+
 TEST_CASE("shared graph variants preserve malformed pointer errors") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
 
@@ -1350,6 +1393,20 @@ TEST_CASE("shared graph codec rejects inactive nullable variant dispatch without
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
         CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+    }
+
+    {
+        using value_type = std::variant<std::vector<std::shared_ptr<std::uint64_t>>, std::string>;
+
+        const auto bytes = to_bytes("80");
+        auto       dec   = make_decoder<shared_graph_codec>(bytes);
+        value_type value{std::string{"before"}};
+        const auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
     }
 }
 

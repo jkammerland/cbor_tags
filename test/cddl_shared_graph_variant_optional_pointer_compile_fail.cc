@@ -3,11 +3,12 @@
 
 #include <fmt/format.h>
 #include <memory>
+#include <optional>
+#include <string>
 #include <variant>
-#include <vector>
 
 int main() {
-    using value_type = cbor::tags::ext::smart_ptr::shared_graph_cddl<std::variant<std::shared_ptr<int>, std::vector<int>>>;
+    using value_type = cbor::tags::ext::smart_ptr::shared_graph_cddl<std::variant<std::optional<std::shared_ptr<int>>, std::string>>;
 
     fmt::memory_buffer buffer;
     cbor::tags::cddl_schema_to<value_type>(buffer, {.row_options = {.format_by_rows = false}});

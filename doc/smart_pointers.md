@@ -150,8 +150,15 @@ and 29. Non-colliding static tags can coexist:
 using ok = std::variant<std::shared_ptr<int>, static_tag<42>, std::string>;
 ```
 
+Graph-mode variants can also dispatch a direct vector of shared pointers by its
+top-level array shape:
+
+```cpp
+using ok_vector = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+```
+
 Tag 28, tag 29, and catch-all tag alternatives are ambiguous in graph mode and
-fail graph-mode decode:
+fail graph-mode decode when a direct `std::shared_ptr<T>` alternative is present:
 
 ```cpp
 using bad_shareable = std::variant<std::shared_ptr<int>, static_tag<28>>;
@@ -160,7 +167,14 @@ using bad_catch_all = std::variant<std::shared_ptr<int>, as_tag_any>;
 ```
 
 The same rejection applies when the colliding tag alternative is nested in
-another variant.
+another variant. A graph vector alternative is also rejected if any other
+alternative is array-shaped, and broader indirect pointer forms are not variant
+dispatch targets:
+
+```cpp
+using bad_array = std::variant<std::vector<std::shared_ptr<int>>, std::vector<int>>;
+using bad_nested = std::variant<std::optional<std::shared_ptr<int>>, std::string>;
+```
 
 ## CDDL
 
@@ -187,7 +201,8 @@ cddl_schema_to<shared_graph_cddl<std::shared_ptr<int>>>(schema);
 // root = [0] / #6.28(int) / #6.29(uint)
 ```
 
-For aggregate roots the scope applies recursively:
+The wrapper is only valid at the schema root. For aggregate roots the scope
+applies recursively:
 
 ```cpp
 struct Root {
@@ -196,14 +211,17 @@ struct Root {
 };
 
 cddl_schema_to<shared_graph_cddl<Root>>(schema);
+// Root = [[0] / #6.28(Person) / #6.29(uint), [* ([0] / #6.28(Person) / #6.29(uint))]]
+// Person = ...
 ```
 
 The generated CDDL describes the wire shape. It cannot prove that a
 `#6.29(uint)` reference points to an earlier tag 28 item in the same graph
 session; that remains decoder session validation. `std::variant` alternatives
-inside `shared_graph_cddl<T>` reject tag 28/29 and catch-all tag collisions, and
-also reject array-shaped alternatives that would be ambiguous with the `[0]`
-null pointer form.
+inside `shared_graph_cddl<T>` reject tag 28/29 and catch-all tag collisions when
+a direct `std::shared_ptr<T>` alternative is present. A direct
+`std::vector<std::shared_ptr<T>>` alternative is supported when no other
+alternative is array-shaped.
 
 ## Limits
 

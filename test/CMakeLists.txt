@@ -82,6 +82,53 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+function(add_cddl_shared_graph_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_nested_scope_compile_fails
+  cddl_shared_graph_nested_scope_compile_fail.cc
+  "CDDL scope wrappers are only valid as cddl_schema_to roots")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_tag29_compile_fails
+  cddl_shared_graph_variant_tag29_compile_fail.cc
+  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_any_tag_compile_fails
+  cddl_shared_graph_variant_any_tag_compile_fail.cc
+  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_nested_any_tag_compile_fails
+  cddl_shared_graph_variant_nested_any_tag_compile_fail.cc
+  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_multiple_pointers_compile_fails
+  cddl_shared_graph_variant_multiple_pointers_compile_fail.cc
+  "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_optional_pointer_compile_fails
+  cddl_shared_graph_variant_optional_pointer_compile_fail.cc
+  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_nested_pointer_compile_fails
+  cddl_shared_graph_variant_nested_pointer_compile_fail.cc
+  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_vector_array_compile_fails
+  cddl_shared_graph_variant_vector_array_compile_fail.cc
+  "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
+
 add_executable(cddl_variant_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_duplicate_tags_compile_fail.cc)
 target_link_libraries(cddl_variant_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
@@ -211,6 +258,21 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=smart_ptr_variant_array_compile_fails"
     "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives\\."
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_variant_shared_graph_vector_array_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_shared_graph_vector_array_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_shared_graph_vector_array_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_shared_graph_vector_array_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_shared_graph_vector_array_compile_fails"
+    "-DPASS_REGEX=Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives\\."
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 

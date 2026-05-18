@@ -122,6 +122,8 @@ struct CDDLSharedGraphPointers {
 using CDDLVariantWithSmartPointer       = std::variant<std::shared_ptr<int>, std::string>;
 using CDDLVariantWithNestedSmartPointer = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
 using CDDLSharedGraphVariant            = std::variant<std::shared_ptr<int>, static_tag<42>, std::string>;
+using CDDLSharedGraphVectorVariant      = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+using CDDLSharedGraphUniqueVariant      = std::variant<std::unique_ptr<int>, std::string>;
 
 template <typename T, std::size_t Depth> struct CDDLDeepVector {
     using type = std::vector<typename CDDLDeepVector<T, Depth - 1U>::type>;
@@ -175,6 +177,11 @@ static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepValue>(
 static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveValue>());
 static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
 static_assert(detail::CDDLScopedType<cbor::tags::ext::smart_ptr::shared_graph_cddl<CDDLSharedGraphPointers>>);
+static_assert(detail::cddl_is_shared_graph_vector_alternative<std::vector<std::shared_ptr<int>>>());
+static_assert(!detail::cddl_is_shared_graph_vector_alternative<std::vector<std::optional<std::shared_ptr<int>>>>());
+static_assert(!detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::vector<std::shared_ptr<int>>>());
+static_assert(detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::optional<std::shared_ptr<int>>>());
+static_assert(detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::vector<std::optional<std::shared_ptr<int>>>>());
 static_assert(detail::cddl_contains_shared_graph_pointer<std::shared_ptr<int>>());
 static_assert(detail::cddl_contains_shared_graph_collision_tag<static_tag<28>>());
 static_assert(detail::cddl_contains_shared_graph_collision_tag<static_tag<29>>());
@@ -337,6 +344,15 @@ struct CDDLNamedNullablePointers {
     std::unique_ptr<std::uint64_t>      count;
     std::shared_ptr<std::string>        name;
     std::optional<std::shared_ptr<int>> maybe_count;
+};
+
+struct CDDLNamedSharedGraphGroup {
+    std::shared_ptr<CDDLPlainTwo> owner;
+};
+
+struct CDDLNamedSharedGraphRoot {
+    as_named_group<CDDLNamedSharedGraphGroup> group;
+    std::shared_ptr<std::string>              reviewer;
 };
 
 struct CDDLNamedEnumChildMap {
@@ -608,6 +624,13 @@ TEST_CASE("CDDL emits shared graph pointer shapes through explicit smart pointer
     CHECK_EQ(cddl_schema_inline<shared_graph_cddl<std::unique_ptr<int>>>(), "root = [0] / [1, int]");
     CHECK_EQ(cddl_schema_inline<std::shared_ptr<int>>(), "root = [0] / [1, int]");
     CHECK_EQ(cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphVariant>>(), "root = [0] / #6.28(int) / #6.29(uint) / #6.42 / tstr");
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphVectorVariant>>(), "root = [* ([0] / #6.28(int) / #6.29(uint))] / tstr");
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphUniqueVariant>>(), "root = [0] / [1, int] / tstr");
+
+    std::string named_root_schema;
+    cddl_schema_to<shared_graph_cddl<std::shared_ptr<int>>>(named_root_schema,
+                                                            {.row_options = {.format_by_rows = false}, .root_name = "graph_ptr"});
+    CHECK_EQ(named_root_schema, "graph_ptr = [0] / #6.28(int) / #6.29(uint)");
 
     const auto schema = cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphPointers>>();
     CBOR_TAGS_TEST_LOG("CDDL shared graph pointers: \n{}\n", schema);
@@ -616,6 +639,14 @@ TEST_CASE("CDDL emits shared graph pointer shapes through explicit smart pointer
                         "CDDLSharedGraphPointers = [[0] / #6.28(CDDLPlainTwo) / #6.29(uint), [* ([0] / #6.28(tstr) / #6.29(uint))]]",
                         "CDDLPlainTwo = [int, tstr]"));
     CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
+
+    fmt::memory_buffer inline_buffer;
+    cddl_schema_to<shared_graph_cddl<CDDLSharedGraphPointers>>(inline_buffer,
+                                                               {.row_options = {.format_by_rows = false}, .always_inline = true});
+    const auto inline_schema = fmt::to_string(inline_buffer);
+    CHECK(substrings_in(inline_schema, "CDDLSharedGraphPointers = [[0] / #6.28([int, tstr]) / #6.29(uint), [* ([0] / #6.28(tstr) / "
+                                       "#6.29(uint))]]"));
+    CHECK_EQ(inline_schema.find("CDDLPlainTwo ="), std::string::npos);
 }
 
 TEST_CASE("CDDL shared graph scope keeps a separate definition cache") {
@@ -636,6 +667,23 @@ TEST_CASE("CDDL shared graph scope keeps a separate definition cache") {
     CHECK(substrings_in(graph_schema, "#6.28(", "#6.29(uint)", "[0] / #6.28(tstr) / #6.29(uint)"));
     CHECK_EQ(graph_schema.find("[1, CDDLPlainTwo]"), std::string::npos);
     CHECK_EQ(graph_schema.find("[1, tstr]"), std::string::npos);
+
+    detail::CDDLContext reverse_context;
+
+    fmt::memory_buffer reverse_graph_buffer;
+    cddl_schema_to<shared_graph_cddl<CDDLSharedGraphPointers>>(reverse_graph_buffer, {.row_options = {.format_by_rows = false}},
+                                                               std::ref(reverse_context));
+
+    fmt::memory_buffer reverse_nullable_buffer;
+    cddl_schema_to<CDDLSharedGraphPointers>(reverse_nullable_buffer, {.row_options = {.format_by_rows = false}}, std::ref(reverse_context));
+
+    const auto reverse_graph_schema    = fmt::to_string(reverse_graph_buffer);
+    const auto reverse_nullable_schema = fmt::to_string(reverse_nullable_buffer);
+
+    CHECK(substrings_in(reverse_graph_schema, "#6.28(", "#6.29(uint)", "[0] / #6.28(tstr) / #6.29(uint)"));
+    CHECK(substrings_in(reverse_nullable_schema, "[0] / [1, ", "[0] / [1, tstr]"));
+    CHECK_EQ(reverse_nullable_schema.find("#6.28("), std::string::npos);
+    CHECK_EQ(reverse_nullable_schema.find("#6.29(uint)"), std::string::npos);
 }
 
 TEST_CASE("CDDL supports recursive aggregate containers") {
@@ -828,6 +876,26 @@ TEST_CASE("named-map CDDL keeps nullable pointer fields required unless optional
     fmt::memory_buffer buffer;
     cddl_schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
     CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: [0] / [1, uint], name: [0] / [1, tstr], ? maybe_count: [0] / [1, int]}");
+}
+
+TEST_CASE("named-map CDDL propagates shared graph pointer scope through named maps and groups") {
+    using cbor::tags::ext::smart_ptr::shared_graph_cddl;
+
+    fmt::memory_buffer map_buffer;
+    cddl_schema_to<shared_graph_cddl<as_named_map<CDDLNamedSharedGraphRoot>>>(
+        map_buffer, {.row_options = {.format_by_rows = false}, .root_name = "GraphRoot"});
+    const auto map_schema = fmt::to_string(map_buffer);
+    CHECK(substrings_in(map_schema, "GraphRoot = {group, reviewer: [0] / #6.28(tstr) / #6.29(uint)}",
+                        "group = (owner: [0] / #6.28(CDDLPlainTwo) / #6.29(uint))", "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(map_schema.find("[1, CDDLPlainTwo]"), std::string::npos);
+    CHECK_EQ(map_schema.find("[1, tstr]"), std::string::npos);
+
+    fmt::memory_buffer group_buffer;
+    cddl_schema_to<shared_graph_cddl<as_named_group<CDDLNamedSharedGraphGroup>>>(
+        group_buffer, {.row_options = {.format_by_rows = false}, .root_name = "GraphGroup"});
+    const auto group_schema = fmt::to_string(group_buffer);
+    CHECK(substrings_in(group_schema, "GraphGroup = (owner: [0] / #6.28(CDDLPlainTwo) / #6.29(uint))", "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(group_schema.find("[1, CDDLPlainTwo]"), std::string::npos);
 }
 
 TEST_CASE("named-map CDDL indents nested inline named groups by depth") {

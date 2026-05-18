@@ -99,6 +99,19 @@ constexpr std::size_t decodable_nullable_pointer_count_v =
 
 template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = decodable_nullable_pointer_count_v<Ts...> > 0U;
 
+template <typename T> struct decodable_shared_graph_vector : std::false_type {};
+
+template <NullablePointerValue T, typename Allocator>
+struct decodable_shared_graph_vector<std::vector<std::shared_ptr<T>, Allocator>> : std::bool_constant<std::default_initializable<T>> {};
+
+template <typename T> constexpr bool decodable_shared_graph_vector_v = decodable_shared_graph_vector<std::remove_cvref_t<T>>::value;
+
+template <typename... Ts>
+constexpr std::size_t decodable_shared_graph_vector_count_v =
+    (std::size_t{0} + ... + (decodable_shared_graph_vector_v<Ts> ? std::size_t{1} : std::size_t{0}));
+
+template <typename... Ts> constexpr bool has_decodable_shared_graph_vector_v = decodable_shared_graph_vector_count_v<Ts...> > 0U;
+
 template <typename Variant, std::uint64_t Tag>
 constexpr bool variant_contains_static_tag_v = [] {
     constexpr auto tags      = ValidConceptMapping<Variant>::tags;
@@ -277,16 +290,20 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
 [[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, std::variant<Ts...> &value, major_type major,
                                                                                std::byte                     additional_info,
                                                                                std::optional<std::uint64_t> &tag) {
-    static_assert(((IsCborMajor<Ts> || decodable_nullable_pointer_v<Ts>) && ...),
-                  "Variant alternatives must be core CBOR types or decodable nullable smart pointers for this codec.");
+    static_assert(
+        ((IsCborMajor<Ts> || decodable_nullable_pointer_v<Ts> || (GraphTagsPossible && decodable_shared_graph_vector_v<Ts>)) && ...),
+        "Variant alternatives must be core CBOR types, decodable nullable smart pointers, or shared graph vectors for this "
+        "codec.");
     static_assert(decodable_nullable_pointer_count_v<Ts...> <= 1U,
                   "Variant nullable smart pointer alternatives are ambiguous because they share the same [0] / [1, value] shape.");
 
     using variant_type          = std::variant<Ts...>;
     using major_index           = cbor::tags::detail::MajorIndex;
     constexpr auto core_mapping = valid_concept_mapping_array_v<variant_type>;
-    static_assert(core_mapping[major_index::Array] == 0,
+    static_assert(decodable_nullable_pointer_count_v<Ts...> == 0U || core_mapping[major_index::Array] == 0,
                   "Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives.");
+    static_assert(decodable_shared_graph_vector_count_v<Ts...> == 0U || core_mapping[major_index::Array] == 1U,
+                  "Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives.");
     static_assert(!GraphTagsPossible || !variant_has_shared_graph_tag_collision_v<Ts...>,
                   "Variant shared_ptr alternatives in a shared graph collide with tags 28/29 or a catch-all tag alternative.");
     static_assert(core_mapping[major_index::Unsigned] <= 1, "Multiple types match against major type 0 (unsigned integer)");
@@ -692,10 +709,11 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
     }
 
     template <typename... Ts>
-        requires detail::has_decodable_nullable_pointer_v<Ts...>
+        requires(detail::has_decodable_nullable_pointer_v<Ts...> || detail::has_decodable_shared_graph_vector_v<Ts...>)
     [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
         if (active_decode_session_ == nullptr) {
-            if constexpr (detail::has_nullable_ptr_codec_v<Self>) {
+            if constexpr (detail::has_nullable_ptr_codec_v<Self> && detail::has_decodable_nullable_pointer_v<Ts...> &&
+                          !detail::has_decodable_shared_graph_vector_v<Ts...>) {
                 return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
             } else {
                 return status_code::error;
