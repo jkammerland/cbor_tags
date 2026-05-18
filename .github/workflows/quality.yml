@@ -81,6 +81,45 @@ jobs:
         path: coverage-report
         if-no-files-found: error
 
+  conan-package:
+    name: Conan package consumer (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "default", cppstd: "20", options: "" }
+          - { name: "std-expected", cppstd: "23", options: "-o cbor-tags/*:std_expected=True" }
+          - { name: "boost-pfr-names", cppstd: "20", options: "-o cbor-tags/*:boost_pfr_names=True" }
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install Conan tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ gcc ninja-build python3-pip
+        python3 -m pip install --user --break-system-packages "conan>=2,<3"
+        echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+    - name: Create and test package
+      shell: bash
+      run: |
+        conan profile detect --force
+        options="${{ matrix.options }}"
+        conan create . \
+          --build=missing \
+          -s build_type=Release \
+          -s compiler.cppstd=${{ matrix.cppstd }} \
+          -c tools.cmake.cmaketoolchain:generator=Ninja \
+          ${options}
+
   benchmark-build:
     name: C++ Benchmark Compile (${{ matrix.config.name }})
     runs-on: ubuntu-latest

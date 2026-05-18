@@ -3,7 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_extensions.h"
-#include "cbor_tags/extensions/cbor_visualization_traits.h"
+#include "cbor_tags/extensions/cddl_traits.h"
 
 #include <concepts>
 #include <cstddef>
@@ -386,6 +386,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                 result = decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, decoded_value, major, additional_info, tag);
             } else if constexpr (IsTag<raw_type>) {
                 result = dec.decode(decoded_value, read_tag_once());
+            } else if constexpr (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>) {
+                result = dec.decode_shared_graph_vector_variant_alternative(decoded_value, major, additional_info);
             } else {
                 result = dec.decode(decoded_value, major, additional_info);
             }
@@ -749,6 +751,26 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         return status_code::no_match_for_tag;
     }
 
+    template <typename Vector>
+    [[nodiscard]] status_code decode_shared_graph_vector_variant_alternative(Vector &value, major_type major, std::byte additional_info) {
+        if (active_decode_session_ == nullptr) {
+            return status_code::error;
+        }
+
+        auto      &session    = *active_decode_session_;
+        const auto checkpoint = session.decoded_shared_objects_.size();
+        try {
+            auto status = static_cast<Self &>(*this).decode(value, major, additional_info);
+            if (status != status_code::success) {
+                session.rollback_to(checkpoint);
+            }
+            return status;
+        } catch (...) {
+            session.rollback_to(checkpoint);
+            throw;
+        }
+    }
+
     template <detail::NullablePointerValue T>
     [[nodiscard]] status_code decode_null(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
         auto &dec = static_cast<Self &>(*this);
@@ -837,7 +859,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
 
 } // namespace cbor::tags::ext::smart_ptr
 
-namespace cbor::tags::detail {
+namespace cbor::tags::cddl {
 
 template <typename T> struct cddl_scope_traits<ext::smart_ptr::shared_graph_cddl<T>> {
     using value_type = typename ext::smart_ptr::shared_graph_cddl<T>::value_type;
@@ -845,4 +867,4 @@ template <typename T> struct cddl_scope_traits<ext::smart_ptr::shared_graph_cddl
     static constexpr cddl_shared_pointer_mode shared_pointer_mode = cddl_shared_pointer_mode::shared_graph;
 };
 
-} // namespace cbor::tags::detail
+} // namespace cbor::tags::cddl

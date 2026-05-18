@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -132,6 +133,20 @@ TEST_CASE("status messages cover every declared status code") {
         CHECK_NE(status_message(status), "Unknown CBOR status code"sv);
     }
     CHECK_EQ(status_message(static_cast<status_code>(255)), "Unknown CBOR status code"sv);
+}
+
+TEST_CASE("nested variants dispatch through core tag alternatives") {
+    using nested_type = std::variant<static_tag<42>, std::string>;
+    using value_type  = std::variant<std::uint64_t, nested_type>;
+
+    const auto bytes = to_bytes("d82a");
+    value_type value{std::uint64_t{}};
+    auto       dec = make_decoder(bytes);
+
+    REQUIRE(dec(value));
+    REQUIRE(std::holds_alternative<nested_type>(value));
+    const auto &nested = std::get<nested_type>(value);
+    CHECK(std::holds_alternative<static_tag<42>>(nested));
 }
 
 TEST_SUITE("Decoding the wrong thing") {

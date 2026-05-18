@@ -4,7 +4,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/detail/cbor_item.h"
-#include "cbor_tags/extensions/cbor_visualization_traits.h"
+#include "cbor_tags/extensions/cddl_traits.h"
 
 #ifndef CBOR_TAGS_USE_MAGIC_ENUM_NAMES
 #define CBOR_TAGS_USE_MAGIC_ENUM_NAMES 0

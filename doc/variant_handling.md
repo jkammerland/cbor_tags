@@ -1,4 +1,31 @@
-Below is "psuedo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows of you can optimize away unused codepaths with "if constexpr", in this case the codepaths are constrained by the variant type.
+# Variant Handling
+
+## Runtime Decode
+
+`std::variant` decode dispatches by the current CBOR major type and, for tag
+values, by the decoded tag number. Nested variants participate in the same
+dispatch instead of being treated as an opaque alternative:
+
+```cpp
+using nested_type = std::variant<cbor::tags::static_tag<42>, std::string>;
+using value_type = std::variant<std::uint64_t, nested_type>;
+
+auto input = to_bytes("d82a"); // #6.42
+value_type value{};
+auto dec = cbor::tags::make_decoder(input);
+
+REQUIRE(dec(value));
+REQUIRE(std::holds_alternative<nested_type>(value));
+CHECK(std::holds_alternative<cbor::tags::static_tag<42>>(std::get<nested_type>(value)));
+```
+
+Alternative shapes must still be unambiguous. A variant with two alternatives
+that both match the same tag or the same catch-all shape is rejected at compile
+time where the type system exposes that collision.
+
+## Compile-Time Dispatch
+
+Below is "pseudo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows how you can optimize away unused code paths with `if constexpr`; in this case the code paths are constrained by the variant type.
 
 Allocator note: `std::variant` does not carry a parent container allocator. Decoding `std::pmr` alternatives inside a variant nested in a PMR container is a known allocator-containment gap until variant alternative construction gets an explicit parent allocator context.
 

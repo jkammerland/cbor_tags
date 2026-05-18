@@ -94,7 +94,7 @@ Generates CDDL schema for the given type into output buffer
 - `row_options.format_by_rows`: Format multi-field aggregate payload arrays across multiple lines
 - `always_inline`: Inline nested aggregate definitions when possible; recursive references stay named
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
-- `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`
+- `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when C++26 static reflection or `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON` is available
 
 Generated schemas mirror the default encoder shape plus explicitly documented
 transform/extension shapes. Multi-field aggregates are arrays, single-field
@@ -104,10 +104,21 @@ Static tags render as `#6.n(payload)`. Dynamic tag values are not available
 from the type alone, so dynamic tags render as `#6(payload)`. Recursive
 aggregate types are emitted as named CDDL rules.
 
-Extension headers may add CDDL support by specializing the CDDL traits in
-`cbor_tags/extensions/cbor_visualization_traits.h`. Simple tagged extension
-types expose fixed tag metadata, while scoped wrappers can select a different
-rendering policy for a whole schema root. For example,
+Extension headers may add CDDL support by specializing the public CDDL traits
+in `cbor::tags::cddl`, declared by
+`cbor_tags/extensions/cddl_traits.h`. Simple tagged extension types expose fixed
+tag metadata, while scoped wrappers can select a different rendering policy for
+a whole schema root:
+
+```cpp
+namespace cbor::tags::cddl {
+template <> struct cddl_tagged_bstr_array_traits<MyTypedBstrView> {
+    static constexpr std::uint64_t tag = 1000;
+};
+}
+```
+
+For example,
 `cbor::tags::ext::smart_ptr::shared_graph_cddl<T>` switches only that schema
 root to the shared-graph `std::shared_ptr<T>` shape without changing the default
 nullable pointer schema.
@@ -148,10 +159,12 @@ reported unless the application widens the range, for example with a
 `magic_enum::customize::enum_range<T>` specialization defined before schema
 generation.
 
-### C++26 Named Maps
+### Named Maps
 
-When `CBOR_TAGS_USE_STD_REFLECTION=ON`, reflected member names can be used as
-CBOR map keys through the explicit named-map transform:
+When named reflection is enabled through C++26 static reflection
+(`CBOR_TAGS_USE_STD_REFLECTION=ON`) or C++20 Boost.PFR field names
+(`CBOR_TAGS_USE_BOOST_PFR_NAMES=ON`), reflected member names can be used as CBOR
+map keys through the explicit named-map transform:
 
 ```cpp
 struct Person {

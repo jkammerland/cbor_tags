@@ -54,6 +54,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nullable_pointer_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -66,6 +67,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_shared_graph_variant_tag_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -78,6 +80,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_shared_graph_variant_array_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -91,6 +94,7 @@ function(add_cddl_shared_graph_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGE
       ${CMAKE_COMMAND}
       "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
       "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
       "-DPASS_REGEX=${PASS_REGEX}"
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -141,6 +145,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -153,6 +158,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_ref_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -165,6 +171,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nested_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -177,6 +184,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_structural_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -189,6 +197,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nested_any_tag_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -201,6 +210,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_optional_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -213,6 +223,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_any_tag_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -225,6 +236,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_static_tag_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -237,6 +249,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_dynamic_tag_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=CDDL for std::variant alternatives with dynamic CBOR tags is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -249,6 +262,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=smart_ptr_variant_two_nullable_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous because they share the same \\[0\\] / \\[1, value\\] shape\\."
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -261,6 +275,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=smart_ptr_variant_array_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives\\."
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -276,6 +291,7 @@ add_test(
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=smart_ptr_variant_shared_graph_vector_array_compile_fails"
+    "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives\\."
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -289,6 +305,7 @@ function(add_typed_array_variant_compile_fail_test TEST_NAME SOURCE_FILE)
       ${CMAKE_COMMAND}
       "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
       "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
       "-DPASS_REGEX=Multiple types match against major type 6 \\(tag\\)"
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -309,6 +326,7 @@ if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
         ${CMAKE_COMMAND}
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DTEST_TARGET=${TEST_NAME}"
+        "-DCONFIG=$<CONFIG>"
         "-DPASS_REGEX=fixed field names must be unique after flattening as_named_group members"
         -P
         "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
@@ -328,6 +346,7 @@ if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
         ${CMAKE_COMMAND}
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DTEST_TARGET=${TEST_NAME}"
+        "-DCONFIG=$<CONFIG>"
         "-DPASS_REGEX=at most one as_named_extension field after flattening as_named_group members"
         -P
         "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")

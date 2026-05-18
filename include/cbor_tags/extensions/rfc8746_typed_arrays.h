@@ -3,7 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_segments.h"
-#include "cbor_tags/extensions/cbor_visualization_traits.h"
+#include "cbor_tags/extensions/cddl_traits.h"
 
 #include <algorithm>
 #include <array>
@@ -743,7 +743,7 @@ template <typename Dimensions, typename Array>
 
 } // namespace cbor::tags::ext::rfc8746
 
-namespace cbor::tags::detail {
+namespace cbor::tags::cddl {
 
 template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
 struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
@@ -798,7 +798,7 @@ struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array
     static constexpr std::uint64_t tag = ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::cbor_array_tag;
 };
 
-} // namespace cbor::tags::detail
+} // namespace cbor::tags::cddl
 
 namespace cbor::tags::ext::rfc8746 {
 
@@ -1109,6 +1109,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
+    // Borrowed segmented output is zero-copy and therefore requires native byte
+    // order. Use encode_typed_array_segments_copy for portable converted output.
     if constexpr (detail::native_matches_byte_order<ByteOrder>) {
         return encode_tagged_bstr_segments(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {
@@ -1120,6 +1122,8 @@ template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbo
           typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
 void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
+    // Borrowed segmented output is zero-copy and therefore requires native byte
+    // order. Use encode_typed_array_segments_copy for portable converted output.
     if constexpr (detail::native_matches_byte_order<ByteOrder>) {
         encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {

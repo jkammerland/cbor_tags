@@ -81,9 +81,9 @@ class CborTagsConan(ConanFile):
         self.cpp_info.set_property("cmake_target_name", "cbor::tags")
         self.cpp_info.requires = ["fmt::fmt", "nameof::nameof"]
         if not self.options.std_expected:
-            self.cpp_info.requires.append("tl-expected::tl-expected")
+            self.cpp_info.requires.append("tl-expected::expected")
         if self.options.boost_pfr_names:
-            self.cpp_info.requires.append("boost::boost")
+            self.cpp_info.requires.append("boost::headers")
         if self.options.magic_enum_names:
             self.cpp_info.requires.append("magic_enum::magic_enum")
         self.cpp_info.bindirs = []

@@ -12,6 +12,7 @@
 #include <limits>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -762,6 +763,28 @@ TEST_CASE("rfc8746 float typed arrays use exact big-endian wire bytes") {
     }
 }
 
+TEST_CASE("rfc8746 endian conversion helpers are reversible") {
+    using cbor::tags::ext::rfc8746::detail::byteswap_bits;
+    using cbor::tags::ext::rfc8746::detail::native_to_wire_bits;
+    using cbor::tags::ext::rfc8746::detail::wire_to_native_bits;
+
+    CHECK_EQ(byteswap_bits<std::uint16_t>(0x1234U), 0x3412U);
+    CHECK_EQ(byteswap_bits<std::uint32_t>(0x12345678U), 0x78563412U);
+    CHECK_EQ(byteswap_bits<std::uint64_t>(0x0102030405060708ULL), 0x0807060504030201ULL);
+
+    const auto swapped_array =
+        byteswap_bits(std::array{std::byte{0x00}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05},
+                                 std::byte{0x06}, std::byte{0x07}, std::byte{0x08}, std::byte{0x09}, std::byte{0x0A}, std::byte{0x0B},
+                                 std::byte{0x0C}, std::byte{0x0D}, std::byte{0x0E}, std::byte{0x0F}});
+    CHECK_EQ(swapped_array, std::array{std::byte{0x0F}, std::byte{0x0E}, std::byte{0x0D}, std::byte{0x0C}, std::byte{0x0B}, std::byte{0x0A},
+                                       std::byte{0x09}, std::byte{0x08}, std::byte{0x07}, std::byte{0x06}, std::byte{0x05}, std::byte{0x04},
+                                       std::byte{0x03}, std::byte{0x02}, std::byte{0x01}, std::byte{0x00}});
+
+    constexpr auto value = std::uint64_t{0x0102030405060708ULL};
+    CHECK_EQ(wire_to_native_bits<typed_array_byte_order::big>(native_to_wire_bits<typed_array_byte_order::big>(value)), value);
+    CHECK_EQ(wire_to_native_bits<typed_array_byte_order::little>(native_to_wire_bits<typed_array_byte_order::little>(value)), value);
+}
+
 TEST_CASE("rfc8746 int64 typed arrays use exact little-endian wire bytes") {
     const std::vector<std::int64_t> values{-1, 0x0102030405060708LL};
 
@@ -794,6 +817,20 @@ TEST_CASE("rfc8746 typed array owned segment fallback matches normal encoding") 
     REQUIRE_EQ(segments.size(), 1U);
     CHECK(segments[0].is_owned());
     CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(normal));
+}
+
+TEST_CASE("rfc8746 borrowed segmented output rejects converted byte order") {
+    const std::vector<std::int32_t> values{1, -2, 3};
+    const auto                      span = std::span<const std::int32_t>{values};
+    cbor_segments                   segments;
+
+    if constexpr (std::endian::native == std::endian::little) {
+        CHECK_THROWS_AS((void)encode_typed_array_segments<typed_array_byte_order::big>(span), std::logic_error);
+        CHECK_THROWS_AS(encode_typed_array_segments_into<typed_array_byte_order::big>(segments, span), std::logic_error);
+    } else if constexpr (std::endian::native == std::endian::big) {
+        CHECK_THROWS_AS((void)encode_typed_array_segments<typed_array_byte_order::little>(span), std::logic_error);
+        CHECK_THROWS_AS(encode_typed_array_segments_into<typed_array_byte_order::little>(segments, span), std::logic_error);
+    }
 }
 
 TEST_CASE("rfc8746 big-endian typed array owned segment fallback matches normal encoding") {

@@ -1176,6 +1176,29 @@ TEST_CASE("shared graph vector variants preserve malformed pointer element error
     }
 }
 
+TEST_CASE("shared graph vector variants roll back decoded ids after element failures") {
+    using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
+    using value_type  = std::variant<vector_type, std::string>;
+
+    const auto                  bytes = to_bytes("82d81c182ad81d01d81d00");
+    auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+    shared_graph_decode_session decode_graph;
+    value_type                  value{std::string{"before"}};
+
+    const auto failed_vector = dec(as_shared_graph(decode_graph, value));
+    REQUIRE_FALSE(failed_vector);
+    CHECK_EQ(failed_vector.error(), status_code::error);
+    REQUIRE(std::holds_alternative<std::string>(value));
+    CHECK_EQ(std::get<std::string>(value), "before");
+
+    auto       leaked = std::make_shared<std::uint64_t>(7U);
+    const auto ref    = dec(as_shared_graph(decode_graph, leaked));
+    REQUIRE_FALSE(ref);
+    CHECK_EQ(ref.error(), status_code::error);
+    REQUIRE(static_cast<bool>(leaked));
+    CHECK_EQ(*leaked, 7U);
+}
+
 TEST_CASE("shared graph vector variants roundtrip null pointer elements") {
     using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
     using value_type  = std::variant<vector_type, std::string>;
