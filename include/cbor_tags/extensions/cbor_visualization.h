@@ -100,7 +100,8 @@ namespace detail {
 
 struct CDDLContext;
 
-template <typename T> std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
 
 struct CDDLContext {
     enum class DefinitionState { visiting, done };
@@ -441,13 +442,22 @@ template <typename T, typename...> struct first_type {
 
 template <typename... Ts> using first_type_t = typename first_type<Ts...>::type;
 
-template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options);
-template <typename T>
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_type_expr(CDDLContext &context, CDDLOptions options);
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string ensure_cddl_named_map_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
-template <typename T>
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name = {});
-template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
-template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
+
+template <typename T>
+concept CDDLScopedType = requires {
+    typename cddl_scope_traits<std::remove_cvref_t<T>>::value_type;
+    { cddl_scope_traits<std::remove_cvref_t<T>>::shared_pointer_mode } -> std::convertible_to<cddl_shared_pointer_mode>;
+};
 
 template <typename T>
 concept CDDLTaggedByteStringArray = requires {
@@ -497,7 +507,10 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         return false;
     } else {
         using next_seen = cddl_seen_append_t<Seen, value_type>;
-        if constexpr (CDDLHomogeneousArray<value_type>) {
+        if constexpr (CDDLScopedType<value_type>) {
+            using traits = cddl_scope_traits<value_type>;
+            return cddl_contains_nullable_pointer<typename traits::value_type, next_seen>();
+        } else if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
@@ -582,6 +595,49 @@ template <typename T> consteval bool cddl_contains_fixed_tag() {
     }
 }
 
+template <typename T, std::uint64_t Tag> consteval bool cddl_contains_fixed_tag_value() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsOptional<value_type>) {
+        return cddl_contains_fixed_tag_value<typename value_type::value_type, Tag>();
+    } else if constexpr (IsVariant<value_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (cddl_contains_fixed_tag_value<Ts, Tag>() || ...);
+        }(static_cast<value_type *>(nullptr));
+    } else if constexpr (cddl_direct_fixed_tag_available<value_type>()) {
+        return cddl_direct_fixed_tag<value_type>() == Tag;
+    } else {
+        return false;
+    }
+}
+
+template <typename T> consteval bool cddl_contains_shared_graph_pointer() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsOptional<value_type>) {
+        return cddl_contains_shared_graph_pointer<typename value_type::value_type>();
+    } else if constexpr (IsVariant<value_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (cddl_contains_shared_graph_pointer<Ts>() || ...);
+        }(static_cast<value_type *>(nullptr));
+    } else {
+        return is_std_shared_ptr<value_type>::value;
+    }
+}
+
+template <typename T> consteval bool cddl_contains_shared_graph_collision_tag() {
+    return cddl_contains_tag_header<T>() || cddl_contains_fixed_tag_value<T, 28U>() || cddl_contains_fixed_tag_value<T, 29U>();
+}
+
+template <typename T> consteval std::size_t cddl_nullable_pointer_alternative_count() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (IsVariant<value_type>) {
+        return []<typename... Ts>(std::variant<Ts...> *) consteval {
+            return (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>());
+        }(static_cast<value_type *>(nullptr));
+    } else {
+        return cddl_contains_nullable_pointer<value_type>() ? std::size_t{1} : std::size_t{0};
+    }
+}
+
 template <typename A, typename B> consteval bool cddl_fixed_tags_overlap() {
     using a_type = std::remove_cvref_t<A>;
     using b_type = std::remove_cvref_t<B>;
@@ -610,13 +666,26 @@ template <typename A, typename B> consteval bool cddl_tag_alternatives_overlap()
            (cddl_contains_tag_header<A>() && cddl_contains_tag_header<B>());
 }
 
-consteval bool cddl_variant_has_tag_overlap() { return false; }
+template <cddl_shared_pointer_mode PointerMode, typename A, typename B> consteval bool cddl_scoped_tag_alternatives_overlap() {
+    if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
+        return cddl_tag_alternatives_overlap<A, B>() ||
+               (cddl_contains_shared_graph_pointer<A>() && cddl_contains_shared_graph_collision_tag<B>()) ||
+               (cddl_contains_shared_graph_pointer<B>() && cddl_contains_shared_graph_collision_tag<A>()) ||
+               (cddl_contains_shared_graph_pointer<A>() && cddl_contains_shared_graph_pointer<B>());
+    } else {
+        return cddl_tag_alternatives_overlap<A, B>();
+    }
+}
 
-template <typename T> consteval bool cddl_variant_has_tag_overlap() { return false; }
+template <cddl_shared_pointer_mode PointerMode> consteval bool cddl_scoped_variant_has_tag_overlap() { return false; }
 
-template <typename T, typename U, typename... Rest> consteval bool cddl_variant_has_tag_overlap() {
-    return cddl_tag_alternatives_overlap<T, U>() || (cddl_tag_alternatives_overlap<T, Rest>() || ...) ||
-           cddl_variant_has_tag_overlap<U, Rest...>();
+template <cddl_shared_pointer_mode PointerMode, typename T> consteval bool cddl_scoped_variant_has_tag_overlap() { return false; }
+
+template <cddl_shared_pointer_mode PointerMode, typename T, typename U, typename... Rest>
+consteval bool cddl_scoped_variant_has_tag_overlap() {
+    return cddl_scoped_tag_alternatives_overlap<PointerMode, T, U>() ||
+           (cddl_scoped_tag_alternatives_overlap<PointerMode, T, Rest>() || ...) ||
+           cddl_scoped_variant_has_tag_overlap<PointerMode, U, Rest...>();
 }
 
 constexpr bool is_cddl_id_start(char value) {
@@ -644,7 +713,17 @@ inline std::string sanitize_cddl_id(std::string_view raw) {
     return result;
 }
 
-template <typename T> std::string cddl_type_key() { return std::string(nameof::nameof_full_type<std::remove_cvref_t<T>>()); }
+template <cddl_shared_pointer_mode PointerMode> constexpr std::string_view cddl_scope_key_prefix() {
+    if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
+        return "__cddl_shared_graph:";
+    } else {
+        return "";
+    }
+}
+
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable> std::string cddl_type_key() {
+    return std::string(cddl_scope_key_prefix<PointerMode>()) + std::string(nameof::nameof_full_type<std::remove_cvref_t<T>>());
+}
 
 template <typename T> std::string cddl_type_name() { return sanitize_cddl_id(nameof::nameof_short_type<std::remove_cvref_t<T>>()); }
 
@@ -676,9 +755,13 @@ inline std::string cddl_member_key(std::string_view raw) {
     return std::string(raw);
 }
 
-template <typename T> std::string cddl_named_map_key() { return "__cddl_named_map:" + cddl_type_key<T>(); }
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable> std::string cddl_named_map_key() {
+    return "__cddl_named_map:" + cddl_type_key<T, PointerMode>();
+}
 
-template <typename T> std::string cddl_named_group_key() { return "__cddl_named_group:" + cddl_type_key<T>(); }
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable> std::string cddl_named_group_key() {
+    return "__cddl_named_group:" + cddl_type_key<T, PointerMode>();
+}
 
 template <typename T> std::string cddl_enum_key() { return "__cddl_enum:" + cddl_type_key<T>(); }
 
@@ -713,17 +796,19 @@ template <typename T> std::string cddl_tagged_bstr_array_expr() {
     return fmt::format("#6.{}(bstr)", cddl_tagged_bstr_array_traits<value_type>::tag);
 }
 
-template <typename T> std::string cddl_homogeneous_array_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_homogeneous_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using traits     = cddl_homogeneous_array_traits<value_type>;
-    return fmt::format("#6.{}({})", traits::tag, cddl_type_expr<typename traits::array_type>(context, options));
+    return fmt::format("#6.{}({})", traits::tag, cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
 }
 
-template <typename T> std::string cddl_multi_dimensional_array_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_multi_dimensional_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using traits     = cddl_multi_dimensional_array_traits<value_type>;
-    auto dimensions  = parenthesize_choice(cddl_type_expr<typename traits::dimensions_type>(context, options));
-    auto array       = parenthesize_choice(cddl_type_expr<typename traits::array_type>(context, options));
+    auto dimensions  = parenthesize_choice(cddl_type_expr<typename traits::dimensions_type, PointerMode>(context, options));
+    auto array       = parenthesize_choice(cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
     return fmt::format("#6.{}([{}, {}])", traits::tag, dimensions, array);
 }
 
@@ -902,8 +987,9 @@ std::string ensure_cddl_enum_definition(CDDLContext &context, CDDLOptions option
     return std::string(def.name);
 }
 
-template <typename... Ts> std::string cddl_fixed_array_expr(CDDLContext &context, CDDLOptions options) {
-    std::array<std::string, sizeof...(Ts)> items{cddl_type_expr<std::remove_cvref_t<Ts>>(context, options)...};
+template <cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable, typename... Ts>
+std::string cddl_fixed_array_expr(CDDLContext &context, CDDLOptions options) {
+    std::array<std::string, sizeof...(Ts)> items{cddl_type_expr<std::remove_cvref_t<Ts>, PointerMode>(context, options)...};
 
     if (!options.row_options.format_by_rows) {
         return "[" + join_cddl(items, ", ") + "]";
@@ -922,26 +1008,28 @@ template <typename... Ts> std::string cddl_fixed_array_expr(CDDLContext &context
     return result;
 }
 
-template <typename... Ts> std::string cddl_payload_expr(CDDLContext &context, CDDLOptions options) {
+template <cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable, typename... Ts>
+std::string cddl_payload_expr(CDDLContext &context, CDDLOptions options) {
     if constexpr (sizeof...(Ts) == 0) {
         return "[]";
     } else if constexpr (sizeof...(Ts) == 1) {
-        return cddl_type_expr<std::remove_cvref_t<first_type_t<Ts...>>>(context, options);
+        return cddl_type_expr<std::remove_cvref_t<first_type_t<Ts...>>, PointerMode>(context, options);
     } else {
-        return cddl_fixed_array_expr<Ts...>(context, options);
+        return cddl_fixed_array_expr<PointerMode, Ts...>(context, options);
     }
 }
 
-template <typename Tuple, std::size_t Offset, std::size_t... Is>
+template <typename Tuple, std::size_t Offset, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable, std::size_t... Is>
 std::string cddl_payload_from_tuple(CDDLContext &context, CDDLOptions options, std::index_sequence<Is...>) {
-    return cddl_payload_expr<std::tuple_element_t<Offset + Is, Tuple>...>(context, options);
+    return cddl_payload_expr<PointerMode, std::tuple_element_t<Offset + Is, Tuple>...>(context, options);
 }
 
-template <typename Tuple, std::size_t Offset> std::string cddl_payload_from_tuple(CDDLContext &context, CDDLOptions options) {
+template <typename Tuple, std::size_t Offset, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_payload_from_tuple(CDDLContext &context, CDDLOptions options) {
     using tuple_type               = std::remove_cvref_t<Tuple>;
     constexpr std::size_t size     = std::tuple_size_v<tuple_type>;
     constexpr std::size_t payloads = size >= Offset ? size - Offset : 0;
-    return cddl_payload_from_tuple<tuple_type, Offset>(context, options, std::make_index_sequence<payloads>{});
+    return cddl_payload_from_tuple<tuple_type, Offset, PointerMode>(context, options, std::make_index_sequence<payloads>{});
 }
 
 template <typename T> std::string cddl_tag_prefix() {
@@ -976,41 +1064,44 @@ inline void reject_explicit_root_name_collision(CDDLContext &context, CDDLRootId
     }
 }
 
-template <typename T> std::string cddl_aggregate_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_aggregate_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     static_assert(!is_empty_cddl_aggregate_v<value_type>, "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
 
     using tuple_type = aggregate_tuple_t<value_type>;
 
     if constexpr (HasInlineTag<value_type>) {
-        return fmt::format("#6.{}({})", value_type::cbor_tag, cddl_payload_from_tuple<tuple_type, 0>(context, options));
+        return fmt::format("#6.{}({})", value_type::cbor_tag, cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options));
     } else if constexpr (HasStaticTag<value_type>) {
         using tag_type = std::remove_cvref_t<decltype(value_type::cbor_tag)>;
-        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1>(context, options));
+        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
     } else if constexpr (HasDynamicTag<value_type>) {
-        return fmt::format("#6({})", cddl_payload_from_tuple<tuple_type, 1>(context, options));
+        return fmt::format("#6({})", cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
     } else {
-        return cddl_payload_from_tuple<tuple_type, 0>(context, options);
+        return cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options);
     }
 }
 
-template <typename T> std::string cddl_tuple_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_tuple_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using tuple_type = value_type;
 
     if constexpr (IsTaggedTuple<value_type>) {
         using tag_type = std::remove_cvref_t<std::tuple_element_t<0, tuple_type>>;
-        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1>(context, options));
+        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
     } else {
-        return cddl_payload_from_tuple<tuple_type, 0>(context, options);
+        return cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options);
     }
 }
 
-template <typename T> std::string cddl_sequence_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_sequence_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using item_type  = std::remove_cvref_t<typename value_type::value_type>;
 
-    auto item = parenthesize_choice(cddl_type_expr<item_type>(context, options));
+    auto item = parenthesize_choice(cddl_type_expr<item_type, PointerMode>(context, options));
     if constexpr (is_std_array<value_type>::value) {
         return fmt::format("[{}*{} {}]", is_std_array<value_type>::size, is_std_array<value_type>::size, item);
     } else if constexpr (is_std_span<value_type>::value) {
@@ -1024,12 +1115,13 @@ template <typename T> std::string cddl_sequence_expr(CDDLContext &context, CDDLO
     }
 }
 
-template <typename T> std::string cddl_map_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_map_expr(CDDLContext &context, CDDLOptions options) {
     using value_type  = std::remove_cvref_t<T>;
     using key_type    = std::remove_cvref_t<typename value_type::key_type>;
     using mapped_type = std::remove_cvref_t<typename value_type::mapped_type>;
-    auto key          = parenthesize_choice(cddl_type_expr<key_type>(context, options));
-    auto value        = parenthesize_choice(cddl_type_expr<mapped_type>(context, options));
+    auto key          = parenthesize_choice(cddl_type_expr<key_type, PointerMode>(context, options));
+    auto value        = parenthesize_choice(cddl_type_expr<mapped_type, PointerMode>(context, options));
     return fmt::format("{{* {} => {}}}", key, value);
 }
 
@@ -1043,7 +1135,8 @@ inline CDDLOptions cddl_nested_row_options(CDDLOptions options) {
     return options;
 }
 
-template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
+template <typename T, std::size_t I, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using tuple_type = aggregate_tuple_t<value_type>;
     using field_type = std::remove_cvref_t<std::tuple_element_t<I, tuple_type>>;
@@ -1051,28 +1144,30 @@ template <typename T, std::size_t I> std::string cddl_named_member_entry(CDDLCon
     constexpr auto raw_name = detail::aggregate_member_name<value_type, I>();
     if constexpr (IsNamedGroupWrapper<field_type>) {
         if (options.always_inline) {
-            return cddl_named_group_expr<named_group_value_t<field_type>>(context, cddl_nested_row_options(options));
+            return cddl_named_group_expr<named_group_value_t<field_type>, PointerMode>(context, cddl_nested_row_options(options));
         }
-        return ensure_cddl_named_group_definition<named_group_value_t<field_type>>(context, options, raw_name);
+        return ensure_cddl_named_group_definition<named_group_value_t<field_type>, PointerMode>(context, options, raw_name);
     } else if constexpr (IsNamedExtensionWrapper<field_type>) {
         using extension_type = named_extension_value_t<field_type>;
         static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
                       "as_named_extension requires a map with text-string keys");
-        return fmt::format("* tstr => {}", cddl_type_expr<typename extension_type::mapped_type>(context, options));
+        return fmt::format("* tstr => {}", cddl_type_expr<typename extension_type::mapped_type, PointerMode>(context, options));
     } else if constexpr (IsOptional<field_type>) {
-        return fmt::format("? {}: {}", cddl_member_key(raw_name), cddl_type_expr<typename field_type::value_type>(context, options));
+        return fmt::format("? {}: {}", cddl_member_key(raw_name),
+                           cddl_type_expr<typename field_type::value_type, PointerMode>(context, options));
     } else {
-        return fmt::format("{}: {}", cddl_member_key(raw_name), cddl_type_expr<field_type>(context, options));
+        return fmt::format("{}: {}", cddl_member_key(raw_name), cddl_type_expr<field_type, PointerMode>(context, options));
     }
 }
 
-template <typename T, std::size_t... Is>
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable, std::size_t... Is>
 std::string cddl_named_entries(CDDLContext &context, CDDLOptions options, std::index_sequence<Is...>) {
-    std::array<std::string, sizeof...(Is)> items{cddl_named_member_entry<T, Is>(context, options)...};
+    std::array<std::string, sizeof...(Is)> items{cddl_named_member_entry<T, Is, PointerMode>(context, options)...};
     return join_cddl(items, options.row_options.format_by_rows ? ",\n" + cddl_row_indent(options, 1) : ", ");
 }
 
-template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open, char close) {
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open, char close) {
     using value_type            = std::remove_cvref_t<T>;
     constexpr auto member_count = detail::aggregate_member_count<value_type>();
     static_assert(detail::named_fixed_member_keys_are_unique<value_type>(),
@@ -1080,26 +1175,26 @@ template <typename T> std::string cddl_named_body(CDDLContext &context, CDDLOpti
     static_assert(detail::named_flattened_extension_count<value_type>() <= 1U,
                   "as_named_map/as_named_group may contain at most one as_named_extension field after flattening as_named_group members");
     if (!options.row_options.format_by_rows) {
-        return fmt::format("{}{}{}", open, cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{}),
-                           close);
+        return fmt::format("{}{}{}", open,
+                           cddl_named_entries<value_type, PointerMode>(context, options, std::make_index_sequence<member_count>{}), close);
     }
 
-    auto entries = cddl_named_entries<value_type>(context, options, std::make_index_sequence<member_count>{});
+    auto entries = cddl_named_entries<value_type, PointerMode>(context, options, std::make_index_sequence<member_count>{});
     if (!entries.empty()) {
         entries = cddl_row_indent(options, 1) + entries;
     }
     return fmt::format("{}\n{}\n{}{}", open, entries, cddl_row_indent(options), close);
 }
 
-template <typename T> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options) {
-    return cddl_named_body<T>(context, options, '{', '}');
+template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options) {
+    return cddl_named_body<T, PointerMode>(context, options, '{', '}');
 }
 
-template <typename T> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options) {
-    return cddl_named_body<T>(context, options, '(', ')');
+template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options) {
+    return cddl_named_body<T, PointerMode>(context, options, '(', ')');
 }
 
-template <typename T>
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string ensure_cddl_named_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name,
                                          std::string (*key_fn)(), std::string (*expr_fn)(CDDLContext &, CDDLOptions)) {
     const auto key = key_fn();
@@ -1119,43 +1214,47 @@ std::string ensure_cddl_named_definition(CDDLContext &context, CDDLOptions optio
     return std::string(def.name);
 }
 
-template <typename T>
+template <typename T, cddl_shared_pointer_mode PointerMode>
 std::string ensure_cddl_named_map_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
     using value_type = std::remove_cvref_t<T>;
     static_assert(IsAggregate<value_type>, "as_named_map requires an aggregate payload");
-    return ensure_cddl_named_definition<value_type>(context, options, preferred_name, cddl_named_map_key<value_type>,
-                                                    cddl_named_map_expr<value_type>);
+    return ensure_cddl_named_definition<value_type, PointerMode>(
+        context, options, preferred_name, cddl_named_map_key<value_type, PointerMode>, cddl_named_map_expr<value_type, PointerMode>);
 }
 
-template <typename T>
+template <typename T, cddl_shared_pointer_mode PointerMode>
 std::string ensure_cddl_named_group_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
     using value_type = std::remove_cvref_t<T>;
     static_assert(IsAggregate<value_type>, "as_named_group requires an aggregate payload");
-    return ensure_cddl_named_definition<value_type>(context, options, preferred_name, cddl_named_group_key<value_type>,
-                                                    cddl_named_group_expr<value_type>);
+    return ensure_cddl_named_definition<value_type, PointerMode>(
+        context, options, preferred_name, cddl_named_group_key<value_type, PointerMode>, cddl_named_group_expr<value_type, PointerMode>);
 }
 #else
-template <typename T> std::string ensure_cddl_named_map_definition(CDDLContext &, CDDLOptions, std::string_view) {
+template <typename T, cddl_shared_pointer_mode PointerMode>
+std::string ensure_cddl_named_map_definition(CDDLContext &, CDDLOptions, std::string_view) {
     static_assert(always_false<std::remove_cvref_t<T>>::value,
                   "as_named_map requires named reflection (C++26 std::meta or Boost.PFR field names)");
     return {};
 }
 
-template <typename T> std::string ensure_cddl_named_group_definition(CDDLContext &, CDDLOptions, std::string_view) {
+template <typename T, cddl_shared_pointer_mode PointerMode>
+std::string ensure_cddl_named_group_definition(CDDLContext &, CDDLOptions, std::string_view) {
     static_assert(always_false<std::remove_cvref_t<T>>::value,
                   "as_named_group requires named reflection (C++26 std::meta or Boost.PFR field names)");
     return {};
 }
 #endif
 
-template <typename T> std::string cddl_rule_expr(CDDLContext &context, CDDLOptions options, std::string_view name) {
-    return fmt::format("{} = {}", name, cddl_aggregate_expr<T>(context, options));
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_rule_expr(CDDLContext &context, CDDLOptions options, std::string_view name) {
+    return fmt::format("{} = {}", name, cddl_aggregate_expr<T, PointerMode>(context, options));
 }
 
-template <typename T> std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
+template <typename T, cddl_shared_pointer_mode PointerMode>
+std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, std::string_view preferred_name) {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
-        const auto key = cddl_type_key<value_type>();
+        const auto key = cddl_type_key<value_type, PointerMode>();
         if (auto *def = context.find_by_key(key)) {
             if (def->state == CDDLContext::DefinitionState::visiting) {
                 def->recursive_reference = true;
@@ -1165,7 +1264,7 @@ template <typename T> std::string ensure_cddl_definition(CDDLContext &context, C
 
         auto  name = unique_cddl_name(context, key, preferred_name.empty() ? cddl_type_name<value_type>() : preferred_name);
         auto &def  = context.reserve(key, name);
-        auto  body = cddl_aggregate_expr<value_type>(context, options);
+        auto  body = cddl_aggregate_expr<value_type, PointerMode>(context, options);
         if (options.always_inline && preferred_name.empty() && !def.recursive_reference) {
             context.erase_by_key(key);
             return body;
@@ -1176,13 +1275,16 @@ template <typename T> std::string ensure_cddl_definition(CDDLContext &context, C
         def.state = CDDLContext::DefinitionState::done;
         return std::string(def.name);
     } else {
-        return cddl_type_expr<value_type>(context, options);
+        return cddl_type_expr<value_type, PointerMode>(context, options);
     }
 }
 
-template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
+template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsEnum<value_type>) {
+    if constexpr (CDDLScopedType<value_type>) {
+        using traits = cddl_scope_traits<value_type>;
+        return cddl_type_expr<typename traits::value_type, traits::shared_pointer_mode>(context, options);
+    } else if constexpr (IsEnum<value_type>) {
         if constexpr (cddl_enum_entry_count<value_type>() != 0) {
             if (cddl_use_named_enum<value_type>(options)) {
                 if (options.always_inline) {
@@ -1203,9 +1305,9 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
     } else if constexpr (IsBinaryString<value_type>) {
         return "bstr";
     } else if constexpr (IsIndefiniteWrapper<value_type>) {
-        return cddl_type_expr<indefinite_value_t<value_type>>(context, options);
+        return cddl_type_expr<indefinite_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsOptional<value_type>) {
-        return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type>(context, options));
+        return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type, PointerMode>(context, options));
     } else if constexpr (IsNullablePointer<value_type>) {
         using element_type = nullable_pointer_element_t<value_type>;
         static_assert(is_supported_nullable_pointer_v<value_type>,
@@ -1213,26 +1315,42 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
                       "T must be non-const, non-void, and non-array");
         static_assert(std::default_initializable<element_type>,
                       "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
-        return fmt::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type>(context, options)));
+        if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph && is_std_shared_ptr<value_type>::value) {
+            return fmt::format("[0] / #6.28({}) / #6.29(uint)",
+                               parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+        } else {
+            return fmt::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+        }
     } else if constexpr (CDDLTaggedByteStringArray<value_type>) {
         return cddl_tagged_bstr_array_expr<value_type>();
     } else if constexpr (CDDLHomogeneousArray<value_type>) {
-        return cddl_homogeneous_array_expr<value_type>(context, options);
+        return cddl_homogeneous_array_expr<value_type, PointerMode>(context, options);
     } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
-        return cddl_multi_dimensional_array_expr<value_type>(context, options);
+        return cddl_multi_dimensional_array_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsVariant<value_type>) {
         return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
             constexpr auto matching_major_types = valid_concept_mapping_array_v<std::variant<Ts...>>;
             static_assert(matching_major_types[MajorIndex::Tag] <= 1,
                           "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
-            static_assert(!cddl_variant_has_tag_overlap<Ts...>(),
+            static_assert(!cddl_scoped_variant_has_tag_overlap<PointerMode, Ts...>(),
                           "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                           "CDDL for std::variant alternatives with dynamic CBOR tags is unsupported");
-            static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
-                          "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
-                          "decode is not extension-codec aware");
-            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts>(variant_context, variant_options)...}, " / ");
+            if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
+                constexpr auto pointer_alternatives = (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>());
+                static_assert(pointer_alternatives <= 1U,
+                              "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported");
+                static_assert(pointer_alternatives == 0U || matching_major_types[MajorIndex::Array] == 0U,
+                              "CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is "
+                              "unsupported");
+            } else {
+                static_assert(
+                    (!cddl_contains_nullable_pointer<Ts>() && ...),
+                    "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
+                    "decode is not extension-codec aware");
+            }
+            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(variant_context, variant_options)...},
+                             " / ");
         }(static_cast<value_type *>(nullptr), context, options);
     } else if constexpr (IsArrayHeader<value_type>) {
         return "[* any]";
@@ -1241,25 +1359,25 @@ template <typename T> std::string cddl_type_expr(CDDLContext &context, CDDLOptio
     } else if constexpr (IsTagHeader<value_type>) {
         return "#6(any)";
     } else if constexpr (IsNamedMapWrapper<value_type>) {
-        return ensure_cddl_named_map_definition<named_map_value_t<value_type>>(context, options);
+        return ensure_cddl_named_map_definition<named_map_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsNamedGroupWrapper<value_type>) {
-        return ensure_cddl_named_group_definition<named_group_value_t<value_type>>(context, options);
+        return ensure_cddl_named_group_definition<named_group_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsNamedExtensionWrapper<value_type>) {
         static_assert(always_false<value_type>::value, "as_named_extension is only valid inside as_named_map aggregates");
         return {};
     } else if constexpr (IsMap<value_type>) {
-        return cddl_map_expr<value_type>(context, options);
+        return cddl_map_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsArray<value_type>) {
-        return cddl_sequence_expr<value_type>(context, options);
+        return cddl_sequence_expr<value_type, PointerMode>(context, options);
     } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
         return cddl_tag_prefix<value_type>();
     } else if constexpr (is_cddl_tag_only_tuple_v<value_type>) {
         static_assert(always_false<value_type>::value, "tag-only tuple has no CBOR payload; CDDL schema unsupported");
         return {};
     } else if constexpr (IsTuple<value_type>) {
-        return cddl_tuple_expr<value_type>(context, options);
+        return cddl_tuple_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsAggregate<value_type>) {
-        return ensure_cddl_definition<value_type>(context, options);
+        return ensure_cddl_definition<value_type, PointerMode>(context, options);
     } else if constexpr (IsSimple<value_type>) {
         if constexpr (IsBool<value_type>) {
             return "bool";
@@ -1309,7 +1427,7 @@ template <typename T> std::string tag_marker_root_expr(CDDLContext &context, CDD
     return fmt::format("{}(any)", cddl_tag_prefix<std::remove_cvref_t<T>>());
 }
 
-template <typename T, typename OutputBuffer>
+template <typename T, typename OutputBuffer, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 void cddl_schema_root_expr_to(OutputBuffer &output_buffer, CDDLContext &cddl_context, CDDLOptions options) {
     using value_type       = std::remove_cvref_t<T>;
     auto root_name         = root_rule_name<value_type>(options);
@@ -1325,107 +1443,117 @@ void cddl_schema_root_expr_to(OutputBuffer &output_buffer, CDDLContext &cddl_con
         (void)cddl_context.reserve(root_key, root_name);
         reserved_root_key = true;
     }
-    auto root_expr = cddl_type_expr<value_type>(cddl_context, options);
+    auto root_expr = cddl_type_expr<value_type, PointerMode>(cddl_context, options);
     if (reserved_root_key) {
         cddl_context.erase_by_key(root_key);
     }
     fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, root_expr);
 }
 
-} // namespace detail
-
-template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
-auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context context) {
+template <typename T, cddl_shared_pointer_mode PointerMode, typename OutputBuffer, typename Context>
+auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Context &context) {
     using value_type   = std::remove_cvref_t<T>;
-    auto &cddl_context = detail::cddl_context_ref(context);
+    auto &cddl_context = cddl_context_ref(context);
     debug::println("cddl_schema_to: {}", nameof::nameof_short_type<T>());
 
     if constexpr (IsNamedMapWrapper<value_type>) {
         using named_value_type = named_map_value_t<value_type>;
         const auto requested_root_name =
-            options.root_name.empty() ? detail::cddl_type_name<named_value_type>() : detail::sanitize_cddl_id(options.root_name);
-        const auto root_key = detail::cddl_named_map_key<named_value_type>();
+            options.root_name.empty() ? cddl_type_name<named_value_type>() : sanitize_cddl_id(options.root_name);
+        const auto root_key = cddl_named_map_key<named_value_type, PointerMode>();
         if (!options.root_name.empty()) {
-            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+            reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
         }
-        (void)detail::ensure_cddl_named_map_definition<named_value_type>(cddl_context, options, requested_root_name);
+        (void)ensure_cddl_named_map_definition<named_value_type, PointerMode>(cddl_context, options, requested_root_name);
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         }
     } else if constexpr (IsNamedGroupWrapper<value_type>) {
         using named_value_type = named_group_value_t<value_type>;
         const auto requested_root_name =
-            options.root_name.empty() ? detail::cddl_type_name<named_value_type>() : detail::sanitize_cddl_id(options.root_name);
-        const auto root_key = detail::cddl_named_group_key<named_value_type>();
+            options.root_name.empty() ? cddl_type_name<named_value_type>() : sanitize_cddl_id(options.root_name);
+        const auto root_key = cddl_named_group_key<named_value_type, PointerMode>();
         if (!options.root_name.empty()) {
-            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+            reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
         }
-        (void)detail::ensure_cddl_named_group_definition<named_value_type>(cddl_context, options, requested_root_name);
+        (void)ensure_cddl_named_group_definition<named_value_type, PointerMode>(cddl_context, options, requested_root_name);
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         }
     } else if constexpr (IsEnum<value_type>) {
-        if constexpr (detail::cddl_enum_entry_count<value_type>() != 0) {
-            if (detail::cddl_use_named_enum<value_type>(options) && !options.always_inline) {
+        if constexpr (cddl_enum_entry_count<value_type>() != 0) {
+            if (cddl_use_named_enum<value_type>(options) && !options.always_inline) {
                 const auto requested_root_name =
-                    options.root_name.empty() ? detail::cddl_type_name<value_type>() : detail::sanitize_cddl_id(options.root_name);
-                const auto root_key = detail::cddl_enum_key<value_type>();
+                    options.root_name.empty() ? cddl_type_name<value_type>() : sanitize_cddl_id(options.root_name);
+                const auto root_key = cddl_enum_key<value_type>();
                 if (!options.root_name.empty()) {
-                    detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+                    reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
                 }
-                (void)detail::ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
+                (void)ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
                 if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
                     fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
                 }
             } else {
-                detail::cddl_schema_root_expr_to<value_type>(output_buffer, cddl_context, options);
+                cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
             }
         } else {
-            detail::cddl_schema_root_expr_to<value_type>(output_buffer, cddl_context, options);
+            cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
         }
     } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
-        static_assert(!detail::is_empty_cddl_aggregate_v<value_type>,
-                      "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
-        const auto requested_root_name = detail::root_rule_name<value_type>(options);
-        const auto root_key            = detail::cddl_type_key<value_type>();
+        static_assert(!is_empty_cddl_aggregate_v<value_type>, "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
+        const auto requested_root_name = root_rule_name<value_type>(options);
+        const auto root_key            = cddl_type_key<value_type, PointerMode>();
         if (!options.root_name.empty()) {
-            detail::reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+            reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
         }
-        const auto  root_name = detail::ensure_cddl_definition<value_type>(cddl_context, options, requested_root_name);
+        const auto  root_name = ensure_cddl_definition<value_type, PointerMode>(cddl_context, options, requested_root_name);
         const auto *root_def  = cddl_context.find_by_key(root_key);
         if (root_def != nullptr) {
             fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         } else {
             fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name,
-                           detail::cddl_aggregate_expr<value_type>(cddl_context, options));
+                           cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
         }
     } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
-        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", detail::root_rule_name<value_type>(options),
-                       detail::tag_marker_root_expr<value_type>(cddl_context, options));
+        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_rule_name<value_type>(options),
+                       tag_marker_root_expr<value_type>(cddl_context, options));
     } else {
-        detail::cddl_schema_root_expr_to<value_type>(output_buffer, cddl_context, options);
+        cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {
         std::string root_key;
         if constexpr (IsNamedMapWrapper<value_type>) {
-            root_key = detail::cddl_named_map_key<named_map_value_t<value_type>>();
+            root_key = cddl_named_map_key<named_map_value_t<value_type>, PointerMode>();
         } else if constexpr (IsNamedGroupWrapper<value_type>) {
-            root_key = detail::cddl_named_group_key<named_group_value_t<value_type>>();
+            root_key = cddl_named_group_key<named_group_value_t<value_type>, PointerMode>();
         } else if constexpr (IsEnum<value_type>) {
-            if (detail::cddl_use_named_enum<value_type>(options) && !options.always_inline) {
-                root_key = detail::cddl_enum_key<value_type>();
+            if (cddl_use_named_enum<value_type>(options) && !options.always_inline) {
+                root_key = cddl_enum_key<value_type>();
             }
         } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
-            root_key = detail::cddl_type_key<value_type>();
+            root_key = cddl_type_key<value_type, PointerMode>();
         }
 
         for (const auto &def : cddl_context.definitions | std::views::reverse) {
             const std::string_view key{def.key.data(), def.key.size()};
-            if (key != root_key && def.state == detail::CDDLContext::DefinitionState::done) {
+            if (key != root_key && def.state == CDDLContext::DefinitionState::done) {
                 fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.cddl);
             }
         }
+    }
+}
+
+} // namespace detail
+
+template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
+auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context context) {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (detail::CDDLScopedType<value_type>) {
+        using traits = detail::cddl_scope_traits<value_type>;
+        return detail::cddl_schema_to_impl<typename traits::value_type, traits::shared_pointer_mode>(output_buffer, options, context);
+    } else {
+        return detail::cddl_schema_to_impl<value_type, detail::cddl_shared_pointer_mode::nullable>(output_buffer, options, context);
     }
 }
 

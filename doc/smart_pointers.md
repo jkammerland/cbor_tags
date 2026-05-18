@@ -165,9 +165,45 @@ another variant.
 ## CDDL
 
 CDDL generation renders nullable pointer shapes as `[0] / [1, T]`, matching
-`nullable_ptr_codec`. Shared pointer identity and `shared_graph_codec` tag 28/29
-session semantics are runtime codec rules and are not expressed in generated
-CDDL.
+`nullable_ptr_codec`.
+
+```cpp
+#include "cbor_tags/extensions/cbor_visualization.h"
+#include "cbor_tags/extensions/smart_ptr.h"
+
+std::string schema;
+cddl_schema_to<std::shared_ptr<int>>(schema);
+// root = [0] / [1, int]
+```
+
+Use `shared_graph_cddl<T>` when the schema should describe values encoded
+through `as_shared_graph(...)`. In that scoped schema, `std::shared_ptr<T>`
+renders as the graph wire shape: null pointer, first shareable value, or later
+shared reference.
+
+```cpp
+std::string schema;
+cddl_schema_to<shared_graph_cddl<std::shared_ptr<int>>>(schema);
+// root = [0] / #6.28(int) / #6.29(uint)
+```
+
+For aggregate roots the scope applies recursively:
+
+```cpp
+struct Root {
+    std::shared_ptr<Person> owner;
+    std::vector<std::shared_ptr<Person>> reviewers;
+};
+
+cddl_schema_to<shared_graph_cddl<Root>>(schema);
+```
+
+The generated CDDL describes the wire shape. It cannot prove that a
+`#6.29(uint)` reference points to an earlier tag 28 item in the same graph
+session; that remains decoder session validation. `std::variant` alternatives
+inside `shared_graph_cddl<T>` reject tag 28/29 and catch-all tag collisions, and
+also reject array-shaped alternatives that would be ambiguous with the `[0]`
+null pointer form.
 
 ## Limits
 

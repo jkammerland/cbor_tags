@@ -104,6 +104,14 @@ Static tags render as `#6.n(payload)`. Dynamic tag values are not available
 from the type alone, so dynamic tags render as `#6(payload)`. Recursive
 aggregate types are emitted as named CDDL rules.
 
+Extension headers may add CDDL support by specializing the CDDL traits in
+`cbor_tags/extensions/cbor_visualization_traits.h`. Simple tagged extension
+types expose fixed tag metadata, while scoped wrappers can select a different
+rendering policy for a whole schema root. For example,
+`cbor::tags::ext::smart_ptr::shared_graph_cddl<T>` switches only that schema
+root to the shared-graph `std::shared_ptr<T>` shape without changing the default
+nullable pointer schema.
+
 ### Enum Names
 
 By default, C++ enum types render as their CBOR integer shape because the
@@ -180,12 +188,16 @@ non-const, non-void, non-array pointee types render as `[0] / [1, T]`, matching
 the opt-in `cbor::tags::ext::smart_ptr::nullable_ptr_codec` wire shape. Pointer
 fields remain required in named maps unless the field type itself is
 `std::optional`; a null pointer is an explicit `[0]`, not an omitted member.
-Shared pointer identity and `shared_graph_codec` reference-table semantics are
-runtime codec rules and are not expressed in CDDL; the graph codec uses CBOR
-value-sharing tags 28 and 29 at runtime. As a conservative generator limitation,
-`std::variant` alternatives that contain nullable smart pointers are rejected by
-the CDDL generator, including tagged alternatives that may be runtime-decodable
-through an opt-in codec.
+For `shared_graph_codec` schemas, include `cbor_tags/extensions/smart_ptr.h` and
+wrap the schema root in `cbor::tags::ext::smart_ptr::shared_graph_cddl<T>`.
+Inside that scope, `std::shared_ptr<T>` renders as
+`[0] / #6.28(T) / #6.29(uint)`, matching `as_shared_graph(...)` roots.
+Reference-table validity is still a runtime decoder-session rule and cannot be
+fully expressed in CDDL. In the default nullable scope, `std::variant`
+alternatives that contain nullable smart pointers are rejected by the CDDL
+generator. In `shared_graph_cddl<T>`, variants may contain one nullable smart
+pointer alternative when no array-shaped alternative or tag 28/29 collision is
+present.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

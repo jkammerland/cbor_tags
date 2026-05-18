@@ -267,8 +267,11 @@ dec(as_shared_graph(decode_graph, second));
 
 `nullable_ptr_codec` encodes null pointers as `[0]` and values as `[1, value]`.
 `shared_graph_codec` uses CBOR value-sharing tags 28/29 inside
-`as_shared_graph(...)` roots. See [Smart Pointer Codecs](doc/smart_pointers.md)
-for wire shapes, limitations, value-sharing spec links, and variant behavior.
+`as_shared_graph(...)` roots. Use `shared_graph_cddl<T>` when generated CDDL
+should describe that graph shape, rendering `std::shared_ptr<T>` as
+`[0] / #6.28(T) / #6.29(uint)`. See
+[Smart Pointer Codecs](doc/smart_pointers.md) for wire shapes, limitations,
+value-sharing spec links, CDDL examples, and variant behavior.
 See [Codec Extensions](doc/codec_extensions.md) for the general opt-in extension
 pattern.
 

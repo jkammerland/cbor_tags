@@ -12,7 +12,6 @@ int main() {
     using optional_ref = std::optional<typed_array_ref<std::int32_t>>;
 
     fmt::memory_buffer buffer;
-    cbor::tags::cddl_schema_to<std::variant<optional_ref, typed_array<std::int32_t>>>(
-        buffer, {.row_options = {.format_by_rows = false}});
+    cbor::tags::cddl_schema_to<std::variant<optional_ref, typed_array<std::int32_t>>>(buffer, {.row_options = {.format_by_rows = false}});
     return 0;
 }

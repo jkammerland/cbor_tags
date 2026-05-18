@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/extensions/cbor_visualization_traits.h"
 
 #include <concepts>
 #include <cstddef>
@@ -25,6 +26,10 @@ enum class shared_graph_encode_lookup { unordered_map, linear_scan };
 
 template <typename T> struct shared_graph_encode_root;
 template <typename T> struct shared_graph_decode_root;
+
+template <typename T> struct shared_graph_cddl {
+    using value_type = std::remove_cvref_t<T>;
+};
 
 template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &session, const T &value);
 template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value);
@@ -810,3 +815,13 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
 };
 
 } // namespace cbor::tags::ext::smart_ptr
+
+namespace cbor::tags::detail {
+
+template <typename T> struct cddl_scope_traits<ext::smart_ptr::shared_graph_cddl<T>> {
+    using value_type = typename ext::smart_ptr::shared_graph_cddl<T>::value_type;
+
+    static constexpr cddl_shared_pointer_mode shared_pointer_mode = cddl_shared_pointer_mode::shared_graph;
+};
+
+} // namespace cbor::tags::detail
