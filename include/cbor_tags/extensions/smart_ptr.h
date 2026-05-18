@@ -102,7 +102,8 @@ template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = deco
 template <typename T> struct decodable_shared_graph_vector : std::false_type {};
 
 template <NullablePointerValue T, typename Allocator>
-struct decodable_shared_graph_vector<std::vector<std::shared_ptr<T>, Allocator>> : std::bool_constant<std::default_initializable<T>> {};
+struct decodable_shared_graph_vector<std::vector<std::shared_ptr<T>, Allocator>>
+    : std::bool_constant<std::default_initializable<T> && std::default_initializable<std::vector<std::shared_ptr<T>, Allocator>>> {};
 
 template <typename T> constexpr bool decodable_shared_graph_vector_v = decodable_shared_graph_vector<std::remove_cvref_t<T>>::value;
 
@@ -395,6 +396,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
             if (result == status_code::incomplete) {
                 saw_incomplete = true;
+            } else if constexpr (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>) {
+                pointer_error = result;
             }
             return false;
         }

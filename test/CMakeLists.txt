@@ -125,6 +125,10 @@ add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_nested_pointer_compile_fail.cc
   "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
+  cddl_shared_graph_variant_map_pointer_compile_fails
+  cddl_shared_graph_variant_map_pointer_compile_fail.cc
+  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_vector_array_compile_fails
   cddl_shared_graph_variant_vector_array_compile_fail.cc
   "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
