@@ -132,7 +132,7 @@ int main() { return 0; }
 endif()
 
 if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
-  find_package(magic_enum 0.9.8 REQUIRED CONFIG)
+  find_package(magic_enum 0.9.7 REQUIRED CONFIG)
   if(NOT TARGET magic_enum::magic_enum)
     message(FATAL_ERROR "CBOR_TAGS_USE_MAGIC_ENUM_NAMES requires a magic_enum CMake config that exports magic_enum::magic_enum.")
   endif()
@@ -245,7 +245,7 @@ if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "Boost 1.84 REQUIRED CONFIG")
 endif()
 if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
-  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.8 REQUIRED CONFIG")
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.7 REQUIRED CONFIG")
 endif()
 
 # Link dependencies
