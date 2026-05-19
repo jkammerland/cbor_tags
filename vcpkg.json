@@ -7,10 +7,6 @@
   "builtin-baseline": "a7f2963aed6b381ce54c0803330bb4de36cd3241",
   "dependencies": [
     {
-      "name": "tl-expected",
-      "version>=": "1.1.0"
-    },
-    {
       "name": "nameof",
       "version>=": "0.10.4"
     },
@@ -19,7 +15,22 @@
       "version>=": "11.0.2"
     }
   ],
+  "default-features": [
+    "tl-expected"
+  ],
   "features": {
+    "tl-expected": {
+      "description": "Install tl::expected dependencies for the default C++20 expected backend.",
+      "dependencies": [
+        {
+          "name": "tl-expected",
+          "version>=": "1.1.0"
+        }
+      ]
+    },
+    "std-expected": {
+      "description": "Use the C++23 std::expected backend without installing tl::expected."
+    },
     "boost-pfr-names": {
       "description": "Install Boost.PFR dependencies for the optional C++20 named-map reflection backend.",
       "dependencies": [

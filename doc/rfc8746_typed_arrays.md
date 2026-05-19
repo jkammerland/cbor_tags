@@ -218,18 +218,20 @@ For segmented output buffers, the extension can emit tag and payload segments
 directly:
 
 ```cpp
-auto segments = encode_typed_array_segments(std::span<const std::int32_t>{values});
+auto borrowed = encode_typed_array_borrowed_segments(std::span<const std::int32_t>{values});
+auto owned = encode_typed_array_segments_copy(std::span<const std::int32_t>{values});
 ```
 
 When the requested byte order matches native byte order, the payload segment can
 borrow from the input span. On common little-endian hosts this means
-`encode_typed_array_segments(...)` is zero-copy for the little-endian tags, while
-big-endian output should use `encode_typed_array_segments_copy_be(...)`.
+`encode_typed_array_borrowed_segments(...)` is zero-copy for the little-endian
+tags, while big-endian output should use `encode_typed_array_segments_copy_be(...)`.
 The borrowed helpers throw `std::logic_error` when the requested byte order does
 not match native byte order because they cannot represent a byte-swapped borrowed
 view. Use `encode_typed_array_segments_copy<ByteOrder>(...)` or the `_copy_be`
 convenience helper when portable segmented output matters more than zero-copy
-borrowing.
+borrowing. `encode_typed_array_segments(...)` remains as a compatibility alias for
+the borrowed helper; new code should use the explicit borrowed or copy spelling.
 
 ## Endian Performance
 

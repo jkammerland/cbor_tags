@@ -63,6 +63,12 @@ template <typename T>
 concept CanWrapAsTypedArray = requires(T &&values) { as_typed_array(std::forward<T>(values)); };
 
 template <typename T>
+concept CanEncodeTypedArrayBorrowedSegmentsBe = requires(T &&values) { encode_typed_array_borrowed_segments_be(std::forward<T>(values)); };
+
+template <typename T>
+concept CanEncodeTypedArraySegmentsBe = requires(T &&values) { encode_typed_array_segments_be(std::forward<T>(values)); };
+
+template <typename T>
 concept CanWrapAsHomogeneousArray = requires(T &&values) { as_homogeneous_array(std::forward<T>(values)); };
 
 template <typename Dimensions, typename Array>
@@ -711,6 +717,19 @@ TEST_CASE("rfc8746 typed array variant tag mismatches do not consume payload") {
     CHECK_EQ(to_hex(payload), "01020304");
 }
 
+TEST_CASE("rfc8746 typed array variants preserve malformed matching-tag errors") {
+    using value_type = std::variant<typed_array<std::int32_t>, static_tag<42>>;
+
+    const auto bytes = to_bytes("d84e43010203");
+    auto       dec   = make_decoder<typed_array_codec>(bytes);
+
+    value_type decoded{static_tag<42>{}};
+    auto       result = dec(decoded);
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::unexpected_group_size);
+    CHECK(std::holds_alternative<static_tag<42>>(decoded));
+}
+
 TEST_CASE("rfc8746 int32 typed array uses exact little-endian wire bytes") {
     const std::vector<std::int32_t> values{-1, -2, 0x01020304};
 
@@ -842,6 +861,32 @@ TEST_CASE("rfc8746 big-endian typed array owned segment fallback matches normal 
     REQUIRE_EQ(segments.size(), 1U);
     CHECK(segments[0].is_owned());
     CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(normal));
+}
+
+TEST_CASE("rfc8746 big-endian typed array segment helpers mirror explicit byte-order helpers") {
+    const std::vector<double> values{1.0, -2.5};
+    const auto                span          = std::span<const double>{values};
+    const auto                explicit_copy = encode_typed_array_segments_copy<typed_array_byte_order::big>(span);
+    const auto                named_copy    = encode_typed_array_segments_copy_be(span);
+
+    CHECK_EQ(to_hex(flatten_segments(named_copy)), to_hex(flatten_segments(explicit_copy)));
+
+    if constexpr (std::endian::native == std::endian::big) {
+        const auto explicit_borrowed = encode_typed_array_borrowed_segments<typed_array_byte_order::big>(span);
+        const auto named_borrowed    = encode_typed_array_borrowed_segments_be(span);
+        const auto legacy_borrowed   = encode_typed_array_segments_be(span);
+
+        CHECK_EQ(to_hex(flatten_segments(named_borrowed)), to_hex(flatten_segments(explicit_borrowed)));
+        CHECK_EQ(to_hex(flatten_segments(legacy_borrowed)), to_hex(flatten_segments(explicit_borrowed)));
+    } else {
+        CHECK_THROWS_AS((void)encode_typed_array_borrowed_segments_be(span), std::logic_error);
+        CHECK_THROWS_AS((void)encode_typed_array_segments_be(span), std::logic_error);
+    }
+
+    static_assert(CanEncodeTypedArrayBorrowedSegmentsBe<std::span<const double>>);
+    static_assert(CanEncodeTypedArrayBorrowedSegmentsBe<std::span<double>>);
+    static_assert(CanEncodeTypedArraySegmentsBe<std::span<const double>>);
+    static_assert(CanEncodeTypedArraySegmentsBe<std::span<double>>);
 }
 
 TEST_CASE("rfc8746 typed array segmented output borrows native little-endian payload") {

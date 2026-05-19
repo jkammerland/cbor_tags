@@ -159,6 +159,17 @@ struct custom_codec_1_small_size_vector {
     [[nodiscard]] size_type size() const noexcept { return static_cast<size_type>(values.size()); }
 };
 
+template <typename T>
+concept CanWrapAsCustomCodec1 = requires(T &&value) { cbor::tags::ext::custom_codec_1::as_custom_codec_1(std::forward<T>(value)); };
+
+template <typename T>
+concept CanWrapAsCustomCodec1Payload =
+    requires(T &&value) { cbor::tags::ext::custom_codec_1::as_custom_codec_1_payload(std::forward<T>(value)); };
+
+template <typename Tag, typename T>
+concept CanWrapAsTaggedCustomCodec1 =
+    requires(Tag &&tag, T &&value) { cbor::tags::ext::custom_codec_1::as_custom_codec_1(std::forward<Tag>(tag), std::forward<T>(value)); };
+
 template <typename T> void check_compact_wire(const T &in, T out, std::string_view expected_hex) {
     using namespace cbor::tags;
     using namespace cbor::tags::ext::custom_codec_1;
@@ -215,6 +226,19 @@ static_assert(!std::ranges::sized_range<compact_unsized_even_view>);
 static_assert(std::ranges::range<custom_codec_1_single_pass_view>);
 static_assert(!std::ranges::sized_range<custom_codec_1_single_pass_view>);
 static_assert(std::ranges::range<custom_codec_1_small_size_vector>);
+static_assert(!std::default_initializable<cbor::tags::ext::custom_codec_1::custom_codec_1_ref<compact_payload>>);
+static_assert(!std::default_initializable<cbor::tags::ext::custom_codec_1::custom_codec_1_payload_ref<compact_payload>>);
+static_assert(
+    !std::default_initializable<cbor::tags::ext::custom_codec_1::custom_codec_1_tag_ref<cbor::tags::static_tag<1>, compact_payload>>);
+static_assert(CanWrapAsCustomCodec1<compact_payload &>);
+static_assert(CanWrapAsCustomCodec1<const compact_payload &>);
+static_assert(!CanWrapAsCustomCodec1<compact_payload &&>);
+static_assert(CanWrapAsCustomCodec1Payload<compact_payload &>);
+static_assert(!CanWrapAsCustomCodec1Payload<const compact_payload &>);
+static_assert(!CanWrapAsCustomCodec1Payload<compact_payload &&>);
+static_assert(CanWrapAsTaggedCustomCodec1<cbor::tags::static_tag<1>, compact_payload &>);
+static_assert(CanWrapAsTaggedCustomCodec1<cbor::tags::static_tag<1>, const compact_payload &>);
+static_assert(!CanWrapAsTaggedCustomCodec1<cbor::tags::static_tag<1>, compact_payload &&>);
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag<::compact_payload>() { return static_tag<1000>{}; }
