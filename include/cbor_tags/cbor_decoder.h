@@ -1346,10 +1346,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         static_assert(no_ambigous_major_types_in_variant, "Variant has ambigous major types, if this would compile, only the first type \
                                                           (among the ambigous) would get decoded.");
 
-        bool saw_incomplete = false;
+        bool        saw_incomplete = false;
+        status_code hard_error     = status_code::success;
 
-        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<bool CatchAllPass, typename U>() -> bool {
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
+                           &hard_error]<bool CatchAllPass, typename U>() -> bool {
             using raw_type = std::remove_cvref_t<U>;
+            if (hard_error != status_code::success) {
+                return false;
+            }
             if (!matches_major_dispatch<raw_type>(major)) {
                 return false;
             }
@@ -1377,6 +1382,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
+            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
+                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+                hard_error = result;
+                return false;
             } else {
                 return false;
             }
@@ -1392,6 +1401,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             found = (try_decode.template operator()<false, T>() || ...);
         }
         if (!found) {
+            if (hard_error != status_code::success) {
+                return hard_error;
+            }
             if (saw_incomplete) {
                 return status_code::incomplete;
             }

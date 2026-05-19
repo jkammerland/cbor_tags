@@ -300,13 +300,15 @@ jobs:
               cxx_standard: "20",
               configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON",
               vcpkg_features: "",
+              vcpkg_no_default_features: "OFF",
               consumer_mode: "default"
             }
           - {
               name: "cxx23-std-expected",
               cxx_standard: "23",
               configure_flags: "-DCBOR_TAGS_USE_STD_EXPECTED=ON",
-              vcpkg_features: "",
+              vcpkg_features: "std-expected",
+              vcpkg_no_default_features: "ON",
               consumer_mode: "default"
             }
           - {
@@ -314,7 +316,16 @@ jobs:
               cxx_standard: "20",
               configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON -DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON",
               vcpkg_features: "magic-enum-names",
+              vcpkg_no_default_features: "OFF",
               consumer_mode: "magic_enum"
+            }
+          - {
+              name: "boost-pfr-names",
+              cxx_standard: "20",
+              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON -DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON",
+              vcpkg_features: "boost-pfr-names",
+              vcpkg_no_default_features: "OFF",
+              consumer_mode: "boost_pfr"
             }
 
     steps:
@@ -341,9 +352,13 @@ jobs:
         install_prefix="${RUNNER_TEMP}/cbor-tags-prefix-${{ matrix.name }}"
         configure_flags="${{ matrix.configure_flags }}"
         vcpkg_features="${{ matrix.vcpkg_features }}"
+        vcpkg_no_default_features="${{ matrix.vcpkg_no_default_features }}"
         feature_args=()
+        if [[ "${vcpkg_no_default_features}" == "ON" ]]; then
+          feature_args+=(-DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON)
+        fi
         if [[ -n "${vcpkg_features}" ]]; then
-          feature_args=(-DVCPKG_MANIFEST_FEATURES="${vcpkg_features}")
+          feature_args+=(-DVCPKG_MANIFEST_FEATURES="${vcpkg_features}")
         fi
 
         cmake -S . -B "${build_dir}" -G Ninja \
@@ -393,6 +408,50 @@ jobs:
                 {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::CDDLEnumMode::named_values});
             const auto text = fmt::to_string(schema);
             return text.find("red") == std::string::npos ? 1 : 0;
+        }
+        EOF
+        elif [[ "${{ matrix.consumer_mode }}" == "boost_pfr" ]]; then
+          cat > "${consumer_dir}/main.cpp" <<'EOF'
+        #include <cbor_tags/cbor_decoder.h>
+        #include <cbor_tags/cbor_encoder.h>
+        #include <cbor_tags/cbor_reflection_config.h>
+        #include <cbor_tags/extensions/cbor_visualization.h>
+        #include <fmt/format.h>
+
+        #include <cstddef>
+        #include <cstdint>
+        #include <string>
+        #include <vector>
+
+        struct Person {
+            std::uint8_t age;
+            std::string name;
+        };
+
+        int main() {
+            static_assert(CBOR_TAGS_HAS_BOOST_PFR_NAMES == 1);
+
+            fmt::memory_buffer schema;
+            cbor::tags::cddl_schema_to<cbor::tags::as_named_map<Person>>(
+                schema, {.row_options = {.format_by_rows = false}, .root_name = "person"});
+            const auto text = fmt::to_string(schema);
+            if (text.find("age: uint") == std::string::npos || text.find("name: tstr") == std::string::npos) {
+                return 1;
+            }
+
+            Person input{.age = 42, .name = "Ada"};
+            std::vector<std::byte> bytes;
+            auto enc = cbor::tags::make_encoder(bytes);
+            if (!enc(cbor::tags::as_named_map{input})) {
+                return 2;
+            }
+
+            Person decoded{};
+            auto dec = cbor::tags::make_decoder(bytes);
+            if (!dec(cbor::tags::as_named_map{decoded})) {
+                return 3;
+            }
+            return decoded.age == input.age && decoded.name == input.name ? 0 : 4;
         }
         EOF
         else

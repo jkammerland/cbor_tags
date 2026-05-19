@@ -39,6 +39,8 @@ class CborTagsConan(ConanFile):
     def configure(self):
         # Header-only library
         self.package_type = "header-library"
+        if self.options.boost_pfr_names:
+            self.options["boost/*"].header_only = True
 
     def validate(self):
         check_min_cppstd(self, "20")

@@ -1067,8 +1067,8 @@ template <typename T> std::string cddl_tag_prefix() {
 }
 
 template <typename T>
-constexpr bool is_empty_cddl_aggregate_v =
-    IsAggregate<std::remove_cvref_t<T>> && !IsTag<std::remove_cvref_t<T>> && aggregate_binding_count<std::remove_cvref_t<T>> == 0;
+constexpr bool is_empty_cddl_aggregate_v = IsAggregate<std::remove_cvref_t<T>> && !IsTag<std::remove_cvref_t<T>> &&
+                                           std::tuple_size_v<aggregate_tuple_t<std::remove_cvref_t<T>>> == 0;
 
 template <typename T> constexpr bool is_cddl_tag_only_tuple_v = IsTagOnlyTuple<std::remove_cvref_t<T>>;
 

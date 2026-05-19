@@ -96,6 +96,18 @@ struct CDDLTypedArrays {
         matrix;
 };
 
+struct CDDLTypedArrayRefs {
+    cbor::tags::ext::rfc8746::typed_array_ref<std::int32_t>  samples;
+    cbor::tags::ext::rfc8746::typed_array_ref<std::uint16_t> levels;
+};
+
+struct CDDLStructuralArrayRefs {
+    cbor::tags::ext::rfc8746::homogeneous_array_ref<std::vector<int>> homogeneous;
+    cbor::tags::ext::rfc8746::multi_dimensional_array_ref<std::array<std::uint64_t, 2>,
+                                                          cbor::tags::ext::rfc8746::typed_array_ref<std::uint16_t>>
+        matrix;
+};
+
 struct CDDLLooksLikeTypedArray {
     using value_type                              = int;
     static constexpr auto          byte_order     = cbor::tags::ext::rfc8746::typed_array_byte_order::little;
@@ -569,6 +581,8 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_view_be<float>>(), "root = #6.81(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_ref<std::int32_t>>(), "root = #6.78(bstr)");
     CHECK_EQ(cddl_schema_inline<rfc8746::homogeneous_array<std::vector<int>>>(), "root = #6.41([* int])");
+    CHECK_EQ(cddl_schema_inline<CDDLTypedArrayRefs>(), "CDDLTypedArrayRefs = [#6.78(bstr), #6.69(bstr)]");
+    CHECK_EQ(cddl_schema_inline<CDDLStructuralArrayRefs>(), "CDDLStructuralArrayRefs = [#6.41([* int]), #6.40([[2*2 uint], #6.69(bstr)])]");
 
     using row_major     = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
     using column_major  = rfc8746::multi_dimensional_column_major_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;

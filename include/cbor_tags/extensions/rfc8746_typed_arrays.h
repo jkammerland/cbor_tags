@@ -840,24 +840,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
         return detail::decode_payload<value_type, ByteOrder>(
             dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
-                if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
-                    return status_code::no_match_for_bstr_on_buffer;
-                }
-                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                    if (payload_size_u64 > payload_size_limit) {
-                        return status_code::error;
-                    }
-                }
-
-                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-                if ((payload_size % sizeof(value_type)) != 0U) {
-                    return status_code::unexpected_group_size;
-                }
-                array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
-                return status_code::success;
+                return decode_typed_array_payload<T, ByteOrder>(array, payload_major, payload_info);
             });
     }
 
@@ -868,24 +851,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         auto &dec        = static_cast<Self &>(*this);
 
         return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
-            if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-            if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                if (payload_size_u64 > payload_size_limit) {
-                    return status_code::error;
-                }
-            }
-
-            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-            if ((payload_size % sizeof(value_type)) != 0U) {
-                return status_code::unexpected_group_size;
-            }
-            array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
-            return status_code::success;
+            return decode_typed_array_payload<T, ByteOrder>(array, payload_major, payload_info);
         });
     }
 
@@ -896,26 +862,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         auto &dec        = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type, ByteOrder>(
-            dec, major, additional_info, [&](major_type, [[maybe_unused]] std::byte payload_info) {
-                if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
-                    return status_code::contiguous_view_on_non_contiguous_data;
-                } else {
-                    const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-                    if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                        const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                        if (payload_size_u64 > payload_size_limit) {
-                            return status_code::error;
-                        }
-                    }
-
-                    auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-                    const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-                    if ((payload_size % sizeof(value_type)) != 0U) {
-                        return status_code::unexpected_group_size;
-                    }
-                    view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
-                    return status_code::success;
-                }
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_typed_array_view_payload<T, ByteRange, ByteOrder>(view, payload_major, payload_info);
             });
     }
 
@@ -925,26 +873,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type, [[maybe_unused]] std::byte payload_info) {
-            if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
-                return status_code::contiguous_view_on_non_contiguous_data;
-            } else {
-                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                    if (payload_size_u64 > payload_size_limit) {
-                        return status_code::error;
-                    }
-                }
-
-                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-                if ((payload_size % sizeof(value_type)) != 0U) {
-                    return status_code::unexpected_group_size;
-                }
-                view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
-                return status_code::success;
-            }
+        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
+            return decode_typed_array_view_payload<T, ByteRange, ByteOrder>(view, payload_major, payload_info);
         });
     }
 
@@ -1001,6 +931,72 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     }
 
   private:
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    [[nodiscard]] status_code decode_typed_array_payload(typed_array<T, ByteOrder> &array, major_type payload_major,
+                                                         std::byte payload_info) {
+        using value_type = std::remove_cv_t<T>;
+        if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+            return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        auto         &dec = static_cast<Self &>(*this);
+        std::uint64_t payload_size_u64{};
+        auto          status = decode_payload_size(payload_info, payload_size_u64);
+        if (status != status_code::success) {
+            return status;
+        }
+
+        const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+        auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+        if ((payload_size % sizeof(value_type)) != 0U) {
+            return status_code::unexpected_group_size;
+        }
+        array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
+        return status_code::success;
+    }
+
+    template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+        requires(IsTypedArrayElementFor<T, ByteOrder> && detail::DecodableTypedArrayPayloadRange<Self, ByteRange>)
+    [[nodiscard]] status_code decode_typed_array_view_payload(typed_array_view<T, ByteRange, ByteOrder> &view, major_type payload_major,
+                                                              std::byte payload_info) {
+        using value_type = std::remove_cv_t<T>;
+        if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+            return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            auto         &dec = static_cast<Self &>(*this);
+            std::uint64_t payload_size_u64{};
+            auto          status = decode_payload_size(payload_info, payload_size_u64);
+            if (status != status_code::success) {
+                return status;
+            }
+
+            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+            if ((payload_size % sizeof(value_type)) != 0U) {
+                return status_code::unexpected_group_size;
+            }
+            view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
+            return status_code::success;
+        }
+    }
+
+    [[nodiscard]] status_code decode_payload_size(std::byte payload_info, std::uint64_t &payload_size_u64) {
+        auto &dec        = static_cast<Self &>(*this);
+        payload_size_u64 = dec.decode_unsigned(payload_info);
+        if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+            const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+            if (payload_size_u64 > payload_size_limit) {
+                return status_code::error;
+            }
+        }
+        return status_code::success;
+    }
+
     template <typename Payload> void encode_homogeneous_array_payload(const Payload &payload) {
         static_assert(IsArray<std::remove_cvref_t<Payload>>, "RFC 8746 homogeneous_array payload must encode as a CBOR array");
 
@@ -1108,9 +1104,10 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
-    // Borrowed segmented output is zero-copy and therefore requires native byte
-    // order. Use encode_typed_array_segments_copy for portable converted output.
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments(std::span<const T> values) {
+    // The returned payload segment borrows from values and must not outlive the
+    // referenced element storage. Use encode_typed_array_segments_copy for owned
+    // portable output, including byte-order conversion.
     if constexpr (detail::native_matches_byte_order<ByteOrder>) {
         return encode_tagged_bstr_segments(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {
@@ -1121,9 +1118,10 @@ template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typ
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
           typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
-void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
-    // Borrowed segmented output is zero-copy and therefore requires native byte
-    // order. Use encode_typed_array_segments_copy for portable converted output.
+void encode_typed_array_borrowed_segments_into(Segments &segments, std::span<const T> values) {
+    // The appended payload segment borrows from values and must not outlive the
+    // referenced element storage. Use encode_typed_array_segments_copy for owned
+    // portable output, including byte-order conversion.
     if constexpr (detail::native_matches_byte_order<ByteOrder>) {
         encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {
@@ -1133,15 +1131,41 @@ void encode_typed_array_segments_into(Segments &segments, std::span<const T> val
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments(std::span<T> values) {
+    return encode_typed_array_borrowed_segments<ByteOrder>(std::span<const T>{values.data(), values.size()});
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
+void encode_typed_array_borrowed_segments_into(Segments &segments, std::span<T> values) {
+    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, std::span<const T>{values.data(), values.size()});
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
+    return encode_typed_array_borrowed_segments<ByteOrder>(values);
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
+    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, values);
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<T> values) {
-    return encode_typed_array_segments<ByteOrder>(std::span<const T>{values.data(), values.size()});
+    return encode_typed_array_borrowed_segments<ByteOrder>(values);
 }
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
           typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 void encode_typed_array_segments_into(Segments &segments, std::span<T> values) {
-    encode_typed_array_segments_into<ByteOrder>(segments, std::span<const T>{values.data(), values.size()});
+    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, values);
 }
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
@@ -1168,14 +1192,26 @@ template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typ
 
 template <typename T>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments_be(std::span<const T> values) {
+    return encode_typed_array_borrowed_segments<typed_array_byte_order::big>(values);
+}
+
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments_be(std::span<T> values) {
+    return encode_typed_array_borrowed_segments_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
 [[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<const T> values) {
-    return encode_typed_array_segments<typed_array_byte_order::big>(values);
+    return encode_typed_array_borrowed_segments_be(values);
 }
 
 template <typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
 [[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<T> values) {
-    return encode_typed_array_segments_be(std::span<const T>{values.data(), values.size()});
+    return encode_typed_array_borrowed_segments_be(values);
 }
 
 template <typename T>

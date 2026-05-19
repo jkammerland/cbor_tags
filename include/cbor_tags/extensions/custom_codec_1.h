@@ -16,22 +16,43 @@
 
 namespace cbor::tags::ext::custom_codec_1 {
 
-template <typename T> struct custom_codec_1_ref {
-    T *value_{};
+template <typename T> class custom_codec_1_ref {
+  public:
+    constexpr explicit custom_codec_1_ref(T &value) noexcept : value_(std::addressof(value)) {}
+
+    [[nodiscard]] constexpr T &get() const noexcept { return *value_; }
+
+  private:
+    T *value_;
 };
 
-template <typename T> struct custom_codec_1_payload_ref {
-    T *value_{};
+template <typename T> class custom_codec_1_payload_ref {
+  public:
+    constexpr explicit custom_codec_1_payload_ref(T &value) noexcept : value_(std::addressof(value)) {}
+
+    [[nodiscard]] constexpr T &get() const noexcept { return *value_; }
+
+  private:
+    T *value_;
 };
 
-template <typename Tag, typename T> struct custom_codec_1_tag_ref {
-    Tag tag_{};
-    T  *value_{};
+template <typename Tag, typename T> class custom_codec_1_tag_ref {
+  public:
+    constexpr custom_codec_1_tag_ref(Tag tag, T &value) noexcept : tag_(std::move(tag)), value_(std::addressof(value)) {}
+
+    [[nodiscard]] constexpr const Tag &tag() const noexcept { return tag_; }
+    [[nodiscard]] constexpr T         &get() const noexcept { return *value_; }
+
+  private:
+    Tag tag_;
+    T  *value_;
 };
 
-template <typename T> constexpr custom_codec_1_ref<T> as_custom_codec_1(T &value) noexcept { return {std::addressof(value)}; }
+template <typename T> constexpr custom_codec_1_ref<T> as_custom_codec_1(T &value) noexcept { return custom_codec_1_ref<T>{value}; }
 
-template <typename T> constexpr custom_codec_1_ref<const T> as_custom_codec_1(const T &value) noexcept { return {std::addressof(value)}; }
+template <typename T> constexpr custom_codec_1_ref<const T> as_custom_codec_1(const T &value) noexcept {
+    return custom_codec_1_ref<const T>{value};
+}
 
 template <typename T>
     requires(!std::is_lvalue_reference_v<T>)
@@ -40,7 +61,7 @@ void as_custom_codec_1(T &&) = delete;
 template <typename T>
     requires(!std::is_const_v<T>)
 constexpr custom_codec_1_payload_ref<T> as_custom_codec_1_payload(T &value) noexcept {
-    return {std::addressof(value)};
+    return custom_codec_1_payload_ref<T>{value};
 }
 
 template <typename T>
@@ -49,12 +70,12 @@ void as_custom_codec_1_payload(T &&) = delete;
 
 template <typename Tag, typename T>
 constexpr custom_codec_1_tag_ref<std::remove_cvref_t<Tag>, T> as_custom_codec_1(Tag &&tag, T &value) noexcept {
-    return {std::forward<Tag>(tag), std::addressof(value)};
+    return custom_codec_1_tag_ref<std::remove_cvref_t<Tag>, T>{std::forward<Tag>(tag), value};
 }
 
 template <typename Tag, typename T>
 constexpr custom_codec_1_tag_ref<std::remove_cvref_t<Tag>, const T> as_custom_codec_1(Tag &&tag, const T &value) noexcept {
-    return {std::forward<Tag>(tag), std::addressof(value)};
+    return custom_codec_1_tag_ref<std::remove_cvref_t<Tag>, const T>{std::forward<Tag>(tag), value};
 }
 
 template <typename Tag, typename T>
@@ -99,11 +120,11 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
     using cbor::tags::cbor_codec_mixin_base<Self>::encode;
 
     template <typename T> constexpr void encode(const custom_codec_1_ref<T> &value) {
-        encode_tagged(cbor::tags::detail::custom_codec_1::tag_for(*value.value_), *value.value_);
+        encode_tagged(cbor::tags::detail::custom_codec_1::tag_for(value.get()), value.get());
     }
 
     template <typename Tag, typename T> constexpr void encode(const custom_codec_1_tag_ref<Tag, T> &value) {
-        encode_tagged(cbor::tags::detail::custom_codec_1::tag_to_uint64(value.tag_), *value.value_);
+        encode_tagged(cbor::tags::detail::custom_codec_1::tag_to_uint64(value.tag()), value.get());
     }
 
     template <typename T> [[nodiscard]] constexpr status_code decode(custom_codec_1_ref<T> value) {
@@ -135,17 +156,17 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
 
     template <typename T>
     [[nodiscard]] constexpr status_code decode(custom_codec_1_ref<T> value, major_type major, std::byte additional_info) {
-        return decode_tagged(cbor::tags::detail::custom_codec_1::tag_for(*value.value_), *value.value_, major, additional_info);
+        return decode_tagged(cbor::tags::detail::custom_codec_1::tag_for(value.get()), value.get(), major, additional_info);
     }
 
     template <typename T>
     [[nodiscard]] constexpr status_code decode(custom_codec_1_payload_ref<T> value, major_type major, std::byte additional_info) {
-        return decode_payload_bstr(*value.value_, major, additional_info);
+        return decode_payload_bstr(value.get(), major, additional_info);
     }
 
     template <typename Tag, typename T>
     [[nodiscard]] constexpr status_code decode(custom_codec_1_tag_ref<Tag, T> value, major_type major, std::byte additional_info) {
-        return decode_tagged(cbor::tags::detail::custom_codec_1::tag_to_uint64(value.tag_), *value.value_, major, additional_info);
+        return decode_tagged(cbor::tags::detail::custom_codec_1::tag_to_uint64(value.tag()), value.get(), major, additional_info);
     }
 
   private:
