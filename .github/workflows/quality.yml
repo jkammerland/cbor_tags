@@ -91,6 +91,7 @@ jobs:
           - { name: "default", cppstd: "20", options: "" }
           - { name: "std-expected", cppstd: "23", options: "-o cbor-tags/*:std_expected=True" }
           - { name: "boost-pfr-names", cppstd: "20", options: "-o cbor-tags/*:boost_pfr_names=True" }
+          - { name: "magic-enum-names", cppstd: "20", options: "-o cbor-tags/*:magic_enum_names=True" }
 
     steps:
     - uses: actions/checkout@v6.0.2

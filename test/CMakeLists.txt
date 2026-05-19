@@ -7,7 +7,7 @@ if(NOT TARGET fmt::fmt)
   cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 endif()
 if(NOT TARGET magic_enum::magic_enum)
-  cpmaddpackage("gh:Neargye/magic_enum@0.9.8")
+  cpmaddpackage("gh:Neargye/magic_enum@0.9.7")
 endif()
 cpmaddpackage("gh:jkammerland/doctest@1.0.1")
 
