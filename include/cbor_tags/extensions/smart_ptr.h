@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #include <concepts>
@@ -253,40 +254,6 @@ template <typename Decoder, NullablePointerValue T>
     return status;
 }
 
-template <bool CatchAllPass, typename U> constexpr bool matches_variant_simple_dispatch(std::byte additional_info) {
-    using type = std::remove_cvref_t<U>;
-    if constexpr (IsOptional<type>) {
-        if (additional_info == static_cast<std::byte>(SimpleType::Null)) {
-            return true;
-        }
-        return matches_variant_simple_dispatch<CatchAllPass, typename type::value_type>(additional_info);
-    } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, std::byte info) {
-            return (matches_variant_simple_dispatch<CatchAllPass, Ts>(info) || ...);
-        }(static_cast<type *>(nullptr), additional_info);
-    } else if constexpr (std::is_same_v<type, simple>) {
-        const auto value = std::to_integer<std::uint8_t>(additional_info);
-        return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
-    } else if constexpr (IsSimple<type>) {
-        return !CatchAllPass && compare_simple_value<type>(additional_info);
-    } else {
-        return false;
-    }
-}
-
-template <typename U> constexpr bool matches_variant_major_dispatch(major_type major) {
-    using type = std::remove_cvref_t<U>;
-    if constexpr (IsOptional<type>) {
-        return major == major_type::Simple || matches_variant_major_dispatch<typename type::value_type>(major);
-    } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, major_type m) {
-            return (matches_variant_major_dispatch<Ts>(m) || ...);
-        }(static_cast<type *>(nullptr), major);
-    } else {
-        return is_valid_major<major_type, type>(major);
-    }
-}
-
 template <bool GraphTagsPossible, typename Self, typename... Ts>
 [[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, std::variant<Ts...> &value, major_type major,
                                                                                std::byte                     additional_info,
@@ -373,10 +340,10 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
             return false;
         } else {
-            if (!matches_variant_major_dispatch<raw_type>(major)) {
+            if (!cbor::tags::detail::matches_major_dispatch<raw_type>(major)) {
                 return false;
             }
-            if (major == major_type::Simple && !matches_variant_simple_dispatch<CatchAllPass, raw_type>(additional_info)) {
+            if (major == major_type::Simple && !cbor::tags::detail::matches_simple_dispatch<CatchAllPass, raw_type>(additional_info)) {
                 return false;
             }
 
