@@ -7,9 +7,12 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
+#include <vector>
 
 namespace cbor::tags::detail {
 
@@ -40,6 +43,32 @@ constexpr void append_extension_owned_bytes(Encoder &enc, R &&bytes) {
 template <typename Encoder> constexpr void encode_extension_bstr_payload(Encoder &enc, std::span<const std::byte> payload) {
     encode_extension_bstr_header(enc, static_cast<std::uint64_t>(payload.size()));
     append_extension_owned_bytes(enc, payload);
+}
+
+template <typename T>
+concept DirectResizableByteOutputBuffer = std::ranges::contiguous_range<T> && requires(T &buffer, std::size_t size) {
+    buffer.resize(size);
+    { buffer.size() } -> std::convertible_to<std::size_t>;
+    std::ranges::data(buffer);
+} && sizeof(std::ranges::range_value_t<T>) == 1U;
+
+template <typename Encoder, typename Fill>
+constexpr void append_extension_generated_bytes(Encoder &enc, std::size_t byte_count, Fill &&fill) {
+    using output_buffer_type = std::remove_reference_t<decltype(enc.data_)>;
+    if constexpr (DirectResizableByteOutputBuffer<output_buffer_type>) {
+        const auto start = static_cast<std::size_t>(enc.data_.size());
+        if (byte_count > (std::numeric_limits<std::size_t>::max)() - start) {
+            throw std::length_error("CBOR extension payload exceeds output buffer limits");
+        }
+
+        enc.data_.resize(start + byte_count);
+        auto *payload = reinterpret_cast<std::byte *>(std::ranges::data(enc.data_) + start);
+        std::forward<Fill>(fill)(std::span<std::byte>{payload, byte_count});
+    } else {
+        std::vector<std::byte> payload(byte_count);
+        std::forward<Fill>(fill)(std::span<std::byte>{payload});
+        append_extension_owned_bytes(enc, std::span<const std::byte>{payload});
+    }
 }
 
 template <typename Encoder, typename Segment> constexpr void append_extension_segment(Encoder &enc, const Segment &segment) {

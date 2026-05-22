@@ -203,13 +203,6 @@ inline constexpr bool native_matches_byte_order =
     (std::endian::native == std::endian::little && ByteOrder == typed_array_byte_order::little) ||
     (std::endian::native == std::endian::big && ByteOrder == typed_array_byte_order::big);
 
-template <typename T>
-concept DirectResizableByteOutputBuffer = std::ranges::contiguous_range<T> && requires(T &buffer, std::size_t size) {
-    buffer.resize(size);
-    { buffer.size() } -> std::convertible_to<std::size_t>;
-    std::ranges::data(buffer);
-} && sizeof(std::ranges::range_value_t<T>) == 1U;
-
 template <typename BitType> [[nodiscard]] BitType byteswap_bits(BitType value) noexcept {
     static_assert(std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>);
     if constexpr (std::same_as<BitType, std::array<std::byte, 16>>) {
@@ -312,24 +305,6 @@ void write_endian_payload_to(std::span<std::byte> output, std::span<const T> val
             cursor += sizeof(wire_bits);
         }
     }
-}
-
-template <typed_array_byte_order ByteOrder, typename T>
-    requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] std::vector<std::byte> endian_payload(std::span<const T> values) {
-    std::vector<std::byte> bytes(values.size_bytes());
-    write_endian_payload_to<ByteOrder>(std::span<std::byte>{bytes.data(), bytes.size()}, values);
-    return bytes;
-}
-
-template <typed_array_byte_order ByteOrder, DirectResizableByteOutputBuffer OutputBuffer, typename T>
-    requires IsTypedArrayElementFor<T, ByteOrder>
-void append_endian_payload_to(OutputBuffer &output, std::span<const T> values) {
-    const auto start        = static_cast<std::size_t>(output.size());
-    const auto payload_size = static_cast<std::size_t>(values.size_bytes());
-    output.resize(start + payload_size);
-    auto *payload = reinterpret_cast<std::byte *>(std::ranges::data(output) + start);
-    write_endian_payload_to<ByteOrder>(std::span<std::byte>{payload, payload_size}, values);
 }
 
 template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
@@ -1058,14 +1033,9 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     void encode_converted_payload(std::span<const T> values) {
         auto &enc = static_cast<Self &>(*this);
         cbor::tags::detail::encode_extension_bstr_header(enc, static_cast<std::uint64_t>(values.size_bytes()));
-
-        using output_buffer_type = std::remove_reference_t<decltype(enc.data_)>;
-        if constexpr (detail::DirectResizableByteOutputBuffer<output_buffer_type>) {
-            detail::append_endian_payload_to<ByteOrder>(enc.data_, values);
-        } else {
-            auto payload = detail::endian_payload<ByteOrder>(values);
-            append_owned_payload_data(std::span<const std::byte>{payload});
-        }
+        cbor::tags::detail::append_extension_generated_bytes(enc, values.size_bytes(), [values](std::span<std::byte> payload) {
+            detail::write_endian_payload_to<ByteOrder>(payload, values);
+        });
     }
 
     template <typename T, typed_array_byte_order ByteOrder>
@@ -1170,7 +1140,8 @@ template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typ
 [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
     const auto tag_header =
         cbor::tags::detail::encode_cbor_major_argument_header(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::byte{0xC0});
-    auto       payload     = detail::endian_payload<ByteOrder>(values);
+    auto payload = std::vector<std::byte>(values.size_bytes());
+    detail::write_endian_payload_to<ByteOrder>(std::span<std::byte>{payload}, values);
     const auto bstr_header = cbor::tags::detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
 
     cbor_segments segments;
