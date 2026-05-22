@@ -231,27 +231,9 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
     template <typename T>
     [[nodiscard]] constexpr status_code decode_tagged(std::uint64_t expected_tag, T &value, major_type major, std::byte additional_info) {
         auto &dec = static_cast<Self &>(*this);
-        if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
-        }
-
-        std::uint64_t actual_tag{};
-        auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, actual_tag);
-        if (status != status_code::success) {
-            return status;
-        }
-        if (actual_tag != expected_tag) {
-            return status_code::no_match_for_tag;
-        }
-
-        major_type payload_major{};
-        std::byte  payload_info{};
-        status = cbor::tags::detail::read_extension_initial_byte(dec, payload_major, payload_info);
-        if (status != status_code::success) {
-            return status;
-        }
-
-        return decode_payload_bstr(value, payload_major, payload_info);
+        return cbor::tags::detail::decode_tagged_bstr_payload_header(
+            dec, expected_tag, major, additional_info,
+            [&](std::byte payload_info) { return decode_payload_bstr(value, major_type::ByteString, payload_info); });
     }
 
     template <typename T>
