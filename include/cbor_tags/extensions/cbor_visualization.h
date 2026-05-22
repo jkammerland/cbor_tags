@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/detail/cbor_cddl_tag_traits.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_pointer_traits.h"
 #include "cbor_tags/extensions/cddl_traits.h"
@@ -2212,7 +2213,7 @@ constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_
     fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
 
     bool emitted = false;
-    while (!dec.reader_.empty(dec.data_)) {
+    while (!detail::decoder_at_end(dec)) {
         auto result = dec(values);
         if (!result) {
             throw std::runtime_error("Malformed CBOR diagnostic top-level item");
