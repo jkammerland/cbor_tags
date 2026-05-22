@@ -29,9 +29,23 @@ auto dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
 Extension codecs are class-template mixins over the final encoder or decoder
 type. A codec should inherit `cbor_codec_mixin_base<Self>` and bring the base
 overloads into scope so unsupported overloads remain deleted and visible to
-overload resolution:
+overload resolution.
+
+There are two layers to keep separate:
+
+- User-facing customization functions should compose normal CBOR items through
+  the public call operator, for example `return enc(wrap_as_array{a, b});`.
+- Codec implementations may call `enc.encode(...)`, `dec.decode(...)`, and
+  `dec.decode(value, major, additional_info)` directly. These are the internal
+  dispatch primitives, especially after the initial byte has already been
+  consumed and split into `major` and `additional_info`.
+
+Do not add sequencing APIs such as `encode_all`; use `operator()(...)` for
+normal public composition and direct dispatch only inside codec internals.
 
 ```cpp
+#include "cbor_tags/detail/cbor_extension_decode.h"
+
 template <typename Self>
 struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
     using cbor::tags::cbor_codec_mixin_base<Self>::decode;
@@ -39,30 +53,34 @@ struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
 
     void encode(const my_type& value) {
         auto& enc = static_cast<Self&>(*this);
-        enc(cbor::tags::make_tag_pair(cbor::tags::static_tag<100>{}, value.payload));
+        enc.encode(cbor::tags::static_tag<100>{});
+        enc.encode(value.payload);
     }
 
     [[nodiscard]] cbor::tags::status_code
     decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
         auto& dec = static_cast<Self&>(*this);
-        if (major != cbor::tags::major_type::Tag) {
-            return cbor::tags::status_code::unexpected_major;
-        }
-
-        const auto tag = dec.decode_unsigned(additional_info);
-        if (tag != 100U) {
-            return cbor::tags::status_code::unexpected_tag;
-        }
-        return dec(value.payload);
+        return cbor::tags::detail::decode_tagged_payload(
+            dec, 100U, major, additional_info,
+            [&] { return dec.decode(value.payload); });
     }
 };
 ```
 
 Decode overloads receive the already-read initial byte split into `major` and
 `additional_info`. Validate both, consume exactly the payload for the type, and
-return `status_code` for malformed CBOR. Encode overloads may throw for API
-misuse that cannot be represented by `status_code`; the public encoder catches
-exceptions and returns `status_code::error`.
+return `status_code` for malformed CBOR. Prefer the shared helpers in
+`cbor_tags/detail/cbor_extension_decode.h` for consumed-header operations such
+as tag matching, definite-size decoding, payload byte checks, and tagged
+byte-string payload headers; they preserve `incomplete` and malformed-header
+errors without relying on the outer public exception boundary.
+
+Encode overloads may throw for API misuse that cannot be represented by
+`status_code`; the public encoder catches exceptions and returns
+`status_code::error`. Prefer the shared helpers in
+`cbor_tags/detail/cbor_extension_encode.h` when a codec needs to emit raw tag
+headers, byte-string headers, generated payload bytes, or segment payloads.
+Those helpers centralize the necessary encoder-internal buffer access.
 
 Borrowed wrapper helpers should be lvalue-only when they store references to
 user memory:
