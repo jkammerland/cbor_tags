@@ -10,9 +10,13 @@
 
 namespace cbor::tags::detail {
 
+template <typename Decoder> [[nodiscard]] constexpr bool decoder_at_end(const Decoder &dec) noexcept {
+    return dec.reader_.empty(dec.data_);
+}
+
 template <typename Decoder>
 [[nodiscard]] constexpr status_code read_extension_initial_byte(Decoder &dec, major_type &major, std::byte &additional_info) {
-    if (dec.reader_.empty(dec.data_)) {
+    if (decoder_at_end(dec)) {
         return status_code::incomplete;
     }
 
