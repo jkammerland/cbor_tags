@@ -279,58 +279,7 @@ template <IsTag T> constexpr auto getTagDef(const T &t) {
     }
 }
 
-template <typename T> constexpr auto getName(const T &) {
-    if constexpr (IsUnsigned<T>) {
-        return "uint";
-    } else if constexpr (IsNegative<T>) {
-        return "nint";
-    } else if constexpr (IsSigned<T>) {
-        return "int";
-    } else if constexpr (IsTextString<T>) {
-        return "tstr";
-    } else if constexpr (IsBinaryString<T>) {
-        return "bstr";
-    } else if constexpr (IsArray<T>) {
-        return "array";
-    } else if constexpr (IsMap<T>) {
-        return "map";
-    } else if constexpr (IsTag<T>) {
-        return nameof::nameof_short_type<T>();
-    } else if constexpr (IsSimple<T>) {
-        if constexpr (IsBool<T>) {
-            return "bool";
-        } else if constexpr (IsFloat16<T>) {
-            return "float16";
-        } else if constexpr (IsFloat32<T>) {
-            return "float32";
-        } else if constexpr (IsFloat64<T>) {
-            return "float64";
-        } else if constexpr (IsNull<T>) {
-            return "null";
-        } else {
-            return "simple";
-        }
-    } else {
-        if constexpr (IsOptional<T>) {
-            using value_type = typename T::value_type;
-            auto name        = getName<value_type>();
-            return std::string(name) + " / null";
-        } else if constexpr (detail::IsNullablePointer<T>) {
-            using element_type = detail::nullable_pointer_element_t<T>;
-            static_assert(detail::is_supported_nullable_pointer_v<T>,
-                          "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
-                          "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
-            static_assert(std::default_initializable<element_type>,
-                          "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
-            auto name = getName<element_type>();
-            return std::string("[0] / [1, ") + std::string(name) + "]";
-        } else if constexpr (IsVariant<T>) {
-            return getVariantNames(T{});
-        } else {
-            return nameof::nameof_short_type<T>();
-        }
-    }
-}
+template <typename T> constexpr auto getName(const T &) { return getName<std::remove_cvref_t<T>>(); }
 
 template <typename T> constexpr auto getName() {
     if constexpr (IsUnsigned<T>) {
