@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_pointer_traits.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #ifndef CBOR_TAGS_USE_MAGIC_ENUM_NAMES
@@ -247,45 +248,6 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
 template <typename CborBuffer, typename OutputBuffer>
 void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options);
 
-template <typename T> struct is_std_unique_ptr : std::false_type {};
-template <typename T, typename Deleter> struct is_std_unique_ptr<std::unique_ptr<T, Deleter>> : std::true_type {
-    using element_type = T;
-};
-
-template <typename T> struct is_std_shared_ptr : std::false_type {};
-template <typename T> struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_type {
-    using element_type = T;
-};
-
-template <typename T> struct is_std_vector_of_shared_ptr : std::false_type {};
-template <typename T, typename Allocator> struct is_std_vector_of_shared_ptr<std::vector<std::shared_ptr<T>, Allocator>> : std::true_type {
-    using element_type = T;
-};
-
-template <typename T>
-concept IsNullablePointer = is_std_unique_ptr<std::remove_cvref_t<T>>::value || is_std_shared_ptr<std::remove_cvref_t<T>>::value;
-
-template <typename T> struct nullable_pointer_element;
-template <typename T, typename Deleter> struct nullable_pointer_element<std::unique_ptr<T, Deleter>> {
-    using type = T;
-};
-template <typename T> struct nullable_pointer_element<std::shared_ptr<T>> {
-    using type = T;
-};
-
-template <typename T> using nullable_pointer_element_t = typename nullable_pointer_element<std::remove_cvref_t<T>>::type;
-
-template <typename T> constexpr bool is_nullable_pointer_value_v = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
-
-template <typename T> struct is_supported_nullable_pointer_owner : std::false_type {};
-template <typename T, typename Deleter>
-struct is_supported_nullable_pointer_owner<std::unique_ptr<T, Deleter>>
-    : std::bool_constant<std::is_same_v<Deleter, std::default_delete<T>>> {};
-template <typename T> struct is_supported_nullable_pointer_owner<std::shared_ptr<T>> : std::true_type {};
-
-template <typename T>
-constexpr bool is_supported_nullable_pointer_v =
-    is_nullable_pointer_value_v<nullable_pointer_element_t<T>> && is_supported_nullable_pointer_owner<std::remove_cvref_t<T>>::value;
 } // namespace detail
 
 template <typename T> constexpr auto getName(const T &);

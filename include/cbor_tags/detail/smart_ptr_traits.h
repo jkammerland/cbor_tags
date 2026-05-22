@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor_concepts_checking.h"
+#include "cbor_tags/detail/cbor_pointer_traits.h"
 
 #include <concepts>
 #include <cstddef>
@@ -16,7 +17,7 @@ inline constexpr std::uint64_t shareable_tag = 28U;
 inline constexpr std::uint64_t sharedref_tag = 29U;
 
 template <typename T>
-concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
+concept NullablePointerValue = cbor::tags::detail::NullablePointerValue<T>;
 
 template <typename T> struct nullable_pointer_traits {
     static constexpr bool decodable = false;
@@ -45,11 +46,18 @@ constexpr std::size_t decodable_nullable_pointer_count_v =
 
 template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = decodable_nullable_pointer_count_v<Ts...> > 0U;
 
-template <typename T> struct decodable_shared_graph_vector : std::false_type {};
+template <typename T, bool IsVectorOfSharedPtr = cbor::tags::detail::is_std_vector_of_shared_ptr<T>::value>
+struct decodable_shared_graph_vector : std::false_type {};
 
-template <NullablePointerValue T, typename Allocator>
-struct decodable_shared_graph_vector<std::vector<std::shared_ptr<T>, Allocator>>
-    : std::bool_constant<std::default_initializable<T> && std::default_initializable<std::vector<std::shared_ptr<T>, Allocator>>> {};
+template <typename T> struct decodable_shared_graph_vector<T, true> {
+  private:
+    using traits     = cbor::tags::detail::is_std_vector_of_shared_ptr<T>;
+    using value_type = T;
+
+  public:
+    static constexpr bool value = NullablePointerValue<typename traits::element_type> &&
+                                  std::default_initializable<typename traits::element_type> && std::default_initializable<value_type>;
+};
 
 template <typename T> constexpr bool decodable_shared_graph_vector_v = decodable_shared_graph_vector<std::remove_cvref_t<T>>::value;
 
