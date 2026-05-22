@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_segments.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #include <algorithm>
@@ -335,26 +336,28 @@ template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
 [[nodiscard]] status_code decode_payload_after_tag(auto &dec, std::uint64_t tag, AssignPayload &&assign_payload) {
     using value_type = std::remove_cv_t<T>;
 
-    if (tag != typed_array_traits<value_type, ByteOrder>::tag) {
-        return status_code::no_match_for_tag;
-    }
-
-    const auto [payload_major, payload_additional_info] = dec.read_initial_byte();
-    if (payload_major != major_type::ByteString || payload_additional_info == std::byte{31}) {
-        return status_code::no_match_for_bstr_on_buffer;
-    }
-
-    return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+    return cbor::tags::detail::decode_tagged_payload_header(
+        dec, typed_array_traits<value_type, ByteOrder>::tag, tag, [&](major_type payload_major, std::byte payload_additional_info) {
+            if (payload_major != major_type::ByteString || payload_additional_info == std::byte{31}) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+        });
 }
 
 template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] status_code decode_payload(auto &dec, major_type major, std::byte additional_info, AssignPayload &&assign_payload) {
-    if (major != major_type::Tag) {
-        return status_code::no_match_for_tag_on_buffer;
-    }
+    using value_type = std::remove_cv_t<T>;
 
-    return decode_payload_after_tag<T, ByteOrder>(dec, dec.decode_unsigned(additional_info), std::forward<AssignPayload>(assign_payload));
+    return cbor::tags::detail::decode_tagged_payload_header(
+        dec, typed_array_traits<value_type, ByteOrder>::tag, major, additional_info,
+        [&](major_type payload_major, std::byte payload_additional_info) {
+            if (payload_major != major_type::ByteString || payload_additional_info == std::byte{31}) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+        });
 }
 
 template <typename T, typed_array_byte_order ByteOrder>
@@ -948,7 +951,11 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         }
 
         const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-        auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+        status                  = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
+        if (status != status_code::success) {
+            return status;
+        }
+        auto raw_payload = dec.decode_bstring_payload(payload_size_u64);
         if ((payload_size % sizeof(value_type)) != 0U) {
             return status_code::unexpected_group_size;
         }
@@ -975,6 +982,10 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                 return status;
             }
 
+            status = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
+            if (status != status_code::success) {
+                return status;
+            }
             auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
             const auto payload_size = static_cast<std::size_t>(payload_size_u64);
             if ((payload_size % sizeof(value_type)) != 0U) {
@@ -986,8 +997,11 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     }
 
     [[nodiscard]] status_code decode_payload_size(std::byte payload_info, std::uint64_t &payload_size_u64) {
-        auto &dec        = static_cast<Self &>(*this);
-        payload_size_u64 = dec.decode_unsigned(payload_info);
+        auto      &dec    = static_cast<Self &>(*this);
+        const auto status = cbor::tags::detail::decode_unsigned_argument(dec, payload_info, payload_size_u64);
+        if (status != status_code::success) {
+            return status;
+        }
         if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
             const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
             if (payload_size_u64 > payload_size_limit) {
@@ -1026,19 +1040,13 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     template <typename Fn>
     [[nodiscard]] status_code decode_extension_tag_payload(std::uint64_t expected_tag, major_type major, std::byte additional_info,
                                                            Fn &&decode_payload) {
-        if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
-        }
         auto &dec = static_cast<Self &>(*this);
-        return decode_extension_tag_payload(expected_tag, dec.decode_unsigned(additional_info), std::forward<Fn>(decode_payload));
+        return cbor::tags::detail::decode_tagged_payload(dec, expected_tag, major, additional_info, std::forward<Fn>(decode_payload));
     }
 
     template <typename Fn>
     [[nodiscard]] status_code decode_extension_tag_payload(std::uint64_t expected_tag, std::uint64_t tag, Fn &&decode_payload) {
-        if (tag != expected_tag) {
-            return status_code::no_match_for_tag;
-        }
-        return std::forward<Fn>(decode_payload)();
+        return cbor::tags::detail::decode_tagged_payload(expected_tag, tag, std::forward<Fn>(decode_payload));
     }
 
     void append_owned_payload_data(std::span<const std::byte> payload) {
