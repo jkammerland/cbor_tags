@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/detail/smart_ptr_traits.h"
 #include "cbor_tags/extensions/cddl_traits.h"
@@ -68,18 +69,6 @@ template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_d
 
 namespace detail {
 
-template <typename Decoder>
-[[nodiscard]] status_code decode_definite_array_size(Decoder &dec, major_type major, std::byte additional_info, std::uint64_t &size) {
-    if (major != major_type::Array) {
-        return status_code::no_match_for_array_on_buffer;
-    }
-    if (additional_info == static_cast<std::byte>(31)) {
-        return status_code::unexpected_group_size;
-    }
-    size = dec.decode_unsigned(additional_info);
-    return status_code::success;
-}
-
 template <typename T> inline constexpr char graph_type_token{};
 
 template <typename T> constexpr const void *graph_type_id() noexcept { return &graph_type_token<std::remove_cvref_t<T>>; }
@@ -99,7 +88,7 @@ template <typename Encoder, typename Pointer> void encode_nullable_pointer(Encod
 template <typename Decoder, NullablePointerValue T>
 [[nodiscard]] status_code decode_nullable_pointer(Decoder &dec, std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
     std::uint64_t size{};
-    auto          status = decode_definite_array_size(dec, major, additional_info, size);
+    auto          status = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, size);
     if (status != status_code::success) {
         return status;
     }
@@ -209,11 +198,17 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             return false;
         }
 
-        auto read_tag_once = [&dec, additional_info, &tag] {
+        auto read_tag_once = [&dec, additional_info, &tag](std::uint64_t &tag_value) -> status_code {
             if (!tag.has_value()) {
-                tag = dec.decode_unsigned(additional_info);
+                std::uint64_t decoded_tag{};
+                auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, decoded_tag);
+                if (status != status_code::success) {
+                    return status;
+                }
+                tag = decoded_tag;
             }
-            return *tag;
+            tag_value = *tag;
+            return status_code::success;
         };
 
         if constexpr (decodable_nullable_pointer_v<raw_type>) {
@@ -228,7 +223,16 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             if constexpr (GraphTagsPossible) {
                 if constexpr (decodable_shared_pointer_v<raw_type>) {
                     if (major == major_type::Tag) {
-                        const auto tag_value = read_tag_once();
+                        std::uint64_t tag_value{};
+                        const auto    tag_status = read_tag_once(tag_value);
+                        if (tag_status != status_code::success) {
+                            if (tag_status == status_code::incomplete) {
+                                saw_incomplete = true;
+                            } else {
+                                pointer_error = tag_status;
+                            }
+                            return false;
+                        }
                         if (tag_value != shareable_tag && tag_value != sharedref_tag) {
                             return false;
                         }
@@ -265,7 +269,17 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             if constexpr (IsVariant<raw_type>) {
                 result = decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, decoded_value, major, additional_info, tag);
             } else if constexpr (IsTag<raw_type>) {
-                result = dec.decode(decoded_value, read_tag_once());
+                std::uint64_t tag_value{};
+                const auto    tag_status = read_tag_once(tag_value);
+                if (tag_status != status_code::success) {
+                    if (tag_status == status_code::incomplete) {
+                        saw_incomplete = true;
+                    } else {
+                        pointer_error = tag_status;
+                    }
+                    return false;
+                }
+                result = dec.decode(decoded_value, tag_value);
             } else if constexpr (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>) {
                 result = dec.decode_shared_graph_vector_variant_alternative(decoded_value, major, additional_info);
             } else {
@@ -589,7 +603,11 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        const auto tag = dec.decode_unsigned(additional_info);
+        std::uint64_t tag{};
+        auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        if (status != status_code::success) {
+            return status;
+        }
         return decode_shared_graph_pointer(value, tag);
     }
 
@@ -656,7 +674,7 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         auto &dec = static_cast<Self &>(*this);
 
         std::uint64_t size{};
-        auto          status = detail::decode_definite_array_size(dec, major, additional_info, size);
+        auto          status = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, size);
         if (status != status_code::success) {
             return status;
         }

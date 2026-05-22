@@ -38,6 +38,18 @@ template <typename Decoder>
     return status_code::success;
 }
 
+template <typename Decoder>
+[[nodiscard]] constexpr status_code decode_definite_array_size(Decoder &dec, major_type major, std::byte additional_info,
+                                                               std::uint64_t &size) {
+    if (major != major_type::Array) {
+        return status_code::no_match_for_array_on_buffer;
+    }
+    if (additional_info == std::byte{31}) {
+        return status_code::unexpected_group_size;
+    }
+    return decode_unsigned_argument(dec, additional_info, size);
+}
+
 template <typename Decoder> [[nodiscard]] constexpr status_code require_extension_payload_bytes(Decoder &dec, std::uint64_t byte_count) {
     if constexpr (std::numeric_limits<typename Decoder::size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
         if (byte_count > static_cast<std::uint64_t>(std::numeric_limits<typename Decoder::size_type>::max())) {

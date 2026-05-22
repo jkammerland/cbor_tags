@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
 
 #include <concepts>
 #include <cstddef>
@@ -70,14 +71,23 @@ template <typename Self> struct std_expected_codec : cbor_codec_mixin_base<Self>
                 return status;
             }
 
-            const auto [end_major, end_info] = dec.read_initial_byte();
+            major_type end_major{};
+            std::byte  end_info{};
+            status = cbor::tags::detail::read_extension_initial_byte(dec, end_major, end_info);
+            if (status != status_code::success) {
+                return status;
+            }
             if (end_major != major_type::Simple || end_info != static_cast<std::byte>(31)) {
                 return status_code::unexpected_group_size;
             }
             return status_code::success;
         }
 
-        const auto size = dec.decode_unsigned(additional_info);
+        std::uint64_t size{};
+        auto          status = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, size);
+        if (status != status_code::success) {
+            return status;
+        }
         if (size != 2U) {
             return status_code::unexpected_group_size;
         }
