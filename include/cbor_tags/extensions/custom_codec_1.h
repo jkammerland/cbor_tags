@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/detail/cbor_argument.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
+#include "cbor_tags/detail/cbor_extension_encode.h"
 #include "cbor_tags/detail/custom_codec_1_serialization.h"
 
 #include <cstddef>
@@ -180,8 +181,8 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
         auto &enc     = static_cast<Self &>(*this);
         auto  payload = encode_payload_for_output(enc.data_, value);
 
-        enc.encode_major_and_size(tag, static_cast<typename Self::byte_type>(0xC0));
-        enc.encode_major_and_size(static_cast<std::uint64_t>(payload_size(payload)), static_cast<typename Self::byte_type>(0x40));
+        cbor::tags::detail::encode_extension_tag_header(enc, tag);
+        cbor::tags::detail::encode_extension_bstr_header(enc, static_cast<std::uint64_t>(payload_size(payload)));
         append_payload(enc, payload);
     }
 
@@ -213,7 +214,7 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
         if constexpr (CborSegmentOutputBuffer<std::remove_cvref_t<Payload>>) {
             append_payload_segments(enc, payload);
         } else {
-            cbor::tags::detail::append_byte_range(enc.appender_, enc.data_, payload);
+            cbor::tags::detail::append_extension_owned_bytes(enc, payload);
         }
     }
 
@@ -224,19 +225,7 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
     }
 
     template <typename Segment> static constexpr void append_payload_segment(Self &enc, const Segment &segment) {
-        const auto bytes = segment.bytes();
-        if constexpr (requires {
-                          enc.data_.append_borrowed(bytes);
-                          cbor::tags::detail::append_owned_segment(enc.data_, bytes);
-                      }) {
-            if (segment.is_borrowed()) {
-                enc.data_.append_borrowed(bytes);
-            } else {
-                cbor::tags::detail::append_owned_segment(enc.data_, bytes);
-            }
-        } else {
-            cbor::tags::detail::append_segment_to_encoder(enc, segment);
-        }
+        cbor::tags::detail::append_extension_segment(enc, segment);
     }
 
     template <typename T>
