@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
+#include "cbor_tags/detail/cbor_extension_encode.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #include <algorithm>
@@ -1051,24 +1052,19 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
 
     void append_owned_payload_data(std::span<const std::byte> payload) {
         auto &enc = static_cast<Self &>(*this);
-        if constexpr (requires { enc.appender_.append_owned(enc.data_, payload); }) {
-            enc.appender_.append_owned(enc.data_, payload);
-        } else {
-            enc.appender_(enc.data_, payload);
-        }
+        cbor::tags::detail::append_extension_owned_bytes(enc, payload);
     }
 
     void encode_owned_payload(std::span<const std::byte> payload) {
         auto &enc = static_cast<Self &>(*this);
-        enc.encode_major_and_size(static_cast<std::uint64_t>(payload.size()), static_cast<typename Self::byte_type>(0x40));
-        append_owned_payload_data(payload);
+        cbor::tags::detail::encode_extension_bstr_payload(enc, payload);
     }
 
     template <typename T, typed_array_byte_order ByteOrder>
         requires IsTypedArrayElementFor<T, ByteOrder>
     void encode_converted_payload(std::span<const T> values) {
         auto &enc = static_cast<Self &>(*this);
-        enc.encode_major_and_size(static_cast<std::uint64_t>(values.size_bytes()), static_cast<typename Self::byte_type>(0x40));
+        cbor::tags::detail::encode_extension_bstr_header(enc, static_cast<std::uint64_t>(values.size_bytes()));
 
         using output_buffer_type = std::remove_reference_t<decltype(enc.data_)>;
         if constexpr (detail::DirectResizableByteOutputBuffer<output_buffer_type>) {
