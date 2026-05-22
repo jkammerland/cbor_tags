@@ -44,6 +44,48 @@ template <typename Transcoder> constexpr auto transcode(Transcoder &transcoder, 
     return transcoder(value.value);
 }
 
+struct MemberTranscodeOnly {
+    int first{1};
+    int second{2};
+
+    template <typename Transcoder> constexpr auto transcode(Transcoder &transcoder) const {
+        return transcoder(wrap_as_array{first, second});
+    }
+};
+
+struct MemberEncodeNested {
+    int first{1};
+    int second{2};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(wrap_as_array{first, second}); }
+};
+
+struct FreeEncodeNested {
+    int first{1};
+    int second{2};
+};
+
+template <typename Encoder> constexpr auto encode(Encoder &enc, const FreeEncodeNested &value) {
+    return enc(wrap_as_array{value.first, value.second});
+}
+
+struct FreeTranscodeNested {
+    int first{1};
+    int second{2};
+};
+
+template <typename Transcoder> constexpr auto transcode(Transcoder &transcoder, const FreeTranscodeNested &value) {
+    return transcoder(wrap_as_array{value.first, value.second});
+}
+
+struct TaggedMemberEncodeNested {
+    static_tag<1> cbor_tag;
+    int           first{1};
+    int           second{2};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(wrap_as_array{first, second}); }
+};
+
 struct TaggedMemberEncode {
     static_tag<99> cbor_tag;
     int            value{1};
@@ -201,8 +243,31 @@ TEST_CASE("CBOR Encoder dispatches class encoding overload forms") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
 
-    REQUIRE(enc(MemberEncodeOnly{}, FreeEncodeOnly{}, FreeTranscodeOnly{}, TaggedMemberEncode{}));
-    CHECK_EQ(to_hex(buffer), "070809d86301");
+    REQUIRE(enc(MemberEncodeOnly{}, FreeEncodeOnly{}, FreeTranscodeOnly{}, MemberTranscodeOnly{}, TaggedMemberEncode{}));
+    CHECK_EQ(to_hex(buffer), "070809820102d86301");
+}
+
+TEST_CASE_TEMPLATE("CBOR Encoder propagates custom encoding result failures", T, MemberEncodeNested, MemberTranscodeOnly, FreeEncodeNested,
+                   FreeTranscodeNested) {
+    std::array<std::byte, 1> buffer{std::byte{0xCC}};
+    auto                     enc = make_encoder(buffer);
+
+    auto result = enc(T{});
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(to_hex(buffer), "82");
+}
+
+TEST_CASE("CBOR Encoder propagates custom encoding failures after automatic tag") {
+    std::array<std::byte, 2> buffer{std::byte{0xCC}, std::byte{0xCC}};
+    auto                     enc = make_encoder(buffer);
+
+    auto result = enc(TaggedMemberEncodeNested{});
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(to_hex(buffer), "c182");
 }
 
 TEST_CASE("CBOR Encoder rejects invalid indefinite wrapper type") {
