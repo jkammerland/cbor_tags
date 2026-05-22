@@ -681,6 +681,7 @@ TEST_CASE("shared graph codec rejects malformed graph wrappers") {
     const malformed_case cases[]{
         {"8101", status_code::error, std::nullopt},                           // [1]
         {"8201182a", status_code::unexpected_group_size, 1U},                 // [1, 42]
+        {"d8", status_code::incomplete, std::nullopt},                        // #6.<missing tag argument>
         {"d81c", status_code::incomplete, std::nullopt},                      // #6.28(<missing>)
         {"d81c6161", status_code::no_match_for_uint_on_buffer, std::nullopt}, // #6.28("a")
         {"d81d", status_code::incomplete, std::nullopt},                      // #6.29(<missing>)
@@ -1264,6 +1265,16 @@ TEST_CASE("nullable pointer codec rejects malformed wrappers") {
         CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
         REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 7U);
+    }
+
+    {
+        const auto                     bytes = to_bytes("98");
+        std::shared_ptr<std::uint64_t> decoded;
+        auto                           dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
     }
 
     {
