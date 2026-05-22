@@ -12,6 +12,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace cbor::tags::detail {
@@ -84,6 +85,42 @@ template <typename Encoder, typename Segment> constexpr void append_extension_se
         }
     } else {
         append_segment_to_encoder(enc, segment);
+    }
+}
+
+template <typename Payload> [[nodiscard]] constexpr std::size_t extension_payload_size(const Payload &payload) noexcept {
+    if constexpr (CborSegmentOutputBuffer<std::remove_cvref_t<Payload>>) {
+        std::size_t result{};
+        for (const auto &segment : payload) {
+            result += segment.size();
+        }
+        return result;
+    } else {
+        return payload.size();
+    }
+}
+
+template <typename Encoder, typename Payload> constexpr void append_extension_payload(Encoder &enc, const Payload &payload) {
+    if constexpr (CborSegmentOutputBuffer<std::remove_cvref_t<Payload>>) {
+        for (const auto &segment : payload) {
+            append_extension_segment(enc, segment);
+        }
+    } else {
+        append_extension_owned_bytes(enc, payload);
+    }
+}
+
+template <typename Encoder, typename EncodePayloadTo, typename EncodeSegments>
+[[nodiscard]] constexpr auto make_extension_payload_for_output(Encoder &enc, EncodePayloadTo &&encode_payload_to,
+                                                               EncodeSegments &&encode_segments) {
+    using output_type = std::remove_reference_t<decltype(enc.data_)>;
+    if constexpr (CborAppendOutputBuffer<output_type> && requires { output_type{enc.data_.get_allocator()}; }) {
+        output_type           payload{enc.data_.get_allocator()};
+        appender<output_type> payload_appender;
+        std::forward<EncodePayloadTo>(encode_payload_to)(payload_appender, payload);
+        return payload;
+    } else {
+        return std::forward<EncodeSegments>(encode_segments)();
     }
 }
 
