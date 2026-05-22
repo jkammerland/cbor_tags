@@ -194,14 +194,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                   "Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives.");
     static_assert(!GraphTagsPossible || !variant_has_shared_graph_tag_collision_v<Ts...>,
                   "Variant shared_ptr alternatives in a shared graph collide with tags 28/29 or a catch-all tag alternative.");
-    static_assert(core_mapping[major_index::Unsigned] <= 1, "Multiple types match against major type 0 (unsigned integer)");
-    static_assert(core_mapping[major_index::Negative] <= 1, "Multiple types match against major type 1 (negative integer)");
-    static_assert(core_mapping[major_index::BStr] <= 1, "Multiple types match against major type 2 (byte string)");
-    static_assert(core_mapping[major_index::TStr] <= 1, "Multiple types match against major type 3 (text string)");
-    static_assert(core_mapping[major_index::Map] <= 1, "Multiple types match against major type 5 (map)");
-    static_assert(core_mapping[major_index::Tag] <= 1, "Multiple types match against major type 6 (tag)");
-    static_assert(core_mapping[major_index::DynamicTag] == 0,
-                  "Variant cannot contain dynamic tags, must be known at compile time, use as_tag_any to catch any tag");
+    cbor::tags::detail::require_unambiguous_variant_dispatch_without_array<variant_type>();
     static_assert(valid_concept_mapping_v<variant_type>,
                   "Variant has ambiguous major types; only one alternative may match each core CBOR dispatch shape.");
 
