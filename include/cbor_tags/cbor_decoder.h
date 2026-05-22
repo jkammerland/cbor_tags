@@ -1287,31 +1287,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                                                                    "decode into the type, it must be default constructed first.");
 
         // Check ambiguous types in the variant.
-        using Variant                                     = std::variant<T...>;
-        constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
-        constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
-        static_assert(matching_major_types[MajorIndex::Unsigned] <= 1, "Multiple types match against major type 0 (unsigned integer)");
-        static_assert(matching_major_types[MajorIndex::Negative] <= 1, "Multiple types match against major type 1 (negative integer)");
-        static_assert(matching_major_types[MajorIndex::BStr] <= 1, "Multiple types match against major type 2 (byte string)");
-        static_assert(matching_major_types[MajorIndex::TStr] <= 1, "Multiple types match against major type 3 (text string)");
-        static_assert(matching_major_types[MajorIndex::Array] <= 1, "Multiple types match against major type 4 (array)");
-        static_assert(matching_major_types[MajorIndex::Map] <= 1, "Multiple types match against major type 5 (map)");
-        static_assert(matching_major_types[MajorIndex::Tag] <= 1, "Multiple types match against major type 6 (tag)");
-        static_assert(matching_major_types[MajorIndex::SimpleValued] <= 1, "Multiple types match against major type 7 (simple)");
-        static_assert(matching_major_types[MajorIndex::Boolean] <= 1, "Multiple types match against major type 7 (boolean)");
-        static_assert(matching_major_types[MajorIndex::Null] <= 1, "Multiple types match against major type 7 (null)");
-        static_assert(matching_major_types[MajorIndex::float16] <= 1, "Multiple types match against major type 7 (float16)");
-        static_assert(matching_major_types[MajorIndex::float32] <= 1, "Multiple types match against major type 7 (float32)");
-        static_assert(matching_major_types[MajorIndex::float64] <= 1, "Multiple types match against major type 7 (float64)");
+        using Variant = std::variant<T...>;
+        require_unambiguous_variant_dispatch<Variant>();
         // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
         // Do not restore this as an unmatched-only guard; it misses invalid nested containers
         // and can drift from IsCborMajor/decoder overload truth.
         // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
-        static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
-                      "Variant cannot contain dynamic tags, must be known at compile time, use as_tag_any to catch any tag");
-
-        static_assert(no_ambigous_major_types_in_variant, "Variant has ambigous major types, if this would compile, only the first type \
-                                                          (among the ambigous) would get decoded.");
 
         bool        saw_incomplete = false;
         status_code hard_error     = status_code::success;
