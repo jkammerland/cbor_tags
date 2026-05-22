@@ -337,12 +337,9 @@ template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
 [[nodiscard]] status_code decode_payload_after_tag(auto &dec, std::uint64_t tag, AssignPayload &&assign_payload) {
     using value_type = std::remove_cv_t<T>;
 
-    return cbor::tags::detail::decode_tagged_payload_header(
-        dec, typed_array_traits<value_type, ByteOrder>::tag, tag, [&](major_type payload_major, std::byte payload_additional_info) {
-            if (payload_major != major_type::ByteString || payload_additional_info == std::byte{31}) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+    return cbor::tags::detail::decode_tagged_bstr_payload_header(
+        dec, typed_array_traits<value_type, ByteOrder>::tag, tag, [&](std::byte payload_additional_info) {
+            return std::forward<AssignPayload>(assign_payload)(major_type::ByteString, payload_additional_info);
         });
 }
 
@@ -351,13 +348,9 @@ template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
 [[nodiscard]] status_code decode_payload(auto &dec, major_type major, std::byte additional_info, AssignPayload &&assign_payload) {
     using value_type = std::remove_cv_t<T>;
 
-    return cbor::tags::detail::decode_tagged_payload_header(
-        dec, typed_array_traits<value_type, ByteOrder>::tag, major, additional_info,
-        [&](major_type payload_major, std::byte payload_additional_info) {
-            if (payload_major != major_type::ByteString || payload_additional_info == std::byte{31}) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+    return cbor::tags::detail::decode_tagged_bstr_payload_header(
+        dec, typed_array_traits<value_type, ByteOrder>::tag, major, additional_info, [&](std::byte payload_additional_info) {
+            return std::forward<AssignPayload>(assign_payload)(major_type::ByteString, payload_additional_info);
         });
 }
 

@@ -114,4 +114,35 @@ template <typename Decoder, typename Fn>
     return decode_tagged_payload_header(dec, expected_tag, actual_tag, std::forward<Fn>(decode_payload));
 }
 
+template <typename Fn>
+[[nodiscard]] constexpr status_code decode_bstr_payload_header(major_type payload_major, std::byte payload_info, Fn &&decode_payload) {
+    if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+        return status_code::no_match_for_bstr_on_buffer;
+    }
+    return std::forward<Fn>(decode_payload)(payload_info);
+}
+
+template <typename Decoder, typename Fn>
+[[nodiscard]] constexpr status_code decode_tagged_bstr_payload_header(Decoder &dec, std::uint64_t expected_tag, std::uint64_t actual_tag,
+                                                                      Fn &&decode_payload) {
+    return decode_tagged_payload_header(dec, expected_tag, actual_tag, [&](major_type payload_major, std::byte payload_info) {
+        return decode_bstr_payload_header(payload_major, payload_info, std::forward<Fn>(decode_payload));
+    });
+}
+
+template <typename Decoder, typename Fn>
+[[nodiscard]] constexpr status_code decode_tagged_bstr_payload_header(Decoder &dec, std::uint64_t expected_tag, major_type major,
+                                                                      std::byte additional_info, Fn &&decode_payload) {
+    if (major != major_type::Tag) {
+        return status_code::no_match_for_tag_on_buffer;
+    }
+
+    std::uint64_t actual_tag{};
+    auto          status = decode_unsigned_argument(dec, additional_info, actual_tag);
+    if (status != status_code::success) {
+        return status;
+    }
+    return decode_tagged_bstr_payload_header(dec, expected_tag, actual_tag, std::forward<Fn>(decode_payload));
+}
+
 } // namespace cbor::tags::detail
