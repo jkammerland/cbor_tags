@@ -851,7 +851,7 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
-- Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.8 or newer.
+- Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.7 or newer.
 - CMake 3.20+, or 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`.
 
 ## 📦 Installation

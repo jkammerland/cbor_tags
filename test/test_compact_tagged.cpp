@@ -102,7 +102,6 @@ struct compact_unsized_even_view {
         constexpr void operator++(int) noexcept { ++(*this); }
 
         friend constexpr bool operator==(iterator it, std::default_sentinel_t) noexcept { return it.value > 4; }
-        friend constexpr bool operator==(std::default_sentinel_t sentinel, iterator it) noexcept { return it == sentinel; }
     };
 
     [[nodiscard]] constexpr iterator                begin() const noexcept { return {}; }
@@ -130,7 +129,6 @@ struct custom_codec_1_single_pass_view {
         constexpr void operator++(int) noexcept { ++(*this); }
 
         friend constexpr bool operator==(iterator it, std::default_sentinel_t) noexcept { return it.value >= it.stop; }
-        friend constexpr bool operator==(std::default_sentinel_t sentinel, iterator it) noexcept { return it == sentinel; }
     };
 
     [[nodiscard]] constexpr iterator begin() const noexcept {
