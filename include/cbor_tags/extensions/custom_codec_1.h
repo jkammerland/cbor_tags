@@ -17,6 +17,9 @@
 
 namespace cbor::tags::ext::custom_codec_1 {
 
+namespace cbor_detail  = cbor::tags::detail;
+namespace codec_detail = cbor::tags::detail::custom_codec_1;
+
 template <typename T> class custom_codec_1_ref {
   public:
     constexpr explicit custom_codec_1_ref(T &value) noexcept : value_(std::addressof(value)) {}
@@ -84,14 +87,13 @@ template <typename Tag, typename T>
 void as_custom_codec_1(Tag &&, T &&) = delete;
 
 template <typename Tag, typename T> [[nodiscard]] inline cbor_segments encode_borrowed_segments(Tag &&tag, const T &value) {
-    auto payload = cbor::tags::detail::custom_codec_1::encode_payload_borrowed_segments(value);
+    auto payload = codec_detail::encode_payload_borrowed_segments(value);
 
     cbor_segments segments;
     segments.reserve_segments(payload.size() + 2U);
     segments.append_owned(
-        cbor::tags::detail::encode_cbor_major_argument_header(cbor::tags::detail::custom_codec_1::tag_to_uint64(tag), std::byte{0xC0})
-            .span());
-    segments.append_owned(cbor::tags::detail::encode_cbor_major_argument_header(payload.total_size(), std::byte{0x40}).span());
+        cbor_detail::encode_cbor_major_argument_header(codec_detail::tag_to_uint64(tag), get_major_3_bit_tag<as_tag_any>()).span());
+    segments.append_owned(cbor_detail::encode_cbor_major_argument_header(payload.total_size(), get_major_3_bit_tag<as_bstr_any>()).span());
 
     for (const auto &segment : payload) {
         const auto bytes = segment.bytes();
@@ -105,7 +107,7 @@ template <typename Tag, typename T> [[nodiscard]] inline cbor_segments encode_bo
 }
 
 template <typename T> [[nodiscard]] inline cbor_segments encode_borrowed_segments(const T &value) {
-    return encode_borrowed_segments(cbor::tags::detail::custom_codec_1::tag_for(value), value);
+    return encode_borrowed_segments(codec_detail::tag_for(value), value);
 }
 
 template <typename T>
@@ -121,18 +123,18 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
     using cbor::tags::cbor_codec_mixin_base<Self>::encode;
 
     template <typename T> constexpr void encode(const custom_codec_1_ref<T> &value) {
-        encode_tagged(cbor::tags::detail::custom_codec_1::tag_for(value.get()), value.get());
+        encode_tagged(codec_detail::tag_for(value.get()), value.get());
     }
 
     template <typename Tag, typename T> constexpr void encode(const custom_codec_1_tag_ref<Tag, T> &value) {
-        encode_tagged(cbor::tags::detail::custom_codec_1::tag_to_uint64(value.tag()), value.get());
+        encode_tagged(codec_detail::tag_to_uint64(value.tag()), value.get());
     }
 
     template <typename T> [[nodiscard]] constexpr status_code decode(custom_codec_1_ref<T> value) {
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  additional_info{};
-        auto       status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
+        auto       status = cbor_detail::read_extension_initial_byte(dec, major, additional_info);
         if (status != status_code::success) {
             return status;
         }
@@ -143,7 +145,7 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  additional_info{};
-        auto       status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
+        auto       status = cbor_detail::read_extension_initial_byte(dec, major, additional_info);
         if (status != status_code::success) {
             return status;
         }
@@ -154,7 +156,7 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  additional_info{};
-        auto       status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
+        auto       status = cbor_detail::read_extension_initial_byte(dec, major, additional_info);
         if (status != status_code::success) {
             return status;
         }
@@ -163,7 +165,7 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
 
     template <typename T>
     [[nodiscard]] constexpr status_code decode(custom_codec_1_ref<T> value, major_type major, std::byte additional_info) {
-        return decode_tagged(cbor::tags::detail::custom_codec_1::tag_for(value.get()), value.get(), major, additional_info);
+        return decode_tagged(codec_detail::tag_for(value.get()), value.get(), major, additional_info);
     }
 
     template <typename T>
@@ -173,28 +175,27 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
 
     template <typename Tag, typename T>
     [[nodiscard]] constexpr status_code decode(custom_codec_1_tag_ref<Tag, T> value, major_type major, std::byte additional_info) {
-        return decode_tagged(cbor::tags::detail::custom_codec_1::tag_to_uint64(value.tag()), value.get(), major, additional_info);
+        return decode_tagged(codec_detail::tag_to_uint64(value.tag()), value.get(), major, additional_info);
     }
 
   private:
     template <typename T> constexpr void encode_tagged(std::uint64_t tag, const T &value) {
         auto &enc     = static_cast<Self &>(*this);
-        auto  payload = cbor::tags::detail::make_extension_payload_for_output(
-            enc, [&value](auto &appender, auto &output) { cbor::tags::detail::custom_codec_1::encode_payload_to(appender, output, value); },
-            [&value] { return cbor::tags::detail::custom_codec_1::encode_payload_segments(value); });
+        auto  payload = cbor_detail::make_extension_payload_for_output(
+            enc, [&value](auto &appender, auto &output) { codec_detail::encode_payload_to(appender, output, value); },
+            [&value] { return codec_detail::encode_payload_segments(value); });
 
-        cbor::tags::detail::encode_extension_tag_header(enc, tag);
-        cbor::tags::detail::encode_extension_bstr_header(enc,
-                                                         static_cast<std::uint64_t>(cbor::tags::detail::extension_payload_size(payload)));
-        cbor::tags::detail::append_extension_payload(enc, payload);
+        cbor_detail::encode_extension_tag_header(enc, tag);
+        cbor_detail::encode_extension_bstr_header(enc, static_cast<std::uint64_t>(cbor_detail::extension_payload_size(payload)));
+        cbor_detail::append_extension_payload(enc, payload);
     }
 
     template <typename T>
     [[nodiscard]] constexpr status_code decode_tagged(std::uint64_t expected_tag, T &value, major_type major, std::byte additional_info) {
         auto &dec = static_cast<Self &>(*this);
-        return cbor::tags::detail::decode_tagged_bstr_payload_header(
-            dec, expected_tag, major, additional_info,
-            [&](std::byte payload_info) { return decode_payload_bstr(value, major_type::ByteString, payload_info); });
+        return cbor_detail::decode_tagged_bstr_payload_header(dec, expected_tag, major, additional_info, [&](std::byte payload_info) {
+            return decode_payload_bstr(value, major_type::ByteString, payload_info);
+        });
     }
 
     template <typename T>
@@ -205,28 +206,26 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
         }
 
         std::uint64_t payload_size{};
-        auto          status = cbor::tags::detail::decode_unsigned_argument(dec, payload_info, payload_size);
+        auto          status = cbor_detail::decode_unsigned_argument(dec, payload_info, payload_size);
         if (status != status_code::success) {
             return status;
         }
-        status = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size);
+        status = cbor_detail::require_extension_payload_bytes(dec, payload_size);
         if (status != status_code::success) {
             return status;
         }
 
         using payload_type = decltype(std::declval<Self &>().decode_bstring_payload(std::declval<std::uint64_t>()));
-        if constexpr (!std::ranges::contiguous_range<payload_type> && cbor::tags::detail::custom_codec_1::has_borrowed_decode_refs_v<T>) {
+        if constexpr (!std::ranges::contiguous_range<payload_type> && codec_detail::has_borrowed_decode_refs_v<T>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         }
 
         auto payload = dec.decode_bstring_payload(payload_size);
         if constexpr (std::ranges::contiguous_range<decltype(payload)>) {
-            return cbor::tags::detail::custom_codec_1::decode_payload(
-                std::span<const std::byte>(std::ranges::data(payload), std::ranges::size(payload)), value);
+            return codec_detail::decode_payload(std::span<const std::byte>(std::ranges::data(payload), std::ranges::size(payload)), value);
         } else {
             std::vector<std::byte> payload_bytes(payload.begin(), payload.end());
-            return cbor::tags::detail::custom_codec_1::decode_payload(
-                std::span<const std::byte>(payload_bytes.data(), payload_bytes.size()), value);
+            return codec_detail::decode_payload(std::span<const std::byte>(payload_bytes.data(), payload_bytes.size()), value);
         }
     }
 };

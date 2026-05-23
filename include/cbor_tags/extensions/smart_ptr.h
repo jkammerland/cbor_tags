@@ -163,6 +163,21 @@ template <typename Decoder, NullablePointerValue T>
     return status;
 }
 
+template <typename Decoder>
+[[nodiscard]] constexpr status_code decode_cached_tag_argument(Decoder &dec, std::byte additional_info,
+                                                               std::optional<std::uint64_t> &cached_tag, std::uint64_t &tag_value) {
+    if (!cached_tag.has_value()) {
+        std::uint64_t decoded_tag{};
+        auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, decoded_tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        cached_tag = decoded_tag;
+    }
+    tag_value = *cached_tag;
+    return status_code::success;
+}
+
 template <bool GraphTagsPossible, typename Self, typename... Ts>
 [[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, std::variant<Ts...> &value, major_type major,
                                                                                std::byte                     additional_info,
@@ -198,19 +213,6 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             return false;
         }
 
-        auto read_tag_once = [&dec, additional_info, &tag](std::uint64_t &tag_value) -> status_code {
-            if (!tag.has_value()) {
-                std::uint64_t decoded_tag{};
-                auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, decoded_tag);
-                if (status != status_code::success) {
-                    return status;
-                }
-                tag = decoded_tag;
-            }
-            tag_value = *tag;
-            return status_code::success;
-        };
-
         if constexpr (decodable_nullable_pointer_v<raw_type>) {
             const auto pointer_major =
                 major == major_type::Array || (GraphTagsPossible && decodable_shared_pointer_v<raw_type> && major == major_type::Tag);
@@ -224,7 +226,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                 if constexpr (decodable_shared_pointer_v<raw_type>) {
                     if (major == major_type::Tag) {
                         std::uint64_t tag_value{};
-                        const auto    tag_status = read_tag_once(tag_value);
+                        const auto    tag_status = decode_cached_tag_argument(dec, additional_info, tag, tag_value);
                         if (tag_status != status_code::success) {
                             if (tag_status == status_code::incomplete) {
                                 saw_incomplete = true;
@@ -270,7 +272,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                 result = decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, decoded_value, major, additional_info, tag);
             } else if constexpr (IsTag<raw_type>) {
                 std::uint64_t tag_value{};
-                const auto    tag_status = read_tag_once(tag_value);
+                const auto    tag_status = decode_cached_tag_argument(dec, additional_info, tag, tag_value);
                 if (tag_status != status_code::success) {
                     if (tag_status == status_code::incomplete) {
                         saw_incomplete = true;
