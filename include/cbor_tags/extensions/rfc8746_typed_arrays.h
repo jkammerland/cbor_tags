@@ -1138,11 +1138,11 @@ void encode_typed_array_segments_into(Segments &segments, std::span<T> values) {
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
-    const auto tag_header =
-        cbor::tags::detail::encode_cbor_major_argument_header(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::byte{0xC0});
-    auto payload = std::vector<std::byte>(values.size_bytes());
+    const auto tag_header = cbor::tags::detail::encode_cbor_major_argument_header(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag,
+                                                                                  get_major_3_bit_tag<as_tag_any>());
+    auto       payload    = std::vector<std::byte>(values.size_bytes());
     detail::write_endian_payload_to<ByteOrder>(std::span<std::byte>{payload}, values);
-    const auto bstr_header = cbor::tags::detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
+    const auto bstr_header = cbor::tags::detail::encode_cbor_major_argument_header(payload.size(), get_major_3_bit_tag<as_bstr_any>());
 
     cbor_segments segments;
     segments.reserve(3);

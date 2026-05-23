@@ -10,6 +10,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/cbor_encode_error.h"
 
 #include <bit>
 #include <bitset>
@@ -28,20 +29,6 @@
 namespace cbor::tags {
 
 template <typename T> struct cbor_header_encoder;
-
-namespace detail {
-
-struct encode_status_exception {
-    status_code status;
-};
-
-template <typename Result> constexpr void propagate_encode_result(Result &&result) {
-    if (!result.has_value()) {
-        throw encode_status_exception{result.error()};
-    }
-}
-
-} // namespace detail
 
 template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
     requires CborOutputBuffer<OutputBuffer>
@@ -191,15 +178,15 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
 
         if constexpr (has_transcode) {
-            detail::propagate_encode_result(Access::transcode(*this, value));
+            detail::throw_on_encode_error(Access::transcode(*this, value));
         } else if constexpr (has_encode) {
-            detail::propagate_encode_result(Access::encode(*this, value));
+            detail::throw_on_encode_error(Access::encode(*this, value));
         } else if constexpr (has_free_encode) {
             /* This requires an indirect call in order for some compilers to find the overload. */
-            detail::propagate_encode_result(detail::adl_indirect_encode(*this, value));
+            detail::throw_on_encode_error(detail::adl_indirect_encode(*this, value));
         } else if constexpr (has_free_transcode) {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
-            detail::propagate_encode_result(transcode(*this, value));
+            detail::throw_on_encode_error(transcode(*this, value));
         }
     }
 

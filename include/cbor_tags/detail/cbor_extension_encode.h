@@ -18,27 +18,42 @@
 namespace cbor::tags::detail {
 
 template <typename Encoder> constexpr void encode_extension_tag_header(Encoder &enc, std::uint64_t tag) {
-    enc.encode_major_and_size(tag, static_cast<typename Encoder::byte_type>(0xC0));
+    enc.encode(dynamic_tag<std::uint64_t>{tag});
 }
 
 template <typename Encoder> constexpr void encode_extension_bstr_header(Encoder &enc, std::uint64_t size) {
-    enc.encode_major_and_size(size, static_cast<typename Encoder::byte_type>(0x40));
+    enc.encode_major_and_size(size, static_cast<typename Encoder::byte_type>(get_major_3_bit_tag<as_bstr_any>()));
 }
+
+template <typename R>
+concept ExtensionSpanProvider = requires(R &bytes) {
+    { bytes.span() } -> std::same_as<std::span<const std::byte>>;
+};
+
+template <typename Encoder, typename R>
+concept ExtensionAppenderAcceptsSpanProvider =
+    ExtensionSpanProvider<R> && requires(Encoder &enc, R &bytes) { enc.appender_.append_owned(enc.data_, bytes.span()); };
+
+template <typename R>
+concept ExtensionContiguousSizedByteRange = ByteLikeRange<R> && std::ranges::contiguous_range<R> && std::ranges::sized_range<R>;
+
+template <typename Encoder, typename R>
+concept ExtensionAppenderAcceptsByteSpan = ExtensionContiguousSizedByteRange<R> && requires(Encoder &enc, R &&bytes) {
+    enc.appender_.append_owned(enc.data_, as_byte_span(std::forward<R>(bytes)));
+};
 
 template <typename Encoder, typename R>
     requires ByteLikeRange<R>
 constexpr void append_extension_owned_bytes(Encoder &enc, R &&bytes) {
-    if constexpr (requires {
-                      { bytes.span() } -> std::same_as<std::span<const std::byte>>;
-                      enc.appender_.append_owned(enc.data_, bytes.span());
-                  }) {
+    if constexpr (ExtensionAppenderAcceptsSpanProvider<Encoder, R>) {
         enc.appender_.append_owned(enc.data_, bytes.span());
-    } else if constexpr (std::ranges::contiguous_range<R> && std::ranges::sized_range<R> &&
-                         requires { enc.appender_.append_owned(enc.data_, as_byte_span(std::forward<R>(bytes))); }) {
-        enc.appender_.append_owned(enc.data_, as_byte_span(std::forward<R>(bytes)));
-    } else {
-        append_byte_range(enc.appender_, enc.data_, std::forward<R>(bytes));
+        return;
     }
+    if constexpr (ExtensionAppenderAcceptsByteSpan<Encoder, R>) {
+        enc.appender_.append_owned(enc.data_, as_byte_span(std::forward<R>(bytes)));
+        return;
+    }
+    append_byte_range(enc.appender_, enc.data_, std::forward<R>(bytes));
 }
 
 template <typename Encoder> constexpr void encode_extension_bstr_payload(Encoder &enc, std::span<const std::byte> payload) {
@@ -72,20 +87,23 @@ constexpr void append_extension_generated_bytes(Encoder &enc, std::size_t byte_c
     }
 }
 
+template <typename Output, typename Bytes>
+concept ExtensionDirectSegmentOutput = requires(Output &output, Bytes bytes) {
+    output.append_borrowed(bytes);
+    append_owned_segment(output, bytes);
+};
+
 template <typename Encoder, typename Segment> constexpr void append_extension_segment(Encoder &enc, const Segment &segment) {
     const auto bytes = segment.bytes();
-    if constexpr (requires {
-                      enc.data_.append_borrowed(bytes);
-                      append_owned_segment(enc.data_, bytes);
-                  }) {
+    if constexpr (ExtensionDirectSegmentOutput<std::remove_reference_t<decltype(enc.data_)>, decltype(bytes)>) {
         if (segment.is_borrowed()) {
             enc.data_.append_borrowed(bytes);
         } else {
             append_owned_segment(enc.data_, bytes);
         }
-    } else {
-        append_segment_to_encoder(enc, segment);
+        return;
     }
+    append_segment_to_encoder(enc, segment);
 }
 
 template <typename Payload> [[nodiscard]] constexpr std::size_t extension_payload_size(const Payload &payload) noexcept {
