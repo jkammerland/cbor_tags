@@ -280,8 +280,12 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                     return false;
                 }
                 result = dec.decode(decoded_value, tag_value);
-            } else if constexpr (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>) {
-                result = dec.decode_shared_graph_vector_variant_alternative(decoded_value, major, additional_info);
+            } else if constexpr (GraphTagsPossible) {
+                if constexpr (decodable_shared_graph_vector_v<raw_type>) {
+                    result = dec.decode_shared_graph_vector_variant_alternative(decoded_value, major, additional_info);
+                } else {
+                    result = dec.decode(decoded_value, major, additional_info);
+                }
             } else {
                 result = dec.decode(decoded_value, major, additional_info);
             }
@@ -292,8 +296,10 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
             if (result == status_code::incomplete) {
                 saw_incomplete = true;
-            } else if constexpr (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>) {
-                pointer_error = result;
+            } else if constexpr (GraphTagsPossible) {
+                if constexpr (decodable_shared_graph_vector_v<raw_type>) {
+                    pointer_error = result;
+                }
             }
             return false;
         }

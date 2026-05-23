@@ -433,7 +433,7 @@ TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") 
 TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes") {
     {
         const std::vector<std::uint64_t> dimensions{};
-        const typed_array<std::uint16_t> scalar{{7}};
+        const typed_array<std::uint16_t> scalar{7};
         std::vector<std::byte>           bytes;
         auto                             enc = make_encoder<typed_array_codec>(bytes);
 
@@ -473,7 +473,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
 
     {
         const std::vector<std::uint64_t> dimensions{std::numeric_limits<std::uint64_t>::max(), 2};
-        const typed_array<std::uint16_t> values{{1}};
+        const typed_array<std::uint16_t> values{1};
 
         {
             std::vector<std::byte> bytes;

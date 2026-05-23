@@ -44,8 +44,6 @@ Do not add sequencing APIs such as `encode_all`; use `operator()(...)` for
 normal public composition and direct dispatch only inside codec internals.
 
 ```cpp
-#include "cbor_tags/detail/cbor_extension_decode.h"
-
 template <typename Self>
 struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
     using cbor::tags::cbor_codec_mixin_base<Self>::decode;
@@ -60,27 +58,26 @@ struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
     [[nodiscard]] cbor::tags::status_code
     decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
         auto& dec = static_cast<Self&>(*this);
-        return cbor::tags::detail::decode_tagged_payload(
-            dec, 100U, major, additional_info,
-            [&] { return dec.decode(value.payload); });
+        const auto tag_status = dec.decode(cbor::tags::static_tag<100>{}, major, additional_info);
+        if (tag_status != cbor::tags::status_code::success) {
+            return tag_status;
+        }
+        return dec.decode(value.payload);
     }
 };
 ```
 
 Decode overloads receive the already-read initial byte split into `major` and
 `additional_info`. Validate both, consume exactly the payload for the type, and
-return `status_code` for malformed CBOR. Prefer the shared helpers in
-`cbor_tags/detail/cbor_extension_decode.h` for consumed-header operations such
-as tag matching, definite-size decoding, payload byte checks, and tagged
-byte-string payload headers; they preserve `incomplete` and malformed-header
-errors without relying on the outer public exception boundary.
+return `status_code` for malformed CBOR. Encode overloads may throw for API
+misuse that cannot be represented by `status_code`; the public encoder catches
+exceptions and returns `status_code::error`.
 
-Encode overloads may throw for API misuse that cannot be represented by
-`status_code`; the public encoder catches exceptions and returns
-`status_code::error`. Prefer the shared helpers in
-`cbor_tags/detail/cbor_extension_encode.h` when a codec needs to emit raw tag
-headers, byte-string headers, generated payload bytes, or segment payloads.
-Those helpers centralize the necessary encoder-internal buffer access.
+The built-in extension implementations also use small helpers under
+`include/cbor_tags/detail/` for operations the public call operator cannot
+express, such as reading a size from an already-consumed header or appending
+generated payload bytes after a byte-string header. Those helpers are internal
+project infrastructure, not public extension-author API.
 
 Borrowed wrapper helpers should be lvalue-only when they store references to
 user memory:
