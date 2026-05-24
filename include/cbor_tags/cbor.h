@@ -70,6 +70,11 @@ enum class status_code : uint8_t {
     end_no_match_decoding
 };
 
+template <typename Self> struct cbor_codec_mixin_base {
+    constexpr void        encode() = delete;
+    constexpr status_code decode() = delete;
+};
+
 constexpr std::string_view status_message(status_code s) {
     switch (s) {
     case status_code::success: return "Success";

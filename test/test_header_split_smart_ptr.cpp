@@ -1,9 +1,5 @@
-// Keep the extension header first so this test catches direct include dependencies.
-// clang-format off
+// A public extension header should be enough for its codec wrappers and factories.
 #include <cbor_tags/extensions/smart_ptr.h>
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
-// clang-format on
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <memory>

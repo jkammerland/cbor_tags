@@ -1,9 +1,5 @@
-// Keep the extension base first so this test documents the explicit codec include boundary.
-// clang-format off
+// A custom codec user should not need an order-sensitive encoder/decoder include recipe.
 #include <cbor_tags/cbor_extensions.h>
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
-// clang-format on
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
