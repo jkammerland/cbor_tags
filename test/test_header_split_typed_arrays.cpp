@@ -1,5 +1,8 @@
-#include <cbor_tags/cbor_decoder.h>
+// Keep the extension header first so this test catches direct include dependencies.
+// clang-format off
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/cbor_decoder.h>
+// clang-format on
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>

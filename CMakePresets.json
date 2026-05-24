@@ -5,6 +5,8 @@
     "",
     "Configure presets:",
     "- debug/release/relwithdebinfo/minsizerel: CMAKE_BUILD_TYPE presets",
+    "- debug-tests/debug-unit: Debug test builds with CBOR_TAGS_BUILD_TESTS=ON",
+    "- debug-std-expected: Debug tests with C++23 std::expected return backend",
     "- boost-pfr-names: Debug tests with C++20 Boost.PFR named-map reflection",
     "- magic-enum-names: Debug tests with CDDL enum-name definitions through magic_enum",
     "- coverage/coverage-release: --coverage instrumentation (non-Windows)",
@@ -97,6 +99,28 @@
       "inherits": "base-debug",
       "displayName": "Debug",
       "description": "CMAKE_BUILD_TYPE=Debug (typically -O0 -g)"
+    },
+    {
+      "name": "debug-tests",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/debug-tests",
+      "displayName": "Debug Tests",
+      "description": "Debug build with tests enabled",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "debug-std-expected",
+      "inherits": "debug-tests",
+      "binaryDir": "${sourceDir}/build/std-expected",
+      "displayName": "Debug std::expected",
+      "description": "Debug tests with the C++23 std::expected return backend",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "23",
+        "CBOR_TAGS_USE_STD_EXPECTED": "ON",
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "boost-pfr-names",
@@ -429,14 +453,30 @@
       "jobs": 0
     },
     {
+      "name": "debug-tests",
+      "inherits": "build-base",
+      "configurePreset": "debug-tests",
+      "displayName": "Debug Tests Build",
+      "description": "Build the full debug test configuration",
+      "jobs": 0
+    },
+    {
       "name": "debug-unit",
       "inherits": "build-base",
-      "configurePreset": "debug",
+      "configurePreset": "debug-tests",
       "displayName": "Debug Unit Test Build",
       "description": "Build only the doctest unit-test binary in debug mode",
       "targets": [
         "tests"
       ],
+      "jobs": 0
+    },
+    {
+      "name": "debug-std-expected",
+      "inherits": "build-base",
+      "configurePreset": "debug-std-expected",
+      "displayName": "Debug std::expected Build",
+      "description": "Build tests with the C++23 std::expected return backend",
       "jobs": 0
     },
     {
@@ -710,9 +750,16 @@
       "description": "Run all tests in debug mode"
     },
     {
+      "name": "debug-tests",
+      "inherits": "test-base",
+      "configurePreset": "debug-tests",
+      "displayName": "Debug Tests",
+      "description": "Run the full debug test configuration"
+    },
+    {
       "name": "debug-unit",
       "inherits": "test-base",
-      "configurePreset": "debug",
+      "configurePreset": "debug-tests",
       "displayName": "Debug Unit Tests",
       "description": "Run only the doctest unit-test binary in debug mode",
       "filter": {
@@ -720,6 +767,13 @@
           "name": "^tests$"
         }
       }
+    },
+    {
+      "name": "debug-std-expected",
+      "inherits": "test-base",
+      "configurePreset": "debug-std-expected",
+      "displayName": "Debug std::expected Tests",
+      "description": "Run tests with the C++23 std::expected return backend"
     },
     {
       "name": "boost-pfr-names",
@@ -933,13 +987,32 @@
       ]
     },
     {
+      "name": "debug-tests",
+      "displayName": "Debug Tests Workflow",
+      "description": "Configure, build, and run the full debug test configuration",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug-tests"
+        },
+        {
+          "type": "build",
+          "name": "debug-tests"
+        },
+        {
+          "type": "test",
+          "name": "debug-tests"
+        }
+      ]
+    },
+    {
       "name": "debug-unit",
       "displayName": "Debug Unit Test Workflow",
       "description": "Configure, build, and run only the debug doctest unit-test binary",
       "steps": [
         {
           "type": "configure",
-          "name": "debug"
+          "name": "debug-tests"
         },
         {
           "type": "build",
@@ -948,6 +1021,25 @@
         {
           "type": "test",
           "name": "debug-unit"
+        }
+      ]
+    },
+    {
+      "name": "debug-std-expected",
+      "displayName": "Debug std::expected Workflow",
+      "description": "Configure, build, and test the C++23 std::expected return backend",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug-std-expected"
+        },
+        {
+          "type": "build",
+          "name": "debug-std-expected"
+        },
+        {
+          "type": "test",
+          "name": "debug-std-expected"
         }
       ]
     },
