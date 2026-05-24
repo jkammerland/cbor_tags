@@ -24,6 +24,8 @@
 #include <vector>
 
 using namespace cbor::tags;
+namespace rfc8746   = cbor::tags::ext::rfc8746;
+namespace smart_ptr = cbor::tags::ext::smart_ptr;
 
 namespace cbor_tags_test_cddl {
 template <typename T> std::string cddl_schema_inline() {
@@ -89,28 +91,25 @@ struct CDDLContainers {
 };
 
 struct CDDLTypedArrays {
-    cbor::tags::ext::rfc8746::typed_array<std::int32_t>                     samples;
-    cbor::tags::ext::rfc8746::typed_array_be<double>                        measurements;
-    cbor::tags::ext::rfc8746::homogeneous_array<std::vector<std::uint64_t>> homogeneous;
-    cbor::tags::ext::rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, cbor::tags::ext::rfc8746::typed_array<std::uint16_t>>
-        matrix;
+    rfc8746::typed_array<std::int32_t>                                                                samples;
+    rfc8746::typed_array_be<double>                                                                   measurements;
+    rfc8746::homogeneous_array<std::vector<std::uint64_t>>                                            homogeneous;
+    rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>> matrix;
 };
 
 struct CDDLTypedArrayRefs {
-    cbor::tags::ext::rfc8746::typed_array_ref<std::int32_t>  samples;
-    cbor::tags::ext::rfc8746::typed_array_ref<std::uint16_t> levels;
+    rfc8746::typed_array_ref<std::int32_t>  samples;
+    rfc8746::typed_array_ref<std::uint16_t> levels;
 };
 
 struct CDDLStructuralArrayRefs {
-    cbor::tags::ext::rfc8746::homogeneous_array_ref<std::vector<int>> homogeneous;
-    cbor::tags::ext::rfc8746::multi_dimensional_array_ref<std::array<std::uint64_t, 2>,
-                                                          cbor::tags::ext::rfc8746::typed_array_ref<std::uint16_t>>
-        matrix;
+    rfc8746::homogeneous_array_ref<std::vector<int>>                                                            homogeneous;
+    rfc8746::multi_dimensional_array_ref<std::array<std::uint64_t, 2>, rfc8746::typed_array_ref<std::uint16_t>> matrix;
 };
 
 struct CDDLLooksLikeTypedArray {
     using value_type                              = int;
-    static constexpr auto          byte_order     = cbor::tags::ext::rfc8746::typed_array_byte_order::little;
+    static constexpr auto          byte_order     = rfc8746::typed_array_byte_order::little;
     static constexpr std::uint64_t cbor_array_tag = 999;
     int                            value;
 };
@@ -188,7 +187,7 @@ static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveSma
 static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepValue>());
 static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveValue>());
 static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
-static_assert(detail::CDDLScopedType<cbor::tags::ext::smart_ptr::shared_graph_cddl<CDDLSharedGraphPointers>>);
+static_assert(detail::CDDLScopedType<smart_ptr::shared_graph_cddl<CDDLSharedGraphPointers>>);
 static_assert(detail::cddl_is_shared_graph_vector_alternative<std::vector<std::shared_ptr<int>>>());
 static_assert(!detail::cddl_is_shared_graph_vector_alternative<std::vector<std::optional<std::shared_ptr<int>>>>());
 static_assert(!detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::vector<std::shared_ptr<int>>>());
@@ -551,8 +550,6 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
 }
 
 TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
-    namespace rfc8746 = cbor::tags::ext::rfc8746;
-
     check_cddl_typed_array_tag<rfc8746::typed_array<std::uint8_t>>(64);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint16_t>>(65);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint32_t>>(66);
@@ -632,7 +629,7 @@ TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
 }
 
 TEST_CASE("CDDL emits shared graph pointer shapes through explicit smart pointer scope") {
-    using cbor::tags::ext::smart_ptr::shared_graph_cddl;
+    using smart_ptr::shared_graph_cddl;
 
     CHECK_EQ(cddl_schema_inline<shared_graph_cddl<std::shared_ptr<int>>>(), "root = [0] / #6.28(int) / #6.29(uint)");
     CHECK_EQ(cddl_schema_inline<shared_graph_cddl<std::unique_ptr<int>>>(), "root = [0] / [1, int]");
@@ -664,7 +661,7 @@ TEST_CASE("CDDL emits shared graph pointer shapes through explicit smart pointer
 }
 
 TEST_CASE("CDDL shared graph scope keeps a separate definition cache") {
-    using cbor::tags::ext::smart_ptr::shared_graph_cddl;
+    using smart_ptr::shared_graph_cddl;
 
     detail::CDDLContext context;
 
@@ -893,7 +890,7 @@ TEST_CASE("named-map CDDL keeps nullable pointer fields required unless optional
 }
 
 TEST_CASE("named-map CDDL propagates shared graph pointer scope through named maps and groups") {
-    using cbor::tags::ext::smart_ptr::shared_graph_cddl;
+    using smart_ptr::shared_graph_cddl;
 
     fmt::memory_buffer map_buffer;
     cddl_schema_to<shared_graph_cddl<as_named_map<CDDLNamedSharedGraphRoot>>>(

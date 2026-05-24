@@ -19,6 +19,7 @@
 
 using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
+namespace smart_ptr_detail = cbor::tags::ext::smart_ptr::detail;
 
 namespace smart_ptr_test {
 
@@ -65,8 +66,7 @@ struct graph_decode_consumes_then_fails {
         if (!result) {
             return result;
         }
-        return cbor::tags::expected<void, cbor::tags::status_code>{
-            cbor::tags::unexpected<cbor::tags::status_code>{cbor::tags::status_code::error}};
+        return expected<void, status_code>{unexpected<status_code>{status_code::error}};
     }
 };
 
@@ -97,7 +97,7 @@ struct graph_nested_encode_session_mismatch {
     friend cbor::tags::Access;
 
     template <typename Encoder> auto encode(Encoder &enc) const {
-        auto result = enc(cbor::tags::ext::smart_ptr::as_shared_graph(*other, value));
+        auto result = enc(as_shared_graph(*other, value));
         if (!result) {
             throw std::runtime_error("nested shared graph session mismatch");
         }
@@ -112,7 +112,7 @@ struct graph_nested_decode_session_mismatch {
   private:
     friend cbor::tags::Access;
 
-    template <typename Decoder> auto decode(Decoder &dec) { return dec(cbor::tags::ext::smart_ptr::as_shared_graph(*other, value)); }
+    template <typename Decoder> auto decode(Decoder &dec) { return dec(as_shared_graph(*other, value)); }
 };
 
 struct graph_reset_during_encode {
@@ -1094,8 +1094,8 @@ TEST_CASE("shared graph codec decodes vector smart pointer variants inside graph
     using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
     using value_type  = std::variant<vector_type, std::string>;
 
-    static_assert(cbor::tags::ext::smart_ptr::detail::has_decodable_shared_graph_vector_v<vector_type, std::string>);
-    static_assert(!cbor::tags::ext::smart_ptr::detail::has_decodable_nullable_pointer_v<vector_type, std::string>);
+    static_assert(smart_ptr_detail::has_decodable_shared_graph_vector_v<vector_type, std::string>);
+    static_assert(!smart_ptr_detail::has_decodable_nullable_pointer_v<vector_type, std::string>);
 
     auto       shared = std::make_shared<std::uint64_t>(42U);
     value_type value{vector_type{shared, shared}};
@@ -1407,13 +1407,10 @@ TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers"
 
     static_assert(!std::is_aggregate_v<shared_graph_encode_root<std::uint64_t>>);
     static_assert(!std::is_aggregate_v<shared_graph_decode_root<std::uint64_t>>);
-    static_assert(
-        !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<42>>);
-    static_assert(
-        cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<28>>);
-    static_assert(
-        cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<29>>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, as_tag_any>);
+    static_assert(!smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<42>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<28>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<29>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, as_tag_any>);
 
     {
         const auto bytes = to_bytes("d82a");
@@ -1601,14 +1598,13 @@ TEST_CASE("shared graph variants dispatch nested non-colliding tag alternatives"
     using nested_type = std::variant<std::string, static_tag<42>>;
     using value_type  = std::variant<std::shared_ptr<std::uint64_t>, nested_type>;
 
+    static_assert(!smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, nested_type>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                             std::variant<std::string, static_tag<28>>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                             std::variant<std::string, static_tag<29>>>);
     static_assert(
-        !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, nested_type>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
-                                                                                               std::variant<std::string, static_tag<28>>>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
-                                                                                               std::variant<std::string, static_tag<29>>>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
-                                                                                               std::variant<std::string, as_tag_any>>);
+        smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, std::variant<std::string, as_tag_any>>);
 
     const auto                  bytes = to_bytes("d82a");
     auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);

@@ -29,26 +29,26 @@ namespace {
 struct range_regression_not_cbor {};
 
 template <typename R>
-concept CanMakeArrayRange = requires(R &&range) { cbor::tags::as_array_range(std::forward<R>(range)); };
+concept CanMakeArrayRange = requires(R &&range) { as_array_range(std::forward<R>(range)); };
 
 template <typename R>
-concept CanMakeMapRange = requires(R &&range) { cbor::tags::as_map_range(std::forward<R>(range)); };
+concept CanMakeMapRange = requires(R &&range) { as_map_range(std::forward<R>(range)); };
 
 template <typename R>
-concept CanMakeTstrRange = requires(R &&range) { cbor::tags::as_tstr_range(std::forward<R>(range)); };
+concept CanMakeTstrRange = requires(R &&range) { as_tstr_range(std::forward<R>(range)); };
 
-using regression_int_array_wrapper = cbor::tags::array_range<std::ranges::ref_view<std::vector<int>>>;
+using regression_int_array_wrapper = array_range<std::ranges::ref_view<std::vector<int>>>;
 using regression_nested_array      = std::array<regression_int_array_wrapper, 1>;
-using regression_bad_array_wrapper = cbor::tags::array_range<std::ranges::single_view<range_regression_not_cbor>>;
+using regression_bad_array_wrapper = array_range<std::ranges::single_view<range_regression_not_cbor>>;
 using regression_bad_map_entries   = std::array<std::pair<int, regression_bad_array_wrapper>, 1>;
 
 static_assert(CanMakeArrayRange<regression_nested_array &>);
 static_assert(!CanMakeMapRange<regression_bad_map_entries &>);
-static_assert(cbor::tags::IsFixedArray<std::span<int>>);
-static_assert(cbor::tags::IsFixedArray<std::span<int, 2>>);
-static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte, 2>>);
-static_assert(!cbor::tags::IsFixedArray<std::span<const std::byte>>);
-static_assert(cbor::tags::detail::is_static_extent_span_v<std::span<const std::byte, 2>>);
+static_assert(IsFixedArray<std::span<int>>);
+static_assert(IsFixedArray<std::span<int, 2>>);
+static_assert(!IsFixedArray<std::span<const std::byte, 2>>);
+static_assert(!IsFixedArray<std::span<const std::byte>>);
+static_assert(detail::is_static_extent_span_v<std::span<const std::byte, 2>>);
 static_assert(CanMakeArrayRange<std::vector<bool> &>);
 static_assert(CanMakeTstrRange<std::string &>);
 static_assert(CanMakeTstrRange<std::array<char, 2> &>);
@@ -106,7 +106,7 @@ struct counting_sized_bidirectional_bytes {
     size_type size() const noexcept { return bytes.size(); }
 };
 
-static_assert(cbor::tags::CborInputBuffer<counting_sized_bidirectional_bytes>);
+static_assert(CborInputBuffer<counting_sized_bidirectional_bytes>);
 
 struct byte_view_with_unrelated_span : std::ranges::view_interface<byte_view_with_unrelated_span> {
     std::array<std::uint8_t, 3> bytes{};
@@ -125,7 +125,7 @@ struct byte_view_with_unrelated_span : std::ranges::view_interface<byte_view_wit
 };
 
 static_assert(std::ranges::view<byte_view_with_unrelated_span>);
-static_assert(cbor::tags::IsByteLikeRange<byte_view_with_unrelated_span>);
+static_assert(IsByteLikeRange<byte_view_with_unrelated_span>);
 
 struct counting_append_buffer {
     using value_type     = std::byte;
@@ -167,7 +167,7 @@ struct counting_append_buffer {
     }
 };
 
-static_assert(cbor::tags::CborOutputBuffer<counting_append_buffer>);
+static_assert(CborOutputBuffer<counting_append_buffer>);
 
 struct counting_memory_resource : std::pmr::memory_resource {
     std::size_t                allocations{};
@@ -583,8 +583,8 @@ TEST_CASE("reserved definite byte string range encode does not allocate") {
 }
 
 TEST_CASE("sized non-contiguous readers use size for offset bounds checks") {
-    counting_sized_bidirectional_bytes                                    input{1024};
-    cbor::tags::detail::reader<counting_sized_bidirectional_bytes, false> reader{input};
+    counting_sized_bidirectional_bytes                        input{1024};
+    detail::reader<counting_sized_bidirectional_bytes, false> reader{input};
 
     CHECK_FALSE(reader.empty(input, 1023));
     CHECK(reader.empty(input, 1024));

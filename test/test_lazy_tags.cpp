@@ -25,6 +25,7 @@ using namespace cbor::tags;
 namespace {
 
 using cbor::tags::test::detail::allocation_failure_guard;
+using cbor::tags::test::detail::fail_test_allocations;
 
 struct accept_any_tag {
     bool operator()(std::uint64_t) const { return true; }
@@ -63,10 +64,10 @@ std::vector<std::byte> make_deeply_nested_tag(std::size_t depth) {
 }
 
 template <typename Buffer>
-concept CanFindStaticTags = requires(Buffer &&buffer) { cbor::tags::find_tags<100>(std::forward<Buffer>(buffer)); };
+concept CanFindStaticTags = requires(Buffer &&buffer) { find_tags<100>(std::forward<Buffer>(buffer)); };
 
 template <typename Buffer>
-concept CanFindRuntimeTags = requires(Buffer &&buffer) { cbor::tags::find_tags(std::forward<Buffer>(buffer), accept_any_tag{}); };
+concept CanFindRuntimeTags = requires(Buffer &&buffer) { find_tags(std::forward<Buffer>(buffer), accept_any_tag{}); };
 
 template <typename Ptr> struct lazy_tag_byte_iterator {
     Ptr p{};
@@ -119,7 +120,7 @@ struct lazy_tag_distinct_const_iterator_view : std::ranges::view_interface<lazy_
 } // namespace
 
 void *operator new(std::size_t size) {
-    if (cbor::tags::test::detail::fail_test_allocations) {
+    if (fail_test_allocations) {
         throw std::bad_alloc{};
     }
     if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
@@ -129,7 +130,7 @@ void *operator new(std::size_t size) {
 }
 
 void *operator new[](std::size_t size) {
-    if (cbor::tags::test::detail::fail_test_allocations) {
+    if (fail_test_allocations) {
         throw std::bad_alloc{};
     }
     if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
@@ -156,7 +157,7 @@ static_assert(CanFindStaticTags<lazy_tag_distinct_const_iterator_view &>);
 
 using lazy_tag_byte_vector        = std::vector<std::byte>;
 using lazy_tag_byte_subrange      = std::ranges::subrange<lazy_tag_byte_vector::const_iterator>;
-using lazy_tag_mutable_span_match = cbor::tags::tag_match<std::span<std::byte>>;
+using lazy_tag_mutable_span_match = tag_match<std::span<std::byte>>;
 using lazy_tag_mutable_payload    = decltype(std::declval<lazy_tag_mutable_span_match &>().payload_range());
 static_assert(CanFindStaticTags<lazy_tag_byte_subrange &>);
 static_assert(!CanFindStaticTags<lazy_tag_byte_subrange>);
@@ -168,12 +169,12 @@ namespace {
 
 [[nodiscard]] auto make_static_tags_from_local_span(const lazy_tag_byte_vector &buffer) {
     std::span<const std::byte> span{buffer.data(), buffer.size()};
-    return cbor::tags::find_tags<100>(span);
+    return find_tags<100>(span);
 }
 
 [[nodiscard]] auto make_runtime_tags_from_local_subrange(const lazy_tag_byte_vector &buffer) {
     lazy_tag_byte_subrange subrange{buffer.begin(), buffer.end()};
-    return cbor::tags::find_tags(subrange, [](std::uint64_t tag) { return tag == 100; });
+    return find_tags(subrange, [](std::uint64_t tag) { return tag == 100; });
 }
 
 } // namespace
@@ -217,13 +218,13 @@ TEST_CASE("lazy tag scanner view construction does not copy buffer contents") {
     {
         allocation_failure_guard guard;
         try {
-            auto vector_view = cbor::tags::find_tags<100>(buffer);
+            auto vector_view = find_tags<100>(buffer);
 
             std::span<const std::byte> span{buffer.data(), buffer.size()};
-            auto                       span_view = cbor::tags::find_tags<100>(span);
+            auto                       span_view = find_tags<100>(span);
 
             lazy_tag_byte_subrange subrange{buffer.begin(), buffer.end()};
-            auto                   subrange_view = cbor::tags::find_tags<100>(subrange);
+            auto                   subrange_view = find_tags<100>(subrange);
 
             (void)vector_view;
             (void)span_view;
