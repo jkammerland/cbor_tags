@@ -6,7 +6,6 @@
 
 #include <concepts>
 #include <cstddef>
-#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <limits>
