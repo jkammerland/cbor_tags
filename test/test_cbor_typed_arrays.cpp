@@ -20,6 +20,8 @@
 
 using namespace cbor::tags;
 using namespace cbor::tags::ext::rfc8746;
+namespace rfc8746_detail = cbor::tags::ext::rfc8746::detail;
+using cbor::tags::test::detail::allocation_failure_guard;
 
 namespace {
 
@@ -84,8 +86,8 @@ concept CanWrapAsMultiDimensionalColumnMajorArray = requires(Dimensions &&dimens
 template <typename T>
 concept HasTypedArrayPayloadBytes = requires(const T &view) { view.payload_bytes(); };
 
-static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::byte>>);
-static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
+static_assert(rfc8746_detail::TypedArrayPayloadRange<std::span<const std::byte>>);
+static_assert(!rfc8746_detail::TypedArrayPayloadRange<std::span<const std::uint16_t>>);
 static_assert(IsTag<homogeneous_array<std::vector<int>>>);
 static_assert(IsTag<multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>>>);
 static_assert(IsTag<multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>>>);
@@ -123,17 +125,17 @@ static_assert(!IsTag<multi_dimensional_array_ref<std::vector<std::uint64_t>, typ
 using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
 using extension_encoder = decltype(make_encoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
 using bad_payload_range = std::ranges::iota_view<unsigned char, unsigned char>;
-static_assert(cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<bad_payload_range>);
+static_assert(rfc8746_detail::TypedArrayPayloadRange<bad_payload_range>);
 static_assert(!CanDecode<extension_decoder, typed_array_view<std::int32_t, bad_payload_range>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view<std::int32_t>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view_be<double>>);
-static_assert(cbor::tags::ext::rfc8746::IsRFC8746ArrayPayload<typed_array_view<std::int32_t>>);
-static_assert(!cbor::tags::ext::rfc8746::IsRFC8746EncodableArrayPayload<typed_array_view<std::int32_t>>);
+static_assert(IsRFC8746ArrayPayload<typed_array_view<std::int32_t>>);
+static_assert(!IsRFC8746EncodableArrayPayload<typed_array_view<std::int32_t>>);
 static_assert(!CanWrapAsMultiDimensionalArray<std::vector<std::uint64_t> &, typed_array_view<std::int32_t> &>);
 static_assert(!CanWrapAsMultiDimensionalColumnMajorArray<std::vector<std::uint64_t> &, typed_array_view<std::int32_t> &>);
 
 using owning_payload_range = std::ranges::owning_view<std::vector<std::byte>>;
-static_assert(!cbor::tags::ext::rfc8746::detail::TypedArrayPayloadRange<owning_payload_range>);
+static_assert(!rfc8746_detail::TypedArrayPayloadRange<owning_payload_range>);
 
 template <typename T> std::vector<std::byte> encode_normal(std::span<const T> values) {
     std::vector<std::byte> output;
@@ -783,9 +785,9 @@ TEST_CASE("rfc8746 float typed arrays use exact big-endian wire bytes") {
 }
 
 TEST_CASE("rfc8746 endian conversion helpers are reversible") {
-    using cbor::tags::ext::rfc8746::detail::byteswap_bits;
-    using cbor::tags::ext::rfc8746::detail::native_to_wire_bits;
-    using cbor::tags::ext::rfc8746::detail::wire_to_native_bits;
+    using rfc8746_detail::byteswap_bits;
+    using rfc8746_detail::native_to_wire_bits;
+    using rfc8746_detail::wire_to_native_bits;
 
     CHECK_EQ(byteswap_bits<std::uint16_t>(0x1234U), 0x3412U);
     CHECK_EQ(byteswap_bits<std::uint32_t>(0x12345678U), 0x78563412U);
@@ -915,7 +917,7 @@ TEST_CASE("rfc8746 typed array segmented into helper does not allocate after res
         segments.reserve_segments(3);
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_typed_array_segments_into(segments, span);
         }
 

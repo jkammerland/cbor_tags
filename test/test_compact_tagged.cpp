@@ -24,6 +24,9 @@
 #include <variant>
 #include <vector>
 
+using namespace cbor::tags;
+using namespace cbor::tags::ext::custom_codec_1;
+
 namespace {
 
 enum class compact_enum : std::uint16_t { one = 0x0102 };
@@ -80,8 +83,8 @@ struct custom_codec_1_pmr_aggregate_payload {
 };
 
 struct custom_codec_1_dynamic_tag_payload {
-    cbor::tags::dynamic_tag<std::uint16_t> cbor_tag;
-    std::uint8_t                           value{};
+    dynamic_tag<std::uint16_t> cbor_tag;
+    std::uint8_t               value{};
 };
 
 struct compact_unsized_even_view {
@@ -158,20 +161,15 @@ struct custom_codec_1_small_size_vector {
 };
 
 template <typename T>
-concept CanWrapAsCustomCodec1 = requires(T &&value) { cbor::tags::ext::custom_codec_1::as_custom_codec_1(std::forward<T>(value)); };
+concept CanWrapAsCustomCodec1 = requires(T &&value) { as_custom_codec_1(std::forward<T>(value)); };
 
 template <typename T>
-concept CanWrapAsCustomCodec1Payload =
-    requires(T &&value) { cbor::tags::ext::custom_codec_1::as_custom_codec_1_payload(std::forward<T>(value)); };
+concept CanWrapAsCustomCodec1Payload = requires(T &&value) { as_custom_codec_1_payload(std::forward<T>(value)); };
 
 template <typename Tag, typename T>
-concept CanWrapAsTaggedCustomCodec1 =
-    requires(Tag &&tag, T &&value) { cbor::tags::ext::custom_codec_1::as_custom_codec_1(std::forward<Tag>(tag), std::forward<T>(value)); };
+concept CanWrapAsTaggedCustomCodec1 = requires(Tag &&tag, T &&value) { as_custom_codec_1(std::forward<Tag>(tag), std::forward<T>(value)); };
 
 template <typename T> void check_compact_wire(const T &in, T out, std::string_view expected_hex) {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
-
     std::vector<std::byte> compact;
     auto                   enc = make_encoder<custom_codec_1>(compact);
     REQUIRE(enc(as_custom_codec_1(static_tag<1>{}, in)));
@@ -183,9 +181,6 @@ template <typename T> void check_compact_wire(const T &in, T out, std::string_vi
 }
 
 template <typename T> auto decode_compact_hex(std::string_view hex, T &&value) {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
-
     auto bytes = to_bytes(hex);
     auto dec   = make_decoder<custom_codec_1>(bytes);
     return dec(std::forward<T>(value));
@@ -217,35 +212,31 @@ struct default_memory_resource_guard {
 } // namespace
 
 static_assert(!std::default_initializable<compact_non_default_view_payload>);
-static_assert(cbor::tags::detail::aggregate_binding_count<compact_non_default_view_payload> == 2);
-static_assert(cbor::tags::detail::custom_codec_1::has_borrowed_decode_refs_v<compact_non_default_view_payload>);
+static_assert(detail::aggregate_binding_count<compact_non_default_view_payload> == 2);
+static_assert(detail::custom_codec_1::has_borrowed_decode_refs_v<compact_non_default_view_payload>);
 static_assert(std::ranges::range<compact_unsized_even_view>);
 static_assert(!std::ranges::sized_range<compact_unsized_even_view>);
 static_assert(std::ranges::range<custom_codec_1_single_pass_view>);
 static_assert(!std::ranges::sized_range<custom_codec_1_single_pass_view>);
 static_assert(std::ranges::range<custom_codec_1_small_size_vector>);
-static_assert(!std::default_initializable<cbor::tags::ext::custom_codec_1::custom_codec_1_ref<compact_payload>>);
-static_assert(!std::default_initializable<cbor::tags::ext::custom_codec_1::custom_codec_1_payload_ref<compact_payload>>);
-static_assert(
-    !std::default_initializable<cbor::tags::ext::custom_codec_1::custom_codec_1_tag_ref<cbor::tags::static_tag<1>, compact_payload>>);
+static_assert(!std::default_initializable<custom_codec_1_ref<compact_payload>>);
+static_assert(!std::default_initializable<custom_codec_1_payload_ref<compact_payload>>);
+static_assert(!std::default_initializable<custom_codec_1_tag_ref<static_tag<1>, compact_payload>>);
 static_assert(CanWrapAsCustomCodec1<compact_payload &>);
 static_assert(CanWrapAsCustomCodec1<const compact_payload &>);
 static_assert(!CanWrapAsCustomCodec1<compact_payload &&>);
 static_assert(CanWrapAsCustomCodec1Payload<compact_payload &>);
 static_assert(!CanWrapAsCustomCodec1Payload<const compact_payload &>);
 static_assert(!CanWrapAsCustomCodec1Payload<compact_payload &&>);
-static_assert(CanWrapAsTaggedCustomCodec1<cbor::tags::static_tag<1>, compact_payload &>);
-static_assert(CanWrapAsTaggedCustomCodec1<cbor::tags::static_tag<1>, const compact_payload &>);
-static_assert(!CanWrapAsTaggedCustomCodec1<cbor::tags::static_tag<1>, compact_payload &&>);
+static_assert(CanWrapAsTaggedCustomCodec1<static_tag<1>, compact_payload &>);
+static_assert(CanWrapAsTaggedCustomCodec1<static_tag<1>, const compact_payload &>);
+static_assert(!CanWrapAsTaggedCustomCodec1<static_tag<1>, compact_payload &&>);
 
 namespace cbor::tags {
 template <> constexpr auto cbor_tag<::compact_payload>() { return static_tag<1000>{}; }
 } // namespace cbor::tags
 
 TEST_CASE("compact tagged roundtrips aggregate payload without CBOR field wrappers") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
-
     const compact_payload in{
         .a      = 0x1234,
         .b      = -2,
@@ -274,8 +265,6 @@ TEST_CASE("compact tagged roundtrips aggregate payload without CBOR field wrappe
 }
 
 TEST_CASE("compact tagged roundtrips deep nested aggregate schemas") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     compact_deep_payload in{
         .leaves =
@@ -314,8 +303,6 @@ TEST_CASE("compact tagged roundtrips deep nested aggregate schemas") {
 }
 
 TEST_CASE("compact tagged pins exact nested tuple map optional variant wire") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     using left_type  = std::map<std::uint8_t, std::optional<std::variant<std::uint16_t, std::string>>>;
     using right_type = std::optional<std::vector<std::variant<std::uint8_t, std::string>>>;
@@ -331,8 +318,6 @@ TEST_CASE("compact tagged pins exact nested tuple map optional variant wire") {
 }
 
 TEST_CASE("compact tagged explicit tag encodes typed arrays without per-element float markers") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<double> values{1.0, 2.0, 4.0};
 
@@ -351,8 +336,6 @@ TEST_CASE("compact tagged explicit tag encodes typed arrays without per-element 
 }
 
 TEST_CASE("compact tagged float32 ranges use raw little-endian payload bytes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<float> values{1.0F, -2.5F, 4.0F};
 
@@ -368,8 +351,6 @@ TEST_CASE("compact tagged float32 ranges use raw little-endian payload bytes") {
 }
 
 TEST_CASE("custom_codec_1 explicit borrowed segments borrow contiguous float32 payload bytes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<float> values{1.0F, -2.5F, 4.0F};
 
@@ -395,8 +376,6 @@ TEST_CASE("custom_codec_1 explicit borrowed segments borrow contiguous float32 p
 }
 
 TEST_CASE("compact tagged fixed float32 arrays omit compact length prefixes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::array<float, 3> values{1.0F, -2.5F, 4.0F};
 
@@ -412,8 +391,6 @@ TEST_CASE("compact tagged fixed float32 arrays omit compact length prefixes") {
 }
 
 TEST_CASE("compact tagged non-contiguous float32 ranges keep the same wire shape") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::deque<float> values{1.0F, -2.5F, 4.0F};
 
@@ -429,8 +406,6 @@ TEST_CASE("compact tagged non-contiguous float32 ranges keep the same wire shape
 }
 
 TEST_CASE("compact tagged scalar payloads have stable minimal wire shapes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     check_compact_wire(std::byte{0xAA}, std::byte{}, "c141aa");
     check_compact_wire(std::uint16_t{0x1234}, std::uint16_t{}, "c1423412");
@@ -454,8 +429,6 @@ TEST_CASE("compact tagged scalar payloads have stable minimal wire shapes") {
 }
 
 TEST_CASE("compact tagged scalar extremes are bit exact") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     check_compact_wire(std::numeric_limits<std::int64_t>::min(), std::int64_t{}, "c1480000000000000080");
     check_compact_wire(std::numeric_limits<std::uint64_t>::max(), std::uint64_t{}, "c148ffffffffffffffff");
@@ -475,8 +448,6 @@ TEST_CASE("compact tagged scalar extremes are bit exact") {
 }
 
 TEST_CASE("compact tagged fixed arrays omit compact length prefixes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     check_compact_wire(std::array<std::byte, 3>{std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}}, std::array<std::byte, 3>{},
                        "c143aabbcc");
@@ -485,8 +456,6 @@ TEST_CASE("compact tagged fixed arrays omit compact length prefixes") {
 }
 
 TEST_CASE("compact tagged zero length payloads are still schema-specific") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     check_compact_wire(std::array<std::byte, 0>{}, std::array<std::byte, 0>{}, "c140");
     check_compact_wire(std::string{}, std::string{"not empty"}, "c14100");
@@ -495,8 +464,6 @@ TEST_CASE("compact tagged zero length payloads are still schema-specific") {
 }
 
 TEST_CASE("custom_codec_1 handles pmr text strings without the default resource") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     std::array<std::byte, 256>          source_storage{};
     std::pmr::monotonic_buffer_resource source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
@@ -521,8 +488,6 @@ TEST_CASE("custom_codec_1 handles pmr text strings without the default resource"
 }
 
 TEST_CASE("custom_codec_1 handles pmr byte strings without the default resource") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto source = std::vector<std::byte>(64, std::byte{0xAB});
 
@@ -544,8 +509,6 @@ TEST_CASE("custom_codec_1 handles pmr byte strings without the default resource"
 }
 
 TEST_CASE("custom_codec_1 decodes mutable byte spans into existing storage") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto source = std::vector{std::byte{0xAA}, std::byte{0xBB}};
 
@@ -562,8 +525,6 @@ TEST_CASE("custom_codec_1 decodes mutable byte spans into existing storage") {
 }
 
 TEST_CASE("custom_codec_1 decodes dynamic mutable byte spans into existing storage") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto source = std::vector{std::byte{0xCA}, std::byte{0xFE}, std::byte{0x01}};
 
@@ -580,8 +541,6 @@ TEST_CASE("custom_codec_1 decodes dynamic mutable byte spans into existing stora
 }
 
 TEST_CASE("custom_codec_1 rejects mutable byte span size mismatches") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto source = std::vector{std::byte{0xAA}, std::byte{0xBB}};
 
@@ -599,8 +558,6 @@ TEST_CASE("custom_codec_1 rejects mutable byte span size mismatches") {
 }
 
 TEST_CASE("custom_codec_1 propagates pmr allocators to nested text strings") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<std::string> source{std::string(64, 'a'), std::string(64, 'b')};
 
@@ -625,8 +582,6 @@ TEST_CASE("custom_codec_1 propagates pmr allocators to nested text strings") {
 }
 
 TEST_CASE("custom_codec_1 propagates pmr allocators to nested optional text strings") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto source = std::vector<std::optional<std::string>>{std::string(64, 'o'), std::nullopt};
 
@@ -652,8 +607,6 @@ TEST_CASE("custom_codec_1 propagates pmr allocators to nested optional text stri
 }
 
 TEST_CASE("custom_codec_1 preserves pmr allocators in aggregate fields") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     std::array<std::byte, 512>           source_storage{};
     std::pmr::monotonic_buffer_resource  source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
@@ -686,8 +639,6 @@ TEST_CASE("custom_codec_1 preserves pmr allocators in aggregate fields") {
 }
 
 TEST_CASE("custom_codec_1 preserves pmr allocators in engaged optional aggregate fields") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     std::array<std::byte, 512>          source_storage{};
     std::pmr::monotonic_buffer_resource source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
@@ -721,8 +672,6 @@ TEST_CASE("custom_codec_1 preserves pmr allocators in engaged optional aggregate
 }
 
 TEST_CASE("custom_codec_1 propagates pmr allocators to optional aggregate range elements") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     std::array<std::byte, 512>          source_storage{};
     std::pmr::monotonic_buffer_resource source_resource(source_storage.data(), source_storage.size(), std::pmr::null_memory_resource());
@@ -758,8 +707,6 @@ TEST_CASE("custom_codec_1 propagates pmr allocators to optional aggregate range 
 }
 
 TEST_CASE("custom_codec_1 propagates pmr allocators to map text strings") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::map<std::string, std::string> source{{std::string(64, 'k'), std::string(64, 'v')}};
 
@@ -792,8 +739,6 @@ TEST_CASE("custom_codec_1 propagates pmr allocators to map text strings") {
 }
 
 TEST_CASE("compact tagged dynamic tags use the same compact payload core") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::uint8_t value{7};
 
@@ -809,8 +754,6 @@ TEST_CASE("compact tagged dynamic tags use the same compact payload core") {
 }
 
 TEST_CASE("compact tagged preserves embedded dynamic tag fields while decoding") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto value = custom_codec_1_dynamic_tag_payload{
         .cbor_tag = dynamic_tag<std::uint16_t>{300},
@@ -833,8 +776,6 @@ TEST_CASE("compact tagged preserves embedded dynamic tag fields while decoding")
 }
 
 TEST_CASE("compact tagged preserves dynamic tagged tuple fields while decoding") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const auto tagged = std::tuple{dynamic_tag<std::uint16_t>{301}, std::uint8_t{8}};
 
@@ -851,8 +792,6 @@ TEST_CASE("compact tagged preserves dynamic tagged tuple fields while decoding")
 }
 
 TEST_CASE("compact tagged long tag and length boundaries stay compact") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         const bool             value{true};
@@ -933,8 +872,6 @@ TEST_CASE("compact tagged long tag and length boundaries stay compact") {
 }
 
 TEST_CASE("compact tagged supports existing tag pair idiom") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     auto tagged = make_tag_pair(static_tag<123>{}, std::vector<std::uint16_t>{0x1234, 0xABCD});
 
@@ -950,8 +887,6 @@ TEST_CASE("compact tagged supports existing tag pair idiom") {
 }
 
 TEST_CASE("compact tagged supports plain and tagged tuple payloads") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     check_compact_wire(std::tuple<std::uint8_t, bool>{7, true}, std::tuple<std::uint8_t, bool>{}, "c1420701");
 
@@ -969,8 +904,6 @@ TEST_CASE("compact tagged supports plain and tagged tuple payloads") {
 }
 
 TEST_CASE("compact tagged infers inline aggregate tags") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const compact_inline_tag_payload in{.value = 7, .ok = true};
 
@@ -986,8 +919,6 @@ TEST_CASE("compact tagged infers inline aggregate tags") {
 }
 
 TEST_CASE("compact tagged decode composes after the initial byte is already consumed") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::uint16_t value{0x1234};
 
@@ -1004,8 +935,6 @@ TEST_CASE("compact tagged decode composes after the initial byte is already cons
 }
 
 TEST_CASE("compact tagged consumed-initial-byte decode reports malformed envelopes without throwing") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         auto          compact = to_bytes("d9");
@@ -1028,8 +957,6 @@ TEST_CASE("compact tagged consumed-initial-byte decode reports malformed envelop
 }
 
 TEST_CASE("compact tagged wrong tag rejects before payload decode") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<std::uint16_t> values{1, 2, 3};
     std::vector<std::byte>           compact;
@@ -1045,8 +972,6 @@ TEST_CASE("compact tagged wrong tag rejects before payload decode") {
 }
 
 TEST_CASE("compact tagged malformed envelope metadata is rejected") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         bool out{};
@@ -1105,8 +1030,6 @@ TEST_CASE("compact tagged malformed envelope metadata is rejected") {
 }
 
 TEST_CASE("compact tagged malformed bool is rejected") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     struct bool_payload {
         bool value{};
@@ -1128,8 +1051,6 @@ TEST_CASE("compact tagged malformed bool is rejected") {
 }
 
 TEST_CASE("compact tagged malformed bool arrays and vectors are rejected") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         std::array<bool, 2> out{true, true};
@@ -1148,8 +1069,6 @@ TEST_CASE("compact tagged malformed bool arrays and vectors are rejected") {
 }
 
 TEST_CASE("compact tagged malformed optional payload leaves destination unchanged") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         std::optional<std::uint16_t> decoded{0xBEEF};
@@ -1184,8 +1103,6 @@ TEST_CASE("compact tagged malformed optional payload leaves destination unchange
 }
 
 TEST_CASE("compact tagged rejects malformed compact lengths and variant indexes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         std::vector<std::uint16_t> decoded;
@@ -1220,8 +1137,6 @@ TEST_CASE("compact tagged rejects malformed compact lengths and variant indexes"
 }
 
 TEST_CASE("compact tagged malformed containers leave destinations unchanged") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         std::vector<std::uint16_t> decoded{0xBEEF};
@@ -1247,8 +1162,6 @@ TEST_CASE("compact tagged malformed containers leave destinations unchanged") {
 }
 
 TEST_CASE("compact tagged map decode handles repeated keys according to container semantics") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         std::map<std::uint8_t, std::uint16_t> decoded;
@@ -1266,8 +1179,6 @@ TEST_CASE("compact tagged map decode handles repeated keys according to containe
 }
 
 TEST_CASE("compact tagged variants roundtrip primitive alternatives by index") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     using payload = std::variant<std::uint8_t, double, std::string>;
 
@@ -1277,8 +1188,6 @@ TEST_CASE("compact tagged variants roundtrip primitive alternatives by index") {
 }
 
 TEST_CASE("compact tagged variants preserve duplicate alternative indexes") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     using payload = std::variant<std::uint8_t, std::uint8_t, std::string>;
 
@@ -1296,8 +1205,6 @@ TEST_CASE("compact tagged variants preserve duplicate alternative indexes") {
 }
 
 TEST_CASE("compact tagged variants decode non-default alternatives when the destination is seeded with the same index") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     using payload = std::variant<std::uint8_t, std::span<const std::byte, 2>>;
 
@@ -1316,8 +1223,6 @@ TEST_CASE("compact tagged variants decode non-default alternatives when the dest
 }
 
 TEST_CASE("compact tagged byte-like strings use binary compact dispatch") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::basic_string<std::byte> in{std::byte{0xAA}, std::byte{0xBB}};
     std::basic_string<std::byte>       out;
@@ -1333,8 +1238,6 @@ TEST_CASE("compact tagged byte-like strings use binary compact dispatch") {
 }
 
 TEST_CASE("compact tagged materializes unsized input views before encoding") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const compact_unsized_even_view evens;
 
@@ -1350,8 +1253,6 @@ TEST_CASE("compact tagged materializes unsized input views before encoding") {
 }
 
 TEST_CASE("custom_codec_1 encodes input ranges with one payload pass") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const custom_codec_1_single_pass_view values;
 
@@ -1369,8 +1270,6 @@ TEST_CASE("custom_codec_1 encodes input ranges with one payload pass") {
 }
 
 TEST_CASE("custom_codec_1 encodes fixed output buffers with one payload pass") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const custom_codec_1_single_pass_view values;
 
@@ -1383,8 +1282,6 @@ TEST_CASE("custom_codec_1 encodes fixed output buffers with one payload pass") {
 }
 
 TEST_CASE("custom_codec_1 segmented output preserves wire format without flattening first") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<std::uint16_t> values{0x1234, 0xABCD};
 
@@ -1414,8 +1311,6 @@ TEST_CASE("custom_codec_1 segmented output preserves wire format without flatten
 }
 
 TEST_CASE("compact tagged rejects borrowed views from non-contiguous payload storage") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     struct view_payload {
         std::string_view label{};
@@ -1436,8 +1331,6 @@ TEST_CASE("compact tagged rejects borrowed views from non-contiguous payload sto
 }
 
 TEST_CASE("compact tagged borrowed views inside containers decode only from contiguous storage") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<std::string_view> in{"a", "bb"};
 
@@ -1487,8 +1380,6 @@ TEST_CASE("compact tagged borrowed views inside containers decode only from cont
 }
 
 TEST_CASE("compact tagged borrowed views decode from contiguous payload storage") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         const std::string_view in{"borrowed"};
@@ -1520,8 +1411,6 @@ TEST_CASE("compact tagged borrowed views decode from contiguous payload storage"
 }
 
 TEST_CASE("compact tagged borrowed view detection handles nested and non-default aggregates") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     {
         const std::optional<std::string_view> in{"borrowed"};
@@ -1564,8 +1453,6 @@ TEST_CASE("compact tagged borrowed view detection handles nested and non-default
 }
 
 TEST_CASE("compact tagged owning values decode from non-contiguous payload storage") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<std::uint16_t> values{0x1234, 0xABCD};
     std::vector<std::byte>           compact;
@@ -1580,8 +1467,6 @@ TEST_CASE("compact tagged owning values decode from non-contiguous payload stora
 }
 
 TEST_CASE("compact tagged non-contiguous containers roundtrip through compact ranges") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::deque<std::uint16_t> values{0x1234, 0xABCD};
 
@@ -1597,8 +1482,6 @@ TEST_CASE("compact tagged non-contiguous containers roundtrip through compact ra
 }
 
 TEST_CASE("compact tagged fixed borrowed binary spans validate compact length") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     std::array<std::byte, 2>      backing{std::byte{0xCC}, std::byte{0xDD}};
     std::span<const std::byte, 2> decoded{backing};
@@ -1609,8 +1492,6 @@ TEST_CASE("compact tagged fixed borrowed binary spans validate compact length") 
 }
 
 TEST_CASE("compact tagged truncated payload reports incomplete") {
-    using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
 
     const std::vector<std::uint32_t> values{1, 2, 3};
     std::vector<std::byte>           compact;
