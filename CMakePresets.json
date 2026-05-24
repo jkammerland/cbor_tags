@@ -6,7 +6,9 @@
     "Configure presets:",
     "- debug/release/relwithdebinfo/minsizerel: CMAKE_BUILD_TYPE presets",
     "- debug-tests/debug-unit: Debug test builds with CBOR_TAGS_BUILD_TESTS=ON",
-    "- debug-std-expected: Debug tests with C++23 std::expected return backend",
+    "- debug-cxx26/release-cxx26: Tests in generic C++26 mode",
+    "- debug-std-expected/release-std-expected: Tests with C++23 std::expected return backend",
+    "- debug-std-reflection/release-std-reflection: GCC C++26 std::meta reflection tests",
     "- boost-pfr-names: Debug tests with C++20 Boost.PFR named-map reflection",
     "- magic-enum-names: Debug tests with CDDL enum-name definitions through magic_enum",
     "- coverage/coverage-release: --coverage instrumentation (non-Windows)",
@@ -120,6 +122,62 @@
         "CMAKE_CXX_STANDARD": "23",
         "CBOR_TAGS_USE_STD_EXPECTED": "ON",
         "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "release-std-expected",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/release-std-expected",
+      "displayName": "Release std::expected",
+      "description": "Release tests with the C++23 std::expected return backend",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "23",
+        "CBOR_TAGS_USE_STD_EXPECTED": "ON",
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "debug-cxx26",
+      "inherits": "debug-tests",
+      "binaryDir": "${sourceDir}/build/cxx26",
+      "displayName": "Debug C++26",
+      "description": "Debug tests in generic C++26 mode",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "26",
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "release-cxx26",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/release-cxx26",
+      "displayName": "Release C++26",
+      "description": "Release tests in generic C++26 mode",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "26",
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "debug-std-reflection",
+      "inherits": "debug-tests",
+      "binaryDir": "${sourceDir}/build/std-reflection",
+      "displayName": "Debug std::meta Reflection",
+      "description": "Debug tests with GCC C++26 std::meta reflection",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON",
+        "CBOR_TAGS_USE_STD_REFLECTION": "ON"
+      }
+    },
+    {
+      "name": "release-std-reflection",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/release-std-reflection",
+      "displayName": "Release std::meta Reflection",
+      "description": "Release tests with GCC C++26 std::meta reflection",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON",
+        "CBOR_TAGS_USE_STD_REFLECTION": "ON"
       }
     },
     {
@@ -480,6 +538,46 @@
       "jobs": 0
     },
     {
+      "name": "release-std-expected",
+      "inherits": "build-base",
+      "configurePreset": "release-std-expected",
+      "displayName": "Release std::expected Build",
+      "description": "Build release tests with the C++23 std::expected return backend",
+      "jobs": 0
+    },
+    {
+      "name": "debug-cxx26",
+      "inherits": "build-base",
+      "configurePreset": "debug-cxx26",
+      "displayName": "Debug C++26 Build",
+      "description": "Build tests in generic C++26 mode",
+      "jobs": 0
+    },
+    {
+      "name": "release-cxx26",
+      "inherits": "build-base",
+      "configurePreset": "release-cxx26",
+      "displayName": "Release C++26 Build",
+      "description": "Build release tests in generic C++26 mode",
+      "jobs": 0
+    },
+    {
+      "name": "debug-std-reflection",
+      "inherits": "build-base",
+      "configurePreset": "debug-std-reflection",
+      "displayName": "Debug std::meta Reflection Build",
+      "description": "Build tests with GCC C++26 std::meta reflection",
+      "jobs": 0
+    },
+    {
+      "name": "release-std-reflection",
+      "inherits": "build-base",
+      "configurePreset": "release-std-reflection",
+      "displayName": "Release std::meta Reflection Build",
+      "description": "Build release tests with GCC C++26 std::meta reflection",
+      "jobs": 0
+    },
+    {
       "name": "boost-pfr-names",
       "inherits": "build-base",
       "configurePreset": "boost-pfr-names",
@@ -776,6 +874,41 @@
       "description": "Run tests with the C++23 std::expected return backend"
     },
     {
+      "name": "release-std-expected",
+      "inherits": "test-base",
+      "configurePreset": "release-std-expected",
+      "displayName": "Release std::expected Tests",
+      "description": "Run release tests with the C++23 std::expected return backend"
+    },
+    {
+      "name": "debug-cxx26",
+      "inherits": "test-base",
+      "configurePreset": "debug-cxx26",
+      "displayName": "Debug C++26 Tests",
+      "description": "Run tests in generic C++26 mode"
+    },
+    {
+      "name": "release-cxx26",
+      "inherits": "test-base",
+      "configurePreset": "release-cxx26",
+      "displayName": "Release C++26 Tests",
+      "description": "Run release tests in generic C++26 mode"
+    },
+    {
+      "name": "debug-std-reflection",
+      "inherits": "test-base",
+      "configurePreset": "debug-std-reflection",
+      "displayName": "Debug std::meta Reflection Tests",
+      "description": "Run tests with GCC C++26 std::meta reflection"
+    },
+    {
+      "name": "release-std-reflection",
+      "inherits": "test-base",
+      "configurePreset": "release-std-reflection",
+      "displayName": "Release std::meta Reflection Tests",
+      "description": "Run release tests with GCC C++26 std::meta reflection"
+    },
+    {
       "name": "boost-pfr-names",
       "inherits": "test-base",
       "configurePreset": "boost-pfr-names",
@@ -1040,6 +1173,101 @@
         {
           "type": "test",
           "name": "debug-std-expected"
+        }
+      ]
+    },
+    {
+      "name": "release-std-expected",
+      "displayName": "Release std::expected Workflow",
+      "description": "Configure, build, and test the release C++23 std::expected return backend",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release-std-expected"
+        },
+        {
+          "type": "build",
+          "name": "release-std-expected"
+        },
+        {
+          "type": "test",
+          "name": "release-std-expected"
+        }
+      ]
+    },
+    {
+      "name": "debug-cxx26",
+      "displayName": "Debug C++26 Workflow",
+      "description": "Configure, build, and test generic C++26 mode",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug-cxx26"
+        },
+        {
+          "type": "build",
+          "name": "debug-cxx26"
+        },
+        {
+          "type": "test",
+          "name": "debug-cxx26"
+        }
+      ]
+    },
+    {
+      "name": "release-cxx26",
+      "displayName": "Release C++26 Workflow",
+      "description": "Configure, build, and test release generic C++26 mode",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release-cxx26"
+        },
+        {
+          "type": "build",
+          "name": "release-cxx26"
+        },
+        {
+          "type": "test",
+          "name": "release-cxx26"
+        }
+      ]
+    },
+    {
+      "name": "debug-std-reflection",
+      "displayName": "Debug std::meta Reflection Workflow",
+      "description": "Configure, build, and test GCC C++26 std::meta reflection",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug-std-reflection"
+        },
+        {
+          "type": "build",
+          "name": "debug-std-reflection"
+        },
+        {
+          "type": "test",
+          "name": "debug-std-reflection"
+        }
+      ]
+    },
+    {
+      "name": "release-std-reflection",
+      "displayName": "Release std::meta Reflection Workflow",
+      "description": "Configure, build, and test release GCC C++26 std::meta reflection",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release-std-reflection"
+        },
+        {
+          "type": "build",
+          "name": "release-std-reflection"
+        },
+        {
+          "type": "test",
+          "name": "release-std-reflection"
         }
       ]
     },
