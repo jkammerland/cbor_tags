@@ -208,12 +208,11 @@ jobs:
               gcc-c++ \
               git \
               ninja-build
-            cmake -S /work -B /tmp/build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCBOR_TAGS_BUILD_TESTS=ON \
-              -DCBOR_TAGS_USE_STD_REFLECTION=ON
+            cmake --preset=release-std-reflection -B /tmp/build \
+              -DCMAKE_C_COMPILER_LAUNCHER= \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=
             cmake --build /tmp/build --parallel
-            ctest --test-dir /tmp/build -C Release --output-on-failure
+            ctest --test-dir /tmp/build --output-on-failure
           '
 
   boost-pfr-names:
