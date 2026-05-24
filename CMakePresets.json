@@ -429,6 +429,17 @@
       "jobs": 0
     },
     {
+      "name": "debug-unit",
+      "inherits": "build-base",
+      "configurePreset": "debug",
+      "displayName": "Debug Unit Test Build",
+      "description": "Build only the doctest unit-test binary in debug mode",
+      "targets": [
+        "tests"
+      ],
+      "jobs": 0
+    },
+    {
       "name": "boost-pfr-names",
       "inherits": "build-base",
       "configurePreset": "boost-pfr-names",
@@ -699,6 +710,18 @@
       "description": "Run all tests in debug mode"
     },
     {
+      "name": "debug-unit",
+      "inherits": "test-base",
+      "configurePreset": "debug",
+      "displayName": "Debug Unit Tests",
+      "description": "Run only the doctest unit-test binary in debug mode",
+      "filter": {
+        "include": {
+          "name": "^tests$"
+        }
+      }
+    },
+    {
       "name": "boost-pfr-names",
       "inherits": "test-base",
       "configurePreset": "boost-pfr-names",
@@ -906,6 +929,25 @@
         {
           "type": "test",
           "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "debug-unit",
+      "displayName": "Debug Unit Test Workflow",
+      "description": "Configure, build, and run only the debug doctest unit-test binary",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug-unit"
+        },
+        {
+          "type": "test",
+          "name": "debug-unit"
         }
       ]
     },
