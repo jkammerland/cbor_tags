@@ -4,9 +4,12 @@
 
 #if __has_include(<expected>) && defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
 
+// Keep the extension header first so this test catches direct include dependencies.
+// clang-format off
+#include <cbor_tags/extensions/std_expected.h>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
-#include <cbor_tags/extensions/std_expected.h>
+// clang-format on
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <expected>

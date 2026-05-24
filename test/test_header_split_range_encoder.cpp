@@ -1,5 +1,8 @@
-#include <cbor_tags/cbor_encoder.h>
+// Keep the split range header first so this test catches direct include dependencies.
+// clang-format off
 #include <cbor_tags/cbor_range_encoder.h>
+#include <cbor_tags/cbor_encoder.h>
+// clang-format on
 #include <doctest/doctest.h>
 #include <vector>
 

@@ -20,6 +20,7 @@
 #include <exception>
 // #include <fmt/base.h>
 #include <iterator>
+#include <new>
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
