@@ -5,15 +5,13 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
-#include <cmath>
 #include <compare>
 #include <concepts>
 #include <cstddef>
-#include <cstdint>
-#include <cstring>
 #include <exception>
+#include <functional>
+#include <iterator>
 #include <ranges>
-#include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>

@@ -3,12 +3,10 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/detail/cbor_item.h"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <ranges>
 #include <span>

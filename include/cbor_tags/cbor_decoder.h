@@ -3,13 +3,10 @@
 #include "cbor_concepts.h"
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
-#include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
-#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
-#include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -21,15 +18,12 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
-#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
-#include <memory>
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
 
-#include <array>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -41,7 +35,6 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 

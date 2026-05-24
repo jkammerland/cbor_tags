@@ -13,18 +13,14 @@
 #include "cbor_tags/detail/cbor_encode_error.h"
 
 #include <bit>
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
 #include <ranges>
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 
