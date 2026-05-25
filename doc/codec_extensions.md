@@ -27,9 +27,11 @@ auto dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
 ```
 
 Extension codecs are class-template mixins over the final encoder or decoder
-type. A codec should inherit `cbor_codec_mixin_base<Self>` and bring the base
-overloads into scope so unsupported overloads remain deleted and visible to
-overload resolution.
+type. Encoder-only mixins should inherit `cbor_encoder_mixin_base<Self>`,
+decoder-only mixins should inherit `cbor_decoder_mixin_base<Self>`, and
+bidirectional codecs should inherit `cbor_codec_mixin_base<Self>`. Bring the
+matching base overloads into scope so unsupported overloads remain deleted and
+visible to overload resolution.
 
 There are two layers to keep separate:
 
@@ -63,6 +65,29 @@ struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
             return tag_status;
         }
         return dec.decode(value.payload);
+    }
+};
+```
+
+One-way extensions can use the narrower bases:
+
+```cpp
+template <typename Self>
+struct my_encoder_only : cbor::tags::cbor_encoder_mixin_base<Self> {
+    using cbor::tags::cbor_encoder_mixin_base<Self>::encode;
+
+    void encode(const my_type& value) {
+        static_cast<Self&>(*this).encode(value.payload);
+    }
+};
+
+template <typename Self>
+struct my_decoder_only : cbor::tags::cbor_decoder_mixin_base<Self> {
+    using cbor::tags::cbor_decoder_mixin_base<Self>::decode;
+
+    [[nodiscard]] cbor::tags::status_code
+    decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
+        return static_cast<Self&>(*this).decode(value.payload, major, additional_info);
     }
 };
 ```
