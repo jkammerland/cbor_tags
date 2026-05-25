@@ -846,10 +846,11 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 ## ✅ Requirements
 
 - tl::expected by default, or C++23 `<expected>` when `CBOR_TAGS_USE_STD_EXPECTED=ON`.
-- fmt 11.0.2 or newer.
-- nameof 0.10.4 or newer.
+- fmt 11.0.2 or newer for the default C++20/C++23 formatting and type-name path.
+- nameof 0.10.4 or newer for the default C++20/C++23 type-name path.
 - C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
 - Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
+- Optional C++26 STL-only mode with `CBOR_TAGS_STL_ONLY=ON`; this uses `std::expected`, `std::format`, and `std::meta` and exports no fmt, nameof, or tl::expected dependency.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
 - Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.7 or newer.
 - CMake 3.20+, or 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`.
@@ -867,7 +868,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.18.0 # or a newer release/commit for newer extension features
+  GIT_TAG v0.19.0 # or a newer release/commit for newer extension features
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -902,12 +903,25 @@ cmake -B build \
   -DCBOR_TAGS_USE_STD_EXPECTED=ON
 ```
 
+C++26 STL-only installed package:
+
+```bash
+cmake --preset=release-cxx26-stl-only
+cmake --build --preset=release-cxx26-stl-only
+```
+
+This mode requires a compiler with C++26 static reflection support. The current
+CI path uses GCC on Fedora with `-std=gnu++26 -freflection`. Installed consumers
+link only `cbor::tags`; no fmt, nameof, or tl::expected package is exported.
+
 Package-manager opt-in examples:
 
 ```bash
 conan install . -o cbor-tags/*:std_expected=True -s compiler.cppstd=23
+conan install . -o cbor-tags/*:stl_only=True -s compiler.cppstd=26
 conan install . -o cbor-tags/*:boost_pfr_names=True
 conan install . -o cbor-tags/*:magic_enum_names=True
+vcpkg install --x-no-default-features --x-feature=stl-only
 vcpkg install --x-feature=boost-pfr-names
 vcpkg install --x-feature=magic-enum-names
 ```

@@ -107,7 +107,7 @@ enc(as_multi_dimensional_array(dimensions, cells));              // #6.40([dim, 
 enc(as_multi_dimensional_column_major_array(dimensions, cells)); // #6.1040([dim, array])
 ```
 
-## Owning And Borrowed Forms
+## Copied And Borrowed Decode Forms
 
 Use `as_typed_array(values)` to encode an existing span or vector without
 changing the application type:
@@ -118,7 +118,8 @@ enc(as_typed_array(values));
 enc(as_typed_array_be(values));
 ```
 
-Decode into `typed_array<T>` when you want an owning `std::vector<T>`:
+Decode into `typed_array<T>` when you want the result object to store its own
+`std::vector<T>` copy of the decoded values:
 
 ```cpp
 typed_array<double> decoded;
@@ -134,8 +135,8 @@ typed_array_be<double> decoded_be;
 dec(decoded_be);
 ```
 
-Decode into `typed_array_view<T>` when you want to borrow the encoded payload
-and materialize values lazily:
+Decode into `typed_array_view<T>` when you want to keep a view of the encoded
+byte string and convert each element to `T` as you iterate:
 
 ```cpp
 typed_array_view<double> view;
@@ -242,14 +243,14 @@ but each multi-byte element must be byte-swapped on little-endian machines.
 
 Local Release benchmark, 65,536 elements, Linux x86-64:
 
-| Operation | LE | BE |
-|-----------|----:|----:|
+| Operation | Little-endian tags | Big-endian tags |
+|-----------|-------------------:|----------------:|
 | `float` encode | 81.57 GB/s | 16.31 GB/s |
 | `double` encode | 70.66 GB/s | 26.36 GB/s |
-| `float` owning decode | 54.83 GB/s | 17.14 GB/s |
-| `double` owning decode | 50.36 GB/s | 27.36 GB/s |
-| `float` view materialize | 21.47 GB/s | 13.30 GB/s |
-| `double` view materialize | 42.09 GB/s | 26.12 GB/s |
+| `float` decode to `typed_array<T>` | 54.83 GB/s | 17.14 GB/s |
+| `double` decode to `typed_array<T>` | 50.36 GB/s | 27.36 GB/s |
+| `float` read `typed_array_view<T>` | 21.47 GB/s | 13.30 GB/s |
+| `double` read `typed_array_view<T>` | 42.09 GB/s | 26.12 GB/s |
 
 CBOR's scalar integer encoding is optimized for canonical interchange, not raw
 numeric lanes: negative integers use major type 1 rather than two's-complement
@@ -307,7 +308,7 @@ homogeneous array wrapper.
 - all RFC scalar definite-length byte-string typed-array tags `64..87`, except reserved tag `76`,
 - `uint8_clamped` and opaque `float128_t`,
 - little-endian and big-endian integer and floating-point arrays,
-- owning typed arrays and borrowed typed-array views,
+- `typed_array<T>` value storage and `typed_array_view<T>` borrowed byte views,
 - non-contiguous input view aliases,
 - borrowed encode wrappers,
 - segmented output helpers,

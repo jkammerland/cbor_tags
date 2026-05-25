@@ -1,6 +1,7 @@
 import os
 
 from conan import ConanFile
+from conan.errors import ConanInvalidConfiguration
 from conan.tools.build import check_min_cppstd
 from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
 from conan.tools.files import copy
@@ -8,14 +9,19 @@ from conan.tools.files import copy
 
 class CborTagsConan(ConanFile):
     name = "cbor-tags"
-    version = "0.18.0"
+    version = "0.19.0"
     license = "MIT"
     description = "Binary tagging library with automatic encoding/decoding for CBOR"
     homepage = "https://github.com/jkammerland/cbor_tags"
     topics = ("cbor", "serialization", "reflection", "tags")
     settings = "os", "compiler", "build_type", "arch"
-    options = {"boost_pfr_names": [True, False], "magic_enum_names": [True, False], "std_expected": [True, False]}
-    default_options = {"boost_pfr_names": False, "magic_enum_names": False, "std_expected": False}
+    options = {
+        "boost_pfr_names": [True, False],
+        "magic_enum_names": [True, False],
+        "std_expected": [True, False],
+        "stl_only": [True, False],
+    }
+    default_options = {"boost_pfr_names": False, "magic_enum_names": False, "std_expected": False, "stl_only": False}
     exports_sources = (
         "CMakeLists.txt",
         "cbor_tags_config.h.in",
@@ -27,6 +33,8 @@ class CborTagsConan(ConanFile):
     )
 
     def requirements(self):
+        if self.options.stl_only:
+            return
         self.requires("fmt/[>=11.0.2 <12]")
         self.requires("nameof/0.10.4")
         if not self.options.std_expected:
@@ -43,6 +51,15 @@ class CborTagsConan(ConanFile):
             self.options["boost/*"].header_only = True
 
     def validate(self):
+        if self.options.stl_only:
+            check_min_cppstd(self, "26")
+            if str(self.settings.compiler) != "gcc":
+                raise ConanInvalidConfiguration("stl_only currently requires GCC C++26 std::meta reflection support")
+            if self.options.boost_pfr_names:
+                raise ConanInvalidConfiguration("stl_only cannot be combined with boost_pfr_names")
+            if self.options.magic_enum_names:
+                raise ConanInvalidConfiguration("stl_only cannot be combined with magic_enum_names")
+            return
         check_min_cppstd(self, "20")
         if self.options.std_expected:
             check_min_cppstd(self, "23")
@@ -60,8 +77,9 @@ class CborTagsConan(ConanFile):
         tc = CMakeToolchain(self)
         tc.variables["CBOR_TAGS_BUILD_TESTS"] = "OFF"
         tc.variables["CBOR_TAGS_INSTALL"] = "ON"
-        tc.variables["CBOR_TAGS_USE_STD_EXPECTED"] = "ON" if self.options.std_expected else "OFF"
-        tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "OFF" if self.options.std_expected else "ON"
+        tc.variables["CBOR_TAGS_STL_ONLY"] = "ON" if self.options.stl_only else "OFF"
+        tc.variables["CBOR_TAGS_USE_STD_EXPECTED"] = "ON" if (self.options.std_expected or self.options.stl_only) else "OFF"
+        tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "OFF" if (self.options.std_expected or self.options.stl_only) else "ON"
         tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.variables["CBOR_TAGS_USE_MAGIC_ENUM_NAMES"] = "ON" if self.options.magic_enum_names else "OFF"
         tc.generate()
@@ -81,12 +99,14 @@ class CborTagsConan(ConanFile):
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "cbor_tags")
         self.cpp_info.set_property("cmake_target_name", "cbor::tags")
-        self.cpp_info.requires = ["fmt::fmt", "nameof::nameof"]
-        if not self.options.std_expected:
+        self.cpp_info.requires = []
+        if not self.options.stl_only:
+            self.cpp_info.requires.extend(["fmt::fmt", "nameof::nameof"])
+        if not self.options.std_expected and not self.options.stl_only:
             self.cpp_info.requires.append("tl-expected::expected")
-        if self.options.boost_pfr_names:
+        if self.options.boost_pfr_names and not self.options.stl_only:
             self.cpp_info.requires.append("boost::headers")
-        if self.options.magic_enum_names:
+        if self.options.magic_enum_names and not self.options.stl_only:
             self.cpp_info.requires.append("magic_enum::magic_enum")
         self.cpp_info.bindirs = []
         self.cpp_info.libdirs = []
@@ -94,8 +114,12 @@ class CborTagsConan(ConanFile):
             self.cpp_info.defines.append("CBOR_TAGS_USE_BOOST_PFR_NAMES=1")
         if self.options.magic_enum_names:
             self.cpp_info.defines.append("CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1")
-        if self.options.std_expected:
+        if self.options.std_expected or self.options.stl_only:
             self.cpp_info.defines.append("CBOR_TAGS_USE_STD_EXPECTED=1")
+        if self.options.stl_only:
+            self.cpp_info.defines.append("CBOR_TAGS_STL_ONLY=1")
+            self.cpp_info.defines.append("CBOR_TAGS_USE_STD_REFLECTION=1")
+            self.cpp_info.cxxflags.append("-freflection")
 
         # Header-only library
         self.cpp_info.header_only = True

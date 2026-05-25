@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <fmt/format.h>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -15,6 +14,8 @@
 #include <vector>
 
 namespace {
+
+namespace text = cbor::tags::detail::text_format;
 
 enum class command_mode { annotate, diagnostic };
 enum class input_format { hex, base64 };
@@ -107,7 +108,7 @@ struct input_error final : std::runtime_error {
         const auto high = hex_value(cleaned[index]);
         const auto low  = hex_value(cleaned[index + 1U]);
         if (high < 0 || low < 0) {
-            throw input_error(fmt::format("hex input contains non-hex character near offset {}", index));
+            throw input_error(text::format("hex input contains non-hex character near offset {}", index));
         }
         output.push_back(static_cast<std::byte>((high << 4U) | low));
     }
@@ -205,7 +206,7 @@ void validate_base64_tail_bits(const std::vector<int> &values, std::size_t paddi
     for (auto index = std::size_t{}; index < data_count; ++index) {
         const auto value = base64_value(cleaned[index]);
         if (value < 0) {
-            throw input_error(fmt::format("base64 input contains invalid character near offset {}", index));
+            throw input_error(text::format("base64 input contains invalid character near offset {}", index));
         }
         values.push_back(value);
     }
@@ -236,7 +237,7 @@ void validate_base64_tail_bits(const std::vector<int> &values, std::size_t paddi
     const auto *end         = value.data() + value.size();
     const auto [ptr, error] = std::from_chars(begin, end, result);
     if (error != std::errc{} || ptr != end) {
-        throw usage_error(fmt::format("{} expects an unsigned integer, got '{}'", option_name, value));
+        throw usage_error(text::format("{} expects an unsigned integer, got '{}'", option_name, value));
     }
     return result;
 }
@@ -320,7 +321,7 @@ struct parsed_arguments {
 
 [[nodiscard]] std::string_view require_value(int &index, int argc, char *argv[], std::string_view option_name) {
     if (index + 1 >= argc) {
-        throw usage_error(fmt::format("{} requires a value", option_name));
+        throw usage_error(text::format("{} requires a value", option_name));
     }
     ++index;
     return argv[index];
@@ -331,7 +332,7 @@ void parse_common_option(parsed_arguments &parsed, std::string_view option, std:
         parsed.input = parse_input_format(value);
         return;
     }
-    throw usage_error(fmt::format("unknown option '{}'", option));
+    throw usage_error(text::format("unknown option '{}'", option));
 }
 
 void parse_annotation_option(parsed_arguments &parsed, std::string_view option, std::string_view value) {
@@ -440,7 +441,7 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
                 continue;
             }
             if (!option_takes_value(arg)) {
-                throw usage_error(fmt::format("unknown option '{}'", arg));
+                throw usage_error(text::format("unknown option '{}'", arg));
             }
             parse_value_option(parsed, arg, require_value(index, argc, argv, arg));
             continue;

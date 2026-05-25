@@ -5,14 +5,16 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
 include(GNUInstallDirs)
 
-# As soon as std::format is more widely available, we can remove this
-if(NOT TARGET fmt::fmt)
+if(NOT CBOR_TAGS_STL_ONLY AND NOT TARGET fmt::fmt)
   cpmaddpackage("gh:fmtlib/fmt#11.1.2")
 endif()
 
 if(CBOR_TAGS_BUILD_CLI)
   add_executable(cbor_tags_cli cbor_tags_cli.cpp)
-  target_link_libraries(cbor_tags_cli PRIVATE cbor::tags fmt::fmt nameof::nameof)
+  target_link_libraries(cbor_tags_cli PRIVATE cbor::tags)
+  if(NOT CBOR_TAGS_STL_ONLY)
+    target_link_libraries(cbor_tags_cli PRIVATE fmt::fmt nameof::nameof)
+  endif()
 
   install(
     TARGETS cbor_tags_cli

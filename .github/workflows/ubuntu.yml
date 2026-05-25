@@ -213,6 +213,29 @@ jobs:
               -DCMAKE_CXX_COMPILER_LAUNCHER=
             cmake --build /tmp/build --parallel
             ctest --test-dir /tmp/build --output-on-failure
+
+            cmake -S /work -B /tmp/stl-only-build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCBOR_TAGS_STL_ONLY=ON \
+              -DCBOR_TAGS_INSTALL=ON \
+              -DCBOR_TAGS_BUILD_TESTS=OFF \
+              -DCMAKE_INSTALL_PREFIX=/tmp/cbor-tags-stl-only \
+              -DCMAKE_C_COMPILER_LAUNCHER= \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=
+            cmake --build /tmp/stl-only-build --parallel
+            cmake --install /tmp/stl-only-build
+            if grep -R -E "find_dependency\\((fmt|nameof|tl-expected)" /tmp/cbor-tags-stl-only; then
+              echo "C++26 STL-only install unexpectedly exports a third-party dependency" >&2
+              exit 10
+            fi
+
+            cmake -S /work/test/consumer/stl_only -B /tmp/stl-only-consumer-build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_PREFIX_PATH=/tmp/cbor-tags-stl-only \
+              -DCMAKE_CXX_STANDARD=26 \
+              -DCMAKE_CXX_STANDARD_REQUIRED=ON
+            cmake --build /tmp/stl-only-consumer-build --parallel
+            /tmp/stl-only-consumer-build/consumer
           '
 
   boost-pfr-names:

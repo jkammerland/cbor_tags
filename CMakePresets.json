@@ -9,6 +9,7 @@
     "- debug-cxx26/release-cxx26: Tests in generic C++26 mode",
     "- debug-std-expected/release-std-expected: Tests with C++23 std::expected return backend",
     "- debug-std-reflection/release-std-reflection: GCC C++26 std::meta reflection tests",
+    "- release-cxx26-stl-only: C++26 std-only installable package without public third-party dependencies",
     "- boost-pfr-names: Debug tests with C++20 Boost.PFR named-map reflection",
     "- magic-enum-names: Debug tests with CDDL enum-name definitions through magic_enum",
     "- coverage/coverage-release: --coverage instrumentation (non-Windows)",
@@ -27,6 +28,7 @@
     "cmake --build --preset=debug",
     "ctest --preset=debug",
     "cmake --workflow --preset=debug",
+    "cmake --workflow --preset=release-cxx26-stl-only",
     "cmake --workflow --preset=valgrind"
   ],
   "cmakeMinimumRequired": {
@@ -178,6 +180,18 @@
       "cacheVariables": {
         "CBOR_TAGS_BUILD_TESTS": "ON",
         "CBOR_TAGS_USE_STD_REFLECTION": "ON"
+      }
+    },
+    {
+      "name": "release-cxx26-stl-only",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/release-cxx26-stl-only",
+      "displayName": "Release C++26 STL-only",
+      "description": "Release installable package using C++26 std::expected/std::meta/std::format and no public third-party dependencies",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "26",
+        "CBOR_TAGS_STL_ONLY": "ON",
+        "CBOR_TAGS_INSTALL": "ON"
       }
     },
     {
@@ -575,6 +589,14 @@
       "configurePreset": "release-std-reflection",
       "displayName": "Release std::meta Reflection Build",
       "description": "Build release tests with GCC C++26 std::meta reflection",
+      "jobs": 0
+    },
+    {
+      "name": "release-cxx26-stl-only",
+      "inherits": "build-base",
+      "configurePreset": "release-cxx26-stl-only",
+      "displayName": "Release C++26 STL-only Build",
+      "description": "Build the installable C++26 STL-only package without public third-party dependencies",
       "jobs": 0
     },
     {
@@ -1268,6 +1290,21 @@
         {
           "type": "test",
           "name": "release-std-reflection"
+        }
+      ]
+    },
+    {
+      "name": "release-cxx26-stl-only",
+      "displayName": "Release C++26 STL-only Workflow",
+      "description": "Configure and build the installable C++26 STL-only package",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release-cxx26-stl-only"
+        },
+        {
+          "type": "build",
+          "name": "release-cxx26-stl-only"
         }
       ]
     },
