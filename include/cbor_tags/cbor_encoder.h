@@ -262,9 +262,9 @@ template <typename T> struct cbor_indefinite_encoder {
 };
 
 template <typename T> struct cbor_variant_encoder {
-    template <typename... Ts> constexpr void encode(const std::variant<Ts...> &value) {
+    template <IsVariant Variant> constexpr void encode(const Variant &value) {
         // encoding a variant is less strict than decoding
-        std::visit([this](const auto &v) { detail::underlying<T>(this).encode(v); }, value);
+        detail::variant_visit([this](const auto &v) { detail::underlying<T>(this).encode(v); }, value);
     }
 };
 

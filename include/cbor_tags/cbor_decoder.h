@@ -709,7 +709,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 #endif
     }
 
-    template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <IsVariant Variant> constexpr status_code decode(Variant &value, major_type major, byte additionalInfo) {
         std::optional<std::uint64_t> tag;
         return decode_variant(value, major, additionalInfo, tag);
     }
@@ -1269,20 +1269,25 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
-    template <typename... T>
-    constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
-                                         std::optional<std::uint64_t> &tag) {
+    template <IsVariant Variant>
+    constexpr status_code decode_variant(Variant &value, major_type major, byte additionalInfo, std::optional<std::uint64_t> &tag) {
         using namespace detail;
-        static_assert((IsCborMajor<T> && ...),
-                      "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
+        using variant_type = std::remove_cvref_t<Variant>;
+
+        static_assert(
+            detail::with_variant_alternatives<variant_type>([]<typename... Alternatives>() { return (IsCborMajor<Alternatives> && ...); }),
+            "All variant alternatives must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the "
+            "variant.");
 
         // TODO: Remove this requirement
-        static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
-                                                                   "decode into the type, it must be default constructed first.");
+        static_assert(
+            detail::with_variant_alternatives<variant_type>(
+                []<typename... Alternatives>() { return (std::is_default_constructible_v<Alternatives> && ...); }),
+            "All variant alternatives must be default constructible. Because in order to decode into the type, each alternative must be "
+            "default constructed first.");
 
         // Check ambiguous types in the variant.
-        using Variant = std::variant<T...>;
-        require_unambiguous_variant_dispatch<Variant>();
+        require_unambiguous_variant_dispatch<variant_type>();
         // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
         // Do not restore this as an unmatched-only guard; it misses invalid nested containers
         // and can drift from IsCborMajor/decoder overload truth.
@@ -1292,8 +1297,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         status_code hard_error     = status_code::success;
 
         auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
-                           &hard_error]<bool CatchAllPass, typename U>() -> bool {
-            using raw_type = std::remove_cvref_t<U>;
+                           &hard_error]<bool CatchAllPass, std::size_t I>() -> bool {
+            using raw_type = detail::variant_alternative_t<I, variant_type>;
             if (hard_error != status_code::success) {
                 return false;
             }
@@ -1319,7 +1324,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
 
             if (result == status_code::success) {
-                value = std::move(decoded_value);
+                detail::variant_assign<I>(value, std::move(decoded_value));
                 return true;
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
@@ -1333,14 +1338,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         };
 
+        auto try_decode_alternatives = [&]<bool CatchAllPass, std::size_t... Is>(std::index_sequence<Is...>) {
+            return (try_decode.template operator()<CatchAllPass, Is>() || ...);
+        };
+
         bool found = false;
         if (major == major_type::Simple) {
-            found = (try_decode.template operator()<false, T>() || ...);
+            found = try_decode_alternatives.template operator()<false>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
             if (!found) {
-                found = (try_decode.template operator()<true, T>() || ...);
+                found = try_decode_alternatives.template operator()<true>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
             }
         } else {
-            found = (try_decode.template operator()<false, T>() || ...);
+            found = try_decode_alternatives.template operator()<false>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
         }
         if (!found) {
             if (hard_error != status_code::success) {

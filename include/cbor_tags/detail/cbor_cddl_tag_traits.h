@@ -59,9 +59,7 @@ template <typename T> consteval bool cddl_contains_tag_header() {
     if constexpr (IsOptional<value_type>) {
         return cddl_contains_tag_header<typename value_type::value_type>();
     } else if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (cddl_contains_tag_header<Ts>() || ...);
-        }(static_cast<value_type *>(nullptr));
+        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_tag_header<Ts>() || ...); });
     } else {
         return IsTagHeader<value_type>;
     }
@@ -72,9 +70,7 @@ template <typename T> consteval bool cddl_contains_fixed_tag() {
     if constexpr (IsOptional<value_type>) {
         return cddl_contains_fixed_tag<typename value_type::value_type>();
     } else if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (cddl_contains_fixed_tag<Ts>() || ...);
-        }(static_cast<value_type *>(nullptr));
+        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_fixed_tag<Ts>() || ...); });
     } else {
         return cddl_direct_fixed_tag_available<value_type>();
     }
@@ -85,9 +81,7 @@ template <typename T, std::uint64_t Tag> consteval bool cddl_contains_fixed_tag_
     if constexpr (IsOptional<value_type>) {
         return cddl_contains_fixed_tag_value<typename value_type::value_type, Tag>();
     } else if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (cddl_contains_fixed_tag_value<Ts, Tag>() || ...);
-        }(static_cast<value_type *>(nullptr));
+        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_fixed_tag_value<Ts, Tag>() || ...); });
     } else if constexpr (cddl_direct_fixed_tag_available<value_type>()) {
         return cddl_direct_fixed_tag<value_type>() == Tag;
     } else {
@@ -100,9 +94,7 @@ template <typename T> consteval bool cddl_contains_shared_graph_pointer() {
     if constexpr (IsOptional<value_type>) {
         return cddl_contains_shared_graph_pointer<typename value_type::value_type>();
     } else if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (cddl_contains_shared_graph_pointer<Ts>() || ...);
-        }(static_cast<value_type *>(nullptr));
+        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_shared_graph_pointer<Ts>() || ...); });
     } else {
         return is_std_shared_ptr<value_type>::value;
     }
@@ -126,13 +118,9 @@ template <typename A, typename B> consteval bool cddl_fixed_tags_overlap() {
     } else if constexpr (IsOptional<b_type>) {
         return cddl_fixed_tags_overlap<a_type, typename b_type::value_type>();
     } else if constexpr (IsVariant<a_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (cddl_fixed_tags_overlap<Ts, b_type>() || ...);
-        }(static_cast<a_type *>(nullptr));
+        return with_variant_alternatives<a_type>([]<typename... Ts>() { return (cddl_fixed_tags_overlap<Ts, b_type>() || ...); });
     } else if constexpr (IsVariant<b_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (cddl_fixed_tags_overlap<a_type, Ts>() || ...);
-        }(static_cast<b_type *>(nullptr));
+        return with_variant_alternatives<b_type>([]<typename... Ts>() { return (cddl_fixed_tags_overlap<a_type, Ts>() || ...); });
     } else if constexpr (cddl_direct_fixed_tag_available<a_type>() && cddl_direct_fixed_tag_available<b_type>()) {
         return cddl_direct_fixed_tag<a_type>() == cddl_direct_fixed_tag<b_type>();
     } else {
