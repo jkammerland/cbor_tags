@@ -9,8 +9,8 @@
 
 namespace cbor::tags {
 
-// Customize this trait for variant-like types that cannot be detected
-// structurally. A usable specialization must provide:
+// Customize this trait for variant-like types that cannot be detected structurally.
+// A usable specialization must provide:
 // - static constexpr std::size_t size
 // - template <std::size_t I> using alternative = ...
 // - static std::size_t index(const T&)
@@ -150,50 +150,11 @@ struct variant_traits<Variant<Ts...>> {
 
 namespace detail {
 
-template <typename T>
-concept VariantTraitsAvailable =
-    requires { typename std::integral_constant<std::size_t, static_cast<std::size_t>(variant_traits<std::remove_cvref_t<T>>::size)>; };
+template <typename T, typename = void> struct is_variant_like : std::false_type {};
 
 template <typename T>
-inline constexpr std::size_t variant_traits_declared_size_v = static_cast<std::size_t>(variant_traits<std::remove_cvref_t<T>>::size);
-
-template <typename Variant, std::size_t I>
-concept VariantTraitReadableAlternative = requires(Variant &value, const Variant &const_value, variant_probe_visitor visitor) {
-    typename variant_traits<Variant>::template alternative<I>;
-    { variant_traits<Variant>::index(const_value) } -> std::convertible_to<std::size_t>;
-    variant_traits<Variant>::template get<I>(value);
-    variant_traits<Variant>::template get<I>(const_value);
-    variant_traits<Variant>::visit(visitor, const_value);
-};
-
-template <typename Variant, std::size_t I>
-concept VariantTraitAssignableAlternative =
-    requires(Variant &value, typename variant_traits<Variant>::template alternative<I> alternative) {
-        variant_traits<Variant>::template assign<I>(value, std::move(alternative));
-    };
-
-template <typename Variant, std::size_t... Is> consteval bool variant_traits_are_usable_impl(std::index_sequence<Is...>) {
-    return (VariantTraitReadableAlternative<Variant, Is> && ...) && (VariantTraitAssignableAlternative<Variant, Is> && ...);
-}
-
-template <typename T> consteval bool variant_traits_are_usable() {
-    using variant_type = std::remove_cvref_t<T>;
-    if constexpr (VariantTraitsAvailable<variant_type>) {
-        if constexpr (variant_traits_declared_size_v<variant_type> == 0U) {
-            return false;
-        }
-        return variant_traits_are_usable_impl<variant_type>(std::make_index_sequence<variant_traits_declared_size_v<variant_type>>{});
-    }
-    return false;
-}
-
-template <typename T>
-concept VariantTraitsUsable = variant_traits_are_usable<T>();
-
-template <typename T> struct is_variant_like : std::bool_constant<VariantTraitsUsable<std::remove_cvref_t<T>>> {
-    static_assert(!VariantTraitsAvailable<std::remove_cvref_t<T>> || VariantTraitsUsable<std::remove_cvref_t<T>>,
-                  "variant_traits<T> must provide size, alternative<I>, index, get<I>, visit, and assign<I>");
-};
+struct is_variant_like<T, std::void_t<decltype(variant_traits<std::remove_cvref_t<T>>::size)>>
+    : std::bool_constant<(variant_traits<std::remove_cvref_t<T>>::size > 0U)> {};
 
 template <typename T>
 concept VariantLike = is_variant_like<std::remove_cvref_t<T>>::value;
