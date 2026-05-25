@@ -34,7 +34,17 @@
       ]
     },
     "std-expected": {
-      "description": "Use the C++23 std::expected backend without installing tl::expected."
+      "description": "Use the C++23 std::expected backend without installing tl::expected.",
+      "dependencies": [
+        {
+          "name": "nameof",
+          "version>=": "0.10.4"
+        },
+        {
+          "name": "fmt",
+          "version>=": "11.0.2"
+        }
+      ]
     },
     "stl-only": {
       "description": "Use the C++26 std::expected/std::meta/std::format path without third-party runtime dependencies."

@@ -28,6 +28,12 @@ int main() {
         return 2;
     }
 
+    std::string type_schema;
+    cddl_schema_to<consumer_point>(type_schema, {.row_options = {.format_by_rows = false}});
+    if (type_schema.find("consumer_point = [uint, uint]") == std::string::npos) {
+        return 6;
+    }
+
     std::vector<std::byte> buffer;
     auto                   enc   = make_encoder(buffer);
     consumer_point         value = {.x = 1, .y = 2};
