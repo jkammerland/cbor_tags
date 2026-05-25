@@ -19,6 +19,7 @@
 
 using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
+namespace smart_ptr_detail = cbor::tags::ext::smart_ptr::detail;
 
 namespace smart_ptr_test {
 
@@ -65,8 +66,8 @@ struct graph_decode_consumes_then_fails {
         if (!result) {
             return result;
         }
-        return cbor::tags::expected<void, cbor::tags::status_code>{
-            cbor::tags::unexpected<cbor::tags::status_code>{cbor::tags::status_code::error}};
+        using decode_error = cbor::tags::unexpected<status_code>;
+        return expected<void, status_code>{decode_error{status_code::error}};
     }
 };
 
@@ -97,7 +98,7 @@ struct graph_nested_encode_session_mismatch {
     friend cbor::tags::Access;
 
     template <typename Encoder> auto encode(Encoder &enc) const {
-        auto result = enc(cbor::tags::ext::smart_ptr::as_shared_graph(*other, value));
+        auto result = enc(as_shared_graph(*other, value));
         if (!result) {
             throw std::runtime_error("nested shared graph session mismatch");
         }
@@ -112,7 +113,7 @@ struct graph_nested_decode_session_mismatch {
   private:
     friend cbor::tags::Access;
 
-    template <typename Decoder> auto decode(Decoder &dec) { return dec(cbor::tags::ext::smart_ptr::as_shared_graph(*other, value)); }
+    template <typename Decoder> auto decode(Decoder &dec) { return dec(as_shared_graph(*other, value)); }
 };
 
 struct graph_reset_during_encode {
@@ -681,6 +682,7 @@ TEST_CASE("shared graph codec rejects malformed graph wrappers") {
     const malformed_case cases[]{
         {"8101", status_code::error, std::nullopt},                           // [1]
         {"8201182a", status_code::unexpected_group_size, 1U},                 // [1, 42]
+        {"d8", status_code::incomplete, std::nullopt},                        // #6.<missing tag argument>
         {"d81c", status_code::incomplete, std::nullopt},                      // #6.28(<missing>)
         {"d81c6161", status_code::no_match_for_uint_on_buffer, std::nullopt}, // #6.28("a")
         {"d81d", status_code::incomplete, std::nullopt},                      // #6.29(<missing>)
@@ -1089,6 +1091,140 @@ TEST_CASE("shared graph codec decodes unambiguous smart pointer variants inside 
     CHECK(first_ptr.get() == second_ptr.get());
 }
 
+TEST_CASE("shared graph codec decodes vector smart pointer variants inside graph roots") {
+    using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
+    using value_type  = std::variant<vector_type, std::string>;
+
+    static_assert(smart_ptr_detail::has_decodable_shared_graph_vector_v<vector_type, std::string>);
+    static_assert(!smart_ptr_detail::has_decodable_nullable_pointer_v<vector_type, std::string>);
+
+    auto       shared = std::make_shared<std::uint64_t>(42U);
+    value_type value{vector_type{shared, shared}};
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, value)));
+    CHECK_EQ(to_hex(buffer), "82d81c182ad81d00");
+
+    auto                        dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session decode_graph;
+    value_type                  decoded{std::string{"before"}};
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded)));
+    REQUIRE(std::holds_alternative<vector_type>(decoded));
+    const auto &decoded_vector = std::get<vector_type>(decoded);
+    REQUIRE_EQ(decoded_vector.size(), 2U);
+    REQUIRE(static_cast<bool>(decoded_vector[0]));
+    REQUIRE(static_cast<bool>(decoded_vector[1]));
+    CHECK_EQ(*decoded_vector[0], 42U);
+    CHECK(decoded_vector[0].get() == decoded_vector[1].get());
+
+    value_type             text{std::string{"ok"}};
+    std::vector<std::byte> text_buffer;
+    auto                   text_enc = make_encoder<shared_graph_codec>(text_buffer);
+    REQUIRE(text_enc(as_shared_graph(encode_graph, text)));
+    CHECK_EQ(to_hex(text_buffer), "626f6b");
+
+    auto       text_dec = make_decoder<shared_graph_codec>(text_buffer);
+    value_type decoded_text{vector_type{}};
+    REQUIRE(text_dec(as_shared_graph(decode_graph, decoded_text)));
+    REQUIRE(std::holds_alternative<std::string>(decoded_text));
+    CHECK_EQ(std::get<std::string>(decoded_text), "ok");
+}
+
+TEST_CASE("shared graph vector variants preserve malformed pointer element errors") {
+    using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
+    using value_type  = std::variant<vector_type, std::string>;
+
+    {
+        const auto                  bytes = to_bytes("81d81d00");
+        auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+
+    {
+        const auto                  bytes = to_bytes("81d81c6161");
+        auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_uint_on_buffer);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+
+    {
+        const auto                  bytes = to_bytes("818101");
+        auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+        shared_graph_decode_session decode_graph;
+        value_type                  value{std::string{"before"}};
+        const auto                  result = dec(as_shared_graph(decode_graph, value));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
+    }
+}
+
+TEST_CASE("shared graph vector variants roll back decoded ids after element failures") {
+    using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
+    using value_type  = std::variant<vector_type, std::string>;
+
+    const auto                  bytes = to_bytes("82d81c182ad81d01d81d00");
+    auto                        dec   = make_decoder<shared_graph_codec>(bytes);
+    shared_graph_decode_session decode_graph;
+    value_type                  value{std::string{"before"}};
+
+    const auto failed_vector = dec(as_shared_graph(decode_graph, value));
+    REQUIRE_FALSE(failed_vector);
+    CHECK_EQ(failed_vector.error(), status_code::error);
+    REQUIRE(std::holds_alternative<std::string>(value));
+    CHECK_EQ(std::get<std::string>(value), "before");
+
+    auto       leaked = std::make_shared<std::uint64_t>(7U);
+    const auto ref    = dec(as_shared_graph(decode_graph, leaked));
+    REQUIRE_FALSE(ref);
+    CHECK_EQ(ref.error(), status_code::error);
+    REQUIRE(static_cast<bool>(leaked));
+    CHECK_EQ(*leaked, 7U);
+}
+
+TEST_CASE("shared graph vector variants roundtrip null pointer elements") {
+    using vector_type = std::vector<std::shared_ptr<std::uint64_t>>;
+    using value_type  = std::variant<vector_type, std::string>;
+
+    value_type value{vector_type{std::shared_ptr<std::uint64_t>{}}};
+
+    std::vector<std::byte>      buffer;
+    auto                        enc = make_encoder<shared_graph_codec>(buffer);
+    shared_graph_encode_session encode_graph;
+
+    REQUIRE(enc(as_shared_graph(encode_graph, value)));
+    CHECK_EQ(to_hex(buffer), "818100");
+
+    auto                        dec = make_decoder<shared_graph_codec>(buffer);
+    shared_graph_decode_session decode_graph;
+    value_type                  decoded{std::string{"before"}};
+
+    REQUIRE(dec(as_shared_graph(decode_graph, decoded)));
+    REQUIRE(std::holds_alternative<vector_type>(decoded));
+    const auto &decoded_vector = std::get<vector_type>(decoded);
+    REQUIRE_EQ(decoded_vector.size(), 1U);
+    CHECK_FALSE(static_cast<bool>(decoded_vector[0]));
+}
+
 TEST_CASE("shared graph variants preserve malformed pointer errors") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
 
@@ -1130,6 +1266,16 @@ TEST_CASE("nullable pointer codec rejects malformed wrappers") {
         CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
         REQUIRE(static_cast<bool>(decoded));
         CHECK_EQ(*decoded, 7U);
+    }
+
+    {
+        const auto                     bytes = to_bytes("98");
+        std::shared_ptr<std::uint64_t> decoded;
+        auto                           dec    = make_decoder<nullable_ptr_codec>(bytes);
+        const auto                     result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
     }
 
     {
@@ -1262,13 +1408,10 @@ TEST_CASE("combined codecs use nullable variant dispatch outside graph wrappers"
 
     static_assert(!std::is_aggregate_v<shared_graph_encode_root<std::uint64_t>>);
     static_assert(!std::is_aggregate_v<shared_graph_decode_root<std::uint64_t>>);
-    static_assert(
-        !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<42>>);
-    static_assert(
-        cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<28>>);
-    static_assert(
-        cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<29>>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, as_tag_any>);
+    static_assert(!smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<42>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<28>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, static_tag<29>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, as_tag_any>);
 
     {
         const auto bytes = to_bytes("d82a");
@@ -1350,6 +1493,20 @@ TEST_CASE("shared graph codec rejects inactive nullable variant dispatch without
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
         CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(value));
+    }
+
+    {
+        using value_type = std::variant<std::vector<std::shared_ptr<std::uint64_t>>, std::string>;
+
+        const auto bytes = to_bytes("80");
+        auto       dec   = make_decoder<shared_graph_codec>(bytes);
+        value_type value{std::string{"before"}};
+        const auto result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        REQUIRE(std::holds_alternative<std::string>(value));
+        CHECK_EQ(std::get<std::string>(value), "before");
     }
 }
 
@@ -1442,14 +1599,13 @@ TEST_CASE("shared graph variants dispatch nested non-colliding tag alternatives"
     using nested_type = std::variant<std::string, static_tag<42>>;
     using value_type  = std::variant<std::shared_ptr<std::uint64_t>, nested_type>;
 
+    static_assert(!smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, nested_type>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                             std::variant<std::string, static_tag<28>>>);
+    static_assert(smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
+                                                                             std::variant<std::string, static_tag<29>>>);
     static_assert(
-        !cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, nested_type>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
-                                                                                               std::variant<std::string, static_tag<28>>>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
-                                                                                               std::variant<std::string, static_tag<29>>>);
-    static_assert(cbor::tags::ext::smart_ptr::detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>,
-                                                                                               std::variant<std::string, as_tag_any>>);
+        smart_ptr_detail::variant_has_shared_graph_tag_collision_v<std::shared_ptr<std::uint64_t>, std::variant<std::string, as_tag_any>>);
 
     const auto                  bytes = to_bytes("d82a");
     auto                        dec   = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);

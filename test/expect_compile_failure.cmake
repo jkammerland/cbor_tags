@@ -10,8 +10,13 @@ if(NOT DEFINED PASS_REGEX)
   message(FATAL_ERROR "PASS_REGEX is required")
 endif()
 
+set(build_command "${CMAKE_COMMAND}" --build "${BUILD_DIR}" --target "${TEST_TARGET}")
+if(DEFINED CONFIG AND NOT CONFIG STREQUAL "")
+  list(APPEND build_command --config "${CONFIG}")
+endif()
+
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" --build "${BUILD_DIR}" --target "${TEST_TARGET}"
+  COMMAND ${build_command}
   WORKING_DIRECTORY "${BUILD_DIR}"
   RESULT_VARIABLE build_result
   OUTPUT_VARIABLE build_stdout

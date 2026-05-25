@@ -3,14 +3,12 @@
 #include "cbor_concepts.h"
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
-#include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_detail.h"
-#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
-#include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
+#include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
@@ -20,15 +18,13 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
-#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
-#include <memory>
+#include <new>
 // #include <magic_enum/magic_enum.hpp>
 // #include <nameof.hpp>
 #include "cbor_tags/cbor_tags_config.h"
 
-#include <array>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -40,7 +36,6 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 
@@ -54,27 +49,6 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     constexpr auto min_value         = std::numeric_limits<T>::min();
     constexpr auto max_cbor_argument = static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
-}
-
-template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(std::byte additional_info) {
-    using type = std::remove_cvref_t<U>;
-    if constexpr (IsOptional<type>) {
-        if (additional_info == static_cast<std::byte>(SimpleType::Null)) {
-            return true;
-        }
-        return matches_simple_dispatch<CatchAllPass, typename type::value_type>(additional_info);
-    } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, std::byte info) {
-            return (matches_simple_dispatch<CatchAllPass, Ts>(info) || ...);
-        }(static_cast<type *>(nullptr), additional_info);
-    } else if constexpr (std::is_same_v<type, simple>) {
-        const auto value = std::to_integer<std::uint8_t>(additional_info);
-        return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
-    } else if constexpr (IsSimple<type>) {
-        return !CatchAllPass && compare_simple_value<type>(additional_info);
-    } else {
-        return false;
-    }
 }
 
 template <typename InputBuffer, typename Reader>
@@ -736,92 +710,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
-        using namespace detail;
-        static_assert((IsCborMajor<T> && ...),
-                      "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
-
-        // TODO: Remove this requirement
-        static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
-                                                                   "decode into the type, it must be default constructed first.");
-
-        // Check ambiguous types in the variant.
-        using Variant                                     = std::variant<T...>;
-        constexpr auto no_ambigous_major_types_in_variant = valid_concept_mapping_v<Variant>;
-        constexpr auto matching_major_types               = valid_concept_mapping_array_v<Variant>;
-        static_assert(matching_major_types[MajorIndex::Unsigned] <= 1, "Multiple types match against major type 0 (unsigned integer)");
-        static_assert(matching_major_types[MajorIndex::Negative] <= 1, "Multiple types match against major type 1 (negative integer)");
-        static_assert(matching_major_types[MajorIndex::BStr] <= 1, "Multiple types match against major type 2 (byte string)");
-        static_assert(matching_major_types[MajorIndex::TStr] <= 1, "Multiple types match against major type 3 (text string)");
-        static_assert(matching_major_types[MajorIndex::Array] <= 1, "Multiple types match against major type 4 (array)");
-        static_assert(matching_major_types[MajorIndex::Map] <= 1, "Multiple types match against major type 5 (map)");
-        static_assert(matching_major_types[MajorIndex::Tag] <= 1, "Multiple types match against major type 6 (tag)");
-        static_assert(matching_major_types[MajorIndex::SimpleValued] <= 1, "Multiple types match against major type 7 (simple)");
-        static_assert(matching_major_types[MajorIndex::Boolean] <= 1, "Multiple types match against major type 7 (boolean)");
-        static_assert(matching_major_types[MajorIndex::Null] <= 1, "Multiple types match against major type 7 (null)");
-        static_assert(matching_major_types[MajorIndex::float16] <= 1, "Multiple types match against major type 7 (float16)");
-        static_assert(matching_major_types[MajorIndex::float32] <= 1, "Multiple types match against major type 7 (float32)");
-        static_assert(matching_major_types[MajorIndex::float64] <= 1, "Multiple types match against major type 7 (float64)");
-        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
-        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
-        // and can drift from IsCborMajor/decoder overload truth.
-        // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
-        static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
-                      "Variant cannot contain dynamic tags, must be known at compile time, use as_tag_any to catch any tag");
-
-        static_assert(no_ambigous_major_types_in_variant, "Variant has ambigous major types, if this would compile, only the first type \
-                                                          (among the ambigous) would get decoded.");
-
-        // Holder for the parsed tag value
-        [[maybe_unused]] std::optional<std::uint64_t> tag;
-        bool                                          saw_incomplete = false;
-
-        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete]<bool CatchAllPass, typename U>() -> bool {
-            if (!is_valid_major<major_type, U>(major)) {
-                return false;
-            }
-
-            if (major == major_type::Simple && !detail::matches_simple_dispatch<CatchAllPass, U>(additionalInfo)) {
-                return false;
-            }
-
-            U           decoded_value;
-            status_code result;
-            if constexpr (IsTag<U>) {
-                if (!tag) {
-                    tag = decode_unsigned(additionalInfo);
-                }
-                result = this->decode(decoded_value, *tag);
-            } else /* Not tag */ {
-                result = this->decode(decoded_value, major, additionalInfo);
-            }
-
-            if (result == status_code::success) {
-                value = std::move(decoded_value);
-                return true;
-            } else if (result == status_code::incomplete) {
-                saw_incomplete = true;
-                return false;
-            } else {
-                return false;
-            }
-        };
-
-        bool found = false;
-        if (major == major_type::Simple) {
-            found = (try_decode.template operator()<false, T>() || ...);
-            if (!found) {
-                found = (try_decode.template operator()<true, T>() || ...);
-            }
-        } else {
-            found = (try_decode.template operator()<false, T>() || ...);
-        }
-        if (!found) {
-            if (saw_incomplete) {
-                return status_code::incomplete;
-            }
-            return status_code::no_match_in_variant_on_buffer;
-        }
-        return status_code::success;
+        std::optional<std::uint64_t> tag;
+        return decode_variant(value, major, additionalInfo, tag);
     }
 
     constexpr status_code decode(as_text_any &value, major_type major, byte additionalInfo) {
@@ -1379,6 +1269,91 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    template <typename... T>
+    constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
+                                         std::optional<std::uint64_t> &tag) {
+        using namespace detail;
+        static_assert((IsCborMajor<T> && ...),
+                      "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
+
+        // TODO: Remove this requirement
+        static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
+                                                                   "decode into the type, it must be default constructed first.");
+
+        // Check ambiguous types in the variant.
+        using Variant = std::variant<T...>;
+        require_unambiguous_variant_dispatch<Variant>();
+        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
+        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
+        // and can drift from IsCborMajor/decoder overload truth.
+        // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
+
+        bool        saw_incomplete = false;
+        status_code hard_error     = status_code::success;
+
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
+                           &hard_error]<bool CatchAllPass, typename U>() -> bool {
+            using raw_type = std::remove_cvref_t<U>;
+            if (hard_error != status_code::success) {
+                return false;
+            }
+            if (!matches_major_dispatch<raw_type>(major)) {
+                return false;
+            }
+
+            if (major == major_type::Simple && !detail::matches_simple_dispatch<CatchAllPass, raw_type>(additionalInfo)) {
+                return false;
+            }
+
+            raw_type    decoded_value;
+            status_code result;
+            if constexpr (IsVariant<raw_type>) {
+                result = this->decode_variant(decoded_value, major, additionalInfo, tag);
+            } else if constexpr (IsTag<raw_type>) {
+                if (!tag) {
+                    tag = decode_unsigned(additionalInfo);
+                }
+                result = this->decode(decoded_value, *tag);
+            } else {
+                result = this->decode(decoded_value, major, additionalInfo);
+            }
+
+            if (result == status_code::success) {
+                value = std::move(decoded_value);
+                return true;
+            } else if (result == status_code::incomplete) {
+                saw_incomplete = true;
+                return false;
+            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
+                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+                hard_error = result;
+                return false;
+            } else {
+                return false;
+            }
+        };
+
+        bool found = false;
+        if (major == major_type::Simple) {
+            found = (try_decode.template operator()<false, T>() || ...);
+            if (!found) {
+                found = (try_decode.template operator()<true, T>() || ...);
+            }
+        } else {
+            found = (try_decode.template operator()<false, T>() || ...);
+        }
+        if (!found) {
+            if (hard_error != status_code::success) {
+                return hard_error;
+            }
+            if (saw_incomplete) {
+                return status_code::incomplete;
+            }
+            return status_code::no_match_in_variant_on_buffer;
+        }
+        return status_code::success;
+    }
+
     template <typename RawView, typename Iterator>
     constexpr void assign_encoded_view(RawView &value, Iterator start, Iterator cursor, size_type size) const {
         using raw_view_type       = std::remove_cvref_t<RawView>;

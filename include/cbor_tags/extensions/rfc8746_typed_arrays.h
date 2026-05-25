@@ -3,16 +3,22 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_segments.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
+#include "cbor_tags/detail/cbor_extension_encode.h"
+#include "cbor_tags/extensions/cddl_traits.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -23,38 +29,163 @@
 
 namespace cbor::tags::ext::rfc8746 {
 
-template <typename T> struct typed_array_traits;
+enum class typed_array_byte_order { little, big };
 
-template <> struct typed_array_traits<std::int32_t> {
-    using bit_type                     = std::uint32_t;
-    static constexpr std::uint64_t tag = 78;
+template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little> struct typed_array_traits;
+
+enum class uint8_clamped : std::uint8_t {};
+
+struct float128_t {
+    // Native-endian IEEE 754 binary128 bits. Encoders convert this representation
+    // to the requested RFC 8746 wire byte order.
+    std::array<std::byte, 16> bytes{};
+
+    friend constexpr bool operator==(const float128_t &, const float128_t &) noexcept = default;
 };
 
-template <> struct typed_array_traits<std::int64_t> {
-    using bit_type                     = std::uint64_t;
-    static constexpr std::uint64_t tag = 79;
+static_assert(sizeof(float128_t) == 16U);
+
+template <std::uint64_t Tag, typename BitType> struct typed_array_traits_base {
+    using bit_type                     = BitType;
+    static constexpr std::uint64_t tag = Tag;
 };
 
-template <> struct typed_array_traits<float16_t> {
-    using bit_type                     = std::uint16_t;
-    static constexpr std::uint64_t tag = 84;
+template <> struct typed_array_traits<std::uint8_t, typed_array_byte_order::little> : typed_array_traits_base<64, std::uint8_t> {};
+template <> struct typed_array_traits<std::uint16_t, typed_array_byte_order::big> : typed_array_traits_base<65, std::uint16_t> {};
+template <> struct typed_array_traits<std::uint32_t, typed_array_byte_order::big> : typed_array_traits_base<66, std::uint32_t> {};
+template <> struct typed_array_traits<std::uint64_t, typed_array_byte_order::big> : typed_array_traits_base<67, std::uint64_t> {};
+template <> struct typed_array_traits<uint8_clamped, typed_array_byte_order::little> : typed_array_traits_base<68, std::uint8_t> {};
+template <> struct typed_array_traits<std::uint16_t, typed_array_byte_order::little> : typed_array_traits_base<69, std::uint16_t> {};
+template <> struct typed_array_traits<std::uint32_t, typed_array_byte_order::little> : typed_array_traits_base<70, std::uint32_t> {};
+template <> struct typed_array_traits<std::uint64_t, typed_array_byte_order::little> : typed_array_traits_base<71, std::uint64_t> {};
+
+template <> struct typed_array_traits<std::int8_t, typed_array_byte_order::little> : typed_array_traits_base<72, std::uint8_t> {};
+template <> struct typed_array_traits<std::int16_t, typed_array_byte_order::big> : typed_array_traits_base<73, std::uint16_t> {};
+template <> struct typed_array_traits<std::int32_t, typed_array_byte_order::big> : typed_array_traits_base<74, std::uint32_t> {};
+template <> struct typed_array_traits<std::int64_t, typed_array_byte_order::big> : typed_array_traits_base<75, std::uint64_t> {};
+template <> struct typed_array_traits<std::int16_t, typed_array_byte_order::little> : typed_array_traits_base<77, std::uint16_t> {};
+template <> struct typed_array_traits<std::int32_t, typed_array_byte_order::little> : typed_array_traits_base<78, std::uint32_t> {};
+template <> struct typed_array_traits<std::int64_t, typed_array_byte_order::little> : typed_array_traits_base<79, std::uint64_t> {};
+
+template <> struct typed_array_traits<float16_t, typed_array_byte_order::big> : typed_array_traits_base<80, std::uint16_t> {};
+template <> struct typed_array_traits<float, typed_array_byte_order::big> : typed_array_traits_base<81, std::uint32_t> {};
+template <> struct typed_array_traits<double, typed_array_byte_order::big> : typed_array_traits_base<82, std::uint64_t> {};
+template <> struct typed_array_traits<float128_t, typed_array_byte_order::big> : typed_array_traits_base<83, std::array<std::byte, 16>> {};
+template <> struct typed_array_traits<float16_t, typed_array_byte_order::little> : typed_array_traits_base<84, std::uint16_t> {};
+template <> struct typed_array_traits<float, typed_array_byte_order::little> : typed_array_traits_base<85, std::uint32_t> {};
+template <> struct typed_array_traits<double, typed_array_byte_order::little> : typed_array_traits_base<86, std::uint64_t> {};
+template <>
+struct typed_array_traits<float128_t, typed_array_byte_order::little> : typed_array_traits_base<87, std::array<std::byte, 16>> {};
+
+inline constexpr std::uint64_t multi_dimensional_array_tag              = 40;
+inline constexpr std::uint64_t homogeneous_array_tag                    = 41;
+inline constexpr std::uint64_t multi_dimensional_column_major_array_tag = 1040;
+
+enum class multi_dimensional_layout { row_major, column_major };
+
+template <typename T>
+concept IsRFC8746DimensionArray =
+    IsArray<std::remove_cvref_t<T>> && IsUnsigned<std::remove_cv_t<std::ranges::range_value_t<std::remove_cvref_t<T>>>>;
+
+template <typename Array>
+    requires IsArray<std::remove_cvref_t<Array>>
+class homogeneous_array {
+  public:
+    using array_type                              = Array;
+    static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
+
+    homogeneous_array() = default;
+    explicit homogeneous_array(Array values) : values_(std::move(values)) {}
+
+    [[nodiscard]] Array       &values() noexcept { return values_; }
+    [[nodiscard]] const Array &values() const noexcept { return values_; }
+
+  private:
+    Array values_{};
 };
 
-template <> struct typed_array_traits<float> {
-    using bit_type                     = std::uint32_t;
-    static constexpr std::uint64_t tag = 85;
+template <typename Array>
+    requires IsArray<std::remove_cvref_t<Array>>
+class homogeneous_array_ref {
+  public:
+    using array_type                              = std::remove_cvref_t<Array>;
+    static constexpr std::uint64_t cbor_array_tag = homogeneous_array_tag;
+
+    constexpr explicit homogeneous_array_ref(const array_type &values) noexcept : values_(&values) {}
+
+    [[nodiscard]] constexpr const array_type &values() const noexcept { return *values_; }
+
+  private:
+    const array_type *values_;
 };
 
-template <> struct typed_array_traits<double> {
-    using bit_type                     = std::uint64_t;
-    static constexpr std::uint64_t tag = 86;
+template <typename Array>
+    requires IsArray<std::remove_cvref_t<Array>>
+[[nodiscard]] constexpr auto as_homogeneous_array(const Array &values) noexcept {
+    return homogeneous_array_ref<Array>{values};
+}
+
+template <typename Array>
+    requires(!std::is_lvalue_reference_v<Array &&> && IsArray<std::remove_cvref_t<Array>>)
+void as_homogeneous_array(Array &&values) = delete;
+
+template <typename Dimensions, typename Array, multi_dimensional_layout Layout = multi_dimensional_layout::row_major>
+    requires IsRFC8746DimensionArray<Dimensions>
+class multi_dimensional_array {
+  public:
+    using dimensions_type = Dimensions;
+    using array_type      = Array;
+
+    static constexpr std::uint64_t cbor_array_tag =
+        Layout == multi_dimensional_layout::row_major ? multi_dimensional_array_tag : multi_dimensional_column_major_array_tag;
+    static constexpr std::uint64_t cbor_tag = cbor_array_tag;
+
+    multi_dimensional_array() = default;
+    multi_dimensional_array(Dimensions dimensions, Array values) : dimensions_(std::move(dimensions)), values_(std::move(values)) {}
+
+    [[nodiscard]] Dimensions       &dimensions() noexcept { return dimensions_; }
+    [[nodiscard]] const Dimensions &dimensions() const noexcept { return dimensions_; }
+    [[nodiscard]] Array            &values() noexcept { return values_; }
+    [[nodiscard]] const Array      &values() const noexcept { return values_; }
+
+  private:
+    Dimensions dimensions_{};
+    Array      values_{};
+};
+
+template <typename Dimensions, typename Array>
+using multi_dimensional_column_major_array = multi_dimensional_array<Dimensions, Array, multi_dimensional_layout::column_major>;
+
+template <typename Dimensions, typename Array, multi_dimensional_layout Layout = multi_dimensional_layout::row_major>
+    requires IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>>
+class multi_dimensional_array_ref {
+  public:
+    using dimensions_type = std::remove_cvref_t<Dimensions>;
+    using array_type      = std::remove_cvref_t<Array>;
+
+    static constexpr std::uint64_t cbor_array_tag =
+        Layout == multi_dimensional_layout::row_major ? multi_dimensional_array_tag : multi_dimensional_column_major_array_tag;
+
+    constexpr multi_dimensional_array_ref(const dimensions_type &dimensions, const array_type &values) noexcept
+        : dimensions_(&dimensions), values_(&values) {}
+
+    [[nodiscard]] constexpr const dimensions_type &dimensions() const noexcept { return *dimensions_; }
+    [[nodiscard]] constexpr const array_type      &values() const noexcept { return *values_; }
+
+  private:
+    const dimensions_type *dimensions_;
+    const array_type      *values_;
+};
+
+template <typename T, typed_array_byte_order ByteOrder>
+concept IsTypedArrayElementFor = requires {
+    typename typed_array_traits<std::remove_cv_t<T>, ByteOrder>::bit_type;
+    { typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T>
-concept IsTypedArrayElement = requires {
-    typename typed_array_traits<std::remove_cv_t<T>>::bit_type;
-    { typed_array_traits<std::remove_cv_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
-};
+concept IsTypedArrayElement = IsTypedArrayElementFor<T, typed_array_byte_order::little>;
 
 namespace detail {
 
@@ -67,84 +198,175 @@ concept DecodableTypedArrayPayloadRange =
     TypedArrayPayloadRange<R> && ((std::ranges::contiguous_range<const R> && !IsContiguous<typename Decoder::input_buffer_type>) ||
                                   requires(Decoder &dec, std::uint64_t length) { R{dec.decode_bstring_payload(length)}; });
 
-template <IsTypedArrayElement T> [[nodiscard]] constexpr auto to_bits(T value) noexcept {
+template <typed_array_byte_order ByteOrder>
+inline constexpr bool native_matches_byte_order =
+    (std::endian::native == std::endian::little && ByteOrder == typed_array_byte_order::little) ||
+    (std::endian::native == std::endian::big && ByteOrder == typed_array_byte_order::big);
+
+template <typename BitType> [[nodiscard]] BitType byteswap_bits(BitType value) noexcept {
+    static_assert(std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>);
+    if constexpr (std::same_as<BitType, std::array<std::byte, 16>>) {
+        std::ranges::reverse(value);
+        return value;
+    } else {
+#if defined(__GNUC__) || defined(__clang__)
+        if constexpr (sizeof(BitType) == 2U) {
+            return static_cast<BitType>(__builtin_bswap16(static_cast<std::uint16_t>(value)));
+        } else if constexpr (sizeof(BitType) == 4U) {
+            return static_cast<BitType>(__builtin_bswap32(static_cast<std::uint32_t>(value)));
+        } else if constexpr (sizeof(BitType) == 8U) {
+            return static_cast<BitType>(__builtin_bswap64(static_cast<std::uint64_t>(value)));
+        } else {
+            return value;
+        }
+#elif defined(_MSC_VER)
+        if constexpr (sizeof(BitType) == 2U) {
+            return static_cast<BitType>(::_byteswap_ushort(static_cast<unsigned short>(value)));
+        } else if constexpr (sizeof(BitType) == 4U) {
+            return static_cast<BitType>(::_byteswap_ulong(static_cast<unsigned long>(value)));
+        } else if constexpr (sizeof(BitType) == 8U) {
+            return static_cast<BitType>(::_byteswap_uint64(static_cast<unsigned __int64>(value)));
+        } else {
+            return value;
+        }
+#else
+        if constexpr (sizeof(BitType) == 2U) {
+            return static_cast<BitType>(((value & BitType{0x00FFU}) << 8U) | ((value & BitType{0xFF00U}) >> 8U));
+        } else if constexpr (sizeof(BitType) == 4U) {
+            return static_cast<BitType>(((value & BitType{0x000000FFU}) << 24U) | ((value & BitType{0x0000FF00U}) << 8U) |
+                                        ((value & BitType{0x00FF0000U}) >> 8U) | ((value & BitType{0xFF000000U}) >> 24U));
+        } else if constexpr (sizeof(BitType) == 8U) {
+            return static_cast<BitType>(
+                ((value & BitType{0x00000000000000FFULL}) << 56U) | ((value & BitType{0x000000000000FF00ULL}) << 40U) |
+                ((value & BitType{0x0000000000FF0000ULL}) << 24U) | ((value & BitType{0x00000000FF000000ULL}) << 8U) |
+                ((value & BitType{0x000000FF00000000ULL}) >> 8U) | ((value & BitType{0x0000FF0000000000ULL}) >> 24U) |
+                ((value & BitType{0x00FF000000000000ULL}) >> 40U) | ((value & BitType{0xFF00000000000000ULL}) >> 56U));
+        } else {
+            return value;
+        }
+#endif
+    }
+}
+
+template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] BitType native_to_wire_bits(BitType bits) noexcept {
+    if constexpr (sizeof(BitType) == 1U || native_matches_byte_order<ByteOrder>) {
+        return bits;
+    } else if constexpr (std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>) {
+        return byteswap_bits(bits);
+    } else {
+        return bits;
+    }
+}
+
+template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] BitType wire_to_native_bits(BitType bits) noexcept {
+    return native_to_wire_bits<ByteOrder>(bits);
+}
+
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] constexpr auto to_bits(T value) noexcept {
     using value_type = std::remove_cv_t<T>;
-    using bit_type   = typename typed_array_traits<value_type>::bit_type;
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
     static_assert(sizeof(value_type) == sizeof(bit_type));
     return std::bit_cast<bit_type>(value);
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] constexpr T from_little_endian(std::span<const std::byte> bytes) noexcept {
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] T from_endian(std::span<const std::byte> bytes) noexcept {
     using value_type = std::remove_cv_t<T>;
-    using bit_type   = typename typed_array_traits<value_type>::bit_type;
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
     static_assert(sizeof(value_type) == sizeof(bit_type));
 
-    bit_type bits{};
-    for (std::size_t i = 0; i < sizeof(value_type); ++i) {
-        bits |= static_cast<bit_type>(std::to_integer<std::uint8_t>(bytes[i])) << (i * 8U);
-    }
-    return std::bit_cast<value_type>(bits);
+    bit_type wire_bits{};
+    std::memcpy(&wire_bits, bytes.data(), sizeof(wire_bits));
+    const auto native_bits = wire_to_native_bits<ByteOrder>(wire_bits);
+    return std::bit_cast<value_type>(native_bits);
 }
 
-template <IsTypedArrayElement T> void append_little_endian_bytes(std::vector<std::byte> &out, T value) {
+template <typed_array_byte_order ByteOrder, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+void write_endian_payload_to(std::span<std::byte> output, std::span<const T> values) {
     using value_type = std::remove_cv_t<T>;
-    auto bits        = to_bits(static_cast<value_type>(value));
-    for (std::size_t i = 0; i < sizeof(value_type); ++i) {
-        out.push_back(static_cast<std::byte>((bits >> (i * 8U)) & 0xFFU));
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
+    static_assert(sizeof(value_type) == sizeof(bit_type));
+
+    if (values.empty()) {
+        return;
+    }
+    if constexpr (native_matches_byte_order<ByteOrder>) {
+        std::memcpy(output.data(), values.data(), values.size_bytes());
+    } else {
+        auto *cursor = output.data();
+        for (const auto value : values) {
+            const auto native_bits = to_bits<ByteOrder>(static_cast<value_type>(value));
+            const auto wire_bits   = native_to_wire_bits<ByteOrder>(native_bits);
+            std::memcpy(cursor, &wire_bits, sizeof(wire_bits));
+            cursor += sizeof(wire_bits);
+        }
     }
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::byte> little_endian_payload(std::span<const T> values) {
-    std::vector<std::byte> bytes;
-    bytes.reserve(values.size_bytes());
-    for (const auto value : values) {
-        append_little_endian_bytes(bytes, value);
-    }
-    return bytes;
+template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] status_code decode_payload_after_tag(auto &dec, std::uint64_t tag, AssignPayload &&assign_payload) {
+    using value_type = std::remove_cv_t<T>;
+
+    return cbor::tags::detail::decode_tagged_bstr_payload_header(
+        dec, typed_array_traits<value_type, ByteOrder>::tag, tag, [&](std::byte payload_additional_info) {
+            return std::forward<AssignPayload>(assign_payload)(major_type::ByteString, payload_additional_info);
+        });
 }
 
-template <IsTypedArrayElement T, typename AssignPayload>
+template <typename T, typed_array_byte_order ByteOrder, typename AssignPayload>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] status_code decode_payload(auto &dec, major_type major, std::byte additional_info, AssignPayload &&assign_payload) {
     using value_type = std::remove_cv_t<T>;
 
-    if (major != major_type::Tag) {
-        return status_code::no_match_for_tag_on_buffer;
-    }
-    if (dec.decode_unsigned(additional_info) != typed_array_traits<value_type>::tag) {
-        return status_code::no_match_for_tag;
-    }
-
-    const auto [payload_major, payload_additional_info] = dec.read_initial_byte();
-    if (payload_major != major_type::ByteString || payload_additional_info == std::byte{31}) {
-        return status_code::no_match_for_bstr_on_buffer;
-    }
-
-    return std::forward<AssignPayload>(assign_payload)(payload_major, payload_additional_info);
+    return cbor::tags::detail::decode_tagged_bstr_payload_header(
+        dec, typed_array_traits<value_type, ByteOrder>::tag, major, additional_info, [&](std::byte payload_additional_info) {
+            return std::forward<AssignPayload>(assign_payload)(major_type::ByteString, payload_additional_info);
+        });
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] std::vector<std::remove_cv_t<T>> copy_values(std::span<const std::byte> payload) {
+template <typename T, typed_array_byte_order ByteOrder>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] std::vector<std::remove_cv_t<T>> copy_values(std::span<const std::byte> payload) {
     using value_type = std::remove_cv_t<T>;
+    using bit_type   = typename typed_array_traits<value_type, ByteOrder>::bit_type;
 
-    std::vector<value_type> values;
-    values.reserve(payload.size() / sizeof(value_type));
-    for (std::size_t offset = 0; offset < payload.size(); offset += sizeof(value_type)) {
-        values.push_back(from_little_endian<value_type>(payload.subspan(offset, sizeof(value_type))));
+    std::vector<value_type> values(payload.size() / sizeof(value_type));
+    if (payload.empty()) {
+        return values;
+    }
+    if constexpr (native_matches_byte_order<ByteOrder>) {
+        std::memcpy(values.data(), payload.data(), payload.size());
+    } else {
+        auto *cursor = payload.data();
+        for (auto &value : values) {
+            bit_type wire_bits{};
+            std::memcpy(&wire_bits, cursor, sizeof(wire_bits));
+            const auto native_bits = wire_to_native_bits<ByteOrder>(wire_bits);
+            value                  = std::bit_cast<value_type>(native_bits);
+            cursor += sizeof(wire_bits);
+        }
     }
     return values;
 }
 
-template <IsTypedArrayElement T, typename PayloadRange>
+template <typename T, typed_array_byte_order ByteOrder, typename PayloadRange>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] std::vector<std::remove_cv_t<T>> materialize_values(PayloadRange &&payload, std::size_t payload_size) {
     using value_type = std::remove_cv_t<T>;
 
-    if constexpr (std::endian::native == std::endian::little && std::ranges::contiguous_range<PayloadRange>) {
+    if constexpr (native_matches_byte_order<ByteOrder> && std::ranges::contiguous_range<PayloadRange>) {
         std::vector<value_type> values(payload_size / sizeof(value_type));
         if (payload_size != 0U) {
             std::memcpy(values.data(), std::ranges::data(payload), payload_size);
         }
         return values;
     } else if constexpr (std::ranges::contiguous_range<PayloadRange>) {
-        return copy_values<value_type>(
+        return copy_values<value_type, ByteOrder>(
             std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::ranges::data(payload)), payload_size});
     } else {
         std::vector<std::byte> payload_bytes;
@@ -152,17 +374,21 @@ template <IsTypedArrayElement T, typename PayloadRange>
         for (auto byte_value : payload) {
             payload_bytes.push_back(static_cast<std::byte>(byte_value));
         }
-        return copy_values<value_type>(std::span<const std::byte>{payload_bytes});
+        return copy_values<value_type, ByteOrder>(std::span<const std::byte>{payload_bytes});
     }
 }
 
 } // namespace detail
 
-template <IsTypedArrayElement T> class typed_array {
+template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array {
   public:
     using value_type                              = std::remove_cv_t<T>;
     using container_type                          = std::vector<value_type>;
-    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     typed_array() = default;
     explicit typed_array(container_type values) : values_(std::move(values)) {}
@@ -176,10 +402,13 @@ template <IsTypedArrayElement T> class typed_array {
     container_type values_{};
 };
 
-template <IsTypedArrayElement T> class typed_array_ref {
+template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array_ref {
   public:
     using value_type                              = std::remove_cv_t<T>;
-    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
 
     constexpr explicit typed_array_ref(std::span<const value_type> values) noexcept : values_(values) {}
 
@@ -206,8 +435,32 @@ template <IsTypedArrayElement T, typename Allocator>
 
 template <IsTypedArrayElement T, typename Allocator> void as_typed_array(std::vector<T, Allocator> &&values) = delete;
 
-template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
-class typed_array_values_view : public std::ranges::view_interface<typed_array_values_view<T, ByteRange>> {
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] constexpr auto as_typed_array_be(std::span<const T> values) noexcept {
+    return typed_array_ref<std::remove_cv_t<T>, typed_array_byte_order::big>{
+        std::span<const std::remove_cv_t<T>>{values.data(), values.size()}};
+}
+
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] constexpr auto as_typed_array_be(std::span<T> values) noexcept {
+    return as_typed_array_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T, typename Allocator>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] constexpr auto as_typed_array_be(const std::vector<T, Allocator> &values) noexcept {
+    return as_typed_array_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T, typename Allocator>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+void as_typed_array_be(std::vector<T, Allocator> &&values) = delete;
+
+template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array_values_view : public std::ranges::view_interface<typed_array_values_view<T, ByteRange, ByteOrder>> {
   public:
     using value_type = std::remove_cv_t<T>;
 
@@ -229,7 +482,7 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
                 byte = static_cast<std::byte>(*it);
                 ++it;
             }
-            return detail::from_little_endian<value_type>(std::span<const std::byte>{bytes});
+            return detail::from_endian<ByteOrder, value_type>(std::span<const std::byte>{bytes});
         }
 
         constexpr iterator &operator++() {
@@ -273,11 +526,16 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
     std::size_t value_count_{};
 };
 
-template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>> class typed_array_view {
+template <typename T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>,
+          typed_array_byte_order ByteOrder = typed_array_byte_order::little>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+class typed_array_view {
   public:
     using value_type                              = std::remove_cv_t<T>;
     using payload_range_type                      = ByteRange;
-    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type>::tag;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     constexpr typed_array_view() = default;
     constexpr explicit typed_array_view(ByteRange payload) : payload_(std::move(payload)), payload_size_(payload_size(payload_)) {}
@@ -294,7 +552,7 @@ template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange = std:
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return payload_size_ / sizeof(value_type); }
 
-    [[nodiscard]] constexpr auto values() const { return typed_array_values_view<value_type, ByteRange>{payload_, size()}; }
+    [[nodiscard]] constexpr auto values() const { return typed_array_values_view<value_type, ByteRange, ByteOrder>{payload_, size()}; }
 
     [[nodiscard]] std::vector<value_type> copy_values() const {
         std::vector<value_type> output;
@@ -323,143 +581,567 @@ using typed_array_view_for =
     typed_array_view<T, std::conditional_t<IsContiguous<typename std::remove_cvref_t<Decoder>::input_buffer_type>,
                                            std::span<const std::byte>, typename std::remove_cvref_t<Decoder>::bstr_view_t>>;
 
+template <typename T, typename Decoder>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+using typed_array_view_be_for =
+    typed_array_view<T,
+                     std::conditional_t<IsContiguous<typename std::remove_cvref_t<Decoder>::input_buffer_type>, std::span<const std::byte>,
+                                        typename std::remove_cvref_t<Decoder>::bstr_view_t>,
+                     typed_array_byte_order::big>;
+
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+using typed_array_be = typed_array<T, typed_array_byte_order::big>;
+
+template <typename T, detail::TypedArrayPayloadRange ByteRange = std::span<const std::byte>>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+using typed_array_view_be = typed_array_view<T, ByteRange, typed_array_byte_order::big>;
+
+template <typename T> struct is_typed_array_wrapper : std::false_type {};
+template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wrapper<typed_array<T, ByteOrder>> : std::true_type {};
+template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
+template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+struct is_typed_array_wrapper<typed_array_view<T, ByteRange, ByteOrder>> : std::true_type {};
+
+template <typename T> struct is_typed_array_encode_wrapper : std::false_type {};
+template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_encode_wrapper<typed_array<T, ByteOrder>> : std::true_type {};
+template <typename T, typed_array_byte_order ByteOrder>
+struct is_typed_array_encode_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
+
+template <typename T> struct is_homogeneous_array_wrapper : std::false_type {};
+template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array<Array>> : std::true_type {};
+template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array_ref<Array>> : std::true_type {};
+
+template <typename T>
+concept IsRFC8746ArrayPayload = IsArray<std::remove_cvref_t<T>> || is_typed_array_wrapper<std::remove_cvref_t<T>>::value ||
+                                is_homogeneous_array_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsRFC8746EncodableArrayPayload = IsArray<std::remove_cvref_t<T>> || is_typed_array_encode_wrapper<std::remove_cvref_t<T>>::value ||
+                                         is_homogeneous_array_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746EncodableArrayPayload<Array>)
+[[nodiscard]] constexpr auto as_multi_dimensional_array(const Dimensions &dimensions, const Array &values) noexcept {
+    return multi_dimensional_array_ref<Dimensions, Array>{dimensions, values};
+}
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Dimensions &&> && IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>> &&
+             IsRFC8746EncodableArrayPayload<Array>)
+void as_multi_dimensional_array(Dimensions &&dimensions, const Array &values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && !std::is_lvalue_reference_v<Array &&> &&
+             IsRFC8746EncodableArrayPayload<std::remove_cvref_t<Array>>)
+void as_multi_dimensional_array(const Dimensions &dimensions, Array &&values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && IsRFC8746EncodableArrayPayload<Array>)
+[[nodiscard]] constexpr auto as_multi_dimensional_column_major_array(const Dimensions &dimensions, const Array &values) noexcept {
+    return multi_dimensional_array_ref<Dimensions, Array, multi_dimensional_layout::column_major>{dimensions, values};
+}
+
+template <typename Dimensions, typename Array>
+    requires(!std::is_lvalue_reference_v<Dimensions &&> && IsRFC8746DimensionArray<std::remove_cvref_t<Dimensions>> &&
+             IsRFC8746EncodableArrayPayload<Array>)
+void as_multi_dimensional_column_major_array(Dimensions &&dimensions, const Array &values) = delete;
+
+template <typename Dimensions, typename Array>
+    requires(IsRFC8746DimensionArray<Dimensions> && !std::is_lvalue_reference_v<Array &&> &&
+             IsRFC8746EncodableArrayPayload<std::remove_cvref_t<Array>>)
+void as_multi_dimensional_column_major_array(const Dimensions &dimensions, Array &&values) = delete;
+
+namespace detail {
+
+template <typename Dimensions> [[nodiscard]] bool dimension_product(const Dimensions &dimensions, std::size_t &product) {
+    product = 1U;
+    for (const auto dimension : dimensions) {
+        const auto value = static_cast<std::uintmax_t>(dimension);
+        if (value == 0U || value > static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+            return false;
+        }
+        const auto size_value = static_cast<std::size_t>(value);
+        if (product > (std::numeric_limits<std::size_t>::max() / size_value)) {
+            return false;
+        }
+        product *= size_value;
+    }
+    return true;
+}
+
+template <typename Payload> [[nodiscard]] std::optional<std::size_t> payload_element_count(const Payload &payload) {
+    using payload_type = std::remove_cvref_t<Payload>;
+    if constexpr (requires {
+                      { payload.size() } -> std::convertible_to<std::size_t>;
+                  }) {
+        return static_cast<std::size_t>(payload.size());
+    } else if constexpr (requires {
+                             { payload.values().size() } -> std::convertible_to<std::size_t>;
+                         }) {
+        return static_cast<std::size_t>(payload.values().size());
+    } else if constexpr (is_homogeneous_array_wrapper<payload_type>::value) {
+        return payload_element_count(payload.values());
+    } else if constexpr (std::ranges::sized_range<const payload_type>) {
+        return static_cast<std::size_t>(std::ranges::size(payload));
+    } else {
+        return std::nullopt;
+    }
+}
+
+template <typename Dimensions, typename Array>
+[[nodiscard]] bool valid_multi_dimensional_shape(const Dimensions &dimensions, const Array &array) {
+    std::size_t expected_count{};
+    if (!dimension_product(dimensions, expected_count)) {
+        return false;
+    }
+    const auto observed_count = payload_element_count(array);
+    return !observed_count || *observed_count == expected_count;
+}
+
+template <typename Dimensions, typename Array>
+void validate_multi_dimensional_shape_or_throw(const Dimensions &dimensions, const Array &array) {
+    if (!valid_multi_dimensional_shape(dimensions, array)) {
+        throw std::invalid_argument("RFC 8746 multi-dimensional array dimensions do not match payload element count");
+    }
+}
+
+template <typename Dimensions, typename Array>
+[[nodiscard]] status_code validate_multi_dimensional_shape_status(const Dimensions &dimensions, const Array &array) {
+    return valid_multi_dimensional_shape(dimensions, array) ? status_code::success : status_code::unexpected_group_size;
+}
+
+} // namespace detail
+
+} // namespace cbor::tags::ext::rfc8746
+
+namespace cbor::tags::cddl {
+
+template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
+struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
+    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+};
+
+template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
+struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_ref<T, ByteOrder>> {
+    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+};
+
+template <typename T, ext::rfc8746::detail::TypedArrayPayloadRange ByteRange, ext::rfc8746::typed_array_byte_order ByteOrder>
+struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_view<T, ByteRange, ByteOrder>> {
+    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+};
+
+template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::homogeneous_array<Array>> {
+    static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array CDDL requires a CBOR array payload type");
+
+    using array_type                   = Array;
+    static constexpr std::uint64_t tag = ext::rfc8746::homogeneous_array<Array>::cbor_array_tag;
+};
+
+template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::homogeneous_array_ref<Array>> {
+    static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array_ref CDDL requires a CBOR array payload type");
+
+    using array_type                   = typename ext::rfc8746::homogeneous_array_ref<Array>::array_type;
+    static constexpr std::uint64_t tag = ext::rfc8746::homogeneous_array_ref<Array>::cbor_array_tag;
+};
+
+template <typename Dimensions, typename Array, ext::rfc8746::multi_dimensional_layout Layout>
+struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array<Dimensions, Array, Layout>> {
+    static_assert(ext::rfc8746::IsRFC8746DimensionArray<Dimensions>,
+                  "RFC 8746 multi_dimensional_array CDDL requires dimensions to be a CBOR array of unsigned integers");
+    static_assert(ext::rfc8746::IsRFC8746ArrayPayload<Array>,
+                  "RFC 8746 multi_dimensional_array CDDL requires an array, typed_array, or homogeneous_array payload type");
+
+    using dimensions_type              = Dimensions;
+    using array_type                   = Array;
+    static constexpr std::uint64_t tag = ext::rfc8746::multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag;
+};
+
+template <typename Dimensions, typename Array, ext::rfc8746::multi_dimensional_layout Layout>
+struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>> {
+    static_assert(ext::rfc8746::IsRFC8746DimensionArray<Dimensions>,
+                  "RFC 8746 multi_dimensional_array_ref CDDL requires dimensions to be a CBOR array of unsigned integers");
+    static_assert(ext::rfc8746::IsRFC8746ArrayPayload<Array>,
+                  "RFC 8746 multi_dimensional_array_ref CDDL requires an array, typed_array, or homogeneous_array payload type");
+
+    using dimensions_type              = typename ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::dimensions_type;
+    using array_type                   = typename ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::array_type;
+    static constexpr std::uint64_t tag = ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>::cbor_array_tag;
+};
+
+} // namespace cbor::tags::cddl
+
+namespace cbor::tags::ext::rfc8746 {
+
 template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <IsTypedArrayElement T> void encode(const typed_array<T> &array) { encode_owned_values(array.span()); }
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode(const typed_array<T, ByteOrder> &array) {
+        encode_owned_values<T, ByteOrder>(array.span());
+    }
 
-    template <IsTypedArrayElement T> void encode(const typed_array_ref<T> &array) { encode_borrowed_values(array.values()); }
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode(const typed_array_ref<T, ByteOrder> &array) {
+        encode_borrowed_values<T, ByteOrder>(array.values());
+    }
 
-    template <IsTypedArrayElement T> [[nodiscard]] status_code decode(typed_array<T> &array, major_type major, std::byte additional_info) {
+    template <typename Array> void encode(const homogeneous_array<Array> &array) { encode_homogeneous_array_payload(array.values()); }
+
+    template <typename Array> void encode(const homogeneous_array_ref<Array> &array) { encode_homogeneous_array_payload(array.values()); }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    void encode(const multi_dimensional_array<Dimensions, Array, Layout> &array) {
+        encode_multi_dimensional_array_payload<Layout>(array.dimensions(), array.values());
+    }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    void encode(const multi_dimensional_array_ref<Dimensions, Array, Layout> &array) {
+        encode_multi_dimensional_array_payload<Layout>(array.dimensions(), array.values());
+    }
+
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    [[nodiscard]] status_code decode(typed_array<T, ByteOrder> &array, major_type major, std::byte additional_info) {
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
-            if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
-                return status_code::no_match_for_bstr_on_buffer;
-            }
-            const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-            if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                if (payload_size_u64 > payload_size_limit) {
-                    return status_code::error;
-                }
-            }
+        return detail::decode_payload<value_type, ByteOrder>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_typed_array_payload<T, ByteOrder>(array, payload_major, payload_info);
+            });
+    }
 
-            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-            if ((payload_size % sizeof(value_type)) != 0U) {
-                return status_code::unexpected_group_size;
-            }
-            array.values() = detail::materialize_values<value_type>(std::move(raw_payload), payload_size);
-            return status_code::success;
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    [[nodiscard]] status_code decode(typed_array<T, ByteOrder> &array, std::uint64_t tag) {
+        using value_type = std::remove_cv_t<T>;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
+            return decode_typed_array_payload<T, ByteOrder>(array, payload_major, payload_info);
         });
     }
 
-    template <IsTypedArrayElement T, detail::TypedArrayPayloadRange ByteRange>
-        requires detail::DecodableTypedArrayPayloadRange<Self, ByteRange>
-    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange> &view, major_type major, std::byte additional_info) {
+    template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+        requires(IsTypedArrayElementFor<T, ByteOrder> && detail::DecodableTypedArrayPayloadRange<Self, ByteRange>)
+    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange, ByteOrder> &view, major_type major, std::byte additional_info) {
         using value_type = std::remove_cv_t<T>;
         auto &dec        = static_cast<Self &>(*this);
 
-        return detail::decode_payload<value_type>(dec, major, additional_info, [&](major_type, std::byte payload_info) {
-            if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
-                return status_code::contiguous_view_on_non_contiguous_data;
-            } else {
-                const auto payload_size_u64 = dec.decode_unsigned(payload_info);
-                if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-                    const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
-                    if (payload_size_u64 > payload_size_limit) {
-                        return status_code::error;
-                    }
-                }
+        return detail::decode_payload<value_type, ByteOrder>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_typed_array_view_payload<T, ByteRange, ByteOrder>(view, payload_major, payload_info);
+            });
+    }
 
-                auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
-                const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-                if ((payload_size % sizeof(value_type)) != 0U) {
-                    return status_code::unexpected_group_size;
-                }
-                view = typed_array_view<value_type, ByteRange>{ByteRange{std::move(raw_payload)}, payload_size};
-                return status_code::success;
+    template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+        requires(IsTypedArrayElementFor<T, ByteOrder> && detail::DecodableTypedArrayPayloadRange<Self, ByteRange>)
+    [[nodiscard]] status_code decode(typed_array_view<T, ByteRange, ByteOrder> &view, std::uint64_t tag) {
+        using value_type = std::remove_cv_t<T>;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type, ByteOrder>(dec, tag, [&](major_type payload_major, std::byte payload_info) {
+            return decode_typed_array_view_payload<T, ByteRange, ByteOrder>(view, payload_major, payload_info);
+        });
+    }
+
+    template <typename Array>
+    [[nodiscard]] status_code decode(homogeneous_array<Array> &array, major_type major, std::byte additional_info) {
+        static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array payload must decode as a CBOR array");
+
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(homogeneous_array<Array>::cbor_array_tag, major, additional_info,
+                                            [&] { return dec.decode(array.values()); });
+    }
+
+    template <typename Array> [[nodiscard]] status_code decode(homogeneous_array<Array> &array, std::uint64_t tag) {
+        static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array payload must decode as a CBOR array");
+
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(homogeneous_array<Array>::cbor_array_tag, tag, [&] { return dec.decode(array.values()); });
+    }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    [[nodiscard]] status_code decode(multi_dimensional_array<Dimensions, Array, Layout> &array, major_type major,
+                                     std::byte additional_info) {
+        static_assert(IsRFC8746DimensionArray<Dimensions>,
+                      "RFC 8746 multi_dimensional_array dimensions must decode as a CBOR array of unsigned integers");
+        static_assert(IsRFC8746ArrayPayload<Array>,
+                      "RFC 8746 multi_dimensional_array payload must decode as an array, typed_array, or homogeneous_array");
+
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, major, additional_info,
+                                            [&] {
+                                                const auto status = dec.decode(wrap_as_array{array.dimensions(), array.values()});
+                                                if (status != status_code::success) {
+                                                    return status;
+                                                }
+                                                return detail::validate_multi_dimensional_shape_status(array.dimensions(), array.values());
+                                            });
+    }
+
+    template <typename Dimensions, typename Array, multi_dimensional_layout Layout>
+    [[nodiscard]] status_code decode(multi_dimensional_array<Dimensions, Array, Layout> &array, std::uint64_t tag) {
+        static_assert(IsRFC8746DimensionArray<Dimensions>,
+                      "RFC 8746 multi_dimensional_array dimensions must decode as a CBOR array of unsigned integers");
+        static_assert(IsRFC8746ArrayPayload<Array>,
+                      "RFC 8746 multi_dimensional_array payload must decode as an array, typed_array, or homogeneous_array");
+
+        auto &dec = static_cast<Self &>(*this);
+        return decode_extension_tag_payload(multi_dimensional_array<Dimensions, Array, Layout>::cbor_array_tag, tag, [&] {
+            const auto status = dec.decode(wrap_as_array{array.dimensions(), array.values()});
+            if (status != status_code::success) {
+                return status;
             }
+            return detail::validate_multi_dimensional_shape_status(array.dimensions(), array.values());
         });
     }
 
   private:
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    [[nodiscard]] status_code decode_typed_array_payload(typed_array<T, ByteOrder> &array, major_type payload_major,
+                                                         std::byte payload_info) {
+        using value_type = std::remove_cv_t<T>;
+        if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+            return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        auto         &dec = static_cast<Self &>(*this);
+        std::uint64_t payload_size_u64{};
+        auto          status = decode_payload_size(payload_info, payload_size_u64);
+        if (status != status_code::success) {
+            return status;
+        }
+
+        const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+        status                  = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
+        if (status != status_code::success) {
+            return status;
+        }
+        auto raw_payload = dec.decode_bstring_payload(payload_size_u64);
+        if ((payload_size % sizeof(value_type)) != 0U) {
+            return status_code::unexpected_group_size;
+        }
+        array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
+        return status_code::success;
+    }
+
+    template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
+        requires(IsTypedArrayElementFor<T, ByteOrder> && detail::DecodableTypedArrayPayloadRange<Self, ByteRange>)
+    [[nodiscard]] status_code decode_typed_array_view_payload(typed_array_view<T, ByteRange, ByteOrder> &view, major_type payload_major,
+                                                              std::byte payload_info) {
+        using value_type = std::remove_cv_t<T>;
+        if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
+            return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        if constexpr (std::ranges::contiguous_range<const ByteRange> && !IsContiguous<typename Self::input_buffer_type>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            auto         &dec = static_cast<Self &>(*this);
+            std::uint64_t payload_size_u64{};
+            auto          status = decode_payload_size(payload_info, payload_size_u64);
+            if (status != status_code::success) {
+                return status;
+            }
+
+            status = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
+            if (status != status_code::success) {
+                return status;
+            }
+            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
+            const auto payload_size = static_cast<std::size_t>(payload_size_u64);
+            if ((payload_size % sizeof(value_type)) != 0U) {
+                return status_code::unexpected_group_size;
+            }
+            view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
+            return status_code::success;
+        }
+    }
+
+    [[nodiscard]] status_code decode_payload_size(std::byte payload_info, std::uint64_t &payload_size_u64) {
+        auto      &dec    = static_cast<Self &>(*this);
+        const auto status = cbor::tags::detail::decode_unsigned_argument(dec, payload_info, payload_size_u64);
+        if (status != status_code::success) {
+            return status;
+        }
+        if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+            const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+            if (payload_size_u64 > payload_size_limit) {
+                return status_code::error;
+            }
+        }
+        return status_code::success;
+    }
+
+    template <typename Payload> void encode_homogeneous_array_payload(const Payload &payload) {
+        static_assert(IsArray<std::remove_cvref_t<Payload>>, "RFC 8746 homogeneous_array payload must encode as a CBOR array");
+
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode(static_tag<homogeneous_array_tag>{});
+        enc.encode(payload);
+    }
+
+    template <multi_dimensional_layout Layout, typename Dimensions, typename Array>
+    void encode_multi_dimensional_array_payload(const Dimensions &dimensions, const Array &array) {
+        static_assert(IsRFC8746DimensionArray<Dimensions>,
+                      "RFC 8746 multi_dimensional_array dimensions must encode as a CBOR array of unsigned integers");
+        static_assert(IsRFC8746EncodableArrayPayload<Array>,
+                      "RFC 8746 multi_dimensional_array payload must encode as an array, typed_array, or homogeneous_array");
+
+        detail::validate_multi_dimensional_shape_or_throw(dimensions, array);
+
+        auto &enc = static_cast<Self &>(*this);
+        if constexpr (Layout == multi_dimensional_layout::row_major) {
+            enc.encode(static_tag<multi_dimensional_array_tag>{});
+        } else {
+            enc.encode(static_tag<multi_dimensional_column_major_array_tag>{});
+        }
+        enc.encode(wrap_as_array{dimensions, array});
+    }
+
+    template <typename Fn>
+    [[nodiscard]] status_code decode_extension_tag_payload(std::uint64_t expected_tag, major_type major, std::byte additional_info,
+                                                           Fn &&decode_payload) {
+        auto &dec = static_cast<Self &>(*this);
+        return cbor::tags::detail::decode_tagged_payload(dec, expected_tag, major, additional_info, std::forward<Fn>(decode_payload));
+    }
+
+    template <typename Fn>
+    [[nodiscard]] status_code decode_extension_tag_payload(std::uint64_t expected_tag, std::uint64_t tag, Fn &&decode_payload) {
+        return cbor::tags::detail::decode_tagged_payload(expected_tag, tag, std::forward<Fn>(decode_payload));
+    }
+
+    void append_owned_payload_data(std::span<const std::byte> payload) {
+        auto &enc = static_cast<Self &>(*this);
+        cbor::tags::detail::append_extension_owned_bytes(enc, payload);
+    }
+
     void encode_owned_payload(std::span<const std::byte> payload) {
         auto &enc = static_cast<Self &>(*this);
-        enc.encode_major_and_size(static_cast<std::uint64_t>(payload.size()), static_cast<typename Self::byte_type>(0x40));
-        if constexpr (requires { enc.appender_.append_owned(enc.data_, payload); }) {
-            enc.appender_.append_owned(enc.data_, payload);
-        } else {
-            enc.appender_(enc.data_, payload);
-        }
+        cbor::tags::detail::encode_extension_bstr_payload(enc, payload);
     }
 
-    template <IsTypedArrayElement T> void encode_owned_values(std::span<const T> values) {
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode_converted_payload(std::span<const T> values) {
+        auto &enc = static_cast<Self &>(*this);
+        cbor::tags::detail::encode_extension_bstr_header(enc, static_cast<std::uint64_t>(values.size_bytes()));
+        cbor::tags::detail::append_extension_generated_bytes(enc, values.size_bytes(), [values](std::span<std::byte> payload) {
+            detail::write_endian_payload_to<ByteOrder>(payload, values);
+        });
+    }
+
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode_owned_values(std::span<const T> values) {
         using value_type = std::remove_cv_t<T>;
         auto &enc        = static_cast<Self &>(*this);
 
-        if constexpr (std::endian::native == std::endian::little) {
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
+        if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             encode_owned_payload(std::as_bytes(values));
         } else {
-            auto payload = detail::little_endian_payload(values);
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
-            encode_owned_payload(std::span<const std::byte>{payload});
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
+            encode_converted_payload<T, ByteOrder>(values);
         }
     }
 
-    template <IsTypedArrayElement T> void encode_borrowed_values(std::span<const T> values) {
+    template <typename T, typed_array_byte_order ByteOrder>
+        requires IsTypedArrayElementFor<T, ByteOrder>
+    void encode_borrowed_values(std::span<const T> values) {
         using value_type = std::remove_cv_t<T>;
         auto &enc        = static_cast<Self &>(*this);
 
-        if constexpr (std::endian::native == std::endian::little) {
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
+        if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
             enc.encode(as_bstr_range(std::as_bytes(values)));
         } else {
-            auto payload = detail::little_endian_payload(values);
-            enc.encode(static_tag<typed_array_traits<value_type>::tag>{});
-            encode_owned_payload(std::span<const std::byte>{payload});
+            enc.encode(static_tag<typed_array_traits<value_type, ByteOrder>::tag>{});
+            encode_converted_payload<T, ByteOrder>(values);
         }
     }
 };
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
-    if constexpr (std::endian::native == std::endian::little) {
-        return encode_tagged_bstr_segments(typed_array_traits<std::remove_cv_t<T>>::tag, std::as_bytes(values));
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments(std::span<const T> values) {
+    // The returned payload segment borrows from values and must not outlive the
+    // referenced element storage. Use encode_typed_array_segments_copy for owned
+    // portable output, including byte-order conversion.
+    if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+        return encode_tagged_bstr_segments(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
     } else {
-        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires a little-endian native payload");
+        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires matching native byte order");
     }
 }
 
-template <cbor::tags::detail::ByteSegmentsOutputBuffer Segments, IsTypedArrayElement T>
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+void encode_typed_array_borrowed_segments_into(Segments &segments, std::span<const T> values) {
+    // The appended payload segment borrows from values and must not outlive the
+    // referenced element storage. Use encode_typed_array_segments_copy for owned
+    // portable output, including byte-order conversion.
+    if constexpr (detail::native_matches_byte_order<ByteOrder>) {
+        encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag, std::as_bytes(values));
+    } else {
+        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires matching native byte order");
+    }
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments(std::span<T> values) {
+    return encode_typed_array_borrowed_segments<ByteOrder>(std::span<const T>{values.data(), values.size()});
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
+void encode_typed_array_borrowed_segments_into(Segments &segments, std::span<T> values) {
+    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, std::span<const T>{values.data(), values.size()});
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
+    return encode_typed_array_borrowed_segments<ByteOrder>(values);
+}
+
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
 void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
-    if constexpr (std::endian::native == std::endian::little) {
-        encode_tagged_bstr_segments_into(segments, typed_array_traits<std::remove_cv_t<T>>::tag, std::as_bytes(values));
-    } else {
-        throw std::logic_error("RFC 8746 typed-array segmented zero-copy encode requires a little-endian native payload");
-    }
+    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, values);
 }
 
-template <IsTypedArrayElement T>
-    requires(!std::is_const_v<T>)
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 [[nodiscard]] cbor_segments encode_typed_array_segments(std::span<T> values) {
-    return encode_typed_array_segments(std::span<const T>{values.data(), values.size()});
+    return encode_typed_array_borrowed_segments<ByteOrder>(values);
 }
 
-template <cbor::tags::detail::ByteSegmentsOutputBuffer Segments, IsTypedArrayElement T>
-    requires(!std::is_const_v<T>)
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, cbor::tags::detail::ByteSegmentsOutputBuffer Segments,
+          typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 void encode_typed_array_segments_into(Segments &segments, std::span<T> values) {
-    encode_typed_array_segments_into(segments, std::span<const T>{values.data(), values.size()});
+    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, values);
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
-    const auto tag_header =
-        cbor::tags::detail::encode_cbor_major_argument_header(typed_array_traits<std::remove_cv_t<T>>::tag, std::byte{0xC0});
-    auto       payload     = detail::little_endian_payload(values);
-    const auto bstr_header = cbor::tags::detail::encode_cbor_major_argument_header(payload.size(), std::byte{0x40});
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
+    const auto tag_header = cbor::tags::detail::encode_cbor_tag_header(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag);
+    auto       payload    = std::vector<std::byte>(values.size_bytes());
+    detail::write_endian_payload_to<ByteOrder>(std::span<std::byte>{payload}, values);
+    const auto bstr_header = cbor::tags::detail::encode_cbor_bstr_header(payload.size());
 
     cbor_segments segments;
     segments.reserve(3);
@@ -469,18 +1151,58 @@ template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_typed_array_
     return segments;
 }
 
-template <IsTypedArrayElement T>
-    requires(!std::is_const_v<T>)
+template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
 [[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<T> values) {
-    return encode_typed_array_segments_copy(std::span<const T>{values.data(), values.size()});
+    return encode_typed_array_segments_copy<ByteOrder>(std::span<const T>{values.data(), values.size()});
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_segments(const typed_array_ref<T> &array) {
-    return encode_typed_array_segments(array.values());
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments_be(std::span<const T> values) {
+    return encode_typed_array_borrowed_segments<typed_array_byte_order::big>(values);
 }
 
-template <IsTypedArrayElement T> [[nodiscard]] cbor_segments encode_segments(const typed_array<T> &array) {
-    return encode_typed_array_segments_copy(array.span());
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments_be(std::span<T> values) {
+    return encode_typed_array_borrowed_segments_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<const T> values) {
+    return encode_typed_array_borrowed_segments_be(values);
+}
+
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<T> values) {
+    return encode_typed_array_borrowed_segments_be(values);
+}
+
+template <typename T>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] cbor_segments encode_typed_array_segments_copy_be(std::span<const T> values) {
+    return encode_typed_array_segments_copy<typed_array_byte_order::big>(values);
+}
+
+template <typename T>
+    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
+[[nodiscard]] cbor_segments encode_typed_array_segments_copy_be(std::span<T> values) {
+    return encode_typed_array_segments_copy_be(std::span<const T>{values.data(), values.size()});
+}
+
+template <typename T, typed_array_byte_order ByteOrder>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_segments(const typed_array_ref<T, ByteOrder> &array) {
+    return encode_typed_array_segments<ByteOrder>(array.values());
+}
+
+template <typename T, typed_array_byte_order ByteOrder>
+    requires IsTypedArrayElementFor<T, ByteOrder>
+[[nodiscard]] cbor_segments encode_segments(const typed_array<T, ByteOrder> &array) {
+    return encode_typed_array_segments_copy<ByteOrder>(array.span());
 }
 
 } // namespace cbor::tags::ext::rfc8746

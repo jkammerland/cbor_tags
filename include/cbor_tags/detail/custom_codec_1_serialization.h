@@ -689,7 +689,7 @@ constexpr status_code decode_variant_alternative(std::uint64_t index, span_reade
     } else {
         if (index == I) {
             using alternative_type = std::variant_alternative_t<I, std::variant<Ts...>>;
-            auto make_alternative  = [&value]() -> alternative_type {
+            auto make_alternative  = [&]() -> alternative_type {
                 if constexpr (std::default_initializable<alternative_type>) {
                     return alternative_type{};
                 } else if constexpr (std::copy_constructible<alternative_type>) {

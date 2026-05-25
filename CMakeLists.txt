@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cbor_tags VERSION 0.17.0)
+project(cbor_tags VERSION 0.18.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
@@ -34,6 +34,7 @@ endif()
 # THE LIBRARY
 file(GLOB_RECURSE CBOR_HEADERS CONFIGURE_DEPENDS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 target_sources(
   ${PROJECT_NAME}
   INTERFACE FILE_SET
@@ -50,9 +51,13 @@ if(CBOR_TAGS_USE_STD_REFLECTION)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     include(CheckCXXSourceCompiles)
     set(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+    set(_CBOR_TAGS_CMAKE_CXX_EXTENSIONS "${CMAKE_CXX_EXTENSIONS}")
     set(_CBOR_TAGS_CMAKE_CXX_STANDARD "${CMAKE_CXX_STANDARD}")
-    unset(CMAKE_CXX_STANDARD)
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=gnu++26 -freflection")
+    set(_CBOR_TAGS_CMAKE_CXX_STANDARD_REQUIRED "${CMAKE_CXX_STANDARD_REQUIRED}")
+    set(CMAKE_CXX_STANDARD 26)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS ON)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -freflection")
     check_cxx_source_compiles(
       [=[
 #include <meta>
@@ -71,9 +76,13 @@ int main() { return 0; }
 ]=]
       CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
     set(CMAKE_REQUIRED_FLAGS "${_CBOR_TAGS_CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_CXX_EXTENSIONS "${_CBOR_TAGS_CMAKE_CXX_EXTENSIONS}")
     set(CMAKE_CXX_STANDARD "${_CBOR_TAGS_CMAKE_CXX_STANDARD}")
+    set(CMAKE_CXX_STANDARD_REQUIRED "${_CBOR_TAGS_CMAKE_CXX_STANDARD_REQUIRED}")
     unset(_CBOR_TAGS_CMAKE_REQUIRED_FLAGS)
+    unset(_CBOR_TAGS_CMAKE_CXX_EXTENSIONS)
     unset(_CBOR_TAGS_CMAKE_CXX_STANDARD)
+    unset(_CBOR_TAGS_CMAKE_CXX_STANDARD_REQUIRED)
 
     if(NOT CBOR_TAGS_COMPILER_HAS_STD_REFLECTION)
       message(FATAL_ERROR "CBOR_TAGS_USE_STD_REFLECTION requires GCC with C++26 reflection support (-std=gnu++26 -freflection).")
@@ -131,7 +140,7 @@ int main() { return 0; }
 endif()
 
 if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
-  find_package(magic_enum 0.9.8 REQUIRED CONFIG)
+  find_package(magic_enum 0.9.7 REQUIRED CONFIG)
   if(NOT TARGET magic_enum::magic_enum)
     message(FATAL_ERROR "CBOR_TAGS_USE_MAGIC_ENUM_NAMES requires a magic_enum CMake config that exports magic_enum::magic_enum.")
   endif()
@@ -244,7 +253,7 @@ if(CBOR_TAGS_USE_BOOST_PFR_NAMES)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "Boost 1.84 REQUIRED CONFIG")
 endif()
 if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
-  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.8 REQUIRED CONFIG")
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.7 REQUIRED CONFIG")
 endif()
 
 # Link dependencies

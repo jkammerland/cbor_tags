@@ -208,12 +208,11 @@ jobs:
               gcc-c++ \
               git \
               ninja-build
-            cmake -S /work -B /tmp/build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCBOR_TAGS_BUILD_TESTS=ON \
-              -DCBOR_TAGS_USE_STD_REFLECTION=ON
+            cmake --preset=release-std-reflection -B /tmp/build \
+              -DCMAKE_C_COMPILER_LAUNCHER= \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=
             cmake --build /tmp/build --parallel
-            ctest --test-dir /tmp/build -C Release --output-on-failure
+            ctest --test-dir /tmp/build --output-on-failure
           '
 
   boost-pfr-names:
@@ -287,3 +286,75 @@ jobs:
     - name: Test
       shell: bash
       run: ctest --preset=magic-enum-names
+
+  installed-package-consumer:
+    name: Ubuntu installed package consumer (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {
+              name: "cxx20-system-expected",
+              cxx_standard: "20",
+              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON",
+              vcpkg_features: "",
+              vcpkg_no_default_features: "OFF",
+              consumer_mode: "default"
+            }
+          - {
+              name: "cxx23-std-expected",
+              cxx_standard: "23",
+              configure_flags: "-DCBOR_TAGS_USE_STD_EXPECTED=ON",
+              vcpkg_features: "std-expected",
+              vcpkg_no_default_features: "ON",
+              consumer_mode: "default"
+            }
+          - {
+              name: "magic-enum-names",
+              cxx_standard: "20",
+              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON -DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON",
+              vcpkg_features: "magic-enum-names",
+              vcpkg_no_default_features: "OFF",
+              consumer_mode: "magic_enum"
+            }
+          - {
+              name: "boost-pfr-names",
+              cxx_standard: "20",
+              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON -DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON",
+              vcpkg_features: "boost-pfr-names",
+              vcpkg_no_default_features: "OFF",
+              consumer_mode: "boost_pfr"
+            }
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl g++ gcc ninja-build tar unzip zip
+
+    - name: Bootstrap vcpkg
+      uses: ./.github/actions/bootstrap-vcpkg
+
+    - name: Build installed package consumer
+      shell: bash
+      env:
+        CBOR_TAGS_CONSUMER_NAME: ${{ matrix.name }}
+        CBOR_TAGS_CXX_STANDARD: ${{ matrix.cxx_standard }}
+        CBOR_TAGS_CONFIGURE_FLAGS: ${{ matrix.configure_flags }}
+        CBOR_TAGS_VCPKG_FEATURES: ${{ matrix.vcpkg_features }}
+        CBOR_TAGS_VCPKG_NO_DEFAULT_FEATURES: ${{ matrix.vcpkg_no_default_features }}
+        CBOR_TAGS_CONSUMER_MODE: ${{ matrix.consumer_mode }}
+        CBOR_TAGS_BUILD_DIR: ${{ github.workspace }}/build-install-${{ matrix.name }}
+        CBOR_TAGS_INSTALL_PREFIX: ${{ runner.temp }}/cbor-tags-prefix-${{ matrix.name }}
+        CBOR_TAGS_CONSUMER_DIR: ${{ runner.temp }}/cbor-tags-consumer-${{ matrix.name }}
+      run: |
+        scripts/run-installed-consumer.sh

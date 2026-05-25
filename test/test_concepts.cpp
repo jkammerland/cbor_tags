@@ -499,29 +499,29 @@ TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, 
 
 TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, signed char, unsigned char) {
     CBOR_TAGS_TEST_LOG("Testing concept with T: {}\n", nameof::nameof_type<T>());
-    CHECK(cbor::tags::ValidCborBuffer<std::array<T, 5>>);
-    CHECK(cbor::tags::ValidCborBuffer<std::vector<T>>);
-    CHECK(cbor::tags::ValidCborBuffer<std::list<T>>);
-    CHECK(cbor::tags::ValidCborBuffer<std::deque<T>>);
-    CHECK(!cbor::tags::ValidCborBuffer<std::forward_list<T>>);
+    CHECK(ValidCborBuffer<std::array<T, 5>>);
+    CHECK(ValidCborBuffer<std::vector<T>>);
+    CHECK(ValidCborBuffer<std::list<T>>);
+    CHECK(ValidCborBuffer<std::deque<T>>);
+    CHECK(!ValidCborBuffer<std::forward_list<T>>);
 }
 
 TEST_CASE("CBOR buffer concept rejects non-byte storage") {
-    static_assert(!cbor::tags::ValidCborBuffer<std::vector<int>>);
-    static_assert(!cbor::tags::ValidCborBuffer<std::array<std::uint16_t, 5>>);
-    static_assert(!cbor::tags::ValidCborBuffer<std::deque<float>>);
-    static_assert(!cbor::tags::ValidCborBuffer<std::list<double>>);
-    static_assert(!cbor::tags::ValidCborBuffer<std::vector<bool>>);
-    static_assert(!cbor::tags::ValidCborBuffer<std::array<bool, 5>>);
+    static_assert(!ValidCborBuffer<std::vector<int>>);
+    static_assert(!ValidCborBuffer<std::array<std::uint16_t, 5>>);
+    static_assert(!ValidCborBuffer<std::deque<float>>);
+    static_assert(!ValidCborBuffer<std::list<double>>);
+    static_assert(!ValidCborBuffer<std::vector<bool>>);
+    static_assert(!ValidCborBuffer<std::array<bool, 5>>);
 }
 
 namespace {
 
 template <typename Buffer>
-concept CanMakeEncoder = requires(Buffer &buffer) { cbor::tags::make_encoder(buffer); };
+concept CanMakeEncoder = requires(Buffer &buffer) { make_encoder(buffer); };
 
 template <typename Buffer>
-concept CanMakeDecoder = requires(Buffer &buffer) { cbor::tags::make_decoder(buffer); };
+concept CanMakeDecoder = requires(Buffer &buffer) { make_decoder(buffer); };
 
 } // namespace
 
@@ -532,20 +532,20 @@ TEST_CASE("CBOR input and output buffer concepts are split") {
     using const_byte_span   = std::span<const std::byte>;
     using mutable_byte_span = std::span<std::byte>;
 
-    static_assert(cbor::tags::CborInputBuffer<byte_vector>);
-    static_assert(cbor::tags::CborInputBuffer<const_byte_span>);
-    static_assert(cbor::tags::CborInputBuffer<byte_subrange>);
-    static_assert(cbor::tags::CborInputBuffer<mutable_subrange>);
+    static_assert(CborInputBuffer<byte_vector>);
+    static_assert(CborInputBuffer<const_byte_span>);
+    static_assert(CborInputBuffer<byte_subrange>);
+    static_assert(CborInputBuffer<mutable_subrange>);
 
-    static_assert(cbor::tags::CborOutputBuffer<byte_vector>);
-    static_assert(cbor::tags::CborOutputBuffer<std::vector<std::uint8_t>>);
-    static_assert(cbor::tags::CborOutputBuffer<std::array<std::byte, 8>>);
-    static_assert(cbor::tags::CborOutputBuffer<mutable_byte_span>);
-    static_assert(!cbor::tags::CborOutputBuffer<const byte_vector>);
-    static_assert(!cbor::tags::CborOutputBuffer<const_byte_span>);
-    static_assert(!cbor::tags::CborOutputBuffer<std::string_view>);
-    static_assert(!cbor::tags::CborOutputBuffer<byte_subrange>);
-    static_assert(!cbor::tags::CborOutputBuffer<mutable_subrange>);
+    static_assert(CborOutputBuffer<byte_vector>);
+    static_assert(CborOutputBuffer<std::vector<std::uint8_t>>);
+    static_assert(CborOutputBuffer<std::array<std::byte, 8>>);
+    static_assert(CborOutputBuffer<mutable_byte_span>);
+    static_assert(!CborOutputBuffer<const byte_vector>);
+    static_assert(!CborOutputBuffer<const_byte_span>);
+    static_assert(!CborOutputBuffer<std::string_view>);
+    static_assert(!CborOutputBuffer<byte_subrange>);
+    static_assert(!CborOutputBuffer<mutable_subrange>);
 
     static_assert(std::ranges::output_range<mutable_subrange, std::byte>);
     static_assert(!CanMakeEncoder<mutable_subrange>);
@@ -553,10 +553,10 @@ TEST_CASE("CBOR input and output buffer concepts are split") {
 }
 
 TEST_CASE("Contiguous range concept") {
-    CHECK(cbor::tags::IsContiguous<std::array<std::byte, 5>>);
-    CHECK(cbor::tags::IsContiguous<std::vector<std::byte>>);
-    CHECK(!cbor::tags::IsContiguous<std::list<std::byte>>);
-    CHECK(!cbor::tags::IsContiguous<std::deque<std::byte>>);
+    CHECK(IsContiguous<std::array<std::byte, 5>>);
+    CHECK(IsContiguous<std::vector<std::byte>>);
+    CHECK(!IsContiguous<std::list<std::byte>>);
+    CHECK(!IsContiguous<std::deque<std::byte>>);
 }
 
 TEST_CASE("Non-contiguous variant ranges expose implemented alternatives") {

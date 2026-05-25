@@ -6,7 +6,6 @@
 
 #include <concepts>
 #include <cstddef>
-#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <limits>
@@ -15,6 +14,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>

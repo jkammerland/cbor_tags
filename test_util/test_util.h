@@ -71,8 +71,22 @@ inline std::vector<byte> to_bytes(std::string_view hex) {
 namespace cbor::tags::test::detail {
 inline bool fail_test_allocations = false;
 
+// MSVC's Debug STL may allocate container proxy state in operations that are
+// allocation-free in Release and in the other STL implementations under test.
+// Keep the global allocation hook enabled where it is a reliable signal.
+inline constexpr bool allocation_failure_guard_enabled =
+#if defined(_MSC_VER) && defined(_DEBUG)
+    false;
+#else
+    true;
+#endif
+
 struct allocation_failure_guard {
-    allocation_failure_guard() { fail_test_allocations = true; }
+    allocation_failure_guard() {
+        if constexpr (allocation_failure_guard_enabled) {
+            fail_test_allocations = true;
+        }
+    }
     ~allocation_failure_guard() { fail_test_allocations = false; }
 };
 

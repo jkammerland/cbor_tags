@@ -31,10 +31,10 @@ else() # Print active generator
   message(STATUS "No generator set?")
 endif()
 
-cbor_tags_append_flag(CMAKE_CXX_FLAGS -Wall -Wextra -pedantic)
-
 # Shared flags for all compilers
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  cbor_tags_append_flag(CMAKE_CXX_FLAGS -Wall -Wextra -pedantic)
+
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     cbor_tags_append_optimization_flag(CMAKE_CXX_FLAGS_DEBUG -O0) # -fconcepts-diagnostics-depth=2 will not work with tidy
     cbor_tags_append_flag(CMAKE_CXX_FLAGS_DEBUG -g -DDEBUG)

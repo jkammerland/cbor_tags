@@ -3,27 +3,24 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
-#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_range_encoder.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/cbor_encode_error.h"
 
 #include <bit>
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
+#include <new>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
 #include <ranges>
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 
@@ -48,7 +45,9 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         try {
             (encode(std::forward<T>(args)), ...);
             return expected_type{};
-        } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (...) {
+        } catch (const detail::encode_status_exception &e) { return unexpected<status_code>(e.status); } catch (const std::bad_alloc &) {
+            return unexpected<status_code>(status_code::out_of_memory);
+        } catch (...) {
             // std::rethrow_exception(std::current_exception()); // for debugging, this handling is TODO!
             return unexpected<status_code>(status_code::error);
         }
@@ -174,17 +173,16 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             this->encode(detail::get_major_6_tag_from_class(value));
         }
 
-        // For now, the only errors from encoding are exceptions. It will be caught by the operator(...) function, up top
         if constexpr (has_transcode) {
-            [[maybe_unused]] auto result = Access::transcode(*this, value);
+            detail::throw_on_encode_error(Access::transcode(*this, value));
         } else if constexpr (has_encode) {
-            [[maybe_unused]] auto result = Access::encode(*this, value);
+            detail::throw_on_encode_error(Access::encode(*this, value));
         } else if constexpr (has_free_encode) {
             /* This requires an indirect call in order for some compilers to find the overload. */
-            [[maybe_unused]] auto result = detail::adl_indirect_encode(*this, value);
+            detail::throw_on_encode_error(detail::adl_indirect_encode(*this, value));
         } else if constexpr (has_free_transcode) {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
-            [[maybe_unused]] auto result = transcode(*this, value);
+            detail::throw_on_encode_error(transcode(*this, value));
         }
     }
 

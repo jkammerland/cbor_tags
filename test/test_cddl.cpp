@@ -2,6 +2,8 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
+#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
+#include "cbor_tags/extensions/smart_ptr.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <array>
@@ -9,6 +11,7 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -21,12 +24,24 @@
 #include <vector>
 
 using namespace cbor::tags;
+namespace rfc8746   = cbor::tags::ext::rfc8746;
+namespace smart_ptr = cbor::tags::ext::smart_ptr;
 
 namespace cbor_tags_test_cddl {
 template <typename T> std::string cddl_schema_inline() {
     fmt::memory_buffer buffer;
     cddl_schema_to<T>(buffer, {.row_options = {.format_by_rows = false}});
     return fmt::to_string(buffer);
+}
+
+template <typename T> std::string cddl_schema_with_options(CDDLOptions options) {
+    fmt::memory_buffer buffer;
+    cddl_schema_to<T>(buffer, options);
+    return fmt::to_string(buffer);
+}
+
+template <typename T> void check_cddl_typed_array_tag(std::uint64_t tag) {
+    CHECK_EQ(cddl_schema_inline<T>(), fmt::format("root = #6.{}(bstr)", tag));
 }
 
 std::size_t count_occurrences(std::string_view haystack, std::string_view needle) {
@@ -75,14 +90,51 @@ struct CDDLContainers {
     std::variant<int, CDDLPlainTwo> either_plain;
 };
 
+struct CDDLTypedArrays {
+    rfc8746::typed_array<std::int32_t>                                                                samples;
+    rfc8746::typed_array_be<double>                                                                   measurements;
+    rfc8746::homogeneous_array<std::vector<std::uint64_t>>                                            homogeneous;
+    rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>> matrix;
+};
+
+struct CDDLTypedArrayRefs {
+    rfc8746::typed_array_ref<std::int32_t>  samples;
+    rfc8746::typed_array_ref<std::uint16_t> levels;
+};
+
+struct CDDLStructuralArrayRefs {
+    rfc8746::homogeneous_array_ref<std::vector<int>>                                                            homogeneous;
+    rfc8746::multi_dimensional_array_ref<std::array<std::uint64_t, 2>, rfc8746::typed_array_ref<std::uint16_t>> matrix;
+};
+
+struct CDDLLooksLikeTypedArray {
+    using value_type                              = int;
+    static constexpr auto          byte_order     = rfc8746::typed_array_byte_order::little;
+    static constexpr std::uint64_t cbor_array_tag = 999;
+    int                            value;
+};
+
+struct CDDLLooksLikeTypedArrayRoot {
+    CDDLLooksLikeTypedArray fake;
+    int                     other;
+};
+
 struct CDDLNullablePointers {
     std::unique_ptr<std::uint64_t>             count;
     std::shared_ptr<std::string>               name;
     std::vector<std::shared_ptr<CDDLPlainTwo>> history;
 };
 
+struct CDDLSharedGraphPointers {
+    std::shared_ptr<CDDLPlainTwo>             owner;
+    std::vector<std::shared_ptr<std::string>> aliases;
+};
+
 using CDDLVariantWithSmartPointer       = std::variant<std::shared_ptr<int>, std::string>;
 using CDDLVariantWithNestedSmartPointer = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+using CDDLSharedGraphVariant            = std::variant<std::shared_ptr<int>, static_tag<42>, std::string>;
+using CDDLSharedGraphVectorVariant      = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+using CDDLSharedGraphUniqueVariant      = std::variant<std::unique_ptr<int>, std::string>;
 
 template <typename T, std::size_t Depth> struct CDDLDeepVector {
     using type = std::vector<typename CDDLDeepVector<T, Depth - 1U>::type>;
@@ -135,6 +187,19 @@ static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveSma
 static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepValue>());
 static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveValue>());
 static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
+static_assert(detail::CDDLScopedType<smart_ptr::shared_graph_cddl<CDDLSharedGraphPointers>>);
+static_assert(detail::cddl_is_shared_graph_vector_alternative<std::vector<std::shared_ptr<int>>>());
+static_assert(!detail::cddl_is_shared_graph_vector_alternative<std::vector<std::optional<std::shared_ptr<int>>>>());
+static_assert(!detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::vector<std::shared_ptr<int>>>());
+static_assert(detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::optional<std::shared_ptr<int>>>());
+static_assert(detail::cddl_contains_unsupported_shared_graph_variant_pointer<std::vector<std::optional<std::shared_ptr<int>>>>());
+static_assert(detail::cddl_contains_shared_graph_pointer<std::shared_ptr<int>>());
+static_assert(detail::cddl_contains_shared_graph_collision_tag<static_tag<28>>());
+static_assert(detail::cddl_contains_shared_graph_collision_tag<static_tag<29>>());
+static_assert(
+    detail::cddl_scoped_variant_has_tag_overlap<detail::cddl_shared_pointer_mode::shared_graph, std::shared_ptr<int>, static_tag<28>>());
+static_assert(!detail::cddl_scoped_variant_has_tag_overlap<detail::cddl_shared_pointer_mode::shared_graph, std::shared_ptr<int>,
+                                                           static_tag<42>, std::string>());
 
 enum class CDDLUnsignedEnum : std::uint8_t {};
 enum class CDDLSignedEnum : std::int8_t {};
@@ -290,6 +355,15 @@ struct CDDLNamedNullablePointers {
     std::unique_ptr<std::uint64_t>      count;
     std::shared_ptr<std::string>        name;
     std::optional<std::shared_ptr<int>> maybe_count;
+};
+
+struct CDDLNamedSharedGraphGroup {
+    std::shared_ptr<CDDLPlainTwo> owner;
+};
+
+struct CDDLNamedSharedGraphRoot {
+    as_named_group<CDDLNamedSharedGraphGroup> group;
+    std::shared_ptr<std::string>              reviewer;
 };
 
 struct CDDLNamedEnumChildMap {
@@ -475,6 +549,70 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
     CHECK_EQ(schema.find("map"), std::string::npos);
 }
 
+TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint8_t>>(64);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint16_t>>(65);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint32_t>>(66);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint64_t>>(67);
+    check_cddl_typed_array_tag<rfc8746::typed_array<rfc8746::uint8_clamped>>(68);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint16_t>>(69);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint32_t>>(70);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::uint64_t>>(71);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::int8_t>>(72);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int16_t>>(73);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int32_t>>(74);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int64_t>>(75);
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::int16_t>>(77);
+    CHECK_EQ(cddl_schema_inline<rfc8746::typed_array<std::int32_t>>(), "root = #6.78(bstr)");
+    check_cddl_typed_array_tag<rfc8746::typed_array<std::int64_t>>(79);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<float16_t>>(80);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<float>>(81);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<double>>(82);
+    check_cddl_typed_array_tag<rfc8746::typed_array_be<rfc8746::float128_t>>(83);
+    check_cddl_typed_array_tag<rfc8746::typed_array<float16_t>>(84);
+    check_cddl_typed_array_tag<rfc8746::typed_array<float>>(85);
+    check_cddl_typed_array_tag<rfc8746::typed_array<double>>(86);
+    check_cddl_typed_array_tag<rfc8746::typed_array<rfc8746::float128_t>>(87);
+
+    CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_view<float>>(), "root = #6.85(bstr)");
+    CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_view_be<float>>(), "root = #6.81(bstr)");
+    CHECK_EQ(cddl_schema_inline<rfc8746::typed_array_ref<std::int32_t>>(), "root = #6.78(bstr)");
+    CHECK_EQ(cddl_schema_inline<rfc8746::homogeneous_array<std::vector<int>>>(), "root = #6.41([* int])");
+    CHECK_EQ(cddl_schema_inline<CDDLTypedArrayRefs>(), "CDDLTypedArrayRefs = [#6.78(bstr), #6.69(bstr)]");
+    CHECK_EQ(cddl_schema_inline<CDDLStructuralArrayRefs>(), "CDDLStructuralArrayRefs = [#6.41([* int]), #6.40([[2*2 uint], #6.69(bstr)])]");
+
+    using row_major     = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
+    using column_major  = rfc8746::multi_dimensional_column_major_array<std::vector<std::uint64_t>, rfc8746::typed_array<std::uint16_t>>;
+    using fixed_rank    = rfc8746::multi_dimensional_array<std::array<std::uint64_t, 2>, rfc8746::typed_array<std::uint16_t>>;
+    using view_payload  = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::typed_array_view<std::uint16_t>>;
+    using plain_payload = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, std::vector<int>>;
+    using homogeneous_payload = rfc8746::multi_dimensional_array<std::vector<std::uint64_t>, rfc8746::homogeneous_array<std::vector<int>>>;
+    CHECK_EQ(cddl_schema_inline<row_major>(), "root = #6.40([[* uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<column_major>(), "root = #6.1040([[* uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<fixed_rank>(), "root = #6.40([[2*2 uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<view_payload>(), "root = #6.40([[* uint], #6.69(bstr)])");
+    CHECK_EQ(cddl_schema_inline<plain_payload>(), "root = #6.40([[* uint], [* int]])");
+    CHECK_EQ(cddl_schema_inline<homogeneous_payload>(), "root = #6.40([[* uint], #6.41([* int])])");
+
+    CHECK_EQ(cddl_schema_inline<std::variant<rfc8746::typed_array<std::int32_t>, rfc8746::typed_array_be<double>>>(),
+             "root = #6.78(bstr) / #6.82(bstr)");
+    CHECK_EQ(cddl_schema_inline<CDDLTypedArrays>(),
+             "CDDLTypedArrays = [#6.78(bstr), #6.82(bstr), #6.41([* uint]), #6.40([[* uint], #6.69(bstr)])]");
+    CHECK_EQ(cddl_schema_with_options<rfc8746::typed_array<std::int32_t>>(CDDLOptions{.row_options = {}, .root_name = "samples"}),
+             "samples = #6.78(bstr)");
+
+    const auto row_schema = cddl_schema_with_options<CDDLTypedArrays>({});
+    CHECK(substrings_in(row_schema, "#6.78(bstr)", "#6.82(bstr)", "#6.41([* uint])", "#6.40([[* uint], #6.69(bstr)])"));
+}
+
+TEST_CASE("CDDL does not infer RFC 8746 wrappers by structural member names") {
+    const auto schema = cddl_schema_inline<CDDLLooksLikeTypedArrayRoot>();
+    CBOR_TAGS_TEST_LOG("CDDL structural lookalike: \n{}\n", schema);
+
+    CHECK(substrings_in(schema, "CDDLLooksLikeTypedArrayRoot = [CDDLLooksLikeTypedArray, int]", "CDDLLooksLikeTypedArray = int"));
+    CHECK_EQ(schema.find("#6.999"), std::string::npos);
+}
+
 TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
     CHECK_EQ(cddl_schema_inline<std::unique_ptr<int>>(), "root = [0] / [1, int]");
     CHECK_EQ(cddl_schema_inline<std::shared_ptr<std::string>>(), "root = [0] / [1, tstr]");
@@ -488,6 +626,75 @@ TEST_CASE("CDDL emits nullable pointer shapes for the smart pointer codec") {
     CHECK(substrings_in(schema, "CDDLNullablePointers = [[0] / [1, uint], [0] / [1, tstr], [* ([0] / [1, CDDLPlainTwo])]]",
                         "CDDLPlainTwo = [int, tstr]"));
     CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
+}
+
+TEST_CASE("CDDL emits shared graph pointer shapes through explicit smart pointer scope") {
+    using smart_ptr::shared_graph_cddl;
+
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<std::shared_ptr<int>>>(), "root = [0] / #6.28(int) / #6.29(uint)");
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<std::unique_ptr<int>>>(), "root = [0] / [1, int]");
+    CHECK_EQ(cddl_schema_inline<std::shared_ptr<int>>(), "root = [0] / [1, int]");
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphVariant>>(), "root = [0] / #6.28(int) / #6.29(uint) / #6.42 / tstr");
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphVectorVariant>>(), "root = [* ([0] / #6.28(int) / #6.29(uint))] / tstr");
+    CHECK_EQ(cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphUniqueVariant>>(), "root = [0] / [1, int] / tstr");
+
+    std::string named_root_schema;
+    cddl_schema_to<shared_graph_cddl<std::shared_ptr<int>>>(named_root_schema,
+                                                            {.row_options = {.format_by_rows = false}, .root_name = "graph_ptr"});
+    CHECK_EQ(named_root_schema, "graph_ptr = [0] / #6.28(int) / #6.29(uint)");
+
+    const auto schema = cddl_schema_inline<shared_graph_cddl<CDDLSharedGraphPointers>>();
+    CBOR_TAGS_TEST_LOG("CDDL shared graph pointers: \n{}\n", schema);
+
+    CHECK(substrings_in(schema,
+                        "CDDLSharedGraphPointers = [[0] / #6.28(CDDLPlainTwo) / #6.29(uint), [* ([0] / #6.28(tstr) / #6.29(uint))]]",
+                        "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
+
+    fmt::memory_buffer inline_buffer;
+    cddl_schema_to<shared_graph_cddl<CDDLSharedGraphPointers>>(inline_buffer,
+                                                               {.row_options = {.format_by_rows = false}, .always_inline = true});
+    const auto inline_schema = fmt::to_string(inline_buffer);
+    CHECK(substrings_in(inline_schema, "CDDLSharedGraphPointers = [[0] / #6.28([int, tstr]) / #6.29(uint), [* ([0] / #6.28(tstr) / "
+                                       "#6.29(uint))]]"));
+    CHECK_EQ(inline_schema.find("CDDLPlainTwo ="), std::string::npos);
+}
+
+TEST_CASE("CDDL shared graph scope keeps a separate definition cache") {
+    using smart_ptr::shared_graph_cddl;
+
+    detail::CDDLContext context;
+
+    fmt::memory_buffer nullable_buffer;
+    cddl_schema_to<CDDLSharedGraphPointers>(nullable_buffer, {.row_options = {.format_by_rows = false}}, std::ref(context));
+
+    fmt::memory_buffer graph_buffer;
+    cddl_schema_to<shared_graph_cddl<CDDLSharedGraphPointers>>(graph_buffer, {.row_options = {.format_by_rows = false}}, std::ref(context));
+
+    const auto nullable_schema = fmt::to_string(nullable_buffer);
+    const auto graph_schema    = fmt::to_string(graph_buffer);
+
+    CHECK(substrings_in(nullable_schema, "[0] / [1, CDDLPlainTwo]", "[0] / [1, tstr]"));
+    CHECK(substrings_in(graph_schema, "#6.28(", "#6.29(uint)", "[0] / #6.28(tstr) / #6.29(uint)"));
+    CHECK_EQ(graph_schema.find("[1, CDDLPlainTwo]"), std::string::npos);
+    CHECK_EQ(graph_schema.find("[1, tstr]"), std::string::npos);
+
+    detail::CDDLContext reverse_context;
+
+    fmt::memory_buffer reverse_graph_buffer;
+    cddl_schema_to<shared_graph_cddl<CDDLSharedGraphPointers>>(reverse_graph_buffer, {.row_options = {.format_by_rows = false}},
+                                                               std::ref(reverse_context));
+
+    fmt::memory_buffer reverse_nullable_buffer;
+    cddl_schema_to<CDDLSharedGraphPointers>(reverse_nullable_buffer, {.row_options = {.format_by_rows = false}}, std::ref(reverse_context));
+
+    const auto reverse_graph_schema    = fmt::to_string(reverse_graph_buffer);
+    const auto reverse_nullable_schema = fmt::to_string(reverse_nullable_buffer);
+
+    CHECK(substrings_in(reverse_graph_schema, "#6.28(", "#6.29(uint)", "[0] / #6.28(tstr) / #6.29(uint)"));
+    CHECK(substrings_in(reverse_nullable_schema, "[0] / [1, ", "[0] / [1, tstr]"));
+    CHECK_EQ(reverse_nullable_schema.find("#6.28("), std::string::npos);
+    CHECK_EQ(reverse_nullable_schema.find("#6.29(uint)"), std::string::npos);
 }
 
 TEST_CASE("CDDL supports recursive aggregate containers") {
@@ -680,6 +887,26 @@ TEST_CASE("named-map CDDL keeps nullable pointer fields required unless optional
     fmt::memory_buffer buffer;
     cddl_schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
     CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: [0] / [1, uint], name: [0] / [1, tstr], ? maybe_count: [0] / [1, int]}");
+}
+
+TEST_CASE("named-map CDDL propagates shared graph pointer scope through named maps and groups") {
+    using smart_ptr::shared_graph_cddl;
+
+    fmt::memory_buffer map_buffer;
+    cddl_schema_to<shared_graph_cddl<as_named_map<CDDLNamedSharedGraphRoot>>>(
+        map_buffer, {.row_options = {.format_by_rows = false}, .root_name = "GraphRoot"});
+    const auto map_schema = fmt::to_string(map_buffer);
+    CHECK(substrings_in(map_schema, "GraphRoot = {group, reviewer: [0] / #6.28(tstr) / #6.29(uint)}",
+                        "group = (owner: [0] / #6.28(CDDLPlainTwo) / #6.29(uint))", "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(map_schema.find("[1, CDDLPlainTwo]"), std::string::npos);
+    CHECK_EQ(map_schema.find("[1, tstr]"), std::string::npos);
+
+    fmt::memory_buffer group_buffer;
+    cddl_schema_to<shared_graph_cddl<as_named_group<CDDLNamedSharedGraphGroup>>>(
+        group_buffer, {.row_options = {.format_by_rows = false}, .root_name = "GraphGroup"});
+    const auto group_schema = fmt::to_string(group_buffer);
+    CHECK(substrings_in(group_schema, "GraphGroup = (owner: [0] / #6.28(CDDLPlainTwo) / #6.29(uint))", "CDDLPlainTwo = [int, tstr]"));
+    CHECK_EQ(group_schema.find("[1, CDDLPlainTwo]"), std::string::npos);
 }
 
 TEST_CASE("named-map CDDL indents nested inline named groups by depth") {

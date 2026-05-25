@@ -76,6 +76,39 @@ jobs:
       shell: pwsh
       run: ctest --test-dir build-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
 
+  std-expected-cxx23:
+    name: Windows MSVC C++23 std::expected return tests
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+        useCloudCache: false
+
+    - name: Configure CMake with std::expected
+      shell: pwsh
+      run: |
+        cmake -B build-std-expected-cxx23 `
+          -G "Visual Studio 17 2022" `
+          -A x64 `
+          -DCBOR_TAGS_BUILD_TESTS=ON `
+          -DCBOR_TAGS_USE_STD_EXPECTED=ON `
+          -DCMAKE_CXX_STANDARD=23 `
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+          -DCMAKE_CXX_EXTENSIONS=OFF
+
+    - name: Build
+      shell: pwsh
+      run: cmake --build build-std-expected-cxx23 --config Release --parallel
+
+    - name: Test
+      shell: pwsh
+      run: ctest --test-dir build-std-expected-cxx23 -C Release --output-on-failure
+
   optional-backends:
     name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }} ${{ matrix.backend.name }}
     runs-on: windows-latest

@@ -194,11 +194,13 @@ TEST_CASE("std::expected codec accepts indefinite two-item arrays") {
 
 TEST_CASE("std::expected codec reports malformed wrappers and payloads") {
     check_decode_error<std::uint64_t, std::string>("a0", status_code::no_match_for_array_on_buffer);
+    check_decode_error<std::uint64_t, std::string>("98", status_code::incomplete);
     check_decode_error<std::uint64_t, std::string>("81f5", status_code::unexpected_group_size);
     check_decode_error<std::uint64_t, std::string>("83f5182a00", status_code::unexpected_group_size);
     check_decode_error<std::uint64_t, std::string>("8200182a", status_code::no_match_for_simple_on_buffer);
     check_decode_error<std::uint64_t, std::string>("82f563626164", status_code::no_match_for_uint_on_buffer);
     check_decode_error<std::uint64_t, std::string>("82f4182a", status_code::no_match_for_tstr_on_buffer);
+    check_decode_error<std::uint64_t, std::string>("9ff5182a", status_code::incomplete);
     check_decode_error<std::uint64_t, std::string>("9ff5182a00ff", status_code::unexpected_group_size);
 }
 

@@ -75,6 +75,44 @@ jobs:
       shell: bash
       run: ctest --test-dir build-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
 
+  std-expected-cxx23:
+    name: macOS AppleClang C++23 std::expected return tests
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Setup Xcode (macOS)
+      uses: maxim-lobanov/setup-xcode@v1.7.0
+      with:
+        xcode-version: '^26.0.0'
+
+    - name: Configure CMake with std::expected
+      shell: bash
+      run: |
+        cmake -B build-std-expected-cxx23 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCBOR_TAGS_USE_STD_EXPECTED=ON \
+          -DCMAKE_CXX_STANDARD=23 \
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+          -DCMAKE_CXX_EXTENSIONS=OFF \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++
+
+    - name: Build
+      shell: bash
+      run: cmake --build build-std-expected-cxx23 --config Release --parallel
+
+    - name: Test
+      shell: bash
+      run: ctest --test-dir build-std-expected-cxx23 -C Release --output-on-failure
+
   optional-backends:
     name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }} ${{ matrix.backend.name }}
     runs-on: macos-latest

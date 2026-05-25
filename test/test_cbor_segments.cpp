@@ -18,6 +18,7 @@
 #include <vector>
 
 using namespace cbor::tags;
+using cbor::tags::test::detail::allocation_failure_guard;
 
 namespace {
 
@@ -169,9 +170,9 @@ struct non_coalescing_byte_segment_storage {
 };
 
 static_assert(IsEncodedItemView<owning_encoded_item_view>);
-static_assert(cbor::tags::detail::SpanBackedEncodedItemView<owning_encoded_item_view>);
-static_assert(!cbor::tags::detail::BorrowedSpanBackedEncodedItemView<owning_encoded_item_view>);
-static_assert(!cbor::tags::detail::EncodedByteViewRange<std::ranges::owning_view<std::vector<std::byte>>>);
+static_assert(detail::SpanBackedEncodedItemView<owning_encoded_item_view>);
+static_assert(!detail::BorrowedSpanBackedEncodedItemView<owning_encoded_item_view>);
+static_assert(!detail::EncodedByteViewRange<std::ranges::owning_view<std::vector<std::byte>>>);
 
 std::vector<std::byte> encode_normal_bstr(std::span<const std::byte> payload) {
     std::vector<std::byte> output;
@@ -187,7 +188,7 @@ template <typename VisitSegments> std::vector<std::byte> flatten_visited_segment
 }
 
 void check_segment_header(std::uint64_t value, std::byte major, const char *expected_hex) {
-    const auto header = cbor::tags::detail::encode_cbor_major_argument_header(value, major);
+    const auto header = detail::encode_cbor_major_argument_header(value, major);
     CHECK_EQ(to_hex(header.span()), expected_hex);
 }
 
@@ -286,7 +287,7 @@ TEST_CASE("segment header encoding covers CBOR size boundaries") {
 }
 
 TEST_CASE("cbor argument headers remain accepted as owned segment input") {
-    const auto header = cbor::tags::detail::encode_cbor_major_argument_header(24, std::byte{0x40});
+    const auto header = detail::encode_cbor_major_argument_header(24, std::byte{0x40});
 
     const auto segment = cbor_segment::owned(header);
     CHECK(segment.is_owned());
@@ -428,7 +429,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
         segments.reserve_segments(2);
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_bstr_segments_into(segments, span);
         }
 
@@ -440,7 +441,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
         segments.reserve_segments(6);
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_indefinite_bstr_segments_into(segments, span, 2);
         }
 
@@ -452,7 +453,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
         segments.reserve_segments(3);
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_tagged_bstr_segments_into(segments, static_tag<24>{}, span);
         }
 
@@ -465,7 +466,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
         segments.append_owned(std::span<const std::byte>{prefix});
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_bstr_segments_into(segments, span);
         }
 
@@ -478,7 +479,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
         segments.append_owned(std::span<const std::byte>{prefix});
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_indefinite_bstr_segments_into(segments, span, 2);
         }
 
@@ -491,7 +492,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
         segments.append_owned(std::span<const std::byte>{prefix});
 
         {
-            cbor::tags::test::detail::allocation_failure_guard guard;
+            allocation_failure_guard guard;
             encode_tagged_bstr_segments_into(segments, static_tag<24>{}, span);
         }
 

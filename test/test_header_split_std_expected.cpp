@@ -4,8 +4,7 @@
 
 #if __has_include(<expected>) && defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
 
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
+// A public extension header should be enough for its codec wrappers and factories.
 #include <cbor_tags/extensions/std_expected.h>
 #include <cstddef>
 #include <doctest/doctest.h>
@@ -13,14 +12,17 @@
 #include <string>
 #include <vector>
 
+using namespace cbor::tags;
+using namespace cbor::tags::ext::std_expected;
+
 TEST_CASE("std::expected split header is directly usable") {
     std::vector<std::byte>          encoded;
     std::expected<int, std::string> value{42};
-    auto                            enc = cbor::tags::make_encoder<cbor::tags::ext::std_expected::std_expected_codec>(encoded);
+    auto                            enc = make_encoder<std_expected_codec>(encoded);
     REQUIRE(enc(value));
 
     std::expected<int, std::string> decoded{};
-    auto                            dec = cbor::tags::make_decoder<cbor::tags::ext::std_expected::std_expected_codec>(encoded);
+    auto                            dec = make_decoder<std_expected_codec>(encoded);
     REQUIRE(dec(decoded));
     REQUIRE(decoded.has_value());
     CHECK_EQ(*decoded, 42);
