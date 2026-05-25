@@ -91,9 +91,8 @@ template <typename Tag, typename T> [[nodiscard]] inline cbor_segments encode_bo
 
     cbor_segments segments;
     segments.reserve_segments(payload.size() + 2U);
-    segments.append_owned(
-        cbor_detail::encode_cbor_major_argument_header(codec_detail::tag_to_uint64(tag), get_major_3_bit_tag<as_tag_any>()).span());
-    segments.append_owned(cbor_detail::encode_cbor_major_argument_header(payload.total_size(), get_major_3_bit_tag<as_bstr_any>()).span());
+    segments.append_owned(cbor_detail::encode_cbor_tag_header(codec_detail::tag_to_uint64(tag)).span());
+    segments.append_owned(cbor_detail::encode_cbor_bstr_header(payload.total_size()).span());
 
     for (const auto &segment : payload) {
         const auto bytes = segment.bytes();
@@ -185,8 +184,8 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
             enc, [&value](auto &appender, auto &output) { codec_detail::encode_payload_to(appender, output, value); },
             [&value] { return codec_detail::encode_payload_segments(value); });
 
-        cbor_detail::encode_extension_tag_header(enc, tag);
-        cbor_detail::encode_extension_bstr_header(enc, static_cast<std::uint64_t>(cbor_detail::extension_payload_size(payload)));
+        cbor_detail::encode_extension_tagged_bstr_header(enc, tag,
+                                                         static_cast<std::uint64_t>(cbor_detail::extension_payload_size(payload)));
         cbor_detail::append_extension_payload(enc, payload);
     }
 

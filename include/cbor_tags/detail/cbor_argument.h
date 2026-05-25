@@ -44,6 +44,9 @@ struct cbor_argument_header {
     }
 };
 
+inline constexpr std::byte cbor_bstr_major_byte = get_major_3_bit_tag<as_bstr_any>();
+inline constexpr std::byte cbor_tag_major_byte  = get_major_3_bit_tag<as_tag_any>();
+
 template <typename EmitByte> constexpr void emit_cbor_major_argument(std::uint64_t value, std::uint8_t major_type, EmitByte &&emit_byte) {
     auto emit = [&emit_byte](std::uint64_t byte) { emit_byte(static_cast<std::uint8_t>(byte)); };
 
@@ -80,6 +83,14 @@ template <typename EmitByte> constexpr void emit_cbor_major_argument(std::uint64
     emit_cbor_major_argument(value, cbor_byte_to_u8(major_type),
                              [&header](std::uint8_t byte) { header.bytes[header.size++] = static_cast<std::byte>(byte); });
     return header;
+}
+
+[[nodiscard]] constexpr cbor_argument_header encode_cbor_bstr_header(std::uint64_t size) noexcept {
+    return encode_cbor_major_argument_header(size, cbor_bstr_major_byte);
+}
+
+[[nodiscard]] constexpr cbor_argument_header encode_cbor_tag_header(std::uint64_t tag) noexcept {
+    return encode_cbor_major_argument_header(tag, cbor_tag_major_byte);
 }
 
 template <typename Appender, typename OutputBuffer, typename Byte>
