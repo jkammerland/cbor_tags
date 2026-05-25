@@ -178,25 +178,29 @@ template <typename Decoder>
     return status_code::success;
 }
 
-template <bool GraphTagsPossible, typename Self, typename... Ts>
-[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, std::variant<Ts...> &value, major_type major,
+template <bool GraphTagsPossible, typename Self, IsVariant Variant>
+[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, Variant &value, major_type major,
                                                                                std::byte                     additional_info,
                                                                                std::optional<std::uint64_t> &tag) {
+    using variant_type = std::remove_cvref_t<Variant>;
+
     static_assert(
-        ((IsCborMajor<Ts> || decodable_nullable_pointer_v<Ts> || (GraphTagsPossible && decodable_shared_graph_vector_v<Ts>)) && ...),
-        "Variant alternatives must be core CBOR types, decodable nullable smart pointers, or shared graph vectors for this "
-        "codec.");
-    static_assert(decodable_nullable_pointer_count_v<Ts...> <= 1U,
+        cbor::tags::detail::with_variant_alternatives<variant_type>([]<typename... Alternatives>() {
+            return ((IsCborMajor<Alternatives> || decodable_nullable_pointer_v<Alternatives> ||
+                     (GraphTagsPossible && decodable_shared_graph_vector_v<Alternatives>)) &&
+                    ...);
+        }),
+        "Variant alternatives must be core CBOR types, decodable nullable smart pointers, or shared graph vectors for this codec.");
+    static_assert(variant_decodable_nullable_pointer_count_v<variant_type> <= 1U,
                   "Variant nullable smart pointer alternatives are ambiguous because they share the same [0] / [1, value] shape.");
 
-    using variant_type          = std::variant<Ts...>;
     using major_index           = cbor::tags::detail::MajorIndex;
     constexpr auto core_mapping = valid_concept_mapping_array_v<variant_type>;
-    static_assert(decodable_nullable_pointer_count_v<Ts...> == 0U || core_mapping[major_index::Array] == 0,
+    static_assert(variant_decodable_nullable_pointer_count_v<variant_type> == 0U || core_mapping[major_index::Array] == 0,
                   "Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives.");
-    static_assert(decodable_shared_graph_vector_count_v<Ts...> == 0U || core_mapping[major_index::Array] == 1U,
+    static_assert(variant_decodable_shared_graph_vector_count_v<variant_type> == 0U || core_mapping[major_index::Array] == 1U,
                   "Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives.");
-    static_assert(!GraphTagsPossible || !variant_has_shared_graph_tag_collision_v<Ts...>,
+    static_assert(!GraphTagsPossible || !variant_has_shared_graph_tag_collision_v<variant_type>,
                   "Variant shared_ptr alternatives in a shared graph collide with tags 28/29 or a catch-all tag alternative.");
     cbor::tags::detail::require_unambiguous_variant_dispatch_without_array<variant_type>();
     static_assert(valid_concept_mapping_v<variant_type>,
@@ -206,8 +210,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
     std::optional<status_code> pointer_error;
 
     auto try_decode = [&dec, major, additional_info, &value, &tag, &saw_incomplete,
-                       &pointer_error]<bool CatchAllPass, typename U>() -> bool {
-        using raw_type = std::remove_cvref_t<U>;
+                       &pointer_error]<bool CatchAllPass, std::size_t I>() -> bool {
+        using raw_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
 
         if (pointer_error.has_value()) {
             return false;
@@ -249,7 +253,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
                 result = dec.decode(decoded_value, major, additional_info);
             }
             if (result == status_code::success) {
-                value = std::move(decoded_value);
+                cbor::tags::detail::variant_assign<I>(value, std::move(decoded_value));
                 return true;
             }
             if (result == status_code::incomplete) {
@@ -293,7 +297,7 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
 
             if (result == status_code::success) {
-                value = std::move(decoded_value);
+                cbor::tags::detail::variant_assign<I>(value, std::move(decoded_value));
                 return true;
             }
             if (result == status_code::incomplete) {
@@ -307,14 +311,21 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
         }
     };
 
+    auto try_decode_alternatives = [&]<bool CatchAllPass, std::size_t... Is>(std::index_sequence<Is...>) {
+        return (try_decode.template operator()<CatchAllPass, Is>() || ...);
+    };
+
     bool found = false;
     if (major == major_type::Simple) {
-        found = (try_decode.template operator()<false, Ts>() || ...);
+        found = try_decode_alternatives.template operator()<false>(
+            std::make_index_sequence<cbor::tags::detail::variant_size_v<variant_type>>{});
         if (!found) {
-            found = (try_decode.template operator()<true, Ts>() || ...);
+            found = try_decode_alternatives.template operator()<true>(
+                std::make_index_sequence<cbor::tags::detail::variant_size_v<variant_type>>{});
         }
     } else {
-        found = (try_decode.template operator()<false, Ts>() || ...);
+        found = try_decode_alternatives.template operator()<false>(
+            std::make_index_sequence<cbor::tags::detail::variant_size_v<variant_type>>{});
     }
     if (!found) {
         if (pointer_error.has_value()) {
@@ -328,8 +339,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
     return status_code::success;
 }
 
-template <bool GraphTagsPossible, typename Self, typename... Ts>
-[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers(Self &dec, std::variant<Ts...> &value, major_type major,
+template <bool GraphTagsPossible, typename Self, IsVariant Variant>
+[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers(Self &dec, Variant &value, major_type major,
                                                                           std::byte additional_info) {
     std::optional<std::uint64_t> tag;
     return decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, value, major, additional_info, tag);
@@ -505,9 +516,9 @@ template <typename Self> struct nullable_ptr_codec : detail::nullable_ptr_codec_
         return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
 
-    template <typename... Ts>
-        requires(detail::has_decodable_nullable_pointer_v<Ts...> && !detail::has_shared_graph_codec_v<Self>)
-    [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
+    template <IsVariant Variant>
+        requires(detail::variant_has_decodable_nullable_pointer_v<Variant> && !detail::has_shared_graph_codec_v<Self>)
+    [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
         return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
     }
 };
@@ -619,18 +630,18 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         return decode_shared_graph_pointer(value, tag);
     }
 
-    template <typename... Ts>
-        requires(detail::has_decodable_nullable_pointer_v<Ts...> || detail::has_decodable_shared_graph_vector_v<Ts...>)
-    [[nodiscard]] status_code decode(std::variant<Ts...> &value, major_type major, std::byte additional_info) {
+    template <IsVariant Variant>
+        requires(detail::variant_has_decodable_nullable_pointer_v<Variant> || detail::variant_has_decodable_shared_graph_vector_v<Variant>)
+    [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
         if (active_decode_session_ == nullptr) {
-            if constexpr (detail::has_nullable_ptr_codec_v<Self> && detail::has_decodable_nullable_pointer_v<Ts...> &&
-                          !detail::has_decodable_shared_graph_vector_v<Ts...>) {
+            if constexpr (detail::has_nullable_ptr_codec_v<Self> && detail::variant_has_decodable_nullable_pointer_v<Variant> &&
+                          !detail::variant_has_decodable_shared_graph_vector_v<Variant>) {
                 return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
             } else {
                 return status_code::error;
             }
         }
-        if constexpr (detail::variant_has_shared_graph_tag_collision_v<Ts...>) {
+        if constexpr (detail::variant_has_shared_graph_tag_collision_v<Variant>) {
             return status_code::error;
         } else {
             return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);
@@ -638,9 +649,9 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
     }
 
   private:
-    template <bool GraphTagsPossible, typename FriendSelf, typename... Ts>
-    friend constexpr status_code detail::decode_variant_with_nullable_pointers_impl(FriendSelf &, std::variant<Ts...> &, major_type,
-                                                                                    std::byte, std::optional<std::uint64_t> &);
+    template <bool GraphTagsPossible, typename FriendSelf, IsVariant FriendVariant>
+    friend constexpr status_code detail::decode_variant_with_nullable_pointers_impl(FriendSelf &, FriendVariant &, major_type, std::byte,
+                                                                                    std::optional<std::uint64_t> &);
 
     template <detail::NullablePointerValue T>
         requires std::default_initializable<T>

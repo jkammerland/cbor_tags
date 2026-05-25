@@ -255,17 +255,15 @@ void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_b
 template <typename T> constexpr auto getName(const T &);
 template <typename T> constexpr auto getName();
 
-template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames() {
-    std::string result;
-    ((result += std::string(getName<Ts>()) + " / "), ...);
-    return result.substr(0, result.empty() ? 0 : (result.size() - 3));
+template <IsVariant Variant> constexpr auto getVariantNames() {
+    return detail::with_variant_alternatives<Variant>([]<typename... Ts>() {
+        std::string result;
+        ((result += std::string(getName<Ts>()) + " / "), ...);
+        return result.substr(0, result.empty() ? 0 : (result.size() - 3));
+    });
 }
 
-template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames(const Variant<Ts...> &&) {
-    std::string result;
-    ((result += std::string(getName<Ts>()) + " / "), ...);
-    return result.substr(0, result.empty() ? 0 : (result.size() - 3));
-}
+template <IsVariant Variant> constexpr auto getVariantNames(const Variant &) { return getVariantNames<std::remove_cvref_t<Variant>>(); }
 
 template <IsTag T> constexpr auto getTagDef(const T &t) {
     if constexpr (HasInlineTag<T>) {
@@ -328,7 +326,7 @@ template <typename T> constexpr auto getName() {
             auto name = getName<element_type>();
             return std::string("[0] / [1, ") + std::string(name) + "]";
         } else if constexpr (IsVariant<T>) {
-            return getVariantNames(T{});
+            return getVariantNames<T>();
         } else {
             return detail::short_type_name<T>();
         }
@@ -425,9 +423,8 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
-            return []<typename... Ts>(std::variant<Ts...> *) consteval {
-                return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...);
-            }(static_cast<value_type *>(nullptr));
+            return detail::with_variant_alternatives<value_type>(
+                []<typename... Ts>() { return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...); });
         } else if constexpr (IsNamedMapWrapper<value_type>) {
             return cddl_contains_nullable_pointer<named_map_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedGroupWrapper<value_type>) {
@@ -453,9 +450,8 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
 template <typename T> consteval std::size_t cddl_nullable_pointer_alternative_count() {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>());
-        }(static_cast<value_type *>(nullptr));
+        return detail::with_variant_alternatives<value_type>(
+            []<typename... Ts>() { return (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>()); });
     } else {
         return cddl_contains_nullable_pointer<value_type>() ? std::size_t{1} : std::size_t{0};
     }
@@ -1110,38 +1106,36 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
         return cddl_multi_dimensional_array_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
-            constexpr auto matching_major_types = valid_concept_mapping_array_v<std::variant<Ts...>>;
+        return detail::with_variant_alternatives<value_type>([&context, &options]<typename... Ts>() {
+            constexpr auto matching_major_types = valid_concept_mapping_array_v<value_type>;
             static_assert(matching_major_types[MajorIndex::Tag] <= 1,
-                          "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
+                          "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(!cddl_scoped_variant_has_tag_overlap<PointerMode, Ts...>(),
-                          "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
+                          "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
-                          "CDDL for std::variant alternatives with dynamic CBOR tags is unsupported");
+                          "CDDL for variant alternatives with dynamic CBOR tags is unsupported");
             if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
                 constexpr auto direct_pointer_alternatives =
                     (std::size_t{0} + ... + (cddl_is_direct_nullable_pointer_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
                 constexpr auto graph_vector_alternatives =
                     (std::size_t{0} + ... + (cddl_is_shared_graph_vector_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
                 static_assert((!cddl_contains_unsupported_shared_graph_variant_pointer<Ts>() && ...),
-                              "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported");
+                              "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported");
                 static_assert(direct_pointer_alternatives <= 1U,
-                              "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported");
+                              "CDDL for variant alternatives containing multiple nullable smart pointers is unsupported");
                 static_assert(direct_pointer_alternatives == 0U || matching_major_types[MajorIndex::Array] == 0U,
-                              "CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is "
+                              "CDDL for variant alternatives containing nullable smart pointers and array-shaped alternatives is "
                               "unsupported");
                 static_assert(graph_vector_alternatives == 0U || matching_major_types[MajorIndex::Array] == 1U,
-                              "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped "
+                              "CDDL for variant alternatives containing shared graph vector smart pointers and other array-shaped "
                               "alternatives is unsupported");
             } else {
-                static_assert(
-                    (!cddl_contains_nullable_pointer<Ts>() && ...),
-                    "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
-                    "decode is not extension-codec aware");
+                static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
+                              "CDDL for variant alternatives containing nullable smart pointers is unsupported because runtime variant "
+                              "decode is not extension-codec aware");
             }
-            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(variant_context, variant_options)...},
-                             " / ");
-        }(static_cast<value_type *>(nullptr), context, options);
+            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(context, options)...}, " / ");
+        });
     } else if constexpr (IsArrayHeader<value_type>) {
         return "[* any]";
     } else if constexpr (IsMapHeader<value_type>) {

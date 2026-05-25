@@ -58,7 +58,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nullable_pointer_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives containing nullable smart pointers is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -71,7 +71,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_shared_graph_variant_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -84,7 +84,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_shared_graph_variant_array_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives containing nullable smart pointers and array-shaped alternatives is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -110,35 +110,35 @@ add_cddl_shared_graph_compile_fail_test(
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_tag29_compile_fails
   cddl_shared_graph_variant_tag29_compile_fail.cc
-  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_any_tag_compile_fails
   cddl_shared_graph_variant_any_tag_compile_fail.cc
-  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_nested_any_tag_compile_fails
   cddl_shared_graph_variant_nested_any_tag_compile_fail.cc
-  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_multiple_pointers_compile_fails
   cddl_shared_graph_variant_multiple_pointers_compile_fail.cc
-  "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing multiple nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_optional_pointer_compile_fails
   cddl_shared_graph_variant_optional_pointer_compile_fail.cc
-  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_nested_pointer_compile_fails
   cddl_shared_graph_variant_nested_pointer_compile_fail.cc
-  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_map_pointer_compile_fails
   cddl_shared_graph_variant_map_pointer_compile_fail.cc
-  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_vector_array_compile_fails
   cddl_shared_graph_variant_vector_array_compile_fail.cc
-  "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
+  "CDDL for variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
 
 add_executable(cddl_variant_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_duplicate_tags_compile_fail.cc)
 target_link_libraries(cddl_variant_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
@@ -149,7 +149,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -162,7 +162,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_ref_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -175,7 +175,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nested_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -188,7 +188,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_structural_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -201,7 +201,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nested_any_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -214,7 +214,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_optional_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -227,7 +227,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_any_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -240,7 +240,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_static_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -253,7 +253,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_dynamic_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with dynamic CBOR tags is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with dynamic CBOR tags is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
