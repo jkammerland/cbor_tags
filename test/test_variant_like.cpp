@@ -64,7 +64,17 @@ template <std::size_t I, typename... Ts> constexpr decltype(auto) get(const adl_
     return std::get<I>(value.storage);
 }
 
-template <typename Visitor, typename... Variants> constexpr decltype(auto) visit(Visitor &&visitor, Variants &&...variants) {
+template <typename T>
+concept HasVariantStorage = requires(T &&value) { std::forward<T>(value).storage; };
+
+template <typename T>
+concept HasIndexMember = requires(const std::remove_cvref_t<T> &value) {
+    { value.index() } -> std::convertible_to<std::size_t>;
+};
+
+template <typename Visitor, typename... Variants>
+    requires((HasVariantStorage<Variants> && HasIndexMember<Variants>) && ...)
+constexpr decltype(auto) visit(Visitor &&visitor, Variants &&...variants) {
     return std::visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants).storage...);
 }
 
@@ -95,25 +105,60 @@ template <typename T, typename... Ts> constexpr decltype(auto) get(const which_v
     return std::get<T>(value.storage);
 }
 
-template <typename Visitor, typename... Variants> constexpr decltype(auto) apply_visitor(Visitor &&visitor, Variants &&...variants) {
+template <typename Visitor, typename... Variants>
+    requires(HasVariantStorage<Variants> && ...)
+constexpr decltype(auto) apply_visitor(Visitor &&visitor, Variants &&...variants) {
     return std::visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants).storage...);
 }
+
+template <typename... Ts> struct aggregate_adl_variant {
+    std::variant<Ts...> storage;
+
+    [[nodiscard]] constexpr std::size_t index() const noexcept { return storage.index(); }
+
+    template <std::size_t I, typename... Args> constexpr decltype(auto) emplace(Args &&...args) {
+        return storage.template emplace<I>(std::forward<Args>(args)...);
+    }
+};
+
+template <std::size_t I, typename... Ts> constexpr decltype(auto) get(aggregate_adl_variant<Ts...> &value) noexcept {
+    return std::get<I>(value.storage);
+}
+
+template <std::size_t I, typename... Ts> constexpr decltype(auto) get(const aggregate_adl_variant<Ts...> &value) noexcept {
+    return std::get<I>(value.storage);
+}
+
+template <typename... Ts> struct indexed_aggregate {
+    std::size_t selected{};
+
+    [[nodiscard]] constexpr std::size_t index() const noexcept { return selected; }
+};
 
 } // namespace variant_like_test
 
 TEST_CASE("variant-like traits recognize non-std variant APIs") {
-    using adl_variant   = variant_like_test::adl_variant<std::uint64_t, std::string>;
-    using which_variant = variant_like_test::which_variant<std::uint64_t, std::string>;
+    using adl_variant       = variant_like_test::adl_variant<std::uint64_t, std::string>;
+    using aggregate_variant = variant_like_test::aggregate_adl_variant<std::uint64_t, std::string>;
+    using indexed_aggregate = variant_like_test::indexed_aggregate<std::uint64_t, std::string>;
+    using which_variant     = variant_like_test::which_variant<std::uint64_t, std::string>;
 
     static_assert(tags::IsVariant<adl_variant>);
+    static_assert(tags::IsVariant<aggregate_variant>);
     static_assert(tags::IsVariant<which_variant>);
     static_assert(tags::IsCborMajor<adl_variant>);
+    static_assert(tags::IsCborMajor<aggregate_variant>);
     static_assert(tags::IsCborMajor<which_variant>);
     static_assert(tags::valid_concept_mapping_v<adl_variant>);
+    static_assert(tags::valid_concept_mapping_v<aggregate_variant>);
     static_assert(tags::valid_concept_mapping_v<which_variant>);
+    static_assert(!tags::IsVariant<indexed_aggregate>);
+    static_assert(std::is_aggregate_v<aggregate_variant>);
+    static_assert(!tags::IsAggregate<aggregate_variant>);
     static_assert(!tags::IsVariant<std::tuple<std::uint64_t, std::string>>);
 
     CHECK(tags::detail::variant_size_v<adl_variant> == 2U);
+    CHECK(tags::detail::variant_size_v<aggregate_variant> == 2U);
     CHECK(tags::detail::variant_size_v<which_variant> == 2U);
 }
 
@@ -131,6 +176,22 @@ TEST_CASE("variant-like type with ADL visit and indexed get roundtrips through n
 
     REQUIRE(tags::detail::variant_index(output) == 1U);
     CHECK(variant_like_test::get<1>(output) == "variant-like");
+}
+
+TEST_CASE("aggregate variant-like wrapper roundtrips as a variant instead of an aggregate") {
+    using variant = variant_like_test::aggregate_adl_variant<std::uint64_t, std::string>;
+
+    std::vector<std::byte> buffer;
+    auto                   enc = tags::make_encoder(buffer);
+    variant                input{std::variant<std::uint64_t, std::string>{std::string{"aggregate-variant"}}};
+    REQUIRE(enc(input));
+
+    auto    dec = tags::make_decoder(buffer);
+    variant output;
+    REQUIRE(dec(output));
+
+    REQUIRE(tags::detail::variant_index(output) == 1U);
+    CHECK(variant_like_test::get<1>(output) == "aggregate-variant");
 }
 
 TEST_CASE("variant-like type with which and apply_visitor uses assignment fallback") {
