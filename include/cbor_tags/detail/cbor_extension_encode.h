@@ -18,11 +18,17 @@
 namespace cbor::tags::detail {
 
 template <typename Encoder> constexpr void encode_extension_tag_header(Encoder &enc, std::uint64_t tag) {
-    enc.encode(dynamic_tag<std::uint64_t>{tag});
+    append_cbor_major_argument(enc.appender_, enc.data_, tag, cbor_tag_major_byte);
 }
 
 template <typename Encoder> constexpr void encode_extension_bstr_header(Encoder &enc, std::uint64_t size) {
-    enc.encode_major_and_size(size, static_cast<typename Encoder::byte_type>(get_major_3_bit_tag<as_bstr_any>()));
+    append_cbor_major_argument(enc.appender_, enc.data_, size, cbor_bstr_major_byte);
+}
+
+template <typename Encoder>
+constexpr void encode_extension_tagged_bstr_header(Encoder &enc, std::uint64_t tag, std::uint64_t payload_size) {
+    encode_extension_tag_header(enc, tag);
+    encode_extension_bstr_header(enc, payload_size);
 }
 
 template <typename R>
