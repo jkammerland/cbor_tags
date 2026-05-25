@@ -66,7 +66,8 @@ struct graph_decode_consumes_then_fails {
         if (!result) {
             return result;
         }
-        return expected<void, status_code>{unexpected<status_code>{status_code::error}};
+        using decode_error = cbor::tags::unexpected<status_code>;
+        return expected<void, status_code>{decode_error{status_code::error}};
     }
 };
 
