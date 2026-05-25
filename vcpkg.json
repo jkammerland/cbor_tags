@@ -5,20 +5,25 @@
   "homepage": "https://github.com/jkammerland/cbor_tags",
   "license": "MIT",
   "builtin-baseline": "a7f2963aed6b381ce54c0803330bb4de36cd3241",
-  "dependencies": [
-    {
-      "name": "nameof",
-      "version>=": "0.10.4"
-    },
-    {
-      "name": "fmt",
-      "version>=": "11.0.2"
-    }
-  ],
+  "dependencies": [],
   "default-features": [
+    "format-names",
     "tl-expected"
   ],
   "features": {
+    "format-names": {
+      "description": "Install fmt and nameof dependencies for the default C++20/C++23 API surface.",
+      "dependencies": [
+        {
+          "name": "nameof",
+          "version>=": "0.10.4"
+        },
+        {
+          "name": "fmt",
+          "version>=": "11.0.2"
+        }
+      ]
+    },
     "tl-expected": {
       "description": "Install tl::expected dependencies for the default C++20 expected backend.",
       "dependencies": [
@@ -30,6 +35,9 @@
     },
     "std-expected": {
       "description": "Use the C++23 std::expected backend without installing tl::expected."
+    },
+    "stl-only": {
+      "description": "Use the C++26 std::expected/std::meta/std::format path without third-party runtime dependencies."
     },
     "boost-pfr-names": {
       "description": "Install Boost.PFR dependencies for the optional C++20 named-map reflection backend.",

@@ -4,6 +4,10 @@
 #cmakedefine01 CBOR_TAGS_DEBUG
 #endif
 
+#ifndef CBOR_TAGS_STL_ONLY
+#cmakedefine01 CBOR_TAGS_STL_ONLY
+#endif
+
 #ifndef CBOR_TAGS_USE_STD_REFLECTION
 #cmakedefine01 CBOR_TAGS_USE_STD_REFLECTION
 #endif
@@ -23,7 +27,13 @@
 #include <string_view>
 
 #if CBOR_TAGS_DEBUG == 1
+#if CBOR_TAGS_STL_ONLY == 1
+#include <format>
+#include <print>
+#include <string>
+#else
 #include <fmt/format.h>
+#endif
 #endif
 
 namespace cbor::tags::debug {
@@ -34,7 +44,11 @@ struct ConfigConstants {
 template <typename... Args> inline constexpr void print([[maybe_unused]] std::string_view fmt, [[maybe_unused]] const Args &...args) {
 #if CBOR_TAGS_DEBUG == 1
     if constexpr (ConfigConstants::debug_enabled) {
+    #if CBOR_TAGS_STL_ONLY == 1
+        std::print("{}", std::vformat(std::string(fmt), std::make_format_args(args...)));
+    #else
         fmt::print(fmt::runtime(fmt), args...);
+    #endif
     }
 #endif
 }
@@ -43,7 +57,11 @@ template <typename... Args> inline constexpr void println([[maybe_unused]] std::
 #if CBOR_TAGS_DEBUG == 1
     if constexpr (ConfigConstants::debug_enabled) {
         print(fmt, args...);
+    #if CBOR_TAGS_STL_ONLY == 1
+        std::print("\n");
+    #else
         fmt::print("\n");
+    #endif
     }
 #endif
 }

@@ -4,8 +4,12 @@
 #include "cbor_tags/cbor_tags_config.h"
 #endif
 
+#ifndef CBOR_TAGS_STL_ONLY
+#define CBOR_TAGS_STL_ONLY 0
+#endif
+
 #ifndef CBOR_TAGS_USE_STD_EXPECTED
-#define CBOR_TAGS_USE_STD_EXPECTED 0
+#define CBOR_TAGS_USE_STD_EXPECTED CBOR_TAGS_STL_ONLY
 #endif
 
 #if CBOR_TAGS_USE_STD_EXPECTED

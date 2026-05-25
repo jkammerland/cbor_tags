@@ -7,6 +7,8 @@
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_pointer_traits.h"
+#include "cbor_tags/detail/text_format.h"
+#include "cbor_tags/detail/type_name.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #ifndef CBOR_TAGS_USE_MAGIC_ENUM_NAMES
@@ -31,15 +33,11 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <fmt/base.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <memory_resource>
-#include <nameof.hpp>
 #include <optional>
 #include <span>
 #include <stack>
@@ -53,6 +51,8 @@
 #include <vector>
 
 namespace cbor::tags {
+
+namespace text = detail::text_format;
 
 enum class AnnotationMode { no_annotation, smart };
 
@@ -231,13 +231,13 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
     while (begin != end) {
         if (current_count == 0) {
             if (!is_first_line) {
-                fmt::format_to(std::back_inserter(output_buffer), "\n");
+                text::format_to(std::back_inserter(output_buffer), "\n");
             }
-            fmt::format_to(std::back_inserter(output_buffer), "{}{}", indent, offset);
+            text::format_to(std::back_inserter(output_buffer), "{}{}", indent, offset);
             is_first_line = false;
         }
 
-        fmt::format_to(std::back_inserter(output_buffer), "{:02x}", static_cast<std::uint8_t>(*begin));
+        text::format_to(std::back_inserter(output_buffer), "{:02x}", static_cast<std::uint8_t>(*begin));
         ++begin;
 
         ++current_count;
@@ -269,13 +269,13 @@ template <template <typename...> typename Variant, typename... Ts> constexpr aut
 
 template <IsTag T> constexpr auto getTagDef(const T &t) {
     if constexpr (HasInlineTag<T>) {
-        return fmt::format("#6.{}", T::cbor_tag);
+        return text::format("#6.{}", T::cbor_tag);
     } else {
         if constexpr (IsTuple<T>) {
             const auto tag = std::get<0>(t);
-            return fmt::format("#6.{}", static_cast<std::uint64_t>(tag));
+            return text::format("#6.{}", static_cast<std::uint64_t>(tag));
         } else {
-            return fmt::format("#6.{}", static_cast<std::uint64_t>(t.cbor_tag));
+            return text::format("#6.{}", static_cast<std::uint64_t>(t.cbor_tag));
         }
     }
 }
@@ -298,7 +298,7 @@ template <typename T> constexpr auto getName() {
     } else if constexpr (IsMap<T>) {
         return "map";
     } else if constexpr (IsTag<T>) {
-        return nameof::nameof_short_type<T>();
+        return detail::short_type_name<T>();
     } else if constexpr (IsSimple<T>) {
         if constexpr (IsBool<T>) {
             return "bool";
@@ -330,7 +330,7 @@ template <typename T> constexpr auto getName() {
         } else if constexpr (IsVariant<T>) {
             return getVariantNames(T{});
         } else {
-            return nameof::nameof_short_type<T>();
+            return detail::short_type_name<T>();
         }
     }
 }
@@ -504,10 +504,10 @@ template <cddl_shared_pointer_mode PointerMode> constexpr std::string_view cddl_
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable> std::string cddl_type_key() {
-    return std::string(cddl_scope_key_prefix<PointerMode>()) + std::string(nameof::nameof_full_type<std::remove_cvref_t<T>>());
+    return std::string(cddl_scope_key_prefix<PointerMode>()) + std::string(detail::full_type_name<std::remove_cvref_t<T>>());
 }
 
-template <typename T> std::string cddl_type_name() { return sanitize_cddl_id(nameof::nameof_short_type<std::remove_cvref_t<T>>()); }
+template <typename T> std::string cddl_type_name() { return sanitize_cddl_id(detail::short_type_name<std::remove_cvref_t<T>>()); }
 
 inline std::string quote_cddl_text(std::string_view raw) {
     std::string result = "\"";
@@ -559,7 +559,7 @@ inline std::string unique_cddl_name(CDDLContext &context, std::string_view key, 
     }
 
     for (std::size_t suffix = 2;; ++suffix) {
-        auto candidate = fmt::format("{}_{}", fallback, suffix);
+        auto candidate = text::format("{}_{}", fallback, suffix);
         if (!context.contains_name(candidate)) {
             return candidate;
         }
@@ -575,14 +575,14 @@ inline std::string parenthesize_choice(std::string value) {
 
 template <typename T> std::string cddl_tagged_bstr_array_expr() {
     using value_type = std::remove_cvref_t<T>;
-    return fmt::format("#6.{}(bstr)", cddl_tagged_bstr_array_traits<value_type>::tag);
+    return text::format("#6.{}(bstr)", cddl_tagged_bstr_array_traits<value_type>::tag);
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_homogeneous_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     using traits     = cddl_homogeneous_array_traits<value_type>;
-    return fmt::format("#6.{}({})", traits::tag, cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
+    return text::format("#6.{}({})", traits::tag, cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
@@ -591,7 +591,7 @@ std::string cddl_multi_dimensional_array_expr(CDDLContext &context, CDDLOptions 
     using traits     = cddl_multi_dimensional_array_traits<value_type>;
     auto dimensions  = parenthesize_choice(cddl_type_expr<typename traits::dimensions_type, PointerMode>(context, options));
     auto array       = parenthesize_choice(cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
-    return fmt::format("#6.{}([{}, {}])", traits::tag, dimensions, array);
+    return text::format("#6.{}([{}, {}])", traits::tag, dimensions, array);
 }
 
 template <std::size_t N> std::string join_cddl(const std::array<std::string, N> &items, std::string_view separator) {
@@ -650,7 +650,7 @@ template <typename T> std::vector<std::string> cddl_enum_items_to_cddl(std::vect
     std::vector<std::string> cddl_items;
     cddl_items.reserve(items.size());
     for (const auto &[value, name] : items) {
-        cddl_items.push_back(fmt::format("{}: {}", cddl_member_key(name), cddl_enum_value_literal(value)));
+        cddl_items.push_back(text::format("{}: {}", cddl_member_key(name), cddl_enum_value_literal(value)));
     }
     return cddl_items;
 }
@@ -693,9 +693,9 @@ template <typename T> std::string cddl_enum_value_literal(T value) {
     using underlying_type = std::underlying_type_t<std::remove_cvref_t<T>>;
     const auto underlying = static_cast<underlying_type>(value);
     if constexpr (std::is_signed_v<underlying_type>) {
-        return fmt::format("{}", static_cast<std::intmax_t>(underlying));
+        return text::format("{}", static_cast<std::intmax_t>(underlying));
     } else {
-        return fmt::format("{}", static_cast<std::uintmax_t>(underlying));
+        return text::format("{}", static_cast<std::uintmax_t>(underlying));
     }
 }
 
@@ -763,7 +763,7 @@ std::string ensure_cddl_enum_definition(CDDLContext &context, CDDLOptions option
 
     auto  name = unique_cddl_name(context, key, preferred_name.empty() ? cddl_type_name<value_type>() : preferred_name);
     auto &def  = context.reserve(key, name);
-    auto  cddl = fmt::format("{} = {}", name, cddl_enum_expr<value_type>(options));
+    auto  cddl = text::format("{} = {}", name, cddl_enum_expr<value_type>(options));
     def.cddl   = std::pmr::string(cddl, &context.memory_resource);
     def.state  = CDDLContext::DefinitionState::done;
     return std::string(def.name);
@@ -817,7 +817,7 @@ std::string cddl_payload_from_tuple(CDDLContext &context, CDDLOptions options) {
 template <typename T> std::string cddl_tag_prefix() {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (is_static_tag_t<value_type>::value) {
-        return fmt::format("#6.{}", value_type::cbor_tag);
+        return text::format("#6.{}", value_type::cbor_tag);
     } else {
         return "#6";
     }
@@ -842,7 +842,7 @@ inline void reject_explicit_root_name_collision(CDDLContext &context, CDDLRootId
 
     const std::string_view existing_key{existing->key.data(), existing->key.size()};
     if (existing_key != root.key) {
-        throw std::invalid_argument(fmt::format("CDDL root_name '{}' collides with an existing definition", root.name));
+        throw std::invalid_argument(text::format("CDDL root_name '{}' collides with an existing definition", root.name));
     }
 }
 
@@ -854,12 +854,12 @@ std::string cddl_aggregate_expr(CDDLContext &context, CDDLOptions options) {
     using tuple_type = aggregate_tuple_t<value_type>;
 
     if constexpr (HasInlineTag<value_type>) {
-        return fmt::format("#6.{}({})", value_type::cbor_tag, cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options));
+        return text::format("#6.{}({})", value_type::cbor_tag, cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options));
     } else if constexpr (HasStaticTag<value_type>) {
         using tag_type = std::remove_cvref_t<decltype(value_type::cbor_tag)>;
-        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
+        return text::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
     } else if constexpr (HasDynamicTag<value_type>) {
-        return fmt::format("#6({})", cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
+        return text::format("#6({})", cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
     } else {
         return cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options);
     }
@@ -872,7 +872,7 @@ std::string cddl_tuple_expr(CDDLContext &context, CDDLOptions options) {
 
     if constexpr (IsTaggedTuple<value_type>) {
         using tag_type = std::remove_cvref_t<std::tuple_element_t<0, tuple_type>>;
-        return fmt::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
+        return text::format("{}({})", cddl_tag_prefix<tag_type>(), cddl_payload_from_tuple<tuple_type, 1, PointerMode>(context, options));
     } else {
         return cddl_payload_from_tuple<tuple_type, 0, PointerMode>(context, options);
     }
@@ -885,15 +885,15 @@ std::string cddl_sequence_expr(CDDLContext &context, CDDLOptions options) {
 
     auto item = parenthesize_choice(cddl_type_expr<item_type, PointerMode>(context, options));
     if constexpr (is_std_array<value_type>::value) {
-        return fmt::format("[{}*{} {}]", is_std_array<value_type>::size, is_std_array<value_type>::size, item);
+        return text::format("[{}*{} {}]", is_std_array<value_type>::size, is_std_array<value_type>::size, item);
     } else if constexpr (is_std_span<value_type>::value) {
         if constexpr (is_std_span<value_type>::extent != std::dynamic_extent) {
-            return fmt::format("[{}*{} {}]", is_std_span<value_type>::extent, is_std_span<value_type>::extent, item);
+            return text::format("[{}*{} {}]", is_std_span<value_type>::extent, is_std_span<value_type>::extent, item);
         } else {
-            return fmt::format("[* {}]", item);
+            return text::format("[* {}]", item);
         }
     } else {
-        return fmt::format("[* {}]", item);
+        return text::format("[* {}]", item);
     }
 }
 
@@ -904,7 +904,7 @@ std::string cddl_map_expr(CDDLContext &context, CDDLOptions options) {
     using mapped_type = std::remove_cvref_t<typename value_type::mapped_type>;
     auto key          = parenthesize_choice(cddl_type_expr<key_type, PointerMode>(context, options));
     auto value        = parenthesize_choice(cddl_type_expr<mapped_type, PointerMode>(context, options));
-    return fmt::format("{{* {} => {}}}", key, value);
+    return text::format("{{* {} => {}}}", key, value);
 }
 
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
@@ -933,12 +933,12 @@ std::string cddl_named_member_entry(CDDLContext &context, CDDLOptions options) {
         using extension_type = named_extension_value_t<field_type>;
         static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
                       "as_named_extension requires a map with text-string keys");
-        return fmt::format("* tstr => {}", cddl_type_expr<typename extension_type::mapped_type, PointerMode>(context, options));
+        return text::format("* tstr => {}", cddl_type_expr<typename extension_type::mapped_type, PointerMode>(context, options));
     } else if constexpr (IsOptional<field_type>) {
-        return fmt::format("? {}: {}", cddl_member_key(raw_name),
-                           cddl_type_expr<typename field_type::value_type, PointerMode>(context, options));
+        return text::format("? {}: {}", cddl_member_key(raw_name),
+                            cddl_type_expr<typename field_type::value_type, PointerMode>(context, options));
     } else {
-        return fmt::format("{}: {}", cddl_member_key(raw_name), cddl_type_expr<field_type, PointerMode>(context, options));
+        return text::format("{}: {}", cddl_member_key(raw_name), cddl_type_expr<field_type, PointerMode>(context, options));
     }
 }
 
@@ -957,15 +957,15 @@ std::string cddl_named_body(CDDLContext &context, CDDLOptions options, char open
     static_assert(detail::named_flattened_extension_count<value_type>() <= 1U,
                   "as_named_map/as_named_group may contain at most one as_named_extension field after flattening as_named_group members");
     if (!options.row_options.format_by_rows) {
-        return fmt::format("{}{}{}", open,
-                           cddl_named_entries<value_type, PointerMode>(context, options, std::make_index_sequence<member_count>{}), close);
+        return text::format("{}{}{}", open,
+                            cddl_named_entries<value_type, PointerMode>(context, options, std::make_index_sequence<member_count>{}), close);
     }
 
     auto entries = cddl_named_entries<value_type, PointerMode>(context, options, std::make_index_sequence<member_count>{});
     if (!entries.empty()) {
         entries = cddl_row_indent(options, 1) + entries;
     }
-    return fmt::format("{}\n{}\n{}{}", open, entries, cddl_row_indent(options), close);
+    return text::format("{}\n{}\n{}{}", open, entries, cddl_row_indent(options), close);
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options) {
@@ -990,7 +990,7 @@ std::string ensure_cddl_named_definition(CDDLContext &context, CDDLOptions optio
     auto  name = unique_cddl_name(context, key, preferred_name.empty() ? cddl_type_name<T>() : preferred_name);
     auto &def  = context.reserve(key, name);
     auto  body = expr_fn(context, options);
-    auto  cddl = fmt::format("{} = {}", name, body);
+    auto  cddl = text::format("{} = {}", name, body);
     def.cddl   = std::pmr::string(cddl, &context.memory_resource);
     def.state  = CDDLContext::DefinitionState::done;
     return std::string(def.name);
@@ -1029,7 +1029,7 @@ std::string ensure_cddl_named_group_definition(CDDLContext &, CDDLOptions, std::
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_rule_expr(CDDLContext &context, CDDLOptions options, std::string_view name) {
-    return fmt::format("{} = {}", name, cddl_aggregate_expr<T, PointerMode>(context, options));
+    return text::format("{} = {}", name, cddl_aggregate_expr<T, PointerMode>(context, options));
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode>
@@ -1052,7 +1052,7 @@ std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, st
             return body;
         }
 
-        auto cddl = fmt::format("{} = {}", name, body);
+        auto cddl = text::format("{} = {}", name, body);
         def.cddl  = std::pmr::string(cddl, &context.memory_resource);
         def.state = CDDLContext::DefinitionState::done;
         return std::string(def.name);
@@ -1089,7 +1089,7 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     } else if constexpr (IsIndefiniteWrapper<value_type>) {
         return cddl_type_expr<indefinite_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsOptional<value_type>) {
-        return fmt::format("{} / null", cddl_type_expr<typename value_type::value_type, PointerMode>(context, options));
+        return text::format("{} / null", cddl_type_expr<typename value_type::value_type, PointerMode>(context, options));
     } else if constexpr (IsNullablePointer<value_type>) {
         using element_type = nullable_pointer_element_t<value_type>;
         static_assert(is_supported_nullable_pointer_v<value_type>,
@@ -1098,10 +1098,10 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
         static_assert(std::default_initializable<element_type>,
                       "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
         if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph && is_std_shared_ptr<value_type>::value) {
-            return fmt::format("[0] / #6.28({}) / #6.29(uint)",
-                               parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+            return text::format("[0] / #6.28({}) / #6.29(uint)",
+                                parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
         } else {
-            return fmt::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+            return text::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
         }
     } else if constexpr (CDDLTaggedByteStringArray<value_type>) {
         return cddl_tagged_bstr_array_expr<value_type>();
@@ -1214,20 +1214,20 @@ template <typename T> std::string root_rule_name(CDDLOptions options) {
 template <typename T> std::string tag_marker_root_expr(CDDLContext &context, CDDLOptions options) {
     (void)context;
     (void)options;
-    return fmt::format("{}(any)", cddl_tag_prefix<std::remove_cvref_t<T>>());
+    return text::format("{}(any)", cddl_tag_prefix<std::remove_cvref_t<T>>());
 }
 
 template <typename T, typename OutputBuffer, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 void cddl_schema_root_expr_to(OutputBuffer &output_buffer, CDDLContext &cddl_context, CDDLOptions options) {
     using value_type       = std::remove_cvref_t<T>;
     auto root_name         = root_rule_name<value_type>(options);
-    auto root_key          = fmt::format("__cddl_root:{}", root_name);
+    auto root_key          = text::format("__cddl_root:{}", root_name);
     bool reserved_root_key = false;
     if (!options.root_name.empty()) {
         reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = root_name});
     } else if (cddl_context.contains_name(root_name)) {
         root_name = unique_cddl_name(cddl_context, root_key, root_name);
-        root_key  = fmt::format("__cddl_root:{}", root_name);
+        root_key  = text::format("__cddl_root:{}", root_name);
     }
     if (!cddl_context.contains_name(root_name)) {
         (void)cddl_context.reserve(root_key, root_name);
@@ -1237,14 +1237,14 @@ void cddl_schema_root_expr_to(OutputBuffer &output_buffer, CDDLContext &cddl_con
     if (reserved_root_key) {
         cddl_context.erase_by_key(root_key);
     }
-    fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, root_expr);
+    text::format_to(std::back_inserter(output_buffer), "{} = {}", root_name, root_expr);
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode, typename OutputBuffer, typename Context>
 auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Context &context) {
     using value_type   = std::remove_cvref_t<T>;
     auto &cddl_context = cddl_context_ref(context);
-    debug::println("cddl_schema_to: {}", nameof::nameof_short_type<T>());
+    debug::println("cddl_schema_to: {}", detail::short_type_name<T>());
 
     if constexpr (IsNamedMapWrapper<value_type>) {
         using named_value_type = named_map_value_t<value_type>;
@@ -1256,7 +1256,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         }
         (void)ensure_cddl_named_map_definition<named_value_type, PointerMode>(cddl_context, options, requested_root_name);
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+            text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         }
     } else if constexpr (IsNamedGroupWrapper<value_type>) {
         using named_value_type = named_group_value_t<value_type>;
@@ -1268,7 +1268,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         }
         (void)ensure_cddl_named_group_definition<named_value_type, PointerMode>(cddl_context, options, requested_root_name);
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+            text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         }
     } else if constexpr (IsEnum<value_type>) {
         if constexpr (cddl_enum_entry_count<value_type>() != 0) {
@@ -1281,7 +1281,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
                 }
                 (void)ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
                 if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-                    fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+                    text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
                 }
             } else {
                 cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
@@ -1299,14 +1299,14 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         const auto  root_name = ensure_cddl_definition<value_type, PointerMode>(cddl_context, options, requested_root_name);
         const auto *root_def  = cddl_context.find_by_key(root_key);
         if (root_def != nullptr) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+            text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
         } else {
-            fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_name,
-                           cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
+            text::format_to(std::back_inserter(output_buffer), "{} = {}", root_name,
+                            cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
         }
     } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
-        fmt::format_to(std::back_inserter(output_buffer), "{} = {}", root_rule_name<value_type>(options),
-                       tag_marker_root_expr<value_type>(cddl_context, options));
+        text::format_to(std::back_inserter(output_buffer), "{} = {}", root_rule_name<value_type>(options),
+                        tag_marker_root_expr<value_type>(cddl_context, options));
     } else {
         cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
     }
@@ -1328,7 +1328,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         for (const auto &def : cddl_context.definitions | std::views::reverse) {
             const std::string_view key{def.key.data(), def.key.size()};
             if (key != root_key && def.state == CDDLContext::DefinitionState::done) {
-                fmt::format_to(std::back_inserter(output_buffer), "\n{}", def.cddl);
+                text::format_to(std::back_inserter(output_buffer), "\n{}", def.cddl);
             }
         }
     }
@@ -1413,7 +1413,7 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
             auto header_size = string_length_to_header_size(size);
             detail::format_bytes(output_buffer, it, it + 1, options);                                          // Major type
             detail::format_bytes(output_buffer, it + 1, it + header_size, {.current_indent = 0, .offset = 1}); // extra header
-            fmt::format_to(std::back_inserter(output_buffer), "\n");
+            text::format_to(std::back_inserter(output_buffer), "\n");
             options.current_indent++;
             options.offset++;
             detail::format_bytes(output_buffer, it + header_size, next_it, options);
@@ -1434,84 +1434,84 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         }
         options.current_indent += should_indent;
         options.offset = indent_stack.size();
-        fmt::format_to(std::back_inserter(output_buffer), "\n");
+        text::format_to(std::back_inserter(output_buffer), "\n");
         it = next_it;
     }
 }
 
 template <typename OutputBuffer> constexpr void cddl_prelude_to(OutputBuffer &buffer) {
-    fmt::format_to(std::back_inserter(buffer), "any = #\n"
-                                               "\n"
-                                               "uint = #0\n"
-                                               "nint = #1\n"
-                                               "int = uint / nint\n"
-                                               "\n"
-                                               "bstr = #2\n"
-                                               "bytes = bstr\n"
-                                               "tstr = #3\n"
-                                               "text = tstr\n"
-                                               "\n"
-                                               "tdate = #6.0(tstr)\n"
-                                               "time = #6.1(number)\n"
-                                               "number = int / float\n"
-                                               "biguint = #6.2(bstr)\n"
-                                               "bignint = #6.3(bstr)\n"
-                                               "bigint = biguint / bignint\n"
-                                               "integer = int / bigint\n"
-                                               "unsigned = uint / biguint\n"
-                                               "decfrac = #6.4([e10: int, m: integer])\n"
-                                               "bigfloat = #6.5([e2: int, m: integer])\n"
-                                               "eb64url = #6.21(any)\n"
-                                               "eb64legacy = #6.22(any)\n"
-                                               "eb16 = #6.23(any)\n"
-                                               "encoded-cbor = #6.24(bstr)\n"
-                                               "uri = #6.32(tstr)\n"
-                                               "b64url = #6.33(tstr)\n"
-                                               "b64legacy = #6.34(tstr)\n"
-                                               "regexp = #6.35(tstr)\n"
-                                               "mime-message = #6.36(tstr)\n"
-                                               "cbor-any = #6.55799(any)\n"
-                                               "\n"
-                                               "float16 = #7.25\n"
-                                               "float32 = #7.26\n"
-                                               "float64 = #7.27\n"
-                                               "float16-32 = float16 / float32\n"
-                                               "float32-64 = float32 / float64\n"
-                                               "float = float16-32 / float64\n"
-                                               "\n"
-                                               "false = #7.20\n"
-                                               "true = #7.21\n"
-                                               "bool = false / true\n"
-                                               "nil = #7.22\n"
-                                               "null = nil\n"
-                                               "undefined = #7.23\n");
+    text::format_to(std::back_inserter(buffer), "any = #\n"
+                                                "\n"
+                                                "uint = #0\n"
+                                                "nint = #1\n"
+                                                "int = uint / nint\n"
+                                                "\n"
+                                                "bstr = #2\n"
+                                                "bytes = bstr\n"
+                                                "tstr = #3\n"
+                                                "text = tstr\n"
+                                                "\n"
+                                                "tdate = #6.0(tstr)\n"
+                                                "time = #6.1(number)\n"
+                                                "number = int / float\n"
+                                                "biguint = #6.2(bstr)\n"
+                                                "bignint = #6.3(bstr)\n"
+                                                "bigint = biguint / bignint\n"
+                                                "integer = int / bigint\n"
+                                                "unsigned = uint / biguint\n"
+                                                "decfrac = #6.4([e10: int, m: integer])\n"
+                                                "bigfloat = #6.5([e2: int, m: integer])\n"
+                                                "eb64url = #6.21(any)\n"
+                                                "eb64legacy = #6.22(any)\n"
+                                                "eb16 = #6.23(any)\n"
+                                                "encoded-cbor = #6.24(bstr)\n"
+                                                "uri = #6.32(tstr)\n"
+                                                "b64url = #6.33(tstr)\n"
+                                                "b64legacy = #6.34(tstr)\n"
+                                                "regexp = #6.35(tstr)\n"
+                                                "mime-message = #6.36(tstr)\n"
+                                                "cbor-any = #6.55799(any)\n"
+                                                "\n"
+                                                "float16 = #7.25\n"
+                                                "float32 = #7.26\n"
+                                                "float64 = #7.27\n"
+                                                "float16-32 = float16 / float32\n"
+                                                "float32-64 = float32 / float64\n"
+                                                "float = float16-32 / float64\n"
+                                                "\n"
+                                                "false = #7.20\n"
+                                                "true = #7.21\n"
+                                                "bool = false / true\n"
+                                                "nil = #7.22\n"
+                                                "null = nil\n"
+                                                "undefined = #7.23\n");
 }
 
 template <typename OutputBuffer> void append_diagnostic_separator(OutputBuffer &output_buffer, bool format_by_rows) {
-    fmt::format_to(std::back_inserter(output_buffer), "{}", format_by_rows ? ",\n" : ", ");
+    text::format_to(std::back_inserter(output_buffer), "{}", format_by_rows ? ",\n" : ", ");
 }
 
 template <typename OutputBuffer, typename Iterator>
 void append_escaped_diagnostic_text(OutputBuffer &output_buffer, Iterator begin, Iterator end) {
-    fmt::format_to(std::back_inserter(output_buffer), "\"");
+    text::format_to(std::back_inserter(output_buffer), "\"");
     for (; begin != end; ++begin) {
         const auto value = static_cast<unsigned char>(*begin);
         switch (value) {
-        case '"': fmt::format_to(std::back_inserter(output_buffer), "\\\""); break;
-        case '\\': fmt::format_to(std::back_inserter(output_buffer), "\\\\"); break;
-        case '\n': fmt::format_to(std::back_inserter(output_buffer), "\\n"); break;
-        case '\r': fmt::format_to(std::back_inserter(output_buffer), "\\r"); break;
-        case '\t': fmt::format_to(std::back_inserter(output_buffer), "\\t"); break;
+        case '"': text::format_to(std::back_inserter(output_buffer), "\\\""); break;
+        case '\\': text::format_to(std::back_inserter(output_buffer), "\\\\"); break;
+        case '\n': text::format_to(std::back_inserter(output_buffer), "\\n"); break;
+        case '\r': text::format_to(std::back_inserter(output_buffer), "\\r"); break;
+        case '\t': text::format_to(std::back_inserter(output_buffer), "\\t"); break;
         default:
             if (value < 0x20) {
-                fmt::format_to(std::back_inserter(output_buffer), "\\x{:02x}", value);
+                text::format_to(std::back_inserter(output_buffer), "\\x{:02x}", value);
             } else {
-                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<char>(value));
+                text::format_to(std::back_inserter(output_buffer), "{}", static_cast<char>(value));
             }
             break;
         }
     }
-    fmt::format_to(std::back_inserter(output_buffer), "\"");
+    text::format_to(std::back_inserter(output_buffer), "\"");
 }
 
 namespace detail {
@@ -1675,7 +1675,7 @@ template <typename OutputBuffer> struct smart_annotator {
             if (spaces && index != begin) {
                 result.push_back(' ');
             }
-            fmt::format_to(std::back_inserter(result), "{:02x}", byte_at(index));
+            text::format_to(std::back_inserter(result), "{:02x}", byte_at(index));
         }
         return result;
     }
@@ -1712,8 +1712,8 @@ template <typename OutputBuffer> struct smart_annotator {
         const auto output_size =
             checked_add(checked_add(checked_add(checked_add(left.size(), padding), 2U), comment_indent), checked_add(comment.size(), 1U));
         ensure_output_capacity(output_size);
-        fmt::format_to(std::back_inserter(output_buffer), "{}{}# {}{}\n", left, std::string(padding, ' '), std::string(comment_indent, ' '),
-                       comment);
+        text::format_to(std::back_inserter(output_buffer), "{}{}# {}{}\n", left, std::string(padding, ' '),
+                        std::string(comment_indent, ' '), comment);
     }
 
     void emit_plain_line(std::size_t depth, std::string left) {
@@ -1722,7 +1722,7 @@ template <typename OutputBuffer> struct smart_annotator {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
         ensure_output_capacity(left.size() + 1U);
-        fmt::format_to(std::back_inserter(output_buffer), "{}\n", left);
+        text::format_to(std::back_inserter(output_buffer), "{}\n", left);
     }
 
     void emit_header(std::size_t depth, std::size_t begin, std::size_t end, std::string_view comment) {
@@ -1776,7 +1776,7 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     [[nodiscard]] std::string bytes_comment(std::size_t begin, std::size_t length) const {
-        return fmt::format("h'{}'", hex_range(begin, begin + length, false));
+        return text::format("h'{}'", hex_range(begin, begin + length, false));
     }
 
     [[nodiscard]] std::size_t text_comment_size(std::size_t begin, std::size_t length) const {
@@ -1802,7 +1802,7 @@ template <typename OutputBuffer> struct smart_annotator {
         if (argument == std::numeric_limits<std::uint64_t>::max()) {
             return "negative(-18446744073709551616)";
         }
-        return fmt::format("negative(-{})", argument + 1U);
+        return text::format("negative(-{})", argument + 1U);
     }
 
     [[nodiscard]] static std::string tag_comment(std::uint64_t tag) {
@@ -1819,7 +1819,7 @@ template <typename OutputBuffer> struct smart_annotator {
         case 35: return "regexp, tag(35)";
         case 36: return "mime-message, tag(36)";
         case 55799: return "cbor-any, tag(55799)";
-        default: return fmt::format("tag({})", tag);
+        default: return text::format("tag({})", tag);
         }
     }
 
@@ -1829,7 +1829,7 @@ template <typename OutputBuffer> struct smart_annotator {
         case 21: return "true, simple(21)";
         case 22: return "null, simple(22)";
         case 23: return "undefined, simple(23)";
-        default: return fmt::format("simple({})", value);
+        default: return text::format("simple({})", value);
         }
     }
 
@@ -1837,7 +1837,7 @@ template <typename OutputBuffer> struct smart_annotator {
         const auto payload_begin = bytes.begin() + static_cast<std::ptrdiff_t>(begin);
         const auto payload_end   = bytes.begin() + static_cast<std::ptrdiff_t>(begin + length);
         if (!is_valid_utf8(payload_begin, payload_end)) {
-            auto comment = fmt::format("non-utf8({})", length);
+            auto comment = text::format("non-utf8({})", length);
             ensure_output_capacity(comment.size());
             return comment;
         }
@@ -1857,7 +1857,7 @@ template <typename OutputBuffer> struct smart_annotator {
         const auto kind =
             header.major == static_cast<std::uint8_t>(major_type::TextString) ? std::string_view{"text"} : std::string_view{"bytes"};
         if (header.additional_info == 31U) {
-            emit_header(depth, header.begin, position, fmt::format("{}(*)", kind));
+            emit_header(depth, header.begin, position, text::format("{}(*)", kind));
             while (true) {
                 if (empty()) {
                     throw std::runtime_error("Unterminated indefinite CBOR string");
@@ -1880,7 +1880,7 @@ template <typename OutputBuffer> struct smart_annotator {
         }
 
         const auto length = read_argument(header.additional_info);
-        emit_header(depth, header.begin, position, fmt::format("{}({})", kind, length));
+        emit_header(depth, header.begin, position, text::format("{}({})", kind, length));
         ensure_payload_available(length);
         const auto payload_begin = position;
         const auto payload_size  = static_cast<std::size_t>(length);
@@ -1909,7 +1909,7 @@ template <typename OutputBuffer> struct smart_annotator {
         }
 
         const auto size = read_argument(header.additional_info);
-        emit_header(depth, header.begin, position, fmt::format("array({})", size));
+        emit_header(depth, header.begin, position, text::format("array({})", size));
         for (std::uint64_t index = 0; index < size; ++index) {
             parse_item(depth + 1U);
         }
@@ -1935,7 +1935,7 @@ template <typename OutputBuffer> struct smart_annotator {
         }
 
         const auto size = read_argument(header.additional_info);
-        emit_header(depth, header.begin, position, fmt::format("map({})", size));
+        emit_header(depth, header.begin, position, text::format("map({})", size));
         for (std::uint64_t index = 0; index < size; ++index) {
             parse_item(depth + 1U);
             parse_item(depth + 1U);
@@ -1969,19 +1969,19 @@ template <typename OutputBuffer> struct smart_annotator {
         case 25: {
             const auto bits  = read_uint16_raw();
             const auto value = static_cast<double>(float16_t{bits});
-            emit_header(depth, header.begin, position, fmt::format("float16({})", value));
+            emit_header(depth, header.begin, position, text::format("float16({})", value));
             return;
         }
         case 26: {
             const auto bits  = read_uint32_raw();
             const auto value = std::bit_cast<float>(bits);
-            emit_header(depth, header.begin, position, fmt::format("float32({})", value));
+            emit_header(depth, header.begin, position, text::format("float32({})", value));
             return;
         }
         case 27: {
             const auto bits  = read_uint64_raw();
             const auto value = std::bit_cast<double>(bits);
-            emit_header(depth, header.begin, position, fmt::format("float64({})", value));
+            emit_header(depth, header.begin, position, text::format("float64({})", value));
             return;
         }
         default: throw std::runtime_error("Invalid CBOR simple additional information");
@@ -2009,7 +2009,7 @@ template <typename OutputBuffer> struct smart_annotator {
         switch (header.major) {
         case 0: {
             const auto value = read_argument(header.additional_info);
-            emit_header(depth, header.begin, position, fmt::format("unsigned({})", value));
+            emit_header(depth, header.begin, position, text::format("unsigned({})", value));
             return;
         }
         case 1: {
@@ -2052,7 +2052,7 @@ void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_b
 
     std::string staged_output;
     smart_annotator<std::string>{.bytes = bytes, .output_buffer = staged_output, .options = options}.annotate_sequence();
-    fmt::format_to(std::back_inserter(output_buffer), "{}", staged_output);
+    text::format_to(std::back_inserter(output_buffer), "{}", staged_output);
 }
 
 } // namespace detail
@@ -2080,7 +2080,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         check_depth();
         const auto format_by_rows = options.row_options.format_by_rows;
         auto       base_offset    = std::string(options.row_options.offset * options.row_options.current_indent * format_by_rows, ' ');
-        fmt::format_to(std::back_inserter(output_buffer), "{{{}", options.row_options.format_by_rows ? "\n" : "");
+        text::format_to(std::back_inserter(output_buffer), "{{{}", options.row_options.format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
         auto child   = child_options();
         bool emitted = false;
@@ -2094,10 +2094,10 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
                 append_diagnostic_separator(output_buffer, format_by_rows);
             }
             if (format_by_rows) {
-                fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+                text::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
             }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, key);
-            fmt::format_to(std::back_inserter(output_buffer), ": ");
+            text::format_to(std::back_inserter(output_buffer), ": ");
             if (!dec(value)) {
                 throw std::runtime_error("Malformed CBOR diagnostic map value");
             }
@@ -2106,38 +2106,38 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         }
         options.row_options.current_indent--;
         if (format_by_rows && emitted) {
-            fmt::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
+            text::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
         }
-        fmt::format_to(std::back_inserter(output_buffer), "}}");
+        text::format_to(std::back_inserter(output_buffer), "}}");
     }
 
     template <IsArrayHeader T> constexpr void operator()(const T &arg) {
         check_depth();
         const bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
         auto       base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
-        fmt::format_to(std::back_inserter(output_buffer), "[{}", format_by_rows ? "\n" : "");
+        text::format_to(std::back_inserter(output_buffer), "[{}", format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
         auto child   = child_options();
         bool emitted = false;
         for (size_t i = 0; i < arg.size; i++) {
             detail::catch_all_variant values;
             if (!dec(values)) {
-                throw std::runtime_error(fmt::format("Malformed CBOR diagnostic array item {}", i));
+                throw std::runtime_error(text::format("Malformed CBOR diagnostic array item {}", i));
             }
             if (emitted) {
                 append_diagnostic_separator(output_buffer, format_by_rows);
             }
             if (format_by_rows) {
-                fmt::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
+                text::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
             }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, values);
             emitted = true;
         }
         options.row_options.current_indent--;
         if (format_by_rows && emitted) {
-            fmt::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
+            text::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
         }
-        fmt::format_to(std::back_inserter(output_buffer), "]");
+        text::format_to(std::back_inserter(output_buffer), "]");
     }
 
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
@@ -2146,7 +2146,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         auto range        = std::ranges::subrange(after_header, current_pos);
         auto char_view    = range | std::views::transform([](auto b) { return static_cast<char>(b); });
         if (options.check_tstr_utf8 && !detail::is_valid_utf8(range)) {
-            fmt::format_to(std::back_inserter(output_buffer), "non-utf8({})", arg.size);
+            text::format_to(std::back_inserter(output_buffer), "non-utf8({})", arg.size);
             return;
         }
         append_escaped_diagnostic_text(output_buffer, std::ranges::begin(char_view), std::ranges::end(char_view));
@@ -2157,45 +2157,53 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         auto current_pos  = dec.tell();
         auto after_header = current_pos - arg.size;
         auto range        = std::ranges::subrange(after_header, current_pos);
-        fmt::format_to(std::back_inserter(output_buffer), "h'{:02x}'", fmt::join(range, ""));
+        text::format_to(std::back_inserter(output_buffer), "h'");
+        for (const auto value : range) {
+            if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, std::byte>) {
+                text::format_to(std::back_inserter(output_buffer), "{:02x}", std::to_integer<std::uint8_t>(value));
+            } else {
+                text::format_to(std::back_inserter(output_buffer), "{:02x}", static_cast<std::uint8_t>(value));
+            }
+        }
+        text::format_to(std::back_inserter(output_buffer), "'");
     }
 
     template <typename T> constexpr void operator()(const T &arg) {
 
         if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
-            fmt::format_to(std::back_inserter(output_buffer), "{}", arg);
+            text::format_to(std::back_inserter(output_buffer), "{}", arg);
         } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
-            fmt::format_to(std::back_inserter(output_buffer), "-{}", arg.value);
+            text::format_to(std::back_inserter(output_buffer), "-{}", arg.value);
         } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(arg)>>) {
             check_depth();
             detail::catch_all_variant value;
-            fmt::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
+            text::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
             if (!dec(value)) {
                 throw std::runtime_error("Malformed CBOR diagnostic tag payload");
             }
             std::visit<void>(diagnostic_visitor{output_buffer, dec, child_options()}, value);
-            fmt::format_to(std::back_inserter(output_buffer), ")");
+            text::format_to(std::back_inserter(output_buffer), ")");
         } else if constexpr (IsSimple<std::remove_cvref_t<decltype(arg)>>) {
             if constexpr (IsBool<std::remove_cvref_t<decltype(arg)>>) {
-                fmt::format_to(std::back_inserter(output_buffer), "{}", arg ? "true" : "false");
+                text::format_to(std::back_inserter(output_buffer), "{}", arg ? "true" : "false");
             } else if constexpr (IsNull<std::remove_cvref_t<decltype(arg)>>) {
-                fmt::format_to(std::back_inserter(output_buffer), "null");
+                text::format_to(std::back_inserter(output_buffer), "null");
             } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float16_t> ||
                                  std::is_same_v<std::remove_cvref_t<decltype(arg)>, float>) {
-                fmt::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
+                text::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
             } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, double>) {
-                fmt::format_to(std::back_inserter(output_buffer), "{}", arg);
+                text::format_to(std::back_inserter(output_buffer), "{}", arg);
             } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, simple>) {
                 if (arg.value == static_cast<simple::value_type>(SimpleType::Undefined)) {
-                    fmt::format_to(std::back_inserter(output_buffer), "undefined");
+                    text::format_to(std::back_inserter(output_buffer), "undefined");
                 } else {
-                    fmt::format_to(std::back_inserter(output_buffer), "simple({})", arg.value);
+                    text::format_to(std::back_inserter(output_buffer), "simple({})", arg.value);
                 }
             } else {
-                fmt::format_to(std::back_inserter(output_buffer), "simple");
+                text::format_to(std::back_inserter(output_buffer), "simple");
             }
         } else {
-            fmt::format_to(std::back_inserter(output_buffer), "unknown");
+            text::format_to(std::back_inserter(output_buffer), "unknown");
         }
     }
 };
@@ -2210,7 +2218,7 @@ constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_
     detail::catch_all_variant values;
     auto                      dec = make_decoder(buffer);
 
-    fmt::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
+    text::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
 
     bool emitted = false;
     while (!detail::decoder_at_end(dec)) {
@@ -2226,9 +2234,9 @@ constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_
     }
 
     if (options.row_options.format_by_rows && emitted) {
-        fmt::format_to(std::back_inserter(output_buffer), "\n");
+        text::format_to(std::back_inserter(output_buffer), "\n");
     }
-    fmt::format_to(std::back_inserter(output_buffer), "]");
+    text::format_to(std::back_inserter(output_buffer), "]");
 }
 
 } // namespace cbor::tags

@@ -255,8 +255,8 @@ and invalid text strings render as `non-utf8(N)`, where `N` is byte length.
 ## Dependencies
 
 - C++20 compiler
-- [fmtlib](https://github.com/fmtlib/fmt)
-- [nameof](https://github.com/Neargye/nameof)
+- [fmtlib](https://github.com/fmtlib/fmt), unless using the C++26 STL-only path
+- [nameof](https://github.com/Neargye/nameof), unless using the C++26 STL-only path
 - [magic_enum](https://github.com/Neargye/magic_enum), optional for named enum CDDL in C++20 builds
 
 ## Documentation
