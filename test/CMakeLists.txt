@@ -390,3 +390,7 @@ if(TARGET cbor_tags_cli)
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/test_cli.cmake")
 endif()
+
+if(CBOR_TAGS_BUILD_INTEROP_TESTS)
+  add_subdirectory(interop)
+endif()
