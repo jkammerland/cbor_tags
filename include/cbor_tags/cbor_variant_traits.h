@@ -9,11 +9,21 @@
 
 namespace cbor::tags {
 
+// Customize this trait for variant-like types that cannot be detected
+// structurally. A usable specialization must provide:
+// - static constexpr std::size_t size
+// - template <std::size_t I> using alternative = ...
+// - static std::size_t index(const T&)
+// - static get<I>(T&&), visit(visitor, variants...), and assign<I>(T&, value)
 template <typename T> struct variant_traits;
 
 namespace detail {
 
 template <typename T> struct variant_dependent_false : std::false_type {};
+
+struct variant_probe_visitor {
+    template <typename... Args> constexpr void operator()(Args &&...) const noexcept {}
+};
 
 template <typename T>
 concept VariantTemplateIndexable = requires(const T &value) {
@@ -22,21 +32,69 @@ concept VariantTemplateIndexable = requires(const T &value) {
     { value.which() } -> std::convertible_to<int>;
 };
 
-template <typename T, typename = void> struct is_variant_like : std::false_type {};
+template <typename Visitor, typename... Variants>
+concept HasVariantVisit =
+    requires(Visitor &&visitor, Variants &&...variants) { visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants)...); };
 
-template <typename T>
-struct is_variant_like<T, std::void_t<decltype(variant_traits<std::remove_cvref_t<T>>::size)>>
-    : std::bool_constant<(variant_traits<std::remove_cvref_t<T>>::size > 0U)> {};
+template <typename Visitor, typename... Variants>
+concept HasVariantApplyVisitor = requires(Visitor &&visitor, Variants &&...variants) {
+    apply_visitor(std::forward<Visitor>(visitor), std::forward<Variants>(variants)...);
+};
 
-template <typename T>
-concept VariantLike = is_variant_like<std::remove_cvref_t<T>>::value;
+template <typename Variant>
+concept VariantTemplateVisitable =
+    HasVariantVisit<variant_probe_visitor, const Variant &> || HasVariantApplyVisitor<variant_probe_visitor, const Variant &>;
+
+template <std::size_t I, typename Variant>
+concept VariantIndexedGettable = requires(Variant &&value) { get<I>(std::forward<Variant>(value)); };
+
+template <typename Alternative, typename Variant>
+concept VariantTypedGettable = requires(Variant &&value) { get<Alternative>(std::forward<Variant>(value)); };
+
+template <std::size_t I, typename Alternative, typename Variant> consteval bool variant_alternative_gettable() {
+    if constexpr (VariantIndexedGettable<I, Variant>) {
+        return true;
+    } else {
+        return VariantTypedGettable<Alternative, Variant>;
+    }
+}
+
+template <typename Variant, typename... Ts, std::size_t... Is> consteval bool variant_template_gettable_impl(std::index_sequence<Is...>) {
+    return (variant_alternative_gettable<Is, Ts, Variant &>() && ...) && (variant_alternative_gettable<Is, Ts, const Variant &>() && ...);
+}
+
+template <typename Variant, typename... Ts>
+concept VariantTemplateGettable = (sizeof...(Ts) > 0U) && variant_template_gettable_impl<Variant, Ts...>(std::index_sequence_for<Ts...>{});
+
+template <std::size_t I, typename Alternative, typename Variant> consteval bool variant_alternative_assignable() {
+    if constexpr (requires(Variant &value, Alternative alternative) { value.template emplace<I>(std::move(alternative)); }) {
+        return true;
+    } else {
+        return std::assignable_from<Variant &, Alternative>;
+    }
+}
+
+template <typename Variant, typename... Ts, std::size_t... Is> consteval bool variant_template_assignable_impl(std::index_sequence<Is...>) {
+    return (variant_alternative_assignable<Is, Ts, Variant>() && ...);
+}
+
+template <typename Variant, typename... Ts>
+concept VariantTemplateAssignable =
+    (sizeof...(Ts) > 0U) && variant_template_assignable_impl<Variant, Ts...>(std::index_sequence_for<Ts...>{});
+
+template <typename Variant, typename... Ts>
+concept VariantTemplateLike = VariantTemplateIndexable<Variant> && VariantTemplateVisitable<Variant> &&
+                              VariantTemplateGettable<Variant, Ts...> && VariantTemplateAssignable<Variant, Ts...>;
 
 template <typename Visitor, typename... Variants> constexpr decltype(auto) variant_adl_visit(Visitor &&visitor, Variants &&...variants) {
     using std::visit;
     if constexpr (requires { visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants)...); }) {
         return visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants)...);
-    } else {
+    } else if constexpr (requires { apply_visitor(std::forward<Visitor>(visitor), std::forward<Variants>(variants)...); }) {
         return apply_visitor(std::forward<Visitor>(visitor), std::forward<Variants>(variants)...);
+    } else {
+        static_assert(variant_dependent_false<std::remove_cvref_t<Visitor>>::value,
+                      "variant-like types require visit(visitor, variant...) or apply_visitor(visitor, variant...)");
     }
 }
 
@@ -54,7 +112,7 @@ template <std::size_t I, typename Variant> constexpr decltype(auto) variant_adl_
 } // namespace detail
 
 template <template <typename...> typename Variant, typename... Ts>
-    requires detail::VariantTemplateIndexable<Variant<Ts...>>
+    requires detail::VariantTemplateLike<Variant<Ts...>, Ts...>
 struct variant_traits<Variant<Ts...>> {
     using variant_type = Variant<Ts...>;
 
@@ -91,6 +149,54 @@ struct variant_traits<Variant<Ts...>> {
 };
 
 namespace detail {
+
+template <typename T>
+concept VariantTraitsAvailable =
+    requires { typename std::integral_constant<std::size_t, static_cast<std::size_t>(variant_traits<std::remove_cvref_t<T>>::size)>; };
+
+template <typename T>
+inline constexpr std::size_t variant_traits_declared_size_v = static_cast<std::size_t>(variant_traits<std::remove_cvref_t<T>>::size);
+
+template <typename Variant, std::size_t I>
+concept VariantTraitReadableAlternative = requires(Variant &value, const Variant &const_value, variant_probe_visitor visitor) {
+    typename variant_traits<Variant>::template alternative<I>;
+    { variant_traits<Variant>::index(const_value) } -> std::convertible_to<std::size_t>;
+    variant_traits<Variant>::template get<I>(value);
+    variant_traits<Variant>::template get<I>(const_value);
+    variant_traits<Variant>::visit(visitor, const_value);
+};
+
+template <typename Variant, std::size_t I>
+concept VariantTraitAssignableAlternative =
+    requires(Variant &value, typename variant_traits<Variant>::template alternative<I> alternative) {
+        variant_traits<Variant>::template assign<I>(value, std::move(alternative));
+    };
+
+template <typename Variant, std::size_t... Is> consteval bool variant_traits_are_usable_impl(std::index_sequence<Is...>) {
+    return (VariantTraitReadableAlternative<Variant, Is> && ...) && (VariantTraitAssignableAlternative<Variant, Is> && ...);
+}
+
+template <typename T> consteval bool variant_traits_are_usable() {
+    using variant_type = std::remove_cvref_t<T>;
+    if constexpr (VariantTraitsAvailable<variant_type>) {
+        if constexpr (variant_traits_declared_size_v<variant_type> == 0U) {
+            return false;
+        }
+        return variant_traits_are_usable_impl<variant_type>(std::make_index_sequence<variant_traits_declared_size_v<variant_type>>{});
+    }
+    return false;
+}
+
+template <typename T>
+concept VariantTraitsUsable = variant_traits_are_usable<T>();
+
+template <typename T> struct is_variant_like : std::bool_constant<VariantTraitsUsable<std::remove_cvref_t<T>>> {
+    static_assert(!VariantTraitsAvailable<std::remove_cvref_t<T>> || VariantTraitsUsable<std::remove_cvref_t<T>>,
+                  "variant_traits<T> must provide size, alternative<I>, index, get<I>, visit, and assign<I>");
+};
+
+template <typename T>
+concept VariantLike = is_variant_like<std::remove_cvref_t<T>>::value;
 
 template <typename Variant> inline constexpr std::size_t variant_size_v = variant_traits<std::remove_cvref_t<Variant>>::size;
 
