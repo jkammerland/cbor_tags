@@ -674,33 +674,35 @@ template <typename T> constexpr status_code decode_optional(span_reader &reader,
     return status_code::success;
 }
 
-template <typename Writer, typename... Ts> constexpr void encode_variant(Writer &writer, const std::variant<Ts...> &value) {
-    write_varuint(writer, static_cast<std::uint64_t>(value.index()));
-    std::visit([&writer](const auto &alternative) { encode_value(writer, alternative); }, value);
+template <typename Writer, IsVariant Variant> constexpr void encode_variant(Writer &writer, const Variant &value) {
+    write_varuint(writer, static_cast<std::uint64_t>(cbor::tags::detail::variant_index(value)));
+    cbor::tags::detail::variant_visit([&writer](const auto &alternative) { encode_value(writer, alternative); }, value);
 }
 
-template <std::size_t I = 0, typename... Ts>
-constexpr status_code decode_variant_alternative(std::uint64_t index, span_reader &reader, std::variant<Ts...> &value) {
-    if constexpr (I >= sizeof...(Ts)) {
+template <std::size_t I = 0, IsVariant Variant>
+constexpr status_code decode_variant_alternative(std::uint64_t index, span_reader &reader, Variant &value) {
+    using variant_type = std::remove_cvref_t<Variant>;
+
+    if constexpr (I >= cbor::tags::detail::variant_size_v<variant_type>) {
         (void)index;
         (void)reader;
         (void)value;
         return status_code::no_match_in_variant_on_buffer;
     } else {
         if (index == I) {
-            using alternative_type = std::variant_alternative_t<I, std::variant<Ts...>>;
+            using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
             auto make_alternative  = [&]() -> alternative_type {
                 if constexpr (std::default_initializable<alternative_type>) {
                     return alternative_type{};
                 } else if constexpr (std::copy_constructible<alternative_type>) {
-                    return alternative_type{std::get<I>(value)};
+                    return alternative_type{cbor::tags::detail::variant_get<I>(value)};
                 } else {
                     static_assert(dependent_false<alternative_type>::value,
                                   "custom_codec_1 variant alternatives must be default-initializable or copy-constructible");
                 }
             };
             if constexpr (!std::default_initializable<alternative_type>) {
-                if (value.index() != I) {
+                if (cbor::tags::detail::variant_index(value) != I) {
                     return status_code::error;
                 }
             }
@@ -709,14 +711,14 @@ constexpr status_code decode_variant_alternative(std::uint64_t index, span_reade
             if (status != status_code::success) {
                 return status;
             }
-            value.template emplace<I>(std::move(alternative));
+            cbor::tags::detail::variant_assign<I>(value, std::move(alternative));
             return status_code::success;
         }
         return decode_variant_alternative<I + 1>(index, reader, value);
     }
 }
 
-template <typename... Ts> constexpr status_code decode_variant(span_reader &reader, std::variant<Ts...> &value) {
+template <IsVariant Variant> constexpr status_code decode_variant(span_reader &reader, Variant &value) {
     std::uint64_t index{};
     auto          status = read_varuint(reader, index);
     if (status != status_code::success) {
@@ -1040,9 +1042,8 @@ template <typename T> struct has_borrowed_decode_refs {
         } else if constexpr (IsOptional<type>) {
             return has_borrowed_decode_refs<typename type::value_type>::value;
         } else if constexpr (IsVariant<type>) {
-            return []<typename... Ts>(std::variant<Ts...> *) consteval {
-                return (has_borrowed_decode_refs<std::remove_cvref_t<Ts>>::value || ...);
-            }(static_cast<type *>(nullptr));
+            return cbor::tags::detail::with_variant_alternatives<type>(
+                []<typename... Ts>() { return (has_borrowed_decode_refs<std::remove_cvref_t<Ts>>::value || ...); });
         } else if constexpr (IsMap<type>) {
             return has_borrowed_decode_refs<typename type::key_type>::value || has_borrowed_decode_refs<typename type::mapped_type>::value;
         } else if constexpr (IsRangeOfCborValues<type>) {
