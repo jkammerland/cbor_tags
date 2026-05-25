@@ -21,6 +21,11 @@ namespace cbor::tags::detail {
 
 template <typename T> inline constexpr bool type_name_backend_available = false;
 
+#if !CBOR_TAGS_STL_ONLY
+template <typename T> inline constexpr auto short_type_name_storage = nameof::nameof_short_type<T>();
+template <typename T> inline constexpr auto full_type_name_storage  = nameof::nameof_full_type<T>();
+#endif
+
 template <typename T> constexpr std::string_view short_type_name() {
 #if CBOR_TAGS_STL_ONLY
 #if CBOR_TAGS_HAS_STD_REFLECTION
@@ -36,7 +41,7 @@ template <typename T> constexpr std::string_view short_type_name() {
     return {};
 #endif
 #else
-    return nameof::nameof_short_type<T>();
+    return std::string_view{short_type_name_storage<T>};
 #endif
 }
 
@@ -53,7 +58,7 @@ template <typename T> constexpr std::string_view full_type_name() {
     return {};
 #endif
 #else
-    return nameof::nameof_full_type<T>();
+    return std::string_view{full_type_name_storage<T>};
 #endif
 }
 
