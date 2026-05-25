@@ -868,7 +868,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.18.0 # or a newer release/commit for newer extension features
+  GIT_TAG v0.19.0 # or a newer release/commit for newer extension features
 )
 
 FetchContent_MakeAvailable(cbor_tags)
