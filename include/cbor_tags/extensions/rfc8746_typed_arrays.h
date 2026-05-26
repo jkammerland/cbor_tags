@@ -77,6 +77,11 @@ template <> struct typed_array_traits<double, typed_array_byte_order::little> : 
 template <>
 struct typed_array_traits<float128_t, typed_array_byte_order::little> : typed_array_traits_base<87, std::array<std::byte, 16>> {};
 
+static_assert(std::numeric_limits<float>::is_iec559 && sizeof(float) == sizeof(std::uint32_t),
+              "RFC 8746 float typed arrays require IEEE 754 binary32 float");
+static_assert(std::numeric_limits<double>::is_iec559 && sizeof(double) == sizeof(std::uint64_t),
+              "RFC 8746 double typed arrays require IEEE 754 binary64 double");
+
 inline constexpr std::uint64_t multi_dimensional_array_tag              = 40;
 inline constexpr std::uint64_t homogeneous_array_tag                    = 41;
 inline constexpr std::uint64_t multi_dimensional_column_major_array_tag = 1040;
