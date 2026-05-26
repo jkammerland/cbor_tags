@@ -103,7 +103,10 @@
       "name": "debug",
       "inherits": "base-debug",
       "displayName": "Debug",
-      "description": "CMAKE_BUILD_TYPE=Debug (typically -O0 -g)"
+      "description": "CMAKE_BUILD_TYPE=Debug (typically -O0 -g)",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "debug-tests",
@@ -234,19 +237,28 @@
       "name": "release",
       "inherits": "base-release",
       "displayName": "Release",
-      "description": "CMAKE_BUILD_TYPE=Release (typically -O3)"
+      "description": "CMAKE_BUILD_TYPE=Release (typically -O3)",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "relwithdebinfo",
       "inherits": "base-relwithdebinfo",
       "displayName": "Release with Debug Info",
-      "description": "CMAKE_BUILD_TYPE=RelWithDebInfo (typically -O2 -g)"
+      "description": "CMAKE_BUILD_TYPE=RelWithDebInfo (typically -O2 -g)",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "minsizerel",
       "inherits": "base-minsizerel",
       "displayName": "Minimum Size Release",
-      "description": "Size-optimized build (-Os), minimal binary size for embedded or space-constrained deployments"
+      "description": "Size-optimized build (-Os), minimal binary size for embedded or space-constrained deployments",
+      "cacheVariables": {
+        "CBOR_TAGS_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "coverage",
@@ -878,6 +890,9 @@
         "outputOnFailure": true,
         "verbosity": "default"
       },
+      "execution": {
+        "noTestsAction": "error"
+      },
       "environment": {
         "CCACHE_DIR": "${sourceDir}/build/.ccache",
         "CCACHE_BASEDIR": "${sourceDir}",
@@ -1483,8 +1498,8 @@
     },
     {
       "name": "package",
-      "displayName": "Package Workflow",
-      "description": "Complete release workflow: configure → build → test → package with CPack",
+      "displayName": "Release Validation Workflow",
+      "description": "Complete release validation workflow: configure → build → test",
       "steps": [
         {
           "type": "configure",

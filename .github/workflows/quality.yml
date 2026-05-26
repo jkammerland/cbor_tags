@@ -121,6 +121,38 @@ jobs:
           -c tools.cmake.cmaketoolchain:generator=Ninja \
           ${options}
 
+  conan-stl-only-package:
+    name: Conan package consumer (stl-only)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Create and test STL-only package in Fedora
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "${{ github.workspace }}:/work:ro,z" \
+          -w /work \
+          registry.fedoraproject.org/fedora:44 \
+          bash -euxo pipefail -c '
+            dnf -y install \
+              cmake \
+              gcc-c++ \
+              git \
+              ninja-build \
+              python3-pip
+            python3 -m pip install --user "conan>=2,<3"
+            export PATH="${HOME}/.local/bin:${PATH}"
+            conan profile detect --force
+            conan create . \
+              --build=missing \
+              -s build_type=Release \
+              -s compiler.cppstd=26 \
+              -c tools.cmake.cmaketoolchain:generator=Ninja \
+              -o cbor-tags/*:stl_only=True
+          '
+
   benchmark-build:
     name: C++ Benchmark Compile (${{ matrix.config.name }})
     runs-on: ubuntu-latest
