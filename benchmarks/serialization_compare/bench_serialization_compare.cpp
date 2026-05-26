@@ -17,6 +17,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_ranges.h>
+#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <cereal/archives/binary.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/string.hpp>
@@ -75,6 +76,7 @@
 namespace bench_compare {
 
 using byte_buffer = std::vector<std::uint8_t>;
+namespace rfc8746 = cbor::tags::ext::rfc8746;
 
 namespace allocation_probe {
 inline thread_local bool        enabled = false;
@@ -820,6 +822,37 @@ struct cbor_tags_enveloped_codec {
                                      std::string{cbor::tags::status_message(result.error())});
         }
         return checksum(value);
+    }
+};
+
+struct cbor_tags_typed_array_codec {
+    static constexpr std::string_view name = "cbor_tags_rfc8746_typed_array_codec";
+
+    template <typename T> static void encode_into(const std::vector<T> &value, byte_buffer &buffer) {
+        buffer.clear();
+        auto enc    = cbor::tags::make_encoder<rfc8746::typed_array_codec>(buffer);
+        auto result = enc(rfc8746::as_typed_array(value));
+        if (!result) {
+            throw std::runtime_error(std::string{"cbor_tags typed-array codec encode failed: "} +
+                                     std::string{cbor::tags::status_message(result.error())});
+        }
+    }
+
+    template <typename T> static byte_buffer encode(const std::vector<T> &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
+    }
+
+    template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer) {
+        rfc8746::typed_array<typename T::value_type> decoded;
+        auto                                         dec    = cbor::tags::make_decoder<rfc8746::typed_array_codec>(buffer);
+        auto                                         result = dec(decoded);
+        if (!result) {
+            throw std::runtime_error(std::string{"cbor_tags typed-array codec decode failed: "} +
+                                     std::string{cbor::tags::status_message(result.error())});
+        }
+        return checksum(decoded.values());
     }
 };
 
@@ -1859,20 +1892,28 @@ void run_typed_array_segment_encode_reused_benchmark(std::string_view fixture_na
 template <typename Fixture>
 void run_typed_array_fixture(std::string_view name, const Fixture &fixture, ankerl::nanobench::Bench &bench,
                              std::vector<metric_row> &metrics, std::vector<ankerl::nanobench::Result> &results) {
+    const auto codec_encoded    = collect_codec_metrics<cbor_tags_typed_array_codec>(name, fixture, metrics);
     const auto range_encoded    = collect_codec_metrics<cbor_tags_typed_array_range_codec>(name, fixture, metrics);
     const auto bulk_encoded     = collect_codec_metrics<cbor_tags_typed_array_bulk_copy_codec>(name, fixture, metrics);
+    const auto glaze_encoded    = collect_codec_metrics<glaze_cbor_codec>(name, fixture, metrics);
     const auto segments_encoded = collect_typed_array_segment_metrics(name, fixture, metrics);
 
+    run_encode_cold_benchmark<cbor_tags_typed_array_codec>(name, fixture, codec_encoded.size(), bench, results);
     run_encode_cold_benchmark<cbor_tags_typed_array_range_codec>(name, fixture, range_encoded.size(), bench, results);
     run_encode_cold_benchmark<cbor_tags_typed_array_bulk_copy_codec>(name, fixture, bulk_encoded.size(), bench, results);
+    run_encode_cold_benchmark<glaze_cbor_codec>(name, fixture, glaze_encoded.size(), bench, results);
     run_encode_cold_benchmark<cbor_tags_typed_array_segments_codec>(name, fixture, segments_encoded.size(), bench, results);
 
+    run_encode_reused_benchmark<cbor_tags_typed_array_codec>(name, fixture, codec_encoded.size(), bench, results);
     run_encode_reused_benchmark<cbor_tags_typed_array_range_codec>(name, fixture, range_encoded.size(), bench, results);
     run_encode_reused_benchmark<cbor_tags_typed_array_bulk_copy_codec>(name, fixture, bulk_encoded.size(), bench, results);
+    run_encode_reused_benchmark<glaze_cbor_codec>(name, fixture, glaze_encoded.size(), bench, results);
     run_typed_array_segment_encode_reused_benchmark(name, fixture, segments_encoded.size(), bench, results);
 
+    run_decode_benchmark<cbor_tags_typed_array_codec, Fixture>(name, codec_encoded, bench, results);
     run_decode_benchmark<cbor_tags_typed_array_range_codec, Fixture>(name, range_encoded, bench, results);
     run_decode_benchmark<cbor_tags_typed_array_bulk_copy_codec, Fixture>(name, bulk_encoded, bench, results);
+    run_decode_benchmark<glaze_cbor_codec, Fixture>(name, glaze_encoded, bench, results);
     run_decode_benchmark<cbor_tags_typed_array_segments_codec, Fixture>(name, segments_encoded, bench, results);
 }
 
@@ -2001,6 +2042,8 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
     report << "| Library | Version | Wire/adapter behavior | Decode behavior in this suite |\n";
     report << "|---|---:|---|---|\n";
     report << "| cbor_tags | working tree | CBOR, self-describing major types | Materializes native fixtures |\n";
+    report << "| cbor_tags_rfc8746_typed_array_codec | working tree | CBOR tag plus RFC 8746 typed-array byte string through the public "
+              "codec extension | Materializes native numeric vectors |\n";
     report << "| cbor_tags_rfc8746_typed_array_range | working tree | CBOR tag plus RFC 8746 typed-array byte string from a byte view | "
               "Materializes native numeric vectors |\n";
     report << "| cbor_tags_rfc8746_typed_array_bulk_copy | working tree | CBOR tag plus RFC 8746 typed-array byte string with bulk payload "
@@ -2030,8 +2073,8 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
     report << "| int64_series | 4096 signed 64-bit integer values |\n";
     report << "| float64_series | 4096 double-precision floating-point values |\n";
     report << "| *_enveloped | Same payload as the base fixture with benchmark-local top-level type detection |\n";
-    report << "| *_rfc8746_typed_array | Numeric vector encoded as a CBOR RFC 8746 typed-array tag plus byte string; library rows split "
-              "range, bulk-copy, and borrowed-segment paths |\n\n";
+    report << "| *_rfc8746_typed_array | Numeric vector encoded as a CBOR RFC 8746 typed-array tag plus byte string; rows compare public "
+              "codec paths plus benchmark-local range, bulk-copy, and borrowed-segment paths |\n\n";
 
     report << "## Size And Allocation Summary\n\n";
     report << "| Fixture | Library | Encoded bytes | Cold encode allocs | Cold encode bytes | Reserved encode allocs | Reserved encode "
@@ -2059,9 +2102,9 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
               "text-key maps and its `std::vector<uint8_t>` payload uses a byte string.\n";
     report << "- RFC 8746 typed-array rows use IANA CBOR tags 78, 79, and 86 for little-endian int32, int64, and float64 arrays. These "
               "rows are not wire-equivalent to generic CBOR arrays and require an RFC 8746-aware peer.\n";
-    report << "- The RFC 8746 rows are benchmark-local helpers, not a public `cbor_tags` API. The range row uses the existing CBOR range "
-              "encoder, the bulk-copy row materializes one contiguous CBOR buffer, and the segment row represents a scatter/gather "
-              "header-plus-payload shape without joining the buffers.\n";
+    report << "- The `cbor_tags_rfc8746_typed_array_codec` and `glaze_cbor` RFC 8746 rows use public codec APIs. The range and "
+              "bulk-copy rows isolate benchmark-local contiguous-buffer encode variants, and the segment row represents a "
+              "scatter/gather header-plus-payload shape without joining the buffers.\n";
     report << "- The segment row is a little-endian zero-copy ceiling for this benchmark. It borrows the original vector payload and is "
               "not a standalone serialized byte buffer.\n";
     report
