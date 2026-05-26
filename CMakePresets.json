@@ -6,7 +6,7 @@
     "Configure presets:",
     "- debug/release/relwithdebinfo/minsizerel: CMAKE_BUILD_TYPE presets",
     "- debug-tests/debug-unit: Debug test builds with CBOR_TAGS_BUILD_TESTS=ON",
-    "- debug-interop: Debug tests plus opt-in nlohmann/json and Rust cbor-diag CBOR interop checks",
+    "- debug-interop: Debug tests plus opt-in nlohmann/json, Glaze, and Rust cbor-diag CBOR interop checks",
     "- debug-cxx26/release-cxx26: Tests in generic C++26 mode",
     "- debug-std-expected/release-std-expected: Tests with C++23 std::expected return backend",
     "- debug-std-reflection/release-std-reflection: GCC C++26 std::meta reflection tests",
@@ -120,10 +120,11 @@
       "inherits": "debug-tests",
       "binaryDir": "${sourceDir}/build/interop-tests",
       "displayName": "Debug Interop Tests",
-      "description": "Debug tests with opt-in nlohmann/json and Rust cbor-diag CBOR interop checks",
+      "description": "Debug tests with opt-in nlohmann/json, Glaze, and Rust cbor-diag CBOR interop checks",
       "cacheVariables": {
         "CBOR_TAGS_BUILD_INTEROP_TESTS": "ON",
         "CBOR_TAGS_INTEROP_NLOHMANN": "ON",
+        "CBOR_TAGS_INTEROP_GLAZE": "ON",
         "CBOR_TAGS_INTEROP_CBOR_DIAG": "ON"
       }
     },

@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <flatbuffers/flatbuffers.h>
 #include <fstream>
+#include <glaze/cbor.hpp>
 #include <ios>
 #include <iostream>
 #include <limits>
@@ -41,6 +42,7 @@
 #include <streambuf>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -64,6 +66,10 @@
 
 #ifndef CBOR_TAGS_BENCH_FLATBUFFERS_VERSION
 #define CBOR_TAGS_BENCH_FLATBUFFERS_VERSION "unknown"
+#endif
+
+#ifndef CBOR_TAGS_BENCH_GLAZE_VERSION
+#define CBOR_TAGS_BENCH_GLAZE_VERSION "unknown"
 #endif
 
 namespace bench_compare {
@@ -469,6 +475,27 @@ template <typename Archive> void serialize(Archive &archive, bench_compare::Nest
 
 } // namespace boost::serialization
 
+template <> struct glz::meta<bench_compare::FlatRecord> {
+    using T                     = bench_compare::FlatRecord;
+    static constexpr auto value = object("id", &T::id, "sequence", &T::sequence, "active", &T::active, "kind", &T::kind, "temperature",
+                                         &T::temperature, "score", &T::score, "name", &T::name, "samples", &T::samples);
+};
+
+template <> struct glz::meta<bench_compare::KeyValue> {
+    using T                     = bench_compare::KeyValue;
+    static constexpr auto value = object("key", &T::key, "value", &T::value);
+};
+
+template <> struct glz::meta<bench_compare::RecordBatch> {
+    using T                     = bench_compare::RecordBatch;
+    static constexpr auto value = object("records", &T::records);
+};
+
+template <> struct glz::meta<bench_compare::NestedSnapshot> {
+    using T                     = bench_compare::NestedSnapshot;
+    static constexpr auto value = object("title", &T::title, "records", &T::records, "counters", &T::counters, "payload", &T::payload);
+};
+
 namespace bench_compare {
 
 template <typename T> struct object_id;
@@ -844,6 +871,64 @@ struct cbor_tags_typed_array_segments_codec {
 
     template <typename T> static std::uint64_t decode_checksum(const typed_array_segments &segments) {
         return decode_typed_array_segment_checksum<typename T::value_type>(segments);
+    }
+};
+
+struct glaze_cbor_codec {
+    static constexpr std::string_view name = "glaze_cbor";
+
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        buffer.clear();
+        auto result = glz::write_cbor(value, buffer);
+        if (result) {
+            throw std::runtime_error{"Glaze CBOR encode failed"};
+        }
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
+    }
+
+    template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer) {
+        T    value;
+        auto result = glz::read_cbor(value, buffer);
+        if (result) {
+            throw std::runtime_error{"Glaze CBOR decode failed"};
+        }
+        return checksum(value);
+    }
+};
+
+struct glaze_cbor_enveloped_codec {
+    static constexpr std::string_view name = "glaze_cbor_enveloped";
+
+    template <typename T> static void encode_into(const T &value, byte_buffer &buffer) {
+        buffer.clear();
+        const auto envelope = std::tuple<std::uint32_t, const T &>{object_id_v<T>, value};
+        auto       result   = glz::write_cbor(envelope, buffer);
+        if (result) {
+            throw std::runtime_error{"Glaze CBOR enveloped encode failed"};
+        }
+    }
+
+    template <typename T> static byte_buffer encode(const T &value) {
+        byte_buffer buffer;
+        encode_into(value, buffer);
+        return buffer;
+    }
+
+    template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer) {
+        auto envelope = std::tuple<std::uint32_t, T>{};
+        auto result   = glz::read_cbor(envelope, buffer);
+        if (result) {
+            throw std::runtime_error{"Glaze CBOR enveloped decode failed"};
+        }
+        if (std::get<0>(envelope) != object_id_v<T>) {
+            throw std::runtime_error{"Glaze CBOR enveloped object id mismatch"};
+        }
+        return checksum(std::get<1>(envelope));
     }
 };
 
@@ -1667,6 +1752,7 @@ void run_fixture(std::string_view name, const Fixture &fixture, ankerl::nanobenc
     const auto zpp_bits_encoded            = collect_codec_metrics<zpp_bits_codec>(name, fixture, metrics);
     const auto cereal_encoded              = collect_codec_metrics<cereal_codec>(name, fixture, metrics);
     const auto boost_serialization_encoded = collect_codec_metrics<boost_serialization_codec>(name, fixture, metrics);
+    const auto glaze_cbor_encoded          = collect_codec_metrics<glaze_cbor_codec>(name, fixture, metrics);
     const auto flatbuffers_encoded         = collect_codec_metrics<flatbuffers_codec>(name, fixture, metrics);
 
     run_encode_cold_benchmark<cbor_tags_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
@@ -1674,6 +1760,7 @@ void run_fixture(std::string_view name, const Fixture &fixture, ankerl::nanobenc
     run_encode_cold_benchmark<zpp_bits_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
     run_encode_cold_benchmark<cereal_codec>(name, fixture, cereal_encoded.size(), bench, results);
     run_encode_cold_benchmark<boost_serialization_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
+    run_encode_cold_benchmark<glaze_cbor_codec>(name, fixture, glaze_cbor_encoded.size(), bench, results);
     run_encode_cold_benchmark<flatbuffers_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
 
     run_encode_reused_benchmark<cbor_tags_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
@@ -1681,6 +1768,7 @@ void run_fixture(std::string_view name, const Fixture &fixture, ankerl::nanobenc
     run_encode_reused_benchmark<zpp_bits_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
     run_encode_reused_benchmark<cereal_codec>(name, fixture, cereal_encoded.size(), bench, results);
     run_encode_reused_benchmark<boost_serialization_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
+    run_encode_reused_benchmark<glaze_cbor_codec>(name, fixture, glaze_cbor_encoded.size(), bench, results);
     run_encode_reused_benchmark<flatbuffers_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
 
     run_decode_benchmark<cbor_tags_codec, Fixture>(name, cbor_tags_encoded, bench, results);
@@ -1688,6 +1776,7 @@ void run_fixture(std::string_view name, const Fixture &fixture, ankerl::nanobenc
     run_decode_benchmark<zpp_bits_codec, Fixture>(name, zpp_bits_encoded, bench, results);
     run_decode_benchmark<cereal_codec, Fixture>(name, cereal_encoded, bench, results);
     run_decode_benchmark<boost_serialization_codec, Fixture>(name, boost_serialization_encoded, bench, results);
+    run_decode_benchmark<glaze_cbor_codec, Fixture>(name, glaze_cbor_encoded, bench, results);
     run_decode_benchmark<flatbuffers_codec, Fixture>(name, flatbuffers_encoded, bench, results);
 }
 
@@ -1699,6 +1788,7 @@ void run_enveloped_fixture(std::string_view name, const Fixture &fixture, ankerl
     const auto zpp_bits_encoded            = collect_codec_metrics<zpp_bits_enveloped_codec>(name, fixture, metrics);
     const auto cereal_encoded              = collect_codec_metrics<cereal_enveloped_codec>(name, fixture, metrics);
     const auto boost_serialization_encoded = collect_codec_metrics<boost_serialization_enveloped_codec>(name, fixture, metrics);
+    const auto glaze_cbor_encoded          = collect_codec_metrics<glaze_cbor_enveloped_codec>(name, fixture, metrics);
     const auto flatbuffers_encoded         = collect_codec_metrics<flatbuffers_enveloped_codec>(name, fixture, metrics);
 
     run_encode_cold_benchmark<cbor_tags_enveloped_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
@@ -1706,6 +1796,7 @@ void run_enveloped_fixture(std::string_view name, const Fixture &fixture, ankerl
     run_encode_cold_benchmark<zpp_bits_enveloped_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
     run_encode_cold_benchmark<cereal_enveloped_codec>(name, fixture, cereal_encoded.size(), bench, results);
     run_encode_cold_benchmark<boost_serialization_enveloped_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
+    run_encode_cold_benchmark<glaze_cbor_enveloped_codec>(name, fixture, glaze_cbor_encoded.size(), bench, results);
     run_encode_cold_benchmark<flatbuffers_enveloped_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
 
     run_encode_reused_benchmark<cbor_tags_enveloped_codec>(name, fixture, cbor_tags_encoded.size(), bench, results);
@@ -1713,6 +1804,7 @@ void run_enveloped_fixture(std::string_view name, const Fixture &fixture, ankerl
     run_encode_reused_benchmark<zpp_bits_enveloped_codec>(name, fixture, zpp_bits_encoded.size(), bench, results);
     run_encode_reused_benchmark<cereal_enveloped_codec>(name, fixture, cereal_encoded.size(), bench, results);
     run_encode_reused_benchmark<boost_serialization_enveloped_codec>(name, fixture, boost_serialization_encoded.size(), bench, results);
+    run_encode_reused_benchmark<glaze_cbor_enveloped_codec>(name, fixture, glaze_cbor_encoded.size(), bench, results);
     run_encode_reused_benchmark<flatbuffers_enveloped_codec>(name, fixture, flatbuffers_encoded.size(), bench, results);
 
     run_decode_benchmark<cbor_tags_enveloped_codec, Fixture>(name, cbor_tags_encoded, bench, results);
@@ -1720,6 +1812,7 @@ void run_enveloped_fixture(std::string_view name, const Fixture &fixture, ankerl
     run_decode_benchmark<zpp_bits_enveloped_codec, Fixture>(name, zpp_bits_encoded, bench, results);
     run_decode_benchmark<cereal_enveloped_codec, Fixture>(name, cereal_encoded, bench, results);
     run_decode_benchmark<boost_serialization_enveloped_codec, Fixture>(name, boost_serialization_encoded, bench, results);
+    run_decode_benchmark<glaze_cbor_enveloped_codec, Fixture>(name, glaze_cbor_encoded, bench, results);
     run_decode_benchmark<flatbuffers_enveloped_codec, Fixture>(name, flatbuffers_encoded, bench, results);
 }
 
@@ -1815,6 +1908,7 @@ void validate_benchmark_codecs() {
     validate_envelope_rejects_wrong_type<zpp_bits_enveloped_codec>(record);
     validate_envelope_rejects_wrong_type<cereal_enveloped_codec>(record);
     validate_envelope_rejects_wrong_type<boost_serialization_enveloped_codec>(record);
+    validate_envelope_rejects_wrong_type<glaze_cbor_enveloped_codec>(record);
     validate_envelope_rejects_wrong_type<flatbuffers_enveloped_codec>(record);
 
     const auto int32_values = make_int32_series();
@@ -1920,6 +2014,9 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
            << " | Binary aggregate serialization, native-endian defaults | Materializes native fixtures |\n";
     report << "| cereal | " << CBOR_TAGS_BENCH_CEREAL_VERSION << " | BinaryArchive over iostreams | Materializes native fixtures |\n";
     report << "| Boost.Serialization | system Boost | Binary archive with `no_header` | Materializes native fixtures |\n";
+    report << "| Glaze CBOR | " << CBOR_TAGS_BENCH_GLAZE_VERSION
+           << " | CBOR object maps, byte strings for `uint8_t` vectors, and RFC 8746 typed arrays for numeric vectors | "
+              "Materializes native fixtures |\n";
     report << "| FlatBuffers | " << CBOR_TAGS_BENCH_FLATBUFFERS_VERSION
            << " | Schema-generated table/vector format | Verifies and reads fields through zero-copy views |\n\n";
 
@@ -1955,9 +2052,11 @@ void write_report(const std::filesystem::path &output_dir, const std::vector<ank
     report << "- The wire formats are intentionally different: CBOR is self-describing, FlatBuffers is schema-based, and several binary "
               "archives "
               "depend on C++ type/archive contracts.\n";
-    report << "- Known-type rows keep the original benchmark contract. `*_enveloped` rows add top-level type detection: CBOR uses a "
-              "benchmark-local tag, FlatBuffers uses a 4-byte file identifier, and the other binary archives prefix a `uint32_t` "
-              "object id.\n";
+    report << "- Known-type rows keep the original benchmark contract. `*_enveloped` rows add top-level type detection: `cbor_tags` "
+              "uses a benchmark-local tag, Glaze CBOR uses a two-element CBOR array, FlatBuffers uses a 4-byte file identifier, "
+              "and the other binary archives prefix a `uint32_t` object id.\n";
+    report << "- Glaze CBOR's native numeric-vector encoding is already RFC 8746 tag plus byte string, while its object fixtures use "
+              "text-key maps and its `std::vector<uint8_t>` payload uses a byte string.\n";
     report << "- RFC 8746 typed-array rows use IANA CBOR tags 78, 79, and 86 for little-endian int32, int64, and float64 arrays. These "
               "rows are not wire-equivalent to generic CBOR arrays and require an RFC 8746-aware peer.\n";
     report << "- The RFC 8746 rows are benchmark-local helpers, not a public `cbor_tags` API. The range row uses the existing CBOR range "

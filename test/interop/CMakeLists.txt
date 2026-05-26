@@ -4,8 +4,12 @@ set(CBOR_TAGS_INTEROP_NLOHMANN
 set(CBOR_TAGS_INTEROP_CBOR_DIAG
     "AUTO"
     CACHE STRING "Build Rust cbor-diag interop tests: AUTO, ON, or OFF")
+set(CBOR_TAGS_INTEROP_GLAZE
+    "AUTO"
+    CACHE STRING "Build Glaze CBOR interop tests: AUTO, ON, or OFF")
 set_property(CACHE CBOR_TAGS_INTEROP_NLOHMANN PROPERTY STRINGS AUTO ON OFF)
 set_property(CACHE CBOR_TAGS_INTEROP_CBOR_DIAG PROPERTY STRINGS AUTO ON OFF)
+set_property(CACHE CBOR_TAGS_INTEROP_GLAZE PROPERTY STRINGS AUTO ON OFF)
 
 function(cbor_tags_validate_interop_mode MODE_VARIABLE)
   if(NOT "${${MODE_VARIABLE}}" MATCHES "^(AUTO|ON|OFF)$")
@@ -15,6 +19,7 @@ endfunction()
 
 cbor_tags_validate_interop_mode(CBOR_TAGS_INTEROP_NLOHMANN)
 cbor_tags_validate_interop_mode(CBOR_TAGS_INTEROP_CBOR_DIAG)
+cbor_tags_validate_interop_mode(CBOR_TAGS_INTEROP_GLAZE)
 
 if(NOT CBOR_TAGS_INTEROP_NLOHMANN STREQUAL "OFF")
   find_package(nlohmann_json 3.11 CONFIG QUIET)
@@ -30,6 +35,25 @@ if(NOT CBOR_TAGS_INTEROP_NLOHMANN STREQUAL "OFF")
     message(FATAL_ERROR "CBOR_TAGS_INTEROP_NLOHMANN=ON requires nlohmann_json::nlohmann_json.")
   else()
     message(STATUS "Skipping nlohmann/json CBOR interop tests; nlohmann_json was not found.")
+  endif()
+endif()
+
+if(NOT CBOR_TAGS_INTEROP_GLAZE STREQUAL "OFF")
+  find_package(glaze 7.7 CONFIG QUIET)
+  if((NOT TARGET glaze::glaze) AND CBOR_TAGS_INTEROP_GLAZE STREQUAL "ON")
+    set(glaze_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
+    cpmaddpackage("gh:stephenberry/glaze@7.7.0")
+  endif()
+
+  if(TARGET glaze::glaze)
+    add_executable(cbor_tags_interop_glaze_cbor glaze_cbor_roundtrip.cc)
+    target_link_libraries(cbor_tags_interop_glaze_cbor PRIVATE cbor::tags doctest::doctest glaze::glaze)
+    add_test(NAME interop_glaze_cbor COMMAND cbor_tags_interop_glaze_cbor)
+  elseif(CBOR_TAGS_INTEROP_GLAZE STREQUAL "ON")
+    message(FATAL_ERROR "CBOR_TAGS_INTEROP_GLAZE=ON requires glaze::glaze.")
+  else()
+    message(STATUS "Skipping Glaze CBOR interop tests; glaze was not found.")
   endif()
 endif()
 

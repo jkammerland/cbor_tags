@@ -112,7 +112,7 @@ payload.
 ## Serialization Comparison Suite
 
 The cross-library comparison suite is opt-in because it fetches and builds extra
-dependencies. It compares `cbor_tags`, bitsery, zpp_bits, cereal,
+dependencies. It compares `cbor_tags`, bitsery, zpp_bits, cereal, Glaze CBOR,
 Boost.Serialization, and FlatBuffers across fixed fixtures, then writes a
 Markdown report plus raw nanobench JSON/CSV.
 
@@ -134,12 +134,14 @@ Reserved encode rows reserve the final encoded byte length before measurement
 and count only additional encode-time allocations.
 
 The suite keeps known-type rows separate from `*_enveloped` rows. Enveloped
-rows add benchmark-local top-level type detection: CBOR uses a top-level tag,
-FlatBuffers uses a file identifier, and binary archives prefix a `uint32_t`
-object id. Homogeneous numeric fixtures also include CBOR RFC 8746 typed-array
-rows using IANA tags 78, 79, and 86 for little-endian int32, int64, and float64
-byte-string payloads. Those rows are intentionally not wire-equivalent to
-generic CBOR arrays, and they are benchmark-local helpers rather than a public
-typed-array API. The typed-array rows split the existing byte-range encoder,
-a contiguous bulk-copy buffer, and a borrowed header-plus-payload segment path
-so range overhead and the zero-copy ceiling are visible separately.
+rows add benchmark-local top-level type detection: `cbor_tags` uses a top-level
+tag, Glaze CBOR uses a two-element array, FlatBuffers uses a file identifier,
+and binary archives prefix a `uint32_t` object id. Homogeneous numeric fixtures
+also include CBOR RFC 8746 typed-array rows using IANA tags 78, 79, and 86 for
+little-endian int32, int64, and float64 byte-string payloads. Glaze CBOR uses
+that typed-array wire shape for numeric vectors by default. Those rows are
+intentionally not wire-equivalent to generic CBOR arrays, and they are
+benchmark-local helpers rather than a public typed-array API. The typed-array
+rows split the existing byte-range encoder, a contiguous bulk-copy buffer, and a
+borrowed header-plus-payload segment path so range overhead and the zero-copy
+ceiling are visible separately.
