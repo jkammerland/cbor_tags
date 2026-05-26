@@ -1281,6 +1281,92 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    // Keep std::variant on the original pack-based fast path; generic variant-like dispatch is slower here.
+    template <typename... T>
+    constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
+                                         std::optional<std::uint64_t> &tag) {
+        using namespace detail;
+        static_assert((IsCborMajor<T> && ...),
+                      "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
+
+        // TODO: Remove this requirement
+        static_assert((std::is_default_constructible_v<T> && ...), "All types must be default constructible. Because in order to "
+                                                                   "decode into the type, it must be default constructed first.");
+
+        // Check ambiguous types in the variant.
+        using Variant = std::variant<T...>;
+        require_unambiguous_variant_dispatch<Variant>();
+        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
+        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
+        // and can drift from IsCborMajor/decoder overload truth.
+        // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
+
+        bool        saw_incomplete = false;
+        status_code hard_error     = status_code::success;
+
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
+                           &hard_error]<bool CatchAllPass, typename U>() -> bool {
+            using raw_type = std::remove_cvref_t<U>;
+            if (hard_error != status_code::success) {
+                return false;
+            }
+            if (!matches_major_dispatch<raw_type>(major)) {
+                return false;
+            }
+
+            if (major == major_type::Simple && !detail::matches_simple_dispatch<CatchAllPass, raw_type>(additionalInfo)) {
+                return false;
+            }
+
+            raw_type    decoded_value;
+            status_code result;
+            if constexpr (IsVariant<raw_type>) {
+                result = this->decode_variant(decoded_value, major, additionalInfo, tag);
+            } else if constexpr (IsTag<raw_type>) {
+                if (!tag) {
+                    tag = decode_unsigned(additionalInfo);
+                }
+                result = this->decode(decoded_value, *tag);
+            } else {
+                result = this->decode(decoded_value, major, additionalInfo);
+            }
+
+            if (result == status_code::success) {
+                value = std::move(decoded_value);
+                return true;
+            } else if (result == status_code::incomplete) {
+                saw_incomplete = true;
+                return false;
+            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
+                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+                hard_error = result;
+                return false;
+            } else {
+                return false;
+            }
+        };
+
+        bool found = false;
+        if (major == major_type::Simple) {
+            found = (try_decode.template operator()<false, T>() || ...);
+            if (!found) {
+                found = (try_decode.template operator()<true, T>() || ...);
+            }
+        } else {
+            found = (try_decode.template operator()<false, T>() || ...);
+        }
+        if (!found) {
+            if (hard_error != status_code::success) {
+                return hard_error;
+            }
+            if (saw_incomplete) {
+                return status_code::incomplete;
+            }
+            return status_code::no_match_in_variant_on_buffer;
+        }
+        return status_code::success;
+    }
+
     template <IsVariant Variant>
     constexpr status_code decode_variant(Variant &value, major_type major, byte additionalInfo, std::optional<std::uint64_t> &tag) {
         using namespace detail;
