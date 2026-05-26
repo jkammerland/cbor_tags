@@ -153,6 +153,19 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+add_executable(cddl_variant_traits_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_traits_duplicate_tags_compile_fail.cc)
+target_link_libraries(cddl_variant_traits_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
+add_test(
+  NAME cddl_variant_traits_duplicate_tags_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_variant_traits_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 add_executable(cddl_variant_ref_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_ref_duplicate_tags_compile_fail.cc)
 target_link_libraries(cddl_variant_ref_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(

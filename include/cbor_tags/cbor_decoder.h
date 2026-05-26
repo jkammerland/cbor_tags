@@ -1281,7 +1281,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
-    // Keep std::variant on the original pack-based fast path; generic variant-like dispatch is slower here.
+    // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
                                          std::optional<std::uint64_t> &tag) {
