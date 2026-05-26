@@ -351,7 +351,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
     auto seed = std::random_device{}();
     auto gen  = rng::small_generator{seed};
 
-    bench.run("Decoding a uint", [&gen]() {
+    bench.run("Encode+decode a uint", [&gen]() {
         // Prepare encoded data
         Buffer data;
         auto   enc      = make_encoder(data);
@@ -365,7 +365,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a uint with check", [&gen]() {
+    bench.run("Encode+decode a uint with check", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = gen();
@@ -377,7 +377,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a int", [&gen]() {
+    bench.run("Encode+decode a int", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<int64_t>(gen());
@@ -389,7 +389,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a int with check", [&gen]() {
+    bench.run("Encode+decode a int with check", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<int64_t>(gen());
@@ -401,7 +401,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a bstr", [&gen]() {
+    bench.run("Encode+decode a bstr", [&gen]() {
         Buffer                   data;
         auto                     enc = make_encoder(data);
         std::array<std::byte, 4> original;
@@ -416,7 +416,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a bstr with check", [&gen]() {
+    bench.run("Encode+decode a bstr with check", [&gen]() {
         Buffer                   data;
         auto                     enc = make_encoder(data);
         std::array<std::byte, 4> original;
@@ -431,7 +431,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a tstr", [&gen]() {
+    bench.run("Encode+decode a tstr", [&gen]() {
         Buffer      data;
         auto        enc = make_encoder(data);
         std::string s;
@@ -445,7 +445,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a tstr with check", [&gen]() {
+    bench.run("Encode+decode a tstr with check", [&gen]() {
         Buffer      data;
         auto        enc = make_encoder(data);
         std::string s;
@@ -459,7 +459,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding an array", [&gen]() {
+    bench.run("Encode+decode an array", [&gen]() {
         Buffer                 data;
         auto                   enc = make_encoder(data);
         std::array<int16_t, 4> original{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
@@ -472,7 +472,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding an array with check", [&gen]() {
+    bench.run("Encode+decode an array with check", [&gen]() {
         Buffer                 data;
         auto                   enc = make_encoder(data);
         std::array<int16_t, 4> original{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
@@ -485,7 +485,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a map", [&gen]() {
+    bench.run("Encode+decode a map", [&gen]() {
         Buffer                     data;
         auto                       enc = make_encoder(data);
         std::map<int16_t, int32_t> original{{static_cast<short>(gen()), static_cast<int>(gen())},
@@ -498,7 +498,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a map with check", [&gen]() {
+    bench.run("Encode+decode a map with check", [&gen]() {
         Buffer                     data;
         auto                       enc = make_encoder(data);
         std::map<int16_t, int32_t> original{{static_cast<short>(gen()), static_cast<int>(gen())},
@@ -516,7 +516,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         int64_t         value;
     };
 
-    bench.run("Decoding a tag", [&gen]() {
+    bench.run("Encode+decode a tag", [&gen]() {
         Buffer data;
         auto   enc = make_encoder(data);
         A      original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
@@ -528,7 +528,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a tag with check", [&gen]() {
+    bench.run("Encode+decode a tag with check", [&gen]() {
         Buffer data;
         auto   enc = make_encoder(data);
         A      original{.cbor_tag = {}, .value = static_cast<int64_t>(gen())};
@@ -540,7 +540,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a nullptr", []() {
+    bench.run("Encode+decode a nullptr", []() {
         Buffer data;
         auto   enc  = make_encoder(data);
         std::ignore = enc(std::nullptr_t{});
@@ -551,7 +551,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a bool with check", [&gen]() {
+    bench.run("Encode+decode a bool with check", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         bool   original = static_cast<bool>(gen() % 2);
@@ -563,7 +563,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a float16", [&gen]() {
+    bench.run("Encode+decode a float16", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float16_t>(static_cast<float>(gen()));
@@ -575,7 +575,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a float32", [&gen]() {
+    bench.run("Encode+decode a float32", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float>(gen());
@@ -587,7 +587,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a float64", [&gen]() {
+    bench.run("Encode+decode a float64", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<double>(gen());
@@ -599,7 +599,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a float16_t with check", [&gen]() {
+    bench.run("Encode+decode a float16_t with check", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float16_t>(static_cast<float>(gen()));
@@ -611,7 +611,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a float32 with check", [&gen]() {
+    bench.run("Encode+decode a float32 with check", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<float>(gen());
@@ -623,7 +623,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a double with check", [&gen]() {
+    bench.run("Encode+decode a double with check", [&gen]() {
         Buffer data;
         auto   enc      = make_encoder(data);
         auto   original = static_cast<double>(gen());
@@ -635,7 +635,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a simple with check", [&gen]() {
+    bench.run("Encode+decode a simple with check", [&gen]() {
         Buffer data;
         auto   enc = make_encoder(data);
         simple original{static_cast<simple::value_type>(gen())};
@@ -647,7 +647,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a variant(2) with check", [&gen]() {
+    bench.run("Encode+decode a variant(2) with check", [&gen]() {
         Buffer data;
         auto   enc    = make_encoder(data);
         using variant = std::variant<int, double>;
@@ -668,7 +668,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a variant(3) with check", [&gen]() {
+    bench.run("Encode+decode a variant(3) with check", [&gen]() {
         Buffer data;
         auto   enc    = make_encoder(data);
         using variant = std::variant<int, double, std::string_view>;
@@ -691,7 +691,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a variant(4) (1 tags) with check", [&gen]() {
+    bench.run("Encode+decode a variant(4) (1 tags) with check", [&gen]() {
         Buffer data;
         auto   enc    = make_encoder(data);
         using variant = std::variant<int, double, std::string_view, A>;
@@ -716,7 +716,7 @@ template <typename Buffer> void run_decoding_benchmarks_roundtrip(ankerl::nanobe
         ankerl::nanobench::doNotOptimizeAway(value);
     });
 
-    bench.run("Decoding a variant(4) (2 tags) with check", [&gen]() {
+    bench.run("Encode+decode a variant(4) (2 tags) with check", [&gen]() {
         Buffer data;
         auto   enc    = make_encoder(data);
         using variant = std::variant<int, double, B<100>, B<101>>;
@@ -746,7 +746,7 @@ template <typename ContainerType> void run_decoding_benchmark_roundtrip() {
     ankerl::nanobench::Bench bench;
     benchmark_options        options;
 
-    bench.title(std::string(nameof::nameof_type<ContainerType>()) + " buffer, ROUNDTRIP");
+    bench.title(std::string(nameof::nameof_type<ContainerType>()) + " buffer (encode+decode roundtrip)");
     bench.minEpochIterations(100);
     bench.unit(std::string(options.unit));
     bench.performanceCounters(true);

@@ -140,8 +140,9 @@ and binary archives prefix a `uint32_t` object id. Homogeneous numeric fixtures
 also include CBOR RFC 8746 typed-array rows using IANA tags 78, 79, and 86 for
 little-endian int32, int64, and float64 byte-string payloads. Glaze CBOR uses
 that typed-array wire shape for numeric vectors by default. Those rows are
-intentionally not wire-equivalent to generic CBOR arrays, and they are
-benchmark-local helpers rather than a public typed-array API. The typed-array
-rows split the existing byte-range encoder, a contiguous bulk-copy buffer, and a
-borrowed header-plus-payload segment path so range overhead and the zero-copy
-ceiling are visible separately.
+intentionally not wire-equivalent to generic CBOR arrays. The typed-array rows
+include the public `cbor_tags` RFC 8746 codec and Glaze CBOR paths, plus
+benchmark-local byte-range, contiguous bulk-copy buffer, and borrowed
+header-plus-payload segment paths so range overhead and the zero-copy ceiling
+are visible separately. The byte-range and bulk-copy rows are encode variants;
+their decode validation uses the public `cbor_tags` typed-array codec.
