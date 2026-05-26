@@ -6,12 +6,13 @@
 #include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/extensions/custom_codec_1.h"
+#include "cbor_tags/extensions/smart_ptr.h"
 #include "test_util.h"
 
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -19,35 +20,12 @@
 #include <variant>
 #include <vector>
 
-#if __has_include(<boost/variant.hpp>)
-#include <boost/variant.hpp>
-#define CBOR_TAGS_TEST_HAS_BOOST_VARIANT 1
-#endif
-
-#if __has_include(<boost/variant2/variant.hpp>)
-#include <boost/variant2/variant.hpp>
-#define CBOR_TAGS_TEST_HAS_BOOST_VARIANT2 1
-#endif
-
 namespace tags = cbor::tags;
 
-namespace variant_like_test {
+namespace variant_traits_test {
 
-template <typename... Ts> struct adl_variant {
+template <typename... Ts> struct structural_variant {
     std::variant<Ts...> storage;
-
-    constexpr adl_variant() = default;
-
-    template <typename T>
-        requires(!std::same_as<std::remove_cvref_t<T>, adl_variant> && std::constructible_from<std::variant<Ts...>, T>)
-    constexpr adl_variant(T &&value) : storage(std::forward<T>(value)) {}
-
-    template <typename T>
-        requires(!std::same_as<std::remove_cvref_t<T>, adl_variant> && std::assignable_from<std::variant<Ts...> &, T>)
-    constexpr adl_variant &operator=(T &&value) {
-        storage = std::forward<T>(value);
-        return *this;
-    }
 
     [[nodiscard]] constexpr std::size_t index() const noexcept { return storage.index(); }
 
@@ -56,118 +34,112 @@ template <typename... Ts> struct adl_variant {
     }
 };
 
-template <std::size_t I, typename... Ts> constexpr decltype(auto) get(adl_variant<Ts...> &value) noexcept {
+template <std::size_t I, typename... Ts> constexpr decltype(auto) get(structural_variant<Ts...> &value) noexcept {
     return std::get<I>(value.storage);
 }
 
-template <std::size_t I, typename... Ts> constexpr decltype(auto) get(const adl_variant<Ts...> &value) noexcept {
+template <std::size_t I, typename... Ts> constexpr decltype(auto) get(const structural_variant<Ts...> &value) noexcept {
     return std::get<I>(value.storage);
 }
 
-template <typename T>
-concept HasVariantStorage = requires(T &&value) { std::forward<T>(value).storage; };
-
-template <typename T>
-concept HasIndexMember = requires(const std::remove_cvref_t<T> &value) {
-    { value.index() } -> std::convertible_to<std::size_t>;
-};
-
-template <typename Visitor, typename... Variants>
-    requires((HasVariantStorage<Variants> && HasIndexMember<Variants>) && ...)
-constexpr decltype(auto) visit(Visitor &&visitor, Variants &&...variants) {
+template <typename Visitor, typename... Variants> constexpr decltype(auto) visit(Visitor &&visitor, Variants &&...variants) {
     return std::visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants).storage...);
 }
 
-template <typename... Ts> struct which_variant {
+template <typename... Ts> struct legacy_structural_variant {
     std::variant<Ts...> storage;
-
-    constexpr which_variant() = default;
-
-    template <typename T>
-        requires(!std::same_as<std::remove_cvref_t<T>, which_variant> && std::constructible_from<std::variant<Ts...>, T>)
-    constexpr which_variant(T &&value) : storage(std::forward<T>(value)) {}
-
-    template <typename T>
-        requires(!std::same_as<std::remove_cvref_t<T>, which_variant> && std::assignable_from<std::variant<Ts...> &, T>)
-    constexpr which_variant &operator=(T &&value) {
-        storage = std::forward<T>(value);
-        return *this;
-    }
 
     [[nodiscard]] constexpr int which() const noexcept { return static_cast<int>(storage.index()); }
-};
 
-template <typename T, typename... Ts> constexpr decltype(auto) get(which_variant<Ts...> &value) noexcept {
-    return std::get<T>(value.storage);
-}
-
-template <typename T, typename... Ts> constexpr decltype(auto) get(const which_variant<Ts...> &value) noexcept {
-    return std::get<T>(value.storage);
-}
-
-template <typename Visitor, typename... Variants>
-    requires(HasVariantStorage<Variants> && ...)
-constexpr decltype(auto) apply_visitor(Visitor &&visitor, Variants &&...variants) {
-    return std::visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants).storage...);
-}
-
-template <typename... Ts> struct aggregate_adl_variant {
-    std::variant<Ts...> storage;
-
-    [[nodiscard]] constexpr std::size_t index() const noexcept { return storage.index(); }
-
-    template <std::size_t I, typename... Args> constexpr decltype(auto) emplace(Args &&...args) {
-        return storage.template emplace<I>(std::forward<Args>(args)...);
+    template <typename U> constexpr legacy_structural_variant &operator=(U &&value) {
+        storage = std::forward<U>(value);
+        return *this;
     }
 };
 
-template <std::size_t I, typename... Ts> constexpr decltype(auto) get(aggregate_adl_variant<Ts...> &value) noexcept {
-    return std::get<I>(value.storage);
+template <typename T, typename... Ts> constexpr decltype(auto) get(legacy_structural_variant<Ts...> &value) noexcept {
+    return std::get<T>(value.storage);
 }
 
-template <std::size_t I, typename... Ts> constexpr decltype(auto) get(const aggregate_adl_variant<Ts...> &value) noexcept {
-    return std::get<I>(value.storage);
+template <typename T, typename... Ts> constexpr decltype(auto) get(const legacy_structural_variant<Ts...> &value) noexcept {
+    return std::get<T>(value.storage);
 }
 
-template <typename... Ts> struct indexed_aggregate {
-    std::size_t selected{};
+template <typename Visitor, typename... Variants> constexpr decltype(auto) apply_visitor(Visitor &&visitor, Variants &&...variants) {
+    return std::visit(std::forward<Visitor>(visitor), std::forward<Variants>(variants).storage...);
+}
 
-    [[nodiscard]] constexpr std::size_t index() const noexcept { return selected; }
+template <typename... Ts> struct manual_variant {
+    std::variant<Ts...> storage;
+
+    [[nodiscard]] constexpr std::size_t selected() const noexcept { return storage.index(); }
 };
 
-} // namespace variant_like_test
+struct incomplete_traits_variant {
+    std::variant<std::uint64_t, std::string> storage;
+};
 
-TEST_CASE("variant-like traits recognize non-std variant APIs") {
-    using adl_variant       = variant_like_test::adl_variant<std::uint64_t, std::string>;
-    using aggregate_variant = variant_like_test::aggregate_adl_variant<std::uint64_t, std::string>;
-    using indexed_aggregate = variant_like_test::indexed_aggregate<std::uint64_t, std::string>;
-    using which_variant     = variant_like_test::which_variant<std::uint64_t, std::string>;
+} // namespace variant_traits_test
 
-    static_assert(tags::IsVariant<adl_variant>);
-    static_assert(tags::IsVariant<aggregate_variant>);
-    static_assert(tags::IsVariant<which_variant>);
-    static_assert(tags::IsCborMajor<adl_variant>);
-    static_assert(tags::IsCborMajor<aggregate_variant>);
-    static_assert(tags::IsCborMajor<which_variant>);
-    static_assert(tags::valid_concept_mapping_v<adl_variant>);
-    static_assert(tags::valid_concept_mapping_v<aggregate_variant>);
-    static_assert(tags::valid_concept_mapping_v<which_variant>);
-    static_assert(!tags::IsVariant<indexed_aggregate>);
-    static_assert(std::is_aggregate_v<aggregate_variant>);
-    static_assert(!tags::IsAggregate<aggregate_variant>);
+namespace cbor::tags {
+
+template <typename... Ts> struct variant_traits<variant_traits_test::manual_variant<Ts...>> {
+    using variant_type = variant_traits_test::manual_variant<Ts...>;
+
+    static constexpr std::size_t size = sizeof...(Ts);
+
+    template <std::size_t I> using alternative = std::tuple_element_t<I, std::tuple<Ts...>>;
+
+    [[nodiscard]] static constexpr std::size_t index(const variant_type &value) noexcept { return value.selected(); }
+
+    template <std::size_t I, typename VariantRef> static constexpr decltype(auto) get(VariantRef &&value) {
+        return std::get<I>(std::forward<VariantRef>(value).storage);
+    }
+
+    template <typename Visitor, typename... VariantRefs> static constexpr decltype(auto) visit(Visitor &&visitor, VariantRefs &&...values) {
+        return std::visit(std::forward<Visitor>(visitor), std::forward<VariantRefs>(values).storage...);
+    }
+
+    template <std::size_t I, typename U> static constexpr void assign(variant_type &value, U &&decoded_value) {
+        value.storage.template emplace<I>(std::forward<U>(decoded_value));
+    }
+};
+
+template <> struct variant_traits<variant_traits_test::incomplete_traits_variant> {
+    static constexpr std::size_t size = 2U;
+};
+
+} // namespace cbor::tags
+
+TEST_CASE("non-std variants require explicit variant_traits opt-in") {
+    using structural_variant = variant_traits_test::structural_variant<std::uint64_t, std::string>;
+    using legacy_variant     = variant_traits_test::legacy_structural_variant<std::uint64_t, std::string>;
+    using manual_variant     = variant_traits_test::manual_variant<std::uint64_t, std::string>;
+    using incomplete_variant = variant_traits_test::incomplete_traits_variant;
+
+    static_assert(!tags::IsVariant<structural_variant>);
+    static_assert(tags::IsAggregate<structural_variant>);
+    static_assert(!tags::IsVariant<legacy_variant>);
+    static_assert(!tags::IsCborMajor<legacy_variant>);
+    static_assert(!tags::IsVariant<incomplete_variant>);
     static_assert(!tags::IsVariant<std::tuple<std::uint64_t, std::string>>);
 
-    CHECK(tags::detail::variant_size_v<adl_variant> == 2U);
-    CHECK(tags::detail::variant_size_v<aggregate_variant> == 2U);
-    CHECK(tags::detail::variant_size_v<which_variant> == 2U);
+    static_assert(tags::IsVariant<std::variant<std::uint64_t, std::string>>);
+    static_assert(tags::IsVariant<manual_variant>);
+    static_assert(std::is_aggregate_v<manual_variant>);
+    static_assert(tags::IsCborMajor<manual_variant>);
+    static_assert(tags::valid_concept_mapping_v<manual_variant>);
+    static_assert(!tags::IsAggregate<manual_variant>);
+
+    CHECK(tags::detail::variant_size_v<manual_variant> == 2U);
 }
 
-TEST_CASE("variant-like type with ADL visit and indexed get roundtrips through normal CBOR") {
-    using variant = variant_like_test::adl_variant<std::uint64_t, std::string>;
+TEST_CASE("custom variant traits roundtrip through normal CBOR") {
+    using variant = variant_traits_test::manual_variant<std::uint64_t, std::string>;
 
     std::vector<std::byte> buffer;
     auto                   enc = tags::make_encoder(buffer);
-    variant                input{std::string{"variant-like"}};
+    variant                input{std::variant<std::uint64_t, std::string>{std::string{"manual-variant"}}};
     REQUIRE(enc(input));
 
     auto    dec = tags::make_decoder(buffer);
@@ -175,44 +147,12 @@ TEST_CASE("variant-like type with ADL visit and indexed get roundtrips through n
     REQUIRE(dec(output));
 
     REQUIRE(tags::detail::variant_index(output) == 1U);
-    CHECK(variant_like_test::get<1>(output) == "variant-like");
+    CHECK(std::get<1>(output.storage) == "manual-variant");
 }
 
-TEST_CASE("aggregate variant-like wrapper roundtrips as a variant instead of an aggregate") {
-    using variant = variant_like_test::aggregate_adl_variant<std::uint64_t, std::string>;
-
-    std::vector<std::byte> buffer;
-    auto                   enc = tags::make_encoder(buffer);
-    variant                input{std::variant<std::uint64_t, std::string>{std::string{"aggregate-variant"}}};
-    REQUIRE(enc(input));
-
-    auto    dec = tags::make_decoder(buffer);
-    variant output;
-    REQUIRE(dec(output));
-
-    REQUIRE(tags::detail::variant_index(output) == 1U);
-    CHECK(variant_like_test::get<1>(output) == "aggregate-variant");
-}
-
-TEST_CASE("variant-like type with which and apply_visitor uses assignment fallback") {
-    using variant = variant_like_test::which_variant<std::uint64_t, std::string>;
-
-    std::vector<std::byte> buffer;
-    auto                   enc = tags::make_encoder(buffer);
-    variant                input{std::uint64_t{42}};
-    REQUIRE(enc(input));
-
-    auto    dec = tags::make_decoder(buffer);
-    variant output;
-    REQUIRE(dec(output));
-
-    REQUIRE(tags::detail::variant_index(output) == 0U);
-    CHECK(variant_like_test::get<std::uint64_t>(output) == 42U);
-}
-
-TEST_CASE("nested variant-like alternatives decode recursively") {
-    using nested_variant = variant_like_test::which_variant<std::uint64_t, std::string>;
-    using outer_variant  = variant_like_test::adl_variant<nested_variant, bool>;
+TEST_CASE("custom variant traits decode nested alternatives recursively") {
+    using nested_variant = variant_traits_test::manual_variant<std::uint64_t, std::string>;
+    using outer_variant  = variant_traits_test::manual_variant<nested_variant, bool>;
 
     std::vector<std::byte> buffer;
     auto                   enc = tags::make_encoder(buffer);
@@ -223,38 +163,40 @@ TEST_CASE("nested variant-like alternatives decode recursively") {
     REQUIRE(dec(output));
 
     REQUIRE(tags::detail::variant_index(output) == 0U);
-    const auto &nested = variant_like_test::get<0>(output);
+    const auto &nested = std::get<0>(output.storage);
     REQUIRE(tags::detail::variant_index(nested) == 1U);
-    CHECK(variant_like_test::get<std::string>(nested) == "nested");
+    CHECK(std::get<1>(nested.storage) == "nested");
 }
 
-TEST_CASE("variant-like operators use the variant traits hooks") {
-    using variant = variant_like_test::adl_variant<std::uint64_t, std::string, std::nullptr_t>;
+TEST_CASE("custom variant traits support operators") {
+    using variant = variant_traits_test::manual_variant<std::uint64_t, std::string, std::nullptr_t>;
 
-    const variant number{std::uint64_t{7}};
-    const variant text{std::string{"text"}};
-    const variant same_number{std::uint64_t{7}};
+    const variant number{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::uint64_t{7}}};
+    const variant text{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::string{"aa"}}};
+    const variant later_text{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::string{"zz"}}};
+    const variant same_number{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::uint64_t{7}}};
 
     CHECK(tags::variant_comparator<>{}(number, text));
+    CHECK(tags::variant_comparator<>{}(text, later_text));
     CHECK(tags::variant_hasher{}(number) == tags::variant_hasher{}(same_number));
 }
 
-TEST_CASE("variant-like CDDL rendering uses the alternative list") {
-    using variant = variant_like_test::adl_variant<std::uint64_t, std::string>;
+TEST_CASE("custom variant traits render CDDL") {
+    using variant = variant_traits_test::manual_variant<std::uint64_t, std::string>;
 
     std::string schema;
     tags::cddl_schema_to<variant>(schema, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(schema, "root = uint / tstr");
 }
 
-TEST_CASE("custom codec variant serialization uses variant-like traits") {
+TEST_CASE("custom codec variant serialization uses custom variant traits") {
     namespace compact = tags::ext::custom_codec_1;
 
-    using variant = variant_like_test::which_variant<std::uint8_t, std::string>;
+    using variant = variant_traits_test::manual_variant<std::uint8_t, std::string>;
 
     std::vector<std::byte> compact_buffer;
     auto                   enc = tags::make_encoder<compact::custom_codec_1>(compact_buffer);
-    variant                input{std::string{"hi"}};
+    variant                input{std::variant<std::uint8_t, std::string>{std::string{"hi"}}};
     REQUIRE(enc(compact::as_custom_codec_1(tags::static_tag<77>{}, input)));
 
     auto    dec = tags::make_decoder<compact::custom_codec_1>(compact_buffer);
@@ -262,47 +204,96 @@ TEST_CASE("custom codec variant serialization uses variant-like traits") {
     REQUIRE(dec(compact::as_custom_codec_1(tags::static_tag<77>{}, output)));
 
     REQUIRE(tags::detail::variant_index(output) == 1U);
-    CHECK(variant_like_test::get<std::string>(output) == "hi");
+    CHECK(std::get<1>(output.storage) == "hi");
 }
 
-#if CBOR_TAGS_TEST_HAS_BOOST_VARIANT
-TEST_CASE("boost variant roundtrips through variant-like traits when available") {
-    using variant = boost::variant<std::uint64_t, std::string>;
+TEST_CASE("custom variant traits work with nullable smart pointer codec") {
+    namespace smart = tags::ext::smart_ptr;
 
-    static_assert(tags::IsVariant<variant>);
-    static_assert(tags::valid_concept_mapping_v<variant>);
+    using variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, std::string>;
 
-    std::vector<std::byte> buffer;
-    auto                   enc = tags::make_encoder(buffer);
-    variant                input{std::string{"boost"}};
-    REQUIRE(enc(input));
+    {
+        variant input{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::make_shared<std::uint64_t>(42U)}};
 
-    auto    dec = tags::make_decoder(buffer);
-    variant output;
-    REQUIRE(dec(output));
+        std::vector<std::byte> buffer;
+        auto                   enc = tags::make_encoder<smart::nullable_ptr_codec>(buffer);
+        REQUIRE(enc(input));
+        CHECK_EQ(to_hex(buffer), "8201182a");
 
-    REQUIRE(tags::detail::variant_index(output) == 1U);
-    CHECK(boost::get<std::string>(output) == "boost");
+        variant output{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
+        auto    dec = tags::make_decoder<smart::nullable_ptr_codec>(buffer);
+        REQUIRE(dec(output));
+
+        REQUIRE(tags::detail::variant_index(output) == 0U);
+        const auto &ptr = std::get<0>(output.storage);
+        REQUIRE(static_cast<bool>(ptr));
+        CHECK_EQ(*ptr, 42U);
+    }
+
+    {
+        variant input{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::shared_ptr<std::uint64_t>{}}};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = tags::make_encoder<smart::nullable_ptr_codec>(buffer);
+        REQUIRE(enc(input));
+        CHECK_EQ(to_hex(buffer), "8100");
+
+        variant output{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
+        auto    dec = tags::make_decoder<smart::nullable_ptr_codec>(buffer);
+        REQUIRE(dec(output));
+
+        REQUIRE(tags::detail::variant_index(output) == 0U);
+        CHECK_FALSE(static_cast<bool>(std::get<0>(output.storage)));
+    }
+
+    {
+        variant input{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::string{"ok"}}};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = tags::make_encoder<smart::nullable_ptr_codec>(buffer);
+        REQUIRE(enc(input));
+        CHECK_EQ(to_hex(buffer), "626f6b");
+
+        variant output{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::shared_ptr<std::uint64_t>{}}};
+        auto    dec = tags::make_decoder<smart::nullable_ptr_codec>(buffer);
+        REQUIRE(dec(output));
+
+        REQUIRE(tags::detail::variant_index(output) == 1U);
+        CHECK_EQ(std::get<1>(output.storage), "ok");
+    }
 }
-#endif
 
-#if CBOR_TAGS_TEST_HAS_BOOST_VARIANT2
-TEST_CASE("boost variant2 roundtrips through variant-like traits when available") {
-    using variant = boost::variant2::variant<std::uint64_t, std::string>;
+TEST_CASE("custom variant traits work with shared graph smart pointer codec") {
+    namespace smart = tags::ext::smart_ptr;
 
-    static_assert(tags::IsVariant<variant>);
-    static_assert(tags::valid_concept_mapping_v<variant>);
+    using variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>;
 
-    std::vector<std::byte> buffer;
-    auto                   enc = tags::make_encoder(buffer);
-    variant                input{std::string{"boost2"}};
-    REQUIRE(enc(input));
+    auto          shared = std::make_shared<std::uint64_t>(42U);
+    const variant first{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{shared}};
+    const variant second{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{shared}};
 
-    auto    dec = tags::make_decoder(buffer);
-    variant output;
-    REQUIRE(dec(output));
+    std::vector<std::byte>             buffer;
+    auto                               enc = tags::make_encoder<smart::shared_graph_codec>(buffer);
+    smart::shared_graph_encode_session encode_graph;
 
-    REQUIRE(tags::detail::variant_index(output) == 1U);
-    CHECK(boost::variant2::get<std::string>(output) == "boost2");
+    REQUIRE(enc(smart::as_shared_graph(encode_graph, first)));
+    REQUIRE(enc(smart::as_shared_graph(encode_graph, second)));
+    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
+
+    auto                               dec = tags::make_decoder<smart::shared_graph_codec>(buffer);
+    smart::shared_graph_decode_session decode_graph;
+    variant decoded_first{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{std::string{"first"}}};
+    variant decoded_second{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{std::string{"second"}}};
+
+    REQUIRE(dec(smart::as_shared_graph(decode_graph, decoded_first)));
+    REQUIRE(dec(smart::as_shared_graph(decode_graph, decoded_second)));
+    REQUIRE(tags::detail::variant_index(decoded_first) == 0U);
+    REQUIRE(tags::detail::variant_index(decoded_second) == 0U);
+
+    const auto &first_ptr  = std::get<0>(decoded_first.storage);
+    const auto &second_ptr = std::get<0>(decoded_second.storage);
+    REQUIRE(static_cast<bool>(first_ptr));
+    REQUIRE(static_cast<bool>(second_ptr));
+    CHECK_EQ(*first_ptr, 42U);
+    CHECK(first_ptr.get() == second_ptr.get());
 }
-#endif

@@ -579,7 +579,7 @@ template <typename T> struct unwrap_type<std::optional<T>> {
     using type = typename unwrap_type<T>::type;
 };
 
-// Specialization for variant-like types. The first alternative is used as the representative type.
+// Specialization for trait-backed variant types. The first alternative is used as the representative type.
 template <typename T>
     requires IsVariant<T>
 struct unwrap_type<T> {

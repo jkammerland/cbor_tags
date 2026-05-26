@@ -23,6 +23,50 @@ Alternative shapes must still be unambiguous. A variant with two alternatives
 that both match the same tag or the same catch-all shape is rejected at compile
 time where the type system exposes that collision.
 
+## Non-Std Variants
+
+Only `std::variant` is recognized automatically. Other union types must opt in
+with `cbor::tags::variant_traits`; structural `index()`/`visit()` lookalikes are
+not treated as variants by default. Without the specialization, normal overload
+resolution applies, so an aggregate wrapper may encode as an aggregate.
+
+```cpp
+template <class... Ts> struct my_variant {
+    std::variant<Ts...> storage;
+};
+
+template <class... Ts>
+struct cbor::tags::variant_traits<my_variant<Ts...>> {
+    static constexpr std::size_t size = sizeof...(Ts);
+
+    template <std::size_t I>
+    using alternative = std::tuple_element_t<I, std::tuple<Ts...>>;
+
+    static std::size_t index(my_variant<Ts...> const& v) {
+        return v.storage.index();
+    }
+
+    template <std::size_t I, class V>
+    static decltype(auto) get(V&& v) {
+        return std::get<I>(std::forward<V>(v).storage);
+    }
+
+    template <class Visitor, class... Vs>
+    static decltype(auto) visit(Visitor&& visitor, Vs&&... vs) {
+        return std::visit(std::forward<Visitor>(visitor),
+                          std::forward<Vs>(vs).storage...);
+    }
+
+    template <std::size_t I, class U>
+    static void assign(my_variant<Ts...>& v, U&& value) {
+        v.storage.template emplace<I>(std::forward<U>(value));
+    }
+};
+```
+
+`visit` must support both single-variant and multi-variant calls because
+encoding uses the former and comparison helpers use the latter.
+
 ## Compile-Time Dispatch
 
 Below is "pseudo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows how you can optimize away unused code paths with `if constexpr`; in this case the code paths are constrained by the variant type.
