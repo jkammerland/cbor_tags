@@ -4,6 +4,7 @@
 #include <bit>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_lazy_tags.h>
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <cstddef>
 #include <cstdint>
@@ -268,9 +269,12 @@ template <typename Segments> bool has_borrowed_segment(const Segments &segments,
 
 TEST_CASE("codec extensions append user mixins to default encoder and decoder") {
     using default_encoder   = decltype(make_encoder(std::declval<std::vector<std::byte> &>()));
+    using default_decoder   = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
     using extension_encoder = decltype(make_encoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
 
     static_assert(!CanEncode<default_encoder, typed_array<std::int32_t>>);
+    static_assert(!CanDecode<default_decoder, typed_array<std::int32_t>>);
+    static_assert(!CanDecode<default_decoder, typed_array_view<std::int32_t>>);
     static_assert(CanEncode<extension_encoder, typed_array<std::int32_t>>);
 
     std::vector<std::byte> buffer;
@@ -313,6 +317,47 @@ TEST_CASE("rfc8746 typed arrays encode and decode supported element types throug
     check_big_endian_roundtrip<float>({-2.5F, 0.0F, 3.25F});
     check_big_endian_roundtrip<double>({-2.5, 0.0, 3.25});
     check_big_endian_roundtrip<float128_t>({float128_value});
+}
+
+TEST_CASE("rfc8746 typed arrays handle empty payloads across decode paths") {
+    const std::vector<std::int32_t> values;
+    const auto                      encoded = encode_normal(std::span<const std::int32_t>{values});
+    CHECK_EQ(to_hex(encoded), "d84e40");
+
+    {
+        typed_array<std::int32_t> decoded;
+        auto                      dec = make_decoder<typed_array_codec>(encoded);
+        REQUIRE(dec(decoded));
+        CHECK(decoded.values().empty());
+    }
+
+    {
+        typed_array_view<std::int32_t> decoded;
+        auto                           dec = make_decoder<typed_array_codec>(encoded);
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.size(), 0U);
+        CHECK(decoded.copy_values().empty());
+        CHECK(decoded.payload_bytes().empty());
+    }
+
+    {
+        const auto segments = encode_typed_array_segments_copy(std::span<const std::int32_t>{values});
+        CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(encoded));
+    }
+
+    {
+        auto tagged = std::vector<std::byte>{};
+        auto enc    = make_encoder<typed_array_codec>(tagged);
+        REQUIRE(enc(make_tag_pair(static_tag<100>{}, as_typed_array(values))));
+
+        auto view = find_tags<100>(tagged);
+        auto it   = view.begin();
+        REQUIRE(it != view.end());
+
+        typed_array<std::int32_t> decoded;
+        REQUIRE(it->decode<typed_array_codec>(decoded));
+        CHECK(decoded.values().empty());
+    }
 }
 
 TEST_CASE("rfc8746 typed arrays use exact wire bytes for all integer tags") {
@@ -366,8 +411,13 @@ TEST_CASE("rfc8746 typed arrays use exact wire bytes for all float tags") {
     CHECK_EQ(to_hex(encode_big_endian(std::span<const double>{f64_values})), "d852503ff0000000000000c004000000000000");
 
     const std::array<float128_t, 1> f128_values{float128_value};
-    CHECK_EQ(to_hex(encode_big_endian(std::span<const float128_t>{f128_values})), "d853500f0e0d0c0b0a09080706050403020100");
-    CHECK_EQ(to_hex(encode_normal(std::span<const float128_t>{f128_values})), "d85750000102030405060708090a0b0c0d0e0f");
+    if constexpr (std::endian::native == std::endian::little) {
+        CHECK_EQ(to_hex(encode_big_endian(std::span<const float128_t>{f128_values})), "d853500f0e0d0c0b0a09080706050403020100");
+        CHECK_EQ(to_hex(encode_normal(std::span<const float128_t>{f128_values})), "d85750000102030405060708090a0b0c0d0e0f");
+    } else {
+        CHECK_EQ(to_hex(encode_big_endian(std::span<const float128_t>{f128_values})), "d85350000102030405060708090a0b0c0d0e0f");
+        CHECK_EQ(to_hex(encode_normal(std::span<const float128_t>{f128_values})), "d857500f0e0d0c0b0a09080706050403020100");
+    }
 }
 
 TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") {
@@ -1033,6 +1083,26 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
         REQUIRE(result);
         CHECK_EQ(decoded.values(), std::vector<std::int32_t>{1, -2, 3});
     }
+
+    {
+        const std::array<std::int32_t, 3> lazy_values{1, -2, 3};
+        std::vector<std::byte>            tagged;
+        auto                              enc = make_encoder<typed_array_codec>(tagged);
+        REQUIRE(enc(make_tag_pair(static_tag<100>{}, as_typed_array(std::span<const std::int32_t>{lazy_values}))));
+
+        std::deque<std::byte> tagged_input(tagged.begin(), tagged.end());
+        auto                  tags = find_tags<100>(tagged_input);
+        auto                  it   = tags.begin();
+        REQUIRE(it != tags.end());
+
+        auto payload_dec      = it->make_decoder<typed_array_codec>();
+        using lazy_typed_view = typed_array_view_for<std::int32_t, decltype(payload_dec)>;
+        static_assert(std::same_as<typename lazy_typed_view::payload_range_type, typename decltype(payload_dec)::bstr_view_t>);
+
+        lazy_typed_view decoded;
+        REQUIRE(payload_dec(decoded));
+        CHECK_EQ(decoded.copy_values(), std::vector<std::int32_t>{1, -2, 3});
+    }
 }
 
 TEST_CASE("rfc8746 big-endian typed array view decodes non-contiguous byte strings without copying") {
@@ -1122,7 +1192,11 @@ TEST_CASE("rfc8746 typed array decode rejects truncated extended headers and lar
     }
 
     check_decode_error<std::int32_t>("d84e5affffffff", status_code::incomplete);
-    check_decode_error<std::int32_t>("d84e5b0000000100000000", status_code::incomplete);
+    if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
+        check_decode_error<std::int32_t>("d84e5b0000000100000000", status_code::error);
+    } else {
+        check_decode_error<std::int32_t>("d84e5b0000000100000000", status_code::incomplete);
+    }
 }
 
 TEST_CASE("rfc8746 typed array decode accepts non-minimal integer headers through the normal decoder") {
