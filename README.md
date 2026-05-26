@@ -854,7 +854,7 @@ pattern.
 - Optional C++26 STL-only mode with `CBOR_TAGS_STL_ONLY=ON`; this uses `std::expected`, `std::format`, and `std::meta` and exports no fmt, nameof, or tl::expected dependency.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
 - Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.7 or newer.
-- CMake 3.20+, or 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`.
+- CMake 3.20+ for raw `cmake -S/-B` builds, 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`, and 3.31+ for the checked-in preset workflows.
 
 ## 📦 Installation
 
@@ -1061,7 +1061,7 @@ Please see the public online database of [tags](https://www.iana.org/assignments
 - Supports encoding and decoding of various CBOR data types according to [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) 
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) support for defining custom data structures
 
-For more examples and detailed documentation, visit our [Wiki](link-to-wiki).
+Additional focused examples and design notes live under [`doc/`](doc/), including codec extensions, typed arrays, smart pointers, CDDL handling, and named maps.
 
 ## Testing Performance and Benchmarks
 

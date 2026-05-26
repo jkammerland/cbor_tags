@@ -174,6 +174,7 @@ option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
 option(CBOR_TAGS_BUILD_CLI "Build cbor_tags_cli" ${CBOR_TAGS_BUILD_TESTS})
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(CBOR_TAGS_BUILD_EXAMPLES "Build examples" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
 if(CBOR_TAGS_STL_ONLY AND CBOR_TAGS_BUILD_TOOLS)
   message(FATAL_ERROR "CBOR_TAGS_STL_ONLY uses C++26 std::meta and does not support the legacy fmt-based reflection generator.")
@@ -338,6 +339,10 @@ endif()
 # add benchmarks
 if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+
+if(CBOR_TAGS_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 if(CBOR_TAGS_INSTALL)
