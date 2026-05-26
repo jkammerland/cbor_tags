@@ -1,4 +1,5 @@
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/float16_ieee754.h"
 
 #include <array>
 #include <cstddef>
@@ -8,6 +9,7 @@
 #include <ios>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -69,10 +71,52 @@ void write_vectors(std::ofstream &output) {
 
     write_case(output, "nullable_array", encode(wrap_as_array{true, false, nullptr}), "-");
     write_case(output, "uint64_max", encode(std::numeric_limits<std::uint64_t>::max()), "-");
+    write_case(output, "float_values",
+               encode(wrap_as_array{float16_t{1.5F}, 3.25F, -0.0, std::numeric_limits<double>::infinity(),
+                                    -std::numeric_limits<double>::infinity()}),
+               "-");
+    write_case(output, "simple_values", encode(wrap_as_array{simple{16}, simple{23}, simple{24}, simple{255}}), "-");
+    write_case(output, "duplicate_text_keys", encode(as_map{2}, "x"sv, 1U, "x"sv, 2U), "-");
+
+    write_case(output, "tag_boundaries",
+               encode(as_array{7}, make_tag_pair(static_tag<0>{}, "1970-01-01T00:00:00Z"sv), make_tag_pair(static_tag<1>{}, 1U),
+                      make_tag_pair(static_tag<23>{}, 0U), make_tag_pair(static_tag<24>{}, std::array<std::byte, 1>{std::byte{0xf6}}),
+                      make_tag_pair(static_tag<255>{}, "tag255"sv), make_tag_pair(static_tag<256>{}, "tag256"sv),
+                      make_tag_pair(static_tag<55799>{}, "self-described payload"sv)),
+               "-");
+    write_case(output, "nested_tags",
+               encode(make_tag_pair(static_tag<55799>{}, make_tag_pair(static_tag<24>{}, std::array<std::byte, 1>{std::byte{0xf6}}))), "-");
+
+    const auto byte_key = std::array<std::byte, 2>{std::byte{0xca}, std::byte{0xfe}};
+    write_case(output, "non_text_map_keys",
+               encode(as_map{7}, 1U, "uint"sv, negative{1}, "negative"sv, true, "bool"sv, nullptr, "null"sv, byte_key, "bytes"sv,
+                      as_array{2}, 1U, 2U, "array"sv, make_tag_pair(static_tag<42>{}, 1U), "tag"sv),
+               "-");
+
+    auto indefinite_array = std::vector<std::uint64_t>{1U, 2U, 3U};
+    write_case(output, "indefinite_array", encode(as_indefinite{indefinite_array}), "-");
+
+    auto indefinite_map = std::map<std::string, std::uint64_t>{{"a", 1U}, {"b", 2U}};
+    write_case(output, "indefinite_map", encode(as_indefinite{indefinite_map}), "-");
+
+    auto indefinite_text = std::string{"Ada"};
+    write_case(output, "indefinite_text_string", encode(as_indefinite{indefinite_text}), "-");
+
+    auto indefinite_bytes = std::vector<std::byte>{std::byte{0xca}, std::byte{0xfe}};
+    write_case(output, "indefinite_byte_string", encode(as_indefinite{indefinite_bytes}), "-");
+
+    auto nested_indefinite_array = std::vector<std::vector<std::uint64_t>>{{1U, 2U}, {3U}};
+    write_case(output, "nested_indefinite_array", encode(as_indefinite{nested_indefinite_array}), "-");
 
     write_malformed_case(output, "malformed_truncated_uint8", "18");
     write_malformed_case(output, "malformed_short_text_string", "6241");
     write_malformed_case(output, "malformed_unclosed_indefinite_array", "9f0102");
+    write_malformed_case(output, "malformed_unclosed_indefinite_map", "bf616101");
+    write_malformed_case(output, "malformed_unclosed_indefinite_text_string", "7f6141");
+    write_malformed_case(output, "malformed_unclosed_indefinite_byte_string", "5f4101");
+    write_malformed_case(output, "malformed_missing_tag_payload", "d82a");
+    write_malformed_case(output, "malformed_missing_map_value", "a16161");
+    write_malformed_case(output, "malformed_truncated_float64", "fb3ff800");
 }
 
 } // namespace
