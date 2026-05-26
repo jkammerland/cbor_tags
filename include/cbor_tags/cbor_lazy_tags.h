@@ -25,13 +25,28 @@ template <typename Buffer>
 concept LazyTagViewableBuffer =
     requires(Buffer &buffer) { std::views::all(buffer); } && CborInputBuffer<decltype(std::views::all(std::declval<Buffer &>()))>;
 
+template <typename Subrange, template <typename> typename... Extensions> struct lazy_payload_decoder_type {
+    static auto make(Subrange &range) {
+        if constexpr (sizeof...(Extensions) == 0) {
+            return cbor::tags::make_decoder(range);
+        } else {
+            return cbor::tags::make_decoder<Extensions...>(range);
+        }
+    }
+
+    using type = decltype(make(std::declval<Subrange &>()));
+};
+
 } // namespace detail
 
 template <CborInputBuffer Buffer, template <typename> typename... Extensions> class tag_payload_decoder {
   public:
-    using buffer_type = std::remove_cvref_t<Buffer>;
-    using iterator    = std::ranges::iterator_t<const buffer_type>;
-    using subrange    = std::ranges::subrange<iterator>;
+    using buffer_type       = std::remove_cvref_t<Buffer>;
+    using iterator          = std::ranges::iterator_t<const buffer_type>;
+    using subrange          = std::ranges::subrange<iterator>;
+    using decoder_type      = typename detail::lazy_payload_decoder_type<subrange, Extensions...>::type;
+    using input_buffer_type = typename decoder_type::input_buffer_type;
+    using bstr_view_t       = typename decoder_type::bstr_view_t;
 
     constexpr explicit tag_payload_decoder(subrange range) : range_(std::move(range)) {}
 

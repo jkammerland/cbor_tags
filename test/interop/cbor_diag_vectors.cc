@@ -75,7 +75,7 @@ void write_vectors(std::ofstream &output) {
                encode(wrap_as_array{float16_t{1.5F}, 3.25F, -0.0, std::numeric_limits<double>::infinity(),
                                     -std::numeric_limits<double>::infinity()}),
                "-");
-    write_case(output, "simple_values", encode(wrap_as_array{simple{16}, simple{23}, simple{24}, simple{255}}), "-");
+    write_case(output, "simple_values", encode(wrap_as_array{simple{16}, simple{23}, simple{32}, simple{255}}), "-");
     write_case(output, "duplicate_text_keys", encode(as_map{2}, "x"sv, 1U, "x"sv, 2U), "-");
 
     write_case(output, "tag_boundaries",

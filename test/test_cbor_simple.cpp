@@ -3,9 +3,11 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cmath>
 #include <doctest/doctest.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <limits>
 #include <variant>
 
 using namespace cbor::tags;
@@ -58,6 +60,20 @@ TEST_CASE("CBOR Encoder - NaN float") {
     CHECK(enc(value));
     CBOR_TAGS_TEST_LOG("NaN: {}", to_hex(data));
     CHECK_EQ(to_hex(data), "fa7fc00000");
+}
+
+TEST_CASE("CBOR Encoder - half NaN") {
+    std::vector<std::byte> data;
+    auto                   enc   = make_encoder(data);
+    float16_t              value = std::numeric_limits<float>::quiet_NaN();
+    CHECK(enc(value));
+    CBOR_TAGS_TEST_LOG("Half NaN: {}", to_hex(data));
+    CHECK_EQ(to_hex(data), "f97e00");
+
+    auto      dec = make_decoder(data);
+    float16_t decoded;
+    REQUIRE(dec(decoded));
+    CHECK(std::isnan(static_cast<float>(decoded)));
 }
 
 TEST_CASE("CBOR Encoder - Positive double") {
@@ -123,10 +139,10 @@ TEST_CASE("CBOR Encoder - simple") {
 }
 
 TEST_CASE("CBOR check all simples") {
-    { /* The special case when 1 extra byte is required */
+    { /* The first valid simple value that requires 1 extra byte */
         std::vector<std::byte> data;
         auto                   enc = make_encoder(data);
-        simple                 number{24};
+        simple                 number{32};
         REQUIRE(enc(number));
 
         auto   dec = make_decoder(data);
@@ -137,6 +153,9 @@ TEST_CASE("CBOR check all simples") {
 
     {
         for (int i = 0; i <= 255; i++) {
+            if (i >= 24 && i <= 31) {
+                continue;
+            }
             std::vector<std::byte> data;
 
             auto   enc = make_encoder(data);
@@ -148,6 +167,28 @@ TEST_CASE("CBOR check all simples") {
             REQUIRE(dec(decoded));
             CHECK_EQ(number, decoded);
         }
+    }
+}
+
+TEST_CASE("CBOR rejects reserved and non-well-formed simple values") {
+    for (int i = 24; i <= 31; ++i) {
+        std::vector<std::byte> data;
+        auto                   enc    = make_encoder(data);
+        const auto             result = enc(simple{static_cast<simple::value_type>(i)});
+        CAPTURE(i);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag_simple_on_buffer);
+        CHECK(data.empty());
+    }
+
+    for (const auto *hex : {"f800", "f817", "f818", "f81f", "fc", "fd", "fe", "ff"}) {
+        auto   data = to_bytes(hex);
+        auto   dec  = make_decoder(data);
+        simple decoded;
+        auto   result = dec(decoded);
+        CAPTURE(hex);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag_simple_on_buffer);
     }
 }
 

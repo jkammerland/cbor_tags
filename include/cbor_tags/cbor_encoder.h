@@ -68,6 +68,9 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     constexpr void encode(negative value) {
+        if (value.value == 0U) {
+            throw detail::encode_status_exception{status_code::no_match_for_nint_on_buffer};
+        }
         encode_major_and_size(static_cast<std::uint64_t>(value.value - 1), static_cast<byte_type>(0x20));
     }
 
@@ -210,7 +213,16 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     constexpr void encode(std::nullptr_t) { appender_(data_, static_cast<byte_type>(0xF6)); }
 
-    constexpr void encode(simple value) { encode_major_and_size(value.value, static_cast<byte_type>(0xE0)); }
+    constexpr void encode(simple value) {
+        if (!is_valid_simple_value(value.value)) {
+            throw detail::encode_status_exception{status_code::no_match_for_tag_simple_on_buffer};
+        }
+        if (value.value < static_cast<simple::value_type>(24U)) {
+            appender_(data_, static_cast<byte_type>(0xE0U | value.value));
+        } else {
+            appender_.multi_append(data_, static_cast<byte_type>(0xF8), static_cast<byte_type>(value.value));
+        }
+    }
 
     // Variadic friends only in c++26, must be public
     detail::appender<OutputBuffer> appender_;

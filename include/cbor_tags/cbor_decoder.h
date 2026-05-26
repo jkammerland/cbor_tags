@@ -133,10 +133,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode(integer &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
-            value = integer(decode_unsigned(additionalInfo));
+            std::uint64_t decoded{};
+            auto          status = decode_unsigned_argument(additionalInfo, decoded);
+            if (status != status_code::success) {
+                return status;
+            }
+            value = integer(decoded);
         } else if (major == major_type::NegativeInteger) {
-            const auto decoded = decode_unsigned(additionalInfo);
-            value              = integer(negative(decoded + 1));
+            std::uint64_t decoded{};
+            auto          status = decode_unsigned_argument(additionalInfo, decoded);
+            if (status != status_code::success) {
+                return status;
+            }
+            if (decoded == std::numeric_limits<std::uint64_t>::max()) {
+                return status_code::no_match_for_int_on_buffer;
+            }
+            value = integer(negative(decoded + 1));
         } else {
             return status_code::no_match_for_int_on_buffer;
         }
@@ -148,7 +160,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         requires(!std::is_same_v<T, integer>)
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major == major_type::UnsignedInteger) {
-            const auto decoded = decode_unsigned(additionalInfo);
+            std::uint64_t decoded{};
+            auto          status = decode_unsigned_argument(additionalInfo, decoded);
+            if (status != status_code::success) {
+                return status;
+            }
             // Default native integer decode intentionally slices through the target type.
             // strict_integer_decode keeps this check enabled for users that need representability.
             if constexpr (detail::strict_integer_decode_option_v<Options>) {
@@ -158,7 +174,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
             value = static_cast<T>(decoded);
         } else if (major == major_type::NegativeInteger) {
-            const auto decoded = decode_unsigned(additionalInfo);
+            std::uint64_t decoded{};
+            auto          status = decode_unsigned_argument(additionalInfo, decoded);
+            if (status != status_code::success) {
+                return status;
+            }
             // Default native integer decode intentionally slices through the target type.
             // strict_integer_decode keeps this check enabled for users that need representability.
             if constexpr (detail::strict_integer_decode_option_v<Options>) {
@@ -194,7 +214,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::UnsignedInteger) {
             return status_code::no_match_for_uint_on_buffer;
         }
-        const auto decoded = decode_unsigned(additionalInfo);
+        std::uint64_t decoded{};
+        auto          status = decode_unsigned_argument(additionalInfo, decoded);
+        if (status != status_code::success) {
+            return status;
+        }
         // Default native integer decode intentionally slices through the target type.
         // strict_integer_decode keeps this check enabled for users that need representability.
         if constexpr (detail::strict_integer_decode_option_v<Options>) {
@@ -211,8 +235,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::NegativeInteger) {
             return status_code::no_match_for_nint_on_buffer;
         }
-        const auto decoded = decode_unsigned(additionalInfo);
-        value              = negative(decoded + 1);
+        std::uint64_t decoded{};
+        auto          status = decode_unsigned_argument(additionalInfo, decoded);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (decoded == std::numeric_limits<std::uint64_t>::max()) {
+            return status_code::no_match_for_nint_on_buffer;
+        }
+        value = negative(decoded + 1);
 
         return status_code::success;
     }
@@ -393,7 +424,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
-        if (decode_unsigned(additionalInfo) != N) {
+        std::uint64_t tag{};
+        auto          status = decode_unsigned_argument(additionalInfo, tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (tag != N) {
             return status_code::no_match_for_tag;
         }
         return status_code::success;
@@ -416,7 +452,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
+        std::uint64_t decoded_tag{};
+        auto          status = decode_unsigned_argument(additionalInfo, decoded_tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        auto decoded_value = dynamic_tag<T>{static_cast<T>(decoded_tag)};
         if (decoded_value.cbor_tag != value.cbor_tag) {
             return status_code::no_match_for_tag;
         }
@@ -434,7 +475,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto tag = decode_unsigned(additionalInfo);
+        std::uint64_t tag{};
+        auto          status = decode_unsigned_argument(additionalInfo, tag);
+        if (status != status_code::success) {
+            return status;
+        }
         if (tag != std::get<0>(t)) {
             return status_code::no_match_for_tag;
         }
@@ -503,8 +548,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto &&tuple = to_tuple(value);
-        auto   tag   = decode_unsigned(additionalInfo);
+        auto        &&tuple = to_tuple(value);
+        std::uint64_t tag{};
+        auto          status = decode_unsigned_argument(additionalInfo, tag);
+        if (status != status_code::success) {
+            return status;
+        }
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
@@ -598,6 +647,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if (additionalInfo != static_cast<byte>(25)) {
             return status_code::no_match_for_tag_simple_on_buffer;
         }
+        if (reader_.empty(data_, 1)) {
+            return status_code::incomplete;
+        }
         value = read_float16();
         return status_code::success;
     }
@@ -608,6 +660,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if (additionalInfo != static_cast<byte>(26)) {
             return status_code::no_match_for_tag_simple_on_buffer;
         }
+        if (reader_.empty(data_, 3)) {
+            return status_code::incomplete;
+        }
         value = read_float();
         return status_code::success;
     }
@@ -617,6 +672,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_simple_on_buffer;
         } else if (additionalInfo != static_cast<byte>(27)) {
             return status_code::no_match_for_tag_simple_on_buffer;
+        }
+        if (reader_.empty(data_, 7)) {
+            return status_code::incomplete;
         }
         value = read_double();
         return status_code::success;
@@ -718,36 +776,39 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::TextString) {
             return status_code::no_match_for_tstr_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
+        auto status = decode_unsigned_argument(additionalInfo, value.size);
+        if (status != status_code::success) {
+            return status;
+        }
         return detail::skip_sized_string_payload(reader_, data_, value.size);
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
+        auto status = decode_unsigned_argument(additionalInfo, value.size);
+        if (status != status_code::success) {
+            return status;
+        }
         return detail::skip_sized_string_payload(reader_, data_, value.size);
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Array) {
             return status_code::no_match_for_array_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
-        return status_code::success;
+        return decode_unsigned_argument(additionalInfo, value.size);
     }
     constexpr status_code decode(as_map_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Map) {
             return status_code::no_match_for_map_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
-        return status_code::success;
+        return decode_unsigned_argument(additionalInfo, value.size);
     }
     constexpr status_code decode(as_tag_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
-        value.tag = decode_unsigned(additionalInfo);
-        return status_code::success;
+        return decode_unsigned_argument(additionalInfo, value.tag);
     }
     constexpr status_code decode(as_tag_any &value, std::uint64_t tag) {
         value.tag = tag;
@@ -814,7 +875,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if (additionalInfo < static_cast<byte>(24)) {
             value = simple{static_cast<simple::value_type>(additionalInfo)};
         } else if (additionalInfo == static_cast<byte>(24)) {
-            value = simple{static_cast<simple::value_type>(read_uint8())};
+            if (reader_.empty(data_)) {
+                return status_code::incomplete;
+            }
+            const auto decoded = static_cast<simple::value_type>(read_uint8());
+            if (!is_valid_simple_value(decoded) || decoded < static_cast<simple::value_type>(32U)) {
+                return status_code::no_match_for_tag_simple_on_buffer;
+            }
+            value = simple{decoded};
         } else {
             return status_code::no_match_for_tag_simple_on_buffer;
         }
@@ -1078,7 +1146,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     auto key          = detail::make_decode_value_for<key_type>(value);
                     auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
                     auto status       = decode(key, major, additionalInfo);
-                    status            = (status == status_code::success) ? decode(mapped_value) : status;
+                    if (status == status_code::success) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
+                        auto [mapped_major, mapped_additional_info] = read_initial_byte();
+                        if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
+                            return status_code::no_match_for_map_on_buffer;
+                        }
+                        status = decode(mapped_value, mapped_major, mapped_additional_info);
+                    }
                     if (status != status_code::success) {
                         return status;
                     }
@@ -1087,7 +1164,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 } else {
                     value_type result{};
                     auto       status = decode(result.first, major, additionalInfo);
-                    status            = (status == status_code::success) ? decode(result.second) : status;
+                    if (status == status_code::success) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
+                        auto [mapped_major, mapped_additional_info] = read_initial_byte();
+                        if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
+                            return status_code::no_match_for_map_on_buffer;
+                        }
+                        status = decode(result.second, mapped_major, mapped_additional_info);
+                    }
                     if (status != status_code::success) {
                         return status;
                     }
@@ -1117,6 +1203,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             throw parse_incomplete_exception("Unexpected end of input");
         }
         return needed;
+    }
+
+    constexpr status_code decode_unsigned_argument(byte additionalInfo, std::uint64_t &value) {
+        const auto info = std::to_integer<std::uint8_t>(additionalInfo);
+        if (!detail::is_valid_cbor_argument_info(info)) {
+            return status_code::error;
+        }
+
+        const auto payload_size = detail::cbor_argument_payload_size(info);
+        if (payload_size > 0U && reader_.empty(data_, payload_size - 1U)) {
+            return status_code::incomplete;
+        }
+
+        value = decode_unsigned(additionalInfo);
+        return status_code::success;
     }
 
     constexpr uint64_t read_unsigned(byte additionalInfo) {

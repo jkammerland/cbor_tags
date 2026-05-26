@@ -294,7 +294,7 @@ TEST_CASE("nlohmann reads cbor_tags finite and non-finite floats") {
 TEST_CASE("nlohmann rejects cbor_tags simple values beyond JSON null and bool") {
     using namespace cbor::tags;
 
-    for (const auto value : {simple{16}, simple{23}, simple{24}, simple{255}}) {
+    for (const auto value : {simple{16}, simple{23}, simple{32}, simple{255}}) {
         const auto output         = encode_with_cbor_tags(value);
         const auto parse_as_json  = [&output] { [[maybe_unused]] const auto decoded = json::from_cbor(as_uint8(output)); };
         auto       decoded_simple = simple{};

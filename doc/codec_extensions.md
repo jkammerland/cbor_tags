@@ -57,16 +57,24 @@ struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
         enc.encode(value.payload);
     }
 
-    [[nodiscard]] cbor::tags::status_code
-    decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
-        auto& dec = static_cast<Self&>(*this);
-        const auto tag_status = dec.decode(cbor::tags::static_tag<100>{}, major, additional_info);
-        if (tag_status != cbor::tags::status_code::success) {
-            return tag_status;
-        }
-        return dec.decode(value.payload);
-    }
-};
+	    [[nodiscard]] cbor::tags::status_code
+	    decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
+	        auto& dec = static_cast<Self&>(*this);
+	        if (major != cbor::tags::major_type::Tag) {
+	            return cbor::tags::status_code::no_match_for_tag_on_buffer;
+	        }
+
+	        std::uint64_t tag{};
+	        const auto tag_status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+	        if (tag_status != cbor::tags::status_code::success) {
+	            return tag_status;
+	        }
+	        if (tag != 100U) {
+	            return cbor::tags::status_code::no_match_for_tag;
+	        }
+	        return dec.decode(value.payload);
+	    }
+	};
 ```
 
 One-way extensions can use the narrower bases:

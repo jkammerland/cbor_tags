@@ -175,6 +175,7 @@ option(CBOR_TAGS_BUILD_INTEROP_TESTS "Build opt-in third-party CBOR interoperabi
 option(CBOR_TAGS_BUILD_CLI "Build cbor_tags_cli" ${CBOR_TAGS_BUILD_TESTS})
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(CBOR_TAGS_BUILD_EXAMPLES "Build examples" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
 if(CBOR_TAGS_BUILD_INTEROP_TESTS AND NOT CBOR_TAGS_BUILD_TESTS)
   message(FATAL_ERROR "CBOR_TAGS_BUILD_INTEROP_TESTS requires CBOR_TAGS_BUILD_TESTS=ON.")
@@ -342,6 +343,10 @@ endif()
 # add benchmarks
 if(CBOR_TAGS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+
+if(CBOR_TAGS_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 if(CBOR_TAGS_INSTALL)

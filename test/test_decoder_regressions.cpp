@@ -290,7 +290,7 @@ TEST_CASE("decoder should preserve cbor integer sign") {
     CHECK_EQ(decoded.value, 1);
 }
 
-TEST_CASE("decoder should document max negative wrapper edge behavior") {
+TEST_CASE("decoder should reject negative values outside wrapper range") {
     std::vector<std::byte> buffer{std::byte{0x3B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
                                   std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
 
@@ -299,9 +299,8 @@ TEST_CASE("decoder should document max negative wrapper edge behavior") {
         integer decoded{0};
         auto    result = dec(decoded);
 
-        REQUIRE(result);
-        CHECK(decoded.is_negative);
-        CHECK_EQ(decoded.value, 0);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
     }
 
     {
@@ -309,8 +308,8 @@ TEST_CASE("decoder should document max negative wrapper edge behavior") {
         negative decoded{1};
         auto     result = dec(decoded);
 
-        REQUIRE(result);
-        CHECK_EQ(decoded.value, 0);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_nint_on_buffer);
     }
 }
 
@@ -390,6 +389,23 @@ TEST_CASE("decoder should reject truncated float payloads") {
     }
 }
 
+TEST_CASE("direct dispatch returns status for truncated scalar payloads") {
+    std::vector<std::byte> empty;
+    auto                   dec = make_decoder(empty);
+
+    status_code status = status_code::success;
+    CHECK_NOTHROW(status = dec.decode(static_tag<100>{}, major_type::Tag, std::byte{24}));
+    CHECK_EQ(status, status_code::incomplete);
+
+    std::uint64_t unsigned_value{};
+    CHECK_NOTHROW(status = dec.decode(unsigned_value, major_type::UnsignedInteger, std::byte{24}));
+    CHECK_EQ(status, status_code::incomplete);
+
+    float float_value{};
+    CHECK_NOTHROW(status = dec.decode(float_value, major_type::Simple, std::byte{26}));
+    CHECK_EQ(status, status_code::incomplete);
+}
+
 TEST_CASE("decoder should map invalid additional information to error") {
     {
         std::vector<std::byte> buffer{std::byte{0x1C}};
@@ -453,14 +469,14 @@ TEST_CASE("decoder should propagate incomplete from variant alternatives") {
 }
 
 TEST_CASE("decoder should decode extended simple values") {
-    std::vector<std::byte> buffer{std::byte{0xF8}, std::byte{0x10}};
+    std::vector<std::byte> buffer{std::byte{0xF8}, std::byte{0x20}};
 
     auto   dec = make_decoder(buffer);
     simple decoded{};
     auto   result = dec(decoded);
 
     REQUIRE(result);
-    CHECK_EQ(decoded.value, 0x10);
+    CHECK_EQ(decoded.value, 0x20);
 }
 
 TEST_CASE("decoder should accept empty byte strings") {

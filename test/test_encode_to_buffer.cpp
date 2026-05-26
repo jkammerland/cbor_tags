@@ -131,14 +131,15 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
     }
 }
 
-TEST_CASE("CBOR Encoder documents zero negative wrapper edge behavior") {
+TEST_CASE("CBOR Encoder rejects zero negative wrapper") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
     auto result = enc(negative{0});
 
-    REQUIRE(result);
-    CHECK_EQ(to_hex(data), "3bffffffffffffffff");
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::no_match_for_nint_on_buffer);
+    CHECK(data.empty());
 }
 
 TEST_CASE("CBOR Encoder writes exact-size fixed buffers") {
