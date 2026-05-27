@@ -45,6 +45,10 @@ namespace detail {
 
 template <typename T> using variant_traits_t = variant_traits<std::remove_cvref_t<T>>;
 
+template <typename T> struct is_std_variant : std::false_type {};
+
+template <typename... Ts> struct is_std_variant<std::variant<Ts...>> : std::true_type {};
+
 struct variant_probe_visitor {
     template <typename... Args> constexpr void operator()(Args &&...) const noexcept {}
 };
@@ -85,7 +89,11 @@ template <typename T> consteval bool variant_traits_complete() {
 
 template <typename T, typename = void> struct is_variant_like : std::false_type {};
 
-template <typename T> struct is_variant_like<T, std::enable_if_t<variant_traits_complete<T>()>> : std::true_type {};
+template <typename T> struct is_variant_like<T, std::enable_if_t<is_std_variant<std::remove_cvref_t<T>>::value>> : std::true_type {};
+
+template <typename T>
+struct is_variant_like<T, std::enable_if_t<!is_std_variant<std::remove_cvref_t<T>>::value && variant_traits_complete<T>()>>
+    : std::true_type {};
 
 template <typename T>
 concept VariantLike = is_variant_like<std::remove_cvref_t<T>>::value;
