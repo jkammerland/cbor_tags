@@ -111,10 +111,10 @@ TEST_CASE("Range encoding benchmarks") {
     auto bytes  = make_bytes();
 
     auto iota_values       = std::views::iota(0, static_cast<int>(item_count));
-    auto even_values       = values | std::views::filter([](int value) { return value % 2 == 0; });
+    auto filtered_values   = values | std::views::filter([](int) { return true; });
     auto transformed_pairs = values | std::views::transform([](int value) { return std::pair{value, value * 2}; });
-    auto odd_pairs         = values | std::views::filter([](int value) { return value % 2 == 1; }) |
-                     std::views::transform([](int value) { return std::pair{value, value * 2}; });
+    auto filtered_pairs    = values | std::views::filter([](int) { return true; }) |
+                          std::views::transform([](int value) { return std::pair{value, value * 2}; });
     auto transformed_bytes = values | std::views::transform([](int value) { return static_cast<std::uint8_t>(value); });
     auto chunked_bytes     = bytes | std::views::filter([](std::byte) { return true; });
 
@@ -126,12 +126,12 @@ TEST_CASE("Range encoding benchmarks") {
     bench.run("direct vector<int> array", [&] { run_encode(values); });
     bench.run("as_array_range(vector<int>) sized", [&] { run_encode(as_array_range(values)); });
     bench.run("as_array_range(iota_view) sized", [&] { run_encode(as_array_range(iota_values)); });
-    bench.run("as_array_range(filter_view) indefinite", [&] { run_encode(as_array_range(even_values)); });
+    bench.run("as_array_range(filter_view) indefinite", [&] { run_encode(as_array_range(filtered_values)); });
 
     bench.run("direct std::map<int,int>", [&] { run_encode(ordered_pairs); });
     bench.run("as_map_range(vector<pair>) sized", [&] { run_encode(as_map_range(pairs)); });
     bench.run("as_map_range(transform_view) sized", [&] { run_encode(as_map_range(transformed_pairs)); });
-    bench.run("as_map_range(filter_transform_view) indefinite", [&] { run_encode(as_map_range(odd_pairs)); });
+    bench.run("as_map_range(filter_transform_view) indefinite", [&] { run_encode(as_map_range(filtered_pairs)); });
 
     bench.run("direct vector<byte> bstr", [&] { run_encode(bytes); });
     bench.run("as_bstr_range(vector<byte>) sized", [&] { run_encode(as_bstr_range(bytes)); });
@@ -144,17 +144,18 @@ TEST_CASE("Range decoding benchmarks") {
     auto pairs  = make_pairs();
     auto bytes  = make_bytes();
 
-    auto even_values = values | std::views::filter([](int value) { return value % 2 == 0; });
-    auto odd_pairs   = values | std::views::filter([](int value) { return value % 2 == 1; }) |
-                     std::views::transform([](int value) { return std::pair{value, value * 2}; });
+    auto filtered_values = values | std::views::filter([](int) { return true; });
+    auto filtered_pairs  = values | std::views::filter([](int) { return true; }) |
+                          std::views::transform([](int value) { return std::pair{value, value * 2}; });
     auto chunked_bytes = bytes | std::views::filter([](std::byte) { return true; });
 
-    auto definite_array = encode_to_vector(as_array_range(values));
-    auto indef_array    = encode_to_vector(as_array_range(even_values));
-    auto definite_map   = encode_to_vector(as_map_range(pairs));
-    auto indef_map      = encode_to_vector(as_map_range(odd_pairs));
-    auto definite_bstr  = encode_to_vector(as_bstr_range(bytes));
-    auto indef_bstr     = encode_to_vector(as_bstr_range(chunked_bytes, 64));
+    auto definite_array    = encode_to_vector(as_array_range(values));
+    auto indef_array       = encode_to_vector(as_array_range(filtered_values));
+    auto definite_map      = encode_to_vector(as_map_range(pairs));
+    auto indef_map         = encode_to_vector(as_map_range(filtered_pairs));
+    auto definite_bstr     = encode_to_vector(as_bstr_range(bytes));
+    auto indef_bstr        = encode_to_vector(as_bstr_range(chunked_bytes, 64));
+    auto deque_indef_array = std::deque<std::byte>(indef_array.begin(), indef_array.end());
 
     ankerl::nanobench::Bench bench;
     configure(bench, "range decoding");
@@ -174,10 +175,9 @@ TEST_CASE("Range decoding benchmarks") {
     });
 
     bench.run("indefinite array from deque buffer", [&] {
-        std::deque<std::byte> input(indef_array.begin(), indef_array.end());
-        std::vector<int>      decoded;
-        auto                  dec = make_decoder(input);
-        std::ignore               = dec(decoded);
+        std::vector<int> decoded;
+        auto             dec = make_decoder(deque_indef_array);
+        std::ignore          = dec(decoded);
         ankerl::nanobench::doNotOptimizeAway(decoded);
     });
 

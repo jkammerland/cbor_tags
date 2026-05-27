@@ -16,12 +16,15 @@ set(BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(BUILD_SANDBOX OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CEREAL_INSTALL OFF CACHE BOOL "" FORCE)
+set(glaze_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
 set(SKIP_PERFORMANCE_COMPARISON ON CACHE BOOL "" FORCE)
 
 cpmaddpackage("gh:fraillt/bitsery@5.2.5")
 cpmaddpackage("gh:USCiLab/cereal@1.3.2")
 cpmaddpackage(NAME zpp_bits GITHUB_REPOSITORY eyalz800/zpp_bits GIT_TAG v4.7.1 DOWNLOAD_ONLY YES)
 cpmaddpackage(NAME flatbuffers GITHUB_REPOSITORY google/flatbuffers GIT_TAG v25.12.19)
+cpmaddpackage("gh:stephenberry/glaze@7.7.0")
 
 find_package(Boost REQUIRED COMPONENTS serialization)
 
@@ -39,7 +42,8 @@ target_compile_definitions(
           CBOR_TAGS_BENCH_BITSERY_VERSION="5.2.5"
           CBOR_TAGS_BENCH_ZPP_BITS_VERSION="4.7.1"
           CBOR_TAGS_BENCH_CEREAL_VERSION="1.3.2"
-          CBOR_TAGS_BENCH_FLATBUFFERS_VERSION="25.12.19")
+          CBOR_TAGS_BENCH_FLATBUFFERS_VERSION="25.12.19"
+          CBOR_TAGS_BENCH_GLAZE_VERSION="7.7.0")
 
 target_link_libraries(
   ${PROJECT_NAME}
@@ -48,6 +52,7 @@ target_link_libraries(
           benchmark_util
           Bitsery::bitsery
           cereal::cereal
+          glaze::glaze
           FlatBuffers::FlatBuffers
           bench_compare_flatbuffers_generated
           Boost::serialization)

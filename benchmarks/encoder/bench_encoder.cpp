@@ -63,7 +63,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
     });
 
     bench.run("Encoding a bstr", [&gen]() {
-        std::vector<uint8_t>     data;
+        Buffer                   data;
         auto                     enc = make_encoder(data);
         std::array<std::byte, 4> bstr;
         for (auto &b : bstr) {
@@ -74,7 +74,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
     });
 
     bench.run("Encoding a bstr with check", [&gen]() {
-        std::vector<uint8_t>     data;
+        Buffer                   data;
         auto                     enc = make_encoder(data);
         std::array<std::byte, 4> bstr;
         for (auto &b : bstr) {
@@ -113,7 +113,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
     });
 
     bench.run("Encoding an array with check", [&gen]() {
-        std::vector<uint8_t>   data;
+        Buffer                 data;
         auto                   enc = make_encoder(data);
         std::array<int16_t, 4> a{static_cast<short>(gen()), static_cast<short>(gen()), static_cast<short>(gen()),
                                  static_cast<short>(gen())};

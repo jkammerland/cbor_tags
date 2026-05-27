@@ -249,8 +249,8 @@ Local Release benchmark, 65,536 elements, Linux x86-64:
 | `double` encode | 70.66 GB/s | 26.36 GB/s |
 | `float` decode to `typed_array<T>` | 54.83 GB/s | 17.14 GB/s |
 | `double` decode to `typed_array<T>` | 50.36 GB/s | 27.36 GB/s |
-| `float` read `typed_array_view<T>` | 21.47 GB/s | 13.30 GB/s |
-| `double` read `typed_array_view<T>` | 42.09 GB/s | 26.12 GB/s |
+| `float` decode `typed_array_view<T>` then `copy_values()` | 21.47 GB/s | 13.30 GB/s |
+| `double` decode `typed_array_view<T>` then `copy_values()` | 42.09 GB/s | 26.12 GB/s |
 
 CBOR's scalar integer encoding is optimized for canonical interchange, not raw
 numeric lanes: negative integers use major type 1 rather than two's-complement

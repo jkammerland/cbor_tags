@@ -1,0 +1,8 @@
+[package]
+name = "cbor-tags-cbor-diag-interop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cbor-diag = "0.1.12"
