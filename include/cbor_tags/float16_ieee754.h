@@ -39,11 +39,14 @@ struct float16_t {
         std::uint32_t x;
         std::memcpy(&x, &f, sizeof(float));
 
-        std::uint32_t sign     = (x >> 16) & 0x8000;
-        int           exponent = static_cast<int>((x >> 23) & 0xffU) - 127;
-        std::uint32_t mantissa = x & 0x7fffff;
+        std::uint32_t sign         = (x >> 16) & 0x8000;
+        std::uint32_t raw_exponent = (x >> 23) & 0xffU;
+        int           exponent     = static_cast<int>(raw_exponent) - 127;
+        std::uint32_t mantissa     = x & 0x7fffff;
 
-        if (exponent > 15) {
+        if (raw_exponent == 0xffU) {
+            value = sign | (mantissa == 0U ? 0x7c00U : 0x7e00U);
+        } else if (exponent > 15) {
             // Overflow, set to infinity
             value = sign | 0x7c00;
         } else if (exponent < -14) {

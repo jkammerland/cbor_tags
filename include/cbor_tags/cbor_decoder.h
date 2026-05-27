@@ -1078,7 +1078,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     auto key          = detail::make_decode_value_for<key_type>(value);
                     auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
                     auto status       = decode(key, major, additionalInfo);
-                    status            = (status == status_code::success) ? decode(mapped_value) : status;
+                    if (status == status_code::success) {
+                        auto [mapped_major, mapped_additional_info] = read_initial_byte();
+                        if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
+                            return status_code::no_match_for_map_on_buffer;
+                        }
+                        status = decode(mapped_value, mapped_major, mapped_additional_info);
+                    }
                     if (status != status_code::success) {
                         return status;
                     }
@@ -1087,7 +1093,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 } else {
                     value_type result{};
                     auto       status = decode(result.first, major, additionalInfo);
-                    status            = (status == status_code::success) ? decode(result.second) : status;
+                    if (status == status_code::success) {
+                        auto [mapped_major, mapped_additional_info] = read_initial_byte();
+                        if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
+                            return status_code::no_match_for_map_on_buffer;
+                        }
+                        status = decode(result.second, mapped_major, mapped_additional_info);
+                    }
                     if (status != status_code::success) {
                         return status;
                     }

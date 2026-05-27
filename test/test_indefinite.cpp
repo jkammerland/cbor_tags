@@ -254,6 +254,18 @@ TEST_CASE("decode indefinite map without break returns incomplete") {
     CHECK_EQ(result.error(), status_code::incomplete);
 }
 
+TEST_CASE("decode indefinite map rejects break as value") {
+    std::vector<std::byte> buffer{std::byte{0xBF}, std::byte{0x01}, std::byte{0xFF}};
+
+    auto dec = make_decoder(buffer);
+
+    std::map<int, int> decoded{{9, 9}};
+    auto               result = dec(decoded);
+
+    CHECK_FALSE_MESSAGE(result, "A map key followed by break is malformed.");
+    CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+}
+
 TEST_CASE("decode indefinite bstr without break returns incomplete") {
     std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}};
 

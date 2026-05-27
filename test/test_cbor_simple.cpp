@@ -60,6 +60,20 @@ TEST_CASE("CBOR Encoder - NaN float") {
     CHECK_EQ(to_hex(data), "fa7fc00000");
 }
 
+TEST_CASE("CBOR Encoder - half NaN") {
+    std::vector<std::byte> data;
+    auto                   enc   = make_encoder(data);
+    float16_t              value = std::numeric_limits<float>::quiet_NaN();
+    CHECK(enc(value));
+    CBOR_TAGS_TEST_LOG("Half NaN: {}", to_hex(data));
+    CHECK_EQ(to_hex(data), "f97e00");
+
+    auto      dec = make_decoder(data);
+    float16_t decoded;
+    REQUIRE(dec(decoded));
+    CHECK(std::isnan(static_cast<float>(decoded)));
+}
+
 TEST_CASE("CBOR Encoder - Positive double") {
     std::vector<std::byte> data;
     auto                   enc   = make_encoder(data);
