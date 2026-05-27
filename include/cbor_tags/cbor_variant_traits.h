@@ -17,6 +17,8 @@ namespace cbor::tags {
 // - static get<I>(T&) and get<I>(const T&)
 // - static visit(visitor, variant) and visit(visitor, variant, variant)
 // - static assign<I>(T&, value)
+// Recognition checks the type-level shape plus index(). The remaining hooks are
+// instantiated by encoder, decoder, and operator call sites.
 template <typename T> struct variant_traits;
 
 template <typename... Ts> struct variant_traits<std::variant<Ts...>> {
@@ -49,10 +51,6 @@ template <typename T> struct is_std_variant : std::false_type {};
 
 template <typename... Ts> struct is_std_variant<std::variant<Ts...>> : std::true_type {};
 
-struct variant_probe_visitor {
-    template <typename... Args> constexpr void operator()(Args &&...) const noexcept {}
-};
-
 template <typename T, typename = void> struct variant_traits_size : std::integral_constant<std::size_t, 0U> {
     static constexpr bool valid = false;
 };
@@ -63,20 +61,18 @@ struct variant_traits_size<T, std::void_t<decltype(std::integral_constant<std::s
     static constexpr bool valid = true;
 };
 
+template <typename T, std::size_t I> using variant_trait_alternative_probe_t = typename variant_traits_t<T>::template alternative<I>;
+
 template <typename T, std::size_t I>
-concept CompleteVariantTraitAlternative = requires(T &value, const T &const_value, variant_probe_visitor visitor,
-                                                   typename variant_traits_t<T>::template alternative<I> alternative) {
-    typename variant_traits_t<T>::template alternative<I>;
+concept VariantTraitAlternative = requires { typename variant_trait_alternative_probe_t<T, I>; };
+
+template <typename T>
+concept VariantTraitIndexable = requires(const T &const_value) {
     { variant_traits_t<T>::index(const_value) } -> std::convertible_to<std::size_t>;
-    variant_traits_t<T>::template get<I>(value);
-    variant_traits_t<T>::template get<I>(const_value);
-    variant_traits_t<T>::visit(visitor, const_value);
-    variant_traits_t<T>::visit(visitor, const_value, const_value);
-    variant_traits_t<T>::template assign<I>(value, std::move(alternative));
 };
 
 template <typename T, std::size_t... Is> consteval bool variant_traits_complete_impl(std::index_sequence<Is...>) {
-    return (CompleteVariantTraitAlternative<std::remove_cvref_t<T>, Is> && ...);
+    return VariantTraitIndexable<std::remove_cvref_t<T>> && (VariantTraitAlternative<std::remove_cvref_t<T>, Is> && ...);
 }
 
 template <typename T> consteval bool variant_traits_complete() {
