@@ -125,6 +125,7 @@ TEST_CASE("non-std variants require explicit variant_traits opt-in") {
     static_assert(!tags::IsVariant<std::tuple<std::uint64_t, std::string>>);
 
     static_assert(tags::IsVariant<std::variant<std::uint64_t, std::string>>);
+    static_assert(tags::IsVariant<tags::detail::catch_all_variant>);
     static_assert(tags::IsVariant<manual_variant>);
     static_assert(std::is_aggregate_v<manual_variant>);
     static_assert(tags::IsCborMajor<manual_variant>);

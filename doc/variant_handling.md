@@ -31,41 +31,47 @@ not treated as variants by default. Without the specialization, normal overload
 resolution applies, so an aggregate wrapper may encode as an aggregate.
 
 ```cpp
-template <class... Ts> struct my_variant {
-    std::variant<Ts...> storage;
-};
+#include <boost/variant2/variant.hpp>
 
 template <class... Ts>
-struct cbor::tags::variant_traits<my_variant<Ts...>> {
-    static constexpr std::size_t size = sizeof...(Ts);
+struct cbor::tags::variant_traits<boost::variant2::variant<Ts...>> {
+    using variant_type = boost::variant2::variant<Ts...>;
+
+    static constexpr std::size_t size =
+        boost::variant2::variant_size_v<variant_type>;
 
     template <std::size_t I>
-    using alternative = std::tuple_element_t<I, std::tuple<Ts...>>;
+    using alternative =
+        boost::variant2::variant_alternative_t<I, variant_type>;
 
-    static std::size_t index(my_variant<Ts...> const& v) {
-        return v.storage.index();
+    static std::size_t index(variant_type const& value) {
+        return value.index();
     }
 
     template <std::size_t I, class V>
-    static decltype(auto) get(V&& v) {
-        return std::get<I>(std::forward<V>(v).storage);
+    static decltype(auto) get(V&& value) {
+        return boost::variant2::get<I>(std::forward<V>(value));
     }
 
     template <class Visitor, class... Vs>
-    static decltype(auto) visit(Visitor&& visitor, Vs&&... vs) {
-        return std::visit(std::forward<Visitor>(visitor),
-                          std::forward<Vs>(vs).storage...);
+    static decltype(auto) visit(Visitor&& visitor, Vs&&... values) {
+        return boost::variant2::visit(std::forward<Visitor>(visitor),
+                                      std::forward<Vs>(values)...);
     }
 
     template <std::size_t I, class U>
-    static void assign(my_variant<Ts...>& v, U&& value) {
-        v.storage.template emplace<I>(std::forward<U>(value));
+    static void assign(variant_type& value, U&& decoded) {
+        value.template emplace<I>(std::forward<U>(decoded));
     }
 };
 ```
 
 `visit` must support both single-variant and multi-variant calls because
 encoding uses the former and comparison helpers use the latter.
+
+For raw `union` storage with a domain-specific discriminator, prefer an ADL
+`encode`/`decode` overload unless the type can honestly expose the same
+`index`/`get`/`visit`/`assign` operations as a variant.
 
 ## Compile-Time Dispatch
 
