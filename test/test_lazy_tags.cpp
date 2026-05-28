@@ -603,6 +603,12 @@ TEST_CASE("lazy tag scanner reports truncated matching payloads") {
     CHECK(it == view.end());
     CHECK(view.failed());
     CHECK_EQ(view.status(), status_code::incomplete);
+
+    std::deque<std::byte> non_contiguous(buffer.begin(), buffer.end());
+    auto                  non_contiguous_view = find_tags<100>(non_contiguous);
+    CHECK(non_contiguous_view.begin() == non_contiguous_view.end());
+    CHECK(non_contiguous_view.failed());
+    CHECK_EQ(non_contiguous_view.status(), status_code::incomplete);
 }
 
 TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
@@ -633,6 +639,16 @@ TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
         CHECK(view.failed());
         CHECK_EQ(view.status(), status_code::error);
     }
+
+    {
+        auto                  vector_buffer = to_bytes("d864df");
+        std::deque<std::byte> buffer(vector_buffer.begin(), vector_buffer.end());
+        auto                  view = find_tags<100>(buffer);
+        auto                  it   = view.begin();
+        CHECK(it == view.end());
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
 }
 
 TEST_CASE("lazy tag scanner reports malformed indefinite items") {
@@ -640,6 +656,16 @@ TEST_CASE("lazy tag scanner reports malformed indefinite items") {
         auto buffer = to_bytes("bf01ff");
         auto view   = find_tags<100>(buffer);
         auto it     = view.begin();
+        CHECK(it == view.end());
+        CHECK(view.failed());
+        CHECK_EQ(view.status(), status_code::error);
+    }
+
+    {
+        auto                  vector_buffer = to_bytes("bf01ff");
+        std::deque<std::byte> buffer(vector_buffer.begin(), vector_buffer.end());
+        auto                  view = find_tags<100>(buffer);
+        auto                  it   = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
         CHECK_EQ(view.status(), status_code::error);

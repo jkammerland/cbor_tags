@@ -480,12 +480,18 @@ template <typename Encoder> auto encode(Encoder &enc, encoded_item_bstr value) {
     return typename Encoder::expected_type{};
 }
 
+// Visitor spans are callback-scoped. Header spans point at stack-owned bytes and
+// must be consumed before the callback returns; retain only copied bytes or
+// encoded segment objects created by the higher-level segment helpers.
 template <typename VisitSegment> constexpr void visit_bstr_segments(std::span<const std::byte> payload, VisitSegment &&visit_segment) {
     const auto header = detail::encode_cbor_bstr_header(payload.size());
     visit_segment(header.span());
     visit_segment(payload);
 }
 
+// Visitor spans are callback-scoped. Header spans point at stack-owned bytes and
+// must be consumed before the callback returns; retain only copied bytes or
+// encoded segment objects created by the higher-level segment helpers.
 template <typename VisitSegment>
 constexpr void visit_indefinite_bstr_segments(std::span<const std::byte> payload, VisitSegment &&visit_segment,
                                               std::size_t chunk_size = 4096) {
@@ -507,6 +513,9 @@ constexpr void visit_indefinite_bstr_segments(std::span<const std::byte> payload
     visit_segment(std::span<const std::byte>{stop});
 }
 
+// Visitor spans are callback-scoped. Header spans point at stack-owned bytes and
+// must be consumed before the callback returns; retain only copied bytes or
+// encoded segment objects created by the higher-level segment helpers.
 template <typename VisitSegment>
 constexpr void visit_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload, VisitSegment &&visit_segment) {
     const auto tag_header  = detail::encode_cbor_tag_header(tag);

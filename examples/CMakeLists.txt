@@ -1,0 +1,2 @@
+add_executable(cbor_tags_basic_roundtrip basic_roundtrip.cpp)
+target_link_libraries(cbor_tags_basic_roundtrip PRIVATE cbor::tags)
