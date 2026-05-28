@@ -26,7 +26,7 @@
 
 using namespace cbor::tags;
 
-namespace {
+namespace cbor_tags_test_security {
 struct SecurityTaggedDirect {
     static_tag<12> cbor_tag;
     int            value{};
@@ -45,7 +45,11 @@ struct SecurityRootItem {
 struct SecurityRecursiveNode {
     std::vector<SecurityRecursiveNode> children;
 };
+} // namespace cbor_tags_test_security
 
+using namespace cbor_tags_test_security;
+
+namespace {
 std::vector<std::byte> uint64_max_length_text_with_one_payload_byte() {
     return {std::byte{0x7B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
             std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{'x'}};

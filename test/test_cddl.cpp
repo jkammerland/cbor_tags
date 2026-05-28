@@ -67,9 +67,19 @@ struct CDDLPlainTwo {
     std::string name;
 };
 
+struct CDDLSingleField {
+    std::uint64_t id;
+};
+
 struct CDDLTaggedOne {
     static_tag<42> cbor_tag;
     std::string    value;
+};
+
+struct CDDLTaggedTwo {
+    static_tag<44> cbor_tag;
+    int            id;
+    std::string    name;
 };
 
 struct CDDLInlineTaggedOne {
@@ -77,9 +87,21 @@ struct CDDLInlineTaggedOne {
     std::string                    value;
 };
 
+struct CDDLInlineTaggedTwo {
+    static constexpr std::uint64_t cbor_tag = 45;
+    int                            id;
+    std::string                    name;
+};
+
 struct CDDLDynamicTaggedOne {
     dynamic_tag<std::uint64_t> cbor_tag;
     int                        value;
+};
+
+struct CDDLDynamicTaggedTwo {
+    dynamic_tag<std::uint64_t> cbor_tag;
+    int                        id;
+    std::string                name;
 };
 
 struct CDDLContainers {
@@ -88,6 +110,37 @@ struct CDDLContainers {
     std::array<int, 2>              pair;
     std::optional<CDDLPlainTwo>     maybe_plain;
     std::variant<int, CDDLPlainTwo> either_plain;
+};
+
+struct CDDLLabelRoot {
+    CDDLPlainTwo    child;
+    CDDLSingleField single;
+};
+
+struct id {
+    std::uint64_t value;
+};
+
+struct CDDLArrayLabelCollision {
+    id              first;
+    CDDLSingleField second;
+};
+
+struct CDDLValueAliasA {
+    std::uint64_t value;
+};
+
+struct CDDLValueAliasB {
+    std::string value;
+};
+
+struct CDDLArrayLabelAliasCollision {
+    CDDLValueAliasA first;
+    CDDLValueAliasB second;
+};
+
+struct CDDLArrayLabelPreludeAlias {
+    std::uint64_t tstr;
 };
 
 struct CDDLTypedArrays {
@@ -462,6 +515,10 @@ static_assert(detail::named_flattened_extension_count<CDDLNestedMapScopedExtensi
 static_assert(detail::named_flattened_extension_count<CDDLRootWithTwoExtensions>() == 2U);
 
 #endif
+
+struct A {
+    std::string a;
+};
 } // namespace cbor_tags_test_cddl
 
 using namespace cbor_tags_test_cddl;
@@ -534,9 +591,74 @@ TEST_CASE("CDDL aggregate tagged") {
 TEST_CASE("CDDL emits RFC 8610 shapes for aggregate arrays and tag payloads") {
     CHECK_EQ(cddl_schema_inline<CDDLPlainTwo>(), "CDDLPlainTwo = [int, tstr]");
     CHECK_EQ(cddl_schema_inline<CDDLTaggedOne>(), "CDDLTaggedOne = #6.42(tstr)");
+    CHECK_EQ(cddl_schema_inline<CDDLTaggedTwo>(), "CDDLTaggedTwo = #6.44([int, tstr])");
     CHECK_EQ(cddl_schema_inline<CDDLInlineTaggedOne>(), "CDDLInlineTaggedOne = #6.43(tstr)");
+    CHECK_EQ(cddl_schema_inline<CDDLInlineTaggedTwo>(), "CDDLInlineTaggedTwo = #6.45([int, tstr])");
     CHECK_EQ(cddl_schema_inline<CDDLDynamicTaggedOne>(), "CDDLDynamicTaggedOne = #6(int)");
+    CHECK_EQ(cddl_schema_inline<CDDLDynamicTaggedTwo>(), "CDDLDynamicTaggedTwo = #6([int, tstr])");
 }
+
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+TEST_CASE("CDDL labels aggregate array fields when requested") {
+    CHECK_EQ(cddl_schema_with_options<CDDLPlainTwo>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLPlainTwo = [id: int, name: tstr]");
+
+    CHECK_EQ(cddl_schema_with_options<CDDLPlainTwo>({.label_array_fields = true}), "CDDLPlainTwo = [\n"
+                                                                                   "  id: int,\n"
+                                                                                   "  name: tstr\n"
+                                                                                   "]");
+
+    CHECK_EQ(cddl_schema_with_options<CDDLSingleField>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLSingleField = id\n"
+             "id = uint");
+
+    CHECK_EQ(cddl_schema_with_options<CDDLTaggedOne>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLTaggedOne = #6.42(value)\n"
+             "value = tstr");
+    CHECK_EQ(cddl_schema_with_options<CDDLTaggedTwo>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLTaggedTwo = #6.44([id: int, name: tstr])");
+    CHECK_EQ(cddl_schema_with_options<CDDLInlineTaggedOne>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLInlineTaggedOne = #6.43(value)\n"
+             "value = tstr");
+    CHECK_EQ(cddl_schema_with_options<CDDLInlineTaggedTwo>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLInlineTaggedTwo = #6.45([id: int, name: tstr])");
+    CHECK_EQ(cddl_schema_with_options<CDDLDynamicTaggedOne>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLDynamicTaggedOne = #6(value)\n"
+             "value = int");
+    CHECK_EQ(cddl_schema_with_options<CDDLDynamicTaggedTwo>({.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+             "CDDLDynamicTaggedTwo = #6([id: int, name: tstr])");
+
+    const auto nested_schema =
+        cddl_schema_with_options<CDDLLabelRoot>({.row_options = {.format_by_rows = false}, .label_array_fields = true});
+    CHECK(substrings_in(nested_schema, "CDDLLabelRoot = [child: CDDLPlainTwo, single: CDDLSingleField]",
+                        "CDDLPlainTwo = [id: int, name: tstr]", "CDDLSingleField = id", "id = uint"));
+
+    fmt::memory_buffer tuple_buffer;
+    cddl_schema_to<std::tuple<int, std::string>>(tuple_buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true});
+    CHECK_EQ(fmt::to_string(tuple_buffer), "root = [int, tstr]");
+
+    fmt::memory_buffer collision_buffer;
+    CHECK_THROWS_AS(
+        cddl_schema_to<CDDLArrayLabelCollision>(collision_buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+        std::invalid_argument);
+
+    fmt::memory_buffer alias_collision_buffer;
+    CHECK_THROWS_AS(cddl_schema_to<CDDLArrayLabelAliasCollision>(alias_collision_buffer,
+                                                                 {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+                    std::invalid_argument);
+
+    fmt::memory_buffer prelude_alias_buffer;
+    CHECK_THROWS_AS(cddl_schema_to<CDDLArrayLabelPreludeAlias>(prelude_alias_buffer,
+                                                               {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+                    std::invalid_argument);
+}
+#else
+TEST_CASE("CDDL array field labels require named reflection") {
+    fmt::memory_buffer buffer;
+    CHECK_THROWS_AS(cddl_schema_to<CDDLPlainTwo>(buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+                    std::invalid_argument);
+}
+#endif
 
 TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
     const auto schema = cddl_schema_inline<CDDLContainers>();
@@ -1423,10 +1545,6 @@ TEST_CASE("CWT payload map annotation") {
 }
 
 TEST_CASE("CDDL adhoc tagging") {
-    struct A {
-        std::string a;
-    };
-
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
     using tagA = std::pair<static_tag<140>, A>;

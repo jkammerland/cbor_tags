@@ -54,6 +54,17 @@ cbor::tags::cddl_schema_to<Person>(schema, {.row_options = {.format_by_rows = fa
 // Person = [uint, {* tstr => int}, bstr / null]
 ```
 
+When named reflection is available, aggregate array fields can be labeled
+without changing the encoded CBOR shape:
+
+```cpp
+fmt::memory_buffer schema;
+cbor::tags::cddl_schema_to<Person>(
+    schema,
+    {.row_options = {.format_by_rows = false}, .label_array_fields = true});
+// Person = [age: uint, attributes: {* tstr => int}, data: bstr / null]
+```
+
 ### CBOR Annotation
 
 ```cpp
@@ -95,6 +106,7 @@ Generates CDDL schema for the given type into output buffer
 - `always_inline`: Inline nested aggregate definitions when possible; recursive references stay named
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
 - `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when C++26 static reflection or `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON` is available
+- `label_array_fields`: Label aggregate array fields when named reflection is available; single-field aggregates use the field name as a rule alias and reject alias collisions, including CDDL prelude names
 
 Generated schemas mirror the default encoder shape plus explicitly documented
 transform/extension shapes. Multi-field aggregates are arrays, single-field

@@ -19,7 +19,7 @@ using namespace cbor::tags;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-namespace {
+namespace cbor_tags_test_visualization {
 struct VisualizationInner {
     int         id{};
     std::string name;
@@ -30,7 +30,11 @@ struct VisualizationTagged {
     int             id{};
     std::string     name;
 };
+} // namespace cbor_tags_test_visualization
 
+using namespace cbor_tags_test_visualization;
+
+namespace {
 std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     auto count    = std::size_t{};
     auto position = std::size_t{};
