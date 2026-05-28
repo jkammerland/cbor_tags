@@ -38,7 +38,7 @@ class CborTagsConan(ConanFile):
         self.requires("fmt/[>=11.0.2 <12]")
         self.requires("nameof/0.10.4")
         if not self.options.std_expected:
-            self.requires("tl-expected/1.3.1")
+            self.requires("tl-expected/1.1.0")
         if self.options.boost_pfr_names:
             self.requires("boost/[>=1.84.0 <2]")
         if self.options.magic_enum_names:

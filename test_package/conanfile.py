@@ -2,19 +2,25 @@ import os
 
 from conan import ConanFile
 from conan.tools.build import can_run
-from conan.tools.cmake import CMake, cmake_layout
+from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 
 
 class CborTagsTestPackage(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
-    generators = "CMakeDeps", "CMakeToolchain"
     test_type = "explicit"
 
     def requirements(self):
         self.requires(self.tested_reference_str)
 
     def layout(self):
-        cmake_layout(self)
+        cmake_layout(self, build_folder="$TMP")
+
+    def generate(self):
+        deps = CMakeDeps(self)
+        deps.generate()
+        tc = CMakeToolchain(self)
+        tc.user_presets_path = None
+        tc.generate()
 
     def build(self):
         cmake = CMake(self)

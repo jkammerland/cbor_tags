@@ -2,15 +2,18 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_reflection_config.h>
-#include <cbor_tags/extensions/cbor_visualization.h>
-#include <cbor_tags/extensions/custom_codec_1.h>
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <cstddef>
 #include <cstdint>
-#include <fmt/format.h>
 #include <string>
 #include <type_traits>
 #include <vector>
+
+#if !CBOR_TAGS_STL_ONLY
+#include <cbor_tags/extensions/cbor_visualization.h>
+#include <cbor_tags/extensions/custom_codec_1.h>
+#include <fmt/format.h>
+#endif
 
 #if CBOR_TAGS_USE_STD_EXPECTED
 #include <expected>
@@ -67,13 +70,16 @@ int main() {
             return 5;
         }
 
+#if !CBOR_TAGS_STL_ONLY
         fmt::memory_buffer schema;
         cbor::tags::cddl_schema_to<rfc8746::typed_array<std::int32_t>>(schema, {.row_options = {.format_by_rows = false}});
         if (fmt::to_string(schema) != "root = #6.78(bstr)") {
             return 6;
         }
+#endif
     }
 
+#if !CBOR_TAGS_STL_ONLY
     {
         namespace compact = cbor::tags::ext::custom_codec_1;
 
@@ -90,6 +96,7 @@ int main() {
             return 8;
         }
     }
+#endif
 
 #if CBOR_TAGS_USE_MAGIC_ENUM_NAMES
     {
