@@ -18,8 +18,6 @@
 
 #if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
 #include <cbor_tags/cwt/openssl_crypto.h>
-#elif CBOR_TAGS_TEST_PACKAGE_HAS_CWT_WOLFSSL
-#include <cbor_tags/cwt/wolfssl_crypto.h>
 #endif
 
 #if CBOR_TAGS_USE_STD_EXPECTED
@@ -46,8 +44,6 @@ int main() {
 
 #if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
     static_assert(cbor::tags::cwt::openssl_es256_backend::algorithm_id == cbor::tags::cwt::algorithm::es256);
-#elif CBOR_TAGS_TEST_PACKAGE_HAS_CWT_WOLFSSL
-    static_assert(cbor::tags::cwt::wolfssl_es256_backend::algorithm_id == cbor::tags::cwt::algorithm::es256);
 #endif
 
     {

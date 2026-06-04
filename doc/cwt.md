@@ -27,33 +27,16 @@ Enable OpenSSL support explicitly:
 target_link_libraries(app PRIVATE cbor::cwt_openssl)
 ```
 
-Enable wolfSSL support explicitly:
-
-```cmake
--DCBOR_TAGS_ENABLE_CWT_WOLFSSL=ON
-target_link_libraries(app PRIVATE cbor::cwt_wolfssl)
-```
-
-The wolfSSL backend is a separate target so wolfSSL licensing does not propagate
-through the base CBOR library target.
-
 Package managers keep the crypto backends opt-in as well:
 
 ```bash
 conan install . -o cbor-tags/*:cwt_openssl=True
-conan install . -o cbor-tags/*:cwt_wolfssl=True
 vcpkg install --x-feature=cwt-openssl
-vcpkg install --x-feature=cwt-wolfssl
 ```
 
-The wolfSSL backend needs wolfSSL's OpenSSL-compatible EVP surface. Conan sets
-the wolfSSL `opensslextra` and `opensslall` options when
-`cwt_wolfssl=True`; non-Conan wolfSSL packages must be built with equivalent
-compatibility support.
-
 Conan's generated aggregate target is `cbor::all`. Link the specific component
-target (`cbor::tags`, `cbor::cwt`, `cbor::cwt_openssl`, or
-`cbor::cwt_wolfssl`) when dependency propagation matters.
+target (`cbor::tags`, `cbor::cwt`, or `cbor::cwt_openssl`) when dependency
+propagation matters.
 
 ## Sign1 Example
 
@@ -82,8 +65,8 @@ if (message) {
 ```
 
 `make_sign1_tbs(...)` builds the COSE `Sig_structure` bytes for
-`COSE_Sign1`. The OpenSSL and wolfSSL ES256 backends sign and verify those
-bytes and store COSE's raw 64-byte `r || s` ECDSA signature representation.
+`COSE_Sign1`. The OpenSSL ES256 backend signs and verifies those bytes and
+stores COSE's raw 64-byte `r || s` ECDSA signature representation.
 The `sign1(...)` helper writes `alg` to the protected header when it is not
 already set, rejects an algorithm that conflicts with the selected backend, and
 rejects `alg` in the unprotected header.
@@ -107,3 +90,27 @@ if (message) {
 signature entries can be created with `sign_signature(...)` or appended with
 `add_signature(...)`. For `COSE_Sign`, `alg` may be protected at the body or
 signature level, but `alg` in either unprotected header is rejected.
+
+## Custom Backend Example
+
+Crypto providers can be integrated outside this package by defining a backend
+type with the same static API used by the built-in OpenSSL backend:
+
+```cpp
+namespace tags = cbor::tags;
+namespace cwt = cbor::tags::cwt;
+
+struct custom_es256_backend {
+    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
+
+    static tags::expected<cwt::byte_string, tags::status_code>
+    sign(void *key, std::span<const std::byte> to_be_signed);
+
+    static tags::expected<void, tags::status_code>
+    verify(void *key,
+           std::span<const std::byte> to_be_signed,
+           std::span<const std::byte> signature);
+};
+
+auto message = cwt::sign1<custom_es256_backend>(key, {}, {}, payload);
+```

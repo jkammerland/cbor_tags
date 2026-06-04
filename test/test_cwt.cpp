@@ -17,11 +17,6 @@
 #include <openssl/ec.h>
 #include <openssl/evp.h>
 #include <openssl/obj_mac.h>
-#elif CBOR_TAGS_TEST_HAS_CWT_WOLFSSL
-#include <cbor_tags/cwt/wolfssl_crypto.h>
-#include <wolfssl/openssl/ec.h>
-#include <wolfssl/openssl/evp.h>
-#include <wolfssl/openssl/obj_mac.h>
 #endif
 
 using namespace cbor::tags;
@@ -29,12 +24,8 @@ using namespace cbor::tags::cwt;
 
 namespace {
 
-#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL || CBOR_TAGS_TEST_HAS_CWT_WOLFSSL
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
 using crypto_es256_backend = openssl_es256_backend;
-#else
-using crypto_es256_backend = wolfssl_es256_backend;
-#endif
 
 struct evp_pkey_deleter {
     void operator()(EVP_PKEY *key) const noexcept {
@@ -290,6 +281,31 @@ TEST_CASE("COSE Sign helpers create and validate signature entries") {
     CHECK_EQ(missing_signature.error(), status_code::unexpected_group_size);
 }
 
+TEST_CASE("COSE Sign helpers append and validate multiple signature entries") {
+    const byte_string payload{std::byte{0x01}, std::byte{0x02}};
+
+    auto message = sign<toy_es256_backend>(nullptr, {}, {}, payload, header_map{.kid = byte_string{std::byte{0x01}}});
+    REQUIRE(message);
+
+    auto appended = add_signature<toy_es256_backend>(nullptr, *message, header_map{.kid = byte_string{std::byte{0x02}}}, {});
+    REQUIRE(appended);
+    REQUIRE_EQ(message->signatures.size(), 2U);
+
+    auto first_header = decode_protected_header(message->signatures[0].protected_header);
+    REQUIRE(first_header);
+    CHECK_EQ(first_header->alg, algorithm::es256);
+    CHECK_EQ(first_header->kid, byte_string{std::byte{0x01}});
+
+    auto second_header = decode_protected_header(message->signatures[1].protected_header);
+    REQUIRE(second_header);
+    CHECK_EQ(second_header->alg, algorithm::es256);
+    CHECK_EQ(second_header->kid, byte_string{std::byte{0x02}});
+
+    REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message));
+    REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message, std::size_t{0}));
+    REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message, std::size_t{1}));
+}
+
 TEST_CASE("COSE Sign rejects conflicting or unprotected algorithm headers") {
     const byte_string payload{std::byte{0x01}};
 
@@ -324,7 +340,7 @@ TEST_CASE("COSE Sign rejects conflicting or unprotected algorithm headers") {
     CHECK_EQ(verify_signature_unprotected_alg.error(), status_code::error);
 }
 
-#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL || CBOR_TAGS_TEST_HAS_CWT_WOLFSSL
+#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
 TEST_CASE("CWT crypto backend signs and verifies COSE Sign1 ES256") {
     auto key = make_p256_key();
 
