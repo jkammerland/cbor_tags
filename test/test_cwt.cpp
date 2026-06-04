@@ -17,6 +17,11 @@
 #include <openssl/ec.h>
 #include <openssl/evp.h>
 #include <openssl/obj_mac.h>
+#elif CBOR_TAGS_TEST_HAS_CWT_WOLFSSL
+#include <cbor_tags/cwt/wolfssl_crypto.h>
+#include <wolfssl/openssl/ec.h>
+#include <wolfssl/openssl/evp.h>
+#include <wolfssl/openssl/obj_mac.h>
 #endif
 
 using namespace cbor::tags;
@@ -24,19 +29,41 @@ using namespace cbor::tags::cwt;
 
 namespace {
 
+#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL || CBOR_TAGS_TEST_HAS_CWT_WOLFSSL
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
-using evp_pkey_ptr     = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
-using evp_pkey_ctx_ptr = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
+using crypto_es256_backend = openssl_es256_backend;
+#else
+using crypto_es256_backend = wolfssl_es256_backend;
+#endif
+
+struct evp_pkey_deleter {
+    void operator()(EVP_PKEY *key) const noexcept {
+        if (key != nullptr) {
+            EVP_PKEY_free(key);
+        }
+    }
+};
+
+struct evp_pkey_ctx_deleter {
+    void operator()(EVP_PKEY_CTX *context) const noexcept {
+        if (context != nullptr) {
+            (void)EVP_PKEY_CTX_free(context);
+        }
+    }
+};
+
+using evp_pkey_ptr     = std::unique_ptr<EVP_PKEY, evp_pkey_deleter>;
+using evp_pkey_ctx_ptr = std::unique_ptr<EVP_PKEY_CTX, evp_pkey_ctx_deleter>;
 
 evp_pkey_ptr make_p256_key() {
-    evp_pkey_ctx_ptr context{EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free};
+    evp_pkey_ctx_ptr context{EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr)};
     REQUIRE(context);
     REQUIRE(EVP_PKEY_keygen_init(context.get()) == 1);
     REQUIRE(EVP_PKEY_CTX_set_ec_paramgen_curve_nid(context.get(), NID_X9_62_prime256v1) == 1);
 
     EVP_PKEY *raw_key{};
     REQUIRE(EVP_PKEY_keygen(context.get(), &raw_key) == 1);
-    return evp_pkey_ptr{raw_key, EVP_PKEY_free};
+    return evp_pkey_ptr{raw_key};
 }
 #endif
 
@@ -231,37 +258,36 @@ TEST_CASE("COSE Sign rejects conflicting or unprotected algorithm headers") {
     CHECK_EQ(verify_signature_unprotected_alg.error(), status_code::error);
 }
 
-#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
-TEST_CASE("OpenSSL CWT backend signs and verifies COSE Sign1 ES256") {
+#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL || CBOR_TAGS_TEST_HAS_CWT_WOLFSSL
+TEST_CASE("CWT crypto backend signs and verifies COSE Sign1 ES256") {
     auto key = make_p256_key();
 
     const byte_string payload{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
-    auto message = sign1<openssl_es256_backend>(key.get(), header_map{.kid = byte_string{std::byte{0x01}, std::byte{0x02}}}, {}, payload);
+    auto message = sign1<crypto_es256_backend>(key.get(), header_map{.kid = byte_string{std::byte{0x01}, std::byte{0x02}}}, {}, payload);
 
     REQUIRE(message);
     CHECK_EQ(message->signature.size(), 64U);
-    REQUIRE(verify_sign1<openssl_es256_backend>(key.get(), *message));
+    REQUIRE(verify_sign1<crypto_es256_backend>(key.get(), *message));
 
     message->payload->front() = std::byte{0xA2};
-    auto verify_tampered      = verify_sign1<openssl_es256_backend>(key.get(), *message);
+    auto verify_tampered      = verify_sign1<crypto_es256_backend>(key.get(), *message);
     REQUIRE_FALSE(verify_tampered);
     CHECK_EQ(verify_tampered.error(), status_code::error);
 }
 
-TEST_CASE("OpenSSL CWT backend signs and verifies COSE Sign ES256") {
+TEST_CASE("CWT crypto backend signs and verifies COSE Sign ES256") {
     auto key = make_p256_key();
 
     const byte_string payload{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
-    auto              message =
-        sign<openssl_es256_backend>(key.get(), {}, {}, payload, header_map{.kid = byte_string{std::byte{0x01}, std::byte{0x02}}});
+    auto message = sign<crypto_es256_backend>(key.get(), {}, {}, payload, header_map{.kid = byte_string{std::byte{0x01}, std::byte{0x02}}});
 
     REQUIRE(message);
     REQUIRE_EQ(message->signatures.size(), 1U);
     CHECK_EQ(message->signatures.front().signature.size(), 64U);
-    REQUIRE(verify_sign<openssl_es256_backend>(key.get(), *message));
+    REQUIRE(verify_sign<crypto_es256_backend>(key.get(), *message));
 
     message->payload->front() = std::byte{0xA2};
-    auto verify_tampered      = verify_sign<openssl_es256_backend>(key.get(), *message);
+    auto verify_tampered      = verify_sign<crypto_es256_backend>(key.get(), *message);
     REQUIRE_FALSE(verify_tampered);
     CHECK_EQ(verify_tampered.error(), status_code::error);
 }
