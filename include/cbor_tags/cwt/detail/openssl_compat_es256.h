@@ -13,10 +13,9 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
 
 [[nodiscard]] inline expected<byte_string, status_code> ecdsa_der_to_raw_es256(std::span<const std::byte> der_signature) {
     const auto *cursor = reinterpret_cast<const unsigned char *>(der_signature.data());
-    const auto *end = cursor + der_signature.size();
+    const auto *end    = cursor + der_signature.size();
 
-    ossl_ptr<ECDSA_SIG, ECDSA_SIG_free> signature{d2i_ECDSA_SIG(nullptr, &cursor, static_cast<long>(der_signature.size())),
-                                                  ECDSA_SIG_free};
+    ossl_ptr<ECDSA_SIG, ECDSA_SIG_free> signature{d2i_ECDSA_SIG(nullptr, &cursor, static_cast<long>(der_signature.size())), ECDSA_SIG_free};
     if (!signature || cursor != end) {
         return unexpected<status_code>{status_code::error};
     }
@@ -65,7 +64,7 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
     }
 
     std::vector<unsigned char> der(static_cast<std::size_t>(der_size));
-    auto *cursor = der.data();
+    auto                      *cursor = der.data();
     if (i2d_ECDSA_SIG(signature.get(), &cursor) != der_size) {
         return unexpected<status_code>{status_code::error};
     }
@@ -123,8 +122,8 @@ template <typename Key>
         return unexpected<status_code>{status_code::error};
     }
 
-    const auto *input = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    const auto verify_status = EVP_DigestVerify(context.get(), der->data(), der->size(), input, to_be_signed.size());
+    const auto *input         = reinterpret_cast<const unsigned char *>(to_be_signed.data());
+    const auto  verify_status = EVP_DigestVerify(context.get(), der->data(), der->size(), input, to_be_signed.size());
     if (verify_status != 1) {
         return unexpected<status_code>{status_code::error};
     }

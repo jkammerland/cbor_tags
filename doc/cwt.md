@@ -6,7 +6,8 @@ signing objects:
 - CWT registered claims: `claims_set`
 - COSE headers: `header_map`
 - COSE signing objects: `cose_sign`, `cose_signature`, and `cose_sign1`
-- COSE signing input: `sig_structure` and `make_sign1_tbs(...)`
+- COSE signing input: `sig_structure`, `make_sign1_tbs(...)`, and
+  `make_sign_tbs(...)`
 - tag helpers: `as_cwt(...)`, `as_cose_sign1(...)`, and `as_cose_sign(...)`
 
 The base `cbor::tags` target does not link a crypto library.
@@ -68,3 +69,23 @@ bytes and store COSE's raw 64-byte `r || s` ECDSA signature representation.
 The `sign1(...)` helper writes `alg` to the protected header when it is not
 already set, rejects an algorithm that conflicts with the selected backend, and
 rejects `alg` in the unprotected header.
+
+## Sign Example
+
+```cpp
+auto message = cwt::sign<cwt::openssl_es256_backend>(
+    key,
+    {},
+    {},
+    std::span<const std::byte>{*claims_bytes},
+    cwt::header_map{.kid = cwt::byte_string{std::byte{0x01}}});
+
+if (message) {
+    auto result = cwt::verify_sign<cwt::openssl_es256_backend>(key, *message);
+}
+```
+
+`sign(...)` creates a `COSE_Sign` with one `cose_signature`. Additional
+signature entries can be created with `sign_signature(...)` or appended with
+`add_signature(...)`. For `COSE_Sign`, `alg` may be protected at the body or
+signature level, but `alg` in either unprotected header is rejected.
