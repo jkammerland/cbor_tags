@@ -37,6 +37,24 @@ target_link_libraries(app PRIVATE cbor::cwt_wolfssl)
 The wolfSSL backend is a separate target so wolfSSL licensing does not propagate
 through the base CBOR library target.
 
+Package managers keep the crypto backends opt-in as well:
+
+```bash
+conan install . -o cbor-tags/*:cwt_openssl=True
+conan install . -o cbor-tags/*:cwt_wolfssl=True
+vcpkg install --x-feature=cwt-openssl
+vcpkg install --x-feature=cwt-wolfssl
+```
+
+The wolfSSL backend needs wolfSSL's OpenSSL-compatible EVP surface. Conan sets
+the wolfSSL `opensslextra` and `opensslall` options when
+`cwt_wolfssl=True`; non-Conan wolfSSL packages must be built with equivalent
+compatibility support.
+
+Conan's generated aggregate target is `cbor::all`. Link the specific component
+target (`cbor::tags`, `cbor::cwt`, `cbor::cwt_openssl`, or
+`cbor::cwt_wolfssl`) when dependency propagation matters.
+
 ## Sign1 Example
 
 ```cpp
