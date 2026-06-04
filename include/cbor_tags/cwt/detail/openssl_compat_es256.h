@@ -11,6 +11,28 @@ namespace cbor::tags::cwt::detail {
 
 template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, decltype(FreeFn)>;
 
+[[nodiscard]] inline expected<void, status_code> bn_to_fixed_bytes(const BIGNUM *value, std::span<std::byte> output) {
+    const auto value_size = BN_num_bytes(value);
+    if (value_size < 0 || static_cast<std::size_t>(value_size) > output.size()) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    const auto padding_size = output.size() - static_cast<std::size_t>(value_size);
+    for (auto &byte : output.subspan(0U, padding_size)) {
+        byte = std::byte{0};
+    }
+
+    if (value_size == 0) {
+        return {};
+    }
+
+    const auto written = BN_bn2bin(value, reinterpret_cast<unsigned char *>(output.data() + padding_size));
+    if (written != value_size) {
+        return unexpected<status_code>{status_code::error};
+    }
+    return {};
+}
+
 [[nodiscard]] inline expected<byte_string, status_code> ecdsa_der_to_raw_es256(std::span<const std::byte> der_signature) {
     const auto *cursor = reinterpret_cast<const unsigned char *>(der_signature.data());
     const auto *end    = cursor + der_signature.size();
@@ -28,9 +50,13 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
     }
 
     byte_string raw(64);
-    if (BN_bn2binpad(r, reinterpret_cast<unsigned char *>(raw.data()), 32) != 32 ||
-        BN_bn2binpad(s, reinterpret_cast<unsigned char *>(raw.data() + 32), 32) != 32) {
-        return unexpected<status_code>{status_code::error};
+    auto        r_result = bn_to_fixed_bytes(r, std::span<std::byte>{raw.data(), 32U});
+    if (!r_result) {
+        return unexpected<status_code>{r_result.error()};
+    }
+    auto s_result = bn_to_fixed_bytes(s, std::span<std::byte>{raw.data() + 32, 32U});
+    if (!s_result) {
+        return unexpected<status_code>{s_result.error()};
     }
     return raw;
 }
@@ -88,12 +114,15 @@ template <typename Key>
 
     std::size_t der_size{};
     const auto *input = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    if (EVP_DigestSign(context.get(), nullptr, &der_size, input, to_be_signed.size()) != 1) {
+    if (EVP_DigestSignUpdate(context.get(), input, to_be_signed.size()) != 1) {
+        return unexpected<status_code>{status_code::error};
+    }
+    if (EVP_DigestSignFinal(context.get(), nullptr, &der_size) != 1) {
         return unexpected<status_code>{status_code::error};
     }
 
     std::vector<unsigned char> der(der_size);
-    if (EVP_DigestSign(context.get(), der.data(), &der_size, input, to_be_signed.size()) != 1) {
+    if (EVP_DigestSignFinal(context.get(), der.data(), &der_size) != 1) {
         return unexpected<status_code>{status_code::error};
     }
     der.resize(der_size);
@@ -123,7 +152,12 @@ template <typename Key>
     }
 
     const auto *input         = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    const auto  verify_status = EVP_DigestVerify(context.get(), der->data(), der->size(), input, to_be_signed.size());
+    const auto  update_status = EVP_DigestVerifyUpdate(context.get(), input, to_be_signed.size());
+    if (update_status != 1) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    const auto verify_status = EVP_DigestVerifyFinal(context.get(), der->data(), der->size());
     if (verify_status != 1) {
         return unexpected<status_code>{status_code::error};
     }
