@@ -57,6 +57,25 @@ if (!result) {
 Decode to `integer`, `positive`, or `negative` when the full CBOR integer
 domain matters.
 
+## Decode Depth
+
+Default decoders reject raw CBOR items nested deeper than 256 structural
+containers or tags before materializing the target C++ object graph. Excessive
+nesting returns `status_code::max_depth_exceeded`.
+
+Use `max_decode_depth<N>` when a decoder needs a different limit:
+
+```cpp
+using shallow_decoder_options =
+    Options<default_expected, default_wrapping, max_decode_depth<32>>;
+
+auto dec = make_decoder_with_options<shallow_decoder_options>(buffer);
+```
+
+Header-only wrappers such as `as_array_any`, `as_map_any`, `as_tag_any`,
+`as_text_any`, and `as_bstr_any` decode only the current header and are not
+preflighted as full items.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped
@@ -87,3 +106,5 @@ struct my_decoder_options {
 
 If `strict_integer_decode` is omitted, the decoder uses the default slicing
 integer policy.
+If `max_decode_depth` is omitted, the decoder uses the default depth limit of
+256.

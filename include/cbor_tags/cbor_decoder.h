@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -113,12 +114,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            status_collector<self_t> collect_status{*this};
-
-            auto success = (collect_status(std::forward<T>(args)) && ...);
+            auto result  = status_code::success;
+            auto success = (decode_root_argument(std::forward<T>(args), result) && ...);
 
             if (!success) {
-                return unexpected<decltype(collect_status.result)>(collect_status.result);
+                return unexpected<status_code>(result);
             }
             return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
@@ -764,7 +764,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto                                             start = tell();
         detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
         const auto                                             status =
-            detail::read_raw_encoded_item_bounds<InputBuffer, size_type>(data_, start, expected_major, major_mismatch, bounds);
+            detail::read_raw_encoded_item_bounds<InputBuffer, size_type, detail::max_decode_depth_option_v<Options>>(
+                data_, start, expected_major, major_mismatch, bounds);
         if (status != status_code::success) {
             return status;
         }
@@ -892,6 +893,31 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
         const auto [majorType, additionalInfo] = read_initial_byte();
         return decode(value, majorType, additionalInfo);
+    }
+
+    template <typename T> constexpr status_code preflight_root_item() {
+        using value_type = std::remove_cvref_t<T>;
+        if constexpr (IsAnyHeader<value_type>) {
+            return status_code::success;
+        } else {
+            auto        cursor = tell();
+            const auto  end    = std::ranges::end(data_);
+            status_code status = status_code::success;
+            if (!detail::cbor_item_skipper<detail::max_decode_depth_option_v<Options>>::skip_item(cursor, end, status) &&
+                status == status_code::max_depth_exceeded) {
+                return status;
+            }
+            return status_code::success;
+        }
+    }
+
+    template <typename T> constexpr bool decode_root_argument(T &&arg, status_code &result) {
+        result = preflight_root_item<T>();
+        if (result != status_code::success) {
+            return false;
+        }
+        result = decode(arg);
+        return result == status_code::success;
     }
 
     constexpr uint64_t decode_unsigned(byte additionalInfo) {

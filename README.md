@@ -953,6 +953,9 @@ This assumes the input byte buffer itself is already bounded by your transport,
 framing layer, file-size limit, request-body cap, or another application-level
 guard. A PMR arena limits allocations made while materializing decoded C++
 values; it does not limit how much CBOR input you accept.
+Default decoders also reject raw CBOR items nested deeper than 256 structural
+containers or tags before materializing values; use `max_decode_depth<N>` in a
+custom decoder option set to choose a different nesting limit.
 
 ```cpp
 #include <array>
@@ -1003,8 +1006,8 @@ Important limitations(TODO):
 
 A future scanning pass is planned for policy checks before materializing values.
 That pass should be the right place to reject messages by declared array, map,
-or string sizes, nesting depth, or other schema/application limits without
-allocating the target object graph first.
+or string sizes or other schema/application limits without allocating the target
+object graph first.
 
 ## ✨ WIP Features
 

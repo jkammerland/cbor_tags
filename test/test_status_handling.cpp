@@ -127,6 +127,7 @@ TEST_CASE("status messages cover every declared status code") {
         status_code::no_match_for_optional_on_buffer,
         status_code::no_match_in_variant_on_buffer,
         status_code::end_no_match_decoding,
+        status_code::max_depth_exceeded,
     };
 
     for (auto status : statuses) {
