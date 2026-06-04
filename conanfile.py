@@ -18,7 +18,6 @@ class CborTagsConan(ConanFile):
     options = {
         "boost_pfr_names": [True, False],
         "cwt_openssl": [True, False],
-        "cwt_wolfssl": [True, False],
         "magic_enum_names": [True, False],
         "std_expected": [True, False],
         "stl_only": [True, False],
@@ -26,7 +25,6 @@ class CborTagsConan(ConanFile):
     default_options = {
         "boost_pfr_names": False,
         "cwt_openssl": False,
-        "cwt_wolfssl": False,
         "magic_enum_names": False,
         "std_expected": False,
         "stl_only": False,
@@ -44,8 +42,6 @@ class CborTagsConan(ConanFile):
     def requirements(self):
         if self.options.cwt_openssl:
             self.requires("openssl/[>=3 <4]")
-        if self.options.cwt_wolfssl:
-            self.requires("wolfssl/[>=5.9.1 <6]")
         if self.options.stl_only:
             return
         self.requires("fmt/[>=11.0.2 <12]")
@@ -62,9 +58,6 @@ class CborTagsConan(ConanFile):
         self.package_type = "header-library"
         if self.options.boost_pfr_names:
             self.options["boost/*"].header_only = True
-        if self.options.cwt_wolfssl:
-            self.options["wolfssl/*"].opensslextra = True
-            self.options["wolfssl/*"].opensslall = True
 
     def validate(self):
         if self.options.stl_only:
@@ -99,7 +92,6 @@ class CborTagsConan(ConanFile):
         tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.variables["CBOR_TAGS_USE_MAGIC_ENUM_NAMES"] = "ON" if self.options.magic_enum_names else "OFF"
         tc.variables["CBOR_TAGS_ENABLE_CWT_OPENSSL"] = "ON" if self.options.cwt_openssl else "OFF"
-        tc.variables["CBOR_TAGS_ENABLE_CWT_WOLFSSL"] = "ON" if self.options.cwt_wolfssl else "OFF"
         tc.generate()
         deps = CMakeDeps(self)
         deps.generate()
@@ -158,14 +150,6 @@ class CborTagsConan(ConanFile):
             cwt_openssl.libdirs = []
             cwt_openssl.bindirs = []
             cwt_openssl.requires = ["cwt", "openssl::crypto"]
-
-        if self.options.cwt_wolfssl:
-            cwt_wolfssl = self.cpp_info.components["cwt_wolfssl"]
-            cwt_wolfssl.set_property("cmake_target_name", "cbor::cwt_wolfssl")
-            cwt_wolfssl.includedirs = ["include"]
-            cwt_wolfssl.libdirs = []
-            cwt_wolfssl.bindirs = []
-            cwt_wolfssl.requires = ["cwt", "wolfssl::wolfssl"]
 
         # Header-only library
         self.cpp_info.header_only = True
