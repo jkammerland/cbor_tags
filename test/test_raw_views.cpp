@@ -5,14 +5,19 @@
 #include <cbor_tags/cbor_ranges.h>
 #include <cbor_tags/cbor_raw_views.h>
 #include <compare>
+#include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <iterator>
 #include <list>
+#include <map>
 #include <ranges>
 #include <span>
+#include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace cbor::tags;
@@ -50,6 +55,14 @@ static_assert(CanMakeBstrRange<list_encoded_byte_view>);
 static_assert(IsEncodedArrayView<list_encoded_array_view>);
 static_assert(!HasEncodedSpan<list_encoded_byte_view>);
 static_assert(!HasEncodedSpan<list_encoded_array_view>);
+
+using default_decoder_type = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
+using returning_decoder_type =
+    decltype(make_decoder_with_options<encoded_item_view_decoder_options>(std::declval<std::vector<std::byte> &>()));
+
+static_assert(std::same_as<decltype(std::declval<default_decoder_type &>()(std::declval<std::uint64_t &>())), expected<void, status_code>>);
+static_assert(std::same_as<decltype(std::declval<returning_decoder_type &>()(std::declval<std::uint64_t &>())),
+                           expected<typename returning_decoder_type::raw_encoded_item_view, status_code>>);
 
 template <typename RawView> std::vector<std::byte> reencode(const RawView &view) {
     std::vector<std::byte> output;
@@ -160,6 +173,96 @@ TEST_CASE("raw encoded item views decode one item and re-encode exact bytes") {
     CHECK_EQ(to_hex(item.bytes()), "83010203");
     CHECK_EQ(to_hex(reencode(item)), "83010203");
     CHECK(trailing);
+}
+
+TEST_CASE("encoded item view decoder option returns exact bytes for typed values") {
+    auto bytes = to_bytes("83010203f5");
+    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+    std::vector<std::uint64_t> values;
+    bool                       trailing{};
+
+    auto array_result = dec(values);
+    REQUIRE(array_result);
+    CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
+    CHECK_EQ(to_hex(array_result->bytes()), "83010203");
+
+    auto trailing_result = dec(trailing);
+    REQUIRE(trailing_result);
+    CHECK(trailing);
+    CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+}
+
+TEST_CASE("encoded item view decoder option returns the full tagged item for tag and payload targets") {
+    auto bytes = to_bytes("c16c48656c6c6f20776f726c6421");
+    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+    std::string payload;
+    auto        result = dec(static_tag<1>{}, payload);
+
+    REQUIRE(result);
+    CHECK_EQ(payload, "Hello world!");
+    CHECK_EQ(to_hex(result->bytes()), "c16c48656c6c6f20776f726c6421");
+}
+
+TEST_CASE("encoded item view decoder option borrows non-contiguous input") {
+    auto                 contiguous = to_bytes("83010203");
+    std::list<std::byte> bytes(contiguous.begin(), contiguous.end());
+    auto                 dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+    std::vector<std::uint64_t> values;
+    auto                       result = dec(values);
+
+    REQUIRE(result);
+    CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
+    CHECK_EQ(to_hex(result->bytes()), "83010203");
+
+    auto it = bytes.begin();
+    ++it;
+    *it = std::byte{0x0A};
+
+    CHECK_EQ(to_hex(result->bytes()), "830a0203");
+}
+
+TEST_CASE("encoded item view decoder option reports malformed input and typed decode errors") {
+    {
+        auto bytes = to_bytes("830102");
+        auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+        std::vector<std::uint64_t> values;
+        auto                       result = dec(values);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
+
+    {
+        auto bytes = to_bytes("83010203");
+        auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+        std::map<int, int> value;
+        auto               result = dec(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+    }
+}
+
+TEST_CASE("encoded item view decoder option rejects partial item consumption") {
+    auto bytes = to_bytes("c101");
+    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+    auto result = dec(static_tag<1>{});
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+
+    std::uint64_t payload{};
+    auto          payload_result = dec(payload);
+
+    REQUIRE(payload_result);
+    CHECK_EQ(payload, 1);
+    CHECK_EQ(to_hex(payload_result->bytes()), "01");
 }
 
 TEST_CASE("raw encoded array and map views require matching top-level major type") {

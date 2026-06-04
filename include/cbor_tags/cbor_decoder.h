@@ -105,22 +105,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using raw_encoded_array_view = encoded_array_view_for<InputBuffer>;
     using raw_encoded_map_view   = encoded_map_view_for<InputBuffer>;
 
-    using expected_type   = typename Options::return_type;
-    using unexpected_type = typename Options::error_type;
+    using expected_type   = typename detail::decoder_return_type<Options, InputBuffer>::type;
+    using unexpected_type = typename expected_type::error_type;
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            status_collector<self_t> collect_status{*this};
+            if constexpr (detail::return_encoded_item_view_option_v<Options>) {
+                return decode_with_encoded_item_view(std::forward<T>(args)...);
+            } else {
+                status_collector<self_t> collect_status{*this};
 
-            auto success = (collect_status(std::forward<T>(args)) && ...);
+                auto success = (collect_status(std::forward<T>(args)) && ...);
 
-            if (!success) {
-                return unexpected<decltype(collect_status.result)>(collect_status.result);
+                if (!success) {
+                    return unexpected<decltype(collect_status.result)>(collect_status.result);
+                }
+                return expected_type{};
             }
-            return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch (const parse_incomplete_exception &) {
@@ -1266,6 +1270,33 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         status_collector<self_t> collect_status{*this};
         [[maybe_unused]] auto    success = (collect_status(std::forward<Args>(args)) && ...);
         return collect_status.result;
+    }
+
+    template <typename... T> constexpr expected_type decode_with_encoded_item_view(T &&...args) {
+        if (reader_.empty(data_)) {
+            return unexpected<status_code>(status_code::incomplete);
+        }
+
+        const auto                                             start = tell();
+        detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
+        const auto                                             status =
+            detail::read_raw_encoded_item_bounds<InputBuffer, size_type>(data_, start, std::nullopt, status_code::error, bounds);
+        if (status != status_code::success) {
+            return unexpected<status_code>(status);
+        }
+
+        status_collector<self_t> collect_status{*this};
+        const auto               success = (collect_status(std::forward<T>(args)) && ...);
+        if (!success) {
+            return unexpected<decltype(collect_status.result)>(collect_status.result);
+        }
+        if (tell() != bounds.cursor) {
+            return unexpected<status_code>(status_code::error);
+        }
+
+        raw_encoded_item_view encoded_item;
+        assign_encoded_view(encoded_item, bounds.start, bounds.cursor, bounds.size);
+        return expected_type{std::move(encoded_item)};
     }
 
     constexpr auto tell() const noexcept {
