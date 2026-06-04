@@ -154,6 +154,28 @@ Passing the complete output span as the source, or otherwise overlapping the
 source with bytes the encoder writes, remains unsupported. Use separate storage
 when that layout is not practical.
 
+## Return Encoded Item Views
+
+Use `encoded_item_view_decoder_options` when a successful decode should also
+return the exact encoded CBOR item bytes that produced the decoded value.
+
+```cpp
+auto dec = make_decoder_with_options<encoded_item_view_decoder_options>(buffer);
+
+Claims claims{};
+auto encoded = dec(claims);
+if (!encoded) {
+    auto status = encoded.error();
+}
+```
+
+The typed value is still supplied as an output argument. The success value is
+`decltype(dec)::raw_encoded_item_view`, a borrowed view into the decoder input.
+Keep the input buffer alive and unchanged while using it.
+
+The returned view covers exactly one complete CBOR item. If the typed decode
+only consumes part of that item, the call fails with `status_code::error`.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped
