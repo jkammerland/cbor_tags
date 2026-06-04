@@ -161,6 +161,72 @@ TEST_CASE("COSE Sign Sig_structure uses body and signature protected headers") {
     CHECK_EQ(to_hex(std::span<const std::byte>{encoded.data(), 9}), "d83dd8628443a10126");
 }
 
+TEST_CASE("COSE signing structs decode from arrays and CWT tagged wrappers") {
+    const auto sign1_protected = encode_protected_header(header_map{.alg = algorithm::es256});
+    REQUIRE(sign1_protected);
+    cose_sign1 sign1_message{
+        .protected_header = *sign1_protected,
+        .unprotected      = header_map{.kid = byte_string{std::byte{0x01}}},
+        .payload          = byte_string{std::byte{0x01}, std::byte{0x02}},
+        .signature        = byte_string(64, std::byte{0xA5}),
+    };
+
+    std::vector<std::byte> encoded_sign1;
+    auto                   sign1_enc = make_encoder(encoded_sign1);
+    REQUIRE(sign1_enc(as_cwt(as_cose_sign1(sign1_message))));
+
+    cose_sign1 decoded_sign1;
+    auto       sign1_decoded_tag = make_tag_pair(cose_sign1_tag{}, decoded_sign1);
+    auto       sign1_decoded_cwt = make_tag_pair(cwt_tag{}, sign1_decoded_tag);
+    auto       sign1_dec         = make_decoder(encoded_sign1);
+    REQUIRE(sign1_dec(sign1_decoded_cwt));
+    CHECK_EQ(decoded_sign1.protected_header, sign1_message.protected_header);
+    CHECK_EQ(decoded_sign1.unprotected.kid, sign1_message.unprotected.kid);
+    CHECK_EQ(decoded_sign1.payload, sign1_message.payload);
+    CHECK_EQ(decoded_sign1.signature, sign1_message.signature);
+
+    const auto signature_protected = encode_protected_header(header_map{.kid = byte_string{std::byte{0x02}}});
+    REQUIRE(signature_protected);
+    cose_signature signature{
+        .protected_header = *signature_protected,
+        .unprotected      = {},
+        .signature        = byte_string(64, std::byte{0x5A}),
+    };
+
+    std::vector<std::byte> encoded_signature;
+    auto                   signature_enc = make_encoder(encoded_signature);
+    REQUIRE(signature_enc(signature));
+
+    cose_signature decoded_signature;
+    auto           signature_dec = make_decoder(encoded_signature);
+    REQUIRE(signature_dec(decoded_signature));
+    CHECK_EQ(decoded_signature.protected_header, signature.protected_header);
+    CHECK_EQ(decoded_signature.unprotected.kid, signature.unprotected.kid);
+    CHECK_EQ(decoded_signature.signature, signature.signature);
+
+    cose_sign sign_message{
+        .protected_header = *sign1_protected,
+        .unprotected      = {},
+        .payload          = byte_string{std::byte{0x03}, std::byte{0x04}},
+        .signatures       = {signature},
+    };
+
+    std::vector<std::byte> encoded_sign;
+    auto                   sign_enc = make_encoder(encoded_sign);
+    REQUIRE(sign_enc(as_cwt(as_cose_sign(sign_message))));
+
+    cose_sign decoded_sign;
+    auto      sign_decoded_tag = make_tag_pair(cose_sign_tag{}, decoded_sign);
+    auto      sign_decoded_cwt = make_tag_pair(cwt_tag{}, sign_decoded_tag);
+    auto      sign_dec         = make_decoder(encoded_sign);
+    REQUIRE(sign_dec(sign_decoded_cwt));
+    CHECK_EQ(decoded_sign.protected_header, sign_message.protected_header);
+    CHECK_EQ(decoded_sign.payload, sign_message.payload);
+    REQUIRE_EQ(decoded_sign.signatures.size(), 1U);
+    CHECK_EQ(decoded_sign.signatures.front().protected_header, signature.protected_header);
+    CHECK_EQ(decoded_sign.signatures.front().signature, signature.signature);
+}
+
 TEST_CASE("COSE Sign1 validates protected header algorithm for backend") {
     const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es384});
     REQUIRE(protected_header);
