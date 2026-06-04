@@ -63,6 +63,42 @@ target_sources(
             "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
 add_library(cbor::tags ALIAS ${PROJECT_NAME})
 
+add_library(cbor_tags_cwt INTERFACE)
+target_link_libraries(cbor_tags_cwt INTERFACE cbor::tags)
+target_compile_features(cbor_tags_cwt INTERFACE cxx_std_20)
+set_target_properties(cbor_tags_cwt PROPERTIES EXPORT_NAME cwt)
+add_library(cbor::cwt ALIAS cbor_tags_cwt)
+
+option(CBOR_TAGS_ENABLE_CWT_OPENSSL "Enable the optional OpenSSL CWT crypto backend target" OFF)
+option(CBOR_TAGS_ENABLE_CWT_WOLFSSL "Enable the optional wolfSSL CWT crypto backend target" OFF)
+
+if(CBOR_TAGS_ENABLE_CWT_OPENSSL)
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  add_library(cbor_tags_cwt_openssl INTERFACE)
+  target_link_libraries(cbor_tags_cwt_openssl INTERFACE cbor::cwt OpenSSL::Crypto)
+  target_compile_features(cbor_tags_cwt_openssl INTERFACE cxx_std_20)
+  set_target_properties(cbor_tags_cwt_openssl PROPERTIES EXPORT_NAME cwt_openssl)
+  add_library(cbor::cwt_openssl ALIAS cbor_tags_cwt_openssl)
+endif()
+
+if(CBOR_TAGS_ENABLE_CWT_WOLFSSL)
+  find_package(wolfSSL REQUIRED CONFIG)
+  if(TARGET wolfssl::wolfssl)
+    set(CBOR_TAGS_WOLFSSL_TARGET wolfssl::wolfssl)
+  elseif(TARGET wolfSSL::wolfssl)
+    set(CBOR_TAGS_WOLFSSL_TARGET wolfSSL::wolfssl)
+  elseif(TARGET wolfssl)
+    set(CBOR_TAGS_WOLFSSL_TARGET wolfssl)
+  else()
+    message(FATAL_ERROR "wolfSSL was found, but no supported wolfSSL CMake target was exported.")
+  endif()
+  add_library(cbor_tags_cwt_wolfssl INTERFACE)
+  target_link_libraries(cbor_tags_cwt_wolfssl INTERFACE cbor::cwt ${CBOR_TAGS_WOLFSSL_TARGET})
+  target_compile_features(cbor_tags_cwt_wolfssl INTERFACE cxx_std_20)
+  set_target_properties(cbor_tags_cwt_wolfssl PROPERTIES EXPORT_NAME cwt_wolfssl)
+  add_library(cbor::cwt_wolfssl ALIAS cbor_tags_cwt_wolfssl)
+endif()
+
 if(CBOR_TAGS_STL_ONLY)
   target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_STL_ONLY=1)
 endif()
@@ -287,6 +323,12 @@ endif()
 if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.7 REQUIRED CONFIG")
 endif()
+if(TARGET cbor_tags_cwt_openssl)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "OpenSSL REQUIRED COMPONENTS Crypto")
+endif()
+if(TARGET cbor_tags_cwt_wolfssl)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "wolfSSL REQUIRED CONFIG")
+endif()
 
 # Link dependencies
 if(NOT CBOR_TAGS_STL_ONLY)
@@ -351,7 +393,21 @@ endif()
 
 if(CBOR_TAGS_INSTALL)
   cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.6)
-  set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
+  set(CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS cbor_tags_cwt)
+  if(TARGET cbor_tags_cwt_openssl)
+    list(APPEND CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS cbor_tags_cwt_openssl)
+  endif()
+  if(TARGET cbor_tags_cwt_wolfssl)
+    list(APPEND CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS cbor_tags_cwt_wolfssl)
+  endif()
+  set(CBOR_TAGS_INSTALL_PACKAGE_ARGS
+      ${PROJECT_NAME}
+      NAMESPACE
+      cbor::
+      ALIAS_NAME
+      tags
+      ADDITIONAL_TARGETS
+      ${CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS})
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
   endif()
