@@ -1,10 +1,12 @@
 #pragma once
 
+// clang-format off
 #include <openssl/bn.h>
 #include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 
 #include "cbor_tags/cwt/detail/openssl_compat_es256.h"
+// clang-format on
 
 namespace cbor::tags::cwt {
 
