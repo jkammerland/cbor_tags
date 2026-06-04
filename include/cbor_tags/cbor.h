@@ -135,10 +135,12 @@ using default_expected = Option<expected<void, status_code>>;
 namespace detail {
 struct wrap_groups {};
 struct strict_integer_decode {};
+struct return_encoded_item_view {};
 }; // namespace detail
 
-using default_wrapping        = Option<detail::wrap_groups>;
-using strict_integer_decoding = Option<detail::strict_integer_decode>;
+using default_wrapping         = Option<detail::wrap_groups>;
+using strict_integer_decoding  = Option<detail::strict_integer_decode>;
+using return_encoded_item_view = Option<detail::return_encoded_item_view>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
@@ -166,12 +168,38 @@ template <typename... T> struct Options {
     static constexpr bool wrap_groups = contains<default_wrapping, T...>();
     // When true, decoding a CBOR integer into a narrower native integer target rejects instead of slicing.
     static constexpr bool strict_integer_decode = contains<strict_integer_decoding, T...>();
+    // When true, decoder call operators return a borrowed view of the exact encoded item on success.
+    static constexpr bool return_encoded_item_view = contains<::cbor::tags::return_encoded_item_view, T...>();
 
     constexpr Options() = default;
 };
 
-using default_options                = Options<default_expected, default_wrapping>;
-using strict_integer_decoder_options = Options<default_expected, default_wrapping, strict_integer_decoding>;
+using default_options                   = Options<default_expected, default_wrapping>;
+using strict_integer_decoder_options    = Options<default_expected, default_wrapping, strict_integer_decoding>;
+using encoded_item_view_decoder_options = Options<default_expected, default_wrapping, return_encoded_item_view>;
+
+namespace detail {
+template <typename T>
+concept HasReturnEncodedItemViewOption = requires {
+    { T::return_encoded_item_view } -> std::convertible_to<bool>;
+};
+
+template <typename T, bool HasOption = HasReturnEncodedItemViewOption<T>> struct return_encoded_item_view_option : std::false_type {};
+
+template <typename T>
+struct return_encoded_item_view_option<T, true> : std::bool_constant<static_cast<bool>(T::return_encoded_item_view)> {};
+
+template <typename T> inline constexpr bool return_encoded_item_view_option_v = return_encoded_item_view_option<T>::value;
+
+template <typename Options, typename InputBuffer, bool ReturnEncodedItemView = return_encoded_item_view_option_v<Options>>
+struct decoder_return_type {
+    using type = typename Options::return_type;
+};
+
+template <typename Options, typename InputBuffer> struct decoder_return_type<Options, InputBuffer, true> {
+    using type = expected<encoded_item_view_for<InputBuffer>, status_code>;
+};
+} // namespace detail
 // ---------
 
 struct binary_array_view {
