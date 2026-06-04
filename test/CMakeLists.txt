@@ -31,9 +31,6 @@ target_link_libraries(tests PRIVATE cbor::tags doctest::doctest fmt::fmt nameof:
 if(TARGET cbor_tags_cwt_openssl)
   target_link_libraries(tests PRIVATE cbor::cwt_openssl)
   target_compile_definitions(tests PRIVATE CBOR_TAGS_TEST_HAS_CWT_OPENSSL=1)
-elseif(TARGET cbor_tags_cwt_wolfssl)
-  target_link_libraries(tests PRIVATE cbor::cwt_wolfssl)
-  target_compile_definitions(tests PRIVATE CBOR_TAGS_TEST_HAS_CWT_WOLFSSL=1)
 endif()
 
 # Enable ASAN for linux and macos
