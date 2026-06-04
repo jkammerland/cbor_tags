@@ -70,6 +70,18 @@
         }
       ]
     },
+    "cwt-openssl": {
+      "description": "Install OpenSSL for the optional cbor::cwt_openssl CWT crypto backend target.",
+      "dependencies": [
+        "openssl"
+      ]
+    },
+    "cwt-wolfssl": {
+      "description": "Install wolfSSL for the optional cbor::cwt_wolfssl CWT crypto backend target.",
+      "dependencies": [
+        "wolfssl"
+      ]
+    },
     "magic-enum-names": {
       "description": "Install magic_enum dependencies for optional CDDL enum-name definitions.",
       "dependencies": [
