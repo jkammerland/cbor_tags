@@ -10,18 +10,29 @@
 namespace cbor::tags {
 
 template <std::ranges::view R> struct array_range {
+    using range_type = R;
+    using value_type = std::remove_cvref_t<std::ranges::range_value_t<R>>;
+
     R range_;
 
     constexpr explicit array_range(R range) : range_(std::move(range)) {}
 };
 
 template <std::ranges::view R> struct map_range {
+    using range_type  = R;
+    using entry_type  = std::ranges::range_reference_t<R>;
+    using key_type    = std::remove_cvref_t<decltype(detail::pair_first(std::declval<entry_type>()))>;
+    using mapped_type = std::remove_cvref_t<decltype(detail::pair_second(std::declval<entry_type>()))>;
+
     R range_;
 
     constexpr explicit map_range(R range) : range_(std::move(range)) {}
 };
 
 template <std::ranges::view R> struct bstr_range {
+    using range_type = R;
+    using value_type = std::byte;
+
     R           range_;
     std::size_t chunk_size_{4096};
 
@@ -29,6 +40,9 @@ template <std::ranges::view R> struct bstr_range {
 };
 
 template <std::ranges::view R> struct tstr_range {
+    using range_type = R;
+    using value_type = char;
+
     R           range_;
     std::size_t chunk_size_{4096};
 
@@ -39,6 +53,10 @@ namespace detail {
 
 template <typename T> struct is_valid_explicit_range_wrapper : std::false_type {};
 template <typename T> struct is_const_iterable_explicit_range_wrapper : std::false_type {};
+template <typename T> struct is_array_range_wrapper : std::false_type {};
+template <typename T> struct is_map_range_wrapper : std::false_type {};
+template <typename T> struct is_bstr_range_wrapper : std::false_type {};
+template <typename T> struct is_tstr_range_wrapper : std::false_type {};
 
 template <typename T>
 concept ExplicitRangeWrapperReference = is_valid_explicit_range_wrapper<std::remove_cvref_t<T>>::value;
@@ -68,14 +86,18 @@ concept CborMapEntry = IsPairLike<T> && CborRangeComponent<decltype(pair_first(s
                        CborRangeComponent<decltype(pair_second(std::declval<T>()))>;
 
 template <std::ranges::view R> struct is_valid_explicit_range_wrapper<array_range<R>> : std::bool_constant<CborArrayRange<R>> {};
+template <std::ranges::view R> struct is_array_range_wrapper<array_range<R>> : std::true_type {};
 
 template <std::ranges::view R>
 struct is_valid_explicit_range_wrapper<map_range<R>>
     : std::bool_constant<std::ranges::input_range<R> && IsPairLikeRange<R> && CborMapEntry<std::ranges::range_reference_t<R>>> {};
+template <std::ranges::view R> struct is_map_range_wrapper<map_range<R>> : std::true_type {};
 
 template <std::ranges::view R> struct is_valid_explicit_range_wrapper<bstr_range<R>> : std::bool_constant<IsByteLikeRange<R>> {};
+template <std::ranges::view R> struct is_bstr_range_wrapper<bstr_range<R>> : std::true_type {};
 
 template <std::ranges::view R> struct is_valid_explicit_range_wrapper<tstr_range<R>> : std::bool_constant<CborTextRange<R>> {};
+template <std::ranges::view R> struct is_tstr_range_wrapper<tstr_range<R>> : std::true_type {};
 
 template <std::ranges::view R>
 struct is_const_iterable_explicit_range_wrapper<array_range<R>> : std::bool_constant<std::ranges::range<const R>> {};
@@ -88,6 +110,26 @@ struct is_const_iterable_explicit_range_wrapper<bstr_range<R>> : std::bool_const
 
 template <std::ranges::view R>
 struct is_const_iterable_explicit_range_wrapper<tstr_range<R>> : std::bool_constant<std::ranges::range<const R>> {};
+
+template <typename T>
+concept ArrayRangeWrapper = is_array_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept MapRangeWrapper = is_map_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept BstrRangeWrapper = is_bstr_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept TstrRangeWrapper = is_tstr_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept StringRangeWrapper = BstrRangeWrapper<T> || TstrRangeWrapper<T>;
+
+template <typename T>
+concept BoundedExplicitRangeWrapper =
+    IsBoundedSizeWrapper<T> &&
+    (ArrayRangeWrapper<bounded_size_value_t<T>> || MapRangeWrapper<bounded_size_value_t<T>> || StringRangeWrapper<bounded_size_value_t<T>>);
 
 } // namespace detail
 

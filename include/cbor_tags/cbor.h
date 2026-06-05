@@ -31,6 +31,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -71,7 +72,8 @@ enum class status_code : uint8_t {
     no_match_for_simple_on_buffer,
     no_match_for_optional_on_buffer,
     no_match_in_variant_on_buffer,
-    end_no_match_decoding
+    end_no_match_decoding,
+    size_limit_exceeded
 };
 
 template <typename Self> struct cbor_encoder_mixin_base {
@@ -114,6 +116,7 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::no_match_for_optional_on_buffer: return "Unexpected CBOR format: optional value decode failed";
     case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";
     case status_code::end_no_match_decoding: return "Unexpected error at end of CBOR decoding: invalid terminal state";
+    case status_code::size_limit_exceeded: return "CBOR item size limit exceeded";
     default: return "Unknown CBOR status code";
     }
 }
@@ -143,6 +146,53 @@ using strict_integer_decoding = Option<detail::strict_integer_decode>;
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
 };
+
+template <typename T, std::size_t Min, std::size_t Max> struct bounded_size {
+    static_assert(Min <= Max, "bounded_size<T, Min, Max> requires Min <= Max");
+
+    using value_type = std::remove_reference_t<T>;
+
+    static constexpr std::size_t min_size = Min;
+    static constexpr std::size_t max_size = Max;
+
+    T value_{};
+
+    constexpr bounded_size()
+        requires(!std::is_reference_v<T> && std::default_initializable<T>)
+    = default;
+
+    constexpr explicit bounded_size(const value_type &value)
+        requires(!std::is_reference_v<T> && std::copy_constructible<value_type>)
+        : value_(value) {}
+
+    constexpr explicit bounded_size(value_type &&value)
+        requires(!std::is_reference_v<T> && std::move_constructible<value_type>)
+        : value_(std::move(value)) {}
+
+    constexpr explicit bounded_size(value_type &value)
+        requires(std::is_lvalue_reference_v<T>)
+        : value_(value) {}
+
+    [[nodiscard]] constexpr decltype(auto) value() noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() const noexcept { return (value_); }
+};
+
+template <typename T, std::size_t Max> using max_size = bounded_size<T, 0, Max>;
+template <typename T, std::size_t N> using exact_size = bounded_size<T, N, N>;
+
+template <std::size_t Min, std::size_t Max, typename T> [[nodiscard]] constexpr auto as_bounded_size(T &&value) {
+    using stored_type = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::remove_cvref_t<T>>;
+    return bounded_size<stored_type, Min, Max>{std::forward<T>(value)};
+}
+
+namespace detail {
+
+template <std::size_t Min, std::size_t Max> [[nodiscard]] constexpr status_code bounded_size_status(std::uint64_t size) noexcept {
+    return size >= static_cast<std::uint64_t>(Min) && size <= static_cast<std::uint64_t>(Max) ? status_code::success
+                                                                                              : status_code::size_limit_exceeded;
+}
+
+} // namespace detail
 
 template <typename... T> struct ReturnTypeHelper {
     static auto get_return_type() {
