@@ -763,9 +763,9 @@ TEST_CASE("decoder should apply depth preflight to tags non-contiguous inputs an
     }
 
     {
-        auto                   contiguous = nested_definite_arrays(257);
-        std::deque<std::byte>  buffer(contiguous.begin(), contiguous.end());
-        auto                   dec = make_decoder(buffer);
+        auto                                          contiguous = nested_definite_arrays(257);
+        std::deque<std::byte>                         buffer(contiguous.begin(), contiguous.end());
+        auto                                          dec = make_decoder(buffer);
         typename decltype(dec)::raw_encoded_item_view item;
         auto                                          result = dec(item);
 
@@ -779,7 +779,7 @@ TEST_CASE("decoder should apply depth preflight to tags non-contiguous inputs an
         buffer.insert(buffer.end(), nested.begin(), nested.end());
         auto dec = make_decoder(buffer);
 
-        std::uint64_t                         first{99};
+        std::uint64_t                                 first{99};
         typename decltype(dec)::raw_encoded_item_view item;
         auto                                          result = dec(first, item);
 

@@ -144,8 +144,8 @@ template <std::size_t N> struct max_decode_depth {
 };
 }; // namespace detail
 
-using default_wrapping        = Option<detail::wrap_groups>;
-using strict_integer_decoding = Option<detail::strict_integer_decode>;
+using default_wrapping                          = Option<detail::wrap_groups>;
+using strict_integer_decoding                   = Option<detail::strict_integer_decode>;
 template <std::size_t N> using max_decode_depth = Option<detail::max_decode_depth<N>>;
 
 namespace detail {
@@ -158,8 +158,7 @@ template <std::size_t N> struct max_decode_depth_from_option<Option<max_decode_d
     static constexpr std::size_t value           = N;
 };
 template <typename... T> consteval std::size_t selected_max_decode_depth() {
-    static_assert((std::size_t{0U} + ... + (max_decode_depth_from_option<T>::is_depth_option ? std::size_t{1U} : std::size_t{0U})) <=
-                      1U,
+    static_assert((std::size_t{0U} + ... + (max_decode_depth_from_option<T>::is_depth_option ? std::size_t{1U} : std::size_t{0U})) <= 1U,
                   "Options may contain at most one max_decode_depth<N> option");
     std::size_t result = default_max_decode_depth;
     ((result = max_decode_depth_from_option<T>::is_depth_option ? max_decode_depth_from_option<T>::value : result), ...);

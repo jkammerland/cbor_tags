@@ -763,9 +763,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         const auto                                             start = tell();
         detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
-        const auto                                             status =
-            detail::read_raw_encoded_item_bounds<InputBuffer, size_type, detail::max_decode_depth_option_v<Options>>(
-                data_, start, expected_major, major_mismatch, bounds);
+        const auto status = detail::read_raw_encoded_item_bounds<InputBuffer, size_type, detail::max_decode_depth_option_v<Options>>(
+            data_, start, expected_major, major_mismatch, bounds);
         if (status != status_code::success) {
             return status;
         }
