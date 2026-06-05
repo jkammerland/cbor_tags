@@ -614,43 +614,42 @@ template <typename T, typed_array_byte_order ByteOrder>
 struct is_typed_array_encode_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
 
 template <typename T> struct bounded_typed_array_traits {
-    static constexpr bool is_typed_array = false;
-    static constexpr bool encode_target  = false;
-    static constexpr bool decode_target  = false;
+    static constexpr bool is_typed_array  = false;
+    static constexpr bool encode_target   = false;
+    static constexpr bool decode_target   = false;
     static constexpr bool decode_to_owned = false;
 };
 
 template <typename T, typed_array_byte_order ByteOrder> struct bounded_typed_array_traits<typed_array<T, ByteOrder>> {
-    using value_type                    = std::remove_cv_t<T>;
-    static constexpr auto byte_order    = ByteOrder;
-    static constexpr bool is_typed_array = true;
-    static constexpr bool encode_target  = true;
-    static constexpr bool decode_target  = true;
+    using value_type                      = std::remove_cv_t<T>;
+    static constexpr auto byte_order      = ByteOrder;
+    static constexpr bool is_typed_array  = true;
+    static constexpr bool encode_target   = true;
+    static constexpr bool decode_target   = true;
     static constexpr bool decode_to_owned = true;
 };
 
 template <typename T, typed_array_byte_order ByteOrder> struct bounded_typed_array_traits<typed_array_ref<T, ByteOrder>> {
-    using value_type                    = std::remove_cv_t<T>;
-    static constexpr auto byte_order    = ByteOrder;
-    static constexpr bool is_typed_array = true;
-    static constexpr bool encode_target  = true;
-    static constexpr bool decode_target  = false;
+    using value_type                      = std::remove_cv_t<T>;
+    static constexpr auto byte_order      = ByteOrder;
+    static constexpr bool is_typed_array  = true;
+    static constexpr bool encode_target   = true;
+    static constexpr bool decode_target   = false;
     static constexpr bool decode_to_owned = false;
 };
 
 template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
 struct bounded_typed_array_traits<typed_array_view<T, ByteRange, ByteOrder>> {
-    using value_type                    = std::remove_cv_t<T>;
-    static constexpr auto byte_order    = ByteOrder;
-    static constexpr bool is_typed_array = true;
-    static constexpr bool encode_target  = false;
-    static constexpr bool decode_target  = true;
+    using value_type                      = std::remove_cv_t<T>;
+    static constexpr auto byte_order      = ByteOrder;
+    static constexpr bool is_typed_array  = true;
+    static constexpr bool encode_target   = false;
+    static constexpr bool decode_target   = true;
     static constexpr bool decode_to_owned = false;
 };
 
 template <typename T>
-concept BoundedTypedArrayWrapper =
-    IsBoundedSizeWrapper<T> && bounded_typed_array_traits<bounded_size_value_t<T>>::is_typed_array;
+concept BoundedTypedArrayWrapper = IsBoundedSizeWrapper<T> && bounded_typed_array_traits<bounded_size_value_t<T>>::is_typed_array;
 
 template <typename T>
 concept BoundedTypedArrayEncodeWrapper = BoundedTypedArrayWrapper<T> && bounded_typed_array_traits<bounded_size_value_t<T>>::encode_target;
@@ -660,9 +659,9 @@ concept BoundedTypedArrayDecodeWrapper = BoundedTypedArrayWrapper<T> && bounded_
 
 template <typename Decoder, typename T>
 concept BoundedTypedArrayDecodeWrapperFor =
-    BoundedTypedArrayDecodeWrapper<T> &&
-    (!requires { typename bounded_size_value_t<T>::payload_range_type; } ||
-     detail::DecodableTypedArrayPayloadRange<Decoder, typename bounded_size_value_t<T>::payload_range_type>);
+    BoundedTypedArrayDecodeWrapper<T> && (!requires {
+        typename bounded_size_value_t<T>::payload_range_type;
+    } || detail::DecodableTypedArrayPayloadRange<Decoder, typename bounded_size_value_t<T>::payload_range_type>);
 
 template <typename T> struct is_homogeneous_array_wrapper : std::false_type {};
 template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array<Array>> : std::true_type {};
@@ -793,19 +792,19 @@ namespace cbor::tags::cddl {
 
 template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
 struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
-    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+    static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
     static constexpr std::uint64_t element_byte_size = ext::rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
 template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
 struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_ref<T, ByteOrder>> {
-    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+    static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
     static constexpr std::uint64_t element_byte_size = ext::rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
 template <typename T, ext::rfc8746::detail::TypedArrayPayloadRange ByteRange, ext::rfc8746::typed_array_byte_order ByteOrder>
 struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_view<T, ByteRange, ByteOrder>> {
-    static constexpr std::uint64_t tag = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
+    static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
     static constexpr std::uint64_t element_byte_size = ext::rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
@@ -1043,8 +1042,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         }
     }
 
-    template <std::size_t Min, std::size_t Max, typename Array>
-    static void require_bounded_typed_array_element_count(const Array &array) {
+    template <std::size_t Min, std::size_t Max, typename Array> static void require_bounded_typed_array_element_count(const Array &array) {
         const auto size = typed_array_element_count(array);
         if (cbor::tags::detail::bounded_size_status<Min, Max>(size) != status_code::success) {
             throw cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
