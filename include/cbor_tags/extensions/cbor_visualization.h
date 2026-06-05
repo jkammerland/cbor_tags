@@ -420,11 +420,6 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             return cddl_scoped_type_contains_nullable_pointer<value_type>();
         } else if constexpr (IsBoundedSizeWrapper<value_type>) {
             return cddl_contains_nullable_pointer<bounded_size_value_t<value_type>, next_seen>();
-        } else if constexpr (detail::ArrayRangeWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
-        } else if constexpr (detail::MapRangeWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
-                   cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
         } else if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
@@ -432,7 +427,8 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             using traits = cddl_multi_dimensional_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
                    cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
-        } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
+        } else if constexpr (detail::ArrayRangeWrapper<value_type> || IsOptional<value_type> ||
+                             (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
             return []<typename... Ts>(std::variant<Ts...> *) consteval {
@@ -446,7 +442,7 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, next_seen>();
         } else if constexpr (IsIndefiniteWrapper<value_type>) {
             return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, next_seen>();
-        } else if constexpr (IsMap<value_type>) {
+        } else if constexpr (detail::MapRangeWrapper<value_type> || IsMap<value_type>) {
             return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
                    cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
         } else if constexpr (IsTuple<value_type>) {
@@ -1053,7 +1049,8 @@ template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode
 std::string cddl_bounded_sequence_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     validate_bounded_fixed_sequence<Min, Max, value_type>();
-    if constexpr (is_std_array<value_type>::value || (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent)) {
+    if constexpr (is_std_array<value_type>::value ||
+                  (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent)) {
         return cddl_sequence_expr<value_type, PointerMode>(context, options);
     } else {
         using item_type = std::remove_cvref_t<typename value_type::value_type>;
@@ -1130,8 +1127,7 @@ std::string cddl_bounded_size_expr(CDDLContext &context, CDDLOptions options) {
     } else if constexpr (IsArray<render_type>) {
         return cddl_bounded_sequence_expr<render_type, traits::min, traits::max, PointerMode>(context, options);
     } else {
-        static_assert(always_false<render_type>::value,
-                      "bounded_size CDDL requires a string, array, map, or explicit range wrapper");
+        static_assert(always_false<render_type>::value, "bounded_size CDDL requires a string, array, map, or explicit range wrapper");
         return {};
     }
 }
@@ -1297,9 +1293,9 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
         return {};
     } else if constexpr (IsBoundedSizeWrapper<value_type>) {
         return cddl_bounded_size_expr<value_type, PointerMode>(context, options);
-    } else if constexpr (detail::BstrRangeWrapper<value_type>) {
+    } else if constexpr (detail::BstrRangeWrapper<value_type> || IsBinaryString<value_type>) {
         return "bstr";
-    } else if constexpr (detail::TstrRangeWrapper<value_type>) {
+    } else if constexpr (detail::TstrRangeWrapper<value_type> || IsTextString<value_type>) {
         return "tstr";
     } else if constexpr (detail::ArrayRangeWrapper<value_type>) {
         return cddl_array_range_expr<value_type, PointerMode>(context, options);
@@ -1321,10 +1317,6 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
         return "nint";
     } else if constexpr (IsSigned<value_type>) {
         return "int";
-    } else if constexpr (IsTextString<value_type>) {
-        return "tstr";
-    } else if constexpr (IsBinaryString<value_type>) {
-        return "bstr";
     } else if constexpr (IsIndefiniteWrapper<value_type>) {
         return cddl_type_expr<indefinite_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsOptional<value_type>) {
