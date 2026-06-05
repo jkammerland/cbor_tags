@@ -130,6 +130,16 @@ static_assert(rfc8746_detail::TypedArrayPayloadRange<bad_payload_range>);
 static_assert(!CanDecode<extension_decoder, typed_array_view<std::int32_t, bad_payload_range>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view<std::int32_t>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view_be<double>>);
+static_assert(IsCborMajor<bounded_size<typed_array<std::int32_t>, 1, 3>>);
+static_assert(IsCborMajor<bounded_size<typed_array_ref<std::int32_t>, 1, 3>>);
+static_assert(IsCborMajor<bounded_size<typed_array_view<std::int32_t>, 1, 3>>);
+static_assert(CanEncode<extension_encoder, bounded_size<typed_array<std::int32_t>, 1, 3>>);
+static_assert(CanEncode<extension_encoder, bounded_size<typed_array_ref<std::int32_t>, 1, 3>>);
+static_assert(!CanEncode<extension_encoder, bounded_size<typed_array_view<std::int32_t>, 1, 3>>);
+static_assert(CanDecode<extension_decoder, bounded_size<typed_array<std::int32_t>, 1, 3>>);
+static_assert(!CanDecode<extension_decoder, bounded_size<typed_array_ref<std::int32_t>, 1, 3>>);
+static_assert(CanDecode<extension_decoder, bounded_size<typed_array_view<std::int32_t>, 1, 3>>);
+static_assert(!CanDecode<extension_decoder, bounded_size<typed_array_view<std::int32_t, bad_payload_range>, 1, 3>>);
 static_assert(IsRFC8746ArrayPayload<typed_array_view<std::int32_t>>);
 static_assert(!IsRFC8746EncodableArrayPayload<typed_array_view<std::int32_t>>);
 static_assert(!CanWrapAsMultiDimensionalArray<std::vector<std::uint64_t> &, typed_array_view<std::int32_t> &>);
@@ -1156,6 +1166,100 @@ TEST_CASE("rfc8746 typed array borrowed encode wrapper rejects rvalue containers
     static_assert(CanWrapAsMultiDimensionalColumnMajorArray<const dimensions_type &, const typed_array<std::int32_t> &>);
     static_assert(!CanWrapAsMultiDimensionalColumnMajorArray<dimensions_type &&, const typed_array<std::int32_t> &>);
     static_assert(!CanWrapAsMultiDimensionalColumnMajorArray<const dimensions_type &, typed_array<std::int32_t> &&>);
+}
+
+TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
+    const auto encoded_three = to_bytes("d84e4c010000000200000003000000");
+
+    {
+        auto                   values = bounded_size<typed_array<std::int32_t>, 1, 3>{typed_array<std::int32_t>{{1, 2, 3}}};
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<typed_array_codec>(buffer);
+
+        REQUIRE(enc(values));
+        CHECK_EQ(to_hex(buffer), "d84e4c010000000200000003000000");
+    }
+
+    {
+        auto                   values = bounded_size<typed_array<std::int32_t>, 1, 3>{typed_array<std::int32_t>{{1, 2, 3, 4}}};
+        std::vector<std::byte> buffer;
+        auto                   enc    = make_encoder<typed_array_codec>(buffer);
+        const auto             result = enc(values);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(buffer.empty());
+    }
+
+    {
+        std::vector<std::int32_t> values{1, 2, 3};
+        std::vector<std::byte>    buffer;
+        auto                      enc = make_encoder<typed_array_codec>(buffer);
+
+        REQUIRE(enc(as_bounded_size<1, 3>(as_typed_array(values))));
+        CHECK_EQ(to_hex(buffer), "d84e4c010000000200000003000000");
+    }
+
+    {
+        std::vector<std::int32_t> values{1, 2, 3, 4};
+        std::vector<std::byte>    buffer;
+        auto                      enc    = make_encoder<typed_array_codec>(buffer);
+        const auto                result = enc(as_bounded_size<1, 3>(as_typed_array(values)));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(buffer.empty());
+    }
+
+    {
+        bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
+        auto                                          dec = make_decoder<typed_array_codec>(encoded_three);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.value().values(), (std::vector<std::int32_t>{1, 2, 3}));
+    }
+
+    {
+        bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
+        auto                                          input  = to_bytes("d84e5001000000020000000300000004000000");
+        auto                                          dec    = make_decoder<typed_array_codec>(input);
+        const auto                                    result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(decoded.value().values().empty());
+    }
+
+    {
+        bounded_size<typed_array<std::int32_t>, 2, 3> decoded;
+        auto                                          input  = to_bytes("d84e4401000000");
+        auto                                          dec    = make_decoder<typed_array_codec>(input);
+        const auto                                    result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(decoded.value().values().empty());
+    }
+
+    {
+        bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
+        auto                                          input  = to_bytes("d84e450100000000");
+        auto                                          dec    = make_decoder<typed_array_codec>(input);
+        const auto                                    result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK(decoded.value().values().empty());
+    }
+
+    {
+        bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
+        auto                                               dec = make_decoder<typed_array_codec>(encoded_three);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.value().size(), 3U);
+        CHECK_EQ(decoded.value().copy_values(), (std::vector<std::int32_t>{1, 2, 3}));
+    }
 }
 
 TEST_CASE("rfc8746 typed array decode rejects malformed inputs") {

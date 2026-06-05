@@ -967,9 +967,11 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 ## Limiting Decode Allocation With `std::pmr`
 
 When decoding untrusted CBOR into owning containers, an input can declare very
-large array, map, text-string, or byte-string sizes. The decoder does not impose
-schema or application size limits for you. If you need allocation containment,
-decode into allocator-aware types backed by a bounded `std::pmr::memory_resource`.
+large array, map, text-string, or byte-string sizes. Plain containers do not
+impose schema or application size limits for you. Use
+`cbor::tags::bounded_size<T, Min, Max>` for per-field protocol size bounds, and
+use allocator-aware types backed by a bounded `std::pmr::memory_resource` for
+allocation containment.
 
 This assumes the input byte buffer itself is already bounded by your transport,
 framing layer, file-size limit, request-body cap, or another application-level
@@ -985,6 +987,8 @@ values; it does not limit how much CBOR input you accept.
 
 #include <cbor_tags/cbor.h>
 
+namespace ct = cbor::tags;
+
 // Example input: ["a", "b"].
 // In production, populate this from a size-capped input path.
 std::vector<std::byte> input{
@@ -999,10 +1003,10 @@ std::pmr::monotonic_buffer_resource arena(
 
 std::pmr::vector<std::pmr::string> values{&arena};
 
-auto dec = cbor::tags::make_decoder(input);
+auto dec = ct::make_decoder(input);
 auto result = dec(values);
 
-if (!result && result.error() == cbor::tags::status_code::out_of_memory) {
+if (!result && result.error() == ct::status_code::out_of_memory) {
     // The bounded arena was exhausted.
 }
 ```
@@ -1018,7 +1022,11 @@ std::pmr::vector<std::optional<std::pmr::string>>
 
 Important limitations:
 
-- This is allocation containment, not schema validation.
+- PMR alone is allocation containment, not schema validation.
+- `bounded_size<T, Min, Max>` validates the wrapped field's declared size and
+  generates matching CDDL, but unwrapped containers remain unbounded.
+- RFC 8746 scalar typed arrays can also be wrapped in `bounded_size`; the C++
+  bounds are element counts, while generated CDDL constrains byte-string size.
 - Normal typed decoding is single-pass and has no built-in nesting-depth limit.
 - Input-controlled stack growth is limited to [recursive decode paths](doc/decoder_resource_limits.md#recursive-decode-paths), such as
   recursively defined destination types or custom codecs that explicitly recurse.
@@ -1036,6 +1044,11 @@ return cbor::tags::make_decoder(input)(value);
 
 See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
 [`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
+
+A future general scanning pass is planned for whole-message policy checks before
+materializing values. That pass should be the right place to reject messages by
+global declared sizes, nesting depth, or other schema/application limits without
+allocating the target object graph first.
 
 ## ✨ WIP Features
 
