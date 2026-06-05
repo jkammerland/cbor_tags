@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -236,6 +237,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         value              = negative(decoded + 1);
 
         return status_code::success;
+    }
+
+    template <IsBoundedSizeWrapper B>
+        requires(!detail::BoundedSizeExtensionWrapper<B> && !detail::BoundedExplicitRangeWrapper<B>)
+    constexpr status_code decode(B &value, major_type major, byte additionalInfo) {
+        using bounded_type = std::remove_cvref_t<B>;
+        using traits       = bounded_size_traits<bounded_type>;
+        using wrapped_type = bounded_size_value_t<bounded_type>;
+
+        const auto status = preflight_bounded_size<wrapped_type, traits::min, traits::max>(major, additionalInfo);
+        if (status != status_code::success) {
+            return status;
+        }
+        return decode(value.value(), major, additionalInfo);
     }
 
     template <IsBinaryString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
@@ -932,6 +947,161 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode(value, majorType, additionalInfo);
     }
 
+    template <std::size_t Min, std::size_t Max>
+    constexpr status_code bounded_definite_size_status(byte additionalInfo, std::uint64_t &size) {
+        auto        cursor = tell();
+        const auto  end    = std::ranges::end(data_);
+        status_code status = status_code::success;
+        if (!detail::cbor_item_reader::read_argument(cursor, end, std::to_integer<std::uint8_t>(additionalInfo), size, status)) {
+            return status;
+        }
+        return detail::bounded_size_status<Min, Max>(size);
+    }
+
+    template <std::size_t Min, std::size_t Max>
+    constexpr status_code preflight_bounded_indefinite_string(major_type expected_major, status_code mismatch_status) {
+        auto        cursor = tell();
+        const auto  end    = std::ranges::end(data_);
+        status_code status = status_code::success;
+        std::uint64_t size{};
+
+        while (true) {
+            if (cursor == end) {
+                return status_code::incomplete;
+            }
+            if (detail::is_cbor_break_byte(detail::cbor_byte_to_u8(*cursor))) {
+                return detail::bounded_size_status<Min, Max>(size);
+            }
+
+            detail::cbor_item_header chunk{};
+            if (!detail::cbor_item_reader::read_header(cursor, end, chunk, status)) {
+                return status;
+            }
+            if (chunk.major != expected_major || chunk.additional_info == 31U) {
+                return mismatch_status;
+            }
+
+            std::uint64_t chunk_size{};
+            if (!detail::cbor_item_reader::read_argument(cursor, end, chunk.additional_info, chunk_size, status)) {
+                return status;
+            }
+            if (chunk_size > static_cast<std::uint64_t>(Max) || size > static_cast<std::uint64_t>(Max) - chunk_size) {
+                return status_code::size_limit_exceeded;
+            }
+            size += chunk_size;
+            if (!detail::cbor_item_reader::advance_bytes(cursor, end, chunk_size, status)) {
+                return status;
+            }
+        }
+    }
+
+    template <std::size_t Min, std::size_t Max, bool IsMapRoot> constexpr status_code preflight_bounded_indefinite_container() {
+        auto        cursor = tell();
+        const auto  end    = std::ranges::end(data_);
+        status_code status = status_code::success;
+        std::uint64_t item_count{};
+
+        while (true) {
+            if (cursor == end) {
+                return status_code::incomplete;
+            }
+            if (detail::is_cbor_break_byte(detail::cbor_byte_to_u8(*cursor))) {
+                if constexpr (IsMapRoot) {
+                    if (item_count % 2U != 0U) {
+                        return status_code::no_match_for_map_on_buffer;
+                    }
+                    return detail::bounded_size_status<Min, Max>(item_count / 2U);
+                } else {
+                    return detail::bounded_size_status<Min, Max>(item_count);
+                }
+            }
+            if constexpr (IsMapRoot) {
+                if (item_count / 2U == static_cast<std::uint64_t>(Max)) {
+                    return status_code::size_limit_exceeded;
+                }
+            } else {
+                if (item_count == static_cast<std::uint64_t>(Max)) {
+                    return status_code::size_limit_exceeded;
+                }
+            }
+
+            if (!detail::cbor_item_skipper<>::skip_item(cursor, end, status)) {
+                return status;
+            }
+            ++item_count;
+            if constexpr (IsMapRoot) {
+                if ((item_count / 2U) > static_cast<std::uint64_t>(Max) ||
+                    ((item_count / 2U) == static_cast<std::uint64_t>(Max) && item_count % 2U != 0U)) {
+                    return status_code::size_limit_exceeded;
+                }
+            } else {
+                if (item_count > static_cast<std::uint64_t>(Max)) {
+                    return status_code::size_limit_exceeded;
+                }
+            }
+        }
+    }
+
+    template <typename Wrapped, std::size_t Min, std::size_t Max>
+    constexpr status_code preflight_bounded_size(major_type major, byte additionalInfo) {
+        using wrapped_type = std::remove_cvref_t<Wrapped>;
+        static_assert(IsString<wrapped_type> || IsArray<wrapped_type> || IsMap<wrapped_type>,
+                      "bounded_size<T, Min, Max> decode requires T to decode as a string, array, or map");
+
+        if constexpr (IsBinaryString<wrapped_type>) {
+            if (major != major_type::ByteString) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
+                if (additionalInfo != static_cast<byte>(31)) {
+                    return status_code::no_match_for_bstr_on_buffer;
+                }
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return preflight_bounded_indefinite_string<Min, Max>(major_type::ByteString, status_code::no_match_for_bstr_on_buffer);
+            }
+        } else if constexpr (IsTextString<wrapped_type>) {
+            if (major != major_type::TextString) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
+                if (additionalInfo != static_cast<byte>(31)) {
+                    return status_code::no_match_for_tstr_on_buffer;
+                }
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return preflight_bounded_indefinite_string<Min, Max>(major_type::TextString, status_code::no_match_for_tstr_on_buffer);
+            }
+        } else if constexpr (IsMap<wrapped_type>) {
+            if (major != major_type::Map) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
+                if (additionalInfo != static_cast<byte>(31)) {
+                    return status_code::no_match_for_map_on_buffer;
+                }
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return preflight_bounded_indefinite_container<Min, Max, true>();
+            }
+        } else if constexpr (IsArray<wrapped_type>) {
+            if (major != major_type::Array) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
+                if (additionalInfo != static_cast<byte>(31)) {
+                    return status_code::no_match_for_array_on_buffer;
+                }
+            }
+            if (additionalInfo == static_cast<byte>(31)) {
+                return preflight_bounded_indefinite_container<Min, Max, false>();
+            }
+        }
+
+        std::uint64_t size{};
+        return bounded_definite_size_status<Min, Max>(additionalInfo, size);
+    }
+
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
         if (additionalInfo < static_cast<byte>(24)) {
             return static_cast<uint64_t>(additionalInfo);
@@ -1445,6 +1615,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return false;
             } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
                        result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+                hard_error = result;
+                return false;
+            } else if (result == status_code::size_limit_exceeded) {
                 hard_error = result;
                 return false;
             } else {
