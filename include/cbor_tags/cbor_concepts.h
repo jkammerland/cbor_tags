@@ -262,21 +262,20 @@ template <typename T> struct bounded_size_traits {
     static constexpr bool        is_bounded_size = false;
     static constexpr std::size_t min             = 0;
     static constexpr std::size_t max             = 0;
-    using wrapped_type                          = void;
+    using wrapped_type                           = void;
 };
 
 template <typename T, std::size_t Min, std::size_t Max> struct bounded_size_traits<bounded_size<T, Min, Max>> {
     static constexpr bool        is_bounded_size = true;
     static constexpr std::size_t min             = Min;
     static constexpr std::size_t max             = Max;
-    using wrapped_type                          = T;
+    using wrapped_type                           = T;
 };
 
 template <typename T>
 concept IsBoundedSizeWrapper = bounded_size_traits<std::remove_cvref_t<T>>::is_bounded_size;
 
-template <typename T>
-using bounded_size_wrapped_t = typename bounded_size_traits<std::remove_cvref_t<T>>::wrapped_type;
+template <typename T> using bounded_size_wrapped_t = typename bounded_size_traits<std::remove_cvref_t<T>>::wrapped_type;
 
 template <typename T> using bounded_size_value_t = std::remove_cvref_t<bounded_size_wrapped_t<T>>;
 
@@ -694,26 +693,43 @@ template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
 
 // Helper for container like types, e.g optional
 template <typename T> struct ContainsCborMajor<T, false> {
-    static constexpr bool value = IsAnyHeader<T> || IsCborMajor<typename T::value_type>;
+    static constexpr bool value = [] {
+        if constexpr (IsAnyHeader<T>) {
+            return true;
+        } else if constexpr (requires { typename T::value_type; }) {
+            return IsCborMajor<typename T::value_type>;
+        } else {
+            return false;
+        }
+    }();
 };
 
 template <typename T> struct ContainsCborMajor<T, true> {
-    static constexpr bool value = IsAnyHeader<T> || (IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>);
+    static constexpr bool value = [] {
+        if constexpr (IsAnyHeader<T>) {
+            return true;
+        } else if constexpr (requires {
+                                 typename T::key_type;
+                                 typename T::mapped_type;
+                             }) {
+            return IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>;
+        } else {
+            return false;
+        }
+    }();
 };
 
 template <typename T>
     requires IsBoundedSizeWrapper<T>
 struct ContainsCborMajor<T, false> {
-    using wrapped_type = bounded_size_value_t<T>;
+    using wrapped_type          = bounded_size_value_t<T>;
     static constexpr bool value = [] {
-        if constexpr (IsString<wrapped_type>) {
+        if constexpr (IsString<wrapped_type> || detail::BoundedSizeExtensionType<wrapped_type>) {
             return true;
         } else if constexpr (IsArray<wrapped_type>) {
             return ContainsCborMajor<wrapped_type>::value;
         } else if constexpr (IsMap<wrapped_type>) {
             return ContainsCborMajor<wrapped_type, true>::value;
-        } else if constexpr (detail::BoundedSizeExtensionType<wrapped_type>) {
-            return true;
         } else {
             return false;
         }

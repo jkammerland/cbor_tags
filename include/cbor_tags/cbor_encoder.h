@@ -97,8 +97,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         const auto &wrapped = value.value();
         if constexpr (IsIndefiniteWrapper<wrapped_type>) {
             using inner_type = indefinite_value_t<wrapped_type>;
-            static_assert(std::ranges::sized_range<inner_type>,
-                          "bounded_size<as_indefinite<T>, Min, Max> requires T to be a sized range");
+            static_assert(std::ranges::sized_range<inner_type>, "bounded_size<as_indefinite<T>, Min, Max> requires T to be a sized range");
             if (std::cmp_greater(std::ranges::size(wrapped.value_), std::numeric_limits<std::uint64_t>::max())) {
                 throw detail::encode_status_exception{status_code::size_limit_exceeded};
             }

@@ -960,9 +960,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <std::size_t Min, std::size_t Max>
     constexpr status_code preflight_bounded_indefinite_string(major_type expected_major, status_code mismatch_status) {
-        auto        cursor = tell();
-        const auto  end    = std::ranges::end(data_);
-        status_code status = status_code::success;
+        auto          cursor = tell();
+        const auto    end    = std::ranges::end(data_);
+        status_code   status = status_code::success;
         std::uint64_t size{};
 
         while (true) {
@@ -996,9 +996,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <std::size_t Min, std::size_t Max, bool IsMapRoot> constexpr status_code preflight_bounded_indefinite_container() {
-        auto        cursor = tell();
-        const auto  end    = std::ranges::end(data_);
-        status_code status = status_code::success;
+        auto          cursor = tell();
+        const auto    end    = std::ranges::end(data_);
+        status_code   status = status_code::success;
         std::uint64_t item_count{};
 
         while (true) {
@@ -1613,11 +1613,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
-                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
-                hard_error = result;
-                return false;
-            } else if (result == status_code::size_limit_exceeded) {
+            } else if (result == status_code::size_limit_exceeded ||
+                       (major == major_type::Tag && result != status_code::no_match_for_tag &&
+                        result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer)) {
                 hard_error = result;
                 return false;
             } else {

@@ -755,10 +755,10 @@ TEST_CASE("bounded_size enforces encode and decode limits for materialized conta
     }
 
     {
-        auto                                  buffer = to_bytes("83010203");
+        auto                                 buffer = to_bytes("83010203");
         bounded_size<std::vector<int>, 0, 2> decoded;
-        auto                                  dec    = make_decoder(buffer);
-        auto                                  result = dec(decoded);
+        auto                                 dec    = make_decoder(buffer);
+        auto                                 result = dec(decoded);
 
         CHECK_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
@@ -777,10 +777,10 @@ TEST_CASE("bounded_size enforces encode and decode limits for materialized conta
     }
 
     {
-        auto                                buffer = to_bytes("7f626162626364ff");
-        bounded_size<std::string, 0, 3>     decoded;
-        auto                                dec    = make_decoder(buffer);
-        auto                                result = dec(decoded);
+        auto                            buffer = to_bytes("7f626162626364ff");
+        bounded_size<std::string, 0, 3> decoded;
+        auto                            dec    = make_decoder(buffer);
+        auto                            result = dec(decoded);
 
         CHECK_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
@@ -788,10 +788,10 @@ TEST_CASE("bounded_size enforces encode and decode limits for materialized conta
     }
 
     {
-        auto                                  buffer = to_bytes("8101");
+        auto                                 buffer = to_bytes("8101");
         bounded_size<std::vector<int>, 2, 4> decoded;
-        auto                                  dec    = make_decoder(buffer);
-        auto                                  result = dec(decoded);
+        auto                                 dec    = make_decoder(buffer);
+        auto                                 result = dec(decoded);
 
         CHECK_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
@@ -799,10 +799,10 @@ TEST_CASE("bounded_size enforces encode and decode limits for materialized conta
     }
 
     {
-        auto                                             buffer = to_bytes("4101");
-        bounded_size<std::vector<std::byte>, 2, 4>       decoded;
-        auto                                             dec    = make_decoder(buffer);
-        auto                                             result = dec(decoded);
+        auto                                       buffer = to_bytes("4101");
+        bounded_size<std::vector<std::byte>, 2, 4> decoded;
+        auto                                       dec    = make_decoder(buffer);
+        auto                                       result = dec(decoded);
 
         CHECK_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
@@ -867,7 +867,7 @@ TEST_CASE("bounded_size enforces encode and decode limits for materialized conta
     }
 
     {
-        CDDLBoundedVariant value{bounded_size<std::string, 1, 4>{std::string{"name"}}};
+        CDDLBoundedVariant     value{bounded_size<std::string, 1, 4>{std::string{"name"}}};
         std::vector<std::byte> buffer;
         auto                   enc = make_encoder(buffer);
 
@@ -962,7 +962,7 @@ TEST_CASE("bounded_size enforces explicit range wrapper limits") {
     {
         auto                   values = std::views::iota(1, 4);
         std::vector<std::byte> buffer;
-        auto                   enc    = make_encoder(buffer);
+        auto                   enc = make_encoder(buffer);
 
         auto result = enc(as_bounded_size<3, 3>(as_array_range(values)));
 
@@ -1139,13 +1139,10 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
     check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int64_t>>(75);
     check_cddl_typed_array_tag<rfc8746::typed_array<std::int16_t>>(77);
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array<std::int32_t>>(), "root = #6.78(bstr)");
-    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>>(),
-             "root = #6.78(bstr .size (4..12))");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>>(), "root = #6.78(bstr .size (4..12))");
     CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_ref<std::uint8_t>, 4, 4>>(), "root = #6.64(bstr .size 4)");
-    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_be<std::int16_t>, 1, 3>>(),
-             "root = #6.73(bstr .size (2..6))");
-    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_view<std::int32_t>, 1, 3>>(),
-             "root = #6.78(bstr .size (4..12))");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_be<std::int16_t>, 1, 3>>(), "root = #6.73(bstr .size (2..6))");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_view<std::int32_t>, 1, 3>>(), "root = #6.78(bstr .size (4..12))");
     check_cddl_typed_array_tag<rfc8746::typed_array<std::int64_t>>(79);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<float16_t>>(80);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<float>>(81);
