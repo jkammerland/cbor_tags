@@ -112,6 +112,118 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
+    class structural_scope {
+      public:
+        constexpr structural_scope() noexcept = default;
+        constexpr explicit structural_scope(self_t &decoder) noexcept : decoder_(&decoder) {}
+        structural_scope(const structural_scope &) = delete;
+        constexpr structural_scope(structural_scope &&other) noexcept : decoder_(std::exchange(other.decoder_, nullptr)) {}
+
+        constexpr structural_scope &operator=(const structural_scope &) = delete;
+        constexpr structural_scope &operator=(structural_scope &&other) noexcept {
+            if (this != &other) {
+                release();
+                decoder_ = std::exchange(other.decoder_, nullptr);
+            }
+            return *this;
+        }
+
+        constexpr ~structural_scope() { release(); }
+
+      private:
+        constexpr void release() noexcept {
+            if (decoder_ != nullptr) {
+                --decoder_->structural_depth_;
+                decoder_ = nullptr;
+            }
+        }
+
+        self_t *decoder_{};
+    };
+
+    struct entered_array {
+        std::uint64_t    size{};
+        structural_scope scope;
+
+        constexpr entered_array(std::uint64_t size_, structural_scope scope_) noexcept : size(size_), scope(std::move(scope_)) {}
+    };
+
+    struct entered_map {
+        std::uint64_t    size{};
+        structural_scope scope;
+
+        constexpr entered_map(std::uint64_t size_, structural_scope scope_) noexcept : size(size_), scope(std::move(scope_)) {}
+    };
+
+    struct entered_tag {
+        std::uint64_t    tag{};
+        structural_scope scope;
+
+        constexpr entered_tag(std::uint64_t tag_, structural_scope scope_) noexcept : tag(tag_), scope(std::move(scope_)) {}
+    };
+
+    [[nodiscard]] constexpr expected<entered_array, status_code> enter_array() {
+        return enter_definite_container<entered_array>(major_type::Array, status_code::no_match_for_array_on_buffer);
+    }
+
+    [[nodiscard]] constexpr expected<entered_array, status_code> enter_array(std::uint64_t expected_size) {
+        auto result = enter_array();
+        if (!result) {
+            return unexpected<status_code>(result.error());
+        }
+        if (result->size != expected_size) {
+            return unexpected<status_code>(status_code::unexpected_group_size);
+        }
+        return result;
+    }
+
+    [[nodiscard]] constexpr expected<entered_map, status_code> enter_map() {
+        return enter_definite_container<entered_map>(major_type::Map, status_code::no_match_for_map_on_buffer);
+    }
+
+    [[nodiscard]] constexpr expected<entered_map, status_code> enter_map(std::uint64_t expected_size) {
+        auto result = enter_map();
+        if (!result) {
+            return unexpected<status_code>(result.error());
+        }
+        if (result->size != expected_size) {
+            return unexpected<status_code>(status_code::unexpected_group_size);
+        }
+        return result;
+    }
+
+    [[nodiscard]] constexpr expected<entered_tag, status_code> enter_tag() {
+        if (reader_.empty(data_)) {
+            return unexpected<status_code>(status_code::incomplete);
+        }
+
+        const auto [major, additional_info] = read_initial_byte();
+        if (major != major_type::Tag) {
+            return unexpected<status_code>(status_code::no_match_for_tag_on_buffer);
+        }
+        if (additional_info == static_cast<byte>(31)) {
+            return unexpected<status_code>(status_code::no_match_for_tag);
+        }
+
+        const auto tag   = decode_unsigned(additional_info);
+        auto       scope = enter_structural_item();
+        if (!scope) {
+            return unexpected<status_code>(scope.error());
+        }
+        return entered_tag{tag, std::move(*scope)};
+    }
+
+    [[nodiscard]] constexpr expected<entered_tag, status_code> enter_tag(std::uint64_t expected_tag) {
+        auto result = enter_tag();
+        if (!result) {
+            return unexpected<status_code>(result.error());
+        }
+        if (result->tag != expected_tag) {
+            return unexpected<status_code>(status_code::no_match_for_tag);
+        }
+        return result;
+    }
+
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
             auto result  = status_code::success;
@@ -326,6 +438,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
+        auto depth_scope = enter_structural_item();
+        if (!depth_scope) {
+            return depth_scope.error();
+        }
+
         if (additionalInfo == static_cast<byte>(31)) {
             if constexpr (IsFixedArray<T>) {
                 return status_code::unexpected_group_size;
@@ -439,11 +556,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag;
         }
 
-        auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
-        if (array_header_status != status_code::success) {
-            return array_header_status;
+        auto tag_scope = enter_structural_item();
+        if (!tag_scope) {
+            return tag_scope.error();
         }
-        return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, detail::tuple_tail(t));
+
+        auto tail = detail::tuple_tail(t);
+        return this->decode_wrapped_group(tail, [this, &tail] {
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tail);
+        });
     }
 
     template <IsTaggedTuple T> constexpr status_code decode(T &t, std::uint64_t tag) {
@@ -451,48 +572,38 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag;
         }
 
-        auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(t));
-        if (array_header_status != status_code::success) {
-            return array_header_status;
-        }
-        return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, detail::tuple_tail(t));
+        auto tail = detail::tuple_tail(t);
+        return this->decode_wrapped_group(tail, [this, &tail] {
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tail);
+        });
     }
 
     template <typename T>
         requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
     constexpr status_code decode(T &value) {
-        auto &&tuple = to_tuple(value);
+        auto tuple = to_tuple(value);
 
-        // Decode the tag
-        auto result = status_code::success;
         if constexpr (HasInlineTag<T>) {
-            result = decode(static_tag<T::cbor_tag>{});
+            auto tag_scope = this->enter_tag(T::cbor_tag);
+            if (!tag_scope) {
+                return tag_scope.error();
+            }
+            return this->decode_wrapped_group(tuple, [this, &tuple] {
+                return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
+            });
         } else if constexpr (IsTag<T>) {
-            result = decode(std::get<0>(tuple));
-        }
-        // Check if the tag was decoded successfully
-        if (result != status_code::success) {
-            return result;
-        }
-
-        // Decode the group header
-        auto group_status = status_code::success;
-        if constexpr (HasInlineTag<T> || !IsTag<T>) {
-            group_status = this->decode_wrapped_group(tuple);
+            auto tag_scope = this->enter_tag(static_cast<std::uint64_t>(std::get<0>(tuple)));
+            if (!tag_scope) {
+                return tag_scope.error();
+            }
+            auto tail = detail::tuple_tail(tuple);
+            return this->decode_wrapped_group(tail, [this, &tail] {
+                return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tail);
+            });
         } else {
-            group_status = this->decode_wrapped_group(detail::tuple_tail(tuple));
-        }
-        // Check if the group was decoded successfully
-        if (group_status != status_code::success) {
-            return group_status;
-        }
-
-        // Decode the group and return the result
-        if constexpr (HasInlineTag<T> || !IsTag<T>) {
-            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
-        } else {
-            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); },
-                              detail::tuple_tail(tuple));
+            return this->decode_wrapped_group(tuple, [this, &tuple] {
+                return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
+            });
         }
     }
 
@@ -503,15 +614,19 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto &&tuple = to_tuple(value);
-        auto   tag   = decode_unsigned(additionalInfo);
+        auto tuple     = to_tuple(value);
+        auto tag       = decode_unsigned(additionalInfo);
+        auto tag_scope = enter_structural_item();
+        if (!tag_scope) {
+            return tag_scope.error();
+        }
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
     template <typename T>
         requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
     constexpr status_code decode(T &value, std::uint64_t tag) {
-        auto &&tuple = to_tuple(value);
+        auto tuple = to_tuple(value);
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
@@ -541,30 +656,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (tag != T::cbor_tag) {
                 return status_code::no_match_for_tag;
             }
-            auto array_header_status = this->decode_wrapped_group(tuple);
-            if (array_header_status != status_code::success) {
-                return array_header_status;
-            }
-            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
+            return this->decode_wrapped_group(tuple, [this, &tuple] {
+                return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tuple);
+            });
         } else {
             if (tag != std::get<0>(tuple)) {
                 return status_code::no_match_for_tag;
             }
-            auto array_header_status = this->decode_wrapped_group(detail::tuple_tail(tuple));
-            if (array_header_status != status_code::success) {
-                return array_header_status;
-            }
-            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); },
-                              detail::tuple_tail(tuple));
+            auto tail = detail::tuple_tail(tuple);
+            return this->decode_wrapped_group(tail, [this, &tail] {
+                return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, tail);
+            });
         }
     }
 
     template <IsUntaggedTuple T> constexpr status_code decode(T &value) {
-        auto group_status = this->decode_wrapped_group(value);
-        if (group_status != status_code::success) {
-            return group_status;
-        }
-        return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, value);
+        return this->decode_wrapped_group(value, [this, &value] {
+            return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, value);
+        });
     }
 
     constexpr status_code decode(bool &value, major_type major, byte additionalInfo) {
@@ -764,7 +873,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto                                             start = tell();
         detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
         const auto status = detail::read_raw_encoded_item_bounds<InputBuffer, size_type, detail::max_decode_depth_option_v<Options>>(
-            data_, start, expected_major, major_mismatch, bounds);
+            data_, start, expected_major, major_mismatch, bounds, structural_depth_);
         if (status != status_code::success) {
             return status;
         }
@@ -836,31 +945,34 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                       "transcoding operation! "
                       "Give friend access if members are private, i.e friend cbor::tags::Access (full namespace is required)");
 
-        // Automatic tag decoding - only performed if NOT in a variant context
-        // In a variant context the tag is already decoded. The reason is that
-        // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
-        // alternatives. If we are here, then we have already checked that this is the right tag.
-        if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
-            auto tag_status = this->decode(detail::get_major_6_tag_from_class(value));
-            if (tag_status != status_code::success) {
-                return tag_status;
+        auto decode_payload = [this, &value]() constexpr -> status_code {
+            if constexpr (has_transcode) {
+                auto result = Access::transcode(*this, value);
+                return result ? status_code::success : result.error();
+            } else if constexpr (has_decode) {
+                auto result = Access::decode(*this, value);
+                return result ? status_code::success : result.error();
+            } else if constexpr (has_free_decode) {
+                /* This requires an indirect call in order for some compilers to find the overload. */
+                auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
+                return result ? status_code::success : result.error();
+            } else if (has_free_transcode) {
+                /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
+                auto result = transcode(*this, std::forward<C>(value));
+                return result ? status_code::success : result.error();
             }
-        }
+            return status_code::error;
+        };
 
-        if constexpr (has_transcode) {
-            auto result = Access::transcode(*this, value);
-            return result ? status_code::success : result.error();
-        } else if constexpr (has_decode) {
-            auto result = Access::decode(*this, value);
-            return result ? status_code::success : result.error();
-        } else if constexpr (has_free_decode) {
-            /* This requires an indirect call in order for some compilers to find the overload. */
-            auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
-        } else if (has_free_transcode) {
-            /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
-            auto result = transcode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
+        // Automatic tag decoding - only performed if NOT in a variant context.
+        if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
+            auto tag_scope = this->enter_tag(static_cast<std::uint64_t>(detail::get_major_6_tag_from_class(value)));
+            if (!tag_scope) {
+                return tag_scope.error();
+            }
+            return decode_payload();
+        } else {
+            return decode_payload();
         }
 
         // throw std::runtime_error("This should never happen");
@@ -894,27 +1006,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode(value, majorType, additionalInfo);
     }
 
-    template <typename T> constexpr status_code preflight_root_item() {
-        using value_type = std::remove_cvref_t<T>;
-        if constexpr (IsAnyHeader<value_type>) {
-            return status_code::success;
-        } else {
-            auto        cursor = tell();
-            const auto  end    = std::ranges::end(data_);
-            status_code status = status_code::success;
-            if (!detail::cbor_item_skipper<detail::max_decode_depth_option_v<Options>>::skip_item(cursor, end, status) &&
-                status == status_code::max_depth_exceeded) {
-                return status;
-            }
-            return status_code::success;
-        }
-    }
-
     template <typename T> constexpr bool decode_root_argument(T &&arg, status_code &result) {
-        result = preflight_root_item<T>();
-        if (result != status_code::success) {
-            return false;
-        }
         result = decode(arg);
         return result == status_code::success;
     }
@@ -1277,14 +1369,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     };
 
-    template <typename T> constexpr auto decode_wrapped_group(T &&) {
-        using tuple_type      = std::decay_t<T>;
-        constexpr auto size_  = std::tuple_size_v<tuple_type>;
-        auto           status = status_code::success;
+    template <typename T, typename DecodePayload> constexpr auto decode_wrapped_group(T &&, DecodePayload &&decode_payload) {
+        using tuple_type     = std::decay_t<T>;
+        constexpr auto size_ = std::tuple_size_v<tuple_type>;
         if constexpr (size_ > 1 && Options::wrap_groups) {
-            status = this->decode(as_array{size_});
+            auto group = this->enter_array(size_);
+            if (!group) {
+                return group.error();
+            }
         }
-        return status;
+        return std::forward<DecodePayload>(decode_payload)();
     }
 
     template <typename... Args> constexpr auto applier(Args &&...args) {
@@ -1306,6 +1400,38 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    std::size_t structural_depth_{};
+
+    [[nodiscard]] constexpr expected<structural_scope, status_code> enter_structural_item() {
+        if (structural_depth_ == detail::max_decode_depth_option_v<Options>) {
+            return unexpected<status_code>(status_code::max_depth_exceeded);
+        }
+        ++structural_depth_;
+        return structural_scope{*this};
+    }
+
+    template <typename Entered>
+    [[nodiscard]] constexpr expected<Entered, status_code> enter_definite_container(major_type expected_major, status_code major_mismatch) {
+        if (reader_.empty(data_)) {
+            return unexpected<status_code>(status_code::incomplete);
+        }
+
+        const auto [major, additional_info] = read_initial_byte();
+        if (major != expected_major) {
+            return unexpected<status_code>(major_mismatch);
+        }
+        if (additional_info == static_cast<byte>(31)) {
+            return unexpected<status_code>(status_code::unexpected_group_size);
+        }
+
+        const auto size  = decode_unsigned(additional_info);
+        auto       scope = enter_structural_item();
+        if (!scope) {
+            return unexpected<status_code>(scope.error());
+        }
+        return Entered{size, std::move(*scope)};
+    }
+
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
                                          std::optional<std::uint64_t> &tag) {
@@ -1327,6 +1453,19 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         bool        saw_incomplete = false;
         status_code hard_error     = status_code::success;
+
+        structural_scope tag_scope{};
+        if (major == major_type::Tag && !tag) {
+            if (additionalInfo == static_cast<byte>(31)) {
+                return status_code::no_match_for_tag;
+            }
+            tag        = decode_unsigned(additionalInfo);
+            auto scope = enter_structural_item();
+            if (!scope) {
+                return scope.error();
+            }
+            tag_scope = std::move(*scope);
+        }
 
         auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
                            &hard_error]<bool CatchAllPass, typename U>() -> bool {
@@ -1487,9 +1626,12 @@ template <typename T> struct cbor_header_decoder {
 
     constexpr status_code                           decode(as_array value) { return validate_size(major_type::Array, value.size_); }
     template <typename... Ts> constexpr status_code decode(wrap_as_array<Ts...> value) {
-        auto result = validate_size(major_type::Array, value.size_);
-        if (result != status_code::success) {
-            return result;
+        auto group = detail::underlying<T>(this).enter_array(value.size_);
+        if (!group) {
+            if (group.error() == status_code::no_match_for_array_on_buffer) {
+                return status_code::error;
+            }
+            return group.error();
         }
         return std::apply([this](auto &&...args) { return detail::underlying<T>(this).applier(std::forward<decltype(args)>(args)...); },
                           value.values_);

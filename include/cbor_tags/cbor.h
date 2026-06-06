@@ -192,7 +192,7 @@ template <typename... T> struct Options {
     static constexpr bool wrap_groups = contains<default_wrapping, T...>();
     // When true, decoding a CBOR integer into a narrower native integer target rejects instead of slicing.
     static constexpr bool strict_integer_decode = contains<strict_integer_decoding, T...>();
-    // Maximum raw CBOR structural depth accepted before materialized decode.
+    // Maximum CBOR structural depth accepted by raw and materialized decode paths.
     static constexpr std::size_t max_decode_depth = detail::selected_max_decode_depth<T...>();
 
     constexpr Options() = default;
