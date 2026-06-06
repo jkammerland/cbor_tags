@@ -953,9 +953,48 @@ This assumes the input byte buffer itself is already bounded by your transport,
 framing layer, file-size limit, request-body cap, or another application-level
 guard. A PMR arena limits allocations made while materializing decoded C++
 values; it does not limit how much CBOR input you accept.
-Default decoders also reject raw CBOR items nested deeper than 256 structural
-containers or tags before materializing values; use `max_decode_depth<N>` in a
-custom decoder option set to choose a different nesting limit.
+Default decoders also reject raw and materialized CBOR values nested deeper
+than 256 structural containers or tags; use `max_decode_depth<N>` in a custom
+decoder option set to choose a different nesting limit.
+
+Custom decoders that manually read a container or tag header and then decode
+its payload should use the depth-managed scoped helpers. The returned object
+must stay alive until the payload has been decoded.
+
+```cpp
+namespace ct = cbor::tags;
+
+struct Claims {
+    std::int64_t issuer{};
+
+    template <typename Dec>
+    ct::expected<void, ct::status_code> decode(Dec& dec) {
+        auto map = dec.enter_map(1);
+        if (!map) {
+            return ct::unexpected<ct::status_code>{map.error()};
+        }
+
+        std::int64_t key{};
+        auto key_result = dec(key);
+        if (!key_result) {
+            return key_result;
+        }
+
+        auto value_result = dec(issuer);
+        if (!value_result) {
+            return value_result;
+        }
+
+        return {};
+    }
+};
+```
+
+The split header adapters (`as_array`, `as_map`, `as_array_any`, `as_map_any`,
+`static_tag`, and `dynamic_tag`) intentionally read only the current header.
+They do not keep a depth scope alive for later `dec(...)` calls. Use `enter_*`
+when the custom decoder owns the payload decode and needs depth enforcement for
+that payload.
 
 ```cpp
 #include <array>

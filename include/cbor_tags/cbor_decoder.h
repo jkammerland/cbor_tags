@@ -40,6 +40,8 @@
 
 namespace cbor::tags {
 
+template <typename T> struct cbor_indefinite_decoder;
+
 namespace detail {
 template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
     return value <= static_cast<std::uint64_t>(std::numeric_limits<T>::max());
@@ -51,6 +53,12 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     constexpr auto max_cbor_argument = static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
 }
+
+template <typename T> struct is_optional_tag : std::false_type {};
+
+template <typename T> struct is_optional_tag<std::optional<T>> : std::bool_constant<IsTag<std::remove_cvref_t<T>>> {};
+
+template <typename T> inline constexpr bool is_optional_tag_v = is_optional_tag<std::remove_cvref_t<T>>::value;
 
 template <typename InputBuffer, typename Reader>
 constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffer &data, std::uint64_t length) {
@@ -112,6 +120,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
+  private:
+    template <typename> friend struct cbor_indefinite_decoder;
+
     class structural_scope {
       public:
         constexpr structural_scope() noexcept = default;
@@ -141,25 +152,50 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         self_t *decoder_{};
     };
 
+  public:
     struct entered_array {
-        std::uint64_t    size{};
-        structural_scope scope;
+        std::uint64_t size{};
 
+        entered_array(const entered_array &)                          = delete;
+        constexpr entered_array(entered_array &&) noexcept            = default;
+        constexpr entered_array &operator=(const entered_array &)     = delete;
+        constexpr entered_array &operator=(entered_array &&) noexcept = default;
+
+      private:
+        friend self_t;
         constexpr entered_array(std::uint64_t size_, structural_scope scope_) noexcept : size(size_), scope(std::move(scope_)) {}
+
+        structural_scope scope;
     };
 
     struct entered_map {
-        std::uint64_t    size{};
-        structural_scope scope;
+        std::uint64_t size{};
 
+        entered_map(const entered_map &)                          = delete;
+        constexpr entered_map(entered_map &&) noexcept            = default;
+        constexpr entered_map &operator=(const entered_map &)     = delete;
+        constexpr entered_map &operator=(entered_map &&) noexcept = default;
+
+      private:
+        friend self_t;
         constexpr entered_map(std::uint64_t size_, structural_scope scope_) noexcept : size(size_), scope(std::move(scope_)) {}
+
+        structural_scope scope;
     };
 
     struct entered_tag {
-        std::uint64_t    tag{};
-        structural_scope scope;
+        std::uint64_t tag{};
 
+        entered_tag(const entered_tag &)                          = delete;
+        constexpr entered_tag(entered_tag &&) noexcept            = default;
+        constexpr entered_tag &operator=(const entered_tag &)     = delete;
+        constexpr entered_tag &operator=(entered_tag &&) noexcept = default;
+
+      private:
+        friend self_t;
         constexpr entered_tag(std::uint64_t tag_, structural_scope scope_) noexcept : tag(tag_), scope(std::move(scope_)) {}
+
+        structural_scope scope;
     };
 
     [[nodiscard]] constexpr expected<entered_array, status_code> enter_array() {
@@ -808,6 +844,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::no_match_for_optional_on_buffer;
     }
 
+    template <typename T> constexpr status_code decode(std::optional<T> &value, std::uint64_t tag) {
+        using value_type = std::remove_cvref_t<T>;
+        auto t           = detail::make_decode_value_for_optional<value_type>(value);
+        auto result      = decode(t, tag);
+        if (result == status_code::success) {
+            value = std::move(t);
+        }
+        return result;
+    }
+
     template <typename U> constexpr status_code decode([[maybe_unused]] as_named_map<U> value) {
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
         return detail::decode_named_map(*this, value.value_);
@@ -1377,8 +1423,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (!group) {
                 return group.error();
             }
+            return std::forward<DecodePayload>(decode_payload)();
+        } else {
+            return std::forward<DecodePayload>(decode_payload)();
         }
-        return std::forward<DecodePayload>(decode_payload)();
     }
 
     template <typename... Args> constexpr auto applier(Args &&...args) {
@@ -1485,7 +1533,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             status_code result;
             if constexpr (IsVariant<raw_type>) {
                 result = this->decode_variant(decoded_value, major, additionalInfo, tag);
-            } else if constexpr (IsTag<raw_type>) {
+            } else if constexpr (detail::is_optional_tag_v<raw_type> || IsTag<raw_type>) {
                 if (!tag) {
                     tag = decode_unsigned(additionalInfo);
                 }
@@ -1579,6 +1627,10 @@ template <typename T> struct cbor_indefinite_decoder {
             if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_map_on_buffer;
             }
+            auto depth_scope = dec.enter_structural_item();
+            if (!depth_scope) {
+                return depth_scope.error();
+            }
             return dec.decode_indef_map(value.value_);
         } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
             if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
@@ -1587,6 +1639,10 @@ template <typename T> struct cbor_indefinite_decoder {
             if constexpr (IsFixedArray<U>) {
                 return status_code::unexpected_group_size;
             } else {
+                auto depth_scope = dec.enter_structural_item();
+                if (!depth_scope) {
+                    return depth_scope.error();
+                }
                 return dec.decode_indef_array(value.value_);
             }
         } else {
