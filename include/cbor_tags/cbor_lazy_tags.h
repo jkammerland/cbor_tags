@@ -124,7 +124,7 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
 
         iterator() = default;
         explicit iterator(tag_view *view)
-            : view_(view), walker_(std::ranges::begin(std::as_const(view->buffer_)), std::ranges::end(std::as_const(view->buffer_))) {
+            : view_(view), cursor_(std::ranges::begin(std::as_const(view->buffer_)), std::ranges::end(std::as_const(view->buffer_))) {
             find_next();
         }
 
@@ -153,31 +153,20 @@ template <CborInputBuffer Buffer, typename Predicate> class tag_view : public st
             }
 
             detail::cbor_tag_event<iterator_t> event{};
-            while (walker_.next_tag(event)) {
-                if (!std::invoke(view_->predicate_, event.tag)) {
-                    continue;
-                }
-
-                auto        payload_end = event.payload_begin;
-                status_code status      = status_code::success;
-                if (!detail::cbor_item_skipper<max_stack_depth>::skip_item(payload_end, walker_.end(), status, walker_.stack_depth())) {
-                    fail(status);
-                    return;
-                }
-
-                current_ = match_type{event.tag, event.payload_begin, payload_end};
+            while (cursor_.next_matching_tag(view_->predicate_, event)) {
+                current_ = match_type{event.tag, event.payload_begin, event.payload_end};
                 return;
             }
 
-            view_->status_ = walker_.status();
+            view_->status_ = cursor_.status();
             done_          = true;
         }
 
-        static constexpr std::size_t                          max_stack_depth = 256;
-        tag_view                                             *view_{};
-        detail::cbor_item_walker<max_stack_depth, iterator_t> walker_{};
-        match_type                                            current_{};
-        bool                                                  done_{};
+        static constexpr std::size_t                                     max_indefinite_depth = 256;
+        tag_view                                                        *view_{};
+        detail::cbor_structural_cursor<max_indefinite_depth, iterator_t> cursor_{};
+        match_type                                                       current_{};
+        bool                                                             done_{};
     };
 
     constexpr tag_view(buffer_type buffer, Predicate predicate) : buffer_(std::move(buffer)), predicate_(std::move(predicate)) {}

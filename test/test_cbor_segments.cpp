@@ -221,6 +221,25 @@ int count_borrowed_segments(const cbor_segments &segments) {
     return count;
 }
 
+std::vector<std::byte> nested_definite_arrays(std::size_t depth) {
+    std::vector<std::byte> bytes(depth, std::byte{0x81});
+    bytes.push_back(std::byte{0x00});
+    return bytes;
+}
+
+std::vector<std::byte> nested_indefinite_arrays(std::size_t depth) {
+    std::vector<std::byte> bytes;
+    bytes.reserve((depth * 2U) + 1U);
+    for (std::size_t index = 0; index < depth; ++index) {
+        bytes.push_back(std::byte{0x9F});
+    }
+    bytes.push_back(std::byte{0x00});
+    for (std::size_t index = 0; index < depth; ++index) {
+        bytes.push_back(std::byte{0xFF});
+    }
+    return bytes;
+}
+
 } // namespace
 
 using tiny_inline_byte_segments   = basic_byte_segments<default_byte_segment_storage<4>>;
@@ -625,6 +644,44 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
 
         REQUIRE_FALSE(item);
         CHECK_EQ(item.error(), status_code::incomplete);
+    }
+}
+
+TEST_CASE("encoded item segment validation skips deep definite containers without frame depth pressure") {
+    const auto bytes = nested_definite_arrays(1024);
+
+    cbor_segments segments;
+    segments.append_owned(std::span<const std::byte>{bytes.data(), bytes.size()});
+
+    auto item = validate_item_segments(std::move(segments));
+
+    REQUIRE(item);
+    CHECK_EQ(to_hex(item->flatten()), to_hex(bytes));
+}
+
+TEST_CASE("encoded item segment validation keeps indefinite traversal state bounded internally") {
+    {
+        const auto bytes = nested_indefinite_arrays(256);
+
+        cbor_segments segments;
+        segments.append_owned(std::span<const std::byte>{bytes.data(), bytes.size()});
+
+        auto item = validate_item_segments(std::move(segments));
+
+        REQUIRE(item);
+        CHECK_EQ(to_hex(item->flatten()), to_hex(bytes));
+    }
+
+    {
+        const auto bytes = nested_indefinite_arrays(257);
+
+        cbor_segments segments;
+        segments.append_owned(std::span<const std::byte>{bytes.data(), bytes.size()});
+
+        auto item = validate_item_segments(std::move(segments));
+
+        REQUIRE_FALSE(item);
+        CHECK_EQ(item.error(), status_code::error);
     }
 }
 

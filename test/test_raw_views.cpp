@@ -147,6 +147,25 @@ void check_raw_item_decode_error(const char *hex, status_code expected) {
     CHECK_EQ(result.error(), expected);
 }
 
+std::vector<std::byte> nested_definite_arrays(std::size_t depth) {
+    std::vector<std::byte> bytes(depth, std::byte{0x81});
+    bytes.push_back(std::byte{0x00});
+    return bytes;
+}
+
+std::vector<std::byte> nested_indefinite_arrays(std::size_t depth) {
+    std::vector<std::byte> bytes;
+    bytes.reserve((depth * 2U) + 1U);
+    for (std::size_t index = 0; index < depth; ++index) {
+        bytes.push_back(std::byte{0x9F});
+    }
+    bytes.push_back(std::byte{0x00});
+    for (std::size_t index = 0; index < depth; ++index) {
+        bytes.push_back(std::byte{0xFF});
+    }
+    return bytes;
+}
+
 } // namespace
 
 TEST_CASE("raw encoded item views decode one item and re-encode exact bytes") {
@@ -218,6 +237,41 @@ TEST_CASE("raw encoded views preserve indefinite arrays and maps") {
         REQUIRE(dec(map));
         CHECK_EQ(to_hex(map.bytes()), "bf016161029f0304ffff");
         CHECK_EQ(to_hex(reencode(map)), "bf016161029f0304ffff");
+    }
+}
+
+TEST_CASE("raw encoded views skip deeply nested definite containers without frame depth pressure") {
+    auto bytes = nested_definite_arrays(1024);
+    auto dec   = make_decoder(bytes);
+
+    encoded_item_view item;
+
+    REQUIRE(dec(item));
+    CHECK_EQ(item.size(), bytes.size());
+    CHECK_EQ(to_hex(item.bytes()), to_hex(bytes));
+}
+
+TEST_CASE("raw encoded views keep indefinite traversal state bounded internally") {
+    {
+        auto bytes = nested_indefinite_arrays(256);
+        auto dec   = make_decoder(bytes);
+
+        encoded_item_view item;
+
+        REQUIRE(dec(item));
+        CHECK_EQ(item.size(), bytes.size());
+        CHECK_EQ(to_hex(item.bytes()), to_hex(bytes));
+    }
+
+    {
+        auto bytes = nested_indefinite_arrays(257);
+        auto dec   = make_decoder(bytes);
+
+        encoded_item_view item;
+        auto              result = dec(item);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
     }
 }
 

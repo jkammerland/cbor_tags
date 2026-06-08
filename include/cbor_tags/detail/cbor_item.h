@@ -6,9 +6,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <ranges>
+#include <type_traits>
 
 namespace cbor::tags::detail {
 
@@ -19,10 +21,9 @@ struct cbor_item_header {
 };
 
 struct cbor_item_frame {
-    bool          indefinite{};
     major_type    major{};
-    std::uint64_t remaining{};
     bool          map_expects_value{};
+    std::uint64_t parent_pending{};
 };
 
 struct cbor_item_reader {
@@ -110,194 +111,136 @@ struct cbor_item_reader {
 
 template <typename Iterator> struct cbor_tag_event {
     std::uint64_t tag{};
+    Iterator      tag_begin{};
     Iterator      payload_begin{};
+    Iterator      payload_end{};
+    Iterator      item_end{};
 };
 
-template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
+template <std::size_t MaxDepth, typename Iterator> class cbor_structural_cursor {
   public:
-    cbor_item_walker() = default;
-    constexpr cbor_item_walker(Iterator begin, Iterator end) : cursor_(begin), end_(end) {}
+    cbor_structural_cursor() = default;
+    constexpr cbor_structural_cursor(Iterator begin, Iterator end) : cursor_(begin), end_(end) {}
 
     [[nodiscard]] constexpr Iterator    end() const { return end_; }
     [[nodiscard]] constexpr status_code status() const noexcept { return status_; }
     [[nodiscard]] constexpr bool        failed() const noexcept { return status_ != status_code::success; }
     [[nodiscard]] constexpr bool        done() const noexcept { return done_; }
-    [[nodiscard]] constexpr std::size_t stack_depth() const noexcept { return stack_size_; }
+    [[nodiscard]] constexpr Iterator    position() const { return cursor_; }
 
-    constexpr bool next_tag(cbor_tag_event<Iterator> &event) {
+    constexpr bool skip_one(Iterator &item_end) {
+        pending_    = 1;
+        stack_size_ = 0;
+        status_     = status_code::success;
+        done_       = false;
+
+        while (true) {
+            auto has_item = false;
+            if (!prepare_item(false, has_item)) {
+                return false;
+            }
+            if (!has_item) {
+                item_end = cursor_;
+                return true;
+            }
+            event_sink sink{};
+            auto       ignored = false;
+            if (!consume_item(static_cast<no_predicate *>(nullptr), sink, ignored)) {
+                return false;
+            }
+        }
+    }
+
+    template <typename Predicate> constexpr bool next_matching_tag(Predicate &predicate, cbor_tag_event<Iterator> &event) {
         if (done_) {
             return false;
         }
 
         while (true) {
-            pop_completed_frames();
-
-            if (cursor_ == end_) {
-                if (stack_empty()) {
-                    done_   = true;
-                    status_ = status_code::success;
-                } else {
-                    fail(status_code::incomplete);
-                }
+            auto has_item = false;
+            if (!prepare_item(true, has_item)) {
                 return false;
             }
-
-            if (consume_indefinite_break_if_present()) {
-                if (done_) {
-                    return false;
-                }
-                continue;
-            }
-
-            if (is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
-                fail(status_code::error);
+            if (!has_item) {
                 return false;
             }
-
-            if (!consume_parent_item()) {
-                fail(status_code::error);
+            auto emitted = false;
+            if (!consume_item(&predicate, event, emitted)) {
                 return false;
             }
-
-            cbor_item_header header{};
-            auto             read_status = status_code::success;
-            if (!cbor_item_reader::read_header(cursor_, end_, header, read_status)) {
-                fail(read_status);
-                return false;
-            }
-
-            switch (header.major) {
-            case major_type::UnsignedInteger:
-            case major_type::NegativeInteger: {
-                std::uint64_t ignored{};
-                if (header.additional_info == 31U || !read_argument(header.additional_info, ignored)) {
-                    if (!done_) {
-                        fail(status_code::error);
-                    }
-                    return false;
-                }
-                break;
-            }
-            case major_type::ByteString:
-            case major_type::TextString: {
-                if (header.additional_info == 31U) {
-                    if (!skip_indefinite_string(header.major)) {
-                        return false;
-                    }
-                } else {
-                    std::uint64_t length{};
-                    if (!read_argument(header.additional_info, length) || !skip_bytes(length)) {
-                        return false;
-                    }
-                }
-                break;
-            }
-            case major_type::Array: {
-                if (header.additional_info == 31U) {
-                    if (!push_frame(cbor_item_frame{.indefinite = true, .major = major_type::Array})) {
-                        return false;
-                    }
-                } else {
-                    std::uint64_t length{};
-                    if (!read_argument(header.additional_info, length)) {
-                        return false;
-                    }
-                    if (length > 0U && !push_frame(cbor_item_frame{.major = major_type::Array, .remaining = length})) {
-                        return false;
-                    }
-                }
-                break;
-            }
-            case major_type::Map: {
-                if (header.additional_info == 31U) {
-                    if (!push_frame(cbor_item_frame{.indefinite = true, .major = major_type::Map})) {
-                        return false;
-                    }
-                } else {
-                    std::uint64_t length{};
-                    if (!read_argument(header.additional_info, length)) {
-                        return false;
-                    }
-                    if (length > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
-                        fail(status_code::error);
-                        return false;
-                    }
-                    const auto item_count = length * 2U;
-                    if (item_count > 0U && !push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
-                        return false;
-                    }
-                }
-                break;
-            }
-            case major_type::Tag: {
-                std::uint64_t tag{};
-                if (header.additional_info == 31U || !read_argument(header.additional_info, tag)) {
-                    if (!done_) {
-                        fail(status_code::error);
-                    }
-                    return false;
-                }
-                auto payload_begin = cursor_;
-                if (!push_frame(cbor_item_frame{.major = major_type::Tag, .remaining = 1})) {
-                    return false;
-                }
-                event = cbor_tag_event<Iterator>{.tag = tag, .payload_begin = payload_begin};
+            if (emitted) {
                 return true;
-            }
-            case major_type::Simple:
-                if (is_reserved_simple_argument(header.additional_info)) {
-                    fail(status_code::error);
-                    return false;
-                }
-                if (header.additional_info >= 24U && !skip_bytes(std::uint64_t{1U << (header.additional_info - 24U)})) {
-                    return false;
-                }
-                break;
-            default: fail(status_code::error); return false;
             }
         }
     }
 
   private:
+    struct event_sink {};
+    struct no_predicate {};
+
     constexpr void fail(status_code status) noexcept {
         status_ = status;
         done_   = true;
     }
 
-    constexpr void pop_completed_frames() noexcept {
-        while (!stack_empty() && !stack_back().indefinite && stack_back().remaining == 0) {
-            stack_pop_back();
-        }
-    }
+    constexpr bool prepare_item(bool sequence, bool &has_item) {
+        while (pending_ == 0U) {
+            if (stack_empty()) {
+                if (sequence && cursor_ != end_) {
+                    pending_ = 1;
+                    has_item = true;
+                    return true;
+                }
+                done_    = true;
+                has_item = false;
+                return true;
+            }
 
-    constexpr bool consume_parent_item() noexcept {
-        if (stack_empty()) {
-            return true;
-        }
-        auto &frame = stack_back();
-        if (frame.indefinite) {
+            if (cursor_ == end_) {
+                fail(status_code::incomplete);
+                return false;
+            }
+
+            auto &frame = stack_back();
+            if (is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
+                if (frame.major == major_type::Map && frame.map_expects_value) {
+                    fail(status_code::error);
+                    return false;
+                }
+                ++cursor_;
+                pending_ = frame.parent_pending;
+                stack_pop_back();
+                continue;
+            }
+
             if (frame.major == major_type::Map) {
                 frame.map_expects_value = !frame.map_expects_value;
             }
+            pending_ = 1;
+            has_item = true;
             return true;
         }
-        if (frame.remaining == 0) {
-            return false;
-        }
-        --frame.remaining;
+
+        has_item = true;
         return true;
     }
 
-    constexpr bool consume_indefinite_break_if_present() {
-        if (stack_empty() || !stack_back().indefinite || cursor_ == end_ || !is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
+    constexpr bool add_pending(std::uint64_t count) {
+        if (count > std::numeric_limits<std::uint64_t>::max() - pending_) {
+            fail(status_code::error);
             return false;
         }
-        if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
+        pending_ += count;
+        return true;
+    }
+
+    constexpr bool enter_indefinite(major_type major) {
+        if (stack_size_ == stack_.size()) {
             fail(status_code::error);
-            return true;
+            return false;
         }
-        ++cursor_;
-        stack_pop_back();
+        stack_[stack_size_++] = cbor_item_frame{.major = major, .parent_pending = pending_};
+        pending_              = 0;
         return true;
     }
 
@@ -328,184 +271,144 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
         return true;
     }
 
-    [[nodiscard]] constexpr bool  stack_empty() const noexcept { return stack_size_ == 0; }
-    [[nodiscard]] constexpr auto &stack_back() noexcept { return stack_[stack_size_ - 1]; }
-    constexpr void                stack_pop_back() noexcept { --stack_size_; }
-    constexpr bool                push_frame(cbor_item_frame frame) {
-        if (stack_size_ == stack_.size()) {
+    template <typename Predicate, typename Event> constexpr bool consume_item(Predicate *predicate, Event &event, bool &emitted_tag) {
+        emitted_tag = false;
+        if (pending_ == 0U) {
             fail(status_code::error);
             return false;
         }
-        stack_[stack_size_++] = frame;
+        --pending_;
+
+        if (cursor_ == end_) {
+            fail(status_code::incomplete);
+            return false;
+        }
+        if (is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
+            fail(status_code::error);
+            return false;
+        }
+
+        const auto       item_begin = cursor_;
+        cbor_item_header header{};
+        auto             read_status = status_code::success;
+        if (!cbor_item_reader::read_header(cursor_, end_, header, read_status)) {
+            fail(read_status);
+            return false;
+        }
+
+        switch (header.major) {
+        case major_type::UnsignedInteger:
+        case major_type::NegativeInteger:
+            if (header.additional_info == 31U || !read_argument(header.additional_info, header.argument)) {
+                if (!done_) {
+                    fail(status_code::error);
+                }
+                return false;
+            }
+            break;
+        case major_type::ByteString:
+        case major_type::TextString:
+            if (header.additional_info == 31U) {
+                if (!skip_indefinite_string(header.major)) {
+                    return false;
+                }
+            } else {
+                if (!read_argument(header.additional_info, header.argument) || !skip_bytes(header.argument)) {
+                    return false;
+                }
+            }
+            break;
+        case major_type::Array:
+            if (header.additional_info == 31U) {
+                if (!enter_indefinite(major_type::Array)) {
+                    return false;
+                }
+            } else if (!read_argument(header.additional_info, header.argument) || !add_pending(header.argument)) {
+                return false;
+            }
+            break;
+        case major_type::Map:
+            if (header.additional_info == 31U) {
+                if (!enter_indefinite(major_type::Map)) {
+                    return false;
+                }
+            } else {
+                if (!read_argument(header.additional_info, header.argument)) {
+                    return false;
+                }
+                if (header.argument > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
+                    fail(status_code::error);
+                    return false;
+                }
+                if (!add_pending(header.argument * 2U)) {
+                    return false;
+                }
+            }
+            break;
+        case major_type::Tag: {
+            if (header.additional_info == 31U || !read_argument(header.additional_info, header.argument) || !add_pending(1)) {
+                if (!done_) {
+                    fail(status_code::error);
+                }
+                return false;
+            }
+            const auto payload_begin = cursor_;
+            if constexpr (!std::is_same_v<Event, event_sink>) {
+                if (predicate != nullptr && std::invoke(*predicate, header.argument)) {
+                    cbor_structural_cursor<MaxDepth, Iterator> payload_cursor{payload_begin, end_};
+                    auto                                       payload_end = payload_begin;
+                    if (!payload_cursor.skip_one(payload_end)) {
+                        fail(payload_cursor.status());
+                        return false;
+                    }
+                    event       = cbor_tag_event<Iterator>{.tag           = header.argument,
+                                                           .tag_begin     = item_begin,
+                                                           .payload_begin = payload_begin,
+                                                           .payload_end   = payload_end,
+                                                           .item_end      = payload_end};
+                    emitted_tag = true;
+                }
+            }
+            break;
+        }
+        case major_type::Simple:
+            if (is_reserved_simple_argument(header.additional_info)) {
+                fail(status_code::error);
+                return false;
+            }
+            if (header.additional_info >= 24U && !skip_bytes(std::uint64_t{1U << (header.additional_info - 24U)})) {
+                return false;
+            }
+            break;
+        default: fail(status_code::error); return false;
+        }
         return true;
     }
+
+    [[nodiscard]] constexpr bool  stack_empty() const noexcept { return stack_size_ == 0; }
+    [[nodiscard]] constexpr auto &stack_back() noexcept { return stack_[stack_size_ - 1]; }
+    constexpr void                stack_pop_back() noexcept { --stack_size_; }
 
     Iterator                              cursor_{};
     Iterator                              end_{};
     std::array<cbor_item_frame, MaxDepth> stack_{};
     std::size_t                           stack_size_{};
+    std::uint64_t                         pending_{};
     status_code                           status_{status_code::success};
     bool                                  done_{};
 };
 
 template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
-    template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status, std::size_t initial_depth = 0) {
-        if (initial_depth > MaxDepth) {
-            status = status_code::error;
+    template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status) {
+        cbor_structural_cursor<MaxDepth, Iterator> structural_cursor{cursor, end};
+        auto                                       item_end = cursor;
+        if (!structural_cursor.skip_one(item_end)) {
+            status = structural_cursor.status();
             return false;
         }
-        std::array<cbor_item_frame, MaxDepth> stack{};
-        std::size_t                           stack_size{};
-        bool                                  root_started{};
-
-        auto stack_empty = [&] { return stack_size == 0; };
-        auto stack_back  = [&]() -> cbor_item_frame  &{ return stack[stack_size - 1]; };
-        auto pop_frame   = [&] { --stack_size; };
-        auto push_frame  = [&](cbor_item_frame frame) {
-            if (initial_depth + stack_size == stack.size()) {
-                status = status_code::error;
-                return false;
-            }
-            stack[stack_size++] = frame;
-            return true;
-        };
-
-        while (true) {
-            while (!stack_empty() && !stack_back().indefinite && stack_back().remaining == 0) {
-                pop_frame();
-            }
-            if (root_started && stack_empty()) {
-                return true;
-            }
-
-            if (!stack_empty() && stack_back().indefinite) {
-                if (cursor == end) {
-                    status = status_code::incomplete;
-                    return false;
-                }
-                if (is_cbor_break_byte(cbor_byte_to_u8(*cursor))) {
-                    if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
-                        status = status_code::error;
-                        return false;
-                    }
-                    ++cursor;
-                    pop_frame();
-                    continue;
-                }
-            }
-
-            if (cursor == end) {
-                status = status_code::incomplete;
-                return false;
-            }
-            if (is_cbor_break_byte(cbor_byte_to_u8(*cursor))) {
-                status = status_code::error;
-                return false;
-            }
-
-            if (stack_empty()) {
-                root_started = true;
-            } else if (auto &frame = stack_back(); frame.indefinite) {
-                if (frame.major == major_type::Map) {
-                    frame.map_expects_value = !frame.map_expects_value;
-                }
-            } else {
-                if (frame.remaining == 0) {
-                    status = status_code::error;
-                    return false;
-                }
-                --frame.remaining;
-            }
-
-            cbor_item_header header{};
-            if (!cbor_item_reader::read_header(cursor, end, header, status)) {
-                return false;
-            }
-
-            switch (header.major) {
-            case major_type::UnsignedInteger:
-            case major_type::NegativeInteger:
-                if (header.additional_info == 31U) {
-                    status = status_code::error;
-                    return false;
-                }
-                if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
-                    return false;
-                }
-                break;
-            case major_type::ByteString:
-            case major_type::TextString:
-                if (header.additional_info == 31U) {
-                    if (!cbor_item_reader::skip_indefinite_string(cursor, end, header.major, status)) {
-                        return false;
-                    }
-                } else {
-                    if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
-                        return false;
-                    }
-                    if (!cbor_item_reader::advance_bytes(cursor, end, header.argument, status)) {
-                        return false;
-                    }
-                }
-                break;
-            case major_type::Array:
-                if (header.additional_info == 31U) {
-                    if (!push_frame(cbor_item_frame{.indefinite = true, .major = major_type::Array})) {
-                        return false;
-                    }
-                } else {
-                    if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
-                        return false;
-                    }
-                    if (header.argument > 0U && !push_frame(cbor_item_frame{.major = major_type::Array, .remaining = header.argument})) {
-                        return false;
-                    }
-                }
-                break;
-            case major_type::Map:
-                if (header.additional_info == 31U) {
-                    if (!push_frame(cbor_item_frame{.indefinite = true, .major = major_type::Map})) {
-                        return false;
-                    }
-                } else {
-                    if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
-                        return false;
-                    }
-                    if (header.argument > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
-                        status = status_code::error;
-                        return false;
-                    }
-                    const auto item_count = header.argument * 2U;
-                    if (item_count > 0U && !push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
-                        return false;
-                    }
-                }
-                break;
-            case major_type::Tag:
-                if (header.additional_info == 31U) {
-                    status = status_code::error;
-                    return false;
-                }
-                if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
-                    return false;
-                }
-                if (!push_frame(cbor_item_frame{.major = major_type::Tag, .remaining = 1})) {
-                    return false;
-                }
-                break;
-            case major_type::Simple:
-                if (is_reserved_simple_argument(header.additional_info)) {
-                    status = status_code::error;
-                    return false;
-                }
-                if (header.additional_info >= 24U &&
-                    !cbor_item_reader::advance_bytes(cursor, end, std::uint64_t{1U << (header.additional_info - 24U)}, status)) {
-                    return false;
-                }
-                break;
-            default: status = status_code::error; return false;
-            }
-        }
+        cursor = item_end;
+        status = status_code::success;
+        return true;
     }
 };
 

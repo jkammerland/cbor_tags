@@ -597,7 +597,7 @@ TEST_CASE("sized non-contiguous readers use size for offset bounds checks") {
     CHECK_EQ(input.increments, 1);
 }
 
-TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload validation") {
+TEST_CASE("lazy tag scanner validates matched payloads without definite parent depth leakage") {
     {
         auto buffer = make_deep_tag_with_array_payload(254);
         auto view   = find_tags<100>(buffer);
@@ -613,13 +613,17 @@ TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload va
     }
 
     {
-        auto buffer = make_deep_tag_with_array_payload(255);
+        auto buffer = make_deep_tag_with_array_payload(1024);
         auto view   = find_tags<100>(buffer);
         auto it     = view.begin();
 
+        REQUIRE(it != view.end());
+        CHECK_EQ(it->tag(), 100);
+        CHECK_EQ(to_hex(it->payload_range()), "81182a");
+
+        ++it;
         CHECK(it == view.end());
-        CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::success);
     }
 }
 

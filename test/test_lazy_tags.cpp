@@ -63,6 +63,22 @@ std::vector<std::byte> make_deeply_nested_tag(std::size_t depth) {
     return buffer;
 }
 
+std::vector<std::byte> make_indefinitely_nested_tag(std::size_t depth) {
+    std::vector<std::byte> buffer;
+    buffer.reserve((depth * 2U) + 4U);
+    for (std::size_t index = 0; index < depth; ++index) {
+        buffer.push_back(std::byte{0x9F});
+    }
+    buffer.push_back(std::byte{0xD8});
+    buffer.push_back(std::byte{0x64});
+    buffer.push_back(std::byte{0x18});
+    buffer.push_back(std::byte{0x2A});
+    for (std::size_t index = 0; index < depth; ++index) {
+        buffer.push_back(std::byte{0xFF});
+    }
+    return buffer;
+}
+
 template <typename Buffer>
 concept CanFindStaticTags = requires(Buffer &&buffer) { find_tags<100>(std::forward<Buffer>(buffer)); };
 
@@ -519,9 +535,31 @@ TEST_CASE("lazy tag scanner stress scans deeply nested definite containers witho
     CHECK_EQ(view.status(), status_code::success);
 }
 
-TEST_CASE("lazy tag scanner handles no-allocation depth boundary") {
+TEST_CASE("lazy tag scanner does not spend frame stack on definite nesting") {
+    auto buffer = make_deeply_nested_tag(1024);
+    auto view   = find_tags<100>(buffer);
+    bool threw  = false;
+    int  matches{};
+
     {
-        auto buffer = make_deeply_nested_tag(255);
+        allocation_failure_guard guard;
+        try {
+            for (auto it = view.begin(); it != view.end(); ++it) {
+                ++matches;
+                CHECK_EQ(it->tag(), 100);
+                CHECK_EQ(to_hex(it->payload_range()), "182a");
+            }
+        } catch (...) { threw = true; }
+    }
+
+    CHECK(!threw);
+    CHECK_EQ(matches, 1);
+    CHECK_EQ(view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner keeps indefinite traversal state private and bounded") {
+    {
+        auto buffer = make_indefinitely_nested_tag(256);
         auto view   = find_tags<100>(buffer);
         bool threw  = false;
         int  matches{};
@@ -541,7 +579,7 @@ TEST_CASE("lazy tag scanner handles no-allocation depth boundary") {
     }
 
     {
-        auto buffer = make_deeply_nested_tag(256);
+        auto buffer = make_indefinitely_nested_tag(257);
         auto view   = find_tags<100>(buffer);
         bool threw  = false;
 

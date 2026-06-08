@@ -1699,6 +1699,14 @@ template <typename OutputBuffer> struct smart_annotator {
         std::uint8_t additional_info{};
     };
 
+    struct annotation_frame {
+        major_type    major{};
+        bool          indefinite{};
+        std::uint64_t remaining{};
+        bool          map_expects_value{};
+        std::size_t   child_depth{};
+    };
+
     [[nodiscard]] bool empty() const noexcept { return position >= bytes.size(); }
 
     [[nodiscard]] std::uint8_t byte_at(std::size_t index) const { return std::to_integer<std::uint8_t>(bytes[index]); }
@@ -1954,11 +1962,27 @@ template <typename OutputBuffer> struct smart_annotator {
         }
     }
 
-    void parse_string(std::size_t depth, item_header header) {
+    void parse_definite_string(std::size_t depth, item_header header, std::string_view kind) {
         check_depth(depth);
+        const auto length = read_argument(header.additional_info);
+        emit_header(depth, header.begin, position, text::format("{}({})", kind, length));
+        ensure_payload_available(length);
+        const auto payload_begin = position;
+        const auto payload_size  = static_cast<std::size_t>(length);
+        position += payload_size;
+        const auto is_text = header.major == static_cast<std::uint8_t>(major_type::TextString);
+        if (!is_text) {
+            ensure_output_capacity(bytes_comment_size(payload_size));
+        }
+        const auto comment = is_text ? text_or_non_utf8_comment(payload_begin, payload_size) : bytes_comment(payload_begin, payload_size);
+        emit_payload(depth + 1U, payload_begin, payload_size, comment);
+    }
+
+    void parse_string(std::size_t depth, item_header header) {
         const auto kind =
             header.major == static_cast<std::uint8_t>(major_type::TextString) ? std::string_view{"text"} : std::string_view{"bytes"};
         if (header.additional_info == 31U) {
+            check_depth(depth);
             emit_header(depth, header.begin, position, text::format("{}(*)", kind));
             while (true) {
                 if (empty()) {
@@ -1975,79 +1999,53 @@ template <typename OutputBuffer> struct smart_annotator {
                 if (chunk_major != header.major || chunk_info == 31U) {
                     throw std::runtime_error("Invalid indefinite CBOR string chunk");
                 }
-                parse_string(depth + 1U, {.begin           = chunk_begin,
-                                          .major           = static_cast<std::uint8_t>(chunk_major),
-                                          .additional_info = static_cast<std::uint8_t>(chunk_info)});
+                parse_definite_string(depth + 1U,
+                                      {.begin           = chunk_begin,
+                                       .major           = static_cast<std::uint8_t>(chunk_major),
+                                       .additional_info = static_cast<std::uint8_t>(chunk_info)},
+                                      kind);
             }
+        } else {
+            parse_definite_string(depth, header, kind);
         }
-
-        const auto length = read_argument(header.additional_info);
-        emit_header(depth, header.begin, position, text::format("{}({})", kind, length));
-        ensure_payload_available(length);
-        const auto payload_begin = position;
-        const auto payload_size  = static_cast<std::size_t>(length);
-        position += payload_size;
-        const auto is_text = header.major == static_cast<std::uint8_t>(major_type::TextString);
-        if (!is_text) {
-            ensure_output_capacity(bytes_comment_size(payload_size));
-        }
-        const auto comment = is_text ? text_or_non_utf8_comment(payload_begin, payload_size) : bytes_comment(payload_begin, payload_size);
-        emit_payload(depth + 1U, payload_begin, payload_size, comment);
     }
 
-    void parse_array(std::size_t depth, item_header header) {
+    void parse_array(std::size_t depth, item_header header, std::vector<annotation_frame> &frames) {
         if (header.additional_info == 31U) {
             emit_header(depth, header.begin, position, "array(*)");
-            while (true) {
-                if (empty()) {
-                    throw std::runtime_error("Unterminated indefinite CBOR array");
-                }
-                if (next_is_break()) {
-                    consume_break(depth + 1U);
-                    return;
-                }
-                parse_item(depth + 1U);
-            }
+            frames.push_back(annotation_frame{.major = major_type::Array, .indefinite = true, .child_depth = depth + 1U});
+            return;
         }
 
         const auto size = read_argument(header.additional_info);
         emit_header(depth, header.begin, position, text::format("array({})", size));
-        for (std::uint64_t index = 0; index < size; ++index) {
-            parse_item(depth + 1U);
+        if (size > 0U) {
+            frames.push_back(annotation_frame{.major = major_type::Array, .remaining = size, .child_depth = depth + 1U});
         }
     }
 
-    void parse_map(std::size_t depth, item_header header) {
+    void parse_map(std::size_t depth, item_header header, std::vector<annotation_frame> &frames) {
         if (header.additional_info == 31U) {
             emit_header(depth, header.begin, position, "map(*)");
-            while (true) {
-                if (empty()) {
-                    throw std::runtime_error("Unterminated indefinite CBOR map");
-                }
-                if (next_is_break()) {
-                    consume_break(depth + 1U);
-                    return;
-                }
-                parse_item(depth + 1U);
-                if (empty() || next_is_break()) {
-                    throw std::runtime_error("Indefinite CBOR map missing value");
-                }
-                parse_item(depth + 1U);
-            }
+            frames.push_back(annotation_frame{.major = major_type::Map, .indefinite = true, .child_depth = depth + 1U});
+            return;
         }
 
         const auto size = read_argument(header.additional_info);
         emit_header(depth, header.begin, position, text::format("map({})", size));
-        for (std::uint64_t index = 0; index < size; ++index) {
-            parse_item(depth + 1U);
-            parse_item(depth + 1U);
+        if (size > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
+            throw std::runtime_error("CBOR annotation size overflow");
+        }
+        const auto item_count = size * 2U;
+        if (item_count > 0U) {
+            frames.push_back(annotation_frame{.major = major_type::Map, .remaining = item_count, .child_depth = depth + 1U});
         }
     }
 
-    void parse_tag(std::size_t depth, item_header header) {
+    void parse_tag(std::size_t depth, item_header header, std::vector<annotation_frame> &frames) {
         const auto tag = read_argument(header.additional_info);
         emit_header(depth, header.begin, position, tag_comment(tag));
-        parse_item(depth + 1U);
+        frames.push_back(annotation_frame{.major = major_type::Tag, .remaining = 1, .child_depth = depth + 1U});
     }
 
     void parse_simple(std::size_t depth, item_header header) {
@@ -2100,7 +2098,7 @@ template <typename OutputBuffer> struct smart_annotator {
         emit_header(depth, header_begin, position, "break");
     }
 
-    void parse_item(std::size_t depth) {
+    void parse_next_item(std::size_t depth, std::vector<annotation_frame> &frames) {
         check_depth(depth);
         const auto header_begin = position;
         const auto initial_byte = read_byte();
@@ -2121,17 +2119,55 @@ template <typename OutputBuffer> struct smart_annotator {
         }
         case 2:
         case 3: parse_string(depth, header); return;
-        case 4: parse_array(depth, header); return;
-        case 5: parse_map(depth, header); return;
-        case 6: parse_tag(depth, header); return;
+        case 4: parse_array(depth, header, frames); return;
+        case 5: parse_map(depth, header, frames); return;
+        case 6: parse_tag(depth, header, frames); return;
         case 7: parse_simple(depth, header); return;
         default: throw std::runtime_error("Invalid CBOR major type");
         }
     }
 
     void annotate_sequence() {
-        while (!empty()) {
-            parse_item(0);
+        std::vector<annotation_frame> frames;
+        while (true) {
+            if (frames.empty()) {
+                if (empty()) {
+                    return;
+                }
+                parse_next_item(0, frames);
+                continue;
+            }
+
+            auto &frame = frames.back();
+            if (!frame.indefinite) {
+                if (frame.remaining == 0U) {
+                    frames.pop_back();
+                    continue;
+                }
+                --frame.remaining;
+                const auto child_depth = frame.child_depth;
+                parse_next_item(child_depth, frames);
+                continue;
+            }
+
+            if (empty()) {
+                throw std::runtime_error(frame.major == major_type::Map ? "Unterminated indefinite CBOR map"
+                                                                        : "Unterminated indefinite CBOR array");
+            }
+            if (next_is_break()) {
+                if (frame.major == major_type::Map && frame.map_expects_value) {
+                    throw std::runtime_error("Indefinite CBOR map missing value");
+                }
+                const auto break_depth = frame.child_depth;
+                consume_break(break_depth);
+                frames.pop_back();
+                continue;
+            }
+            if (frame.major == major_type::Map) {
+                frame.map_expects_value = !frame.map_expects_value;
+            }
+            const auto child_depth = frame.child_depth;
+            parse_next_item(child_depth, frames);
         }
     }
 };
