@@ -555,7 +555,7 @@ TEST_CASE("lazy tag scanner handles no-allocation depth boundary") {
 
         CHECK(!threw);
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::max_depth_exceeded);
+        CHECK_EQ(view.status(), status_code::error);
     }
 }
 

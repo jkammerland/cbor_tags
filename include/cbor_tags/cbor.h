@@ -71,8 +71,7 @@ enum class status_code : uint8_t {
     no_match_for_simple_on_buffer,
     no_match_for_optional_on_buffer,
     no_match_in_variant_on_buffer,
-    end_no_match_decoding,
-    max_depth_exceeded
+    end_no_match_decoding
 };
 
 template <typename Self> struct cbor_encoder_mixin_base {
@@ -115,7 +114,6 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::no_match_for_optional_on_buffer: return "Unexpected CBOR format: optional value decode failed";
     case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";
     case status_code::end_no_match_decoding: return "Unexpected error at end of CBOR decoding: invalid terminal state";
-    case status_code::max_depth_exceeded: return "CBOR nesting depth limit exceeded";
     default: return "Unknown CBOR status code";
     }
 }
@@ -137,34 +135,10 @@ using default_expected = Option<expected<void, status_code>>;
 namespace detail {
 struct wrap_groups {};
 struct strict_integer_decode {};
-inline constexpr std::size_t default_max_decode_depth = 256U;
-template <std::size_t N> struct max_decode_depth {
-    static_assert(N > 0U, "max_decode_depth<N> requires N > 0");
-    static constexpr std::size_t value = N;
-};
 }; // namespace detail
 
-using default_wrapping                          = Option<detail::wrap_groups>;
-using strict_integer_decoding                   = Option<detail::strict_integer_decode>;
-template <std::size_t N> using max_decode_depth = Option<detail::max_decode_depth<N>>;
-
-namespace detail {
-template <typename T> struct max_decode_depth_from_option {
-    static constexpr bool        is_depth_option = false;
-    static constexpr std::size_t value           = default_max_decode_depth;
-};
-template <std::size_t N> struct max_decode_depth_from_option<Option<max_decode_depth<N>>> {
-    static constexpr bool        is_depth_option = true;
-    static constexpr std::size_t value           = N;
-};
-template <typename... T> consteval std::size_t selected_max_decode_depth() {
-    static_assert((std::size_t{0U} + ... + (max_decode_depth_from_option<T>::is_depth_option ? std::size_t{1U} : std::size_t{0U})) <= 1U,
-                  "Options may contain at most one max_decode_depth<N> option");
-    std::size_t result = default_max_decode_depth;
-    ((result = max_decode_depth_from_option<T>::is_depth_option ? max_decode_depth_from_option<T>::value : result), ...);
-    return result;
-}
-} // namespace detail
+using default_wrapping        = Option<detail::wrap_groups>;
+using strict_integer_decoding = Option<detail::strict_integer_decode>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
@@ -192,8 +166,6 @@ template <typename... T> struct Options {
     static constexpr bool wrap_groups = contains<default_wrapping, T...>();
     // When true, decoding a CBOR integer into a narrower native integer target rejects instead of slicing.
     static constexpr bool strict_integer_decode = contains<strict_integer_decoding, T...>();
-    // Maximum raw CBOR structural depth accepted before materialized decode.
-    static constexpr std::size_t max_decode_depth = detail::selected_max_decode_depth<T...>();
 
     constexpr Options() = default;
 };

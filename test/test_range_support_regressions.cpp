@@ -619,7 +619,7 @@ TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload va
 
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::max_depth_exceeded);
+        CHECK_EQ(view.status(), status_code::error);
     }
 }
 

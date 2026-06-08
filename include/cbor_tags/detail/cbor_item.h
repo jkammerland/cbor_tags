@@ -114,8 +114,6 @@ template <typename Iterator> struct cbor_tag_event {
 };
 
 template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
-    static_assert(MaxDepth > 0U, "cbor_item_walker requires MaxDepth > 0");
-
   public:
     cbor_item_walker() = default;
     constexpr cbor_item_walker(Iterator begin, Iterator end) : cursor_(begin), end_(end) {}
@@ -335,7 +333,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
     constexpr void                stack_pop_back() noexcept { --stack_size_; }
     constexpr bool                push_frame(cbor_item_frame frame) {
         if (stack_size_ == stack_.size()) {
-            fail(status_code::max_depth_exceeded);
+            fail(status_code::error);
             return false;
         }
         stack_[stack_size_++] = frame;
@@ -350,12 +348,10 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
     bool                                  done_{};
 };
 
-template <std::size_t MaxDepth = default_max_decode_depth> struct cbor_item_skipper {
-    static_assert(MaxDepth > 0U, "cbor_item_skipper requires MaxDepth > 0");
-
+template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
     template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status, std::size_t initial_depth = 0) {
         if (initial_depth > MaxDepth) {
-            status = status_code::max_depth_exceeded;
+            status = status_code::error;
             return false;
         }
         std::array<cbor_item_frame, MaxDepth> stack{};
@@ -367,7 +363,7 @@ template <std::size_t MaxDepth = default_max_decode_depth> struct cbor_item_skip
         auto pop_frame   = [&] { --stack_size; };
         auto push_frame  = [&](cbor_item_frame frame) {
             if (initial_depth + stack_size == stack.size()) {
-                status = status_code::max_depth_exceeded;
+                status = status_code::error;
                 return false;
             }
             stack[stack_size++] = frame;

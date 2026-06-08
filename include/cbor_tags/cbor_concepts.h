@@ -47,22 +47,6 @@ template <typename T> struct strict_integer_decode_option<T, true> : std::bool_c
 
 template <typename T> inline constexpr bool strict_integer_decode_option_v = strict_integer_decode_option<T>::value;
 
-template <typename T>
-concept HasMaxDecodeDepthOption = requires {
-    { T::max_decode_depth } -> std::convertible_to<std::size_t>;
-};
-
-template <typename T, bool HasOption = HasMaxDecodeDepthOption<T>> struct max_decode_depth_option {
-    static constexpr std::size_t value = 256U;
-};
-
-template <typename T> struct max_decode_depth_option<T, true> {
-    static constexpr std::size_t value = static_cast<std::size_t>(T::max_decode_depth);
-    static_assert(value > 0U, "decoder options max_decode_depth must be greater than zero");
-};
-
-template <typename T> inline constexpr std::size_t max_decode_depth_option_v = max_decode_depth_option<T>::value;
-
 } // namespace detail
 
 template <typename T>

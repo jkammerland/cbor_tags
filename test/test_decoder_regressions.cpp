@@ -27,18 +27,6 @@ consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument
     return argument != std::numeric_limits<std::uint64_t>::max();
 }
 
-std::vector<std::byte> nested_definite_arrays(std::size_t depth) {
-    std::vector<std::byte> buffer(depth, std::byte{0x81});
-    buffer.push_back(std::byte{0x00});
-    return buffer;
-}
-
-std::vector<std::byte> nested_tags(std::size_t depth) {
-    std::vector<std::byte> buffer(depth, std::byte{0xC0});
-    buffer.push_back(std::byte{0x00});
-    return buffer;
-}
-
 struct minimal_decoder_options {
     using is_options  = void;
     using return_type = expected<void, status_code>;
@@ -47,14 +35,8 @@ struct minimal_decoder_options {
     static constexpr bool wrap_groups = true;
 };
 
-using shallow_depth_decoder_options = Options<default_expected, default_wrapping, max_decode_depth<4>>;
-using deep_depth_decoder_options    = Options<default_expected, default_wrapping, max_decode_depth<300>>;
-
 static_assert(IsOptions<minimal_decoder_options>);
 static_assert(!cbor::tags::detail::strict_integer_decode_option_v<minimal_decoder_options>);
-static_assert(cbor::tags::detail::max_decode_depth_option_v<minimal_decoder_options> == 256U);
-static_assert(cbor::tags::detail::max_decode_depth_option_v<shallow_depth_decoder_options> == 4U);
-static_assert(cbor::tags::detail::max_decode_depth_option_v<deep_depth_decoder_options> == 300U);
 
 struct NonDefaultComparator {
     int tag;
@@ -689,115 +671,6 @@ TEST_CASE("decoder should report incomplete indefinite bstr without retry contra
 
     CHECK_FALSE_MESSAGE(result, "Truncated indefinite bstr should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
-}
-
-TEST_CASE("decoder should enforce default raw item depth before materialized decode") {
-    {
-        auto buffer = nested_definite_arrays(256);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        REQUIRE_MESSAGE(result, "Default decode depth should accept the boundary depth.");
-        CHECK_EQ(item.size(), buffer.size());
-    }
-
-    {
-        auto buffer = nested_definite_arrays(257);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Default decode depth should reject one level past the boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-}
-
-TEST_CASE("decoder should enforce custom raw item depth option") {
-    {
-        auto buffer = nested_definite_arrays(4);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        REQUIRE_MESSAGE(result, "Custom decode depth should accept the configured boundary depth.");
-        CHECK_EQ(item.size(), buffer.size());
-    }
-
-    {
-        auto buffer = nested_definite_arrays(5);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Custom decode depth should reject one level past the configured boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto buffer = nested_definite_arrays(257);
-        auto dec    = make_decoder_with_options<deep_depth_decoder_options>(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        REQUIRE_MESSAGE(result, "Raw view bounds should use the configured decode depth, not the default depth.");
-        CHECK_EQ(item.size(), buffer.size());
-    }
-}
-
-TEST_CASE("decoder should apply depth preflight to tags non-contiguous inputs and later root arguments") {
-    {
-        auto buffer = nested_tags(257);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Nested tags should consume the same depth budget as nested arrays.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto                                          contiguous = nested_definite_arrays(257);
-        std::deque<std::byte>                         buffer(contiguous.begin(), contiguous.end());
-        auto                                          dec = make_decoder(buffer);
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Non-contiguous inputs should use the same raw depth preflight.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto buffer = std::vector<std::byte>{std::byte{0x00}};
-        auto nested = nested_definite_arrays(257);
-        buffer.insert(buffer.end(), nested.begin(), nested.end());
-        auto dec = make_decoder(buffer);
-
-        std::uint64_t                                 first{99};
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(first, item);
-
-        CHECK_FALSE_MESSAGE(result, "Each top-level decode argument should get its own depth preflight.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-        CHECK_EQ(first, 0U);
-    }
-}
-
-TEST_CASE("decoder depth preflight should not change header-only wrapper behavior") {
-    auto buffer = nested_definite_arrays(257);
-    auto dec    = make_decoder(buffer);
-
-    as_array_any header{};
-    auto         result = dec(header);
-
-    REQUIRE_MESSAGE(result, "Header-only wrappers should keep decoding only the current header.");
-    CHECK_EQ(header.size, 1U);
 }
 
 TEST_CASE("decoder should decode complete definite values in one shot") {
