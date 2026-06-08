@@ -204,11 +204,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
                     if (!read_argument(header.additional_info, length)) {
                         return false;
                     }
-                    if (length == 0U) {
-                        if (!observe_structural_item()) {
-                            return false;
-                        }
-                    } else if (!push_frame(cbor_item_frame{.major = major_type::Array, .remaining = length})) {
+                    if (length > 0U && !push_frame(cbor_item_frame{.major = major_type::Array, .remaining = length})) {
                         return false;
                     }
                 }
@@ -229,11 +225,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
                         return false;
                     }
                     const auto item_count = length * 2U;
-                    if (item_count == 0U) {
-                        if (!observe_structural_item()) {
-                            return false;
-                        }
-                    } else if (!push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
+                    if (item_count > 0U && !push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
                         return false;
                     }
                 }
@@ -341,15 +333,9 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
     [[nodiscard]] constexpr bool  stack_empty() const noexcept { return stack_size_ == 0; }
     [[nodiscard]] constexpr auto &stack_back() noexcept { return stack_[stack_size_ - 1]; }
     constexpr void                stack_pop_back() noexcept { --stack_size_; }
-    constexpr bool                observe_structural_item() {
+    constexpr bool                push_frame(cbor_item_frame frame) {
         if (stack_size_ == stack_.size()) {
             fail(status_code::max_depth_exceeded);
-            return false;
-        }
-        return true;
-    }
-    constexpr bool push_frame(cbor_item_frame frame) {
-        if (!observe_structural_item()) {
             return false;
         }
         stack_[stack_size_++] = frame;
@@ -376,18 +362,12 @@ template <std::size_t MaxDepth = default_max_decode_depth> struct cbor_item_skip
         std::size_t                           stack_size{};
         bool                                  root_started{};
 
-        auto stack_empty             = [&] { return stack_size == 0; };
-        auto stack_back              = [&]() -> cbor_item_frame              &{ return stack[stack_size - 1]; };
-        auto pop_frame               = [&] { --stack_size; };
-        auto observe_structural_item = [&] {
+        auto stack_empty = [&] { return stack_size == 0; };
+        auto stack_back  = [&]() -> cbor_item_frame  &{ return stack[stack_size - 1]; };
+        auto pop_frame   = [&] { --stack_size; };
+        auto push_frame  = [&](cbor_item_frame frame) {
             if (initial_depth + stack_size == stack.size()) {
                 status = status_code::max_depth_exceeded;
-                return false;
-            }
-            return true;
-        };
-        auto push_frame = [&](cbor_item_frame frame) {
-            if (!observe_structural_item()) {
                 return false;
             }
             stack[stack_size++] = frame;
@@ -481,11 +461,7 @@ template <std::size_t MaxDepth = default_max_decode_depth> struct cbor_item_skip
                     if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
                         return false;
                     }
-                    if (header.argument == 0U) {
-                        if (!observe_structural_item()) {
-                            return false;
-                        }
-                    } else if (!push_frame(cbor_item_frame{.major = major_type::Array, .remaining = header.argument})) {
+                    if (header.argument > 0U && !push_frame(cbor_item_frame{.major = major_type::Array, .remaining = header.argument})) {
                         return false;
                     }
                 }
@@ -504,11 +480,7 @@ template <std::size_t MaxDepth = default_max_decode_depth> struct cbor_item_skip
                         return false;
                     }
                     const auto item_count = header.argument * 2U;
-                    if (item_count == 0U) {
-                        if (!observe_structural_item()) {
-                            return false;
-                        }
-                    } else if (!push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
+                    if (item_count > 0U && !push_frame(cbor_item_frame{.major = major_type::Map, .remaining = item_count})) {
                         return false;
                     }
                 }

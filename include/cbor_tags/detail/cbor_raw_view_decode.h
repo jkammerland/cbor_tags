@@ -20,8 +20,7 @@ template <typename Iterator, typename SizeType> struct raw_encoded_item_bounds {
 template <typename InputBuffer, typename SizeType, std::size_t MaxDepth = default_max_decode_depth>
 constexpr status_code read_raw_encoded_item_bounds(const InputBuffer &data, std::ranges::iterator_t<const InputBuffer> start,
                                                    std::optional<major_type> expected_major, status_code major_mismatch,
-                                                   raw_encoded_item_bounds<std::ranges::iterator_t<const InputBuffer>, SizeType> &bounds,
-                                                   std::size_t initial_depth = 0) {
+                                                   raw_encoded_item_bounds<std::ranges::iterator_t<const InputBuffer>, SizeType> &bounds) {
     const auto end = std::ranges::end(data);
 
     auto             header_cursor = start;
@@ -35,7 +34,7 @@ constexpr status_code read_raw_encoded_item_bounds(const InputBuffer &data, std:
     }
 
     auto cursor = start;
-    if (!cbor_item_skipper<MaxDepth>::skip_item(cursor, end, status, initial_depth)) {
+    if (!cbor_item_skipper<MaxDepth>::skip_item(cursor, end, status)) {
         return status;
     }
 

@@ -33,96 +33,11 @@ std::vector<std::byte> nested_definite_arrays(std::size_t depth) {
     return buffer;
 }
 
-std::vector<std::byte> nested_definite_arrays_ending_in_empty(std::size_t outer_depth) {
-    std::vector<std::byte> buffer(outer_depth, std::byte{0x81});
-    buffer.push_back(std::byte{0x80});
-    return buffer;
-}
-
-std::vector<std::byte> nested_definite_arrays_ending_in_empty_map(std::size_t outer_depth) {
-    std::vector<std::byte> buffer(outer_depth, std::byte{0x81});
-    buffer.push_back(std::byte{0xA0});
-    return buffer;
-}
-
 std::vector<std::byte> nested_tags(std::size_t depth) {
     std::vector<std::byte> buffer(depth, std::byte{0xC0});
     buffer.push_back(std::byte{0x00});
     return buffer;
 }
-
-using nested_array_4 = std::vector<std::vector<std::vector<std::vector<int>>>>;
-using nested_array_5 = std::vector<nested_array_4>;
-
-struct WrappedDepthPayload {
-    std::vector<std::vector<int>> values;
-    int                           marker{};
-};
-
-struct ManualNestedEmptyMap {
-    int key{};
-
-    template <typename Decoder> constexpr expected<void, status_code> decode(Decoder &dec) {
-        auto outer = dec.enter_map(1);
-        if (!outer) {
-            return unexpected<status_code>(outer.error());
-        }
-
-        auto result = dec(key);
-        if (!result) {
-            return result;
-        }
-
-        auto inner = dec.enter_map();
-        if (!inner) {
-            return unexpected<status_code>(inner.error());
-        }
-        return {};
-    }
-};
-
-struct ManualArrayRawChild {
-    std::size_t child_size{};
-
-    template <typename Decoder> constexpr expected<void, status_code> decode(Decoder &dec) {
-        auto array = dec.enter_array(1);
-        if (!array) {
-            return unexpected<status_code>(array.error());
-        }
-
-        typename Decoder::raw_encoded_item_view child;
-        auto                                    result = dec(child);
-        if (!result) {
-            return result;
-        }
-
-        child_size = child.size();
-        return {};
-    }
-};
-
-struct ManualTagRawChild {
-    std::size_t child_size{};
-
-    template <typename Decoder> constexpr expected<void, status_code> decode(Decoder &dec) {
-        auto tag = dec.enter_tag(0);
-        if (!tag) {
-            return unexpected<status_code>(tag.error());
-        }
-
-        typename Decoder::raw_encoded_item_view child;
-        auto                                    result = dec(child);
-        if (!result) {
-            return result;
-        }
-
-        child_size = child.size();
-        return {};
-    }
-};
-
-using optional_tagged_int  = std::optional<std::pair<static_tag<42>, int>>;
-using optional_tag_variant = std::variant<optional_tagged_int, std::uint64_t>;
 
 struct minimal_decoder_options {
     using is_options  = void;
@@ -776,7 +691,7 @@ TEST_CASE("decoder should report incomplete indefinite bstr without retry contra
     CHECK_EQ(result.error(), status_code::incomplete);
 }
 
-TEST_CASE("decoder should enforce default raw item depth") {
+TEST_CASE("decoder should enforce default raw item depth before materialized decode") {
     {
         auto buffer = nested_definite_arrays(256);
         auto dec    = make_decoder(buffer);
@@ -796,50 +711,6 @@ TEST_CASE("decoder should enforce default raw item depth") {
         auto                                          result = dec(item);
 
         CHECK_FALSE_MESSAGE(result, "Default decode depth should reject one level past the boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty(255);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        REQUIRE_MESSAGE(result, "Default decode depth should count an empty innermost array at the boundary.");
-        CHECK_EQ(item.size(), buffer.size());
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty(256);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Default decode depth should reject an empty innermost array past the boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty_map(255);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        REQUIRE_MESSAGE(result, "Default decode depth should count an empty innermost map at the boundary.");
-        CHECK_EQ(item.size(), buffer.size());
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty_map(256);
-        auto dec    = make_decoder(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Default decode depth should reject an empty innermost map past the boundary.");
         CHECK_EQ(result.error(), status_code::max_depth_exceeded);
     }
 }
@@ -868,28 +739,6 @@ TEST_CASE("decoder should enforce custom raw item depth option") {
     }
 
     {
-        auto buffer = nested_definite_arrays_ending_in_empty(4);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Custom decode depth should count empty arrays when enforcing the boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty_map(4);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        typename decltype(dec)::raw_encoded_item_view item;
-        auto                                          result = dec(item);
-
-        CHECK_FALSE_MESSAGE(result, "Custom decode depth should count empty maps when enforcing the boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
         auto buffer = nested_definite_arrays(257);
         auto dec    = make_decoder_with_options<deep_depth_decoder_options>(buffer);
 
@@ -901,139 +750,7 @@ TEST_CASE("decoder should enforce custom raw item depth option") {
     }
 }
 
-TEST_CASE("decoder should enforce custom materialized decode depth option") {
-    {
-        auto buffer = nested_definite_arrays(4);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        nested_array_4 value;
-        auto           result = dec(value);
-
-        REQUIRE_MESSAGE(result, "Materialized decode should accept the configured boundary depth.");
-        REQUIRE_EQ(value.size(), 1U);
-        REQUIRE_EQ(value[0].size(), 1U);
-        REQUIRE_EQ(value[0][0].size(), 1U);
-        REQUIRE_EQ(value[0][0][0].size(), 1U);
-        CHECK_EQ(value[0][0][0][0], 0);
-    }
-
-    {
-        auto buffer = nested_definite_arrays(5);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        nested_array_5 value;
-        auto           result = dec(value);
-
-        CHECK_FALSE_MESSAGE(result, "Materialized decode should reject one level past the configured boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty(3);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        nested_array_4 value;
-        auto           result = dec(value);
-
-        REQUIRE_MESSAGE(result, "Materialized decode should count an empty innermost array at the boundary.");
-        REQUIRE_EQ(value.size(), 1U);
-        REQUIRE_EQ(value[0].size(), 1U);
-        REQUIRE_EQ(value[0][0].size(), 1U);
-        CHECK(value[0][0][0].empty());
-    }
-
-    {
-        auto buffer = nested_definite_arrays_ending_in_empty(4);
-        auto dec    = make_decoder_with_options<shallow_depth_decoder_options>(buffer);
-
-        nested_array_5 value;
-        auto           result = dec(value);
-
-        CHECK_FALSE_MESSAGE(result, "Materialized decode should reject an empty innermost array past the boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-}
-
-TEST_CASE("decoder should keep wrapped aggregate depth while decoding fields") {
-    std::vector<std::byte> buffer{
-        std::byte{0x82}, // wrapper array(2)
-        std::byte{0x81},
-        std::byte{0x80}, // values = [[]]
-        std::byte{0x00}, // marker = 0
-    };
-
-    {
-        auto dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<3>>>(buffer);
-
-        WrappedDepthPayload value;
-        auto                result = dec(value);
-
-        REQUIRE_MESSAGE(result, "Wrapped aggregate decode should accept values at the configured depth boundary.");
-        REQUIRE_EQ(value.values.size(), 1U);
-        CHECK(value.values[0].empty());
-        CHECK_EQ(value.marker, 0);
-    }
-
-    {
-        auto dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<2>>>(buffer);
-
-        WrappedDepthPayload value;
-        auto                result = dec(value);
-
-        CHECK_FALSE_MESSAGE(result, "Wrapped aggregate decode should keep the wrapper depth active for nested fields.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-}
-
-TEST_CASE("decoder should count explicit indefinite array and map wrappers") {
-    {
-        std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x80}, std::byte{0xFF}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<2>>>(buffer);
-
-        std::vector<std::vector<int>> value;
-        auto                          result = dec(as_indefinite{value});
-
-        REQUIRE_MESSAGE(result, "Explicit indefinite array decode should accept nested arrays at the configured boundary.");
-        REQUIRE_EQ(value.size(), 1U);
-        CHECK(value[0].empty());
-    }
-
-    {
-        std::vector<std::byte> buffer{std::byte{0x9F}, std::byte{0x80}, std::byte{0xFF}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<1>>>(buffer);
-
-        std::vector<std::vector<int>> value;
-        auto                          result = dec(as_indefinite{value});
-
-        CHECK_FALSE_MESSAGE(result, "Explicit indefinite array decode should count the outer indefinite wrapper.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-
-    {
-        std::vector<std::byte> buffer{std::byte{0xBF}, std::byte{0x00}, std::byte{0x80}, std::byte{0xFF}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<2>>>(buffer);
-
-        std::map<int, std::vector<int>> value;
-        auto                            result = dec(as_indefinite{value});
-
-        REQUIRE_MESSAGE(result, "Explicit indefinite map decode should accept nested arrays at the configured boundary.");
-        REQUIRE_EQ(value.size(), 1U);
-        CHECK(value.at(0).empty());
-    }
-
-    {
-        std::vector<std::byte> buffer{std::byte{0xBF}, std::byte{0x00}, std::byte{0x80}, std::byte{0xFF}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<1>>>(buffer);
-
-        std::map<int, std::vector<int>> value;
-        auto                            result = dec(as_indefinite{value});
-
-        CHECK_FALSE_MESSAGE(result, "Explicit indefinite map decode should count the outer indefinite wrapper.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-}
-
-TEST_CASE("decoder should enforce depth for tags non-contiguous inputs and later root arguments") {
+TEST_CASE("decoder should apply depth preflight to tags non-contiguous inputs and later root arguments") {
     {
         auto buffer = nested_tags(257);
         auto dec    = make_decoder(buffer);
@@ -1052,7 +769,7 @@ TEST_CASE("decoder should enforce depth for tags non-contiguous inputs and later
         typename decltype(dec)::raw_encoded_item_view item;
         auto                                          result = dec(item);
 
-        CHECK_FALSE_MESSAGE(result, "Non-contiguous inputs should use the same raw depth limit.");
+        CHECK_FALSE_MESSAGE(result, "Non-contiguous inputs should use the same raw depth preflight.");
         CHECK_EQ(result.error(), status_code::max_depth_exceeded);
     }
 
@@ -1066,13 +783,13 @@ TEST_CASE("decoder should enforce depth for tags non-contiguous inputs and later
         typename decltype(dec)::raw_encoded_item_view item;
         auto                                          result = dec(first, item);
 
-        CHECK_FALSE_MESSAGE(result, "Each top-level decode argument should get its own raw depth limit.");
+        CHECK_FALSE_MESSAGE(result, "Each top-level decode argument should get its own depth preflight.");
         CHECK_EQ(result.error(), status_code::max_depth_exceeded);
         CHECK_EQ(first, 0U);
     }
 }
 
-TEST_CASE("decoder depth tracking should not change header-only wrapper behavior") {
+TEST_CASE("decoder depth preflight should not change header-only wrapper behavior") {
     auto buffer = nested_definite_arrays(257);
     auto dec    = make_decoder(buffer);
 
@@ -1081,93 +798,6 @@ TEST_CASE("decoder depth tracking should not change header-only wrapper behavior
 
     REQUIRE_MESSAGE(result, "Header-only wrappers should keep decoding only the current header.");
     CHECK_EQ(header.size, 1U);
-}
-
-TEST_CASE("decoder scoped manual containers should enforce depth") {
-    {
-        std::vector<std::byte> buffer{std::byte{0xA1}, std::byte{0x01}, std::byte{0xA0}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<2>>>(buffer);
-
-        ManualNestedEmptyMap value;
-        auto                 result = dec(value);
-
-        REQUIRE_MESSAGE(result, "Manual enter_map scopes should decode nested maps within the depth boundary.");
-        CHECK_EQ(value.key, 1);
-    }
-
-    {
-        std::vector<std::byte> buffer{std::byte{0xA1}, std::byte{0x01}, std::byte{0xA0}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<1>>>(buffer);
-
-        ManualNestedEmptyMap value;
-        auto                 result = dec(value);
-
-        CHECK_FALSE_MESSAGE(result, "Manual enter_map scopes should reject nested maps past the depth boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-        CHECK_EQ(value.key, 1);
-    }
-}
-
-TEST_CASE("decoder raw views should inherit active typed depth") {
-    {
-        std::vector<std::byte> buffer{std::byte{0x81}, std::byte{0x80}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<2>>>(buffer);
-
-        ManualArrayRawChild value;
-        auto                result = dec(value);
-
-        REQUIRE_MESSAGE(result, "Raw views should decode under the active typed container depth.");
-        CHECK_EQ(value.child_size, 1U);
-    }
-
-    {
-        std::vector<std::byte> buffer{std::byte{0x81}, std::byte{0x80}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<1>>>(buffer);
-
-        ManualArrayRawChild value;
-        auto                result = dec(value);
-
-        CHECK_FALSE_MESSAGE(result, "Raw views should not receive a fresh depth budget inside typed containers.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-}
-
-TEST_CASE("decoder scoped manual tags should enforce depth") {
-    {
-        std::vector<std::byte> buffer{std::byte{0xC0}, std::byte{0x80}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<2>>>(buffer);
-
-        ManualTagRawChild value;
-        auto              result = dec(value);
-
-        REQUIRE_MESSAGE(result, "Manual enter_tag scopes should decode payloads within the depth boundary.");
-        CHECK_EQ(value.child_size, 1U);
-    }
-
-    {
-        std::vector<std::byte> buffer{std::byte{0xC0}, std::byte{0x80}};
-        auto                   dec = make_decoder_with_options<Options<default_expected, default_wrapping, max_decode_depth<1>>>(buffer);
-
-        ManualTagRawChild value;
-        auto              result = dec(value);
-
-        CHECK_FALSE_MESSAGE(result, "Manual enter_tag scopes should reject payloads past the depth boundary.");
-        CHECK_EQ(result.error(), status_code::max_depth_exceeded);
-    }
-}
-
-TEST_CASE("decoder variant should not re-read tag arguments for optional tagged alternatives") {
-    std::vector<std::byte> buffer{std::byte{0xD8}, std::byte{42}, std::byte{0x07}};
-    auto                   dec = make_decoder(buffer);
-
-    optional_tag_variant value{std::uint64_t{0}};
-    auto                 result = dec(value);
-
-    REQUIRE_MESSAGE(result, "Variant dispatch should pass the already decoded tag argument to optional tagged alternatives.");
-    REQUIRE(std::holds_alternative<optional_tagged_int>(value));
-    const auto &tagged = std::get<optional_tagged_int>(value);
-    REQUIRE(tagged.has_value());
-    CHECK_EQ(tagged->second, 7);
 }
 
 TEST_CASE("decoder should decode complete definite values in one shot") {
