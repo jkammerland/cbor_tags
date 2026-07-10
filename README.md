@@ -999,6 +999,8 @@ Important limitations:
 - This is allocation containment, not schema validation.
 - Bound the input at the transport, framing, or application boundary when you need a message-size limit.
 - Normal typed decoding intentionally performs no structural preflight scan and has no built-in nesting-depth limit.
+- Typed decoder call depth follows the destination type. Input-controlled unbounded depth requires a recursive destination shape or a
+  custom codec that explicitly recurses; extra nesting alone cannot deepen a fixed, non-recursive target.
 - A byte limit bounds the maximum possible CBOR nesting because every nested item consumes at least one byte, but it is not a
   portable stack-safety guarantee. Target types, codecs, compiler optimization, caller stack use, and thread stack size all matter.
 - `std::variant` alternatives do not currently receive parent PMR allocator context.

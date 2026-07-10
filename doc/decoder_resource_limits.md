@@ -20,6 +20,43 @@ decoder's existing status for malformed input.
 The size operation must be constant time. Do not traverse an unsized range merely to enforce this check. Streaming and resumable
 parsers should count bytes as chunks arrive and reject a message when its cumulative byte budget is exceeded.
 
+## When Typed Decoding Can Recurse
+
+The typed decoder does not build a generic recursive CBOR tree. It follows the destination C++ type, and container width is handled by
+loops. For a non-recursive destination type, decoder call depth is therefore bounded by the nesting expressed in that type:
+
+```cpp
+std::vector<int> flat;                         // one array level
+std::vector<std::vector<int>> matrix;          // two array levels
+std::vector<std::vector<std::vector<int>>> cube; // three array levels
+```
+
+A million integers in `flat` do not create a million nested decoder calls. Likewise, extra array nesting in the input does not make
+the decoder recurse past `matrix`; when an `int` is expected and another array header is found, decoding returns a type-mismatch
+status.
+
+Input-controlled call depth requires a recursive decode path. The usual case is a recursively defined destination type:
+
+```cpp
+struct recursive_array {
+    std::vector<recursive_array> children;
+
+    template <typename Decoder>
+    cbor::tags::expected<void, cbor::tags::status_code> decode(Decoder &decoder) {
+        return decoder(children);
+    }
+};
+```
+
+Each decoded child can decode another `recursive_array`, so a nested one-element array can add one live C++ call frame per input byte.
+Recursive smart-pointer trees and mutually recursive types have the same property. A custom codec can also create a recursive call
+path explicitly, even if the destination type is not syntactically self-referential. Very deeply but statically nested generated types
+can use substantial stack too, but their maximum depth is fixed at compile time rather than controlled by arbitrary input nesting.
+
+This distinction applies to normal typed decoding. Explicit structural operations such as raw-item views and `find_tags` must inspect
+arbitrary CBOR structure; they use bounded iterative frame storage and report an error when that operation's depth limit is reached
+instead of recursively growing the C++ call stack.
+
 ## Local Stack Measurement
 
 The numbers below are observations from one machine, not portable decoder limits.
