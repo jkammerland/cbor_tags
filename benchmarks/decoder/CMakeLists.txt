@@ -4,7 +4,7 @@ project(bench_decoder CXX)
 add_executable(${PROJECT_NAME})
 
 # add target_sources, all .cpp files in this directory
-target_sources(${PROJECT_NAME} PRIVATE bench_decoder.cpp)
+target_sources(${PROJECT_NAME} PRIVATE bench_decode_preflight.cpp bench_decoder.cpp)
 
 find_package(fmt CONFIG REQUIRED)
 

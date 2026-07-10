@@ -14,6 +14,9 @@ auto decoder = cbor::tags::make_decoder(input);
 return decoder(value);
 ```
 
+The complete [`bounded_decode`](../examples/bounded_decode.cpp) example keeps this policy in application code and preserves the CBOR
+decoder's existing status for malformed input.
+
 The size operation must be constant time. Do not traverse an unsized range merely to enforce this check. Streaming and resumable
 parsers should count bytes as chunks arrive and reject a message when its cumulative byte budget is exceeded.
 

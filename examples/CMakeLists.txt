@@ -1,2 +1,5 @@
 add_executable(cbor_tags_basic_roundtrip basic_roundtrip.cpp)
 target_link_libraries(cbor_tags_basic_roundtrip PRIVATE cbor::tags)
+
+add_executable(cbor_tags_bounded_decode bounded_decode.cpp)
+target_link_libraries(cbor_tags_bounded_decode PRIVATE cbor::tags)
