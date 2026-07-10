@@ -994,17 +994,19 @@ std::pmr::map<std::pmr::string, std::pmr::string>
 std::pmr::vector<std::optional<std::pmr::string>>
 ```
 
-Important limitations(TODO):
+Important limitations:
 
 - This is allocation containment, not schema validation.
-- Use an external scan or application policy when you need max array, map, or string sizes.
+- Bound the input at the transport, framing, or application boundary when you need a message-size limit.
+- Normal typed decoding intentionally performs no structural preflight scan and has no built-in nesting-depth limit.
+- A byte limit bounds the maximum possible CBOR nesting because every nested item consumes at least one byte, but it is not a
+  portable stack-safety guarantee. Target types, codecs, compiler optimization, caller stack use, and thread stack size all matter.
 - `std::variant` alternatives do not currently receive parent PMR allocator context.
 - A bounded arena must use a bounded upstream resource, e.g `std::pmr::null_memory_resource()`.
 
-A future scanning pass is planned for policy checks before materializing values.
-That pass should be the right place to reject messages by declared array, map,
-or string sizes, nesting depth, or other schema/application limits without
-allocating the target object graph first.
+See [Decoder Resource Limits](doc/decoder_resource_limits.md) for measured stack-exhaustion depths on one development machine,
+including the smallest CBOR buffer that failed in that measurement. Resumable or asynchronous parsing should enforce a cumulative
+byte budget as data arrives instead of scanning the message before decoding it.
 
 ## ✨ WIP Features
 
@@ -1024,6 +1026,7 @@ Additional docs:
 - [Codec Extensions](doc/codec_extensions.md)
 - [RFC 8746 Typed Arrays](doc/rfc8746_typed_arrays.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)
+- [Decoder Resource Limits](doc/decoder_resource_limits.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:
