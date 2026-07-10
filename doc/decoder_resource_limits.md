@@ -64,6 +64,17 @@ The smallest buffer observed to exhaust the 8 MiB stack was therefore 13,105 byt
 build first failed at 14,977 bytes. An 8 KiB input cap remained below every measured failure boundary in this experiment, but it is not
 a general safety guarantee.
 
+## Regression Floor
+
+The `test_decode_stack_floor` CTest target decodes and destroys the same recursive vector shape at depth 1,024 in its own process. A
+stack overflow therefore fails that CTest entry without terminating the rest of the suite. The floor is intentionally not the measured
+crash boundary: it is four times deeper than the abandoned 256-level policy while retaining about 13 times of headroom from the
+earliest failure measured above.
+
+The test protects a useful lower bound instead of compiler-specific values. Exact crash depths are unsuitable assertions because
+optimization, standard-library implementation, sanitizer instrumentation, executable stack settings, and operating-system defaults
+can all move them. A future iterative or resumable decoder may exceed the documented measurements without invalidating the test.
+
 ## Why There Is No Universal Minimum
 
 Stack use depends on the decoded C++ type and codec call path. A smaller custom codec probe consumed about 128 bytes per level in GCC
