@@ -1022,9 +1022,10 @@ std::pmr::vector<std::optional<std::pmr::string>>
 
 Important limitations:
 
-- PMR alone is allocation containment, not schema validation.
-- `bounded_size<T, Min, Max>` validates the wrapped field's declared size and
-  generates matching CDDL, but unwrapped containers remain unbounded.
+- PMR is allocation containment, not schema validation.
+- `bounded_size<T, Min, Max>` validates only the immediately wrapped field and
+  generates matching CDDL. An unwrapped inner container is intentionally
+  unbounded; wrap it separately when it also has a protocol limit.
 - RFC 8746 scalar typed arrays can also be wrapped in `bounded_size`; the C++
   bounds are element counts, while generated CDDL constrains byte-string size.
 - Normal typed decoding is single-pass and has no built-in nesting-depth limit.
@@ -1045,10 +1046,11 @@ return cbor::tags::make_decoder(input)(value);
 See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
 [`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
 
-A future general scanning pass is planned for whole-message policy checks before
-materializing values. That pass should be the right place to reject messages by
-global declared sizes, nesting depth, or other schema/application limits without
-allocating the target object graph first.
+Definite container lengths are checked before the decoder calls `reserve`.
+Indefinite containers are checked in one pass and can retain the successfully
+decoded prefix when a later item exceeds the bound. See
+[CDDL Size-Bounded Containers](doc/cddl_handling.md#size-bounded-containers) for
+nesting and range-wrapper examples.
 
 ## ✨ WIP Features
 

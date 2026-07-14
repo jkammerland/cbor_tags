@@ -151,32 +151,32 @@ auto enc = ct::make_encoder(output);
 auto result = enc(ct::as_bounded_size<1, 3>(values));
 ```
 
-Explicit range wrappers can be bounded for encode and CDDL generation. This is
-the supported path for arbitrary views, including non-sized views:
+Explicit range wrappers can be bounded for encode and CDDL generation when the
+wrapped range is a sized range. The encoder reads `size()` before writing:
 
 ```cpp
 namespace ct = cbor::tags;
 
 std::vector<int> values{1, 2, 3, 4};
 
-auto view = ct::as_array_range(values | std::views::filter(is_even));
+auto view = ct::as_array_range(values);
 auto bounded_view = ct::as_bounded_size<0, 4>(view);
 enc(bounded_view);
 // CDDL: [0*4 int]
 ```
 
-Do not wrap a direct non-sized view and expect the library to infer the CBOR
-shape:
+Bounded encoding of a non-sized range is unsupported. Checking it before output
+would require a separate counting traversal. The unbounded range wrappers still
+encode non-sized input in one pass:
 
 ```cpp
 namespace ct = cbor::tags;
 
 auto evens = values | std::views::filter(is_even);
 
-// Unsupported: the view does not say whether it should be array, map, bstr, or tstr.
-enc(ct::as_bounded_size<0, 4>(evens));
+enc(ct::as_array_range(evens));
 
-// Supported:
+// Unsupported: evens has no constant-time size().
 enc(ct::as_bounded_size<0, 4>(ct::as_array_range(evens)));
 ```
 
@@ -196,6 +196,27 @@ enc(ct::as_bounded_size<0, 3>(ct::as_indefinite{values}));
 the configured bound must include that fixed extent. Unwrapped containers still
 render as unbounded `[* value]` or `{* key => value}` and do not get automatic
 schema-size validation.
+
+A bound applies only to the immediately wrapped value. It does not implicitly
+bound nested allocations:
+
+```cpp
+namespace ct = cbor::tags;
+
+using row = std::vector<int>;
+using rows = ct::max_size<std::vector<row>, 16>;
+// Limits the number of rows. Each row remains unbounded.
+
+using bounded_row = ct::max_size<row, 32>;
+using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
+// Limits both the number of rows and the number of values in each row.
+```
+
+For definite containers, the decoder validates the declared size before
+reserving target storage. Indefinite containers are validated while they are
+decoded. If an indefinite value exceeds its maximum, or reaches its break before
+its minimum, decoding returns `status_code::size_limit_exceeded` and leaves the
+successfully decoded prefix in the target.
 
 The RFC 8746 scalar typed-array extension supports `bounded_size` as element
 counts. CDDL renders the corresponding byte-string byte count because the wire

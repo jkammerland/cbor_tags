@@ -612,6 +612,18 @@ TEST_CASE("typed decode reads non-contiguous input once without a structural pre
     CHECK_EQ(input.increments, input.bytes.size());
 }
 
+TEST_CASE("bounded indefinite decoding traverses non-contiguous input once") {
+    counting_sized_bidirectional_bytes input{4};
+    input.bytes = to_bytes("9f0000ff");
+
+    std::vector<std::uint64_t> values;
+    auto                       dec = make_decoder(input);
+
+    REQUIRE(dec(as_bounded_size<0, 2>(values)));
+    CHECK_EQ(values, (std::vector<std::uint64_t>{0, 0}));
+    CHECK_EQ(input.increments, input.bytes.size());
+}
+
 TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload validation") {
     {
         auto buffer = make_deep_tag_with_array_payload(254);
