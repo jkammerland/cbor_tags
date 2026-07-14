@@ -1108,24 +1108,23 @@ std::string cddl_map_range_expr(CDDLContext &context, CDDLOptions options) {
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_bounded_size_expr(CDDLContext &context, CDDLOptions options) {
     using bounded_type = std::remove_cvref_t<T>;
-    using traits       = detail::bounded_size_traits<bounded_type>;
     using wrapped_type = detail::bounded_size_value_t<bounded_type>;
     using render_type  = std::conditional_t<IsIndefiniteWrapper<wrapped_type>, indefinite_value_t<wrapped_type>, wrapped_type>;
 
     if constexpr (CDDLBoundedTaggedByteStringArray<render_type>) {
-        return cddl_bounded_tagged_bstr_array_expr<render_type, traits::min, traits::max>();
+        return cddl_bounded_tagged_bstr_array_expr<render_type, bounded_type::min_size, bounded_type::max_size>();
     } else if constexpr (IsBinaryString<render_type> || detail::BstrRangeWrapper<render_type>) {
-        return cddl_size_control<traits::min, traits::max>("bstr");
+        return cddl_size_control<bounded_type::min_size, bounded_type::max_size>("bstr");
     } else if constexpr (IsTextString<render_type> || detail::TstrRangeWrapper<render_type>) {
-        return cddl_size_control<traits::min, traits::max>("tstr");
+        return cddl_size_control<bounded_type::min_size, bounded_type::max_size>("tstr");
     } else if constexpr (detail::ArrayRangeWrapper<render_type>) {
-        return cddl_bounded_array_range_expr<render_type, traits::min, traits::max, PointerMode>(context, options);
+        return cddl_bounded_array_range_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
     } else if constexpr (detail::MapRangeWrapper<render_type>) {
-        return cddl_bounded_map_range_expr<render_type, traits::min, traits::max, PointerMode>(context, options);
+        return cddl_bounded_map_range_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
     } else if constexpr (IsMap<render_type>) {
-        return cddl_bounded_map_expr<render_type, traits::min, traits::max, PointerMode>(context, options);
+        return cddl_bounded_map_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
     } else if constexpr (IsArray<render_type>) {
-        return cddl_bounded_sequence_expr<render_type, traits::min, traits::max, PointerMode>(context, options);
+        return cddl_bounded_sequence_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
     } else {
         static_assert(always_false<render_type>::value, "bounded_size CDDL requires a string, array, map, or explicit range wrapper");
         return {};

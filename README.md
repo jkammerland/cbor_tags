@@ -1049,9 +1049,10 @@ return cbor::tags::make_decoder(input)(value);
 See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
 [`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
 
-Definite container lengths are checked before the decoder calls `reserve`.
-Indefinite containers are checked in one pass and can retain the successfully
-decoded prefix when a later item exceeds the bound. See
+Definite container lengths are read once and checked before the decoder calls
+`reserve`; there is no validation pre-scan. Indefinite containers are checked in
+one pass and can retain the successfully decoded prefix when a later item
+exceeds the bound. See
 [CDDL Size-Bounded Containers](doc/cddl_handling.md#size-bounded-containers) for
 nesting and range-wrapper examples.
 

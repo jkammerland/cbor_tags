@@ -239,10 +239,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    template <typename T, std::size_t Min, std::size_t Max>
-        requires detail::CoreBoundedSizeValue<T>
+    template <IsBinaryString T, std::size_t Min, std::size_t Max>
     constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
-        return decode_bounded_size<T, Min, Max>(value.value(), major, additionalInfo);
+        return decode_bounded_bstr<Min, Max>(value.value(), major, additionalInfo);
+    }
+
+    template <IsTextString T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_tstr<Min, Max>(value.value(), major, additionalInfo);
+    }
+
+    template <IsArray T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_array<Min, Max>(value.value(), major, additionalInfo);
+    }
+
+    template <IsMap T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_map<Min, Max>(value.value(), major, additionalInfo);
     }
 
     template <IsBinaryString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
@@ -263,7 +277,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        const auto bstring_size = decode_unsigned(additionalInfo);
+        return decode_definite_bstr(t, decode_unsigned(additionalInfo));
+    }
+
+    template <IsBinaryString T> constexpr status_code decode_definite_bstr(T &t, std::uint64_t bstring_size) {
         if constexpr (IsFixedArray<T> || (IsConstBinaryView<T> && detail::is_static_extent_span_v<T>)) {
             if (bstring_size != static_cast<std::uint64_t>(t.size())) {
                 debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
@@ -333,7 +350,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        const auto text_size = decode_unsigned(additionalInfo);
+        return decode_definite_tstr(t, decode_unsigned(additionalInfo));
+    }
+
+    template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
         require_bytes(text_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
@@ -350,7 +370,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else {
             append_definite_string(t, text, text_size);
         }
-
         return status_code::success;
     }
 
@@ -671,7 +690,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (additionalInfo == static_cast<byte>(31)) {
             return decode_indef_tstr(value);
         }
-        const auto text_size = decode_unsigned(additionalInfo);
+        return decode_definite_tstr(value, decode_unsigned(additionalInfo));
+    }
+
+    constexpr status_code decode_definite_tstr(std::string &value, std::uint64_t text_size) {
         require_bytes(text_size);
         if (string_target_aliases_input(value)) {
             return status_code::error;
@@ -692,7 +714,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo == static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
-            const auto length_u64 = decode_unsigned(additionalInfo);
+            return decode_definite_bstr(value, decode_unsigned(additionalInfo));
+        }
+    }
+
+    constexpr status_code decode_definite_bstr(std::basic_string_view<std::byte> &value, std::uint64_t length_u64) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
             if (length_u64 == 0) {
                 value = {};
                 return status_code::success;
@@ -726,7 +755,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo == static_cast<byte>(31)) {
                 return status_code::no_match_for_tstr_on_buffer;
             }
-            value = decode_text(additionalInfo);
+            return decode_definite_tstr(value, decode_unsigned(additionalInfo));
+        }
+    }
+
+    constexpr status_code decode_definite_tstr(std::string_view &value, std::uint64_t text_size) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            value = decode_text_payload(text_size);
             return status_code::success;
         }
     }
@@ -766,15 +803,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::TextString) {
             return status_code::no_match_for_tstr_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
-        return detail::skip_sized_string_payload(reader_, data_, value.size);
+        return decode_definite_tstr(value, decode_unsigned(additionalInfo));
+    }
+    constexpr status_code decode_definite_tstr(as_text_any &value, std::uint64_t text_size) {
+        value.size = text_size;
+        return detail::skip_sized_string_payload(reader_, data_, text_size);
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
-        return detail::skip_sized_string_payload(reader_, data_, value.size);
+        return decode_definite_bstr(value, decode_unsigned(additionalInfo));
+    }
+    constexpr status_code decode_definite_bstr(as_bstr_any &value, std::uint64_t bstring_size) {
+        value.size = bstring_size;
+        return detail::skip_sized_string_payload(reader_, data_, bstring_size);
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Array) {
@@ -942,120 +985,143 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode(value, majorType, additionalInfo);
     }
 
-    template <std::size_t Min, std::size_t Max> constexpr status_code validate_bounded_definite_size(byte additionalInfo) {
-        auto          cursor = tell();
-        const auto    end    = std::ranges::end(data_);
-        status_code   status = status_code::success;
-        std::uint64_t size{};
-        if (!detail::cbor_item_reader::read_argument(cursor, end, std::to_integer<std::uint8_t>(additionalInfo), size, status)) {
-            return status;
+    template <std::size_t Min, std::size_t Max, IsBinaryString T>
+    constexpr status_code decode_bounded_bstr(T &wrapped, major_type major, byte additionalInfo) {
+        if (major != major_type::ByteString) {
+            return status_code::no_match_for_bstr_on_buffer;
         }
-        return detail::bounded_size_status<Min, Max>(size);
-    }
 
-    template <typename Wrapped, std::size_t Min, std::size_t Max>
-    constexpr status_code decode_bounded_size(Wrapped &wrapped, major_type major, byte additionalInfo) {
-        using wrapped_type = std::remove_cvref_t<Wrapped>;
-
-        if constexpr (IsBinaryString<wrapped_type>) {
-            if (major != major_type::ByteString) {
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
-            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                if (additionalInfo != static_cast<byte>(31)) {
-                    return status_code::no_match_for_bstr_on_buffer;
-                }
-            }
+            return decode_indef_bstr<Min, Max>(wrapped.value_);
+        } else {
             if (additionalInfo == static_cast<byte>(31)) {
-                if constexpr (IsConstView<wrapped_type>) {
+                if constexpr (IsConstView<T>) {
                     return status_code::no_match_for_bstr_on_buffer;
-                } else if constexpr (IsFixedArray<wrapped_type>) {
+                } else if constexpr (IsFixedArray<T>) {
                     return status_code::unexpected_group_size;
-                } else if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                    return decode_indef_bstr<Min, Max>(wrapped.value_);
-                } else if constexpr (std::ranges::range<wrapped_type>) {
+                } else if constexpr (std::ranges::range<T>) {
                     return decode_indef_bstr<Min, Max>(wrapped);
                 } else {
                     return decode(wrapped, major, additionalInfo);
                 }
             }
-        } else if constexpr (IsTextString<wrapped_type>) {
-            if (major != major_type::TextString) {
-                return status_code::no_match_for_tstr_on_buffer;
-            }
-            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                if (additionalInfo != static_cast<byte>(31)) {
-                    return status_code::no_match_for_tstr_on_buffer;
-                }
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                if constexpr (IsConstView<wrapped_type>) {
-                    return status_code::no_match_for_tstr_on_buffer;
-                } else if constexpr (IsFixedArray<wrapped_type>) {
-                    return status_code::unexpected_group_size;
-                } else if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                    return decode_indef_tstr<Min, Max>(wrapped.value_);
-                } else if constexpr (std::ranges::range<wrapped_type>) {
-                    return decode_indef_tstr<Min, Max>(wrapped);
-                } else {
-                    return decode(wrapped, major, additionalInfo);
-                }
-            }
-        } else if constexpr (IsMap<wrapped_type>) {
-            if (major != major_type::Map) {
-                return status_code::no_match_for_map_on_buffer;
-            }
-            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                if (additionalInfo != static_cast<byte>(31)) {
-                    return status_code::no_match_for_map_on_buffer;
-                }
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                if constexpr (IsFixedArray<wrapped_type>) {
-                    return status_code::unexpected_group_size;
-                } else if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                    return decode_indef_map<Min, Max>(wrapped.value_);
-                } else if constexpr (IsRangeOfCborValues<wrapped_type>) {
-                    return decode_indef_map<Min, Max>(wrapped);
-                } else {
-                    return decode(wrapped, major, additionalInfo);
-                }
-            }
-        } else if constexpr (IsArray<wrapped_type>) {
-            if (major != major_type::Array) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                if (additionalInfo != static_cast<byte>(31)) {
-                    return status_code::no_match_for_array_on_buffer;
-                }
-            }
-            if (additionalInfo == static_cast<byte>(31)) {
-                if constexpr (IsFixedArray<wrapped_type>) {
-                    return status_code::unexpected_group_size;
-                } else if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-                    return decode_indef_array<Min, Max>(wrapped.value_);
-                } else if constexpr (IsRangeOfCborValues<wrapped_type>) {
-                    return decode_indef_array<Min, Max>(wrapped);
-                } else {
-                    return decode(wrapped, major, additionalInfo);
-                }
-            }
-        }
 
-        if constexpr ((IsMap<wrapped_type> || IsArray<wrapped_type>) && !IsIndefiniteWrapper<wrapped_type>) {
             const auto size   = decode_unsigned(additionalInfo);
             const auto status = detail::bounded_size_status<Min, Max>(size);
             if (status != status_code::success) {
                 return status;
             }
-            return decode_definite_range(wrapped, size);
+            return decode_definite_bstr(wrapped, size);
+        }
+    }
+
+    template <std::size_t Min, std::size_t Max, IsTextString T>
+    constexpr status_code decode_bounded_tstr(T &wrapped, major_type major, byte additionalInfo) {
+        static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g tstr_view<std::deque<char>>");
+        if constexpr (IsConstView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        }
+        if (major != major_type::TextString) {
+            return status_code::no_match_for_tstr_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            return decode_indef_tstr<Min, Max>(wrapped.value_);
         } else {
-            const auto status = validate_bounded_definite_size<Min, Max>(additionalInfo);
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsConstView<T>) {
+                    return status_code::no_match_for_tstr_on_buffer;
+                } else if constexpr (IsFixedArray<T>) {
+                    return status_code::unexpected_group_size;
+                } else if constexpr (std::ranges::range<T>) {
+                    return decode_indef_tstr<Min, Max>(wrapped);
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status<Min, Max>(size);
             if (status != status_code::success) {
                 return status;
             }
-            return decode(wrapped, major, additionalInfo);
+            return decode_definite_tstr(wrapped, size);
+        }
+    }
+
+    template <std::size_t Min, std::size_t Max, IsArray T>
+    constexpr status_code decode_bounded_array(T &wrapped, major_type major, byte additionalInfo) {
+        if (major != major_type::Array) {
+            return status_code::no_match_for_array_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            return decode_indef_array<Min, Max>(wrapped.value_);
+        } else {
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsFixedArray<T>) {
+                    return status_code::unexpected_group_size;
+                } else if constexpr (IsRangeOfCborValues<T>) {
+                    return decode_indef_array<Min, Max>(wrapped);
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status<Min, Max>(size);
+            if (status != status_code::success) {
+                return status;
+            }
+            if constexpr (IsArrayHeader<std::remove_cvref_t<T>>) {
+                wrapped.size = size;
+                return status_code::success;
+            } else {
+                return decode_definite_range(wrapped, size);
+            }
+        }
+    }
+
+    template <std::size_t Min, std::size_t Max, IsMap T>
+    constexpr status_code decode_bounded_map(T &wrapped, major_type major, byte additionalInfo) {
+        if (major != major_type::Map) {
+            return status_code::no_match_for_map_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            return decode_indef_map<Min, Max>(wrapped.value_);
+        } else {
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsRangeOfCborValues<T>) {
+                    return decode_indef_map<Min, Max>(wrapped);
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status<Min, Max>(size);
+            if (status != status_code::success) {
+                return status;
+            }
+            if constexpr (IsMapHeader<std::remove_cvref_t<T>>) {
+                wrapped.size = size;
+                return status_code::success;
+            } else {
+                return decode_definite_range(wrapped, size);
+            }
         }
     }
 
