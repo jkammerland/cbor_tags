@@ -997,18 +997,23 @@ std::pmr::vector<std::optional<std::pmr::string>>
 Important limitations:
 
 - This is allocation containment, not schema validation.
-- Bound the input at the transport, framing, or application boundary when you need a message-size limit.
-- Normal typed decoding intentionally performs no structural preflight scan and has no built-in nesting-depth limit.
-- Typed decoder call depth follows the destination type. Input-controlled unbounded depth requires a recursive destination shape or a
-  custom codec that explicitly recurses; extra nesting alone cannot deepen a fixed, non-recursive target.
-- A byte limit bounds the maximum possible CBOR nesting because every nested item consumes at least one byte, but it is not a
-  portable stack-safety guarantee. Target types, codecs, compiler optimization, caller stack use, and thread stack size all matter.
+- Normal typed decoding is single-pass and has no built-in nesting-depth limit.
+- Input-controlled stack growth is limited to [recursive decode paths](doc/decoder_resource_limits.md#recursive-decode-paths), such as
+  recursively defined destination types or custom codecs that explicitly recurse.
 - `std::variant` alternatives do not currently receive parent PMR allocator context.
 - A bounded arena must use a bounded upstream resource, e.g `std::pmr::null_memory_resource()`.
 
-See [Decoder Resource Limits](doc/decoder_resource_limits.md) for measured stack-exhaustion depths on one development machine,
-including the smallest CBOR buffer that failed in that measurement. Resumable or asynchronous parsing should enforce a cumulative
-byte budget as data arrives instead of scanning the message before decoding it.
+Apply a message-size limit before decoding:
+
+```cpp
+if (input.size() > max_message_bytes)
+    return input_too_large;
+
+return cbor::tags::make_decoder(input)(value);
+```
+
+See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
+[`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
 
 ## ✨ WIP Features
 
