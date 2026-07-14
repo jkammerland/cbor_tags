@@ -85,15 +85,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode_major_and_size(value.cbor_tag, static_cast<byte_type>(0xC0));
     }
 
-    template <IsBoundedSizeWrapper B>
-        requires(!detail::BoundedExplicitRangeWrapper<B> && !detail::BoundedSizeExtensionWrapper<B>)
-    constexpr void encode(const B &value) {
-        using bounded_type = std::remove_cvref_t<B>;
-        using traits       = bounded_size_traits<bounded_type>;
-        using wrapped_type = bounded_size_value_t<bounded_type>;
-        static_assert(IsString<wrapped_type> || IsArray<wrapped_type> || IsMap<wrapped_type>,
-                      "bounded_size<T, Min, Max> requires T to encode as a string, array, map, or explicit range wrapper");
-
+    template <typename T, std::size_t Min, std::size_t Max>
+        requires detail::CoreBoundedSizeValue<T>
+    constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        using wrapped_type  = std::remove_cvref_t<T>;
         const auto &wrapped = value.value();
         if constexpr (IsIndefiniteWrapper<wrapped_type>) {
             using inner_type = indefinite_value_t<wrapped_type>;
@@ -102,18 +97,17 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                 throw detail::encode_status_exception{status_code::size_limit_exceeded};
             }
             const auto size = static_cast<std::uint64_t>(std::ranges::size(wrapped.value_));
-            if (detail::bounded_size_status<traits::min, traits::max>(size) != status_code::success) {
+            if (detail::bounded_size_status<Min, Max>(size) != status_code::success) {
                 throw detail::encode_status_exception{status_code::size_limit_exceeded};
             }
         } else {
             static_assert(std::ranges::sized_range<decltype(wrapped)>,
-                          "bounded_size<T, Min, Max> for direct non-sized ranges is unsupported; use as_array_range, "
-                          "as_map_range, as_bstr_range, or as_tstr_range");
+                          "bounded_size<T, Min, Max> requires a sized range; materialize non-sized input before encoding it");
             if (std::cmp_greater(std::ranges::size(wrapped), std::numeric_limits<std::uint64_t>::max())) {
                 throw detail::encode_status_exception{status_code::size_limit_exceeded};
             }
             const auto size = static_cast<std::uint64_t>(std::ranges::size(wrapped));
-            if (detail::bounded_size_status<traits::min, traits::max>(size) != status_code::success) {
+            if (detail::bounded_size_status<Min, Max>(size) != status_code::success) {
                 throw detail::encode_status_exception{status_code::size_limit_exceeded};
             }
         }

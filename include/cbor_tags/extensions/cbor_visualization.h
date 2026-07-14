@@ -418,8 +418,8 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         using next_seen = cddl_seen_append_t<Seen, value_type>;
         if constexpr (CDDLScopedType<value_type>) {
             return cddl_scoped_type_contains_nullable_pointer<value_type>();
-        } else if constexpr (IsBoundedSizeWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<bounded_size_value_t<value_type>, next_seen>();
+        } else if constexpr (detail::IsBoundedSizeWrapper<value_type>) {
+            return cddl_contains_nullable_pointer<detail::bounded_size_value_t<value_type>, next_seen>();
         } else if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
@@ -1108,8 +1108,8 @@ std::string cddl_map_range_expr(CDDLContext &context, CDDLOptions options) {
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_bounded_size_expr(CDDLContext &context, CDDLOptions options) {
     using bounded_type = std::remove_cvref_t<T>;
-    using traits       = bounded_size_traits<bounded_type>;
-    using wrapped_type = bounded_size_value_t<bounded_type>;
+    using traits       = detail::bounded_size_traits<bounded_type>;
+    using wrapped_type = detail::bounded_size_value_t<bounded_type>;
     using render_type  = std::conditional_t<IsIndefiniteWrapper<wrapped_type>, indefinite_value_t<wrapped_type>, wrapped_type>;
 
     if constexpr (CDDLBoundedTaggedByteStringArray<render_type>) {
@@ -1291,7 +1291,7 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     if constexpr (CDDLScopedType<value_type>) {
         static_assert(always_false<value_type>::value, "CDDL scope wrappers are only valid as cddl_schema_to roots");
         return {};
-    } else if constexpr (IsBoundedSizeWrapper<value_type>) {
+    } else if constexpr (detail::IsBoundedSizeWrapper<value_type>) {
         return cddl_bounded_size_expr<value_type, PointerMode>(context, options);
     } else if constexpr (detail::BstrRangeWrapper<value_type> || IsBinaryString<value_type>) {
         return "bstr";

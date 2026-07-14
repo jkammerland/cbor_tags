@@ -131,6 +131,12 @@ concept BoundedExplicitRangeWrapper =
     IsBoundedSizeWrapper<T> &&
     (ArrayRangeWrapper<bounded_size_value_t<T>> || MapRangeWrapper<bounded_size_value_t<T>> || StringRangeWrapper<bounded_size_value_t<T>>);
 
+template <typename T> using bounded_explicit_range_reference_t = decltype((std::declval<T>().value().range_));
+
+template <typename T>
+concept SizedBoundedExplicitRangeWrapper =
+    BoundedExplicitRangeWrapper<T> && std::ranges::sized_range<bounded_explicit_range_reference_t<T>>;
+
 } // namespace detail
 
 template <std::ranges::viewable_range R>
