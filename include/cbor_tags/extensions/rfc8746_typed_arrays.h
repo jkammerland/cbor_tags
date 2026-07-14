@@ -649,19 +649,19 @@ struct bounded_typed_array_traits<typed_array_view<T, ByteRange, ByteOrder>> {
 };
 
 template <typename T>
-concept BoundedTypedArrayWrapper = IsBoundedSizeWrapper<T> && bounded_typed_array_traits<bounded_size_value_t<T>>::is_typed_array;
+concept BoundedTypedArrayValue = bounded_typed_array_traits<std::remove_cvref_t<T>>::is_typed_array;
 
 template <typename T>
-concept BoundedTypedArrayEncodeWrapper = BoundedTypedArrayWrapper<T> && bounded_typed_array_traits<bounded_size_value_t<T>>::encode_target;
+concept BoundedTypedArrayEncodeValue = BoundedTypedArrayValue<T> && bounded_typed_array_traits<std::remove_cvref_t<T>>::encode_target;
 
 template <typename T>
-concept BoundedTypedArrayDecodeWrapper = BoundedTypedArrayWrapper<T> && bounded_typed_array_traits<bounded_size_value_t<T>>::decode_target;
+concept BoundedTypedArrayDecodeValue = BoundedTypedArrayValue<T> && bounded_typed_array_traits<std::remove_cvref_t<T>>::decode_target;
 
 template <typename Decoder, typename T>
-concept BoundedTypedArrayDecodeWrapperFor =
-    BoundedTypedArrayDecodeWrapper<T> && (!requires {
-        typename bounded_size_value_t<T>::payload_range_type;
-    } || detail::DecodableTypedArrayPayloadRange<Decoder, typename bounded_size_value_t<T>::payload_range_type>);
+concept BoundedTypedArrayDecodeValueFor =
+    BoundedTypedArrayDecodeValue<T> && (!requires {
+        typename std::remove_cvref_t<T>::payload_range_type;
+    } || detail::DecodableTypedArrayPayloadRange<Decoder, typename std::remove_cvref_t<T>::payload_range_type>);
 
 template <typename T> struct is_homogeneous_array_wrapper : std::false_type {};
 template <typename Array> struct is_homogeneous_array_wrapper<homogeneous_array<Array>> : std::true_type {};
@@ -848,32 +848,16 @@ struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array
 
 } // namespace cbor::tags::cddl
 
-namespace cbor::tags::detail {
-
-template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
-struct bounded_size_extension_traits<ext::rfc8746::typed_array<T, ByteOrder>> : std::true_type {};
-
-template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
-struct bounded_size_extension_traits<ext::rfc8746::typed_array_ref<T, ByteOrder>> : std::true_type {};
-
-template <typename T, ext::rfc8746::detail::TypedArrayPayloadRange ByteRange, ext::rfc8746::typed_array_byte_order ByteOrder>
-struct bounded_size_extension_traits<ext::rfc8746::typed_array_view<T, ByteRange, ByteOrder>> : std::true_type {};
-
-} // namespace cbor::tags::detail
-
 namespace cbor::tags::ext::rfc8746 {
 
 template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <IsBoundedSizeWrapper B>
-        requires BoundedTypedArrayEncodeWrapper<B>
-    void encode(const B &bounded) {
-        using bounded_type = std::remove_cvref_t<B>;
-        using traits       = bounded_size_traits<bounded_type>;
-
-        require_bounded_typed_array_element_count<traits::min, traits::max>(bounded.value());
+    template <typename Array, std::size_t Min, std::size_t Max>
+        requires BoundedTypedArrayEncodeValue<Array>
+    void encode(const bounded_size<Array, Min, Max> &bounded) {
+        require_bounded_typed_array_element_count<Min, Max>(bounded.value());
         encode(bounded.value());
     }
 
@@ -949,35 +933,31 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         });
     }
 
-    template <IsBoundedSizeWrapper B>
-        requires BoundedTypedArrayDecodeWrapperFor<Self, B>
-    [[nodiscard]] status_code decode(B &bounded, major_type major, std::byte additional_info) {
-        using bounded_type = std::remove_cvref_t<B>;
-        using traits       = bounded_size_traits<bounded_type>;
-        using array_type   = bounded_size_value_t<bounded_type>;
+    template <typename Array, std::size_t Min, std::size_t Max>
+        requires BoundedTypedArrayDecodeValueFor<Self, Array>
+    [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, major_type major, std::byte additional_info) {
+        using array_type   = std::remove_cvref_t<Array>;
         using array_traits = bounded_typed_array_traits<array_type>;
         using value_type   = typename array_traits::value_type;
         auto &dec          = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type, array_traits::byte_order>(
             dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
-                return decode_bounded_typed_array_payload<traits::min, traits::max>(bounded.value(), payload_major, payload_info);
+                return decode_bounded_typed_array_payload<Min, Max>(bounded.value(), payload_major, payload_info);
             });
     }
 
-    template <IsBoundedSizeWrapper B>
-        requires BoundedTypedArrayDecodeWrapperFor<Self, B>
-    [[nodiscard]] status_code decode(B &bounded, std::uint64_t tag) {
-        using bounded_type = std::remove_cvref_t<B>;
-        using traits       = bounded_size_traits<bounded_type>;
-        using array_type   = bounded_size_value_t<bounded_type>;
+    template <typename Array, std::size_t Min, std::size_t Max>
+        requires BoundedTypedArrayDecodeValueFor<Self, Array>
+    [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, std::uint64_t tag) {
+        using array_type   = std::remove_cvref_t<Array>;
         using array_traits = bounded_typed_array_traits<array_type>;
         using value_type   = typename array_traits::value_type;
         auto &dec          = static_cast<Self &>(*this);
 
         return detail::decode_payload_after_tag<value_type, array_traits::byte_order>(
             dec, tag, [&](major_type payload_major, std::byte payload_info) {
-                return decode_bounded_typed_array_payload<traits::min, traits::max>(bounded.value(), payload_major, payload_info);
+                return decode_bounded_typed_array_payload<Min, Max>(bounded.value(), payload_major, payload_info);
             });
     }
 

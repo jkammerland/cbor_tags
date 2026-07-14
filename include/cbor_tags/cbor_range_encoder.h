@@ -119,27 +119,13 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
         }
     }
 
-    template <std::size_t Min, std::size_t Max, typename R> constexpr void require_bounded_range_size(R &&range) {
-        if constexpr (std::ranges::sized_range<R>) {
-            const auto size = std::ranges::size(range);
-            if (std::cmp_greater(size, std::numeric_limits<std::uint64_t>::max())) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-            if (detail::bounded_size_status<Min, Max>(static_cast<std::uint64_t>(size)) != status_code::success) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-        } else {
-            static_assert(std::ranges::forward_range<R>, "bounded_size for non-sized explicit range wrappers requires a forward range");
-            std::uint64_t size{};
-            for ([[maybe_unused]] auto &&item : range) {
-                if (size == static_cast<std::uint64_t>(Max)) {
-                    throw detail::encode_status_exception{status_code::size_limit_exceeded};
-                }
-                ++size;
-            }
-            if (detail::bounded_size_status<Min, Max>(size) != status_code::success) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
+    template <std::size_t Min, std::size_t Max, std::ranges::sized_range R> constexpr void require_bounded_range_size(R &&range) {
+        const auto size = std::ranges::size(range);
+        if (std::cmp_greater(size, std::numeric_limits<std::uint64_t>::max())) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        if (detail::bounded_size_status<Min, Max>(static_cast<std::uint64_t>(size)) != status_code::success) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
         }
     }
 
@@ -210,10 +196,10 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
         encode_tstr_range(value.range_, value.chunk_size_);
     }
 
-    template <detail::BoundedExplicitRangeWrapper B> constexpr void encode(B &&value) {
+    template <detail::SizedBoundedExplicitRangeWrapper B> constexpr void encode(B &&value) {
         using bounded_type = std::remove_cvref_t<B>;
-        using traits       = bounded_size_traits<bounded_type>;
-        using wrapped_type = bounded_size_value_t<bounded_type>;
+        using traits       = detail::bounded_size_traits<bounded_type>;
+        using wrapped_type = detail::bounded_size_value_t<bounded_type>;
 
         auto &&wrapped = std::forward<B>(value).value();
         if constexpr (detail::ArrayRangeWrapper<wrapped_type>) {

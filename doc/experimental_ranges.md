@@ -182,31 +182,33 @@ enc(as_tstr_range(every_char, 2)); // 7f 62 41 64 61 61 ff
 `chunk_size` defaults to `4096` and must be greater than zero.
 
 Explicit range wrappers can be combined with `bounded_size` when the protocol
-has a known element or byte limit. Sized ranges are checked from their `size()`;
-non-sized ranges must be forward ranges so the encoder can count them before
-writing any output. The bound belongs to `bounded_size`; `chunk_size` on
-`as_bstr_range` and `as_tstr_range` only controls indefinite string chunking.
+has a known element or byte limit and the wrapped range is a sized range. The
+encoder checks `size()` before writing any output. The bound belongs to
+`bounded_size`; `chunk_size` on `as_bstr_range` and `as_tstr_range` only controls
+indefinite string chunking.
 
 ```cpp
 namespace ct = cbor::tags;
 
 std::vector<int> values{1, 2, 3};
-auto evens = values | std::views::filter([](int value) {
-    return (value % 2) == 0;
-});
 
-enc(ct::as_bounded_size<0, 2>(ct::as_array_range(evens)));
-// CDDL: [0*2 int]
+enc(ct::as_bounded_size<0, 3>(ct::as_array_range(values)));
+// CDDL: [0*3 int]
 ```
 
-Wrapping the non-sized view directly is intentionally unsupported because the
-view itself does not select a CBOR major type:
+Bounded encoding of a non-sized range is intentionally unsupported because
+checking the bound before writing would require a separate counting traversal.
+The unbounded explicit wrapper remains one-pass:
 
 ```cpp
 namespace ct = cbor::tags;
 
-enc(ct::as_bounded_size<0, 2>(evens));                 // unsupported
-enc(ct::as_bounded_size<0, 2>(ct::as_array_range(evens))); // supported
+auto evens = values | std::views::filter([](int value) {
+    return (value % 2) == 0;
+});
+
+enc(ct::as_array_range(evens));                            // supported
+enc(ct::as_bounded_size<0, 2>(ct::as_array_range(evens))); // unsupported
 ```
 
 ```cpp
@@ -221,10 +223,11 @@ auto odd_bytes = source | std::views::filter([](unsigned char value) {
 });
 
 enc(ct::as_bstr_range(odd_bytes, 2)); // 5f 42 01 03 ff
-
-enc(ct::as_bounded_size<0, 2>(ct::as_bstr_range(odd_bytes, 2)));
-// same bytes, plus a pre-write byte-count check and CDDL: bstr .size (0..2)
 ```
+
+Use a sized byte range when bounded encoding is required. CDDL generation can
+still describe a bounded explicit range wrapper independently of whether that
+particular C++ range type is encodable.
 
 Range wrappers are encode/CDDL helpers. They are not decode targets; decode into
 an owning container, a string, or one of the borrowed decode view types described

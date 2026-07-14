@@ -131,7 +131,7 @@ static_assert(!CanDecode<extension_decoder, typed_array_view<std::int32_t, bad_p
 static_assert(!CanEncode<extension_encoder, typed_array_view<std::int32_t>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view_be<double>>);
 static_assert(IsCborMajor<bounded_size<typed_array<std::int32_t>, 1, 3>>);
-static_assert(IsCborMajor<bounded_size<typed_array_ref<std::int32_t>, 1, 3>>);
+static_assert(!IsCborMajor<bounded_size<typed_array_ref<std::int32_t>, 1, 3>>);
 static_assert(IsCborMajor<bounded_size<typed_array_view<std::int32_t>, 1, 3>>);
 static_assert(CanEncode<extension_encoder, bounded_size<typed_array<std::int32_t>, 1, 3>>);
 static_assert(CanEncode<extension_encoder, bounded_size<typed_array_ref<std::int32_t>, 1, 3>>);
