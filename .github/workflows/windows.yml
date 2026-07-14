@@ -30,7 +30,7 @@ jobs:
     - name: Setup CMake
       uses: lukka/get-cmake@v4.3.2
       with:
-        cmakeVersion: '4.3.4'
+        cmakeVersion: '4.3.2'
         useCloudCache: false
 
     - name: Configure CMake (Windows)
@@ -117,7 +117,7 @@ jobs:
     - name: Setup CMake
       uses: lukka/get-cmake@v4.3.2
       with:
-        cmakeVersion: '4.3.4'
+        cmakeVersion: '4.3.2'
         useCloudCache: false
 
     - name: Configure CMake with std::expected
@@ -176,7 +176,7 @@ jobs:
     - name: Setup CMake
       uses: lukka/get-cmake@v4.3.2
       with:
-        cmakeVersion: '4.3.4'
+        cmakeVersion: '4.3.2'
         useCloudCache: false
 
     - name: Bootstrap vcpkg
