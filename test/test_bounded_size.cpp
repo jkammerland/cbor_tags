@@ -24,6 +24,9 @@ using bounded_test_encoder = decltype(make_encoder(std::declval<std::vector<std:
 template <typename T>
 concept CanEncodeBounded = requires(bounded_test_encoder &enc, const T &value) { enc.encode(value); };
 
+template <typename T>
+concept CanEncodeMutableBounded = requires(bounded_test_encoder &enc, T &value) { enc.encode(value); };
+
 using sized_array_range = array_range<std::ranges::ref_view<std::vector<int>>>;
 using sized_map_range   = map_range<std::ranges::ref_view<std::vector<std::pair<int, int>>>>;
 using sized_bstr_range  = bstr_range<std::ranges::ref_view<std::vector<std::byte>>>;
@@ -49,6 +52,31 @@ struct bounded_document {
     bounded_size<std::vector<std::byte>, 0, 4>               payload;
     bounded_size<std::vector<int>, 1, 3>                     values;
     bounded_size<std::map<std::string, std::uint64_t>, 0, 2> counters;
+};
+
+struct bounded_extension_value {
+    std::vector<int> values;
+};
+
+template <typename Self> struct bounded_extension_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::decode;
+    using cbor_codec_mixin_base<Self>::encode;
+
+    void encode(const bounded_extension_value &value) { static_cast<Self &>(*this).encode(value.values); }
+
+    template <std::size_t Min, std::size_t Max> void encode(const bounded_size<bounded_extension_value, Min, Max> &bounded) {
+        static_cast<Self &>(*this).encode(as_bounded_size<Min, Max>(bounded.value().values));
+    }
+
+    status_code decode(bounded_extension_value &value, major_type major, std::byte additional_info) {
+        return static_cast<Self &>(*this).decode(value.values, major, additional_info);
+    }
+
+    template <std::size_t Min, std::size_t Max>
+    status_code decode(bounded_size<bounded_extension_value, Min, Max> &bounded, major_type major, std::byte additional_info) {
+        auto values = as_bounded_size<Min, Max>(bounded.value().values);
+        return static_cast<Self &>(*this).decode(values, major, additional_info);
+    }
 };
 
 struct counting_memory_resource : std::pmr::memory_resource {
@@ -88,6 +116,29 @@ TEST_CASE("bounded_size roundtrips a mixed aggregate") {
     CHECK_EQ(output.payload.value(), input.payload.value());
     CHECK_EQ(output.values.value(), input.values.value());
     CHECK_EQ(output.counters.value(), input.counters.value());
+}
+
+TEST_CASE("custom codecs opt in to bounded_size with ordinary overloads") {
+    bounded_size<bounded_extension_value, 1, 2> input{bounded_extension_value{{1, 2}}};
+    std::vector<std::byte>                      buffer;
+    auto                                        enc = make_encoder<bounded_extension_codec>(buffer);
+
+    REQUIRE(enc(input));
+    CHECK_EQ(to_hex(buffer), "820102");
+
+    bounded_size<bounded_extension_value, 1, 2> output;
+    auto                                        dec = make_decoder<bounded_extension_codec>(buffer);
+
+    REQUIRE(dec(output));
+    CHECK_EQ(output.value().values, input.value().values);
+
+    auto invalid     = to_bytes("83010203");
+    auto invalid_dec = make_decoder<bounded_extension_codec>(invalid);
+    auto result      = invalid_dec(output);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(output.value().values, input.value().values);
 }
 
 TEST_CASE("bounded_size rejects invalid definite lengths before output or decode") {
@@ -287,6 +338,23 @@ TEST_CASE("bounded explicit range encoding uses sized ranges") {
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
         CHECK(buffer.empty());
     }
+}
+
+TEST_CASE("bounded explicit ranges preserve const iteration requirements") {
+    std::vector<int> values{1, 2, 3};
+    auto             mutable_transform = values | std::views::transform([offset = 0](int value) mutable { return value + offset; });
+    static_assert(std::ranges::sized_range<decltype(mutable_transform)>);
+    static_assert(!std::ranges::range<const decltype(mutable_transform)>);
+
+    auto range   = as_array_range(std::move(mutable_transform));
+    auto bounded = as_bounded_size<0, 3>(range);
+    static_assert(CanEncodeMutableBounded<decltype(bounded)>);
+    static_assert(!CanEncodeBounded<decltype(bounded)>);
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(bounded));
+    CHECK_EQ(to_hex(buffer), "83010203");
 }
 
 TEST_CASE("bounded explicit indefinite wrappers preserve their wire-shape requirement") {

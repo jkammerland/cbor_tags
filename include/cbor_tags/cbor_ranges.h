@@ -126,16 +126,13 @@ concept TstrRangeWrapper = is_tstr_range_wrapper<std::remove_cvref_t<T>>::value;
 template <typename T>
 concept StringRangeWrapper = BstrRangeWrapper<T> || TstrRangeWrapper<T>;
 
-template <typename T>
-concept BoundedExplicitRangeWrapper =
-    IsBoundedSizeWrapper<T> &&
-    (ArrayRangeWrapper<bounded_size_value_t<T>> || MapRangeWrapper<bounded_size_value_t<T>> || StringRangeWrapper<bounded_size_value_t<T>>);
-
-template <typename T> using bounded_explicit_range_reference_t = decltype((std::declval<T>().value().range_));
+template <typename T> using explicit_range_reference_t = decltype((std::declval<T>().range_));
 
 template <typename T>
-concept SizedBoundedExplicitRangeWrapper =
-    BoundedExplicitRangeWrapper<T> && std::ranges::sized_range<bounded_explicit_range_reference_t<T>>;
+concept SizedExplicitRangeWrapper = ExplicitRangeWrapperComponent<T> && std::ranges::sized_range<explicit_range_reference_t<T>>;
+
+template <typename T>
+concept ConstSizedExplicitRangeWrapper = SizedExplicitRangeWrapper<const std::remove_reference_t<T>>;
 
 } // namespace detail
 

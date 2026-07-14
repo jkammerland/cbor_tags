@@ -213,10 +213,44 @@ using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
 ```
 
 For definite containers, the decoder validates the declared size before
-reserving target storage. Indefinite containers are validated while they are
+reserving target storage, then continues decoding that payload. It does not run
+a validation pre-scan. Indefinite containers are validated while they are
 decoded. If an indefinite value exceeds its maximum, or reaches its break before
 its minimum, decoding returns `status_code::size_limit_exceeded` and leaves the
 successfully decoded prefix in the target.
+
+The core encoder and decoder recognize bounded CBOR text strings, byte strings,
+arrays, and maps. An extension wrapper opts in with an ordinary codec overload;
+no library trait registration is required. When the extension contains a core
+container, its overload can delegate the bound without rereading the CBOR
+header:
+
+```cpp
+struct samples {
+    std::vector<int> values;
+};
+
+template <typename Self>
+struct samples_codec : cbor::tags::cbor_codec_mixin_base<Self> {
+    using cbor::tags::cbor_codec_mixin_base<Self>::decode;
+    using cbor::tags::cbor_codec_mixin_base<Self>::encode;
+
+    template <std::size_t Min, std::size_t Max>
+    void encode(const cbor::tags::bounded_size<samples, Min, Max>& bounded) {
+        static_cast<Self&>(*this).encode(
+            cbor::tags::as_bounded_size<Min, Max>(bounded.value().values));
+    }
+
+    template <std::size_t Min, std::size_t Max>
+    cbor::tags::status_code decode(
+        cbor::tags::bounded_size<samples, Min, Max>& bounded,
+        cbor::tags::major_type major,
+        std::byte additional_info) {
+        auto values = cbor::tags::as_bounded_size<Min, Max>(bounded.value().values);
+        return static_cast<Self&>(*this).decode(values, major, additional_info);
+    }
+};
+```
 
 The RFC 8746 scalar typed-array extension supports `bounded_size` as element
 counts. CDDL renders the corresponding byte-string byte count because the wire

@@ -196,25 +196,26 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
         encode_tstr_range(value.range_, value.chunk_size_);
     }
 
-    template <detail::SizedBoundedExplicitRangeWrapper B> constexpr void encode(B &&value) {
-        using bounded_type = std::remove_cvref_t<B>;
-        using traits       = detail::bounded_size_traits<bounded_type>;
-        using wrapped_type = detail::bounded_size_value_t<bounded_type>;
+    template <detail::SizedExplicitRangeWrapper RangeWrapper, std::size_t Min, std::size_t Max>
+    constexpr void encode(bounded_size<RangeWrapper, Min, Max> &value) {
+        encode_bounded_explicit_range<Min, Max>(value);
+    }
 
-        auto &&wrapped = std::forward<B>(value).value();
-        if constexpr (detail::ArrayRangeWrapper<wrapped_type>) {
-            require_bounded_range_size<traits::min, traits::max>(wrapped.range_);
-            encode_array_range(wrapped.range_);
-        } else if constexpr (detail::MapRangeWrapper<wrapped_type>) {
-            require_bounded_range_size<traits::min, traits::max>(wrapped.range_);
-            encode_map_range(wrapped.range_);
-        } else if constexpr (detail::BstrRangeWrapper<wrapped_type>) {
-            require_bounded_range_size<traits::min, traits::max>(wrapped.range_);
-            encode_bstr_range(wrapped.range_, wrapped.chunk_size_);
-        } else if constexpr (detail::TstrRangeWrapper<wrapped_type>) {
-            require_bounded_range_size<traits::min, traits::max>(wrapped.range_);
-            encode_tstr_range(wrapped.range_, wrapped.chunk_size_);
-        }
+    template <detail::ConstSizedExplicitRangeWrapper RangeWrapper, std::size_t Min, std::size_t Max>
+    constexpr void encode(const bounded_size<RangeWrapper, Min, Max> &value) {
+        encode_bounded_explicit_range<Min, Max>(value);
+    }
+
+    template <detail::SizedExplicitRangeWrapper RangeWrapper, std::size_t Min, std::size_t Max>
+    constexpr void encode(bounded_size<RangeWrapper, Min, Max> &&value) {
+        encode_bounded_explicit_range<Min, Max>(value);
+    }
+
+  private:
+    template <std::size_t Min, std::size_t Max, typename B> constexpr void encode_bounded_explicit_range(B &value) {
+        auto &&wrapped = value.value();
+        require_bounded_range_size<Min, Max>(wrapped.range_);
+        encode(wrapped);
     }
 };
 
