@@ -260,26 +260,14 @@ concept IsNamedWrapper = IsNamedMapWrapper<T> || IsNamedGroupWrapper<T> || IsNam
 
 namespace detail {
 
-template <typename T> struct bounded_size_traits {
-    static constexpr bool        is_bounded_size = false;
-    static constexpr std::size_t min             = 0;
-    static constexpr std::size_t max             = 0;
-    using wrapped_type                           = void;
-};
+template <typename T> inline constexpr bool is_bounded_size_v = false;
 
-template <typename T, std::size_t Min, std::size_t Max> struct bounded_size_traits<bounded_size<T, Min, Max>> {
-    static constexpr bool        is_bounded_size = true;
-    static constexpr std::size_t min             = Min;
-    static constexpr std::size_t max             = Max;
-    using wrapped_type                           = T;
-};
+template <typename T, std::size_t Min, std::size_t Max> inline constexpr bool is_bounded_size_v<bounded_size<T, Min, Max>> = true;
 
 template <typename T>
-concept IsBoundedSizeWrapper = bounded_size_traits<std::remove_cvref_t<T>>::is_bounded_size;
+concept IsBoundedSizeWrapper = is_bounded_size_v<std::remove_cvref_t<T>>;
 
-template <typename T> using bounded_size_wrapped_t = typename bounded_size_traits<std::remove_cvref_t<T>>::wrapped_type;
-
-template <typename T> using bounded_size_value_t = std::remove_cvref_t<bounded_size_wrapped_t<T>>;
+template <typename T> using bounded_size_value_t = std::remove_cvref_t<typename std::remove_cvref_t<T>::value_type>;
 
 } // namespace detail
 
@@ -417,13 +405,6 @@ concept IsMap = IsMapBase<T> || IsIndefiniteMap<T>;
 
 template <typename T>
 concept IsArray = IsArrayBase<T> || IsIndefiniteArray<T>;
-
-namespace detail {
-
-template <typename T>
-concept CoreBoundedSizeValue = IsString<std::remove_cvref_t<T>> || IsArray<std::remove_cvref_t<T>> || IsMap<std::remove_cvref_t<T>>;
-
-} // namespace detail
 
 template <typename T>
 concept IsMultiMap = IsMap<T> && requires(T t) {

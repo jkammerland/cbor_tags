@@ -85,33 +85,16 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode_major_and_size(value.cbor_tag, static_cast<byte_type>(0xC0));
     }
 
-    template <typename T, std::size_t Min, std::size_t Max>
-        requires detail::CoreBoundedSizeValue<T>
-    constexpr void encode(const bounded_size<T, Min, Max> &value) {
-        using wrapped_type  = std::remove_cvref_t<T>;
-        const auto &wrapped = value.value();
-        if constexpr (IsIndefiniteWrapper<wrapped_type>) {
-            using inner_type = indefinite_value_t<wrapped_type>;
-            static_assert(std::ranges::sized_range<inner_type>, "bounded_size<as_indefinite<T>, Min, Max> requires T to be a sized range");
-            if (std::cmp_greater(std::ranges::size(wrapped.value_), std::numeric_limits<std::uint64_t>::max())) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-            const auto size = static_cast<std::uint64_t>(std::ranges::size(wrapped.value_));
-            if (detail::bounded_size_status<Min, Max>(size) != status_code::success) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-        } else {
-            static_assert(std::ranges::sized_range<decltype(wrapped)>,
-                          "bounded_size<T, Min, Max> requires a sized range; materialize non-sized input before encoding it");
-            if (std::cmp_greater(std::ranges::size(wrapped), std::numeric_limits<std::uint64_t>::max())) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-            const auto size = static_cast<std::uint64_t>(std::ranges::size(wrapped));
-            if (detail::bounded_size_status<Min, Max>(size) != status_code::success) {
-                throw detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-        }
-        encode(wrapped);
+    template <IsString T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value);
+    }
+
+    template <IsArray T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value);
+    }
+
+    template <IsMap T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value);
     }
 
     template <IsString T> constexpr void encode(const T &value) {
@@ -247,6 +230,28 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     OutputBuffer                  &data_;
 
   private:
+    template <std::size_t Min, std::size_t Max, typename T> constexpr void encode_bounded_size(const bounded_size<T, Min, Max> &value) {
+        const auto &wrapped     = value.value();
+        const auto &sized_value = [&]() -> decltype(auto) {
+            if constexpr (IsIndefiniteWrapper<std::remove_cvref_t<T>>) {
+                return (wrapped.value_);
+            } else {
+                return (wrapped);
+            }
+        }();
+
+        static_assert(std::ranges::sized_range<decltype(sized_value)>,
+                      "bounded_size<T, Min, Max> requires a sized range; materialize non-sized input before encoding it");
+        const auto range_size = std::ranges::size(sized_value);
+        if (std::cmp_greater(range_size, std::numeric_limits<std::uint64_t>::max())) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        if (detail::bounded_size_status<Min, Max>(static_cast<std::uint64_t>(range_size)) != status_code::success) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        encode(wrapped);
+    }
+
     // Helper method to avoid code duplication
     template <typename Tuple> void aggregate_encode(Tuple &&tuple) {
         std::apply(
