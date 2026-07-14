@@ -29,6 +29,50 @@ The existing decoder benchmarks also prepare some payloads from
 or use fixed-payload benchmarks so each version decodes the same CBOR integer
 widths and container contents.
 
+## Typed Decode Preflight Regression
+
+`bench_decode_preflight.cpp` uses fixed payloads designed to expose a whole-item
+structural pass before typed decoding:
+
+- definite arrays containing 32 and 4096 one-byte unsigned integers;
+- an indefinite array containing 4096 one-byte unsigned integers;
+- 128 nested one-element arrays decoded through a recursive codec.
+
+Each table pairs `public direct typed decode` with
+`emulated structural preflight + typed decode`. The emulation exists only in the
+benchmark and uses the internal raw-item skipper before invoking the public
+decoder. It must not be moved into the normal decode path.
+
+Run only this fixture in a Release benchmark build:
+
+```bash
+cmake -S . -B build/benchmarks \
+  -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
+  -DCBOR_TAGS_BUILD_TESTS=OFF
+cmake --build build/benchmarks --target bench_decoder --parallel
+build/benchmarks/benchmarks/decoder/bench_decoder \
+  --test-case="decode preflight regression benchmarks" --no-skip
+```
+
+The following directional results compare `dd71501`, which adds the real root
+preflight to parent `6617765`, with direct decoding at that parent/current
+implementation. Both builds used GCC 15.2.1, `-O3 -DNDEBUG`, one pinned CPU,
+15 epochs of at least 20 ms per row, and two interleaved runs:
+
+| Fixed payload | Preflight, ns/byte | Direct, ns/byte | Direct speedup |
+|---|---:|---:|---:|
+| definite uint array, 32 elements | 3.26-3.52 | 0.87 | 3.7-4.0x |
+| definite uint array, 4096 elements | 2.31 | 0.79-0.80 | 2.9x |
+| indefinite uint array, 4096 elements | 2.27 | 0.67 | 3.4x |
+| nested one-element arrays, depth 128 | 4.37-4.38 | 1.03-1.04 | 4.2x |
+
+The host reported CPU frequency scaling and the `powersave` governor, so these
+are regression-direction measurements rather than release claims. As a
+cross-check, the current emulated-preflight rows stayed close to the historical
+public-preflight rows.
+
 ## Shared Graph Encode Lookup Rows
 
 The encoder suite includes `shared_graph encode N unique x2 unordered_map`,

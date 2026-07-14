@@ -597,6 +597,21 @@ TEST_CASE("sized non-contiguous readers use size for offset bounds checks") {
     CHECK_EQ(input.increments, 1);
 }
 
+TEST_CASE("typed decode reads non-contiguous input once without a structural preflight") {
+    counting_sized_bidirectional_bytes input{3};
+    input.bytes = {std::byte{0x81}, std::byte{0x81}, std::byte{0x00}};
+
+    auto                          dec = make_decoder(input);
+    std::vector<std::vector<int>> value;
+    auto                          result = dec(value);
+
+    REQUIRE(result);
+    REQUIRE_EQ(value.size(), 1U);
+    REQUIRE_EQ(value[0].size(), 1U);
+    CHECK_EQ(value[0][0], 0);
+    CHECK_EQ(input.increments, input.bytes.size());
+}
+
 TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload validation") {
     {
         auto buffer = make_deep_tag_with_array_payload(254);

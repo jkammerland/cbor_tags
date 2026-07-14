@@ -994,17 +994,26 @@ std::pmr::map<std::pmr::string, std::pmr::string>
 std::pmr::vector<std::optional<std::pmr::string>>
 ```
 
-Important limitations(TODO):
+Important limitations:
 
 - This is allocation containment, not schema validation.
-- Use an external scan or application policy when you need max array, map, or string sizes.
+- Normal typed decoding is single-pass and has no built-in nesting-depth limit.
+- Input-controlled stack growth is limited to [recursive decode paths](doc/decoder_resource_limits.md#recursive-decode-paths), such as
+  recursively defined destination types or custom codecs that explicitly recurse.
 - `std::variant` alternatives do not currently receive parent PMR allocator context.
 - A bounded arena must use a bounded upstream resource, e.g `std::pmr::null_memory_resource()`.
 
-A future scanning pass is planned for policy checks before materializing values.
-That pass should be the right place to reject messages by declared array, map,
-or string sizes, nesting depth, or other schema/application limits without
-allocating the target object graph first.
+Apply a message-size limit before decoding:
+
+```cpp
+if (input.size() > max_message_bytes)
+    return input_too_large;
+
+return cbor::tags::make_decoder(input)(value);
+```
+
+See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
+[`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
 
 ## ✨ WIP Features
 
@@ -1024,6 +1033,7 @@ Additional docs:
 - [Codec Extensions](doc/codec_extensions.md)
 - [RFC 8746 Typed Arrays](doc/rfc8746_typed_arrays.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)
+- [Decoder Resource Limits](doc/decoder_resource_limits.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 
 There are many types of cbor objects defined, the major types are:
