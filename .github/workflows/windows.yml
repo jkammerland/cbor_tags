@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }}
-    runs-on: windows-latest
+    runs-on: windows-2025
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +30,7 @@ jobs:
     - name: Setup CMake
       uses: lukka/get-cmake@v4.3.2
       with:
-        cmakeVersion: '3.31.5'
+        cmakeVersion: '4.3.4'
         useCloudCache: false
 
     - name: Configure CMake (Windows)
@@ -39,13 +39,12 @@ jobs:
         $buildDir = "build-cxx${{ matrix.cxx_standard }}"
         $arguments = @(
           "-B", $buildDir,
-          "-G", "Visual Studio 17 2022",
+          "-G", "Visual Studio 18 2026",
           "-A", "x64",
           "-DCBOR_TAGS_BUILD_TESTS=ON"
         )
         if ("${{ matrix.cxx_standard }}" -eq "26") {
-          # CMake 3.31 does not know how to enable CXX26 for current MSVC/Clang-CL toolsets.
-          # Use the vendor preview flag while keeping CMake's modeled standard at C++23.
+          # CMake 4.3 supports the VS 2026 generator but does not model its C++26 preview mode.
           $cxxFlags = "/std:c++latest"
           if ("${{ matrix.config.toolset }}" -eq "ClangCL") {
             $cxxFlags += " -Wno-unused-command-line-argument"
@@ -76,9 +75,9 @@ jobs:
       shell: pwsh
       run: ctest --test-dir build-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
 
-  std-expected-cxx23:
-    name: Windows MSVC C++23 std::expected return tests
-    runs-on: windows-latest
+  msvc-2022-cxx20:
+    name: Windows MSVC 2022 C++20 compatibility
+    runs-on: windows-2022
 
     steps:
     - uses: actions/checkout@v6.0.2
@@ -89,11 +88,43 @@ jobs:
         cmakeVersion: '3.31.5'
         useCloudCache: false
 
+    - name: Configure CMake (Visual Studio 2022)
+      shell: pwsh
+      run: |
+        cmake -B build-msvc-2022-cxx20 `
+          -G "Visual Studio 17 2022" `
+          -A x64 `
+          -DCBOR_TAGS_BUILD_TESTS=ON `
+          -DCMAKE_CXX_STANDARD=20 `
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+          -DCMAKE_CXX_EXTENSIONS=OFF
+
+    - name: Build
+      shell: pwsh
+      run: cmake --build build-msvc-2022-cxx20 --config Release --parallel
+
+    - name: Test
+      shell: pwsh
+      run: ctest --test-dir build-msvc-2022-cxx20 -C Release --output-on-failure
+
+  std-expected-cxx23:
+    name: Windows MSVC C++23 std::expected return tests
+    runs-on: windows-2025
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '4.3.4'
+        useCloudCache: false
+
     - name: Configure CMake with std::expected
       shell: pwsh
       run: |
         cmake -B build-std-expected-cxx23 `
-          -G "Visual Studio 17 2022" `
+          -G "Visual Studio 18 2026" `
           -A x64 `
           -DCBOR_TAGS_BUILD_TESTS=ON `
           -DCBOR_TAGS_USE_STD_EXPECTED=ON `
@@ -111,7 +142,7 @@ jobs:
 
   optional-backends:
     name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }} ${{ matrix.backend.name }}
-    runs-on: windows-latest
+    runs-on: windows-2025
     strategy:
       fail-fast: false
       matrix:
@@ -145,7 +176,7 @@ jobs:
     - name: Setup CMake
       uses: lukka/get-cmake@v4.3.2
       with:
-        cmakeVersion: '3.31.5'
+        cmakeVersion: '4.3.4'
         useCloudCache: false
 
     - name: Bootstrap vcpkg
@@ -158,7 +189,7 @@ jobs:
         $toolchainFile = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
         $arguments = @(
           "-B", $buildDir,
-          "-G", "Visual Studio 17 2022",
+          "-G", "Visual Studio 18 2026",
           "-A", "x64",
           "-DCBOR_TAGS_BUILD_TESTS=ON",
           "-D${{ matrix.backend.option }}=ON",
@@ -166,8 +197,7 @@ jobs:
           "-DVCPKG_MANIFEST_FEATURES=${{ matrix.backend.feature }}"
         )
         if ("${{ matrix.cxx_standard }}" -eq "26") {
-          # CMake 3.31 does not know how to enable CXX26 for current MSVC/Clang-CL toolsets.
-          # Use the vendor preview flag while keeping CMake's modeled standard at C++23.
+          # CMake 4.3 supports the VS 2026 generator but does not model its C++26 preview mode.
           $cxxFlags = "/std:c++latest"
           if ("${{ matrix.config.toolset }}" -eq "ClangCL") {
             $cxxFlags += " -Wno-unused-command-line-argument"
