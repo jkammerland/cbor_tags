@@ -13,7 +13,7 @@ namespace cbor::tags {
 // A usable specialization must provide:
 // - static constexpr std::size_t size
 // - template <std::size_t I> using alternative = ...
-// - static std::size_t index(const T&)
+// - static std::size_t index(const T&) noexcept
 // - static get<I>(T&) and get<I>(const T&)
 // - static visit(visitor, variant) and visit(visitor, variant, variant)
 // - static assign<I>(T&, value)
@@ -99,6 +99,7 @@ template <typename Variant> inline constexpr std::size_t variant_size_v = varian
 template <std::size_t I, typename Variant> using variant_alternative_t = typename variant_traits_t<Variant>::template alternative<I>;
 
 template <typename Variant> [[nodiscard]] constexpr std::size_t variant_index(const Variant &value) noexcept {
+    static_assert(noexcept(variant_traits_t<Variant>::index(value)), "variant_traits::index must be declared noexcept");
     return variant_traits_t<Variant>::index(value);
 }
 

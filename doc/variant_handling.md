@@ -44,7 +44,7 @@ struct cbor::tags::variant_traits<boost::variant2::variant<Ts...>> {
     using alternative =
         boost::variant2::variant_alternative_t<I, variant_type>;
 
-    static std::size_t index(variant_type const& value) {
+    static std::size_t index(variant_type const& value) noexcept {
         return value.index();
     }
 
@@ -65,6 +65,10 @@ struct cbor::tags::variant_traits<boost::variant2::variant<Ts...>> {
     }
 };
 ```
+
+`index` must be declared `noexcept`. It only reads the active-alternative
+discriminator; types that can fail while determining their active member should
+use an ordinary `encode`/`decode` overload instead of `variant_traits`.
 
 `visit` must support both single-variant and multi-variant calls because
 encoding uses the former and comparison helpers use the latter.

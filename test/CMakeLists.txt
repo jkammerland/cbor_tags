@@ -166,6 +166,19 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+add_executable(variant_traits_throwing_index_compile_fails EXCLUDE_FROM_ALL variant_traits_throwing_index_compile_fail.cc)
+target_link_libraries(variant_traits_throwing_index_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME variant_traits_throwing_index_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=variant_traits_throwing_index_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=variant_traits::index must be declared noexcept"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 add_executable(cddl_variant_ref_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_ref_duplicate_tags_compile_fail.cc)
 target_link_libraries(cddl_variant_ref_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
