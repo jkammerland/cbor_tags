@@ -10,11 +10,14 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <list>
+#include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -62,6 +65,42 @@ concept CanBuildByteSegments = requires { typename basic_byte_segments<Storage>;
 
 template <typename T>
 concept CanWrapSegmentItemAsBstr = requires(T &&value) { as_bstr(std::forward<T>(value)); };
+
+enum class segmented_report_state : std::uint8_t { idle, active };
+
+struct segmented_sample {
+    static constexpr std::uint64_t cbor_tag = 60120;
+
+    std::string                                   name;
+    std::variant<std::int64_t, std::string, bool> value;
+    std::optional<std::string>                    unit;
+
+    bool operator==(const segmented_sample &) const = default;
+};
+
+template <typename Payload> struct segmented_report_input {
+    segmented_report_state                  state{};
+    std::optional<std::string>              note;
+    std::vector<segmented_sample>           samples;
+    std::variant<std::string, bool>         result;
+    std::map<std::string, std::vector<int>> metrics;
+    Payload                                 payload;
+};
+
+template <typename Payload>
+segmented_report_input(segmented_report_state, std::optional<std::string>, std::vector<segmented_sample>, std::variant<std::string, bool>,
+                       std::map<std::string, std::vector<int>>, Payload) -> segmented_report_input<Payload>;
+
+struct segmented_report_output {
+    segmented_report_state                  state{};
+    std::optional<std::string>              note;
+    std::vector<segmented_sample>           samples;
+    std::variant<std::string, bool>         result;
+    std::map<std::string, std::vector<int>> metrics;
+    std::vector<std::byte>                  payload;
+
+    bool operator==(const segmented_report_output &) const = default;
+};
 
 struct copyable_owning_byte_view : std::ranges::view_interface<copyable_owning_byte_view> {
     std::vector<std::byte> bytes;
@@ -318,6 +357,39 @@ TEST_CASE("cbor segments can be used as the normal encoder output backend") {
     CHECK_EQ(to_hex(segmented.flatten()), to_hex(contiguous));
     CHECK(has_borrowed_segment(segmented, blob0.data(), blob0.size()));
     CHECK(has_borrowed_segment(segmented, blob1.data(), blob1.size()));
+}
+
+TEST_CASE("segmented output roundtrips realistic aggregate composition") {
+    std::vector<std::byte>        payload{std::byte{0x00}, std::byte{0x7f}, std::byte{0xff}};
+    std::vector<segmented_sample> samples{
+        {"temperature", std::int64_t{-12}, std::string{"C"}},
+        {"mode", std::string{"maintenance"}, std::nullopt},
+        {"interlock", true, std::nullopt},
+    };
+    std::map<std::string, std::vector<int>> metrics{{"recent", {1, 2, 3}}, {"older", {4}}};
+
+    auto check_roundtrip = [&](std::variant<std::string, bool> result, std::optional<std::string> note) {
+        auto input = segmented_report_input{
+            segmented_report_state::active, note, samples, result, metrics, as_bstr_range(std::span<const std::byte>{payload}),
+        };
+
+        cbor_segments segmented;
+        auto          enc = make_encoder(segmented);
+        REQUIRE(enc(input));
+        CHECK(has_borrowed_segment(segmented, payload.data(), payload.size()));
+
+        const auto              flattened = segmented.flatten();
+        segmented_report_output output;
+        auto                    dec = make_decoder(flattened);
+        REQUIRE(dec(output));
+        REQUIRE(dec.tell() == flattened.end());
+
+        const segmented_report_output expected{segmented_report_state::active, note, samples, result, metrics, payload};
+        CHECK(output == expected);
+    };
+
+    SUBCASE("text result with engaged optional") { check_roundtrip(std::string{"ready"}, std::string{"calibrated"}); }
+    SUBCASE("simple result with disengaged optional") { check_roundtrip(false, std::nullopt); }
 }
 
 TEST_CASE("byte segments support custom inline storage as encoder backend") {
