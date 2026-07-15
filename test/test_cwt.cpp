@@ -97,6 +97,26 @@ TEST_CASE("CWT claims encode with registered integer claim keys") {
     CHECK_EQ(decoded.cwt_id, claims.cwt_id);
 }
 
+TEST_CASE("encoded item view options decode non-empty CWT claims maps") {
+    claims_set claims;
+    claims.issuer     = "idp";
+    claims.expiration = std::int64_t{42};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder(encoded);
+    REQUIRE(enc(claims));
+
+    claims_set decoded;
+    auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options>(encoded);
+    auto       result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.issuer, claims.issuer);
+    CHECK_EQ(decoded.expiration, claims.expiration);
+    CHECK_EQ(to_hex(result->bytes()), to_hex(encoded));
+    CHECK_EQ(dec.tell(), encoded.end());
+}
+
 TEST_CASE("COSE protected header and Sign1 Sig_structure encode in RFC shape") {
     const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256});
     REQUIRE(protected_header);
