@@ -1327,25 +1327,19 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return unexpected<status_code>(status_code::incomplete);
         }
 
-        const auto                                             start = tell();
-        detail::raw_encoded_item_bounds<iterator_t, size_type> bounds{};
-        const auto                                             status =
-            detail::read_raw_encoded_item_bounds<InputBuffer, size_type>(data_, start, std::nullopt, status_code::error, bounds);
-        if (status != status_code::success) {
-            return unexpected<status_code>(status);
-        }
+        const auto start        = tell();
+        const auto start_offset = current_offset();
 
         status_collector<self_t> collect_status{*this};
         const auto               success = (collect_status(std::forward<T>(args)) && ...);
         if (!success) {
             return unexpected<decltype(collect_status.result)>(collect_status.result);
         }
-        if (tell() != bounds.cursor) {
-            return unexpected<status_code>(status_code::error);
-        }
 
+        const auto            cursor = tell();
+        const auto            size   = current_offset() - start_offset;
         raw_encoded_item_view encoded_item;
-        assign_encoded_view(encoded_item, bounds.start, bounds.cursor, bounds.size);
+        assign_encoded_view(encoded_item, start, cursor, size);
         return expected_type{std::move(encoded_item)};
     }
 
@@ -1385,6 +1379,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         return false;
+    }
+
+    [[nodiscard]] constexpr size_type current_offset() const noexcept {
+        if constexpr (IsContiguous<InputBuffer>) {
+            return reader_.position_;
+        } else {
+            return reader_.current_offset_;
+        }
     }
 
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
