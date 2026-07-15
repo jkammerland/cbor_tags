@@ -49,6 +49,42 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+function(add_dynamic_bounded_size_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_cddl_compile_fails
+  dynamic_bounded_size_cddl_compile_fail.cc
+  "dynamic_bounded_size cannot be represented by type-based CDDL")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_variant_decode_compile_fails
+  dynamic_bounded_size_variant_decode_compile_fail.cc
+  "dynamic_bounded_size cannot be decoded as a variant alternative")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_optional_decode_compile_fails
+  dynamic_bounded_size_optional_decode_compile_fail.cc
+  "generic optional decoding cannot create its bounds")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_container_decode_compile_fails
+  dynamic_bounded_size_container_decode_compile_fail.cc
+  "generic container decoding cannot create its bounds")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_nested_compile_fails
+  dynamic_bounded_size_nested_compile_fail.cc
+  "bounded size wrappers cannot directly contain another bounded size wrapper")
+
 add_executable(cddl_variant_nullable_pointer_compile_fails EXCLUDE_FROM_ALL cddl_variant_nullable_pointer_compile_fail.cc)
 target_link_libraries(cddl_variant_nullable_pointer_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
