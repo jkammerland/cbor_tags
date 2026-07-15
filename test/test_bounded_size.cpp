@@ -1,3 +1,4 @@
+#include "cbor_roundtrip.h"
 #include "test_util.h"
 
 #include <array>
@@ -9,6 +10,7 @@
 #include <doctest/doctest.h>
 #include <map>
 #include <memory_resource>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -16,6 +18,7 @@
 #include <vector>
 
 using namespace cbor::tags;
+namespace test_support = cbor::tags::test;
 
 namespace {
 
@@ -53,6 +56,77 @@ struct bounded_document {
     bounded_size<std::vector<int>, 1, 3>                     values;
     bounded_size<std::map<std::string, std::uint64_t>, 0, 2> counters;
 };
+
+enum class bounded_sensor_state : std::uint8_t { idle, active, fault };
+
+struct bounded_sample_batch {
+    static constexpr std::uint64_t cbor_tag = 60000;
+
+    bounded_size<std::string, 1, 12>                source;
+    bounded_size<std::vector<int>, 1, 4>            readings;
+    std::optional<bounded_size<std::string, 0, 16>> note;
+};
+
+using bounded_report_result = std::variant<bounded_size<std::string, 1, 16>, bounded_size<std::map<std::string, int>, 1, 3>, bool>;
+
+struct bounded_sensor_report {
+    bounded_sensor_state                                        state{};
+    bounded_size<std::vector<bounded_sample_batch>, 1, 3>       batches;
+    bounded_report_result                                       result;
+    bounded_size<std::map<std::string, std::vector<int>>, 0, 2> history;
+};
+
+struct plain_sample_batch {
+    static constexpr std::uint64_t cbor_tag = 60000;
+
+    std::string                source;
+    std::vector<int>           readings;
+    std::optional<std::string> note;
+};
+
+using plain_report_result = std::variant<std::string, std::map<std::string, int>, bool>;
+
+struct plain_sensor_report {
+    bounded_sensor_state                    state{};
+    std::vector<plain_sample_batch>         batches;
+    plain_report_result                     result;
+    std::map<std::string, std::vector<int>> history;
+};
+
+struct sample_batch_value {
+    std::string                source;
+    std::vector<int>           readings;
+    std::optional<std::string> note;
+
+    bool operator==(const sample_batch_value &) const = default;
+};
+
+struct sensor_report_value {
+    bounded_sensor_state                    state{};
+    std::vector<sample_batch_value>         batches;
+    plain_report_result                     result;
+    std::map<std::string, std::vector<int>> history;
+
+    bool operator==(const sensor_report_value &) const = default;
+};
+
+sensor_report_value semantic_value(const bounded_sensor_report &report) {
+    std::vector<sample_batch_value> batches;
+    batches.reserve(report.batches.value().size());
+    for (const auto &batch : report.batches.value()) {
+        batches.push_back(
+            {batch.source.value(), batch.readings.value(), batch.note ? std::optional<std::string>{batch.note->value()} : std::nullopt});
+    }
+
+    plain_report_result result;
+    switch (report.result.index()) {
+    case 0: result = std::get<0>(report.result).value(); break;
+    case 1: result = std::get<1>(report.result).value(); break;
+    default: result = std::get<2>(report.result); break;
+    }
+
+    return {report.state, std::move(batches), std::move(result), report.history.value()};
+}
 
 struct bounded_extension_value {
     std::vector<int> values;
@@ -118,18 +192,111 @@ TEST_CASE("bounded_size roundtrips a mixed aggregate") {
     CHECK_EQ(output.counters.value(), input.counters.value());
 }
 
+TEST_CASE("bounded_size roundtrips nested aggregate composition") {
+    auto check_roundtrip = [](const bounded_sensor_report &input) {
+        const auto output = test_support::roundtrip(input);
+        CHECK(semantic_value(output) == semantic_value(input));
+    };
+
+    SUBCASE("map result with engaged and disengaged optionals") {
+        bounded_sensor_report input{
+            bounded_sensor_state::active,
+            bounded_size<std::vector<bounded_sample_batch>, 1, 3>{{
+                {bounded_size<std::string, 1, 12>{"front"}, bounded_size<std::vector<int>, 1, 4>{{1, 2, 3}},
+                 bounded_size<std::string, 0, 16>{"stable"}},
+                {bounded_size<std::string, 1, 12>{"rear"}, bounded_size<std::vector<int>, 1, 4>{{4, 5}}, std::nullopt},
+            }},
+            bounded_size<std::map<std::string, int>, 1, 3>{{{"accepted", 5}, {"rejected", 0}}},
+            bounded_size<std::map<std::string, std::vector<int>>, 0, 2>{{{"recent", {1, 2}}, {"older", {3}}}},
+        };
+
+        check_roundtrip(input);
+    }
+
+    SUBCASE("text result at minimum container sizes") {
+        bounded_sensor_report input{
+            bounded_sensor_state::idle,
+            bounded_size<std::vector<bounded_sample_batch>, 1, 3>{{
+                {bounded_size<std::string, 1, 12>{"a"}, bounded_size<std::vector<int>, 1, 4>{{0}}, bounded_size<std::string, 0, 16>{""}},
+            }},
+            bounded_size<std::string, 1, 16>{"ok"},
+            bounded_size<std::map<std::string, std::vector<int>>, 0, 2>{{}},
+        };
+
+        check_roundtrip(input);
+    }
+
+    SUBCASE("simple result at maximum container sizes") {
+        bounded_sensor_report input{
+            bounded_sensor_state::fault,
+            bounded_size<std::vector<bounded_sample_batch>, 1, 3>{{
+                {bounded_size<std::string, 1, 12>{"abcdefghijkl"}, bounded_size<std::vector<int>, 1, 4>{{1, 2, 3, 4}},
+                 bounded_size<std::string, 0, 16>{"1234567890abcdef"}},
+                {bounded_size<std::string, 1, 12>{"middle"}, bounded_size<std::vector<int>, 1, 4>{{5}}, std::nullopt},
+                {bounded_size<std::string, 1, 12>{"last"}, bounded_size<std::vector<int>, 1, 4>{{6, 7}}, std::nullopt},
+            }},
+            true,
+            bounded_size<std::map<std::string, std::vector<int>>, 0, 2>{{{"a", {}}, {"b", {8, 9}}}},
+        };
+
+        check_roundtrip(input);
+    }
+}
+
+TEST_CASE("bounded_size rejects typed aggregate values outside nested bounds") {
+    auto decode = [](const plain_sensor_report &input, bounded_sensor_report &output) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(input));
+
+        auto dec = make_decoder(buffer);
+        return dec(output);
+    };
+
+    SUBCASE("outer array is below its minimum") {
+        plain_sensor_report   input{bounded_sensor_state::idle, {}, std::string{"ok"}, {}};
+        bounded_sensor_report output;
+        auto                  result = decode(input, output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(output.batches.value().empty());
+    }
+
+    SUBCASE("nested array exceeds its maximum") {
+        plain_sensor_report input{
+            bounded_sensor_state::active,
+            {{"front", {1, 2, 3, 4, 5}, std::nullopt}},
+            std::map<std::string, int>{{"accepted", 1}},
+            {},
+        };
+        bounded_sensor_report output;
+        auto                  result = decode(input, output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+    }
+
+    SUBCASE("selected variant alternative exceeds its maximum") {
+        plain_sensor_report input{
+            bounded_sensor_state::active,
+            {{"front", {1}, std::nullopt}},
+            std::string(17, 'x'),
+            {},
+        };
+        bounded_sensor_report output;
+        auto                  result = decode(input, output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(std::holds_alternative<bounded_size<std::string, 1, 16>>(output.result));
+    }
+}
+
 TEST_CASE("custom codecs opt in to bounded_size with ordinary overloads") {
     bounded_size<bounded_extension_value, 1, 2> input{bounded_extension_value{{1, 2}}};
-    std::vector<std::byte>                      buffer;
-    auto                                        enc = make_encoder<bounded_extension_codec>(buffer);
-
-    REQUIRE(enc(input));
-    CHECK_EQ(to_hex(buffer), "820102");
-
     bounded_size<bounded_extension_value, 1, 2> output;
-    auto                                        dec = make_decoder<bounded_extension_codec>(buffer);
-
-    REQUIRE(dec(output));
+    test_support::roundtrip_into<bounded_extension_codec>(input, output);
     CHECK_EQ(output.value().values, input.value().values);
 
     auto invalid     = to_bytes("83010203");
@@ -139,6 +306,15 @@ TEST_CASE("custom codecs opt in to bounded_size with ordinary overloads") {
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::size_limit_exceeded);
     CHECK_EQ(output.value().values, input.value().values);
+}
+
+TEST_CASE("bounded custom codec pins its CBOR array wire shape") {
+    bounded_size<bounded_extension_value, 1, 2> input{bounded_extension_value{{1, 2}}};
+    std::vector<std::byte>                      buffer;
+    auto                                        enc = make_encoder<bounded_extension_codec>(buffer);
+
+    REQUIRE(enc(input));
+    CHECK_EQ(to_hex(buffer), "820102");
 }
 
 TEST_CASE("bounded_size rejects invalid definite lengths before output or decode") {
@@ -166,7 +342,10 @@ TEST_CASE("bounded_size rejects invalid definite lengths before output or decode
 }
 
 TEST_CASE("bounded_size applies only to the immediately wrapped container") {
-    auto buffer = to_bytes("8183010203");
+    const std::vector<std::vector<int>> input{{1, 2, 3}};
+    std::vector<std::byte>              buffer;
+    auto                                enc = make_encoder(buffer);
+    REQUIRE(enc(input));
 
     max_size<std::vector<std::vector<int>>, 1> outer_only;
     auto                                       outer_dec = make_decoder(buffer);
@@ -317,27 +496,53 @@ TEST_CASE("bounded_size variant propagates a selected alternative size error") {
     CHECK(std::holds_alternative<bounded_size<std::string, 1, 4>>(value));
 }
 
-TEST_CASE("bounded explicit range encoding uses sized ranges") {
+TEST_CASE("bounded explicit range wrappers roundtrip semantic values") {
     {
-        std::vector<int>       values{1, 2, 3};
-        std::vector<std::byte> buffer;
-        auto                   enc    = make_encoder(buffer);
-        auto                   result = enc(as_bounded_size<3, 3>(as_array_range(values)));
+        std::vector<int> values{1, 2, 3};
+        std::vector<int> decoded;
 
-        REQUIRE(result);
-        CHECK_EQ(to_hex(buffer), "83010203");
+        auto input = as_bounded_size<3, 3>(as_array_range(values));
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, values);
     }
 
     {
         std::vector<std::pair<int, int>> values{{1, 2}, {3, 4}};
-        std::vector<std::byte>           buffer;
-        auto                             enc    = make_encoder(buffer);
-        auto                             result = enc(as_bounded_size<0, 1>(as_map_range(values)));
+        std::map<int, int>               decoded;
 
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-        CHECK(buffer.empty());
+        auto input = as_bounded_size<2, 2>(as_map_range(values));
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, (std::map<int, int>{{1, 2}, {3, 4}}));
     }
+
+    {
+        std::vector<std::byte> values{std::byte{0x01}, std::byte{0x02}};
+        std::vector<std::byte> decoded;
+
+        auto input = as_bounded_size<2, 2>(as_bstr_range(values));
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, values);
+    }
+
+    {
+        std::string values{"hello"};
+        std::string decoded;
+
+        auto input = as_bounded_size<1, 5>(as_tstr_range(values));
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, values);
+    }
+}
+
+TEST_CASE("bounded explicit range wrappers reject invalid sizes before output") {
+    std::vector<std::pair<int, int>> values{{1, 2}, {3, 4}};
+    std::vector<std::byte>           buffer;
+    auto                             enc    = make_encoder(buffer);
+    auto                             result = enc(as_bounded_size<0, 1>(as_map_range(values)));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+    CHECK(buffer.empty());
 }
 
 TEST_CASE("bounded explicit ranges preserve const iteration requirements") {

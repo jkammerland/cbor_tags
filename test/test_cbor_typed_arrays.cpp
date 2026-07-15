@@ -1,3 +1,4 @@
+#include "cbor_roundtrip.h"
 #include "test_util.h"
 
 #include <array>
@@ -11,9 +12,12 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -22,6 +26,7 @@
 using namespace cbor::tags;
 using namespace cbor::tags::ext::rfc8746;
 namespace rfc8746_detail = cbor::tags::ext::rfc8746::detail;
+namespace test_support   = cbor::tags::test;
 using cbor::tags::test::detail::allocation_failure_guard;
 
 namespace {
@@ -36,6 +41,40 @@ class toy_value {
   private:
     std::uint64_t value_{};
 };
+
+enum class bounded_typed_report_state : std::uint8_t { idle, active };
+
+struct bounded_typed_report {
+    bounded_typed_report_state                                         state{};
+    std::optional<bounded_size<typed_array<std::int32_t>, 1, 3>>       samples;
+    std::variant<bounded_size<typed_array<double>, 1, 2>, std::string> result;
+    std::map<std::string, std::vector<std::vector<int>>>               groups;
+};
+
+struct bounded_typed_report_value {
+    bounded_typed_report_state                           state{};
+    std::optional<std::vector<std::int32_t>>             samples;
+    std::variant<std::vector<double>, std::string>       result;
+    std::map<std::string, std::vector<std::vector<int>>> groups;
+
+    bool operator==(const bounded_typed_report_value &) const = default;
+};
+
+bounded_typed_report_value semantic_value(const bounded_typed_report &report) {
+    std::optional<std::vector<std::int32_t>> samples;
+    if (report.samples) {
+        samples = report.samples->value().values();
+    }
+
+    std::variant<std::vector<double>, std::string> result;
+    if (report.result.index() == 0) {
+        result = std::get<0>(report.result).value().values();
+    } else {
+        result = std::get<1>(report.result);
+    }
+
+    return {report.state, std::move(samples), std::move(result), report.groups};
+}
 
 template <typename Self> struct toy_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
@@ -1174,7 +1213,8 @@ TEST_CASE("rfc8746 typed array borrowed encode wrapper rejects rvalue containers
 }
 
 TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
-    const auto encoded_three = to_bytes("d84e4c010000000200000003000000");
+    const std::array<std::int32_t, 3> encoded_values{1, 2, 3};
+    const auto                        encoded_three = encode_normal<std::int32_t>(std::span<const std::int32_t>{encoded_values});
 
     {
         auto                   values = bounded_size<typed_array<std::int32_t>, 1, 3>{typed_array<std::int32_t>{{1, 2, 3}}};
@@ -1226,7 +1266,8 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
 
     {
         bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
-        auto                                          input  = to_bytes("d84e5001000000020000000300000004000000");
+        const std::array<std::int32_t, 4>             input_values{1, 2, 3, 4};
+        auto                                          input  = encode_normal<std::int32_t>(std::span<const std::int32_t>{input_values});
         auto                                          dec    = make_decoder<typed_array_codec>(input);
         const auto                                    result = dec(decoded);
 
@@ -1237,7 +1278,8 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
 
     {
         bounded_size<typed_array<std::int32_t>, 2, 3> decoded;
-        auto                                          input  = to_bytes("d84e4401000000");
+        const std::array<std::int32_t, 1>             input_values{1};
+        auto                                          input  = encode_normal<std::int32_t>(std::span<const std::int32_t>{input_values});
         auto                                          dec    = make_decoder<typed_array_codec>(input);
         const auto                                    result = dec(decoded);
 
@@ -1264,6 +1306,32 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.value().size(), 3U);
         CHECK_EQ(decoded.value().copy_values(), (std::vector<std::int32_t>{1, 2, 3}));
+    }
+}
+
+TEST_CASE("rfc8746 bounded typed arrays roundtrip aggregate composition") {
+    SUBCASE("typed alternatives with nested containers") {
+        bounded_typed_report input{
+            bounded_typed_report_state::active,
+            bounded_size<typed_array<std::int32_t>, 1, 3>{typed_array<std::int32_t>{{1, -2, 3}}},
+            bounded_size<typed_array<double>, 1, 2>{typed_array<double>{{1.5, -2.25}}},
+            {{"primary", {{1, 2}, {3}}}, {"secondary", {{4, 5, 6}}}},
+        };
+
+        const auto output = test_support::roundtrip<typed_array_codec>(input);
+        CHECK(semantic_value(output) == semantic_value(input));
+    }
+
+    SUBCASE("null optional and text variant alternative") {
+        bounded_typed_report input{
+            bounded_typed_report_state::idle,
+            std::nullopt,
+            std::string{"offline"},
+            {{"empty", {}}},
+        };
+
+        const auto output = test_support::roundtrip<typed_array_codec>(input);
+        CHECK(semantic_value(output) == semantic_value(input));
     }
 }
 
