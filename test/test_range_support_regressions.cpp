@@ -389,7 +389,7 @@ TEST_CASE("contiguous sized text string ranges match direct text string encoding
         std::vector<std::byte> buffer;
         auto                   enc   = make_encoder(buffer);
         auto                   upper = text | std::views::transform(
-                                [](char value) { return static_cast<char>(value >= 'a' && value <= 'z' ? value - 'a' + 'A' : value); });
+                                                  [](char value) { return static_cast<char>(value >= 'a' && value <= 'z' ? value - 'a' + 'A' : value); });
 
         REQUIRE(enc(as_tstr_range(upper)));
         CHECK_EQ(to_hex(buffer), "6548454c4c4f");
@@ -614,15 +614,21 @@ TEST_CASE("typed decode reads non-contiguous input once without a structural pre
 }
 
 TEST_CASE("bounded indefinite decoding traverses non-contiguous input once") {
-    counting_sized_bidirectional_bytes input{4};
-    input.bytes = to_bytes("9f0000ff");
+    counting_sized_bidirectional_bytes static_input{4};
+    static_input.bytes = to_bytes("9f0000ff");
+    auto dynamic_input = static_input;
 
-    std::vector<std::uint64_t> values;
-    auto                       dec = make_decoder(input);
+    std::vector<std::uint64_t> static_values;
+    auto                       static_dec = make_decoder(static_input);
+    REQUIRE(static_dec(as_bounded_size<0, 2>(static_values)));
 
-    REQUIRE(dec(as_bounded_size<0, 2>(values)));
-    CHECK_EQ(values, (std::vector<std::uint64_t>{0, 0}));
-    CHECK_EQ(input.increments, input.bytes.size());
+    std::vector<std::uint64_t> dynamic_values;
+    auto                       dynamic_dec = make_decoder(dynamic_input);
+    REQUIRE(dynamic_dec(as_bounded_size(dynamic_values, 0, 2)));
+
+    CHECK_EQ(dynamic_values, static_values);
+    CHECK_EQ(static_input.increments, static_input.bytes.size());
+    CHECK_EQ(dynamic_input.increments, static_input.increments);
 }
 
 TEST_CASE("bounded definite decoding adds no input traversal") {
@@ -631,7 +637,8 @@ TEST_CASE("bounded definite decoding adds no input traversal") {
         bounded_input.bytes[0] = std::byte{0x98};
         bounded_input.bytes[1] = std::byte{0x18};
         std::ranges::fill(bounded_input.bytes.begin() + 2, bounded_input.bytes.end(), std::byte{0x00});
-        auto direct_input = bounded_input;
+        auto direct_input  = bounded_input;
+        auto dynamic_input = bounded_input;
 
         std::vector<std::uint64_t> direct_values;
         auto                       direct_dec = make_decoder(direct_input);
@@ -641,8 +648,14 @@ TEST_CASE("bounded definite decoding adds no input traversal") {
         auto                       bounded_dec = make_decoder(bounded_input);
         REQUIRE(bounded_dec(as_bounded_size<24, 24>(bounded_values)));
 
+        std::vector<std::uint64_t> dynamic_values;
+        auto                       dynamic_dec = make_decoder(dynamic_input);
+        REQUIRE(dynamic_dec(as_bounded_size(dynamic_values, 24, 24)));
+
         CHECK_EQ(bounded_values, direct_values);
+        CHECK_EQ(dynamic_values, direct_values);
         CHECK_EQ(bounded_input.increments, direct_input.increments);
+        CHECK_EQ(dynamic_input.increments, direct_input.increments);
         CHECK_EQ(bounded_input.increments, bounded_input.bytes.size());
     }
 
@@ -651,7 +664,8 @@ TEST_CASE("bounded definite decoding adds no input traversal") {
         bounded_input.bytes[0] = std::byte{0x58};
         bounded_input.bytes[1] = std::byte{0x18};
         std::ranges::fill(bounded_input.bytes.begin() + 2, bounded_input.bytes.end(), std::byte{0x2a});
-        auto direct_input = bounded_input;
+        auto direct_input  = bounded_input;
+        auto dynamic_input = bounded_input;
 
         std::vector<std::byte> direct_value;
         auto                   direct_dec = make_decoder(direct_input);
@@ -661,8 +675,14 @@ TEST_CASE("bounded definite decoding adds no input traversal") {
         auto                   bounded_dec = make_decoder(bounded_input);
         REQUIRE(bounded_dec(as_bounded_size<24, 24>(bounded_value)));
 
+        std::vector<std::byte> dynamic_value;
+        auto                   dynamic_dec = make_decoder(dynamic_input);
+        REQUIRE(dynamic_dec(as_bounded_size(dynamic_value, 24, 24)));
+
         CHECK_EQ(bounded_value, direct_value);
+        CHECK_EQ(dynamic_value, direct_value);
         CHECK_EQ(bounded_input.increments, direct_input.increments);
+        CHECK_EQ(dynamic_input.increments, direct_input.increments);
     }
 }
 
