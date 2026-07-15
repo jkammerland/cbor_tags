@@ -15,9 +15,11 @@
 #include <list>
 #include <optional>
 #include <random>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -60,28 +62,47 @@ TEST_CASE("contiguous borrowed views roundtrip aggregate composition") {
         REQUIRE(dec(output));
         REQUIRE(dec.tell() == buffer.end());
 
+        auto require_borrowed_from_buffer = [&](const auto &view) {
+            if (view.empty()) {
+                return;
+            }
+
+            using view_type = std::remove_cvref_t<decltype(view)>;
+
+            const auto buffer_begin = reinterpret_cast<std::uintptr_t>(buffer.data());
+            const auto buffer_end   = buffer_begin + buffer.size();
+            const auto view_begin   = reinterpret_cast<std::uintptr_t>(std::ranges::data(view));
+            const auto view_bytes   = std::ranges::size(view) * sizeof(std::ranges::range_value_t<view_type>);
+
+            REQUIRE_GE(view_begin, buffer_begin);
+            REQUIRE_LE(view_begin, buffer_end);
+            CHECK_LE(view_bytes, buffer_end - view_begin);
+        };
+
         CHECK_EQ(output.state, input.state);
         CHECK_EQ(output.name, input.name);
         CHECK(std::ranges::equal(output.payload, input.payload));
+        require_borrowed_from_buffer(output.name);
+        require_borrowed_from_buffer(output.payload);
         CHECK_EQ(output.note.has_value(), input.note.has_value());
         if (input.note) {
             REQUIRE(output.note);
             CHECK_EQ(*output.note, *input.note);
+            require_borrowed_from_buffer(*output.note);
         }
         REQUIRE_EQ(output.result.index(), input.result.index());
         switch (input.result.index()) {
-        case 0: CHECK_EQ(std::get<0>(output.result), std::get<0>(input.result)); break;
-        case 1: CHECK(std::ranges::equal(std::get<1>(output.result), std::get<1>(input.result))); break;
+        case 0:
+            CHECK_EQ(std::get<0>(output.result), std::get<0>(input.result));
+            require_borrowed_from_buffer(std::get<0>(output.result));
+            break;
+        case 1:
+            CHECK(std::ranges::equal(std::get<1>(output.result), std::get<1>(input.result)));
+            require_borrowed_from_buffer(std::get<1>(output.result));
+            break;
         default: CHECK_EQ(std::get<2>(output.result), std::get<2>(input.result)); break;
         }
         CHECK_EQ(output.samples, input.samples);
-
-        const auto begin = reinterpret_cast<std::uintptr_t>(buffer.data());
-        const auto end   = begin + buffer.size();
-        CHECK_GE(reinterpret_cast<std::uintptr_t>(output.name.data()), begin);
-        CHECK_LT(reinterpret_cast<std::uintptr_t>(output.name.data()), end);
-        CHECK_GE(reinterpret_cast<std::uintptr_t>(output.payload.data()), begin);
-        CHECK_LT(reinterpret_cast<std::uintptr_t>(output.payload.data()), end);
     };
 
     SUBCASE("text variant and engaged optional") {
