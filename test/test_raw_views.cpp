@@ -205,8 +205,23 @@ TEST_CASE("encoded item view decoder option returns the full tagged item for tag
     CHECK_EQ(to_hex(result->bytes()), "c16c48656c6c6f20776f726c6421");
 }
 
+TEST_CASE("encoded item view decoder option returns all bytes consumed by a variadic call") {
+    auto bytes = to_bytes("01f5");
+    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+    std::uint64_t value{};
+    bool          flag{};
+    auto          result = dec(value, flag);
+
+    REQUIRE(result);
+    CHECK_EQ(value, 1);
+    CHECK(flag);
+    CHECK_EQ(to_hex(result->bytes()), "01f5");
+    CHECK_EQ(dec.tell(), bytes.end());
+}
+
 TEST_CASE("encoded item view decoder option borrows non-contiguous input") {
-    auto                 contiguous = to_bytes("83010203");
+    auto                 contiguous = to_bytes("83010203f5");
     std::list<std::byte> bytes(contiguous.begin(), contiguous.end());
     auto                 dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
 
@@ -216,6 +231,13 @@ TEST_CASE("encoded item view decoder option borrows non-contiguous input") {
     REQUIRE(result);
     CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
     CHECK_EQ(to_hex(result->bytes()), "83010203");
+
+    bool trailing{};
+    auto trailing_result = dec(trailing);
+    REQUIRE(trailing_result);
+    CHECK(trailing);
+    CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+    CHECK_EQ(dec.tell(), bytes.end());
 
     auto it = bytes.begin();
     ++it;
@@ -248,14 +270,14 @@ TEST_CASE("encoded item view decoder option reports malformed input and typed de
     }
 }
 
-TEST_CASE("encoded item view decoder option rejects partial item consumption") {
+TEST_CASE("encoded item view decoder option returns a consumed item prefix") {
     auto bytes = to_bytes("c101");
     auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
 
     auto result = dec(static_tag<1>{});
 
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
+    REQUIRE(result);
+    CHECK_EQ(to_hex(result->bytes()), "c1");
 
     std::uint64_t payload{};
     auto          payload_result = dec(payload);
@@ -263,6 +285,7 @@ TEST_CASE("encoded item view decoder option rejects partial item consumption") {
     REQUIRE(payload_result);
     CHECK_EQ(payload, 1);
     CHECK_EQ(to_hex(payload_result->bytes()), "01");
+    CHECK_EQ(dec.tell(), bytes.end());
 }
 
 TEST_CASE("raw encoded array and map views require matching top-level major type") {
