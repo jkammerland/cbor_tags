@@ -76,6 +76,45 @@ bounded_typed_report_value semantic_value(const bounded_typed_report &report) {
     return {report.state, std::move(samples), std::move(result), report.groups};
 }
 
+struct dynamic_bounded_typed_report {
+    bounded_typed_report_state                           state{};
+    dynamic_bounded_size<typed_array<std::int32_t>>      samples;
+    std::optional<std::string>                           note;
+    std::variant<typed_array<double>, std::string>       result;
+    std::map<std::string, std::vector<std::vector<int>>> groups;
+};
+
+struct dynamic_bounded_typed_report_value {
+    bounded_typed_report_state                           state{};
+    std::vector<std::int32_t>                            samples;
+    std::optional<std::string>                           note;
+    std::variant<std::vector<double>, std::string>       result;
+    std::map<std::string, std::vector<std::vector<int>>> groups;
+
+    bool operator==(const dynamic_bounded_typed_report_value &) const = default;
+};
+
+dynamic_bounded_typed_report make_dynamic_bounded_typed_report_output() {
+    return {
+        bounded_typed_report_state::idle,
+        dynamic_bounded_size<typed_array<std::int32_t>>{typed_array<std::int32_t>{}, 1, 3},
+        std::nullopt,
+        typed_array<double>{},
+        {},
+    };
+}
+
+dynamic_bounded_typed_report_value semantic_value(const dynamic_bounded_typed_report &report) {
+    std::variant<std::vector<double>, std::string> result;
+    if (report.result.index() == 0) {
+        result = std::get<0>(report.result).values();
+    } else {
+        result = std::get<1>(report.result);
+    }
+
+    return {report.state, report.samples.value().values(), report.note, std::move(result), report.groups};
+}
+
 template <typename Self> struct toy_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
@@ -1383,7 +1422,8 @@ TEST_CASE("rfc8746 bounded typed arrays roundtrip aggregate composition") {
 }
 
 TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element counts") {
-    const auto encoded_three = to_bytes("d84e4c010000000200000003000000");
+    const std::array<std::int32_t, 3> encoded_values{1, 2, 3};
+    const auto                        encoded_three = encode_normal<std::int32_t>(std::span<const std::int32_t>{encoded_values});
 
     SUBCASE("borrowed encode") {
         std::vector<std::int32_t> values{1, 2, 3};
@@ -1414,10 +1454,11 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
     }
 
     SUBCASE("owned decode rejects before mutation") {
-        auto                      input = to_bytes("d84e5001000000020000000300000004000000");
-        typed_array<std::int32_t> decoded{{9}};
-        auto                      dec    = make_decoder<typed_array_codec>(input);
-        auto                      result = dec(as_bounded_size(decoded, 1, 3));
+        const std::array<std::int32_t, 4> input_values{1, 2, 3, 4};
+        auto                              input = encode_normal<std::int32_t>(std::span<const std::int32_t>{input_values});
+        typed_array<std::int32_t>         decoded{9};
+        auto                              dec    = make_decoder<typed_array_codec>(input);
+        auto                              result = dec(as_bounded_size(decoded, 1, 3));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
@@ -1480,6 +1521,41 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
 
         REQUIRE(dec(as_bounded_size(decoded, 3, 3)));
         CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, -2, 3}));
+    }
+}
+
+TEST_CASE("rfc8746 dynamically bounded typed arrays roundtrip preconfigured aggregate composition") {
+    auto check_roundtrip = [](const dynamic_bounded_typed_report &input) {
+        auto output = make_dynamic_bounded_typed_report_output();
+        test_support::roundtrip_into<typed_array_codec>(input, output);
+
+        CHECK(semantic_value(output) == semantic_value(input));
+        CHECK_EQ(output.samples.min_size(), 1U);
+        CHECK_EQ(output.samples.max_size(), 3U);
+    };
+
+    SUBCASE("typed variant and engaged optional") {
+        dynamic_bounded_typed_report input{
+            bounded_typed_report_state::active,
+            dynamic_bounded_size<typed_array<std::int32_t>>{typed_array<std::int32_t>{{1, -2, 3}}, 1, 3},
+            std::string{"calibrated"},
+            typed_array<double>{{1.5, -2.25}},
+            {{"primary", {{1, 2}, {3}}}, {"secondary", {{4, 5, 6}}}},
+        };
+
+        check_roundtrip(input);
+    }
+
+    SUBCASE("text variant and disengaged optional") {
+        dynamic_bounded_typed_report input{
+            bounded_typed_report_state::idle,
+            dynamic_bounded_size<typed_array<std::int32_t>>{typed_array<std::int32_t>{0}, 1, 3},
+            std::nullopt,
+            std::string{"offline"},
+            {{"empty", {}}},
+        };
+
+        check_roundtrip(input);
     }
 }
 
