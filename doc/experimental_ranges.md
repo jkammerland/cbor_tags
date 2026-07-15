@@ -196,6 +196,18 @@ enc(ct::as_bounded_size<0, 3>(ct::as_array_range(values)));
 // CDDL: [0*3 int]
 ```
 
+Limits selected at runtime use the same sized-range path:
+
+```cpp
+std::size_t max_values = configured_limit();
+enc(ct::as_bounded_size(
+    ct::as_array_range(values), 0, max_values));
+```
+
+The runtime form checks `size()` once before encoding and does not describe a
+type-based CDDL constraint. Use the compile-time form when the bound belongs in
+the schema.
+
 Bounded encoding of a non-sized range is intentionally unsupported because
 checking the bound before writing would require a separate counting traversal.
 The unbounded explicit wrapper remains one-pass:
@@ -209,6 +221,7 @@ auto evens = values | std::views::filter([](int value) {
 
 enc(ct::as_array_range(evens));                            // supported
 enc(ct::as_bounded_size<0, 2>(ct::as_array_range(evens))); // unsupported
+enc(ct::as_bounded_size(ct::as_array_range(evens), 0, 2)); // unsupported
 ```
 
 ```cpp

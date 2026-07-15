@@ -149,6 +149,7 @@ template <typename V1, typename V2, typename T> struct values_equal : std::bool_
 
 template <typename T, std::size_t Min, std::size_t Max> struct bounded_size {
     static_assert(Min <= Max, "bounded_size<T, Min, Max> requires Min <= Max");
+    static_assert(!IsAnyBoundedSizeWrapper<T>, "bounded size wrappers cannot directly contain another bounded size wrapper");
 
     using value_type = std::remove_reference_t<T>;
 
@@ -173,26 +174,109 @@ template <typename T, std::size_t Min, std::size_t Max> struct bounded_size {
         requires(std::is_lvalue_reference_v<T>)
         : value_(value) {}
 
-    [[nodiscard]] constexpr decltype(auto) value() noexcept { return (value_); }
-    [[nodiscard]] constexpr decltype(auto) value() const noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() const & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+    [[nodiscard]] constexpr decltype(auto) value() const && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+};
+
+template <typename T> struct dynamic_bounded_size {
+    static_assert(!IsAnyBoundedSizeWrapper<T>, "bounded size wrappers cannot directly contain another bounded size wrapper");
+
+    using value_type = std::remove_reference_t<T>;
+
+  private:
+    [[nodiscard]] static constexpr std::size_t checked_max(std::size_t min, std::size_t max) {
+        if (min > max) {
+            throw std::invalid_argument("dynamic_bounded_size<T> requires min <= max");
+        }
+        return max;
+    }
+
+    std::size_t min_size_;
+    std::size_t max_size_;
+
+  public:
+    T value_;
+
+    constexpr explicit dynamic_bounded_size(const value_type &value, std::size_t min, std::size_t max)
+        requires(!std::is_reference_v<T> && std::copy_constructible<value_type>)
+        : min_size_(min), max_size_(checked_max(min, max)), value_(value) {}
+
+    constexpr explicit dynamic_bounded_size(value_type &&value, std::size_t min, std::size_t max)
+        requires(!std::is_reference_v<T> && std::move_constructible<value_type>)
+        : min_size_(min), max_size_(checked_max(min, max)), value_(std::move(value)) {}
+
+    constexpr explicit dynamic_bounded_size(value_type &value, std::size_t min, std::size_t max)
+        requires(std::is_lvalue_reference_v<T>)
+        : min_size_(min), max_size_(checked_max(min, max)), value_(value) {}
+
+    [[nodiscard]] constexpr std::size_t min_size() const noexcept { return min_size_; }
+    [[nodiscard]] constexpr std::size_t max_size() const noexcept { return max_size_; }
+
+    [[nodiscard]] constexpr decltype(auto) value() & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() const & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+    [[nodiscard]] constexpr decltype(auto) value() const && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
 };
 
 template <typename T, std::size_t Max> using max_size = bounded_size<T, 0, Max>;
 template <typename T, std::size_t N> using exact_size = bounded_size<T, N, N>;
 
-template <std::size_t Min, std::size_t Max, typename T> [[nodiscard]] constexpr auto as_bounded_size(T &&value) {
-    using stored_type = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::remove_cvref_t<T>>;
-    return bounded_size<stored_type, Min, Max>{std::forward<T>(value)};
-}
-
 namespace detail {
 
-template <std::size_t Min, std::size_t Max> [[nodiscard]] constexpr status_code bounded_size_status(std::uint64_t size) noexcept {
-    return size >= static_cast<std::uint64_t>(Min) && size <= static_cast<std::uint64_t>(Max) ? status_code::success
+template <typename T> [[nodiscard]] constexpr decltype(auto) unwrap_bounded_size(T &&value) {
+    if constexpr (IsAnyBoundedSizeWrapper<T>) {
+        return unwrap_bounded_size(std::forward<T>(value).value());
+    } else {
+        return std::forward<T>(value);
+    }
+}
+
+template <typename T> using bounded_stored_type_t = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::remove_cvref_t<T>>;
+
+[[nodiscard]] constexpr status_code bounded_size_status(std::uint64_t size, std::size_t min, std::size_t max) noexcept {
+    return size >= static_cast<std::uint64_t>(min) && size <= static_cast<std::uint64_t>(max) ? status_code::success
                                                                                               : status_code::size_limit_exceeded;
 }
 
 } // namespace detail
+
+template <std::size_t Min, std::size_t Max, typename T> [[nodiscard]] constexpr auto as_bounded_size(T &&value) {
+    auto &&unwrapped  = detail::unwrap_bounded_size(std::forward<T>(value));
+    using stored_type = detail::bounded_stored_type_t<decltype(unwrapped)>;
+    return bounded_size<stored_type, Min, Max>{std::forward<decltype(unwrapped)>(unwrapped)};
+}
+
+template <typename T> [[nodiscard]] constexpr auto as_bounded_size(T &&value, std::size_t min, std::size_t max) {
+    auto &&unwrapped  = detail::unwrap_bounded_size(std::forward<T>(value));
+    using stored_type = detail::bounded_stored_type_t<decltype(unwrapped)>;
+    return dynamic_bounded_size<stored_type>{std::forward<decltype(unwrapped)>(unwrapped), min, max};
+}
 
 template <typename... T> struct ReturnTypeHelper {
     static auto get_return_type() {

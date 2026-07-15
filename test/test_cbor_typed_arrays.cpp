@@ -1382,6 +1382,107 @@ TEST_CASE("rfc8746 bounded typed arrays roundtrip aggregate composition") {
     }
 }
 
+TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element counts") {
+    const auto encoded_three = to_bytes("d84e4c010000000200000003000000");
+
+    SUBCASE("borrowed encode") {
+        std::vector<std::int32_t> values{1, 2, 3};
+        std::vector<std::byte>    buffer;
+        auto                      enc = make_encoder<typed_array_codec>(buffer);
+
+        REQUIRE(enc(as_bounded_size(as_typed_array(values), 1, 3)));
+        CHECK_EQ(buffer, encoded_three);
+    }
+
+    SUBCASE("encode rejects before output") {
+        typed_array<std::int32_t> values{{1, 2, 3, 4}};
+        std::vector<std::byte>    buffer;
+        auto                      enc    = make_encoder<typed_array_codec>(buffer);
+        auto                      result = enc(as_bounded_size(values, 1, 3));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(buffer.empty());
+    }
+
+    SUBCASE("owned decode") {
+        typed_array<std::int32_t> decoded;
+        auto                      dec = make_decoder<typed_array_codec>(encoded_three);
+
+        REQUIRE(dec(as_bounded_size(decoded, 1, 3)));
+        CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, 2, 3}));
+    }
+
+    SUBCASE("owned decode rejects before mutation") {
+        auto                      input = to_bytes("d84e5001000000020000000300000004000000");
+        typed_array<std::int32_t> decoded{{9}};
+        auto                      dec    = make_decoder<typed_array_codec>(input);
+        auto                      result = dec(as_bounded_size(decoded, 1, 3));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{9}));
+    }
+
+    SUBCASE("view decode") {
+        typed_array_view<std::int32_t> decoded;
+        auto                           dec = make_decoder<typed_array_codec>(encoded_three);
+
+        REQUIRE(dec(as_bounded_size(decoded, 1, 3)));
+        CHECK_EQ(decoded.size(), 3U);
+        CHECK_EQ(decoded.copy_values(), (std::vector<std::int32_t>{1, 2, 3}));
+    }
+
+    SUBCASE("non-contiguous view decode") {
+        std::deque<std::byte> input(encoded_three.begin(), encoded_three.end());
+        auto                  dec = make_decoder<typed_array_codec>(input);
+        using view_type           = typed_array_view_for<std::int32_t, decltype(dec)>;
+        view_type decoded;
+
+        REQUIRE(dec(as_bounded_size(decoded, 1, 3)));
+        CHECK_EQ(decoded.size(), 3U);
+        CHECK_EQ(decoded.copy_values(), (std::vector<std::int32_t>{1, 2, 3}));
+    }
+
+    SUBCASE("misaligned payload preserves structural error") {
+        auto                      input = to_bytes("d84e450100000000");
+        typed_array<std::int32_t> decoded;
+        auto                      dec    = make_decoder<typed_array_codec>(input);
+        auto                      result = dec(as_bounded_size(decoded, 1, 3));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK(decoded.values().empty());
+    }
+
+    SUBCASE("element-to-byte bound conversion does not overflow") {
+        typed_array<std::int32_t> decoded;
+        auto                      dec = make_decoder<typed_array_codec>(encoded_three);
+
+        REQUIRE(dec(as_bounded_size(decoded, 0, std::numeric_limits<std::size_t>::max())));
+        CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, 2, 3}));
+
+        constexpr auto max_representable_elements = std::numeric_limits<std::uint64_t>::max() / sizeof(std::int32_t);
+        if constexpr (std::numeric_limits<std::size_t>::max() > max_representable_elements) {
+            const auto impossible_min = static_cast<std::size_t>(max_representable_elements + 1U);
+            auto       rejected_dec   = make_decoder<typed_array_codec>(encoded_three);
+            auto       result         = rejected_dec(as_bounded_size(decoded, impossible_min, impossible_min));
+
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        }
+    }
+
+    SUBCASE("big-endian decode") {
+        auto                         input = to_bytes("d84a4c00000001fffffffe00000003");
+        typed_array_be<std::int32_t> decoded;
+        auto                         dec = make_decoder<typed_array_codec>(input);
+
+        REQUIRE(dec(as_bounded_size(decoded, 3, 3)));
+        CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, -2, 3}));
+    }
+}
+
 TEST_CASE("rfc8746 typed array decode rejects malformed inputs") {
     check_decode_error<std::int32_t>("d84f4400000000", status_code::no_match_for_tag);
     check_decode_error<std::int32_t>("d84e44010203", status_code::incomplete);

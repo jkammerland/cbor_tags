@@ -788,8 +788,10 @@ std::vector<std::byte> make_indefinite_zero_array(std::size_t count) {
 void benchmark_bounded_array_decode(std::string_view title, const std::vector<std::byte> &encoded, std::size_t count) {
     std::vector<std::uint64_t> direct_value;
     std::vector<std::uint64_t> bounded_value;
+    std::vector<std::uint64_t> dynamic_bounded_value;
     direct_value.reserve(count);
     bounded_value.reserve(count);
+    dynamic_bounded_value.reserve(count);
 
     {
         auto decoder = make_decoder(encoded);
@@ -799,7 +801,12 @@ void benchmark_bounded_array_decode(std::string_view title, const std::vector<st
         auto decoder = make_decoder(encoded);
         REQUIRE(decoder(as_bounded_size<0, 4096>(bounded_value)));
     }
+    {
+        auto decoder = make_decoder(encoded);
+        REQUIRE(decoder(as_bounded_size(dynamic_bounded_value, 0, count)));
+    }
     REQUIRE(direct_value == bounded_value);
+    REQUIRE(direct_value == dynamic_bounded_value);
 
     ankerl::nanobench::Bench bench;
     bench.title(std::string{title});
@@ -824,6 +831,14 @@ void benchmark_bounded_array_decode(std::string_view title, const std::vector<st
         auto result  = decoder(as_bounded_size<0, 4096>(bounded_value));
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(bounded_value.data());
+    });
+
+    bench.batch(encoded.size()).run("dynamic bounded typed decode", [&] {
+        dynamic_bounded_value.clear();
+        auto decoder = make_decoder(encoded);
+        auto result  = decoder(as_bounded_size(dynamic_bounded_value, 0, count));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(dynamic_bounded_value.data());
     });
 }
 

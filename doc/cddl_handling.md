@@ -151,6 +151,56 @@ auto enc = ct::make_encoder(output);
 auto result = enc(ct::as_bounded_size<1, 3>(values));
 ```
 
+Use `dynamic_bounded_size<T>` when the limits are application state rather than
+part of the protocol type. The overload
+`as_bounded_size(value, min, max)` references an lvalue and owns an rvalue:
+
+```cpp
+namespace ct = cbor::tags;
+
+std::size_t max_scores = load_configured_score_limit();
+std::vector<int> scores;
+
+auto dec = ct::make_decoder(input);
+auto result = dec(ct::as_bounded_size(scores, 1, max_scores));
+```
+
+Runtime wrappers have no default constructor because a decoder must never
+receive an unconfigured bound. Construct aggregate fields before decoding:
+
+```cpp
+struct RuntimePerson {
+    ct::dynamic_bounded_size<std::string> name;
+    ct::dynamic_bounded_size<std::vector<int>> scores;
+};
+
+RuntimePerson person{
+    ct::dynamic_bounded_size<std::string>{std::string{}, 1, max_name_bytes},
+    ct::dynamic_bounded_size<std::vector<int>>{
+        std::vector<int>{}, 0, max_scores},
+};
+
+auto result = dec(person);
+```
+
+`min > max` throws `std::invalid_argument` when a runtime wrapper is created.
+Wrapping an already bounded value replaces its old bounds and keeps only one
+wrapper:
+
+```cpp
+auto configured = ct::as_bounded_size(scores, 0, max_scores);
+auto request_bound = ct::as_bounded_size(configured, 1, request_max);
+// request_bound refers to scores and uses [1, request_max].
+```
+
+Type-based CDDL cannot read per-instance limits, so
+`cddl_schema_to<dynamic_bounded_size<T>>` is intentionally rejected. Use
+`bounded_size<T, Min, Max>` for schema-visible protocol limits. Runtime-bounded
+values may be encoded through a selected `std::variant` alternative, but they
+cannot be decoded as variant alternatives or as values that generic optional or
+container decoding must create. Those paths have no configured `min` and `max`
+to attach to the new object.
+
 Explicit range wrappers can be bounded for encode and CDDL generation when the
 wrapped range is a sized range. The encoder reads `size()` before writing:
 
@@ -277,12 +327,34 @@ struct samples_codec : cbor::tags::cbor_codec_mixin_base<Self> {
         auto values = cbor::tags::as_bounded_size<Min, Max>(bounded.value().values);
         return static_cast<Self&>(*this).decode(values, major, additional_info);
     }
+
+    template <typename Value>
+        requires std::same_as<std::remove_cvref_t<Value>, samples>
+    void encode(const cbor::tags::dynamic_bounded_size<Value>& bounded) {
+        static_cast<Self&>(*this).encode(cbor::tags::as_bounded_size(
+            bounded.value().values,
+            bounded.min_size(),
+            bounded.max_size()));
+    }
+
+    template <typename Value>
+        requires std::same_as<std::remove_cvref_t<Value>, samples>
+    cbor::tags::status_code decode(
+        cbor::tags::dynamic_bounded_size<Value>& bounded,
+        cbor::tags::major_type major,
+        std::byte additional_info) {
+        auto values = cbor::tags::as_bounded_size(
+            bounded.value().values,
+            bounded.min_size(),
+            bounded.max_size());
+        return static_cast<Self&>(*this).decode(values, major, additional_info);
+    }
 };
 ```
 
-The RFC 8746 scalar typed-array extension supports `bounded_size` as element
-counts. CDDL renders the corresponding byte-string byte count because the wire
-payload is a `bstr`:
+The RFC 8746 scalar typed-array extension supports static and runtime bounds as
+element counts. Static bounds render the corresponding byte-string byte count
+in CDDL because the wire payload is a `bstr`:
 
 ```cpp
 namespace ct = cbor::tags;
