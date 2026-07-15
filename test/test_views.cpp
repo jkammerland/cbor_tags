@@ -13,14 +13,99 @@
 #include <fmt/format.h>
 #include <iterator>
 #include <list>
+#include <optional>
 #include <random>
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
+#include <vector>
 
 using namespace cbor::tags;
 using namespace cbor::tags::literals;
 using namespace std::string_view_literals;
+
+namespace {
+
+enum class view_report_state : std::uint8_t { idle, active };
+
+struct owning_view_report {
+    view_report_state                                       state{};
+    std::string                                             name;
+    std::vector<std::byte>                                  payload;
+    std::optional<std::string>                              note;
+    std::variant<std::string, std::vector<std::byte>, bool> result;
+    std::array<int, 3>                                      samples{};
+};
+
+struct borrowed_view_report {
+    view_report_state                                                state{};
+    std::string_view                                                 name;
+    std::span<const std::byte>                                       payload;
+    std::optional<std::string_view>                                  note;
+    std::variant<std::string_view, std::span<const std::byte>, bool> result;
+    std::array<int, 3>                                               samples{};
+};
+
+} // namespace
+
+TEST_CASE("contiguous borrowed views roundtrip aggregate composition") {
+    auto check_roundtrip = [](const owning_view_report &input) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(input));
+
+        borrowed_view_report output;
+        auto                 dec = make_decoder(buffer);
+        REQUIRE(dec(output));
+        REQUIRE(dec.tell() == buffer.end());
+
+        CHECK_EQ(output.state, input.state);
+        CHECK_EQ(output.name, input.name);
+        CHECK(std::ranges::equal(output.payload, input.payload));
+        CHECK_EQ(output.note.has_value(), input.note.has_value());
+        if (input.note) {
+            REQUIRE(output.note);
+            CHECK_EQ(*output.note, *input.note);
+        }
+        REQUIRE_EQ(output.result.index(), input.result.index());
+        switch (input.result.index()) {
+        case 0: CHECK_EQ(std::get<0>(output.result), std::get<0>(input.result)); break;
+        case 1: CHECK(std::ranges::equal(std::get<1>(output.result), std::get<1>(input.result))); break;
+        default: CHECK_EQ(std::get<2>(output.result), std::get<2>(input.result)); break;
+        }
+        CHECK_EQ(output.samples, input.samples);
+
+        const auto begin = reinterpret_cast<std::uintptr_t>(buffer.data());
+        const auto end   = begin + buffer.size();
+        CHECK_GE(reinterpret_cast<std::uintptr_t>(output.name.data()), begin);
+        CHECK_LT(reinterpret_cast<std::uintptr_t>(output.name.data()), end);
+        CHECK_GE(reinterpret_cast<std::uintptr_t>(output.payload.data()), begin);
+        CHECK_LT(reinterpret_cast<std::uintptr_t>(output.payload.data()), end);
+    };
+
+    SUBCASE("text variant and engaged optional") {
+        check_roundtrip({view_report_state::active,
+                         "line-controller",
+                         {std::byte{0x00}, std::byte{0x7f}, std::byte{0xff}},
+                         std::string{"calibrated"},
+                         std::string{"ready"},
+                         {1, 2, 3}});
+    }
+
+    SUBCASE("binary variant and disengaged optional") {
+        check_roundtrip({view_report_state::idle,
+                         "sensor",
+                         {std::byte{0x01}, std::byte{0x02}},
+                         std::nullopt,
+                         std::vector<std::byte>{std::byte{0xaa}, std::byte{0xbb}},
+                         {4, 5, 6}});
+    }
+
+    SUBCASE("simple variant") {
+        check_roundtrip({view_report_state::active, "interlock", {std::byte{0x10}}, std::string{"armed"}, true, {7, 8, 9}});
+    }
+}
 
 TEST_CASE("Test view contiguous, tstr") {
     auto data = std::vector<std::byte>{};
