@@ -41,6 +41,17 @@ using filtered_pairs =
 using filtered_bytes = std::ranges::filter_view<std::ranges::ref_view<std::vector<std::byte>>, bool (*)(std::byte)>;
 using filtered_chars = std::ranges::filter_view<std::ranges::ref_view<std::string>, bool (*)(char)>;
 
+static_assert(IsBoundedSizeWrapper<bounded_size<std::vector<int>, 0, 3>>);
+static_assert(IsBoundedSizeWrapper<const bounded_size<std::vector<int>, 0, 3> &>);
+static_assert(!IsBoundedSizeWrapper<std::vector<int>>);
+static_assert(IsArrayRangeWrapper<sized_array_range>);
+static_assert(IsMapRangeWrapper<const sized_map_range &>);
+static_assert(IsBstrRangeWrapper<sized_bstr_range>);
+static_assert(IsTstrRangeWrapper<const sized_tstr_range>);
+static_assert(IsStringRangeWrapper<sized_bstr_range>);
+static_assert(IsStringRangeWrapper<sized_tstr_range>);
+static_assert(!IsStringRangeWrapper<sized_array_range>);
+
 static_assert(CanEncodeBounded<bounded_size<sized_array_range, 0, 3>>);
 static_assert(CanEncodeBounded<bounded_size<sized_map_range, 0, 3>>);
 static_assert(CanEncodeBounded<bounded_size<sized_bstr_range, 0, 3>>);
