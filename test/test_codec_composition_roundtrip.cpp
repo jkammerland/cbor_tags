@@ -215,8 +215,7 @@ TEST_CASE("typed array and nullable pointer codecs roundtrip aggregate compositi
 
     SUBCASE("text result with null pointers and optional") {
         nullable_typed_report input{
-            codec_report_state::idle, std::nullopt, typed_array<std::int32_t>{0}, std::string{"offline"}, nullptr, nullptr,
-            {{"empty", {}}},
+            codec_report_state::idle, std::nullopt, typed_array<std::int32_t>{0}, std::string{"offline"}, nullptr, nullptr, {{"empty", {}}},
         };
 
         check_roundtrip(input);
@@ -236,22 +235,23 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
         REQUIRE(dec(as_shared_graph(decode_session, output)));
         REQUIRE(dec.tell() == buffer.end());
 
-        REQUIRE(output.primary);
+        REQUIRE(static_cast<bool>(output.primary));
         CHECK_EQ(output.primary->id, input.primary->id);
         CHECK_EQ(output.primary->name, input.primary->name);
         CHECK_EQ(output.primary->samples.values(), input.primary->samples.values());
         CHECK_EQ(output.primary->note, input.primary->note);
         REQUIRE_EQ(output.mirrors.size(), input.mirrors.size());
         REQUIRE_EQ(output.mirrors.size(), 3U);
-        CHECK(output.mirrors[0] == output.primary);
-        CHECK(output.mirrors[2] == output.primary);
-        REQUIRE(output.mirrors[1]);
+        const auto primary_address = static_cast<const void *>(output.primary.get());
+        CHECK(static_cast<const void *>(output.mirrors[0].get()) == primary_address);
+        CHECK(static_cast<const void *>(output.mirrors[2].get()) == primary_address);
+        REQUIRE(static_cast<bool>(output.mirrors[1]));
         CHECK_EQ(output.mirrors[1]->id, input.mirrors[1]->id);
         CHECK_EQ(output.history, input.history);
 
         if (selected_is_pointer) {
             REQUIRE(std::holds_alternative<std::shared_ptr<graph_codec_node>>(output.selected));
-            CHECK(std::get<std::shared_ptr<graph_codec_node>>(output.selected) == output.primary);
+            CHECK(static_cast<const void *>(std::get<std::shared_ptr<graph_codec_node>>(output.selected).get()) == primary_address);
         } else {
             REQUIRE(std::holds_alternative<std::string>(output.selected));
             CHECK_EQ(std::get<std::string>(output.selected), std::get<std::string>(input.selected));
@@ -259,7 +259,7 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
 
         CHECK_EQ(static_cast<bool>(output.fallback), static_cast<bool>(input.fallback));
         if (input.fallback) {
-            REQUIRE(output.fallback);
+            REQUIRE(static_cast<bool>(output.fallback));
             CHECK(*output.fallback == *input.fallback);
         }
     };
