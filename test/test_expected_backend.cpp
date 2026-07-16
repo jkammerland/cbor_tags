@@ -20,6 +20,10 @@ using namespace cbor::tags;
 
 namespace {
 
+struct alternate_error {
+    int value;
+};
+
 #if CBOR_TAGS_USE_STD_EXPECTED
 template <typename T> inline constexpr bool             is_configured_expected_v                       = false;
 template <typename T> inline constexpr bool             is_configured_unexpected_v                     = false;
@@ -33,6 +37,18 @@ template <typename E> inline constexpr bool             is_configured_unexpected
 #endif
 
 } // namespace
+
+TEST_CASE("configured expected backend preserves requested error type") {
+    using result_type = expected<int, alternate_error>;
+
+    static_assert(is_configured_expected_v<result_type>);
+    static_assert(std::is_same_v<typename result_type::error_type, alternate_error>);
+
+    result_type result = unexpected<alternate_error>{alternate_error{7}};
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error().value, 7);
+}
 
 TEST_CASE("default return type uses configured expected backend") {
     static_assert(is_configured_expected_v<expected<void, status_code>>);
