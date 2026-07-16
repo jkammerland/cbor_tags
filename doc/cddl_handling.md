@@ -212,6 +212,34 @@ using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
 // Limits both the number of rows and the number of values in each row.
 ```
 
+The bound describes the cardinality of one encoded or decoded CBOR item. It is
+not a persistent invariant on the backing C++ container. Decoding into an
+existing mutable destination validates only the incoming item, then follows the
+core decoder's append/insert contract:
+
+```cpp
+std::vector<int> incoming{1, 2};
+std::vector<std::byte> input;
+ct::make_encoder(input)(incoming);
+
+std::vector<int> destination{9, 8, 7};
+auto result = ct::make_decoder(input)(ct::as_bounded_size<2, 2>(destination));
+// result succeeds; destination is now {9, 8, 7, 1, 2}.
+// Its final size may exceed Max because Max constrained the incoming CBOR array.
+```
+
+Encoding validates the complete wrapped source value. To encode only a bounded
+slice, make that slice the wrapped value instead of expecting the bound to select
+elements:
+
+```cpp
+std::vector<int> values{1, 2, 3, 4};
+
+auto rejected = enc(ct::as_bounded_size<2, 2>(values)); // size 4: rejected
+auto tail = std::span{values}.last<2>();
+auto accepted = enc(ct::as_bounded_size<2, 2>(ct::as_array_range(tail)));
+```
+
 For definite containers, the decoder validates the declared size before
 reserving target storage, then continues decoding that payload. It does not run
 a validation pre-scan. Indefinite containers are validated while they are
