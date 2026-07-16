@@ -108,6 +108,13 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
     requires CborInputBuffer<InputBuffer>
 struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... {
+  private:
+    struct decode_size_bounds {
+        std::uint64_t min_size{};
+        std::uint64_t max_size{std::numeric_limits<std::uint64_t>::max()};
+    };
+
+  public:
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
@@ -1014,7 +1021,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
-            return decode_indef_bstr<true>(wrapped.value_, min, max);
+            return decode_indef_bstr<true>(wrapped.value_, {.min_size = min, .max_size = max});
         } else {
             if (additionalInfo == static_cast<byte>(31)) {
                 if constexpr (IsConstView<T>) {
@@ -1022,7 +1029,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 } else if constexpr (IsFixedArray<T>) {
                     return status_code::unexpected_group_size;
                 } else if constexpr (std::ranges::range<T>) {
-                    return decode_indef_bstr<true>(wrapped, min, max);
+                    return decode_indef_bstr<true>(wrapped, {.min_size = min, .max_size = max});
                 } else {
                     return decode(wrapped, major, additionalInfo);
                 }
@@ -1051,7 +1058,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_tstr_on_buffer;
             }
-            return decode_indef_tstr<true>(wrapped.value_, min, max);
+            return decode_indef_tstr<true>(wrapped.value_, {.min_size = min, .max_size = max});
         } else {
             if (additionalInfo == static_cast<byte>(31)) {
                 if constexpr (IsConstView<T>) {
@@ -1059,7 +1066,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 } else if constexpr (IsFixedArray<T>) {
                     return status_code::unexpected_group_size;
                 } else if constexpr (std::ranges::range<T>) {
-                    return decode_indef_tstr<true>(wrapped, min, max);
+                    return decode_indef_tstr<true>(wrapped, {.min_size = min, .max_size = max});
                 } else {
                     return decode(wrapped, major, additionalInfo);
                 }
@@ -1084,13 +1091,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_array_on_buffer;
             }
-            return decode_indef_array<true>(wrapped.value_, min, max);
+            return decode_indef_array<true>(wrapped.value_, {.min_size = min, .max_size = max});
         } else {
             if (additionalInfo == static_cast<byte>(31)) {
                 if constexpr (IsFixedArray<T>) {
                     return status_code::unexpected_group_size;
                 } else if constexpr (IsRangeOfCborValues<T>) {
-                    return decode_indef_array<true>(wrapped, min, max);
+                    return decode_indef_array<true>(wrapped, {.min_size = min, .max_size = max});
                 } else {
                     return decode(wrapped, major, additionalInfo);
                 }
@@ -1120,11 +1127,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_map_on_buffer;
             }
-            return decode_indef_map<true>(wrapped.value_, min, max);
+            return decode_indef_map<true>(wrapped.value_, {.min_size = min, .max_size = max});
         } else {
             if (additionalInfo == static_cast<byte>(31)) {
                 if constexpr (IsRangeOfCborValues<T>) {
-                    return decode_indef_map<true>(wrapped, min, max);
+                    return decode_indef_map<true>(wrapped, {.min_size = min, .max_size = max});
                 } else {
                     return decode(wrapped, major, additionalInfo);
                 }
@@ -1202,9 +1209,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <bool CheckBounds = false, typename T>
-    constexpr status_code decode_indef_bstr(T &out, std::uint64_t min_size = 0U,
-                                            std::uint64_t max_size = std::numeric_limits<std::uint64_t>::max()) {
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_bstr(T &out, decode_size_bounds bounds = {}) {
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
@@ -1218,7 +1223,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
                     if constexpr (CheckBounds) {
-                        return size >= min_size ? status_code::success : status_code::size_limit_exceeded;
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
                     } else {
                         return status_code::success;
                     }
@@ -1229,7 +1234,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
                 const auto chunk_size = decode_unsigned(additionalInfo);
                 if constexpr (CheckBounds) {
-                    if (chunk_size > max_size || size > max_size - chunk_size) {
+                    if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
                         return status_code::size_limit_exceeded;
                     }
                 }
@@ -1254,9 +1259,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <bool CheckBounds = false, typename T>
-    constexpr status_code decode_indef_tstr(T &out, std::uint64_t min_size = 0U,
-                                            std::uint64_t max_size = std::numeric_limits<std::uint64_t>::max()) {
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_tstr(T &out, decode_size_bounds bounds = {}) {
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
@@ -1270,7 +1273,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
                     if constexpr (CheckBounds) {
-                        return size >= min_size ? status_code::success : status_code::size_limit_exceeded;
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
                     } else {
                         return status_code::success;
                     }
@@ -1281,7 +1284,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
                 const auto chunk_size = decode_unsigned(additionalInfo);
                 if constexpr (CheckBounds) {
-                    if (chunk_size > max_size || size > max_size - chunk_size) {
+                    if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
                         return status_code::size_limit_exceeded;
                     }
                 }
@@ -1306,9 +1309,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <bool CheckBounds = false, typename T>
-    constexpr status_code decode_indef_array(T &value, std::uint64_t min_size = 0U,
-                                             std::uint64_t max_size = std::numeric_limits<std::uint64_t>::max()) {
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_array(T &value, decode_size_bounds bounds = {}) {
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
@@ -1322,13 +1323,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
                     if constexpr (CheckBounds) {
-                        return size >= min_size ? status_code::success : status_code::size_limit_exceeded;
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
                     } else {
                         return status_code::success;
                     }
                 }
                 if constexpr (CheckBounds) {
-                    if (size == max_size) {
+                    if (size == bounds.max_size) {
                         return status_code::size_limit_exceeded;
                     }
                 }
@@ -1353,9 +1354,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <bool CheckBounds = false, typename T>
-    constexpr status_code decode_indef_map(T &value, std::uint64_t min_size = 0U,
-                                           std::uint64_t max_size = std::numeric_limits<std::uint64_t>::max()) {
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_map(T &value, decode_size_bounds bounds = {}) {
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
@@ -1369,13 +1368,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
                     if constexpr (CheckBounds) {
-                        return size >= min_size ? status_code::success : status_code::size_limit_exceeded;
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
                     } else {
                         return status_code::success;
                     }
                 }
                 if constexpr (CheckBounds) {
-                    if (size == max_size) {
+                    if (size == bounds.max_size) {
                         return status_code::size_limit_exceeded;
                     }
                 }
