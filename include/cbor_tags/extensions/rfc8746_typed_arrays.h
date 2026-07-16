@@ -755,6 +755,7 @@ template <typename Dimensions, typename Array>
 
 namespace cbor::tags::cddl {
 
+// Register the RFC 8746 wrappers with the public CDDL extension traits.
 template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
 struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
     static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;

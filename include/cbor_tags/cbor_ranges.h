@@ -111,21 +111,6 @@ struct is_const_iterable_explicit_range_wrapper<bstr_range<R>> : std::bool_const
 template <std::ranges::view R>
 struct is_const_iterable_explicit_range_wrapper<tstr_range<R>> : std::bool_constant<std::ranges::range<const R>> {};
 
-template <typename T>
-concept ArrayRangeWrapper = is_array_range_wrapper<std::remove_cvref_t<T>>::value;
-
-template <typename T>
-concept MapRangeWrapper = is_map_range_wrapper<std::remove_cvref_t<T>>::value;
-
-template <typename T>
-concept BstrRangeWrapper = is_bstr_range_wrapper<std::remove_cvref_t<T>>::value;
-
-template <typename T>
-concept TstrRangeWrapper = is_tstr_range_wrapper<std::remove_cvref_t<T>>::value;
-
-template <typename T>
-concept StringRangeWrapper = BstrRangeWrapper<T> || TstrRangeWrapper<T>;
-
 template <typename T> using explicit_range_reference_t = decltype((std::declval<T>().range_));
 
 template <typename T>
@@ -135,6 +120,21 @@ template <typename T>
 concept ConstSizedExplicitRangeWrapper = SizedExplicitRangeWrapper<const std::remove_reference_t<T>>;
 
 } // namespace detail
+
+template <typename T>
+concept IsArrayRangeWrapper = detail::is_array_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsMapRangeWrapper = detail::is_map_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsBstrRangeWrapper = detail::is_bstr_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsTstrRangeWrapper = detail::is_tstr_range_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsStringRangeWrapper = IsBstrRangeWrapper<T> || IsTstrRangeWrapper<T>;
 
 template <std::ranges::viewable_range R>
     requires detail::CborArrayRange<std::views::all_t<R>>
