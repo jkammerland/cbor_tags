@@ -362,6 +362,91 @@ TEST_CASE("bounded_size applies only to the immediately wrapped container") {
     CHECK(nested_bound.value().empty());
 }
 
+TEST_CASE("bounded_size validates each decoded item independently of existing destination values") {
+    auto decode_definite = []<typename T>(const T &input, T &destination) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(input));
+
+        auto dec = make_decoder(buffer);
+        return dec(as_bounded_size<2, 2>(destination));
+    };
+
+    SUBCASE("definite strings and containers append items within bounds") {
+        std::vector<int> values{9, 8, 7};
+        REQUIRE(decode_definite(std::vector<int>{1, 2}, values));
+        CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2}));
+
+        std::map<std::string, int> mapping{{"existing", 0}};
+        REQUIRE(decode_definite(std::map<std::string, int>{{"a", 1}, {"b", 2}}, mapping));
+        CHECK_EQ(mapping, (std::map<std::string, int>{{"a", 1}, {"b", 2}, {"existing", 0}}));
+
+        std::vector<std::byte> bytes{std::byte{0x00}};
+        REQUIRE(decode_definite(std::vector<std::byte>{std::byte{0xAA}, std::byte{0xBB}}, bytes));
+        CHECK_EQ(bytes, (std::vector<std::byte>{std::byte{0x00}, std::byte{0xAA}, std::byte{0xBB}}));
+
+        std::string text{"prefix:"};
+        REQUIRE(decode_definite(std::string{"ok"}, text));
+        CHECK_EQ(text, "prefix:ok");
+    }
+
+    SUBCASE("the existing destination does not satisfy an incoming item minimum") {
+        std::vector<int>       values{9, 8, 7};
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(std::vector<int>{1}));
+
+        auto dec    = make_decoder(buffer);
+        auto result = dec(as_bounded_size<2, 3>(values));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(values, (std::vector<int>{9, 8, 7}));
+    }
+
+    SUBCASE("indefinite item counters also exclude existing destination values") {
+        auto decode_indefinite = []<typename T>(T input, T &destination) {
+            std::vector<std::byte> buffer;
+            auto                   enc = make_encoder(buffer);
+            REQUIRE(enc(as_indefinite{input}));
+
+            auto dec = make_decoder(buffer);
+            return dec(as_bounded_size<2, 2>(destination));
+        };
+
+        std::vector<int> values{9};
+        REQUIRE(decode_indefinite(std::vector<int>{1, 2}, values));
+        CHECK_EQ(values, (std::vector<int>{9, 1, 2}));
+
+        std::map<std::string, int> mapping{{"existing", 0}};
+        REQUIRE(decode_indefinite(std::map<std::string, int>{{"a", 1}, {"b", 2}}, mapping));
+        CHECK_EQ(mapping, (std::map<std::string, int>{{"a", 1}, {"b", 2}, {"existing", 0}}));
+
+        std::vector<std::byte> bytes{std::byte{0x00}};
+        REQUIRE(decode_indefinite(std::vector<std::byte>{std::byte{0xAA}, std::byte{0xBB}}, bytes));
+        CHECK_EQ(bytes, (std::vector<std::byte>{std::byte{0x00}, std::byte{0xAA}, std::byte{0xBB}}));
+
+        std::string text{"prefix:"};
+        REQUIRE(decode_indefinite(std::string{"ok"}, text));
+        CHECK_EQ(text, "prefix:ok");
+    }
+}
+
+TEST_CASE("bounded_size encode validates the wrapped item independently of existing output") {
+    std::vector<std::byte> buffer{std::byte{0x00}};
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bounded_size<2, 2>(std::vector<int>{1, 2})));
+    CHECK_EQ(buffer.front(), std::byte{0x00});
+
+    const auto before_failure = buffer;
+    auto       result         = enc(as_bounded_size<2, 2>(std::vector<int>{1, 2, 3}));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(buffer, before_failure);
+}
+
 TEST_CASE("definite bounded_size rejects length before reserving") {
     auto buffer = to_bytes("9a00010000");
 

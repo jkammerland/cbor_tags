@@ -1029,6 +1029,9 @@ Important limitations:
 - `bounded_size<T, Min, Max>` validates only the immediately wrapped field and
   generates matching CDDL. An unwrapped inner container is intentionally
   unbounded; wrap it separately when it also has a protocol limit.
+- A size bound constrains one incoming or outgoing CBOR item, not the accumulated
+  size of a pre-populated decode destination. Appending a valid item can leave the
+  destination larger than `Max`.
 - RFC 8746 scalar typed arrays can also be wrapped in `bounded_size`; the C++
   bounds are element counts, while generated CDDL constrains byte-string size.
 - Normal typed decoding is single-pass and has no built-in nesting-depth limit.
