@@ -51,6 +51,25 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     return value <= max_cbor_argument;
 }
 
+template <HasReserve T> constexpr void reserve_for_append(T &value, std::uint64_t additional_size) {
+    using size_type = typename T::size_type;
+
+    const auto current_size = value.size();
+    const auto maximum_size = [&]() {
+        if constexpr (requires { value.max_size(); }) {
+            return value.max_size();
+        } else {
+            return std::numeric_limits<size_type>::max();
+        }
+    }();
+
+    if (std::cmp_greater(current_size, maximum_size) || std::cmp_greater(additional_size, maximum_size - current_size)) {
+        throw std::length_error("CBOR string length exceeds target container max_size");
+    }
+
+    value.reserve(static_cast<size_type>(current_size + static_cast<size_type>(additional_size)));
+}
+
 template <typename InputBuffer, typename Reader>
 constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffer &data, std::uint64_t length) {
     using size_type = typename Reader::size_type;
@@ -265,22 +284,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            auto decoded = detail::make_decode_value_for<T>(t);
             if constexpr (HasReserve<T>) {
-                if (std::cmp_greater(bstring_size, std::numeric_limits<typename T::size_type>::max())) {
-                    throw std::length_error("CBOR byte string length exceeds target container size_type");
-                }
-                decoded.reserve(static_cast<typename T::size_type>(bstring_size));
+                detail::reserve_for_append(t, bstring_size);
             }
             detail::appender<T> appender_;
             if constexpr (IsContiguous<decltype(bstring)>) {
-                appender_(decoded, bstring);
+                appender_(t, bstring);
             } else {
                 for (auto byte_value : bstring) {
-                    appender_(decoded, static_cast<typename T::value_type>(byte_value));
+                    appender_(t, static_cast<typename T::value_type>(byte_value));
                 }
             }
-            t = std::move(decoded);
         }
 
         return status_code::success;
@@ -309,8 +323,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode the text string
-        t = decode_text(additionalInfo);
+        // Decode the complete payload before mutating an owning target.
+        auto text = decode_text(additionalInfo);
+        if constexpr (IsConstView<T>) {
+            t = std::move(text);
+        } else {
+            if constexpr (HasReserve<T> && std::ranges::sized_range<decltype(text)>) {
+                detail::reserve_for_append(t, std::ranges::size(text));
+            }
+            detail::appender<T> appender_;
+            if constexpr (IsContiguous<decltype(text)>) {
+                appender_(t, text);
+            } else {
+                for (auto character : text) {
+                    appender_(t, static_cast<typename T::value_type>(character));
+                }
+            }
+        }
 
         return status_code::success;
     }
@@ -630,7 +659,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return decode_indef_tstr(value);
         }
         auto text = decode_text(additionalInfo);
-        value     = std::string(text);
+        if constexpr (std::ranges::sized_range<decltype(text)>) {
+            detail::reserve_for_append(value, std::ranges::size(text));
+        }
+        detail::appender<std::string> appender_;
+        if constexpr (IsContiguous<decltype(text)>) {
+            appender_(value, text);
+        } else {
+            for (auto character : text) {
+                appender_(value, static_cast<char>(character));
+            }
+        }
         return status_code::success;
     }
 

@@ -82,14 +82,11 @@ TEST_CASE("decode indefinite bstr into vector") {
 
     auto dec = make_decoder(buffer);
 
-    std::vector<std::byte> decoded;
+    std::vector<std::byte> decoded{std::byte{0x00}};
     auto                   result = dec(decoded);
 
     CHECK_MESSAGE(result, "Decoding an indefinite byte string into a normal vector should succeed.");
-    CHECK_EQ(decoded.size(), 3);
-    CHECK_EQ(decoded[0], std::byte{0x01});
-    CHECK_EQ(decoded[1], std::byte{0x02});
-    CHECK_EQ(decoded[2], std::byte{0x03});
+    CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x00}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}));
 }
 
 TEST_CASE("decode indefinite bstr with wrong chunk type") {
@@ -110,11 +107,11 @@ TEST_CASE("decode indefinite tstr into string") {
 
     auto dec = make_decoder(buffer);
 
-    std::string decoded;
+    std::string decoded{"prefix:"};
     auto        result = dec(decoded);
 
     CHECK_MESSAGE(result, "Decoding an indefinite text string into a normal string should succeed.");
-    CHECK_EQ(decoded, "abc");
+    CHECK_EQ(decoded, "prefix:abc");
 }
 
 TEST_CASE("decode explicit indefinite tstr from non-contiguous input") {
@@ -276,6 +273,7 @@ TEST_CASE("decode indefinite bstr without break returns incomplete") {
 
     CHECK_FALSE_MESSAGE(result, "Missing break marker should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}}));
 }
 
 TEST_CASE("decode indefinite bstr with indefinite chunk returns no match") {
@@ -300,6 +298,31 @@ TEST_CASE("decode indefinite bstr with truncated chunk returns incomplete") {
 
     CHECK_FALSE_MESSAGE(result, "Truncated chunk payload should report incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0xFF}}));
+}
+
+TEST_CASE("decode indefinite strings retain completed chunks before malformed input") {
+    {
+        const std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x41}, std::byte{0xAA}, std::byte{0x60}};
+        std::vector<std::byte>       decoded{std::byte{0x01}};
+        auto                         dec    = make_decoder(buffer);
+        auto                         result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+        CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}}));
+    }
+
+    {
+        const std::vector<std::byte> buffer{std::byte{0x7F}, std::byte{0x61}, std::byte{'a'}, std::byte{0x40}};
+        std::string                  decoded{"prefix:"};
+        auto                         dec    = make_decoder(buffer);
+        auto                         result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+        CHECK_EQ(decoded, "prefix:a");
+    }
 }
 
 TEST_CASE("roundtrip indefinite tagged class direct") {
