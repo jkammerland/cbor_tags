@@ -516,7 +516,7 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
         if constexpr (std::endian::native == std::endian::little) {
             auto const typed_zc_vector = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
             auto const typed_zc_name   = std::string{"rfc8746 typed array zc vector<double>["} + std::to_string(count) +
-                                       "] encode segment assembly (represented bytes)";
+                                         "] encode segment assembly (represented bytes)";
             bench.batch(typed_zc_vector.total_size()).run(typed_zc_name, [&] {
                 auto segments = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
                 ankerl::nanobench::doNotOptimizeAway(segments);
