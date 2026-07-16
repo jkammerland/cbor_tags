@@ -585,6 +585,59 @@ TEST_CASE("dynamic bounds apply only to the immediate container") {
     CHECK_EQ(value, (std::vector<std::vector<int>>{{1, 2, 3}}));
 }
 
+TEST_CASE("dynamic bounds validate item cardinality independently of accumulated destinations") {
+    auto decode_definite = []<typename T>(const T &input, T &destination, std::size_t min, std::size_t max) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(input));
+
+        auto dec = make_decoder(buffer);
+        return dec(as_bounded_size(destination, min, max));
+    };
+
+    std::vector<int> values{9, 8, 7};
+    REQUIRE(decode_definite(std::vector<int>{1, 2}, values, 2, 2));
+    CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2}));
+
+    std::map<std::string, int> mapping{{"existing", 0}};
+    REQUIRE(decode_definite(std::map<std::string, int>{{"a", 1}, {"b", 2}}, mapping, 2, 2));
+    CHECK_EQ(mapping, (std::map<std::string, int>{{"a", 1}, {"b", 2}, {"existing", 0}}));
+
+    std::vector<std::byte> bytes{std::byte{0x00}};
+    REQUIRE(decode_definite(std::vector<std::byte>{std::byte{0xAA}, std::byte{0xBB}}, bytes, 2, 2));
+    CHECK_EQ(bytes, (std::vector<std::byte>{std::byte{0x00}, std::byte{0xAA}, std::byte{0xBB}}));
+
+    std::string text{"prefix:"};
+    REQUIRE(decode_definite(std::string{"ok"}, text, 2, 2));
+    CHECK_EQ(text, "prefix:ok");
+
+    auto one_item_buffer = std::vector<std::byte>{};
+    auto one_item_enc    = make_encoder(one_item_buffer);
+    REQUIRE(one_item_enc(std::vector<int>{1}));
+    auto min_dec    = make_decoder(one_item_buffer);
+    auto min_result = min_dec(as_bounded_size(values, 2, 3));
+    REQUIRE_FALSE(min_result);
+    CHECK_EQ(min_result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2}));
+
+    std::vector<int>       indefinite_input{3, 4};
+    std::vector<std::byte> indefinite_buffer;
+    auto                   indefinite_enc = make_encoder(indefinite_buffer);
+    REQUIRE(indefinite_enc(as_indefinite{indefinite_input}));
+    auto indefinite_dec = make_decoder(indefinite_buffer);
+    REQUIRE(indefinite_dec(as_bounded_size(values, 2, 2)));
+    CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2, 3, 4}));
+
+    std::vector<std::byte> output{std::byte{0x00}};
+    auto                   output_enc = make_encoder(output);
+    REQUIRE(output_enc(as_bounded_size(std::vector<int>{1, 2}, 2, 2)));
+    const auto before_failure = output;
+    auto       encode_result  = output_enc(as_bounded_size(std::vector<int>{1, 2, 3}, 2, 2));
+    REQUIRE_FALSE(encode_result);
+    CHECK_EQ(encode_result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(output, before_failure);
+}
+
 TEST_CASE("configured dynamic bounds encode safely through variants") {
     using input_type  = std::variant<dynamic_bounded_size<std::vector<int>>, std::string>;
     using output_type = std::variant<std::vector<int>, std::string>;
