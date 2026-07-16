@@ -262,10 +262,10 @@ using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
 // Limits both the number of rows and the number of values in each row.
 ```
 
-The bound describes the cardinality of one encoded or decoded CBOR item. It is
-not a persistent invariant on the backing C++ container. Decoding into an
-existing mutable destination validates only the incoming item, then follows the
-core decoder's append/insert contract:
+Static and runtime bounds describe the cardinality of one encoded or decoded
+CBOR item. They are not persistent invariants on the backing C++ container.
+Decoding into an existing mutable destination validates only the incoming item,
+then follows the core decoder's append/insert contract:
 
 ```cpp
 std::vector<int> incoming{1, 2};
@@ -275,7 +275,8 @@ ct::make_encoder(input)(incoming);
 std::vector<int> destination{9, 8, 7};
 auto result = ct::make_decoder(input)(ct::as_bounded_size<2, 2>(destination));
 // result succeeds; destination is now {9, 8, 7, 1, 2}.
-// Its final size may exceed Max because Max constrained the incoming CBOR array.
+// Its final size may exceed the configured maximum because that maximum
+// constrained the incoming CBOR array.
 ```
 
 Encoding validates the complete wrapped source value. To encode only a bounded
