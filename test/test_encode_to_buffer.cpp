@@ -131,7 +131,7 @@ TEST_CASE_TEMPLATE("CBOR Encoder array/vector buffer", T, std::vector<std::byte>
     }
 }
 
-TEST_CASE("CBOR Encoder documents zero negative wrapper edge behavior") {
+TEST_CASE("CBOR Encoder writes the negative zero sentinel as the CBOR minimum integer") {
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
 
