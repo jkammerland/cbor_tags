@@ -289,8 +289,8 @@ TEST_SUITE("Decoding the wrong thing") {
             auto                   enc = make_encoder(data);
             REQUIRE(enc(std::vector<std::byte>(64, std::byte{0xAB})));
 
-            // MSVC's Debug STL allocates container proxy state for the temporary
-            // decode target; keep the resource failure on the payload reserve.
+            // Leave room for MSVC Debug STL container proxy state so the bounded
+            // resource fails on the payload reserve.
             check_decode_out_of_memory<std::pmr::vector<std::byte>, 32>(data);
         }
     }
