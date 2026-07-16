@@ -418,8 +418,6 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         using next_seen = cddl_seen_append_t<Seen, value_type>;
         if constexpr (CDDLScopedType<value_type>) {
             return cddl_scoped_type_contains_nullable_pointer<value_type>();
-        } else if constexpr (IsBoundedSizeWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
@@ -427,7 +425,7 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             using traits = cddl_multi_dimensional_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
                    cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
-        } else if constexpr (IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
+        } else if constexpr (IsBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
                              (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
