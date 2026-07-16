@@ -44,7 +44,7 @@ TEST_CASE("configured expected backend preserves requested error type") {
     static_assert(is_configured_expected_v<result_type>);
     static_assert(std::is_same_v<typename result_type::error_type, alternate_error>);
 
-    result_type result = unexpected<alternate_error>{alternate_error{7}};
+    result_type result = cbor::tags::unexpected<alternate_error>{alternate_error{7}};
 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error().value, 7);
