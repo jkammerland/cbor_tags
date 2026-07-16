@@ -4,7 +4,6 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_integer.h"
-#include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_range_encoder.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
