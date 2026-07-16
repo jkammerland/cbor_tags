@@ -1269,7 +1269,7 @@ TEST_CASE("named-map codec scopes nested map extensions") {
     CDDLNestedMapScopedExtensionRoot  input{.rootId = 1,
                                             .child  = as_named_map{child},
                                             .extensions =
-                                               as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
+                                                as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
 
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -1297,8 +1297,8 @@ TEST_CASE("named-map codec scopes nested map extensions") {
 TEST_CASE("named-map codec handles nested named groups with unique flattened keys") {
     CDDLNestedInlineRoot input{.middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
                                    .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{
-                                         .one = std::string{"first"},
-                                         .two = std::string{"second"},
+                                       .one = std::string{"first"},
+                                       .two = std::string{"second"},
                                    }},
                                    .middle = std::string{"middle"},
                                }},

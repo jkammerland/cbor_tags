@@ -103,8 +103,8 @@ TEST_CASE("explicit map range wrappers roundtrip pair-like views") {
     }
 
     {
-        auto odd_pairs = std::views::iota(0, 5) | std::views::filter([](int value) { return value % 2 == 1; }) |
-                         std::views::transform([](int value) { return std::pair{value, value * 10}; });
+        auto               odd_pairs = std::views::iota(0, 5) | std::views::filter([](int value) { return value % 2 == 1; }) |
+                                       std::views::transform([](int value) { return std::pair{value, value * 10}; });
         std::map<int, int> decoded;
 
         auto buffer = roundtrip_through_vector(as_map_range(odd_pairs), decoded);
