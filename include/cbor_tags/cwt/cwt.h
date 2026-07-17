@@ -96,7 +96,7 @@ template <typename Decoder> [[nodiscard]] constexpr expected<algorithm, status_c
     return static_cast<algorithm>(value);
 }
 
-template <typename Decoder> [[nodiscard]] constexpr expected<header_label, status_code> decode_header_label(Decoder &dec) {
+template <typename Decoder> [[nodiscard]] expected<header_label, status_code> decode_header_label(Decoder &dec) {
     const auto [major, additional_info] = dec.read_initial_byte();
     if (major == major_type::UnsignedInteger) {
         return header_label{integer{dec.decode_unsigned(additional_info)}};
