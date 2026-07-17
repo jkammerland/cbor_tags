@@ -21,7 +21,7 @@ namespace cbor::tags {
 // Major Type  | Meaning           | Content
 // ------------|-------------------|-------------------------
 // 0           | unsigned integer  | N (integer in [0, uint64_max])
-// 1           | negative integer  | -1-N (integer in [-uint64_max, -1])
+// 1           | negative integer  | -1-N (integer in [-2^64, -1])
 // 2           | byte string       | N bytes
 // 3           | text string       | N bytes (UTF-8 text)
 // 4           | array             | N data items (elements)

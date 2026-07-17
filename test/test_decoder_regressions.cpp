@@ -24,10 +24,6 @@ using namespace cbor::tags;
 using namespace std::string_view_literals;
 
 namespace {
-consteval bool negative_wrapper_argument_is_representable(std::uint64_t argument) {
-    return argument != std::numeric_limits<std::uint64_t>::max();
-}
-
 struct minimal_decoder_options {
     using is_options  = void;
     using return_type = expected<void, status_code>;
@@ -117,8 +113,6 @@ struct SignedSizeDequeByteRange {
 };
 } // namespace
 
-static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
-static_assert(!negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max()));
 static_assert(!std::is_default_constructible_v<NonDefaultComparator>);
 static_assert(std::is_move_assignable_v<NonDefaultComparator>);
 static_assert(!std::is_default_constructible_v<NonAssignableComparator>);
@@ -131,20 +125,6 @@ static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
-
-TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
-    const auto cancelled = integer{2, true} + integer{2};
-    CHECK_FALSE(cancelled.is_negative);
-    CHECK_EQ(cancelled.value, 0);
-
-    const auto positive_plus_larger_negative = positive{1} + negative{3};
-    CHECK(positive_plus_larger_negative.is_negative);
-    CHECK_EQ(positive_plus_larger_negative.value, 2);
-
-    const auto integer_plus_larger_negative = integer{1} + negative{3};
-    CHECK(integer_plus_larger_negative.is_negative);
-    CHECK_EQ(integer_plus_larger_negative.value, 2);
-}
 
 TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
     CHECK(std::isinf(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7C00)})));
@@ -291,7 +271,7 @@ TEST_CASE("decoder should preserve cbor integer sign") {
     CHECK_EQ(decoded.value, 1);
 }
 
-TEST_CASE("decoder should document max negative wrapper edge behavior") {
+TEST_CASE("decoder should represent the CBOR minimum integer with the negative zero sentinel") {
     std::vector<std::byte> buffer{std::byte{0x3B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
                                   std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
 

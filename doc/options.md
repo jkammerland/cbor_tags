@@ -57,6 +57,29 @@ if (!result) {
 Decode to `integer`, `positive`, or `negative` when the full CBOR integer
 domain matters.
 
+### Wire-domain integer values
+
+`negative` and `integer` preserve values that do not fit any native signed
+integer. Their `value` member is a magnitude: `negative{1}` represents `-1`,
+and `negative{std::numeric_limits<std::uint64_t>::max()}` represents
+`-18446744073709551615`. `negative{0}` is the sentinel for the remaining CBOR
+value, `-18446744073709551616` (`-2^64`):
+
+```cpp
+negative minus_one{1};
+negative cbor_min{0};
+integer  either_sign = cbor_min;
+
+assert(cbor_min < minus_one);
+```
+
+These types support construction, equality, ordering, encoding, and decoding.
+They intentionally do not provide arithmetic because the `negative{0}`
+sentinel has no native unsigned magnitude and arithmetic could silently wrap.
+Convert a non-sentinel value to an application numeric type only after checking
+that the destination can represent it. `positive` remains an alias for
+`std::uint64_t`.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped
