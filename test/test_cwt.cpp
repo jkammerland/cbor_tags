@@ -79,7 +79,7 @@ template <typename... Items> expected<byte_string, status_code> encode_header_it
     auto        enc    = make_encoder(encoded);
     auto        result = enc(as_map{size}, std::forward<Items>(items)...);
     if (!result) {
-        return unexpected<status_code>{result.error()};
+        return cbor::tags::unexpected<status_code>{result.error()};
     }
     return encoded;
 }
