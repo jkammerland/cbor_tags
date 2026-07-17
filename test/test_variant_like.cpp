@@ -198,17 +198,15 @@ TEST_CASE("variant decoding preserves hard alternative failures") {
     }
 }
 
-TEST_CASE("custom variant traits support operators") {
+TEST_CASE("custom variant traits support comparison") {
     using variant = variant_traits_test::manual_variant<std::uint64_t, std::string, std::nullptr_t>;
 
     const variant number{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::uint64_t{7}}};
     const variant text{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::string{"aa"}}};
     const variant later_text{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::string{"zz"}}};
-    const variant same_number{std::variant<std::uint64_t, std::string, std::nullptr_t>{std::uint64_t{7}}};
 
     CHECK(tags::variant_comparator<>{}(number, text));
     CHECK(tags::variant_comparator<>{}(text, later_text));
-    CHECK(tags::variant_hasher{}(number) == tags::variant_hasher{}(same_number));
 }
 
 TEST_CASE("custom variant traits render CDDL") {

@@ -94,7 +94,7 @@ template <typename Compare = std::less<>> struct variant_comparator {
 struct variant_hasher {
     template <IsVariant Variant> size_t operator()(const Variant &v) const noexcept {
         // Start with the index hash
-        size_t seed = std::hash<size_t>{}(detail::variant_index(v));
+        size_t seed = std::hash<size_t>{}(v.index());
         seed ^= hash_variant_value(v);
         seed *= fnv_prime;
         return seed;
@@ -136,11 +136,11 @@ struct variant_hasher {
     template <std::size_t I, IsVariant Variant> static size_t hash_variant_value_impl(const Variant &v) noexcept {
         using variant_type = std::remove_cvref_t<Variant>;
 
-        if constexpr (I == detail::variant_size_v<variant_type>) {
+        if constexpr (I == std::variant_size_v<variant_type>) {
             std::terminate();
         } else {
-            if (detail::variant_index(v) == I) {
-                return hash_cbor_value(detail::variant_get<I>(v));
+            if (v.index() == I) {
+                return hash_cbor_value(std::get<I>(v));
             }
             return hash_variant_value_impl<I + 1>(v);
         }
