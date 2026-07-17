@@ -9,6 +9,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -194,7 +195,17 @@ template <typename T>
 concept IsView = std::ranges::view<T>;
 
 template <typename T>
-concept IsConstView = IsView<T> && std::is_const_v<typename T::element_type>;
+concept IsBasicStringView = requires {
+    typename std::remove_cvref_t<T>::traits_type;
+    requires std::same_as<std::remove_cvref_t<T>, std::basic_string_view<typename std::remove_cvref_t<T>::value_type,
+                                                                         typename std::remove_cvref_t<T>::traits_type>>;
+};
+
+template <typename T>
+concept IsConstView = IsView<T> && (IsBasicStringView<T> || requires {
+                          typename std::remove_cvref_t<T>::element_type;
+                          requires std::is_const_v<typename std::remove_cvref_t<T>::element_type>;
+                      });
 
 template <typename T>
 concept IsConstBinaryView = IsConstView<T> && std::is_same_v<typename T::value_type, std::byte>;

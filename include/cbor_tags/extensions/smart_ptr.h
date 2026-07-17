@@ -298,6 +298,8 @@ template <bool GraphTagsPossible, typename Self, typename... Ts>
             }
             if (result == status_code::incomplete) {
                 saw_incomplete = true;
+            } else if (result == status_code::size_limit_exceeded) {
+                pointer_error = result;
             } else if constexpr (GraphTagsPossible) {
                 if constexpr (decodable_shared_graph_vector_v<raw_type>) {
                     pointer_error = result;
