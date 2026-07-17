@@ -96,6 +96,18 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode_bounded_size(value);
     }
 
+    template <IsString T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        encode_bounded_size(value.value(), value.min_size(), value.max_size());
+    }
+
+    template <IsArray T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        encode_bounded_size(value.value(), value.min_size(), value.max_size());
+    }
+
+    template <IsMap T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        encode_bounded_size(value.value(), value.min_size(), value.max_size());
+    }
+
     template <IsString T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));
         if constexpr (IsBinaryString<T> && std::ranges::borrowed_range<std::remove_cvref_t<T>> &&
@@ -230,7 +242,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
   private:
     template <std::size_t Min, std::size_t Max, typename T> constexpr void encode_bounded_size(const bounded_size<T, Min, Max> &value) {
-        const auto &wrapped     = value.value();
+        encode_bounded_size(value.value(), Min, Max);
+    }
+
+    template <typename T> constexpr void encode_bounded_size(const T &wrapped, std::size_t min, std::size_t max) {
         const auto &sized_value = [&]() -> decltype(auto) {
             if constexpr (IsIndefiniteWrapper<std::remove_cvref_t<T>>) {
                 return (wrapped.value_);
@@ -245,7 +260,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         if (std::cmp_greater(range_size, std::numeric_limits<std::uint64_t>::max())) {
             throw detail::encode_status_exception{status_code::size_limit_exceeded};
         }
-        if (detail::bounded_size_status<Min, Max>(static_cast<std::uint64_t>(range_size)) != status_code::success) {
+        if (detail::bounded_size_status(static_cast<std::uint64_t>(range_size), min, max) != status_code::success) {
             throw detail::encode_status_exception{status_code::size_limit_exceeded};
         }
         encode(wrapped);

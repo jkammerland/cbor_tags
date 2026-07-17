@@ -238,7 +238,7 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         ValidConceptMapping<T>::counts_fn_inner(result, tags, simples);
         return;
     }
-    if constexpr (IsBoundedSizeWrapper<T>) {
+    if constexpr (IsAnyBoundedSizeWrapper<T>) {
         using bounded_type = std::remove_cvref_t<T>;
         using wrapped_type = std::remove_cvref_t<typename bounded_type::value_type>;
         unmatched          = false;
@@ -335,7 +335,7 @@ constexpr void getTagsCounts(std::array<uint64_t, detail::MaxTagsForVariantCheck
         ValidConceptMapping<T>::tags_fn_inner(result, tags, simples);
         return;
     }
-    if constexpr (IsBoundedSizeWrapper<T>) {
+    if constexpr (IsAnyBoundedSizeWrapper<T>) {
         using bounded_type = std::remove_cvref_t<T>;
         using wrapped_type = std::remove_cvref_t<typename bounded_type::value_type>;
         getTagsCounts<wrapped_type>(result, tags, simples);

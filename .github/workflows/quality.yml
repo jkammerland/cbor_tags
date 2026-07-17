@@ -22,23 +22,23 @@ jobs:
       with:
         cmakeVersion: '3.31.5'
 
-    - name: Install LLVM 21 tools
+    - name: Install LLVM 22 tools
       shell: bash
       run: |
         sudo apt-get update
         sudo apt-get install -y ca-certificates ccache gnupg ninja-build wget
         wget -q https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 21
-        sudo apt-get install -y clang-format-21 clang-tidy-21
+        sudo ./llvm.sh 22
+        sudo apt-get install -y clang-format-22 clang-tidy-22
 
     - name: Run lint
       shell: bash
       run: |
-        CC=clang-21 \
-        CXX=clang++-21 \
-        CLANG_FORMAT=clang-format-21 \
-        CLANG_TIDY_EXE=clang-tidy-21 \
+        CC=clang-22 \
+        CXX=clang++-22 \
+        CLANG_FORMAT=clang-format-22 \
+        CLANG_TIDY_EXE=clang-tidy-22 \
         scripts/lint-cxx.sh
 
   coverage:
@@ -167,11 +167,11 @@ jobs:
               family: "gcc"
             }
           - {
-              name: "LLVM 21",
-              cc: "clang-21",
-              cxx: "clang++-21",
+              name: "LLVM 22",
+              cc: "clang-22",
+              cxx: "clang++-22",
               family: "llvm",
-              version: "21"
+              version: "22"
             }
 
     steps:
