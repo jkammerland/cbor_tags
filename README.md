@@ -1084,6 +1084,7 @@ Additional docs:
 - [Smart Pointer Codecs](doc/smart_pointers.md)
 - [Decoder Resource Limits](doc/decoder_resource_limits.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
+- [Testing](doc/testing.md)
 
 There are many types of cbor objects defined, the major types are:
 
