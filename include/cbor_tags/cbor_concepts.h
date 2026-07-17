@@ -9,6 +9,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -109,6 +110,7 @@ template <typename T> struct as_indefinite;
 template <typename T> struct as_named_map;
 template <typename T> struct as_named_group;
 template <typename T> struct as_named_extension;
+template <typename T, std::size_t Min, std::size_t Max> struct bounded_size;
 
 struct as_text_any {
     std::uint64_t size;
@@ -201,7 +203,17 @@ template <typename T>
 concept IsView = std::ranges::view<T>;
 
 template <typename T>
-concept IsConstView = IsView<T> && std::is_const_v<typename T::element_type>;
+concept IsBasicStringView = requires {
+    typename std::remove_cvref_t<T>::traits_type;
+    requires std::same_as<std::remove_cvref_t<T>, std::basic_string_view<typename std::remove_cvref_t<T>::value_type,
+                                                                         typename std::remove_cvref_t<T>::traits_type>>;
+};
+
+template <typename T>
+concept IsConstView = IsView<T> && (IsBasicStringView<T> || requires {
+                          typename std::remove_cvref_t<T>::element_type;
+                          requires std::is_const_v<typename std::remove_cvref_t<T>::element_type>;
+                      });
 
 template <typename T>
 concept IsConstBinaryView = IsConstView<T> && std::is_same_v<typename T::value_type, std::byte>;
@@ -264,6 +276,17 @@ concept IsNamedExtensionWrapper = !std::is_same_v<typename named_extension_value
 
 template <typename T>
 concept IsNamedWrapper = IsNamedMapWrapper<T> || IsNamedGroupWrapper<T> || IsNamedExtensionWrapper<T>;
+
+namespace detail {
+
+template <typename T> inline constexpr bool is_bounded_size_v = false;
+
+template <typename T, std::size_t Min, std::size_t Max> inline constexpr bool is_bounded_size_v<bounded_size<T, Min, Max>> = true;
+
+} // namespace detail
+
+template <typename T>
+concept IsBoundedSizeWrapper = detail::is_bounded_size_v<std::remove_cvref_t<T>>;
 
 template <typename T>
 concept IsTextChar = std::is_integral_v<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1 &&
@@ -593,6 +616,10 @@ template <typename... Ts> struct unwrap_type<std::variant<Ts...>> {
     using type = typename unwrap_type<std::tuple_element_t<0, std::tuple<Ts...>>>::type;
 };
 
+template <typename T, std::size_t Min, std::size_t Max> struct unwrap_type<bounded_size<T, Min, Max>> {
+    using type = typename unwrap_type<std::remove_cvref_t<T>>::type;
+};
+
 // Helper alias
 template <typename T> using unwrap_type_t = typename unwrap_type<T>::type;
 
@@ -642,7 +669,8 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> && !IsNamedWrapper<T>;
+concept IsAggregate =
+    std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> && !IsNamedWrapper<T> && !IsBoundedSizeWrapper<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
@@ -656,10 +684,11 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 
 // TODO: cleanup or simplify
 template <typename T>
-concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
-                      (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) ||
-                      IsNamedMapWrapper<T> || IsEnum<T> || (IsClassWithTagOverload<T>);
+concept IsCborMajor =
+    IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+    (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
+    (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsNamedMapWrapper<T> ||
+    (IsBoundedSizeWrapper<T> && ContainsCborMajorConcept<T>) || IsEnum<T> || (IsClassWithTagOverload<T>);
 
 template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
     static constexpr bool value = (IsCborMajor<Ts> && ...);
@@ -667,11 +696,38 @@ template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
 
 // Helper for container like types, e.g optional
 template <typename T> struct ContainsCborMajor<T, false> {
-    static constexpr bool value = IsAnyHeader<T> || IsCborMajor<typename T::value_type>;
+    static constexpr bool value = [] {
+        if constexpr (IsAnyHeader<T>) {
+            return true;
+        } else if constexpr (requires { typename T::value_type; }) {
+            return IsCborMajor<typename T::value_type>;
+        } else {
+            return false;
+        }
+    }();
 };
 
 template <typename T> struct ContainsCborMajor<T, true> {
-    static constexpr bool value = IsAnyHeader<T> || (IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>);
+    static constexpr bool value = [] {
+        if constexpr (IsAnyHeader<T>) {
+            return true;
+        } else if constexpr (requires {
+                                 typename T::key_type;
+                                 typename T::mapped_type;
+                             }) {
+            return IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>;
+        } else {
+            return false;
+        }
+    }();
+};
+
+template <typename T>
+    requires IsBoundedSizeWrapper<T>
+struct ContainsCborMajor<T, false> {
+    using bounded_type          = std::remove_cvref_t<T>;
+    using wrapped_type          = std::remove_cvref_t<typename bounded_type::value_type>;
+    static constexpr bool value = IsCborMajor<wrapped_type>;
 };
 
 template <typename T>
