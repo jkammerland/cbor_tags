@@ -16,6 +16,8 @@
 
 namespace cbor::tags {
 
+enum class status_code : std::uint8_t;
+
 enum class major_type : std::uint8_t {
     UnsignedInteger = 0,
     NegativeInteger = 1,
@@ -47,6 +49,12 @@ template <typename T> struct strict_integer_decode_option<T, true> : std::bool_c
 
 template <typename T> inline constexpr bool strict_integer_decode_option_v = strict_integer_decode_option<T>::value;
 
+template <typename T>
+concept CodecStatusResult = requires(T result) {
+    { result.has_value() } -> std::convertible_to<bool>;
+    { result.error() } -> std::convertible_to<status_code>;
+};
+
 } // namespace detail
 
 template <typename T>
@@ -72,17 +80,17 @@ template <typename T> constexpr auto cbor_tag() {
 // Free function variants of coding functions
 template <typename T, typename Class>
 concept HasTranscodeFreeFunction = requires(T t, Class c) {
-    { transcode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+    { transcode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
 concept HasEncodeFreeFunction = requires(T t, Class c) {
-    { encode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+    { encode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
 concept HasDecodeFreeFunction = requires(T t, Class c) {
-    { decode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+    { decode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T>
@@ -448,7 +456,9 @@ concept HasInlineTag = requires {
 struct Access {
     // Transcode function
     template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
-        if constexpr (requires { obj.transcode(transcoder).has_value(); }) {
+        if constexpr (requires {
+                          { obj.transcode(transcoder) } -> detail::CodecStatusResult;
+                      }) {
             return obj.transcode(transcoder);
         } else {
             return detail::FalseType{};
@@ -457,7 +467,9 @@ struct Access {
 
     // Encode function
     template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
-        if constexpr (requires { obj.encode(encoder).has_value(); }) {
+        if constexpr (requires {
+                          { obj.encode(encoder) } -> detail::CodecStatusResult;
+                      }) {
             return obj.encode(encoder);
         } else {
             return detail::FalseType{};
@@ -466,7 +478,9 @@ struct Access {
 
     // Decode function
     template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
-        if constexpr (requires { obj.decode(decoder).has_value(); }) {
+        if constexpr (requires {
+                          { obj.decode(decoder) } -> detail::CodecStatusResult;
+                      }) {
             return obj.decode(decoder);
         } else {
             return detail::FalseType{};
@@ -504,17 +518,17 @@ struct Access {
 // Overload of coding functions, as member function
 template <typename T, typename Class>
 concept HasTranscodeMethod = requires(T t, Class c) {
-    { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::transcode(t, c) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
 concept HasEncodeMethod = requires(T t, Class c) {
-    { Access::encode(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::encode(t, c) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
 concept HasDecodeMethod = requires(T t, Class c) {
-    { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::decode(t, c) } -> detail::CodecStatusResult;
 };
 
 template <typename T>
