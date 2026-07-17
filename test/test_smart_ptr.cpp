@@ -1031,6 +1031,41 @@ TEST_CASE("nullable pointer codec decodes unambiguous smart pointer variants") {
     }
 }
 
+TEST_CASE("nullable pointer variants preserve bounded alternative size errors") {
+    using bounded_text = bounded_size<std::string, 1, 4>;
+    using value_type   = std::variant<std::shared_ptr<std::uint64_t>, bounded_text>;
+
+    SUBCASE("boundary value roundtrips") {
+        value_type input{bounded_text{std::string{"name"}}};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<nullable_ptr_codec>(buffer);
+        REQUIRE(enc(input));
+
+        value_type output{std::shared_ptr<std::uint64_t>{}};
+        auto       dec = make_decoder<nullable_ptr_codec>(buffer);
+        REQUIRE(dec(output));
+        REQUIRE(std::holds_alternative<bounded_text>(output));
+        CHECK_EQ(std::get<bounded_text>(output).value(), "name");
+    }
+
+    SUBCASE("oversized value reports the bound and preserves the destination") {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(std::string{"names"}));
+
+        auto       original = std::make_shared<std::uint64_t>(9U);
+        value_type output{original};
+        auto       dec    = make_decoder<nullable_ptr_codec>(buffer);
+        auto       result = dec(output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(output));
+        CHECK(std::get<std::shared_ptr<std::uint64_t>>(output) == original);
+    }
+}
+
 TEST_CASE("nullable pointer variants preserve malformed pointer errors") {
     using value_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
 
