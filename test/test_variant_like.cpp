@@ -9,6 +9,7 @@
 #include "cbor_tags/extensions/smart_ptr.h"
 #include "test_util.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -169,6 +170,34 @@ TEST_CASE("custom variant traits decode nested alternatives recursively") {
     CHECK(std::get<1>(nested.storage) == "nested");
 }
 
+TEST_CASE("variant decoding preserves hard alternative failures") {
+    const std::vector<std::byte> wrong_sized_bstr{std::byte{0x41}, std::byte{0xaa}};
+
+    SUBCASE("std variant") {
+        std::variant<std::uint64_t, std::array<std::byte, 2>> output{std::uint64_t{7}};
+        auto                                                  dec    = tags::make_decoder(wrong_sized_bstr);
+        const auto                                            result = dec(output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), tags::status_code::unexpected_group_size);
+        REQUIRE(output.index() == 0U);
+        CHECK_EQ(std::get<0>(output), 7U);
+    }
+
+    SUBCASE("trait-backed variant") {
+        using variant = variant_traits_test::manual_variant<std::uint64_t, std::array<std::byte, 2>>;
+
+        variant    output{std::variant<std::uint64_t, std::array<std::byte, 2>>{std::uint64_t{7}}};
+        auto       dec    = tags::make_decoder(wrong_sized_bstr);
+        const auto result = dec(output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), tags::status_code::unexpected_group_size);
+        REQUIRE(tags::detail::variant_index(output) == 0U);
+        CHECK_EQ(std::get<0>(output.storage), 7U);
+    }
+}
+
 TEST_CASE("custom variant traits support operators") {
     using variant = variant_traits_test::manual_variant<std::uint64_t, std::string, std::nullptr_t>;
 
@@ -261,6 +290,21 @@ TEST_CASE("custom variant traits work with nullable smart pointer codec") {
 
         REQUIRE(tags::detail::variant_index(output) == 1U);
         CHECK_EQ(std::get<1>(output.storage), "ok");
+    }
+
+    {
+        using fixed_bstr_variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, std::array<std::byte, 2>>;
+
+        const std::vector<std::byte> wrong_sized_bstr{std::byte{0x41}, std::byte{0xaa}};
+        auto                         original = std::make_shared<std::uint64_t>(9U);
+        fixed_bstr_variant           output{std::variant<std::shared_ptr<std::uint64_t>, std::array<std::byte, 2>>{original}};
+        auto                         dec    = tags::make_decoder<smart::nullable_ptr_codec>(wrong_sized_bstr);
+        auto                         result = dec(output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), tags::status_code::unexpected_group_size);
+        REQUIRE(tags::detail::variant_index(output) == 0U);
+        CHECK(std::get<0>(output.storage) == original);
     }
 }
 

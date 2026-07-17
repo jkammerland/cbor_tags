@@ -1337,8 +1337,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
-                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+            } else if (!detail::is_variant_alternative_mismatch(result)) {
                 hard_error = result;
                 return false;
             } else {
@@ -1427,8 +1426,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
-                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+            } else if (!detail::is_variant_alternative_mismatch(result)) {
                 hard_error = result;
                 return false;
             } else {

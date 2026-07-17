@@ -302,10 +302,9 @@ template <bool GraphTagsPossible, typename Self, IsVariant Variant>
             }
             if (result == status_code::incomplete) {
                 saw_incomplete = true;
-            } else if constexpr (GraphTagsPossible) {
-                if constexpr (decodable_shared_graph_vector_v<raw_type>) {
-                    pointer_error = result;
-                }
+            } else if (!cbor::tags::detail::is_variant_alternative_mismatch(result) ||
+                       (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>)) {
+                pointer_error = result;
             }
             return false;
         }
