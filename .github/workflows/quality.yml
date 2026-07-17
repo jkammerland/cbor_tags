@@ -10,6 +10,43 @@ permissions:
   contents: read
 
 jobs:
+  minimum-cmake:
+    name: CMake 3.23 Raw Roundtrip
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake 3.23.5
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.23.5'
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ gcc ninja-build
+
+    - name: Configure
+      shell: bash
+      run: |
+        cmake -S . -B build/minimum-cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCBOR_TAGS_BUILD_CLI=ON \
+          -DCBOR_TAGS_BUILD_EXAMPLES=ON \
+          -DCBOR_TAGS_BUILD_TESTS=OFF
+
+    - name: Build
+      shell: bash
+      run: cmake --build build/minimum-cmake --parallel
+
+    - name: Test
+      shell: bash
+      run: |
+        ./build/minimum-cmake/examples/cbor_tags_basic_roundtrip
+        ./build/minimum-cmake/tools/cbor_tags_cli diagnostic --input hex 01
+
   format-and-tidy:
     name: C++ Format + Clang-Tidy
     runs-on: ubuntu-latest
