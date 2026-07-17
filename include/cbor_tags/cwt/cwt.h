@@ -103,9 +103,6 @@ template <typename Decoder> [[nodiscard]] constexpr expected<header_label, statu
     }
     if (major == major_type::NegativeInteger) {
         const auto argument = dec.decode_unsigned(additional_info);
-        if (argument == std::numeric_limits<std::uint64_t>::max()) {
-            return unexpected<status_code>{status_code::error};
-        }
         return header_label{integer{negative{argument + 1U}}};
     }
     if (major == major_type::TextString) {
