@@ -2,6 +2,15 @@
 
 #include "cbor_tags/cwt/cwt.h"
 
+#include <openssl/obj_mac.h>
+#include <openssl/objects.h>
+#include <openssl/opensslv.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+#include <openssl/core_names.h>
+#else
+#include <openssl/ec.h>
+#endif
+
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -10,6 +19,40 @@
 namespace cbor::tags::cwt::detail {
 
 template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, decltype(FreeFn)>;
+
+[[nodiscard]] inline expected<void, status_code> validate_openssl_es256_key(EVP_PKEY *key) {
+    if (key == nullptr) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+    if (EVP_PKEY_is_a(key, "EC") != 1) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    char        group_name[80]{};
+    std::size_t group_name_size{};
+    if (EVP_PKEY_get_utf8_string_param(key, OSSL_PKEY_PARAM_GROUP_NAME, group_name, sizeof(group_name), &group_name_size) != 1 ||
+        OBJ_txt2nid(group_name) != NID_X9_62_prime256v1) {
+        return unexpected<status_code>{status_code::error};
+    }
+#else
+    if (EVP_PKEY_base_id(key) != EVP_PKEY_EC) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    const auto *ec_key = EVP_PKEY_get0_EC_KEY(key);
+    if (ec_key == nullptr) {
+        return unexpected<status_code>{status_code::error};
+    }
+    const auto *group = EC_KEY_get0_group(ec_key);
+    if (group == nullptr || EC_GROUP_get_curve_name(group) != NID_X9_62_prime256v1) {
+        return unexpected<status_code>{status_code::error};
+    }
+#endif
+
+    return {};
+}
 
 [[nodiscard]] inline expected<void, status_code> bn_to_fixed_bytes(const BIGNUM *value, std::span<std::byte> output) {
     const auto value_size = BN_num_bytes(value);
@@ -99,8 +142,9 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
 
 template <typename Key>
 [[nodiscard]] inline expected<byte_string, status_code> openssl_compat_es256_sign(Key *key, std::span<const std::byte> to_be_signed) {
-    if (key == nullptr) {
-        return unexpected<status_code>{status_code::error};
+    auto key_status = validate_openssl_es256_key(key);
+    if (!key_status) {
+        return unexpected<status_code>{key_status.error()};
     }
 
     ossl_ptr<EVP_MD_CTX, EVP_MD_CTX_free> context{EVP_MD_CTX_new(), EVP_MD_CTX_free};
@@ -133,8 +177,9 @@ template <typename Key>
 template <typename Key>
 [[nodiscard]] inline expected<void, status_code> openssl_compat_es256_verify(Key *key, std::span<const std::byte> to_be_signed,
                                                                              std::span<const std::byte> signature) {
-    if (key == nullptr) {
-        return unexpected<status_code>{status_code::error};
+    auto key_status = validate_openssl_es256_key(key);
+    if (!key_status) {
+        return unexpected<status_code>{key_status.error()};
     }
 
     auto der = ecdsa_raw_es256_to_der(signature);
