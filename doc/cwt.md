@@ -12,6 +12,20 @@ signing objects:
 
 The base `cbor::tags` target does not link a crypto library.
 
+## Header Validation
+
+`header_map` models the registered `alg` and `kid` parameters and the protected
+`crit` parameter. Header labels use `header_label`, which accepts either a CBOR
+integer or text string. Unknown noncritical labels are consumed during decode
+but are not retained.
+
+Critical labels must be unique, must identify a parameter in the same protected
+map, and must be one of the parameters implemented by this API: integer label
+`1` (`alg`) or `4` (`kid`). An empty critical-label array, unknown critical
+label, duplicate map label, or trailing item in a protected-header byte string
+is rejected. Signing and verification also reject `crit` in unprotected
+headers.
+
 ## Targets
 
 ```cmake
@@ -67,9 +81,27 @@ if (message) {
 `make_sign1_tbs(...)` builds the COSE `Sig_structure` bytes for
 `COSE_Sign1`. The OpenSSL ES256 backend signs and verifies those bytes and
 stores COSE's raw 64-byte `r || s` ECDSA signature representation.
+The backend requires an EC key on the P-256 (`prime256v1`) curve; other EC
+curves and non-EC keys are rejected before signing or verification.
 The `sign1(...)` helper writes `alg` to the protected header when it is not
 already set, rejects an algorithm that conflicts with the selected backend, and
 rejects `alg` in the unprotected header.
+
+For a message whose payload field is `null`, detached-payload arguments use
+`std::optional<std::span<const std::byte>>`. `std::nullopt` means that no
+payload was supplied and is an error. An engaged empty span is a valid detached
+empty payload:
+
+```cpp
+auto result = cwt::verify_sign1<cwt::openssl_es256_backend>(
+    key,
+    message,
+    {},
+    std::span<const std::byte>{});
+```
+
+When the message contains an embedded payload, it takes precedence over any
+detached payload argument.
 
 ## Sign Example
 

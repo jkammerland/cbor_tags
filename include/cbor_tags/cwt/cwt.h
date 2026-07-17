@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -33,15 +34,110 @@ enum class algorithm : std::int64_t {
     es512 = -36,
 };
 
+using header_label = std::variant<integer, std::string>;
+
+namespace detail {
+
+[[nodiscard]] constexpr bool is_header_label(const header_label &label, std::uint64_t expected) {
+    const auto *numeric = std::get_if<integer>(&label);
+    return numeric != nullptr && !numeric->is_negative && numeric->value == expected;
+}
+
+[[nodiscard]] constexpr bool contains_header_label(const std::vector<header_label> &labels, const header_label &target) {
+    for (const auto &label : labels) {
+        if (label == target) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] constexpr status_code validate_critical_labels(const std::vector<header_label> &labels, bool has_algorithm, bool has_key_id) {
+    for (std::size_t index = 0; index < labels.size(); ++index) {
+        for (std::size_t previous = 0; previous < index; ++previous) {
+            if (labels[index] == labels[previous]) {
+                return status_code::error;
+            }
+        }
+
+        if (is_header_label(labels[index], 1U)) {
+            if (!has_algorithm) {
+                return status_code::error;
+            }
+        } else if (is_header_label(labels[index], 4U)) {
+            if (!has_key_id) {
+                return status_code::error;
+            }
+        } else {
+            return status_code::error;
+        }
+    }
+    return status_code::success;
+}
+
+template <typename Codec> [[nodiscard]] constexpr auto codec_error(status_code code) {
+    return typename Codec::expected_type{unexpected<status_code>{code}};
+}
+
+template <typename Decoder> [[nodiscard]] constexpr expected<algorithm, status_code> decode_algorithm(Decoder &dec) {
+    const auto [major, additional_info] = dec.read_initial_byte();
+    if (major != major_type::UnsignedInteger && major != major_type::NegativeInteger) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    const auto     argument = dec.decode_unsigned(additional_info);
+    constexpr auto maximum  = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    if (argument > maximum) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    const auto value =
+        major == major_type::UnsignedInteger ? static_cast<std::int64_t>(argument) : std::int64_t{-1} - static_cast<std::int64_t>(argument);
+    return static_cast<algorithm>(value);
+}
+
+template <typename Decoder> [[nodiscard]] constexpr expected<header_label, status_code> decode_header_label(Decoder &dec) {
+    const auto [major, additional_info] = dec.read_initial_byte();
+    if (major == major_type::UnsignedInteger) {
+        return header_label{integer{dec.decode_unsigned(additional_info)}};
+    }
+    if (major == major_type::NegativeInteger) {
+        const auto argument = dec.decode_unsigned(additional_info);
+        if (argument == std::numeric_limits<std::uint64_t>::max()) {
+            return unexpected<status_code>{status_code::error};
+        }
+        return header_label{integer{negative{argument + 1U}}};
+    }
+    if (major == major_type::TextString) {
+        std::string value;
+        const auto  status = dec.decode(value, major, additional_info);
+        if (status != status_code::success) {
+            return unexpected<status_code>{status};
+        }
+        return header_label{std::move(value)};
+    }
+    return unexpected<status_code>{status_code::error};
+}
+
+} // namespace detail
+
 struct header_map {
     std::optional<algorithm>   alg;
     std::optional<byte_string> kid;
+    std::vector<header_label>  crit;
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return !alg && !kid; }
+    [[nodiscard]] constexpr bool empty() const noexcept { return !alg && !kid && crit.empty(); }
 
     template <typename Encoder> constexpr auto encode(Encoder &enc) const {
+        if (detail::validate_critical_labels(crit, alg.has_value(), kid.has_value()) != status_code::success) {
+            return detail::codec_error<Encoder>(status_code::error);
+        }
+
         std::uint64_t size{};
         if (alg) {
+            ++size;
+        }
+        if (!crit.empty()) {
             ++size;
         }
         if (kid) {
@@ -54,6 +150,12 @@ struct header_map {
         }
         if (alg) {
             result = enc(std::uint64_t{1}, *alg);
+            if (!result) {
+                return result;
+            }
+        }
+        if (!crit.empty()) {
+            result = enc(std::uint64_t{2}, crit);
             if (!result) {
                 return result;
             }
@@ -71,22 +173,42 @@ struct header_map {
             return result;
         }
 
-        header_map decoded{};
+        header_map                decoded{};
+        std::vector<header_label> seen_labels;
         for (std::uint64_t index = 0; index < map.size; ++index) {
-            integer key{0};
-            result = dec(key);
-            if (!result) {
-                return result;
+            auto key_result = detail::decode_header_label(dec);
+            if (!key_result) {
+                return detail::codec_error<Decoder>(key_result.error());
             }
+            auto key = std::move(*key_result);
+            if (detail::contains_header_label(seen_labels, key)) {
+                return detail::codec_error<Decoder>(status_code::error);
+            }
+            seen_labels.push_back(key);
 
-            if (!key.is_negative && key.value == 1U) {
-                algorithm value{};
-                result = dec(value);
+            if (detail::is_header_label(key, 1U)) {
+                auto value = detail::decode_algorithm(dec);
+                if (!value) {
+                    return detail::codec_error<Decoder>(value.error());
+                }
+                decoded.alg = *value;
+            } else if (detail::is_header_label(key, 2U)) {
+                as_array_any labels{};
+                result = dec(labels);
                 if (!result) {
                     return result;
                 }
-                decoded.alg = value;
-            } else if (!key.is_negative && key.value == 4U) {
+                if (labels.size == 0U) {
+                    return detail::codec_error<Decoder>(status_code::error);
+                }
+                for (std::uint64_t label_index = 0; label_index < labels.size; ++label_index) {
+                    auto label = detail::decode_header_label(dec);
+                    if (!label) {
+                        return detail::codec_error<Decoder>(label.error());
+                    }
+                    decoded.crit.push_back(std::move(*label));
+                }
+            } else if (detail::is_header_label(key, 4U)) {
                 byte_string value;
                 result = dec(value);
                 if (!result) {
@@ -100,6 +222,10 @@ struct header_map {
                     return result;
                 }
             }
+        }
+
+        if (detail::validate_critical_labels(decoded.crit, decoded.alg.has_value(), decoded.kid.has_value()) != status_code::success) {
+            return detail::codec_error<Decoder>(status_code::error);
         }
 
         *this = std::move(decoded);
@@ -353,15 +479,18 @@ template <typename T> [[nodiscard]] inline expected<byte_string, status_code> en
     if (!result) {
         return unexpected<status_code>{result.error()};
     }
+    if (dec.tell() != bytes.end()) {
+        return unexpected<status_code>{status_code::error};
+    }
     return header;
 }
 
 [[nodiscard]] inline byte_string copy_bytes(std::span<const std::byte> bytes) { return byte_string{bytes.begin(), bytes.end()}; }
 
-[[nodiscard]] inline expected<sig_structure, status_code> make_sign1_sig_structure(const cose_sign1          &message,
-                                                                                   std::span<const std::byte> external_aad     = {},
-                                                                                   std::span<const std::byte> detached_payload = {}) {
-    if (!message.payload && detached_payload.empty()) {
+[[nodiscard]] inline expected<sig_structure, status_code>
+make_sign1_sig_structure(const cose_sign1 &message, std::span<const std::byte> external_aad = {},
+                         std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    if (!message.payload && !detached_payload) {
         return unexpected<status_code>{status_code::error};
     }
 
@@ -370,14 +499,14 @@ template <typename T> [[nodiscard]] inline expected<byte_string, status_code> en
         .body_protected = message.protected_header,
         .sign_protected = std::nullopt,
         .external_aad   = copy_bytes(external_aad),
-        .payload        = message.payload ? *message.payload : copy_bytes(detached_payload),
+        .payload        = message.payload ? *message.payload : copy_bytes(*detached_payload),
     };
 }
 
-[[nodiscard]] inline expected<sig_structure, status_code> make_sign_sig_structure(const cose_sign &message, const cose_signature &signature,
-                                                                                  std::span<const std::byte> external_aad     = {},
-                                                                                  std::span<const std::byte> detached_payload = {}) {
-    if (!message.payload && detached_payload.empty()) {
+[[nodiscard]] inline expected<sig_structure, status_code>
+make_sign_sig_structure(const cose_sign &message, const cose_signature &signature, std::span<const std::byte> external_aad = {},
+                        std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    if (!message.payload && !detached_payload) {
         return unexpected<status_code>{status_code::error};
     }
 
@@ -386,12 +515,13 @@ template <typename T> [[nodiscard]] inline expected<byte_string, status_code> en
         .body_protected = message.protected_header,
         .sign_protected = signature.protected_header,
         .external_aad   = copy_bytes(external_aad),
-        .payload        = message.payload ? *message.payload : copy_bytes(detached_payload),
+        .payload        = message.payload ? *message.payload : copy_bytes(*detached_payload),
     };
 }
 
 [[nodiscard]] inline expected<byte_string, status_code>
-make_sign1_tbs(const cose_sign1 &message, std::span<const std::byte> external_aad = {}, std::span<const std::byte> detached_payload = {}) {
+make_sign1_tbs(const cose_sign1 &message, std::span<const std::byte> external_aad = {},
+               std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     auto structure = make_sign1_sig_structure(message, external_aad, detached_payload);
     if (!structure) {
         return unexpected<status_code>{structure.error()};
@@ -399,9 +529,9 @@ make_sign1_tbs(const cose_sign1 &message, std::span<const std::byte> external_aa
     return encode_to_bytes(*structure);
 }
 
-[[nodiscard]] inline expected<byte_string, status_code> make_sign_tbs(const cose_sign &message, const cose_signature &signature,
-                                                                      std::span<const std::byte> external_aad     = {},
-                                                                      std::span<const std::byte> detached_payload = {}) {
+[[nodiscard]] inline expected<byte_string, status_code>
+make_sign_tbs(const cose_sign &message, const cose_signature &signature, std::span<const std::byte> external_aad = {},
+              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     auto structure = make_sign_sig_structure(message, signature, external_aad, detached_payload);
     if (!structure) {
         return unexpected<status_code>{structure.error()};
@@ -411,7 +541,7 @@ make_sign1_tbs(const cose_sign1 &message, std::span<const std::byte> external_aa
 
 [[nodiscard]] inline expected<void, status_code> validate_sign1_algorithm(const header_map &protected_header, const header_map &unprotected,
                                                                           algorithm expected) {
-    if (unprotected.alg) {
+    if (unprotected.alg || !unprotected.crit.empty()) {
         return unexpected<status_code>{status_code::error};
     }
     if (protected_header.alg && *protected_header.alg != expected) {
@@ -424,7 +554,7 @@ make_sign1_tbs(const cose_sign1 &message, std::span<const std::byte> external_aa
                                                                          const header_map &body_unprotected,
                                                                          const header_map &signature_protected,
                                                                          const header_map &signature_unprotected, algorithm expected) {
-    if (body_unprotected.alg || signature_unprotected.alg) {
+    if (body_unprotected.alg || !body_unprotected.crit.empty() || signature_unprotected.alg || !signature_unprotected.crit.empty()) {
         return unexpected<status_code>{status_code::error};
     }
     if (body_protected.alg && *body_protected.alg != expected) {
@@ -476,7 +606,7 @@ template <typename Backend, typename SigningKey>
 template <typename Backend, typename SigningKey>
 [[nodiscard]] inline expected<cose_signature, status_code>
 sign_signature(SigningKey &&key, const cose_sign &message, header_map protected_header, header_map unprotected,
-               std::span<const std::byte> external_aad = {}, std::span<const std::byte> detached_payload = {}) {
+               std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     auto body_protected = decode_protected_header(message.protected_header);
     if (!body_protected) {
         return unexpected<status_code>{body_protected.error()};
@@ -519,7 +649,7 @@ sign_signature(SigningKey &&key, const cose_sign &message, header_map protected_
 template <typename Backend, typename SigningKey>
 [[nodiscard]] inline expected<void, status_code> add_signature(SigningKey &&key, cose_sign &message, header_map protected_header,
                                                                header_map unprotected, std::span<const std::byte> external_aad = {},
-                                                               std::span<const std::byte> detached_payload = {}) {
+                                                               std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     auto signature = sign_signature<Backend>(std::forward<SigningKey>(key), message, std::move(protected_header), std::move(unprotected),
                                              external_aad, detached_payload);
     if (!signature) {
@@ -562,8 +692,8 @@ sign(SigningKey &&key, header_map protected_header, header_map unprotected, std:
 
 template <typename Backend, typename VerificationKey>
 [[nodiscard]] inline expected<void, status_code> verify_sign1(VerificationKey &&key, const cose_sign1 &message,
-                                                              std::span<const std::byte> external_aad     = {},
-                                                              std::span<const std::byte> detached_payload = {}) {
+                                                              std::span<const std::byte>                external_aad     = {},
+                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     auto protected_header = decode_protected_header(message.protected_header);
     if (!protected_header) {
         return unexpected<status_code>{protected_header.error()};
@@ -585,7 +715,7 @@ template <typename Backend, typename VerificationKey>
 template <typename Backend, typename VerificationKey>
 [[nodiscard]] inline expected<void, status_code>
 verify_signature(VerificationKey &&key, const cose_sign &message, const cose_signature &signature,
-                 std::span<const std::byte> external_aad = {}, std::span<const std::byte> detached_payload = {}) {
+                 std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     auto body_protected = decode_protected_header(message.protected_header);
     if (!body_protected) {
         return unexpected<status_code>{body_protected.error()};
@@ -611,8 +741,8 @@ verify_signature(VerificationKey &&key, const cose_sign &message, const cose_sig
 
 template <typename Backend, typename VerificationKey>
 [[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const cose_sign &message, std::size_t signature_index,
-                                                             std::span<const std::byte> external_aad     = {},
-                                                             std::span<const std::byte> detached_payload = {}) {
+                                                             std::span<const std::byte>                external_aad     = {},
+                                                             std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     if (signature_index >= message.signatures.size()) {
         return unexpected<status_code>{status_code::unexpected_group_size};
     }
@@ -622,8 +752,8 @@ template <typename Backend, typename VerificationKey>
 
 template <typename Backend, typename VerificationKey>
 [[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const cose_sign &message,
-                                                             std::span<const std::byte> external_aad     = {},
-                                                             std::span<const std::byte> detached_payload = {}) {
+                                                             std::span<const std::byte>                external_aad     = {},
+                                                             std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     if (message.signatures.empty()) {
         return unexpected<status_code>{status_code::unexpected_group_size};
     }
