@@ -944,9 +944,11 @@ conan install . -o cbor-tags/*:std_expected=True -s compiler.cppstd=23
 conan install . -o cbor-tags/*:stl_only=True -s compiler.cppstd=26
 conan install . -o cbor-tags/*:boost_pfr_names=True
 conan install . -o cbor-tags/*:magic_enum_names=True
+conan install . -o cbor-tags/*:cwt_openssl=True
 vcpkg install --x-no-default-features --x-feature=stl-only
 vcpkg install --x-feature=boost-pfr-names
 vcpkg install --x-feature=magic-enum-names
+vcpkg install --x-feature=cwt-openssl
 ```
 
 The package features install the optional dependencies; still configure

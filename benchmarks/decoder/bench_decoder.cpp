@@ -756,6 +756,54 @@ template <typename ContainerType> void run_decoding_benchmark_roundtrip() {
     run_decoding_benchmarks_roundtrip<ContainerType>(bench);
 }
 
+template <std::size_t N> void run_encoded_view_benchmark() {
+    std::array<std::uint32_t, N> input{};
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        input[index] = static_cast<std::uint32_t>(index);
+    }
+
+    std::vector<std::uint8_t> encoded;
+    auto                      enc = make_encoder(encoded);
+    REQUIRE(enc(input));
+
+    ankerl::nanobench::Bench bench;
+    bench.title(fmt::format("Encoded-view decode, {} fixed-array elements", N));
+    bench.minEpochIterations(1000);
+    bench.unit("byte");
+    bench.batch(encoded.size());
+    bench.performanceCounters(true);
+    bench.relative(true);
+
+    bench.run("Typed decode", [&encoded] {
+        std::array<std::uint32_t, N> output;
+        auto                         dec    = make_decoder(encoded);
+        auto                         result = dec(output);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    });
+
+    bench.run("Typed decode with encoded view", [&encoded] {
+        std::array<std::uint32_t, N> output;
+        auto                         dec    = make_decoder_with_options<encoded_item_view_decoder_options>(encoded);
+        auto                         result = dec(output);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    });
+
+    bench.run("Raw encoded item view", [&encoded] {
+        auto                                          dec = make_decoder(encoded);
+        typename decltype(dec)::raw_encoded_item_view output;
+        auto                                          result = dec(output);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    });
+}
+
+TEST_CASE("Encoded view decoder benchmarks") {
+    run_encoded_view_benchmark<4>();
+    run_encoded_view_benchmark<4096>();
+}
+
 TEST_CASE("Decoding benchmarks") {
     run_decoding_benchmark<std::vector<uint8_t>>();
     run_decoding_benchmark<std::deque<uint8_t>>();
