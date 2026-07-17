@@ -454,7 +454,7 @@ TEST_CASE("Switching instead of variant") {
             break;
         }
         case 141: {
-            F2 f2;
+            F2 f2{.s = {}};
             result = dec(f2);
             REQUIRE(result);
             CHECK_EQ(f2.s, "43");

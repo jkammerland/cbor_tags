@@ -12,6 +12,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -485,6 +486,49 @@ TEST_CASE("decoder should accept empty text strings") {
 
     CHECK_MESSAGE(result, "Decoding an empty text string should succeed.");
     CHECK(decoded.empty());
+}
+
+TEST_CASE("decoder appends definite strings to mutable targets") {
+    const std::vector<std::byte> source_bytes{std::byte{0xAA}, std::byte{0xBB}};
+    const std::string            source_text{"payload"};
+    std::vector<std::byte>       buffer;
+    auto                         enc = make_encoder(buffer);
+    REQUIRE(enc(source_bytes, source_text, source_text));
+
+    std::vector<std::byte> decoded_bytes{std::byte{0x01}};
+    std::string            decoded_text{"prefix:"};
+    std::pmr::string       decoded_pmr_text{"pmr:"};
+    auto                   dec    = make_decoder(buffer);
+    auto                   result = dec(decoded_bytes, decoded_text, decoded_pmr_text);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded_bytes, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}, std::byte{0xBB}}));
+    CHECK_EQ(decoded_text, "prefix:payload");
+    CHECK_EQ(decoded_pmr_text, "pmr:payload");
+}
+
+TEST_CASE("decoder leaves mutable strings unchanged for truncated definite payloads") {
+    {
+        const std::vector<std::byte> buffer{std::byte{0x43}, std::byte{0xAA}};
+        std::vector<std::byte>       decoded{std::byte{0x01}};
+        auto                         dec    = make_decoder(buffer);
+        auto                         result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}}));
+    }
+
+    {
+        const std::vector<std::byte> buffer{std::byte{0x63}, std::byte{'a'}};
+        std::string                  decoded{"prefix"};
+        auto                         dec    = make_decoder(buffer);
+        auto                         result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, "prefix");
+    }
 }
 
 TEST_CASE("decoder should preserve text bytes without utf8 validation") {
