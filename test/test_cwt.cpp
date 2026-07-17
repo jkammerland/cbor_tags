@@ -195,6 +195,17 @@ TEST_CASE("COSE protected headers consume unknown noncritical text labels") {
     CHECK(decoded->crit.empty());
 }
 
+TEST_CASE("COSE protected headers consume the minimum negative noncritical label") {
+    auto encoded = encode_header_items(2, integer{negative{0}}, true, std::uint64_t{1}, algorithm::es256);
+    REQUIRE(encoded);
+
+    auto decoded = decode_protected_header(*encoded);
+    REQUIRE(decoded);
+    CHECK_EQ(decoded->alg, algorithm::es256);
+    CHECK_FALSE(decoded->kid);
+    CHECK(decoded->crit.empty());
+}
+
 TEST_CASE("COSE protected headers reject malformed labels and values") {
     auto check_rejected = [](expected<byte_string, status_code> encoded) {
         REQUIRE(encoded);
