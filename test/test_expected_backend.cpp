@@ -20,6 +20,34 @@ using namespace cbor::tags;
 
 namespace {
 
+struct alternate_error {
+    int value;
+};
+
+struct codec_error {
+    status_code value;
+
+    constexpr operator status_code() const noexcept { return value; }
+};
+
+struct failing_encoder_codec {
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Encoder> auto encode(Encoder &) const {
+        return expected<void, codec_error>{cbor::tags::unexpected<codec_error>{codec_error{status_code::unexpected_group_size}}};
+    }
+};
+
+struct failing_decoder_codec {
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Decoder> auto decode(Decoder &) {
+        return expected<void, codec_error>{cbor::tags::unexpected<codec_error>{codec_error{status_code::invalid_utf8_sequence}}};
+    }
+};
+
 #if CBOR_TAGS_USE_STD_EXPECTED
 template <typename T> inline constexpr bool             is_configured_expected_v                       = false;
 template <typename T> inline constexpr bool             is_configured_unexpected_v                     = false;
@@ -33,6 +61,18 @@ template <typename E> inline constexpr bool             is_configured_unexpected
 #endif
 
 } // namespace
+
+TEST_CASE("configured expected backend preserves requested error type") {
+    using result_type = expected<int, alternate_error>;
+
+    static_assert(is_configured_expected_v<result_type>);
+    static_assert(std::is_same_v<typename result_type::error_type, alternate_error>);
+
+    result_type result = cbor::tags::unexpected<alternate_error>{alternate_error{7}};
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error().value, 7);
+}
 
 TEST_CASE("default return type uses configured expected backend") {
     static_assert(is_configured_expected_v<expected<void, status_code>>);
@@ -69,4 +109,24 @@ TEST_CASE("configured expected backend supports value-returning helpers") {
     static_assert(is_configured_expected_v<decltype(encoded)>);
     REQUIRE(encoded);
     CHECK_EQ(to_hex(encoded->segments().front().bytes()), "182a");
+}
+
+TEST_CASE("custom codecs accept errors convertible to status code") {
+    std::vector<std::byte> output;
+    auto                   enc           = make_encoder(output);
+    auto                   encode_result = enc(failing_encoder_codec{});
+
+    static_assert(HasEncodeMethod<decltype(enc), failing_encoder_codec>);
+    REQUIRE_FALSE(encode_result);
+    CHECK_EQ(encode_result.error(), status_code::unexpected_group_size);
+    CHECK(output.empty());
+
+    const auto input = to_bytes("00");
+    auto       dec   = make_decoder(input);
+    auto       value = failing_decoder_codec{};
+
+    static_assert(HasDecodeMethod<decltype(dec), failing_decoder_codec>);
+    auto decode_result = dec(value);
+    REQUIRE_FALSE(decode_result);
+    CHECK_EQ(decode_result.error(), status_code::invalid_utf8_sequence);
 }

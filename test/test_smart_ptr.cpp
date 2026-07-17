@@ -638,6 +638,7 @@ TEST_CASE("shared graph codec rejects cycles") {
     auto                        enc = make_encoder<shared_graph_codec>(buffer);
     shared_graph_encode_session encode_graph;
     const auto                  encode_result = enc(as_shared_graph(encode_graph, link));
+    link->next.reset();
 
     REQUIRE_FALSE(encode_result);
     CHECK_EQ(encode_result.error(), status_code::error);
@@ -652,6 +653,9 @@ TEST_CASE("shared graph codec rejects cycles") {
     auto                                        dec = make_decoder<shared_graph_codec>(cycle_bytes);
     shared_graph_decode_session                 decode_graph;
     const auto                                  decode_result = dec(as_shared_graph(decode_graph, decoded));
+    if (decoded) {
+        decoded->next.reset();
+    }
 
     REQUIRE_FALSE(decode_result);
     CHECK_EQ(decode_result.error(), status_code::error);

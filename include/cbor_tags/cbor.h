@@ -124,10 +124,10 @@ template <typename T> struct Option {
 };
 
 #if CBOR_TAGS_USE_STD_EXPECTED
-template <typename T, typename E> using expected = std::expected<T, status_code>;
+template <typename T, typename E> using expected = std::expected<T, E>;
 template <typename E> using unexpected           = std::unexpected<E>;
 #else
-template <typename T, typename E> using expected = tl::expected<T, status_code>;
+template <typename T, typename E> using expected = tl::expected<T, E>;
 template <typename E> using unexpected           = tl::unexpected<E>;
 #endif
 using default_expected = Option<expected<void, status_code>>;
