@@ -10,6 +10,26 @@
 
 namespace cbor::tags::detail {
 
+[[nodiscard]] constexpr bool is_variant_alternative_mismatch(status_code status) noexcept {
+    switch (status) {
+    case status_code::no_match_for_tag:
+    case status_code::no_match_for_tag_simple_on_buffer:
+    case status_code::no_match_for_uint_on_buffer:
+    case status_code::no_match_for_nint_on_buffer:
+    case status_code::no_match_for_int_on_buffer:
+    case status_code::no_match_for_enum_on_buffer:
+    case status_code::no_match_for_bstr_on_buffer:
+    case status_code::no_match_for_tstr_on_buffer:
+    case status_code::no_match_for_array_on_buffer:
+    case status_code::no_match_for_map_on_buffer:
+    case status_code::no_match_for_tag_on_buffer:
+    case status_code::no_match_for_simple_on_buffer:
+    case status_code::no_match_for_optional_on_buffer:
+    case status_code::no_match_in_variant_on_buffer: return true;
+    default: return false;
+    }
+}
+
 template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(std::byte additional_info) {
     using type = std::remove_cvref_t<U>;
     if constexpr (IsOptional<type>) {
@@ -18,9 +38,10 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
         }
         return matches_simple_dispatch<CatchAllPass, typename type::value_type>(additional_info);
     } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, std::byte info) {
+        return with_variant_alternatives<type>([additional_info]<typename... Ts>() {
+            const auto info = additional_info;
             return (matches_simple_dispatch<CatchAllPass, Ts>(info) || ...);
-        }(static_cast<type *>(nullptr), additional_info);
+        });
     } else if constexpr (std::is_same_v<type, simple>) {
         const auto value = std::to_integer<std::uint8_t>(additional_info);
         return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
@@ -36,9 +57,10 @@ template <typename U> constexpr bool matches_major_dispatch(major_type major) {
     if constexpr (IsOptional<type>) {
         return major == major_type::Simple || matches_major_dispatch<typename type::value_type>(major);
     } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, major_type m) {
+        return with_variant_alternatives<type>([major]<typename... Ts>() {
+            const auto m = major;
             return (matches_major_dispatch<Ts>(m) || ...);
-        }(static_cast<type *>(nullptr), major);
+        });
     } else {
         return is_valid_major<major_type, type>(major);
     }

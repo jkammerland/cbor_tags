@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cbor_tags/cbor_variant_traits.h"
 #include "cbor_tags/detail/cbor_range_concepts.h"
 
 #include <array>
@@ -610,6 +611,11 @@ concept IsOptional = requires(T t) {
     T{};                    // Must be default constructible (nullopt)
 };
 
+template <typename T> struct is_variant : std::bool_constant<detail::VariantLike<std::remove_cvref_t<T>>> {};
+
+template <typename T>
+concept IsVariant = is_variant<std::remove_cvref_t<T>>::value;
+
 // Type trait to unwrap nested types
 template <typename T> struct unwrap_type {
     using type = T;
@@ -620,10 +626,11 @@ template <typename T> struct unwrap_type<std::optional<T>> {
     using type = typename unwrap_type<T>::type;
 };
 
-// Specialization for std::variant
-template <typename... Ts> struct unwrap_type<std::variant<Ts...>> {
-    // Get the first type's unwrapped version
-    using type = typename unwrap_type<std::tuple_element_t<0, std::tuple<Ts...>>>::type;
+// Specialization for trait-backed variant types. The first alternative is used as the representative type.
+template <typename T>
+    requires IsVariant<T>
+struct unwrap_type<T> {
+    using type = typename unwrap_type<detail::variant_alternative_t<0, T>>::type;
 };
 
 template <typename T, std::size_t Min, std::size_t Max> struct unwrap_type<bounded_size<T, Min, Max>> {
@@ -637,20 +644,29 @@ template <typename... T> constexpr bool contains_signed_integer = (... || IsSign
 template <typename... T> constexpr bool contains_unsigned       = (... || IsUnsigned<unwrap_type_t<T>>);
 template <typename... T> constexpr bool contains_negative       = (... || IsNegative<unwrap_type_t<T>>);
 
-template <typename T> struct is_variant : std::false_type {};
+namespace detail {
 
-template <typename... Args> struct is_variant<std::variant<Args...>> : std::true_type {};
+template <typename Variant, std::size_t... Is> consteval bool variant_contains_signed_integer_impl(std::index_sequence<Is...>) {
+    return contains_signed_integer<variant_alternative_t<Is, Variant>...>;
+}
 
-template <typename T>
-concept IsVariant = is_variant<std::remove_cvref_t<T>>::value;
+template <typename Variant, std::size_t... Is> consteval bool variant_contains_unsigned_or_negative_impl(std::index_sequence<Is...>) {
+    return contains_unsigned<variant_alternative_t<Is, Variant>...> || contains_negative<variant_alternative_t<Is, Variant>...>;
+}
+
+} // namespace detail
 
 template <typename T> struct variant_contains_integer : std::false_type {};
-template <template <typename...> typename V, typename... T>
-struct variant_contains_integer<V<T...>> : std::bool_constant<contains_signed_integer<T...>> {};
+template <typename T>
+    requires IsVariant<T>
+struct variant_contains_integer<T>
+    : std::bool_constant<detail::variant_contains_signed_integer_impl<T>(std::make_index_sequence<detail::variant_size_v<T>>{})> {};
 
 template <typename T> struct variant_contains_unsigned_or_negative : std::false_type {};
-template <template <typename...> typename V, typename... T>
-struct variant_contains_unsigned_or_negative<V<T...>> : std::bool_constant<contains_unsigned<T...> || contains_negative<T...>> {};
+template <typename T>
+    requires IsVariant<T>
+struct variant_contains_unsigned_or_negative<T>
+    : std::bool_constant<detail::variant_contains_unsigned_or_negative_impl<T>(std::make_index_sequence<detail::variant_size_v<T>>{})> {};
 
 template <typename T>
 concept IsVariantWithSignedInteger = IsVariant<T> && variant_contains_integer<T>::value;
@@ -679,8 +695,8 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsAggregate =
-    std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> && !IsNamedWrapper<T> && !IsAnyBoundedSizeWrapper<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsVariant<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> &&
+                      !IsNamedWrapper<T> && !IsAnyBoundedSizeWrapper<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
@@ -700,8 +716,18 @@ concept IsCborMajor =
     (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsNamedMapWrapper<T> ||
     (IsAnyBoundedSizeWrapper<T> && ContainsCborMajorConcept<T>) || IsEnum<T> || (IsClassWithTagOverload<T>);
 
-template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
-    static constexpr bool value = (IsCborMajor<Ts> && ...);
+namespace detail {
+
+template <typename Variant, std::size_t... Is> consteval bool all_variant_alternatives_are_cbor_major(std::index_sequence<Is...>) {
+    return (IsCborMajor<variant_alternative_t<Is, Variant>> && ...);
+}
+
+} // namespace detail
+
+template <typename T>
+    requires IsVariant<T>
+struct AllTypesAreCborMajor<T> {
+    static constexpr bool value = detail::all_variant_alternatives_are_cbor_major<T>(std::make_index_sequence<detail::variant_size_v<T>>{});
 };
 
 // Helper for container like types, e.g optional

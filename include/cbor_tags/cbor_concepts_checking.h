@@ -124,17 +124,36 @@ template <typename T> inline constexpr bool is_dynamic_tagged_tuple_v = is_dynam
 
 template <typename Variant, auto... Concepts> struct ValidConceptMapping;
 
-template <template <typename...> typename Variant, typename... Ts, auto... Concepts>
-struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
+template <typename Variant, auto... Concepts>
+    requires IsVariant<Variant>
+struct ValidConceptMapping<Variant, Concepts...> {
+  private:
+    using variant_type = std::remove_cvref_t<Variant>;
 
-    static constexpr auto counts_fn_inner = [](std::array<uint64_t, detail::MaxBucketsForVariantChecking> &result,
-                                               std::vector<uint64_t>                                      &tags,
-                                               std::vector<SimpleType> &simples) { (getMatchCount<Ts>(result, tags, simples), ...); };
+    template <std::size_t... Is>
+    static constexpr void counts_fn_inner_impl(std::array<uint64_t, detail::MaxBucketsForVariantChecking> &result,
+                                               std::vector<uint64_t> &tags, std::vector<SimpleType> &simples, std::index_sequence<Is...>) {
+        (getMatchCount<detail::variant_alternative_t<Is, variant_type>>(result, tags, simples), ...);
+    }
 
-    static constexpr auto tags_fn_inner = [](std::array<uint64_t, detail::MaxTagsForVariantChecking> &result, std::vector<uint64_t> &tags,
-                                             std::vector<SimpleType> &simples) { (getTagsCounts<Ts>(result, tags, simples), ...); };
+    template <std::size_t... Is>
+    static constexpr void tags_fn_inner_impl(std::array<uint64_t, detail::MaxTagsForVariantChecking> &result, std::vector<uint64_t> &tags,
+                                             std::vector<SimpleType> &simples, std::index_sequence<Is...>) {
+        (getTagsCounts<detail::variant_alternative_t<Is, variant_type>>(result, tags, simples), ...);
+    }
 
-    static constexpr auto counts_fn_outer = []() {
+  public:
+    static constexpr void counts_fn_inner(std::array<uint64_t, detail::MaxBucketsForVariantChecking> &result, std::vector<uint64_t> &tags,
+                                          std::vector<SimpleType> &simples) {
+        counts_fn_inner_impl(result, tags, simples, std::make_index_sequence<detail::variant_size_v<variant_type>>{});
+    }
+
+    static constexpr void tags_fn_inner(std::array<uint64_t, detail::MaxTagsForVariantChecking> &result, std::vector<uint64_t> &tags,
+                                        std::vector<SimpleType> &simples) {
+        tags_fn_inner_impl(result, tags, simples, std::make_index_sequence<detail::variant_size_v<variant_type>>{});
+    }
+
+    static constexpr auto counts_fn_outer() {
         using namespace detail;
         std::array<uint64_t, detail::MaxBucketsForVariantChecking> result{};
         std::vector<uint64_t>                                      tags;
@@ -158,9 +177,9 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
             result[MajorIndex::SimpleValued] = std::count(simples.begin(), simples.end(), SimpleType::Simple);
         }
         return result;
-    };
+    }
 
-    static constexpr auto tags_fn_outer = []() mutable {
+    static constexpr auto tags_fn_outer() {
         using namespace detail;
         std::array<uint64_t, detail::MaxTagsForVariantChecking> result{};
         std::vector<uint64_t>                                   tags;
@@ -172,21 +191,21 @@ struct ValidConceptMapping<Variant<Ts...>, Concepts...> {
         }
 
         return result;
-    };
+    }
 
-    static constexpr auto tags_size_outer = []() {
+    static constexpr auto tags_size_outer() {
         using namespace detail;
         std::array<uint64_t, detail::MaxTagsForVariantChecking> result{};
         std::vector<uint64_t>                                   tags;
         std::vector<SimpleType>                                 simples;
         tags_fn_inner(result, tags, simples);
         return tags.size();
-    };
+    }
 
-    static constexpr auto majors_and_subtypes_counts = (counts_fn_outer());
-    static constexpr auto tags                       = (tags_fn_outer());
+    static constexpr auto majors_and_subtypes_counts = counts_fn_outer();
+    static constexpr auto tags                       = tags_fn_outer();
 
-    static constexpr uint64_t number_of_tags = (tags_size_outer());
+    static constexpr uint64_t number_of_tags = tags_size_outer();
     static constexpr bool     too_many_tags  = (number_of_tags >= detail::MaxTagsForVariantChecking); // Use a runtime map instead
 
     static constexpr bool no_dynamic_tags    = (majors_and_subtypes_counts[detail::MajorIndex::DynamicTag] == 0);

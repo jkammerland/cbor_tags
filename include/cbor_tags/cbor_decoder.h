@@ -820,7 +820,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 #endif
     }
 
-    template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <IsVariant Variant> constexpr status_code decode(Variant &value, major_type major, byte additionalInfo) {
         std::optional<std::uint64_t> tag;
         return decode_variant(value, major, additionalInfo, tag);
     }
@@ -1596,6 +1596,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
                                          std::optional<std::uint64_t> &tag) {
@@ -1654,9 +1655,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (result == status_code::size_limit_exceeded ||
-                       (major == major_type::Tag && result != status_code::no_match_for_tag &&
-                        result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer)) {
+            } else if (!detail::is_variant_alternative_mismatch(result)) {
                 hard_error = result;
                 return false;
             } else {
@@ -1672,6 +1671,99 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         } else {
             found = (try_decode.template operator()<false, T>() || ...);
+        }
+        if (!found) {
+            if (hard_error != status_code::success) {
+                return hard_error;
+            }
+            if (saw_incomplete) {
+                return status_code::incomplete;
+            }
+            return status_code::no_match_in_variant_on_buffer;
+        }
+        return status_code::success;
+    }
+
+    template <IsVariant Variant>
+    constexpr status_code decode_variant(Variant &value, major_type major, byte additionalInfo, std::optional<std::uint64_t> &tag) {
+        using namespace detail;
+        using variant_type = std::remove_cvref_t<Variant>;
+
+        static_assert(
+            detail::with_variant_alternatives<variant_type>([]<typename... Alternatives>() { return (IsCborMajor<Alternatives> && ...); }),
+            "All variant alternatives must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the "
+            "variant.");
+
+        // TODO: Remove this requirement
+        static_assert(
+            detail::with_variant_alternatives<variant_type>(
+                []<typename... Alternatives>() { return (std::is_default_constructible_v<Alternatives> && ...); }),
+            "All variant alternatives must be default constructible. Because in order to decode into the type, each alternative must be "
+            "default constructed first.");
+
+        // Check ambiguous types in the variant.
+        require_unambiguous_variant_dispatch<variant_type>();
+        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
+        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
+        // and can drift from IsCborMajor/decoder overload truth.
+        // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
+
+        bool        saw_incomplete = false;
+        status_code hard_error     = status_code::success;
+
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
+                           &hard_error]<bool CatchAllPass, std::size_t I>() -> bool {
+            using raw_type = detail::variant_alternative_t<I, variant_type>;
+            if (hard_error != status_code::success) {
+                return false;
+            }
+            if (!matches_major_dispatch<raw_type>(major)) {
+                return false;
+            }
+
+            if (major == major_type::Simple && !detail::matches_simple_dispatch<CatchAllPass, raw_type>(additionalInfo)) {
+                return false;
+            }
+
+            raw_type    decoded_value;
+            status_code result;
+            if constexpr (IsVariant<raw_type>) {
+                result = this->decode_variant(decoded_value, major, additionalInfo, tag);
+            } else if constexpr (IsTag<raw_type>) {
+                if (!tag) {
+                    tag = decode_unsigned(additionalInfo);
+                }
+                result = this->decode(decoded_value, *tag);
+            } else {
+                result = this->decode(decoded_value, major, additionalInfo);
+            }
+
+            if (result == status_code::success) {
+                detail::variant_assign<I>(value, std::move(decoded_value));
+                return true;
+            } else if (result == status_code::incomplete) {
+                saw_incomplete = true;
+                return false;
+            } else if (!detail::is_variant_alternative_mismatch(result)) {
+                hard_error = result;
+                return false;
+            } else {
+                return false;
+            }
+        };
+
+        auto try_decode_alternatives = [&]<bool CatchAllPass, std::size_t... Is>(std::index_sequence<Is...>) {
+            return (try_decode.template operator()<CatchAllPass, Is>() || ...);
+        };
+
+        bool found = false;
+        if (major == major_type::Simple) {
+            found = try_decode_alternatives.template operator()<false>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
+            if (!found) {
+                found = try_decode_alternatives.template operator()<true>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
+            }
+        } else {
+            found = try_decode_alternatives.template operator()<false>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
         }
         if (!found) {
             if (hard_error != status_code::success) {
