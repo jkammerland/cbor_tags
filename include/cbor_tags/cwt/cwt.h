@@ -441,50 +441,51 @@ struct claims_set {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        claims_set           decoded{};
-        std::vector<integer> seen_labels;
-        const auto           status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
-            integer    key{0};
-            const auto key_status = dec.decode(key, key_major, key_additional_info);
-            if (key_status != status_code::success) {
-                return key_status;
+        claims_set                decoded{};
+        std::vector<header_label> seen_labels;
+        const auto                status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
+            auto key_result = detail::decode_header_label(dec, key_major, key_additional_info);
+            if (!key_result) {
+                return key_result.error();
             }
-            if (detail::contains_label(seen_labels, key)) {
+            auto label = std::move(*key_result);
+            if (detail::contains_label(seen_labels, label)) {
                 return status_code::error;
             }
-            seen_labels.push_back(key);
+            seen_labels.push_back(label);
 
-            if (key.is_negative) {
+            const auto *key = std::get_if<integer>(&label);
+            if (key == nullptr || key->is_negative) {
                 typename Decoder::raw_encoded_item_view ignored;
                 return dec.decode(ignored);
-            } else if (key.value == 1U) {
+            } else if (key->value == 1U) {
                 std::string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
                 decoded.issuer = std::move(value);
-            } else if (key.value == 2U) {
+            } else if (key->value == 2U) {
                 std::string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
                 decoded.subject = std::move(value);
-            } else if (key.value == 3U) {
+            } else if (key->value == 3U) {
                 std::string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
                 decoded.audience = std::move(value);
-            } else if (key.value == 4U) {
+            } else if (key->value == 4U) {
                 return detail::decode_numeric_date_field(dec, decoded.expiration);
-            } else if (key.value == 5U) {
+            } else if (key->value == 5U) {
                 return detail::decode_numeric_date_field(dec, decoded.not_before);
-            } else if (key.value == 6U) {
+            } else if (key->value == 6U) {
                 return detail::decode_numeric_date_field(dec, decoded.issued_at);
-            } else if (key.value == 7U) {
+            } else if (key->value == 7U) {
                 byte_string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {

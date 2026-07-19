@@ -278,6 +278,19 @@ TEST_CASE("CWT NumericDate rejects integers outside the int64 domain") {
         CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
         CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
     }
+
+TEST_CASE("CWT claims consume unknown text claim keys") {
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder(encoded);
+    REQUIRE(enc(as_map{2}, std::string{"private"}, std::vector<int>{1, 2, 3}, std::uint64_t{1}, std::string{"issuer"}));
+
+    claims_set decoded;
+    auto       dec = make_decoder(encoded);
+    REQUIRE(dec(decoded));
+    CHECK_EQ(decoded.issuer, "issuer");
+    CHECK_FALSE(decoded.subject);
+    CHECK_FALSE(decoded.audience);
+    CHECK_EQ(dec.tell(), encoded.end());
 }
 
 TEST_CASE("COSE protected header and Sign1 Sig_structure encode in RFC shape") {
