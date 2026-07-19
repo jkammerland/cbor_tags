@@ -125,6 +125,25 @@ TEST_CASE("CWT claims encode with registered integer claim keys") {
     CHECK_EQ(decoded.cwt_id, claims.cwt_id);
 }
 
+TEST_CASE("CWT claims roundtrip array-valued audience") {
+    claims_set claims;
+    claims.audience = std::vector<std::string>{"coap://light.example.com", "coap://sensor.example.com"};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder(encoded);
+    REQUIRE(enc(claims));
+    CHECK_EQ(to_hex(encoded),
+             "a103827818636f61703a2f2f6c696768742e6578616d706c652e636f6d7819636f61703a2f2f73656e736f722e6578616d706c652e636f6d");
+
+    claims_set decoded;
+    auto       dec = make_decoder(encoded);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded.audience);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(*decoded.audience));
+    CHECK_EQ(std::get<std::vector<std::string>>(*decoded.audience), std::get<std::vector<std::string>>(*claims.audience));
+    CHECK_EQ(dec.tell(), encoded.end());
+}
+
 TEST_CASE("encoded item view options decode non-empty CWT claims maps") {
     claims_set claims;
     claims.issuer     = "idp";

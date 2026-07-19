@@ -18,8 +18,9 @@
 
 namespace cbor::tags::cwt {
 
-using byte_string  = std::vector<std::byte>;
-using numeric_date = std::variant<std::int64_t, double>;
+using byte_string    = std::vector<std::byte>;
+using numeric_date   = std::variant<std::int64_t, double>;
+using audience_claim = std::variant<std::string, std::vector<std::string>>;
 
 inline constexpr std::uint64_t cwt_tag_value        = 61;
 inline constexpr std::uint64_t cose_sign1_tag_value = 18;
@@ -362,13 +363,13 @@ struct header_map {
 };
 
 struct claims_set {
-    std::optional<std::string>  issuer;
-    std::optional<std::string>  subject;
-    std::optional<std::string>  audience;
-    std::optional<numeric_date> expiration;
-    std::optional<numeric_date> not_before;
-    std::optional<numeric_date> issued_at;
-    std::optional<byte_string>  cwt_id;
+    std::optional<std::string>    issuer;
+    std::optional<std::string>    subject;
+    std::optional<audience_claim> audience;
+    std::optional<numeric_date>   expiration;
+    std::optional<numeric_date>   not_before;
+    std::optional<numeric_date>   issued_at;
+    std::optional<byte_string>    cwt_id;
 
     template <typename Encoder> constexpr auto encode(Encoder &enc) const {
         std::uint64_t size{};
@@ -473,7 +474,7 @@ struct claims_set {
                 }
                 decoded.subject = std::move(value);
             } else if (key->value == 3U) {
-                std::string value;
+                audience_claim value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
