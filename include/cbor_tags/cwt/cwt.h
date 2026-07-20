@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_segments.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -43,7 +44,7 @@ namespace detail {
     return numeric != nullptr && !numeric->is_negative && numeric->value == expected;
 }
 
-[[nodiscard]] constexpr bool contains_header_label(const std::vector<header_label> &labels, const header_label &target) {
+template <typename Label> [[nodiscard]] constexpr bool contains_label(const std::vector<Label> &labels, const Label &target) {
     for (const auto &label : labels) {
         if (label == target) {
             return true;
@@ -79,14 +80,78 @@ template <typename Codec> [[nodiscard]] constexpr auto codec_error(status_code c
     return typename Codec::expected_type{unexpected<status_code>{code}};
 }
 
+template <typename Decoder, typename DecodeEntry>
+[[nodiscard]] constexpr status_code decode_group_entries(Decoder &dec, major_type expected_major, status_code major_mismatch,
+                                                         DecodeEntry &&decode_entry) {
+    major_type major{};
+    std::byte  additional_info{};
+    auto       status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
+    if (status != status_code::success) {
+        return status;
+    }
+    if (major != expected_major) {
+        return major_mismatch;
+    }
+
+    const auto decode_next = [&]() {
+        major_type key_major{};
+        std::byte  key_additional_info{};
+        const auto key_status = cbor::tags::detail::read_extension_initial_byte(dec, key_major, key_additional_info);
+        if (key_status != status_code::success) {
+            return key_status;
+        }
+        return decode_entry(key_major, key_additional_info);
+    };
+
+    if (additional_info != std::byte{31}) {
+        std::uint64_t size{};
+        status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, size);
+        if (status != status_code::success) {
+            return status;
+        }
+        for (std::uint64_t index = 0; index < size; ++index) {
+            status = decode_next();
+            if (status != status_code::success) {
+                return status;
+            }
+        }
+        return status_code::success;
+    }
+
+    while (true) {
+        major_type key_major{};
+        std::byte  key_additional_info{};
+        status = cbor::tags::detail::read_extension_initial_byte(dec, key_major, key_additional_info);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (key_major == major_type::Simple && key_additional_info == std::byte{31}) {
+            return status_code::success;
+        }
+        status = decode_entry(key_major, key_additional_info);
+        if (status != status_code::success) {
+            return status;
+        }
+    }
+}
+
+template <typename Decoder, typename DecodeEntry>
+[[nodiscard]] constexpr status_code decode_map_entries(Decoder &dec, DecodeEntry &&decode_entry) {
+    return decode_group_entries(dec, major_type::Map, status_code::no_match_for_map_on_buffer, std::forward<DecodeEntry>(decode_entry));
+}
+
 template <typename Decoder> [[nodiscard]] constexpr expected<algorithm, status_code> decode_algorithm(Decoder &dec) {
     const auto [major, additional_info] = dec.read_initial_byte();
     if (major != major_type::UnsignedInteger && major != major_type::NegativeInteger) {
         return unexpected<status_code>{status_code::error};
     }
 
-    const auto     argument = dec.decode_unsigned(additional_info);
-    constexpr auto maximum  = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    std::uint64_t argument{};
+    const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, argument);
+    if (status != status_code::success) {
+        return unexpected<status_code>{status};
+    }
+    constexpr auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
     if (argument > maximum) {
         return unexpected<status_code>{status_code::error};
     }
@@ -96,13 +161,22 @@ template <typename Decoder> [[nodiscard]] constexpr expected<algorithm, status_c
     return static_cast<algorithm>(value);
 }
 
-template <typename Decoder> [[nodiscard]] expected<header_label, status_code> decode_header_label(Decoder &dec) {
-    const auto [major, additional_info] = dec.read_initial_byte();
+template <typename Decoder>
+[[nodiscard]] expected<header_label, status_code> decode_header_label(Decoder &dec, major_type major, std::byte additional_info) {
     if (major == major_type::UnsignedInteger) {
-        return header_label{integer{dec.decode_unsigned(additional_info)}};
+        std::uint64_t value{};
+        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, value);
+        if (status != status_code::success) {
+            return unexpected<status_code>{status};
+        }
+        return header_label{integer{value}};
     }
     if (major == major_type::NegativeInteger) {
-        const auto argument = dec.decode_unsigned(additional_info);
+        std::uint64_t argument{};
+        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, argument);
+        if (status != status_code::success) {
+            return unexpected<status_code>{status};
+        }
         return header_label{integer{negative{argument + 1U}}};
     }
     if (major == major_type::TextString) {
@@ -114,6 +188,74 @@ template <typename Decoder> [[nodiscard]] expected<header_label, status_code> de
         return header_label{std::move(value)};
     }
     return unexpected<status_code>{status_code::error};
+}
+
+template <typename Decoder> [[nodiscard]] expected<header_label, status_code> decode_header_label(Decoder &dec) {
+    major_type major{};
+    std::byte  additional_info{};
+    const auto status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
+    if (status != status_code::success) {
+        return unexpected<status_code>{status};
+    }
+    return decode_header_label(dec, major, additional_info);
+}
+
+template <typename Decoder> [[nodiscard]] status_code decode_critical_labels(Decoder &dec, std::vector<header_label> &labels) {
+    const auto status = decode_group_entries(dec, major_type::Array, status_code::no_match_for_array_on_buffer,
+                                             [&](major_type label_major, std::byte label_additional_info) {
+                                                 auto label = decode_header_label(dec, label_major, label_additional_info);
+                                                 if (!label) {
+                                                     return label.error();
+                                                 }
+                                                 labels.push_back(std::move(*label));
+                                                 return status_code::success;
+                                             });
+    return status == status_code::success && labels.empty() ? status_code::error : status;
+}
+
+template <typename Decoder>
+[[nodiscard]] expected<numeric_date, status_code> decode_numeric_date(Decoder &dec, major_type major, std::byte additional_info) {
+    if (major == major_type::UnsignedInteger || major == major_type::NegativeInteger) {
+        std::uint64_t argument{};
+        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, argument);
+        if (status != status_code::success) {
+            return unexpected<status_code>{status};
+        }
+
+        constexpr auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        if (argument > maximum) {
+            return unexpected<status_code>{status_code::no_match_for_int_on_buffer};
+        }
+        const auto value = major == major_type::UnsignedInteger ? static_cast<std::int64_t>(argument)
+                                                                : std::int64_t{-1} - static_cast<std::int64_t>(argument);
+        return numeric_date{value};
+    }
+
+    if (major == major_type::Simple) {
+        double     value{};
+        const auto status = dec.decode(value, major, additional_info);
+        if (status != status_code::success) {
+            return unexpected<status_code>{status};
+        }
+        return numeric_date{value};
+    }
+
+    return unexpected<status_code>{status_code::no_match_in_variant_on_buffer};
+}
+
+template <typename Decoder> [[nodiscard]] status_code decode_numeric_date_field(Decoder &dec, std::optional<numeric_date> &field) {
+    major_type major{};
+    std::byte  additional_info{};
+    const auto status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
+    if (status != status_code::success) {
+        return status;
+    }
+    auto value = decode_numeric_date(dec, major, additional_info);
+    if (!value) {
+        return value.error();
+    }
+    field = std::move(*value);
+    return status_code::success;
 }
 
 } // namespace detail
@@ -164,61 +306,47 @@ struct header_map {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        as_map_any map{};
-        auto       result = dec(map);
-        if (!result) {
-            return result;
-        }
-
         header_map                decoded{};
         std::vector<header_label> seen_labels;
-        for (std::uint64_t index = 0; index < map.size; ++index) {
-            auto key_result = detail::decode_header_label(dec);
+        const auto                status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
+            auto key_result = detail::decode_header_label(dec, key_major, key_additional_info);
             if (!key_result) {
-                return detail::codec_error<Decoder>(key_result.error());
+                return key_result.error();
             }
             auto key = std::move(*key_result);
-            if (detail::contains_header_label(seen_labels, key)) {
-                return detail::codec_error<Decoder>(status_code::error);
+            if (detail::contains_label(seen_labels, key)) {
+                return status_code::error;
             }
             seen_labels.push_back(key);
 
             if (detail::is_header_label(key, 1U)) {
                 auto value = detail::decode_algorithm(dec);
                 if (!value) {
-                    return detail::codec_error<Decoder>(value.error());
+                    return value.error();
                 }
                 decoded.alg = *value;
             } else if (detail::is_header_label(key, 2U)) {
-                as_array_any labels{};
-                result = dec(labels);
-                if (!result) {
-                    return result;
+                std::vector<header_label> labels;
+                const auto                labels_status = detail::decode_critical_labels(dec, labels);
+                if (labels_status != status_code::success) {
+                    return labels_status;
                 }
-                if (labels.size == 0U) {
-                    return detail::codec_error<Decoder>(status_code::error);
-                }
-                for (std::uint64_t label_index = 0; label_index < labels.size; ++label_index) {
-                    auto label = detail::decode_header_label(dec);
-                    if (!label) {
-                        return detail::codec_error<Decoder>(label.error());
-                    }
-                    decoded.crit.push_back(std::move(*label));
-                }
+                decoded.crit = std::move(labels);
             } else if (detail::is_header_label(key, 4U)) {
                 byte_string value;
-                result = dec(value);
-                if (!result) {
-                    return result;
+                const auto  value_status = dec.decode(value);
+                if (value_status != status_code::success) {
+                    return value_status;
                 }
                 decoded.kid = std::move(value);
             } else {
                 typename Decoder::raw_encoded_item_view ignored;
-                result = dec(ignored);
-                if (!result) {
-                    return result;
-                }
+                return dec.decode(ignored);
             }
+            return status_code::success;
+        });
+        if (status != status_code::success) {
+            return detail::codec_error<Decoder>(status);
         }
 
         if (detail::validate_critical_labels(decoded.crit, decoded.alg.has_value(), decoded.kid.has_value()) != status_code::success) {
@@ -226,7 +354,7 @@ struct header_map {
         }
 
         *this = std::move(decoded);
-        return result;
+        return typename Decoder::expected_type{};
     }
 };
 
@@ -310,63 +438,68 @@ struct claims_set {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        as_map_any map{};
-        auto       result = dec(map);
-        if (!result) {
-            return result;
-        }
-
-        claims_set decoded{};
-        for (std::uint64_t index = 0; index < map.size; ++index) {
-            integer key{0};
-            result = dec(key);
-            if (!result) {
-                return result;
+        claims_set           decoded{};
+        std::vector<integer> seen_labels;
+        const auto           status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
+            integer    key{0};
+            const auto key_status = dec.decode(key, key_major, key_additional_info);
+            if (key_status != status_code::success) {
+                return key_status;
             }
+            if (detail::contains_label(seen_labels, key)) {
+                return status_code::error;
+            }
+            seen_labels.push_back(key);
 
             if (key.is_negative) {
                 typename Decoder::raw_encoded_item_view ignored;
-                result = dec(ignored);
+                return dec.decode(ignored);
             } else if (key.value == 1U) {
                 std::string value;
-                result         = dec(value);
+                const auto  value_status = dec.decode(value);
+                if (value_status != status_code::success) {
+                    return value_status;
+                }
                 decoded.issuer = std::move(value);
             } else if (key.value == 2U) {
                 std::string value;
-                result          = dec(value);
+                const auto  value_status = dec.decode(value);
+                if (value_status != status_code::success) {
+                    return value_status;
+                }
                 decoded.subject = std::move(value);
             } else if (key.value == 3U) {
                 std::string value;
-                result           = dec(value);
+                const auto  value_status = dec.decode(value);
+                if (value_status != status_code::success) {
+                    return value_status;
+                }
                 decoded.audience = std::move(value);
             } else if (key.value == 4U) {
-                numeric_date value{};
-                result             = dec(value);
-                decoded.expiration = std::move(value);
+                return detail::decode_numeric_date_field(dec, decoded.expiration);
             } else if (key.value == 5U) {
-                numeric_date value{};
-                result             = dec(value);
-                decoded.not_before = std::move(value);
+                return detail::decode_numeric_date_field(dec, decoded.not_before);
             } else if (key.value == 6U) {
-                numeric_date value{};
-                result            = dec(value);
-                decoded.issued_at = std::move(value);
+                return detail::decode_numeric_date_field(dec, decoded.issued_at);
             } else if (key.value == 7U) {
                 byte_string value;
-                result         = dec(value);
+                const auto  value_status = dec.decode(value);
+                if (value_status != status_code::success) {
+                    return value_status;
+                }
                 decoded.cwt_id = std::move(value);
             } else {
                 typename Decoder::raw_encoded_item_view ignored;
-                result = dec(ignored);
+                return dec.decode(ignored);
             }
-
-            if (!result) {
-                return result;
-            }
+            return status_code::success;
+        });
+        if (status != status_code::success) {
+            return detail::codec_error<Decoder>(status);
         }
 
         *this = std::move(decoded);
-        return result;
+        return typename Decoder::expected_type{};
     }
 };
 
