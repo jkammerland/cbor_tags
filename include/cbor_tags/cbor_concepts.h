@@ -832,6 +832,7 @@ template <IsUnsigned T> struct dynamic_tag {
 
 template <typename T>
 concept HasReserve = requires(T t) {
+    { t.size() } -> std::convertible_to<typename T::size_type>;
     { t.reserve(std::declval<typename T::size_type>()) };
 };
 
