@@ -144,10 +144,13 @@ dec(destination);
 assert(destination == "prefix:payload");
 ```
 
-A truncated definite string is validated before its destination is modified. For
-an indefinite string or container, successfully decoded chunks or elements remain
-in the destination if a later chunk or element fails. Fixed-size destinations and
-borrowed views retain their exact-size or assignment semantics.
+A definite string validates its complete payload and any required capacity before
+appending. If a later target allocation fails, its semantic value is restored.
+Mutable destinations that overlap the decoder input are rejected with
+`status_code::error`; use separate input and output storage. For an indefinite
+string or container, successfully decoded chunks or elements remain in the
+destination if a later chunk or element fails. Fixed-size destinations and borrowed
+views retain their exact-size or assignment semantics.
 
 Equivalent to manually encoding the struct in the following example:
 ```cpp

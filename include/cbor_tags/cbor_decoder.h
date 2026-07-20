@@ -26,6 +26,7 @@
 #include "cbor_tags/cbor_tags_config.h"
 
 #include <limits>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -36,6 +37,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace cbor::tags {
 
@@ -262,7 +264,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode to intermediate form
+        // Validate the complete payload and any allocation before exposing a
+        // borrowed payload that target growth could invalidate.
+        require_bytes(bstring_size);
+        if constexpr (!IsConstView<T>) {
+            if (string_target_aliases_input(t)) {
+                return status_code::error;
+            }
+        }
+        if constexpr (!IsConstView<T> && !IsFixedArray<T> && HasReserve<T>) {
+            detail::reserve_for_append(t, bstring_size);
+        }
+
         auto bstring = decode_bstring_payload(bstring_size);
 
         // Now handle the target assignment based on contiguity constraints
@@ -284,17 +297,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            if constexpr (HasReserve<T>) {
-                detail::reserve_for_append(t, bstring_size);
-            }
-            detail::appender<T> appender_;
-            if constexpr (IsContiguous<decltype(bstring)>) {
-                appender_(t, bstring);
-            } else {
-                for (auto byte_value : bstring) {
-                    appender_(t, static_cast<typename T::value_type>(byte_value));
-                }
-            }
+            append_definite_string(t, bstring, bstring_size);
         }
 
         return status_code::success;
@@ -323,22 +326,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode the complete payload before mutating an owning target.
-        auto text = decode_text(additionalInfo);
+        const auto text_size = decode_unsigned(additionalInfo);
+        require_bytes(text_size);
+        if constexpr (!IsConstView<T>) {
+            if (string_target_aliases_input(t)) {
+                return status_code::error;
+            }
+            if constexpr (HasReserve<T>) {
+                detail::reserve_for_append(t, text_size);
+            }
+        }
+
+        auto text = decode_text_payload(text_size);
         if constexpr (IsConstView<T>) {
             t = std::move(text);
         } else {
-            if constexpr (HasReserve<T> && std::ranges::sized_range<decltype(text)>) {
-                detail::reserve_for_append(t, std::ranges::size(text));
-            }
-            detail::appender<T> appender_;
-            if constexpr (IsContiguous<decltype(text)>) {
-                appender_(t, text);
-            } else {
-                for (auto character : text) {
-                    appender_(t, static_cast<typename T::value_type>(character));
-                }
-            }
+            append_definite_string(t, text, text_size);
         }
 
         return status_code::success;
@@ -658,18 +661,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (additionalInfo == static_cast<byte>(31)) {
             return decode_indef_tstr(value);
         }
-        auto text = decode_text(additionalInfo);
-        if constexpr (std::ranges::sized_range<decltype(text)>) {
-            detail::reserve_for_append(value, std::ranges::size(text));
+        const auto text_size = decode_unsigned(additionalInfo);
+        require_bytes(text_size);
+        if (string_target_aliases_input(value)) {
+            return status_code::error;
         }
-        detail::appender<std::string> appender_;
-        if constexpr (IsContiguous<decltype(text)>) {
-            appender_(value, text);
-        } else {
-            for (auto character : text) {
-                appender_(value, static_cast<char>(character));
-            }
-        }
+        detail::reserve_for_append(value, text_size);
+        auto text = decode_text_payload(text_size);
+        append_definite_string(value, text, text_size);
         return status_code::success;
     }
 
@@ -995,8 +994,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    constexpr auto decode_text(byte additionalInfo) {
-        const auto length      = decode_unsigned(additionalInfo);
+    constexpr auto decode_text(byte additionalInfo) { return decode_text_payload(decode_unsigned(additionalInfo)); }
+
+    constexpr auto decode_text_payload(std::uint64_t length) {
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
@@ -1347,6 +1347,74 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    template <typename T> constexpr bool string_target_aliases_input(const T &target) const {
+        if constexpr (std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<InputBuffer>>) {
+            if (std::addressof(target) == std::addressof(data_)) {
+                return true;
+            }
+        }
+
+        if constexpr (std::ranges::contiguous_range<const T> && std::ranges::sized_range<const T> &&
+                      std::ranges::contiguous_range<const InputBuffer> && std::ranges::sized_range<const InputBuffer>) {
+            if (std::ranges::empty(target) || std::ranges::empty(data_) || std::is_constant_evaluated()) {
+                return false;
+            }
+
+            const auto *target_begin = std::ranges::data(target);
+            const auto *target_end   = target_begin + std::ranges::size(target);
+            const auto *input_begin  = std::ranges::data(data_);
+            const auto *input_end    = input_begin + std::ranges::size(data_);
+
+            const auto target_begin_address = reinterpret_cast<std::uintptr_t>(target_begin);
+            const auto target_end_address   = reinterpret_cast<std::uintptr_t>(target_end);
+            const auto input_begin_address  = reinterpret_cast<std::uintptr_t>(input_begin);
+            const auto input_end_address    = reinterpret_cast<std::uintptr_t>(input_end);
+            return input_begin_address < target_end_address && target_begin_address < input_end_address;
+        }
+
+        return false;
+    }
+
+    template <typename T, std::ranges::input_range R>
+    constexpr void append_definite_string(T &target, R &&payload, std::uint64_t payload_size) {
+        detail::appender<T> appender_;
+        if constexpr (HasReserve<T>) {
+            if constexpr (IsContiguous<R>) {
+                appender_(target, payload);
+            } else {
+                for (auto value : payload) {
+                    appender_(target, static_cast<typename T::value_type>(value));
+                }
+            }
+        } else {
+            static_assert(
+                requires(T &value) { value.pop_back(); }, "non-reservable string targets must support pop_back for failure rollback");
+
+            std::vector<typename T::value_type> staged;
+            if (std::cmp_greater(payload_size, staged.max_size())) {
+                throw std::length_error("CBOR string length exceeds staging container max_size");
+            }
+            staged.reserve(static_cast<std::size_t>(payload_size));
+            for (auto value : payload) {
+                staged.push_back(static_cast<typename T::value_type>(value));
+            }
+
+            std::size_t appended = 0;
+            try {
+                for (const auto value : staged) {
+                    appender_(target, value);
+                    ++appended;
+                }
+            } catch (...) {
+                while (appended != 0) {
+                    target.pop_back();
+                    --appended;
+                }
+                throw;
+            }
+        }
+    }
+
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
