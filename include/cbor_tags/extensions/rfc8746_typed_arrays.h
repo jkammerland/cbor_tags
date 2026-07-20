@@ -715,16 +715,34 @@ template <typename T, typed_array_byte_order ByteOrder> [[nodiscard]] constexpr 
     return static_cast<std::uint64_t>(sizeof(bit_type));
 }
 
+template <typename T, typed_array_byte_order ByteOrder>
+[[nodiscard]] constexpr status_code bounded_typed_array_payload_size_status(std::uint64_t payload_size, std::size_t min, std::size_t max) {
+    constexpr auto element_size = typed_array_element_byte_size<T, ByteOrder>();
+    constexpr auto max_elements = std::numeric_limits<std::uint64_t>::max() / element_size;
+    if (std::cmp_greater(min, max_elements)) {
+        return status_code::size_limit_exceeded;
+    }
+
+    const auto min_bytes = static_cast<std::uint64_t>(min) * element_size;
+    if (payload_size < min_bytes) {
+        return status_code::size_limit_exceeded;
+    }
+    if (!std::cmp_greater(max, max_elements)) {
+        const auto max_bytes = static_cast<std::uint64_t>(max) * element_size;
+        if (payload_size > max_bytes) {
+            return status_code::size_limit_exceeded;
+        }
+    }
+    return status_code::success;
+}
+
 template <std::size_t Min, std::size_t Max, typename T, typed_array_byte_order ByteOrder>
-[[nodiscard]] constexpr status_code bounded_typed_array_payload_size_status(std::uint64_t payload_size) {
+consteval void validate_static_typed_array_bounds() {
     constexpr auto element_size = typed_array_element_byte_size<T, ByteOrder>();
     static_assert(Min <= (std::numeric_limits<std::uint64_t>::max() / element_size),
                   "bounded_size typed-array minimum byte size overflows uint64_t");
     static_assert(Max <= (std::numeric_limits<std::uint64_t>::max() / element_size),
                   "bounded_size typed-array maximum byte size overflows uint64_t");
-    constexpr auto min_bytes = static_cast<std::uint64_t>(Min) * element_size;
-    constexpr auto max_bytes = static_cast<std::uint64_t>(Max) * element_size;
-    return payload_size >= min_bytes && payload_size <= max_bytes ? status_code::success : status_code::size_limit_exceeded;
 }
 
 template <typename Dimensions, typename Array>
@@ -823,7 +841,16 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     template <typename Array, std::size_t Min, std::size_t Max>
         requires TypedArrayEncodeTarget<Array>
     void encode(const bounded_size<Array, Min, Max> &bounded) {
-        require_bounded_typed_array_element_count<Min, Max>(bounded.value());
+        using array_type = std::remove_cvref_t<Array>;
+        detail::validate_static_typed_array_bounds<Min, Max, typename array_type::value_type, array_type::byte_order>();
+        require_bounded_typed_array_element_count(bounded.value(), Min, Max);
+        encode(bounded.value());
+    }
+
+    template <typename Array>
+        requires TypedArrayEncodeTarget<Array>
+    void encode(const dynamic_bounded_size<Array> &bounded) {
+        require_bounded_typed_array_element_count(bounded.value(), bounded.min_size(), bounded.max_size());
         encode(bounded.value());
     }
 
@@ -903,11 +930,12 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, major_type major, std::byte additional_info) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type, array_type::byte_order>(
             dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
-                return decode_bounded_owned_typed_array_payload<Min, Max>(bounded.value(), payload_major, payload_info);
+                return decode_bounded_owned_typed_array_payload(bounded.value(), payload_major, payload_info, Min, Max);
             });
     }
 
@@ -915,11 +943,12 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, std::uint64_t tag) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload_after_tag<value_type, array_type::byte_order>(
             dec, tag, [&](major_type payload_major, std::byte payload_info) {
-                return decode_bounded_owned_typed_array_payload<Min, Max>(bounded.value(), payload_major, payload_info);
+                return decode_bounded_owned_typed_array_payload(bounded.value(), payload_major, payload_info, Min, Max);
             });
     }
 
@@ -928,11 +957,12 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, major_type major, std::byte additional_info) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type, array_type::byte_order>(
             dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
-                return decode_bounded_typed_array_view_payload<Min, Max>(bounded.value(), payload_major, payload_info);
+                return decode_bounded_typed_array_view_payload(bounded.value(), payload_major, payload_info, Min, Max);
             });
     }
 
@@ -941,11 +971,65 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, std::uint64_t tag) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type, array_type::byte_order>(
+            dec, tag, [&](major_type payload_major, std::byte payload_info) {
+                return decode_bounded_typed_array_view_payload(bounded.value(), payload_major, payload_info, Min, Max);
+            });
+    }
+
+    template <OwnedTypedArrayTarget Array>
+    [[nodiscard]] status_code decode(dynamic_bounded_size<Array> &bounded, major_type major, std::byte additional_info) {
+        using array_type = std::remove_cvref_t<Array>;
+        using value_type = typename array_type::value_type;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload<value_type, array_type::byte_order>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_bounded_owned_typed_array_payload(bounded.value(), payload_major, payload_info, bounded.min_size(),
+                                                                bounded.max_size());
+            });
+    }
+
+    template <OwnedTypedArrayTarget Array> [[nodiscard]] status_code decode(dynamic_bounded_size<Array> &bounded, std::uint64_t tag) {
+        using array_type = std::remove_cvref_t<Array>;
+        using value_type = typename array_type::value_type;
         auto &dec        = static_cast<Self &>(*this);
 
         return detail::decode_payload_after_tag<value_type, array_type::byte_order>(
             dec, tag, [&](major_type payload_major, std::byte payload_info) {
-                return decode_bounded_typed_array_view_payload<Min, Max>(bounded.value(), payload_major, payload_info);
+                return decode_bounded_owned_typed_array_payload(bounded.value(), payload_major, payload_info, bounded.min_size(),
+                                                                bounded.max_size());
+            });
+    }
+
+    template <typename Array>
+        requires DecodableTypedArrayViewTargetFor<Self, Array>
+    [[nodiscard]] status_code decode(dynamic_bounded_size<Array> &bounded, major_type major, std::byte additional_info) {
+        using array_type = std::remove_cvref_t<Array>;
+        using value_type = typename array_type::value_type;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload<value_type, array_type::byte_order>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_bounded_typed_array_view_payload(bounded.value(), payload_major, payload_info, bounded.min_size(),
+                                                               bounded.max_size());
+            });
+    }
+
+    template <typename Array>
+        requires DecodableTypedArrayViewTargetFor<Self, Array>
+    [[nodiscard]] status_code decode(dynamic_bounded_size<Array> &bounded, std::uint64_t tag) {
+        using array_type = std::remove_cvref_t<Array>;
+        using value_type = typename array_type::value_type;
+        auto &dec        = static_cast<Self &>(*this);
+
+        return detail::decode_payload_after_tag<value_type, array_type::byte_order>(
+            dec, tag, [&](major_type payload_major, std::byte payload_info) {
+                return decode_bounded_typed_array_view_payload(bounded.value(), payload_major, payload_info, bounded.min_size(),
+                                                               bounded.max_size());
             });
     }
 
@@ -1012,9 +1096,9 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         return static_cast<std::uint64_t>(array.values().size());
     }
 
-    template <std::size_t Min, std::size_t Max, typename Array> static void require_bounded_typed_array_element_count(const Array &array) {
+    template <typename Array> static void require_bounded_typed_array_element_count(const Array &array, std::size_t min, std::size_t max) {
         const auto size = typed_array_element_count(array);
-        if (cbor::tags::detail::bounded_size_status<Min, Max>(size) != status_code::success) {
+        if (cbor::tags::detail::bounded_size_status(size, min, max) != status_code::success) {
             throw cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
         }
     }
@@ -1048,8 +1132,9 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         return status_code::success;
     }
 
-    template <std::size_t Min, std::size_t Max, typename Value, typed_array_byte_order ByteOrder, typename Consume>
-    [[nodiscard]] status_code decode_bounded_typed_array_bytes(major_type payload_major, std::byte payload_info, Consume &&consume) {
+    template <typename Value, typed_array_byte_order ByteOrder, typename Consume>
+    [[nodiscard]] status_code decode_bounded_typed_array_bytes(major_type payload_major, std::byte payload_info, std::size_t min,
+                                                               std::size_t max, Consume &&consume) {
         if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
             return status_code::no_match_for_bstr_on_buffer;
         }
@@ -1060,7 +1145,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         if (status != status_code::success) {
             return status;
         }
-        status = detail::bounded_typed_array_payload_size_status<Min, Max, Value, ByteOrder>(payload_size_u64);
+        status = detail::bounded_typed_array_payload_size_status<Value, ByteOrder>(payload_size_u64, min, max);
         if (status != status_code::success) {
             return status;
         }
@@ -1080,21 +1165,23 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         return status_code::success;
     }
 
-    template <std::size_t Min, std::size_t Max, OwnedTypedArrayTarget Array>
-    [[nodiscard]] status_code decode_bounded_owned_typed_array_payload(Array &array, major_type payload_major, std::byte payload_info) {
+    template <OwnedTypedArrayTarget Array>
+    [[nodiscard]] status_code decode_bounded_owned_typed_array_payload(Array &array, major_type payload_major, std::byte payload_info,
+                                                                       std::size_t min, std::size_t max) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
 
-        return decode_bounded_typed_array_bytes<Min, Max, value_type, array_type::byte_order>(
-            payload_major, payload_info, [&](auto &&raw_payload, std::size_t payload_size) {
+        return decode_bounded_typed_array_bytes<value_type, array_type::byte_order>(
+            payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
                 array.values() = detail::materialize_values<value_type, array_type::byte_order>(
                     std::forward<decltype(raw_payload)>(raw_payload), payload_size);
             });
     }
 
-    template <std::size_t Min, std::size_t Max, typename Array>
+    template <typename Array>
         requires DecodableTypedArrayViewTargetFor<Self, Array>
-    [[nodiscard]] status_code decode_bounded_typed_array_view_payload(Array &view, major_type payload_major, std::byte payload_info) {
+    [[nodiscard]] status_code decode_bounded_typed_array_view_payload(Array &view, major_type payload_major, std::byte payload_info,
+                                                                      std::size_t min, std::size_t max) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
         using byte_range = typename array_type::payload_range_type;
@@ -1102,8 +1189,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         if constexpr (std::ranges::contiguous_range<const byte_range> && !IsContiguous<typename Self::input_buffer_type>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            return decode_bounded_typed_array_bytes<Min, Max, value_type, array_type::byte_order>(
-                payload_major, payload_info, [&](auto &&raw_payload, std::size_t payload_size) {
+            return decode_bounded_typed_array_bytes<value_type, array_type::byte_order>(
+                payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
                     view = array_type{byte_range{std::forward<decltype(raw_payload)>(raw_payload)}, payload_size};
                 });
         }

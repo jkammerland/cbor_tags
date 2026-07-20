@@ -973,7 +973,8 @@ When decoding untrusted CBOR into owning containers, an input can declare very
 large array, map, text-string, or byte-string sizes. Plain containers do not
 impose schema or application size limits for you. Use
 `cbor::tags::bounded_size<T, Min, Max>` for per-field protocol size bounds, and
-use allocator-aware types backed by a bounded `std::pmr::memory_resource` for
+`cbor::tags::as_bounded_size(value, min, max)` for limits selected at runtime.
+Use allocator-aware types backed by a bounded `std::pmr::memory_resource` for
 allocation containment.
 
 This assumes the input byte buffer itself is already bounded by your transport,
@@ -1007,7 +1008,8 @@ std::pmr::monotonic_buffer_resource arena(
 std::pmr::vector<std::pmr::string> values{&arena};
 
 auto dec = ct::make_decoder(input);
-auto result = dec(values);
+std::size_t max_items = 64; // From application configuration.
+auto result = dec(ct::as_bounded_size(values, 0, max_items));
 
 if (!result && result.error() == ct::status_code::out_of_memory) {
     // The bounded arena was exhausted.
@@ -1026,14 +1028,20 @@ std::pmr::vector<std::optional<std::pmr::string>>
 Important limitations:
 
 - PMR is allocation containment, not schema validation.
-- `bounded_size<T, Min, Max>` validates only the immediately wrapped field and
-  generates matching CDDL. An unwrapped inner container is intentionally
-  unbounded; wrap it separately when it also has a protocol limit.
+- Static and runtime size bounds validate only the immediately wrapped field.
+  An unwrapped inner container is intentionally unbounded; wrap it separately
+  when it also has a limit.
 - A size bound constrains one incoming or outgoing CBOR item, not the accumulated
   size of a pre-populated decode destination. Appending a valid item can leave the
   destination larger than `Max`.
-- RFC 8746 scalar typed arrays can also be wrapped in `bounded_size`; the C++
-  bounds are element counts, while generated CDDL constrains byte-string size.
+- `bounded_size<T, Min, Max>` generates matching type-based CDDL.
+  `dynamic_bounded_size<T>` stores instance data and cannot be represented by
+  type-based CDDL.
+- A runtime-bounded decode destination must already have its bounds. Generic
+  variant, optional, and container decoding cannot invent bounds for a value it
+  creates.
+- RFC 8746 scalar typed arrays support static and runtime bounds as element
+  counts. Static bounds generate CDDL constraints on byte-string size.
 - Normal typed decoding is single-pass and has no built-in nesting-depth limit.
 - Input-controlled stack growth is limited to [recursive decode paths](doc/decoder_resource_limits.md#recursive-decode-paths), such as
   recursively defined destination types or custom codecs that explicitly recurse.

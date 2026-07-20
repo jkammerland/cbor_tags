@@ -54,7 +54,11 @@ template <typename Value, typename Container> constexpr bool can_propagate_conta
 }
 
 template <typename Value, typename Container> constexpr Value make_decode_value_for(Container &container) {
-    if constexpr (uses_container_allocator_for<Value, Container>()) {
+    if constexpr (IsDynamicBoundedSizeWrapper<Value>) {
+        static_assert(
+            always_false<Value>::value,
+            "dynamic_bounded_size requires a preconfigured decode destination; generic container decoding cannot create its bounds");
+    } else if constexpr (uses_container_allocator_for<Value, Container>()) {
         return std::make_from_tuple<Value>(std::uses_allocator_construction_args<Value>(container.get_allocator()));
     } else if constexpr (uses_optional_value_container_allocator_for<Value, Container>()) {
         using value_type = std::remove_cvref_t<Value>;
@@ -66,7 +70,11 @@ template <typename Value, typename Container> constexpr Value make_decode_value_
 }
 
 template <typename Value, typename Optional> constexpr Value make_decode_value_for_optional(Optional &optional) {
-    if constexpr (requires(Value &value) { value.get_allocator(); }) {
+    if constexpr (IsDynamicBoundedSizeWrapper<Value>) {
+        static_assert(
+            always_false<Value>::value,
+            "dynamic_bounded_size requires a preconfigured decode destination; generic optional decoding cannot create its bounds");
+    } else if constexpr (requires(Value &value) { value.get_allocator(); }) {
         if (optional) {
             return std::make_from_tuple<Value>(std::uses_allocator_construction_args<Value>(optional->get_allocator()));
         }

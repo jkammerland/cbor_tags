@@ -425,7 +425,7 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             using traits = cddl_multi_dimensional_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
                    cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
-        } else if constexpr (IsBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
+        } else if constexpr (IsAnyBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
                              (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
@@ -1310,6 +1310,10 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     using value_type = std::remove_cvref_t<T>;
     if constexpr (CDDLScopedType<value_type>) {
         static_assert(always_false<value_type>::value, "CDDL scope wrappers are only valid as cddl_schema_to roots");
+        return {};
+    } else if constexpr (IsDynamicBoundedSizeWrapper<value_type>) {
+        static_assert(always_false<value_type>::value,
+                      "dynamic_bounded_size cannot be represented by type-based CDDL; use bounded_size<T, Min, Max>");
         return {};
     } else if constexpr (IsBoundedSizeWrapper<value_type>) {
         return cddl_bounded_size_expr<value_type, PointerMode>(context, options);
