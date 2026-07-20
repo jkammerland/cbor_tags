@@ -709,6 +709,9 @@ TEST_CASE("CDDL emits bounded sizes for strings containers and range wrappers") 
     CHECK_EQ(cddl_schema_inline<max_size<std::string, 64>>(), "root = tstr .size (0..64)");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::array<int, 2>, 1, 3>>(), "root = [2*2 int]");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::span<int, 2>, 1, 3>>(), "root = [2*2 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::array<std::byte, 2>, 1, 3>>(), "root = bstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<const std::byte, 2>, 1, 3>>(), "root = bstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<const char, 2>, 1, 3>>(), "root = tstr .size 2");
     CHECK_EQ(cddl_schema_inline<bounded_size<as_indefinite<std::vector<int>>, 1, 3>>(), "root = [1*3 int]");
 
     CHECK_EQ(cddl_schema_inline<CDDLBoundedContainers>(),

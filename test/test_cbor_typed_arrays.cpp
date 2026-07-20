@@ -1299,6 +1299,53 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         CHECK(decoded.value().values().empty());
     }
 
+    SUBCASE("malformed payload status precedence") {
+        const std::array shape_invalid_inputs{"d84e45010203", "d84e5a00000005010203"};
+        for (const auto *hex : shape_invalid_inputs) {
+            bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
+            auto                                          input  = to_bytes(hex);
+            auto                                          dec    = make_decoder<typed_array_codec>(input);
+            const auto                                    result = dec(decoded);
+
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::unexpected_group_size);
+            CHECK(decoded.value().values().empty());
+        }
+
+        {
+            bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
+            auto                                          input  = to_bytes("d84e44010203");
+            auto                                          dec    = make_decoder<typed_array_codec>(input);
+            const auto                                    result = dec(decoded);
+
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::incomplete);
+            CHECK(decoded.value().values().empty());
+        }
+
+        for (const auto *hex : shape_invalid_inputs) {
+            bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
+            auto                                               input  = to_bytes(hex);
+            auto                                               dec    = make_decoder<typed_array_codec>(input);
+            const auto                                         result = dec(decoded);
+
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::unexpected_group_size);
+            CHECK_EQ(decoded.value().size(), 0U);
+        }
+
+        {
+            bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
+            auto                                               input  = to_bytes("d84e44010203");
+            auto                                               dec    = make_decoder<typed_array_codec>(input);
+            const auto                                         result = dec(decoded);
+
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::incomplete);
+            CHECK_EQ(decoded.value().size(), 0U);
+        }
+    }
+
     {
         bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
         auto                                               dec = make_decoder<typed_array_codec>(encoded_three);

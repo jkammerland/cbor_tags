@@ -796,3 +796,41 @@ TEST_CASE("bounded explicit indefinite wrappers preserve their wire-shape requir
         CHECK(values.empty());
     }
 }
+
+TEST_CASE("bounded explicit indefinite wrappers reject fixed destinations before mutation") {
+    const std::array array_inputs{"9fff", "9f0102ff", "9f010203ff"};
+    for (const auto *hex : array_inputs) {
+        auto               buffer = to_bytes(hex);
+        std::array<int, 2> values{7, 8};
+        auto               dec    = make_decoder(buffer);
+        auto               result = dec(as_bounded_size<0, 3>(as_indefinite{values}));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK_EQ(values, (std::array<int, 2>{7, 8}));
+    }
+
+    const std::array string_inputs{"5fff", "5f420102ff", "5f43010203ff"};
+    for (const auto *hex : string_inputs) {
+        auto                     buffer = to_bytes(hex);
+        std::array<std::byte, 2> values{std::byte{0xAA}, std::byte{0xBB}};
+        auto                     dec    = make_decoder(buffer);
+        auto                     result = dec(as_bounded_size<0, 3>(as_indefinite{values}));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK_EQ(values, (std::array<std::byte, 2>{std::byte{0xAA}, std::byte{0xBB}}));
+    }
+
+    for (const auto *hex : string_inputs) {
+        auto                     buffer = to_bytes(hex);
+        std::array<std::byte, 2> storage{std::byte{0xAA}, std::byte{0xBB}};
+        std::span<std::byte, 2>  values{storage};
+        auto                     dec    = make_decoder(buffer);
+        auto                     result = dec(as_bounded_size<0, 3>(as_indefinite{values}));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
+        CHECK_EQ(storage, (std::array<std::byte, 2>{std::byte{0xAA}, std::byte{0xBB}}));
+    }
+}
