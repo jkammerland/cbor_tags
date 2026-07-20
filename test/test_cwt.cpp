@@ -1,10 +1,12 @@
 #include "test_util.h"
 
+#include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cwt/cwt.h>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <doctest/doctest.h>
 #include <limits>
 #include <memory>
@@ -143,6 +145,141 @@ TEST_CASE("encoded item view options decode non-empty CWT claims maps") {
     CHECK_EQ(dec.tell(), encoded.end());
 }
 
+TEST_CASE("CWT claims reject duplicate integer labels without replacing the destination") {
+    constexpr std::array duplicate_maps{
+        "a2016161016162", "a201616118016162", "a21863610118636162", "a220f520f4", "a23bfffffffffffffffff53bfffffffffffffffff4",
+    };
+
+    for (const auto hex : duplicate_maps) {
+        CAPTURE(hex);
+        auto       input = to_bytes(hex);
+        claims_set decoded;
+        decoded.issuer = "unchanged";
+        auto result    = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(decoded.issuer, "unchanged");
+    }
+}
+
+TEST_CASE("CWT claims decode definite and indefinite maps with atomic failures") {
+    SUBCASE("indefinite registered claim") {
+        auto       input = to_bytes("bf0163696470ff");
+        claims_set decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "idp");
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("empty indefinite map") {
+        auto       input = to_bytes("bfff");
+        claims_set decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_FALSE(decoded.issuer);
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("unknown claim with nested indefinite value") {
+        auto       input = to_bytes("bf18819f0102ff0163696470ff");
+        claims_set decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "idp");
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("non-contiguous input") {
+        const auto            bytes = to_bytes("bf0163696470ff");
+        std::deque<std::byte> input(bytes.begin(), bytes.end());
+        claims_set            decoded;
+        auto                  dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "idp");
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("missing break") {
+        auto       input = to_bytes("bf0163696470");
+        claims_set decoded;
+        decoded.issuer = "unchanged";
+        auto result    = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.issuer, "unchanged");
+    }
+
+    SUBCASE("break used as value") {
+        auto       input = to_bytes("bf01ff");
+        claims_set decoded;
+        decoded.issuer = "unchanged";
+        auto result    = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(decoded.issuer, "unchanged");
+    }
+}
+
+TEST_CASE("encoded item view options retain complete indefinite CWT claims maps") {
+    auto       input = to_bytes("bf016369647004182aff");
+    claims_set decoded;
+    auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options>(input);
+    auto       result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.issuer, "idp");
+    CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
+    CHECK_EQ(to_hex(result->bytes()), to_hex(input));
+    CHECK_EQ(dec.tell(), input.end());
+}
+
+TEST_CASE("CWT NumericDate rejects integers outside the int64 domain") {
+    constexpr std::array accepted{
+        std::pair{"a1041b7fffffffffffffff", std::numeric_limits<std::int64_t>::max()},
+        std::pair{"a1043b7fffffffffffffff", std::numeric_limits<std::int64_t>::min()},
+    };
+    for (const auto &[hex, expected_value] : accepted) {
+        CAPTURE(hex);
+        auto       input = to_bytes(hex);
+        claims_set decoded;
+
+        REQUIRE(make_decoder(input)(decoded));
+        CHECK_EQ(decoded.expiration, numeric_date{expected_value});
+    }
+
+    {
+        auto       input = to_bytes("a104fb3ff8000000000000");
+        claims_set decoded;
+        REQUIRE(make_decoder(input)(decoded));
+        CHECK_EQ(decoded.expiration, numeric_date{1.5});
+    }
+
+    constexpr std::array rejected{
+        "a1041b8000000000000000",
+        "a1041bffffffffffffffff",
+        "a1043b8000000000000000",
+        "a1043bffffffffffffffff",
+    };
+    for (const auto hex : rejected) {
+        CAPTURE(hex);
+        auto       input = to_bytes(hex);
+        claims_set decoded;
+        decoded.expiration = std::int64_t{42};
+        auto result        = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
+        CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
+    }
+}
+
 TEST_CASE("COSE protected header and Sign1 Sig_structure encode in RFC shape") {
     const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256});
     REQUIRE(protected_header);
@@ -182,6 +319,48 @@ TEST_CASE("COSE protected headers roundtrip supported critical labels") {
     CHECK_EQ(decoded->alg, input.alg);
     CHECK_EQ(decoded->kid, input.kid);
     CHECK(decoded->crit == input.crit);
+}
+
+TEST_CASE("COSE headers decode indefinite maps and critical-label arrays") {
+    SUBCASE("indefinite map") {
+        auto       input = to_bytes("bf0126ff");
+        header_map decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.alg, algorithm::es256);
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("indefinite critical-label array") {
+        auto       input = to_bytes("a3029f0104ff01260441aa");
+        header_map decoded;
+
+        REQUIRE(make_decoder(input)(decoded));
+        CHECK_EQ(decoded.alg, algorithm::es256);
+        CHECK_EQ(decoded.kid, byte_string{std::byte{0xaa}});
+        CHECK_EQ(decoded.crit, (std::vector<header_label>{integer{1}, integer{4}}));
+    }
+
+    SUBCASE("duplicate label in indefinite map") {
+        auto       input = to_bytes("bf01260126ff");
+        header_map decoded;
+        decoded.alg = algorithm::es384;
+        auto result = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(decoded.alg, algorithm::es384);
+    }
+
+    SUBCASE("missing map break") {
+        auto       input = to_bytes("bf0126");
+        header_map decoded;
+        auto       result = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+    }
 }
 
 TEST_CASE("COSE protected headers consume unknown noncritical text labels") {
