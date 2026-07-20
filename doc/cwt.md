@@ -12,6 +12,24 @@ signing objects:
 
 The base `cbor::tags` target does not link a crypto library.
 
+## Claims Validation
+
+`claims_set` accepts both definite-length and break-terminated indefinite-length
+CBOR maps. Every decoded integer claim label must be unique, including unknown
+and non-canonically encoded labels. A duplicate is rejected instead of applying
+first-value-wins or last-value-wins semantics because conflicting claim values
+are not interoperable and are unsafe inputs for authorization decisions. This
+matches RFC 8949's treatment of duplicate map keys as invalid CBOR.
+
+Unknown integer claims are consumed but not retained. Integer `NumericDate`
+values must fit in `std::int64_t`; values outside that range are rejected rather
+than narrowed. Failed claim-map validation leaves the destination `claims_set`
+unchanged.
+
+See [RFC 8392](https://www.rfc-editor.org/rfc/rfc8392.html) for CWT claims and
+[RFC 8949 Section 5.3.1](https://www.rfc-editor.org/rfc/rfc8949.html#section-5.3.1)
+for duplicate-map-key validity.
+
 ## Header Validation
 
 `header_map` models the registered `alg` and `kid` parameters and the protected
