@@ -736,6 +736,15 @@ template <typename T, typed_array_byte_order ByteOrder>
     return status_code::success;
 }
 
+template <std::size_t Min, std::size_t Max, typename T, typed_array_byte_order ByteOrder>
+consteval void validate_static_typed_array_bounds() {
+    constexpr auto element_size = typed_array_element_byte_size<T, ByteOrder>();
+    static_assert(Min <= (std::numeric_limits<std::uint64_t>::max() / element_size),
+                  "bounded_size typed-array minimum byte size overflows uint64_t");
+    static_assert(Max <= (std::numeric_limits<std::uint64_t>::max() / element_size),
+                  "bounded_size typed-array maximum byte size overflows uint64_t");
+}
+
 template <typename Dimensions, typename Array>
 [[nodiscard]] bool valid_multi_dimensional_shape(const Dimensions &dimensions, const Array &array) {
     std::size_t expected_count{};
@@ -832,6 +841,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     template <typename Array, std::size_t Min, std::size_t Max>
         requires TypedArrayEncodeTarget<Array>
     void encode(const bounded_size<Array, Min, Max> &bounded) {
+        using array_type = std::remove_cvref_t<Array>;
+        detail::validate_static_typed_array_bounds<Min, Max, typename array_type::value_type, array_type::byte_order>();
         require_bounded_typed_array_element_count(bounded.value(), Min, Max);
         encode(bounded.value());
     }
@@ -919,7 +930,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, major_type major, std::byte additional_info) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type, array_type::byte_order>(
             dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
@@ -931,7 +943,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, std::uint64_t tag) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload_after_tag<value_type, array_type::byte_order>(
             dec, tag, [&](major_type payload_major, std::byte payload_info) {
@@ -944,7 +957,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, major_type major, std::byte additional_info) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload<value_type, array_type::byte_order>(
             dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
@@ -957,7 +971,8 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
     [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, std::uint64_t tag) {
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
-        auto &dec        = static_cast<Self &>(*this);
+        detail::validate_static_typed_array_bounds<Min, Max, value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
 
         return detail::decode_payload_after_tag<value_type, array_type::byte_order>(
             dec, tag, [&](major_type payload_major, std::byte payload_info) {
