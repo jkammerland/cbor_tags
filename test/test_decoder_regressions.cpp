@@ -10,10 +10,12 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <memory_resource>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -115,6 +117,39 @@ struct SignedSizeDequeByteRange {
     [[nodiscard]] auto end() const noexcept { return bytes.end(); }
     [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
 };
+
+struct ReserveWithoutSizeByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    std::vector<std::byte> bytes;
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    void               reserve(size_type count) { bytes.reserve(count); }
+    void               push_back(value_type value) { bytes.push_back(value); }
+    void               pop_back() { bytes.pop_back(); }
+};
+
+struct controlled_memory_resource : std::pmr::memory_resource {
+    std::pmr::memory_resource *upstream{std::pmr::new_delete_resource()};
+    std::size_t                allocations_before_failure{std::numeric_limits<std::size_t>::max()};
+
+  private:
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        if (allocations_before_failure == 0) {
+            throw std::bad_alloc{};
+        }
+        --allocations_before_failure;
+        return upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *ptr, std::size_t bytes, std::size_t alignment) override { upstream->deallocate(ptr, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
 } // namespace
 
 static_assert(negative_wrapper_argument_is_representable(std::numeric_limits<std::uint64_t>::max() - 1));
@@ -131,6 +166,8 @@ static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
+static_assert(IsBinaryString<ReserveWithoutSizeByteBuffer>);
+static_assert(!HasReserve<ReserveWithoutSizeByteBuffer>);
 
 TEST_CASE("integer arithmetic should cover cancellation and larger negative branches") {
     const auto cancelled = integer{2, true} + integer{2};
@@ -529,6 +566,88 @@ TEST_CASE("decoder leaves mutable strings unchanged for truncated definite paylo
         CHECK_EQ(result.error(), status_code::incomplete);
         CHECK_EQ(decoded, "prefix");
     }
+}
+
+TEST_CASE("decoder rejects definite string targets that alias input storage") {
+    SUBCASE("same byte vector") {
+        std::vector<std::byte> input{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        const auto             original = input;
+        auto                   dec      = make_decoder(input);
+        auto                   result   = dec(input);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(input, original);
+    }
+
+    SUBCASE("same text string") {
+        std::string input{"\x63"
+                          "abc",
+                          4};
+        const auto  original = input;
+        auto        dec      = make_decoder(input);
+        auto        result   = dec(input);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(input, original);
+    }
+
+    SUBCASE("input span overlaps byte vector") {
+        std::vector<std::byte> storage{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        const auto             original = storage;
+        const auto             input    = std::span<const std::byte>{storage};
+        auto                   dec      = make_decoder(input);
+        auto                   result   = dec(storage);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(storage, original);
+    }
+}
+
+TEST_CASE("decoder reserves non-contiguous definite text before mutation") {
+    std::deque<std::byte> input{std::byte{0x78}, std::byte{0x40}};
+    input.insert(input.end(), 64, std::byte{'x'});
+
+    controlled_memory_resource resource;
+    std::pmr::string           decoded{"prefix", &resource};
+    const auto                 original = std::string{decoded};
+    resource.allocations_before_failure = 0;
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+    CHECK_EQ(std::string_view{decoded}, original);
+}
+
+TEST_CASE("decoder rolls back non-reservable definite string append failures") {
+    const std::vector<std::byte> input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
+    controlled_memory_resource   resource;
+    std::pmr::list<std::byte>    decoded{&resource};
+    decoded.push_back(std::byte{0x01});
+    resource.allocations_before_failure = 1;
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+    REQUIRE_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded.front(), std::byte{0x01});
+}
+
+TEST_CASE("reserve without size falls back to staged definite string append") {
+    const std::deque<std::byte>  input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
+    ReserveWithoutSizeByteBuffer decoded{{std::byte{0x01}}};
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.bytes, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}}));
 }
 
 TEST_CASE("decoder should preserve text bytes without utf8 validation") {
