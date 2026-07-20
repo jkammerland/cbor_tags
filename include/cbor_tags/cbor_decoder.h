@@ -995,6 +995,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
+            if constexpr (IsFixedArray<indefinite_value_t<T>>) {
+                return status_code::unexpected_group_size;
+            }
             return decode_indef_bstr<Min, Max>(wrapped.value_);
         } else {
             if (additionalInfo == static_cast<byte>(31)) {
@@ -1032,6 +1035,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_tstr_on_buffer;
             }
+            if constexpr (IsFixedArray<indefinite_value_t<T>>) {
+                return status_code::unexpected_group_size;
+            }
             return decode_indef_tstr<Min, Max>(wrapped.value_);
         } else {
             if (additionalInfo == static_cast<byte>(31)) {
@@ -1064,6 +1070,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (IsIndefiniteWrapper<T>) {
             if (additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_array_on_buffer;
+            }
+            if constexpr (IsFixedArray<indefinite_value_t<T>>) {
+                return status_code::unexpected_group_size;
             }
             return decode_indef_array<Min, Max>(wrapped.value_);
         } else {

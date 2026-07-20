@@ -709,6 +709,9 @@ TEST_CASE("CDDL emits bounded sizes for strings containers and range wrappers") 
     CHECK_EQ(cddl_schema_inline<max_size<std::string, 64>>(), "root = tstr .size (0..64)");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::array<int, 2>, 1, 3>>(), "root = [2*2 int]");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::span<int, 2>, 1, 3>>(), "root = [2*2 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::array<std::byte, 2>, 1, 3>>(), "root = bstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<const std::byte, 2>, 1, 3>>(), "root = bstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<const char, 2>, 1, 3>>(), "root = tstr .size 2");
     CHECK_EQ(cddl_schema_inline<bounded_size<as_indefinite<std::vector<int>>, 1, 3>>(), "root = [1*3 int]");
 
     CHECK_EQ(cddl_schema_inline<CDDLBoundedContainers>(),
@@ -1269,7 +1272,7 @@ TEST_CASE("named-map codec scopes nested map extensions") {
     CDDLNestedMapScopedExtensionRoot  input{.rootId = 1,
                                             .child  = as_named_map{child},
                                             .extensions =
-                                               as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
+                                                as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
 
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -1297,8 +1300,8 @@ TEST_CASE("named-map codec scopes nested map extensions") {
 TEST_CASE("named-map codec handles nested named groups with unique flattened keys") {
     CDDLNestedInlineRoot input{.middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
                                    .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{
-                                         .one = std::string{"first"},
-                                         .two = std::string{"second"},
+                                       .one = std::string{"first"},
+                                       .two = std::string{"second"},
                                    }},
                                    .middle = std::string{"middle"},
                                }},

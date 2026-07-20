@@ -1043,6 +1043,29 @@ template <std::size_t Min, std::size_t Max, typename T> consteval void validate_
     }
 }
 
+template <std::size_t Min, std::size_t Max, typename T> consteval void validate_bounded_fixed_string() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (is_std_array<value_type>::value) {
+        static_assert(Min <= is_std_array<value_type>::size && is_std_array<value_type>::size <= Max,
+                      "bounded_size fixed string extent must be inside the configured CDDL size bounds");
+    } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
+        static_assert(Min <= is_std_span<value_type>::extent && is_std_span<value_type>::extent <= Max,
+                      "bounded_size fixed string extent must be inside the configured CDDL size bounds");
+    }
+}
+
+template <std::size_t Min, std::size_t Max, typename T> std::string cddl_bounded_string_expr(std::string_view base) {
+    using value_type = std::remove_cvref_t<T>;
+    validate_bounded_fixed_string<Min, Max, value_type>();
+    if constexpr (is_std_array<value_type>::value) {
+        return cddl_size_control<is_std_array<value_type>::size, is_std_array<value_type>::size>(base);
+    } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
+        return cddl_size_control<is_std_span<value_type>::extent, is_std_span<value_type>::extent>(base);
+    } else {
+        return cddl_size_control<Min, Max>(base);
+    }
+}
+
 template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_bounded_sequence_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
@@ -1112,9 +1135,9 @@ std::string cddl_bounded_size_expr(CDDLContext &context, CDDLOptions options) {
     if constexpr (CDDLBoundedTaggedByteStringArray<render_type>) {
         return cddl_bounded_tagged_bstr_array_expr<render_type, bounded_type::min_size, bounded_type::max_size>();
     } else if constexpr (IsBinaryString<render_type> || IsBstrRangeWrapper<render_type>) {
-        return cddl_size_control<bounded_type::min_size, bounded_type::max_size>("bstr");
+        return cddl_bounded_string_expr<bounded_type::min_size, bounded_type::max_size, render_type>("bstr");
     } else if constexpr (IsTextString<render_type> || IsTstrRangeWrapper<render_type>) {
-        return cddl_size_control<bounded_type::min_size, bounded_type::max_size>("tstr");
+        return cddl_bounded_string_expr<bounded_type::min_size, bounded_type::max_size, render_type>("tstr");
     } else if constexpr (IsArrayRangeWrapper<render_type>) {
         return cddl_bounded_array_range_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
     } else if constexpr (IsMapRangeWrapper<render_type>) {
