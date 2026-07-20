@@ -85,6 +85,13 @@ add_dynamic_bounded_size_compile_fail_test(
   dynamic_bounded_size_nested_compile_fail.cc
   "bounded size wrappers cannot directly contain another bounded size wrapper")
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  add_dynamic_bounded_size_compile_fail_test(
+    typed_array_static_bounds_compile_fails
+    typed_array_static_bounds_compile_fail.cc
+    "bounded_size typed-array maximum byte size overflows uint64_t")
+endif()
+
 add_executable(cddl_variant_nullable_pointer_compile_fails EXCLUDE_FROM_ALL cddl_variant_nullable_pointer_compile_fail.cc)
 target_link_libraries(cddl_variant_nullable_pointer_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
