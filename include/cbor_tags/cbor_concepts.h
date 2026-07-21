@@ -79,17 +79,26 @@ template <typename T> constexpr auto cbor_tag() {
 
 // Free function variants of coding functions
 template <typename T, typename Class>
-concept HasTranscodeFreeFunction = requires(T t, Class c) {
+concept HasRawTranscodeFreeFunction = requires(T t, Class c) { transcode(t, std::forward<Class>(c)); };
+
+template <typename T, typename Class>
+concept HasRawEncodeFreeFunction = requires(T t, Class c) { encode(t, std::forward<Class>(c)); };
+
+template <typename T, typename Class>
+concept HasRawDecodeFreeFunction = requires(T t, Class c) { decode(t, std::forward<Class>(c)); };
+
+template <typename T, typename Class>
+concept HasTranscodeFreeFunction = HasRawTranscodeFreeFunction<T, Class> && requires(T t, Class c) {
     { transcode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
-concept HasEncodeFreeFunction = requires(T t, Class c) {
+concept HasEncodeFreeFunction = HasRawEncodeFreeFunction<T, Class> && requires(T t, Class c) {
     { encode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
-concept HasDecodeFreeFunction = requires(T t, Class c) {
+concept HasDecodeFreeFunction = HasRawDecodeFreeFunction<T, Class> && requires(T t, Class c) {
     { decode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
@@ -456,9 +465,7 @@ concept HasInlineTag = requires {
 struct Access {
     // Transcode function
     template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
-        if constexpr (requires {
-                          { obj.transcode(transcoder) } -> detail::CodecStatusResult;
-                      }) {
+        if constexpr (requires { obj.transcode(transcoder); }) {
             return obj.transcode(transcoder);
         } else {
             return detail::FalseType{};
@@ -467,9 +474,7 @@ struct Access {
 
     // Encode function
     template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
-        if constexpr (requires {
-                          { obj.encode(encoder) } -> detail::CodecStatusResult;
-                      }) {
+        if constexpr (requires { obj.encode(encoder); }) {
             return obj.encode(encoder);
         } else {
             return detail::FalseType{};
@@ -478,9 +483,7 @@ struct Access {
 
     // Decode function
     template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
-        if constexpr (requires {
-                          { obj.decode(decoder) } -> detail::CodecStatusResult;
-                      }) {
+        if constexpr (requires { obj.decode(decoder); }) {
             return obj.decode(decoder);
         } else {
             return detail::FalseType{};
@@ -517,6 +520,18 @@ struct Access {
 
 // Overload of coding functions, as member function
 template <typename T, typename Class>
+concept HasRawTranscodeMethod =
+    !std::same_as<std::remove_cvref_t<decltype(Access::transcode(std::declval<T &>(), std::declval<Class &>()))>, detail::FalseType>;
+
+template <typename T, typename Class>
+concept HasRawEncodeMethod =
+    !std::same_as<std::remove_cvref_t<decltype(Access::encode(std::declval<T &>(), std::declval<Class &>()))>, detail::FalseType>;
+
+template <typename T, typename Class>
+concept HasRawDecodeMethod =
+    !std::same_as<std::remove_cvref_t<decltype(Access::decode(std::declval<T &>(), std::declval<Class &>()))>, detail::FalseType>;
+
+template <typename T, typename Class>
 concept HasTranscodeMethod = requires(T t, Class c) {
     { Access::transcode(t, c) } -> detail::CodecStatusResult;
 };
@@ -530,6 +545,20 @@ template <typename T, typename Class>
 concept HasDecodeMethod = requires(T t, Class c) {
     { Access::decode(t, c) } -> detail::CodecStatusResult;
 };
+
+template <typename T, typename Class>
+concept HasIncompatibleEncodingCustomization =
+    std::is_class_v<Class> &&
+    ((HasRawTranscodeMethod<T, Class> && !HasTranscodeMethod<T, Class>) || (HasRawEncodeMethod<T, Class> && !HasEncodeMethod<T, Class>) ||
+     (HasRawTranscodeFreeFunction<T, Class> && !HasTranscodeFreeFunction<T, Class>) ||
+     (HasRawEncodeFreeFunction<T, Class> && !HasEncodeFreeFunction<T, Class>));
+
+template <typename T, typename Class>
+concept HasIncompatibleDecodingCustomization =
+    std::is_class_v<Class> &&
+    ((HasRawTranscodeMethod<T, Class> && !HasTranscodeMethod<T, Class>) || (HasRawDecodeMethod<T, Class> && !HasDecodeMethod<T, Class>) ||
+     (HasRawTranscodeFreeFunction<T, Class> && !HasTranscodeFreeFunction<T, Class>) ||
+     (HasRawDecodeFreeFunction<T, Class> && !HasDecodeFreeFunction<T, Class>));
 
 template <typename T>
 concept HasTagNonConstructible = requires(T) {

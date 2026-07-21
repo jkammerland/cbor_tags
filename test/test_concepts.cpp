@@ -1030,6 +1030,11 @@ TEST_SUITE("Classes") {
         static_assert(!HasTranscodeFreeFunction<decltype(encoder), incompatible_free_codec>);
         static_assert(!HasEncodeFreeFunction<decltype(encoder), incompatible_free_codec>);
         static_assert(!HasDecodeFreeFunction<decltype(decoder), incompatible_free_codec>);
+        static_assert(HasRawTranscodeFreeFunction<decltype(encoder), incompatible_free_codec>);
+        static_assert(HasRawEncodeFreeFunction<decltype(encoder), incompatible_free_codec>);
+        static_assert(HasRawDecodeFreeFunction<decltype(decoder), incompatible_free_codec>);
+        static_assert(HasIncompatibleEncodingCustomization<decltype(encoder), incompatible_free_codec>);
+        static_assert(HasIncompatibleDecodingCustomization<decltype(decoder), incompatible_free_codec>);
     }
 
     TEST_CASE("IsClass") {
@@ -1063,6 +1068,11 @@ TEST_SUITE("Classes") {
         static_assert(!HasTranscodeMethod<decltype(encoder), incompatible_member_codec>);
         static_assert(!HasEncodeMethod<decltype(encoder), incompatible_member_codec>);
         static_assert(!HasDecodeMethod<decltype(decoder), incompatible_member_codec>);
+        static_assert(HasRawTranscodeMethod<decltype(encoder), incompatible_member_codec>);
+        static_assert(HasRawEncodeMethod<decltype(encoder), incompatible_member_codec>);
+        static_assert(HasRawDecodeMethod<decltype(decoder), incompatible_member_codec>);
+        static_assert(HasIncompatibleEncodingCustomization<decltype(encoder), incompatible_member_codec>);
+        static_assert(HasIncompatibleDecodingCustomization<decltype(decoder), incompatible_member_codec>);
     }
 
     struct TrulyTagged0 {

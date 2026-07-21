@@ -49,6 +49,39 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_member_encode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_MEMBER_ENCODE
+  "custom encode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_member_decode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_MEMBER_DECODE
+  "custom decode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_free_encode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_FREE_ENCODE
+  "custom encode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_free_decode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_FREE_DECODE
+  "custom decode/transcode must return a result")
+
 add_executable(cddl_variant_nullable_pointer_compile_fails EXCLUDE_FROM_ALL cddl_variant_nullable_pointer_compile_fail.cc)
 target_link_libraries(cddl_variant_nullable_pointer_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
