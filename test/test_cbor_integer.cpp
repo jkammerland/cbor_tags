@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include <array>
 #include <cbor_tags/cbor_concepts.h>
 #include <cbor_tags/cbor_decoder.h>
@@ -7,6 +9,7 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <limits>
+#include <string_view>
 #include <vector>
 
 using namespace cbor::tags;
@@ -139,6 +142,44 @@ TEST_CASE("signed wire wrapper roundtrips positive and negative CBOR boundaries"
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded, original);
     }
+}
+
+TEST_CASE("wire integer wrappers encode exact CBOR width boundaries") {
+    using namespace std::string_view_literals;
+    constexpr auto max = std::numeric_limits<std::uint64_t>::max();
+
+    const auto check_wire = [](const auto value, std::string_view expected_hex) {
+        std::vector<std::byte> data;
+        auto                   enc = make_encoder(data);
+        REQUIRE(enc(value));
+        CHECK_EQ(to_hex(data), expected_hex);
+    };
+
+    check_wire(positive{0}, "00"sv);
+    check_wire(positive{23}, "17"sv);
+    check_wire(positive{24}, "1818"sv);
+    check_wire(positive{255}, "18ff"sv);
+    check_wire(positive{256}, "190100"sv);
+    check_wire(positive{65535}, "19ffff"sv);
+    check_wire(positive{65536}, "1a00010000"sv);
+    check_wire(positive{0xffffffffULL}, "1affffffff"sv);
+    check_wire(positive{0x100000000ULL}, "1b0000000100000000"sv);
+    check_wire(positive{max}, "1bffffffffffffffff"sv);
+
+    check_wire(negative{1}, "20"sv);
+    check_wire(negative{24}, "37"sv);
+    check_wire(negative{25}, "3818"sv);
+    check_wire(negative{256}, "38ff"sv);
+    check_wire(negative{257}, "390100"sv);
+    check_wire(negative{65536}, "39ffff"sv);
+    check_wire(negative{65537}, "3a00010000"sv);
+    check_wire(negative{0x100000000ULL}, "3affffffff"sv);
+    check_wire(negative{0x100000001ULL}, "3b0000000100000000"sv);
+    check_wire(negative{max}, "3bfffffffffffffffe"sv);
+    check_wire(negative{0}, "3bffffffffffffffff"sv);
+
+    check_wire(integer{positive{max}}, "1bffffffffffffffff"sv);
+    check_wire(integer{negative{0}}, "3bffffffffffffffff"sv);
 }
 
 TEST_CASE("Encode, Decode 0s") {

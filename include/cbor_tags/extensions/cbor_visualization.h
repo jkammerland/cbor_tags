@@ -102,6 +102,13 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {}, Context = {})
 
 namespace detail {
 
+[[nodiscard]] inline std::string negative_diagnostic_text(negative value) {
+    if (value.value == 0U) {
+        return "-18446744073709551616";
+    }
+    return text::format("-{}", value.value);
+}
+
 struct CDDLContext;
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
@@ -2060,10 +2067,7 @@ template <typename OutputBuffer> struct smart_annotator {
     [[nodiscard]] static std::size_t bytes_comment_size(std::size_t length) { return checked_add(3U, checked_mul(length, 2U)); }
 
     [[nodiscard]] static std::string negative_comment(std::uint64_t argument) {
-        if (argument == std::numeric_limits<std::uint64_t>::max()) {
-            return "negative(-18446744073709551616)";
-        }
-        return text::format("negative(-{})", argument + 1U);
+        return text::format("negative({})", detail::negative_diagnostic_text(negative{argument + 1U}));
     }
 
     [[nodiscard]] static std::string tag_comment(std::uint64_t tag) {
@@ -2434,7 +2438,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
             text::format_to(std::back_inserter(output_buffer), "{}", arg);
         } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
-            text::format_to(std::back_inserter(output_buffer), "-{}", arg.value);
+            text::format_to(std::back_inserter(output_buffer), "{}", detail::negative_diagnostic_text(arg));
         } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(arg)>>) {
             check_depth();
             detail::catch_all_variant value;
