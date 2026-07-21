@@ -16,10 +16,10 @@ The base `cbor::tags` target does not link a crypto library.
 
 `claims_set` accepts both definite-length and break-terminated indefinite-length
 CBOR maps. Every decoded integer or text claim label must be unique, including
-unknown and non-canonically encoded labels. A duplicate is rejected instead of applying
-first-value-wins or last-value-wins semantics because conflicting claim values
-are not interoperable and are unsafe inputs for authorization decisions. This
-matches RFC 8949's treatment of duplicate map keys as invalid CBOR.
+unknown and non-canonically encoded labels. A duplicate is rejected instead of
+applying first-value-wins or last-value-wins semantics because conflicting claim
+values are not interoperable and are unsafe inputs for authorization decisions.
+This matches RFC 8949's treatment of duplicate map keys as invalid CBOR.
 
 Unknown integer and text claims are consumed but not retained. Integer
 `NumericDate` values must fit in `std::int64_t`; values outside that range are
