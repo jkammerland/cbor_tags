@@ -148,6 +148,13 @@ void check_strict_prefixes(const malformed_report &input) {
     REQUIRE(dec(output));
     REQUIRE(dec.tell() == encoded.end());
     CHECK(output == input);
+
+    std::deque<std::byte> non_contiguous(encoded.begin(), encoded.end());
+    malformed_report      non_contiguous_output;
+    auto                  non_contiguous_dec = make_decoder(non_contiguous);
+    REQUIRE(non_contiguous_dec(non_contiguous_output));
+    REQUIRE(non_contiguous_dec.tell() == non_contiguous.cend());
+    CHECK(non_contiguous_output == input);
 }
 
 struct malformed_case {
