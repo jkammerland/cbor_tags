@@ -340,6 +340,9 @@ struct header_map {
                 }
                 decoded.kid = std::move(value);
             } else {
+                // Unknown parameters are validated for uniqueness within this
+                // bucket, then discarded. Cross-bucket duplicate checks for
+                // unknown labels require a higher-level raw-header policy.
                 typename Decoder::raw_encoded_item_view ignored;
                 return dec.decode(ignored);
             }
