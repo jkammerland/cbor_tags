@@ -1035,6 +1035,8 @@ TEST_SUITE("Classes") {
         static_assert(HasRawDecodeFreeFunction<decltype(decoder), incompatible_free_codec>);
         static_assert(HasIncompatibleEncodingCustomization<decltype(encoder), incompatible_free_codec>);
         static_assert(HasIncompatibleDecodingCustomization<decltype(decoder), incompatible_free_codec>);
+        static_assert(!HasIncompatibleEncodingCustomization<decltype(encoder), decltype(encoder)>);
+        static_assert(!HasIncompatibleDecodingCustomization<decltype(decoder), decltype(decoder)>);
     }
 
     TEST_CASE("IsClass") {

@@ -582,14 +582,14 @@ concept HasDecodeMethod = requires(T t, Class c) {
 
 template <typename T, typename Class>
 concept HasIncompatibleEncodingCustomization =
-    std::is_class_v<Class> &&
+    std::is_class_v<Class> && (!std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<Class>>) &&
     ((HasRawTranscodeMethod<T, Class> && !HasTranscodeMethod<T, Class>) || (HasRawEncodeMethod<T, Class> && !HasEncodeMethod<T, Class>) ||
      (HasRawTranscodeFreeFunction<T, Class> && !HasTranscodeFreeFunction<T, Class>) ||
      (HasRawEncodeFreeFunction<T, Class> && !HasEncodeFreeFunction<T, Class>));
 
 template <typename T, typename Class>
 concept HasIncompatibleDecodingCustomization =
-    std::is_class_v<Class> &&
+    std::is_class_v<Class> && (!std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<Class>>) &&
     ((HasRawTranscodeMethod<T, Class> && !HasTranscodeMethod<T, Class>) || (HasRawDecodeMethod<T, Class> && !HasDecodeMethod<T, Class>) ||
      (HasRawTranscodeFreeFunction<T, Class> && !HasTranscodeFreeFunction<T, Class>) ||
      (HasRawDecodeFreeFunction<T, Class> && !HasDecodeFreeFunction<T, Class>));
