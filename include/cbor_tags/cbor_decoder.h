@@ -547,7 +547,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value) {
         auto &&tuple = to_tuple(value);
 
@@ -585,7 +585,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
@@ -597,14 +597,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, std::uint64_t tag) {
         auto &&tuple = to_tuple(value);
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
     template <typename T>
-        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T>
+        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T> && (!HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, std::uint64_t tag) {
         std::uint64_t class_tag;
         if constexpr (HasTagMember<T>) {
@@ -941,7 +941,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C, bool DecodeTag = true>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode_class_impl(C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
@@ -967,18 +967,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         if constexpr (has_transcode) {
             auto result = Access::transcode(*this, value);
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         } else if constexpr (has_decode) {
             auto result = Access::decode(*this, value);
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         } else if constexpr (has_free_decode) {
             /* This requires an indirect call in order for some compilers to find the overload. */
             auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         } else if (has_free_transcode) {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
             auto result = transcode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         }
 
         // throw std::runtime_error("This should never happen");
@@ -986,22 +986,49 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode(C &value) {
         return decode_class_impl<C, true>(value);
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode_without_tag(C &value) {
         return decode_class_impl<C, false>(value);
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode(C &value, major_type, byte) {
         reader_.seek(-1);
         return this->decode(value);
+    }
+
+    template <typename C>
+        requires HasIncompatibleDecodingCustomization<self_t, C>
+    constexpr status_code decode(C &) {
+        static_assert(always_false<C>::value,
+                      "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
+        return status_code::error;
+    }
+
+    template <typename C>
+        requires HasIncompatibleDecodingCustomization<self_t, C>
+    constexpr status_code decode(C &, major_type, byte) {
+        static_assert(always_false<C>::value,
+                      "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
+        return status_code::error;
+    }
+
+    template <typename C>
+        requires HasIncompatibleDecodingCustomization<self_t, C>
+    constexpr status_code decode(C &, std::uint64_t) {
+        static_assert(always_false<C>::value,
+                      "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
+        return status_code::error;
     }
 
     template <typename T> constexpr status_code decode(T &value) {

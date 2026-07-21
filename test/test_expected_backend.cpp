@@ -30,6 +30,14 @@ struct codec_error {
     constexpr operator status_code() const noexcept { return value; }
 };
 
+struct status_result_without_bool {
+    bool        success;
+    status_code status;
+
+    [[nodiscard]] constexpr bool        has_value() const noexcept { return success; }
+    [[nodiscard]] constexpr status_code error() const noexcept { return status; }
+};
+
 struct failing_encoder_codec {
   private:
     friend cbor::tags::Access;
@@ -47,6 +55,33 @@ struct failing_decoder_codec {
         return expected<void, codec_error>{cbor::tags::unexpected<codec_error>{codec_error{status_code::invalid_utf8_sequence}}};
     }
 };
+
+struct status_only_encoder_codec {
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Encoder> auto encode(Encoder &) const { return status_result_without_bool{true, status_code::success}; }
+};
+
+struct status_only_member_transcode {
+    template <typename Decoder> auto transcode(Decoder &) { return status_result_without_bool{false, status_code::unexpected_group_size}; }
+};
+
+struct status_only_member_decode {
+    template <typename Decoder> auto decode(Decoder &) { return status_result_without_bool{false, status_code::invalid_utf8_sequence}; }
+};
+
+struct status_only_free_decode {};
+
+template <typename Decoder> auto decode(Decoder &, status_only_free_decode &&) {
+    return status_result_without_bool{false, status_code::no_match_for_tstr_on_buffer};
+}
+
+struct status_only_free_transcode {};
+
+template <typename Decoder> auto transcode(Decoder &, status_only_free_transcode &&) {
+    return status_result_without_bool{true, status_code::success};
+}
 
 #if CBOR_TAGS_USE_STD_EXPECTED
 template <typename T> inline constexpr bool             is_configured_expected_v                       = false;
@@ -129,4 +164,36 @@ TEST_CASE("custom codecs accept errors convertible to status code") {
     auto decode_result = dec(value);
     REQUIRE_FALSE(decode_result);
     CHECK_EQ(decode_result.error(), status_code::invalid_utf8_sequence);
+}
+
+TEST_CASE("custom codec results do not require contextual bool conversion") {
+    static_assert(!std::convertible_to<status_result_without_bool, bool>);
+
+    std::vector<std::byte> output;
+    auto                   enc = make_encoder(output);
+    REQUIRE(enc(status_only_encoder_codec{}));
+
+    const auto input = to_bytes("00");
+
+    status_only_member_transcode member_transcode;
+    auto                         member_transcode_dec    = make_decoder(input);
+    auto                         member_transcode_result = member_transcode_dec(member_transcode);
+    REQUIRE_FALSE(member_transcode_result);
+    CHECK_EQ(member_transcode_result.error(), status_code::unexpected_group_size);
+
+    status_only_member_decode member_decode;
+    auto                      member_decode_dec    = make_decoder(input);
+    auto                      member_decode_result = member_decode_dec(member_decode);
+    REQUIRE_FALSE(member_decode_result);
+    CHECK_EQ(member_decode_result.error(), status_code::invalid_utf8_sequence);
+
+    status_only_free_decode free_decode;
+    auto                    free_decode_dec    = make_decoder(input);
+    auto                    free_decode_result = free_decode_dec(free_decode);
+    REQUIRE_FALSE(free_decode_result);
+    CHECK_EQ(free_decode_result.error(), status_code::no_match_for_tstr_on_buffer);
+
+    status_only_free_transcode free_transcode;
+    auto                       free_transcode_dec = make_decoder(input);
+    REQUIRE(free_transcode_dec(free_transcode));
 }

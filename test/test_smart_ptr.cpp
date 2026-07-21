@@ -652,13 +652,15 @@ TEST_CASE("shared graph codec rejects cycles") {
     std::shared_ptr<smart_ptr_test::graph_link> decoded;
     auto                                        dec = make_decoder<shared_graph_codec>(cycle_bytes);
     shared_graph_decode_session                 decode_graph;
-    const auto                                  decode_result = dec(as_shared_graph(decode_graph, decoded));
+    const auto                                  decode_result      = dec(as_shared_graph(decode_graph, decoded));
+    const bool                                  decoded_cycle_root = static_cast<bool>(decoded);
     if (decoded) {
         decoded->next.reset();
     }
 
     REQUIRE_FALSE(decode_result);
     CHECK_EQ(decode_result.error(), status_code::error);
+    CHECK_FALSE(decoded_cycle_root);
 }
 
 TEST_CASE("shared graph codec rejects malformed wrappers before consuming following items") {

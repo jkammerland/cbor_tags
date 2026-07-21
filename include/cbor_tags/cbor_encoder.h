@@ -151,7 +151,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T> && !HasIncompatibleEncodingCustomization<self_t, T>)
     constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
@@ -181,7 +181,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
     template <typename C>
-        requires(IsClassWithEncodingOverload<self_t, C>)
+        requires(IsClassWithEncodingOverload<self_t, C> && !HasIncompatibleEncodingCustomization<self_t, C>)
     constexpr void encode(const C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_encode         = HasEncodeMethod<self_t, C>;
@@ -208,6 +208,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
             detail::throw_on_encode_error(transcode(*this, value));
         }
+    }
+
+    template <typename C>
+        requires HasIncompatibleEncodingCustomization<self_t, C>
+    constexpr void encode(const C &) {
+        static_assert(always_false<C>::value,
+                      "custom encode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
     }
 
     template <IsEnum T> constexpr void encode(T value) { this->encode(static_cast<std::underlying_type_t<T>>(value)); }
