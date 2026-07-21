@@ -114,7 +114,9 @@ TEST_CASE("core roundtrips empty containers and disengaged optionals in aggregat
 }
 
 TEST_CASE("core roundtrip replaces preseeded scalar optional and variant state") {
-    const auto      input = make_frame(std::string{"fresh"});
+    auto input = make_frame(std::string{"fresh"});
+    input.device_name.reset();
+    input.diagnostic.reset();
     telemetry_frame output;
     output.sequence    = 999;
     output.state       = telemetry_state::active;
