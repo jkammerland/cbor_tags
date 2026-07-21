@@ -10,25 +10,25 @@ permissions:
   contents: read
 
 jobs:
-  minimum-cmake:
-    name: CMake 3.23 Raw Roundtrip
+  cmake-compatibility:
+    name: CMake 3.23 Raw + 3.25 Features
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6.0.2
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl g++ gcc ninja-build tar unzip zip
 
     - name: Setup CMake 3.23.5
       uses: lukka/get-cmake@v4.3.2
       with:
         cmakeVersion: '3.23.5'
 
-    - name: Install build tools
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y g++ gcc ninja-build
-
-    - name: Configure
+    - name: Configure raw CMake 3.23 build
       shell: bash
       run: |
         cmake -S . -B build/minimum-cmake -G Ninja \
@@ -37,33 +37,20 @@ jobs:
           -DCBOR_TAGS_BUILD_EXAMPLES=ON \
           -DCBOR_TAGS_BUILD_TESTS=OFF
 
-    - name: Build
+    - name: Build raw CMake 3.23 targets
       shell: bash
       run: cmake --build build/minimum-cmake --parallel
 
-    - name: Test
+    - name: Test raw CMake 3.23 roundtrips
       shell: bash
       run: |
         ./build/minimum-cmake/examples/cbor_tags_basic_roundtrip
         ./build/minimum-cmake/tools/cbor_tags_cli diagnostic --input hex 01
 
-  cmake-3-25-features:
-    name: CMake 3.25 Tests, Benchmark, Install
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v6.0.2
-
     - name: Setup CMake 3.25.3
       uses: lukka/get-cmake@v4.3.2
       with:
         cmakeVersion: '3.25.3'
-
-    - name: Install build tools
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y curl g++ gcc ninja-build tar unzip zip
 
     - name: Bootstrap vcpkg
       uses: ./.github/actions/bootstrap-vcpkg
