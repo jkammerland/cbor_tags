@@ -135,6 +135,14 @@ TEST_CASE("status messages cover every declared status code") {
     CHECK_EQ(status_message(static_cast<status_code>(255)), "Unknown CBOR status code"sv);
 }
 
+TEST_CASE("variant mismatch classification uses the no-match status range") {
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::begin_no_match_decoding));
+    CHECK(detail::is_retriable_variant_mismatch(status_code::no_match_for_tag));
+    CHECK(detail::is_retriable_variant_mismatch(status_code::no_match_in_variant_on_buffer));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::end_no_match_decoding));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::unexpected_group_size));
+}
+
 TEST_CASE("nested variants dispatch through core tag alternatives") {
     using nested_type = std::variant<static_tag<42>, std::string>;
     using value_type  = std::variant<std::uint64_t, nested_type>;

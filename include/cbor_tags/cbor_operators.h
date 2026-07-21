@@ -80,12 +80,14 @@ template <typename Compare> struct cbor_variant_visitor {
 };
 
 template <typename Compare = std::less<>> struct variant_comparator {
-    template <typename Variant> bool operator()(const Variant &lhs, const Variant &rhs) const {
-        if (lhs.index() != rhs.index()) {
-            return Compare{}(lhs.index(), rhs.index());
+    template <IsVariant Variant> bool operator()(const Variant &lhs, const Variant &rhs) const {
+        const auto lhs_index = detail::variant_index(lhs);
+        const auto rhs_index = detail::variant_index(rhs);
+        if (lhs_index != rhs_index) {
+            return Compare{}(lhs_index, rhs_index);
         }
 
-        return std::visit(cbor_variant_visitor<Compare>{}, lhs, rhs);
+        return detail::variant_visit(cbor_variant_visitor<Compare>{}, lhs, rhs);
     }
 };
 

@@ -10,6 +10,12 @@
 
 namespace cbor::tags::detail {
 
+// Only a structural mismatch may try the next variant alternative. Malformed
+// input and resource failures must be returned to the caller unchanged.
+[[nodiscard]] constexpr bool is_retriable_variant_mismatch(status_code status) noexcept {
+    return status > status_code::begin_no_match_decoding && status < status_code::end_no_match_decoding;
+}
+
 template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(std::byte additional_info) {
     using type = std::remove_cvref_t<U>;
     if constexpr (IsOptional<type>) {
@@ -18,9 +24,10 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
         }
         return matches_simple_dispatch<CatchAllPass, typename type::value_type>(additional_info);
     } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, std::byte info) {
+        return with_variant_alternatives<type>([additional_info]<typename... Ts>() {
+            const auto info = additional_info;
             return (matches_simple_dispatch<CatchAllPass, Ts>(info) || ...);
-        }(static_cast<type *>(nullptr), additional_info);
+        });
     } else if constexpr (std::is_same_v<type, simple>) {
         const auto value = std::to_integer<std::uint8_t>(additional_info);
         return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
@@ -36,9 +43,10 @@ template <typename U> constexpr bool matches_major_dispatch(major_type major) {
     if constexpr (IsOptional<type>) {
         return major == major_type::Simple || matches_major_dispatch<typename type::value_type>(major);
     } else if constexpr (IsVariant<type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, major_type m) {
+        return with_variant_alternatives<type>([major]<typename... Ts>() {
+            const auto m = major;
             return (matches_major_dispatch<Ts>(m) || ...);
-        }(static_cast<type *>(nullptr), major);
+        });
     } else {
         return is_valid_major<major_type, type>(major);
     }
