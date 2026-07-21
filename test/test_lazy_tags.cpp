@@ -14,10 +14,12 @@
 #include <iterator>
 #include <map>
 #include <new>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -48,6 +50,39 @@ struct lazy_compact_payload {
     std::vector<int> values;
 
     bool operator==(const lazy_compact_payload &) const = default;
+};
+
+enum class lazy_report_state : std::uint8_t { idle, active, degraded };
+
+struct lazy_report_event {
+    static constexpr std::uint64_t cbor_tag = 60130;
+
+    std::string                                   name;
+    std::variant<std::int64_t, std::string, bool> value;
+    std::optional<std::string>                    unit;
+
+    bool operator==(const lazy_report_event &) const = default;
+};
+
+struct lazy_report_detail {
+    static constexpr std::uint64_t cbor_tag = 60131;
+
+    std::uint32_t                           code{};
+    std::map<std::string, std::vector<int>> channels;
+
+    bool operator==(const lazy_report_detail &) const = default;
+};
+
+using lazy_report_result = std::variant<std::int64_t, std::string, std::vector<std::byte>, lazy_report_detail>;
+
+struct lazy_report {
+    lazy_report_state                       state{};
+    std::optional<std::string>              note;
+    std::vector<lazy_report_event>          events;
+    lazy_report_result                      result;
+    std::map<std::string, std::vector<int>> history;
+
+    bool operator==(const lazy_report &) const = default;
 };
 
 std::vector<std::byte> make_deeply_nested_tag(std::size_t depth) {
@@ -490,6 +525,62 @@ TEST_CASE("lazy tag scanner decodes nested aggregate payloads after no-allocatio
     CHECK(!threw);
     CHECK_EQ(matches, 1);
     CHECK_EQ(full_view.status(), status_code::success);
+}
+
+TEST_CASE("lazy tag scanner roundtrips realistic aggregate matches") {
+    auto make_report = [](lazy_report_state state, lazy_report_result result, std::optional<std::string> note) {
+        return lazy_report{
+            state,
+            std::move(note),
+            {
+                {"temperature", std::int64_t{-12}, std::string{"C"}},
+                {"mode", std::string{"maintenance"}, std::nullopt},
+                {"interlock", true, std::nullopt},
+            },
+            std::move(result),
+            {{"recent", {1, 2, 3}}, {"older", {4}}},
+        };
+    };
+
+    std::vector<lazy_report> expected{
+        make_report(lazy_report_state::active, std::int64_t{-9001}, std::string{"calibrated"}),
+        make_report(lazy_report_state::idle, std::string{"offline"}, std::nullopt),
+        make_report(lazy_report_state::active, std::vector<std::byte>{std::byte{0x00}, std::byte{0x7f}, std::byte{0xff}},
+                    std::string{"binary"}),
+        make_report(lazy_report_state::degraded, lazy_report_detail{19, {{"phase-a", {1, 3}}, {"phase-b", {2, 4}}}}, std::nullopt),
+    };
+
+    using tagged_report = tagged_object<static_tag<902>, lazy_report>;
+    std::vector<tagged_report> tagged;
+    tagged.reserve(expected.size());
+    for (const auto &report : expected) {
+        tagged.push_back(make_tag_pair(static_tag<902>{}, report));
+    }
+
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+    REQUIRE(enc(as_array{2}, make_tag_pair(static_tag<999>{}, std::string{"unrelated"}),
+                std::map<std::string, std::vector<tagged_report>>{{"reports", tagged}}));
+
+    auto check_matches = [&](auto &input) {
+        std::vector<lazy_report> decoded;
+        auto                     view = find_tags<902>(input);
+        for (auto it = view.begin(); it != view.end(); ++it) {
+            lazy_report report;
+            REQUIRE(it->decode(report));
+            decoded.push_back(std::move(report));
+        }
+
+        CHECK_EQ(view.status(), status_code::success);
+        CHECK(decoded == expected);
+    };
+
+    SUBCASE("contiguous input") { check_matches(buffer); }
+
+    SUBCASE("non-contiguous input") {
+        std::deque<std::byte> input(buffer.begin(), buffer.end());
+        check_matches(input);
+    }
 }
 
 TEST_CASE("lazy tag scanner stress scans deeply nested definite containers without heap allocation") {
