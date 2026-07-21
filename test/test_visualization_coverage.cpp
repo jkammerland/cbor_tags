@@ -343,6 +343,10 @@ TEST_CASE("smart buffer annotation renders uint64 max negative exactly") {
     buffer_annotate(buffer, annotation, {.annotation_column = 40});
 
     CHECK(annotation.find("negative(-18446744073709551616)") != std::string::npos);
+
+    std::string diagnostic;
+    buffer_diagnostic(buffer, diagnostic, {.row_options = {.format_by_rows = false}});
+    CHECK_EQ(diagnostic, "[-18446744073709551616]");
 }
 
 TEST_CASE("smart buffer annotation stress tests adversarial single byte inputs") {
