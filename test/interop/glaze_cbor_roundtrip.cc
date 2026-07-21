@@ -246,7 +246,7 @@ TEST_CASE("Glaze collapses duplicate map keys when decoded into std::map") {
     auto result  = glz::read_cbor(decoded, std::string{"\xa2\x61"
                                                        "x\x01\x61"
                                                        "x\x02",
-                                                      7});
+                                                       7});
 
     REQUIRE(!result);
     REQUIRE_EQ(decoded.size(), 1U);

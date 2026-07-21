@@ -1,14 +1,31 @@
 #include "cbor_tags/cbor_operators.h"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <functional>
 #include <map>
 #include <string>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
+
+namespace {
+
+template <typename T>
+concept Hashable = requires(const T &value) {
+    { std::hash<T>{}(value) } -> std::convertible_to<std::size_t>;
+};
+
+using hashable_variant     = std::variant<int, std::string>;
+using non_hashable_variant = std::variant<int, std::vector<int>>;
+
+static_assert(Hashable<hashable_variant>);
+static_assert(!Hashable<non_hashable_variant>);
+
+} // namespace
 
 TEST_CASE("variant comparator orders by variant index") {
     using variant_t = std::variant<std::uint64_t, std::string, std::nullptr_t>;
@@ -54,21 +71,4 @@ TEST_CASE("variant comparator handles tag alternatives") {
 
 TEST_CASE("variant visitor returns false for different direct types") {
     CHECK_FALSE(cbor_variant_visitor<std::less<>>{}(std::uint64_t{1}, std::string{"1"}));
-}
-
-TEST_CASE("variant hasher combines index and hashable values") {
-    using bytes_t   = std::vector<std::byte>;
-    using array_t   = std::vector<int>;
-    using variant_t = std::variant<std::uint64_t, std::string, bytes_t, array_t, bool, std::nullptr_t, float16_t>;
-
-    variant_hasher hash;
-
-    CHECK_NE(hash(variant_t{1U}), hash(variant_t{2U}));
-    CHECK_EQ(hash(variant_t{std::string{"same"}}), hash(variant_t{std::string{"same"}}));
-    CHECK_NE(hash(variant_t{bytes_t{std::byte{0x01}}}), hash(variant_t{bytes_t{std::byte{0x02}}}));
-    CHECK_NE(hash(variant_t{array_t{1, 2}}), hash(variant_t{array_t{1, 3}}));
-    CHECK_NE(hash(variant_t{false}), hash(variant_t{true}));
-    CHECK_EQ(hash(variant_t{nullptr}), hash(variant_t{nullptr}));
-    CHECK_NE(hash(variant_t{float16_t{static_cast<std::uint16_t>(0x3C00)}}),
-             hash(variant_t{float16_t{static_cast<std::uint16_t>(0x4000)}}));
 }

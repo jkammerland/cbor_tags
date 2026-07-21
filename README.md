@@ -127,6 +127,31 @@ enc(tagged);
 > [!NOTE]
 > The definition of a tag is a CBOR major type 6 encoded uint, with a concise data definition format of #6.321(any). This allows generic parsers to decode tags without knowing their semantic meaning or the exact order of internal items. It also means the struct implicitly define a cbor array of exact types following the tag, i.e #6.321([int, float64, tstr]). See tuning options for more details.
 
+The core CBOR decoder accumulates into mutable owning sequence destinations. Arrays,
+maps, byte strings, and text strings are appended to or inserted into; it does not
+clear an existing destination. Initialize the destination empty when replacement
+semantics are wanted. Codec extensions can define a different destination contract.
+
+```cpp
+std::string source = "payload";
+std::vector<std::byte> buffer;
+auto enc = make_encoder(buffer);
+enc(source);
+
+std::string destination = "prefix:";
+auto dec = make_decoder(buffer);
+dec(destination);
+assert(destination == "prefix:payload");
+```
+
+A definite string validates its complete payload and any required capacity before
+appending. If a later target allocation fails, its semantic value is restored.
+Mutable destinations that overlap the decoder input are rejected with
+`status_code::error`; use separate input and output storage. For an indefinite
+string or container, successfully decoded chunks or elements remain in the
+destination if a later chunk or element fails. Fixed-size destinations and borrowed
+views retain their exact-size or assignment semantics.
+
 Equivalent to manually encoding the struct in the following example:
 ```cpp
 Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
@@ -854,7 +879,7 @@ pattern.
 - Optional C++26 STL-only mode with `CBOR_TAGS_STL_ONLY=ON`; this uses `std::expected`, `std::format`, and `std::meta` and exports no fmt, nameof, or tl::expected dependency.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
 - Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.7 or newer.
-- CMake 3.20+ for raw `cmake -S/-B` builds, 3.25+ when building an installed CMake package with `CBOR_TAGS_INSTALL=ON`, and 3.31+ for the checked-in preset workflows.
+- CMake 3.23+ for raw `cmake -S/-B` builds, 3.25+ for tests, benchmarks, or an installed CMake package with `CBOR_TAGS_INSTALL=ON`, and 3.31+ for the checked-in preset workflows.
 
 ## 📦 Installation
 
@@ -922,9 +947,11 @@ conan install . -o cbor-tags/*:std_expected=True -s compiler.cppstd=23
 conan install . -o cbor-tags/*:stl_only=True -s compiler.cppstd=26
 conan install . -o cbor-tags/*:boost_pfr_names=True
 conan install . -o cbor-tags/*:magic_enum_names=True
+conan install . -o cbor-tags/*:cwt_openssl=True
 vcpkg install --x-no-default-features --x-feature=stl-only
 vcpkg install --x-feature=boost-pfr-names
 vcpkg install --x-feature=magic-enum-names
+vcpkg install --x-feature=cwt-openssl
 ```
 
 The package features install the optional dependencies; still configure
@@ -945,9 +972,12 @@ target_link_libraries(your_target PRIVATE cbor::tags)
 ## Limiting Decode Allocation With `std::pmr`
 
 When decoding untrusted CBOR into owning containers, an input can declare very
-large array, map, text-string, or byte-string sizes. The decoder does not impose
-schema or application size limits for you. If you need allocation containment,
-decode into allocator-aware types backed by a bounded `std::pmr::memory_resource`.
+large array, map, text-string, or byte-string sizes. Plain containers do not
+impose schema or application size limits for you. Use
+`cbor::tags::bounded_size<T, Min, Max>` for per-field protocol size bounds, and
+`cbor::tags::as_bounded_size(value, min, max)` for limits selected at runtime.
+Use allocator-aware types backed by a bounded `std::pmr::memory_resource` for
+allocation containment.
 
 This assumes the input byte buffer itself is already bounded by your transport,
 framing layer, file-size limit, request-body cap, or another application-level
@@ -963,6 +993,8 @@ values; it does not limit how much CBOR input you accept.
 
 #include <cbor_tags/cbor.h>
 
+namespace ct = cbor::tags;
+
 // Example input: ["a", "b"].
 // In production, populate this from a size-capped input path.
 std::vector<std::byte> input{
@@ -977,10 +1009,11 @@ std::pmr::monotonic_buffer_resource arena(
 
 std::pmr::vector<std::pmr::string> values{&arena};
 
-auto dec = cbor::tags::make_decoder(input);
-auto result = dec(values);
+auto dec = ct::make_decoder(input);
+std::size_t max_items = 64; // From application configuration.
+auto result = dec(ct::as_bounded_size(values, 0, max_items));
 
-if (!result && result.error() == cbor::tags::status_code::out_of_memory) {
+if (!result && result.error() == ct::status_code::out_of_memory) {
     // The bounded arena was exhausted.
 }
 ```
@@ -996,7 +1029,21 @@ std::pmr::vector<std::optional<std::pmr::string>>
 
 Important limitations:
 
-- This is allocation containment, not schema validation.
+- PMR is allocation containment, not schema validation.
+- Static and runtime size bounds validate only the immediately wrapped field.
+  An unwrapped inner container is intentionally unbounded; wrap it separately
+  when it also has a limit.
+- A size bound constrains one incoming or outgoing CBOR item, not the accumulated
+  size of a pre-populated decode destination. Appending a valid item can leave the
+  destination larger than `Max`.
+- `bounded_size<T, Min, Max>` generates matching type-based CDDL.
+  `dynamic_bounded_size<T>` stores instance data and cannot be represented by
+  type-based CDDL.
+- A runtime-bounded decode destination must already have its bounds. Generic
+  variant, optional, and container decoding cannot invent bounds for a value it
+  creates.
+- RFC 8746 scalar typed arrays support static and runtime bounds as element
+  counts. Static bounds generate CDDL constraints on byte-string size.
 - Normal typed decoding is single-pass and has no built-in nesting-depth limit.
 - Input-controlled stack growth is limited to [recursive decode paths](doc/decoder_resource_limits.md#recursive-decode-paths), such as
   recursively defined destination types or custom codecs that explicitly recurse.
@@ -1014,6 +1061,13 @@ return cbor::tags::make_decoder(input)(value);
 
 See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
 [`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
+
+Definite container lengths are read once and checked before the decoder calls
+`reserve`; there is no validation pre-scan. Indefinite containers are checked in
+one pass and can retain the successfully decoded prefix when a later item
+exceeds the bound. See
+[CDDL Size-Bounded Containers](doc/cddl_handling.md#size-bounded-containers) for
+nesting and range-wrapper examples.
 
 ## ✨ WIP Features
 
@@ -1035,6 +1089,7 @@ Additional docs:
 - [Smart Pointer Codecs](doc/smart_pointers.md)
 - [Decoder Resource Limits](doc/decoder_resource_limits.md)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
+- [Testing](doc/testing.md)
 
 There are many types of cbor objects defined, the major types are:
 

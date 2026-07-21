@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -18,6 +19,7 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
+#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
 #include <new>
@@ -26,6 +28,7 @@
 #include "cbor_tags/cbor_tags_config.h"
 
 #include <limits>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -49,6 +52,30 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     constexpr auto min_value         = std::numeric_limits<T>::min();
     constexpr auto max_cbor_argument = static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
+}
+
+template <typename T>
+concept AppendReservable = HasReserve<T> && requires(const T &value) {
+    { value.size() } -> std::convertible_to<typename T::size_type>;
+};
+
+template <AppendReservable T> constexpr void reserve_for_append(T &value, std::uint64_t additional_size) {
+    using size_type = typename T::size_type;
+
+    const auto current_size = value.size();
+    const auto maximum_size = [&]() {
+        if constexpr (requires { value.max_size(); }) {
+            return value.max_size();
+        } else {
+            return std::numeric_limits<size_type>::max();
+        }
+    }();
+
+    if (std::cmp_greater(current_size, maximum_size) || std::cmp_greater(additional_size, maximum_size - current_size)) {
+        throw std::length_error("CBOR string length exceeds target container max_size");
+    }
+
+    value.reserve(static_cast<size_type>(current_size + static_cast<size_type>(additional_size)));
 }
 
 template <typename InputBuffer, typename Reader>
@@ -88,6 +115,13 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
     requires CborInputBuffer<InputBuffer>
 struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... {
+  private:
+    struct decode_size_bounds {
+        std::uint64_t min_size{};
+        std::uint64_t max_size{std::numeric_limits<std::uint64_t>::max()};
+    };
+
+  public:
     using self_t = decoder<InputBuffer, Options, Decoders...>;
     using Decoders<self_t>::decode...;
 
@@ -105,22 +139,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using raw_encoded_array_view = encoded_array_view_for<InputBuffer>;
     using raw_encoded_map_view   = encoded_map_view_for<InputBuffer>;
 
-    using expected_type   = typename Options::return_type;
-    using unexpected_type = typename Options::error_type;
+    using expected_type   = typename detail::decoder_return_type<Options, InputBuffer>::type;
+    using unexpected_type = typename expected_type::error_type;
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            status_collector<self_t> collect_status{*this};
+            if constexpr (detail::return_encoded_item_view_option_v<Options>) {
+                return decode_with_encoded_item_view(std::forward<T>(args)...);
+            } else {
+                status_collector<self_t> collect_status{*this};
 
-            auto success = (collect_status(std::forward<T>(args)) && ...);
+                auto success = (collect_status(std::forward<T>(args)) && ...);
 
-            if (!success) {
-                return unexpected<decltype(collect_status.result)>(collect_status.result);
+                if (!success) {
+                    return unexpected<decltype(collect_status.result)>(collect_status.result);
+                }
+                return expected_type{};
             }
-            return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch (const parse_incomplete_exception &) {
@@ -217,6 +255,42 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
+    template <IsBinaryString T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_bstr(value.value(), major, additionalInfo, Min, Max);
+    }
+
+    template <IsTextString T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_tstr(value.value(), major, additionalInfo, Min, Max);
+    }
+
+    template <IsArray T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_array(value.value(), major, additionalInfo, Min, Max);
+    }
+
+    template <IsMap T, std::size_t Min, std::size_t Max>
+    constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_map(value.value(), major, additionalInfo, Min, Max);
+    }
+
+    template <IsBinaryString T> constexpr status_code decode(dynamic_bounded_size<T> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_bstr(value.value(), major, additionalInfo, value.min_size(), value.max_size());
+    }
+
+    template <IsTextString T> constexpr status_code decode(dynamic_bounded_size<T> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_tstr(value.value(), major, additionalInfo, value.min_size(), value.max_size());
+    }
+
+    template <IsArray T> constexpr status_code decode(dynamic_bounded_size<T> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_array(value.value(), major, additionalInfo, value.min_size(), value.max_size());
+    }
+
+    template <IsMap T> constexpr status_code decode(dynamic_bounded_size<T> &value, major_type major, byte additionalInfo) {
+        return decode_bounded_map(value.value(), major, additionalInfo, value.min_size(), value.max_size());
+    }
+
     template <IsBinaryString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g std::span<const std::byte>");
 
@@ -235,7 +309,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        const auto bstring_size = decode_unsigned(additionalInfo);
+        return decode_definite_bstr(t, decode_unsigned(additionalInfo));
+    }
+
+    template <IsBinaryString T> constexpr status_code decode_definite_bstr(T &t, std::uint64_t bstring_size) {
         if constexpr (IsFixedArray<T> || (IsConstBinaryView<T> && detail::is_static_extent_span_v<T>)) {
             if (bstring_size != static_cast<std::uint64_t>(t.size())) {
                 debug::println("Fixed array size mismatch: {} != {}", bstring_size, t.size());
@@ -243,7 +320,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode to intermediate form
+        // Validate the complete payload and any allocation before exposing a
+        // borrowed payload that target growth could invalidate.
+        require_bytes(bstring_size);
+        if constexpr (!IsConstView<T>) {
+            if (string_target_aliases_input(t)) {
+                return status_code::error;
+            }
+        }
+        if constexpr (!IsConstView<T> && !IsFixedArray<T> && detail::AppendReservable<T>) {
+            detail::reserve_for_append(t, bstring_size);
+        }
+
         auto bstring = decode_bstring_payload(bstring_size);
 
         // Now handle the target assignment based on contiguity constraints
@@ -265,22 +353,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            auto decoded = detail::make_decode_value_for<T>(t);
-            if constexpr (HasReserve<T>) {
-                if (std::cmp_greater(bstring_size, std::numeric_limits<typename T::size_type>::max())) {
-                    throw std::length_error("CBOR byte string length exceeds target container size_type");
-                }
-                decoded.reserve(static_cast<typename T::size_type>(bstring_size));
-            }
-            detail::appender<T> appender_;
-            if constexpr (IsContiguous<decltype(bstring)>) {
-                appender_(decoded, bstring);
-            } else {
-                for (auto byte_value : bstring) {
-                    appender_(decoded, static_cast<typename T::value_type>(byte_value));
-                }
-            }
-            t = std::move(decoded);
+            append_definite_string(t, bstring);
         }
 
         return status_code::success;
@@ -309,9 +382,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode the text string
-        t = decode_text(additionalInfo);
+        return decode_definite_tstr(t, decode_unsigned(additionalInfo));
+    }
 
+    template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
+        require_bytes(text_size);
+        if constexpr (!IsConstView<T>) {
+            if (string_target_aliases_input(t)) {
+                return status_code::error;
+            }
+        }
+        if constexpr (!IsConstView<T> && detail::AppendReservable<T>) {
+            detail::reserve_for_append(t, text_size);
+        }
+
+        auto text = decode_text_payload(text_size);
+        if constexpr (IsConstView<T>) {
+            t = std::move(text);
+        } else {
+            append_definite_string(t, text);
+        }
         return status_code::success;
     }
 
@@ -336,7 +426,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        const auto length = decode_unsigned(additionalInfo);
+        return decode_definite_range(value, decode_unsigned(additionalInfo));
+    }
+
+    template <IsRangeOfCborValues T> constexpr status_code decode_definite_range(T &value, std::uint64_t length) {
         if constexpr (IsFixedArray<T>) {
             if (length != static_cast<std::uint64_t>(value.size())) {
                 return status_code::unexpected_group_size;
@@ -459,7 +552,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value) {
         auto &&tuple = to_tuple(value);
 
@@ -497,7 +590,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
@@ -509,14 +602,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, std::uint64_t tag) {
         auto &&tuple = to_tuple(value);
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
     template <typename T>
-        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T>
+        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T> && (!HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, std::uint64_t tag) {
         std::uint64_t class_tag;
         if constexpr (HasTagMember<T>) {
@@ -629,8 +722,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (additionalInfo == static_cast<byte>(31)) {
             return decode_indef_tstr(value);
         }
-        auto text = decode_text(additionalInfo);
-        value     = std::string(text);
+        return decode_definite_tstr(value, decode_unsigned(additionalInfo));
+    }
+
+    constexpr status_code decode_definite_tstr(std::string &value, std::uint64_t text_size) {
+        require_bytes(text_size);
+        if (string_target_aliases_input(value)) {
+            return status_code::error;
+        }
+        detail::reserve_for_append(value, text_size);
+        auto text = decode_text_payload(text_size);
+        append_definite_string(value, text);
         return status_code::success;
     }
 
@@ -644,7 +746,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo == static_cast<byte>(31)) {
                 return status_code::no_match_for_bstr_on_buffer;
             }
-            const auto length_u64 = decode_unsigned(additionalInfo);
+            return decode_definite_bstr(value, decode_unsigned(additionalInfo));
+        }
+    }
+
+    constexpr status_code decode_definite_bstr(std::basic_string_view<std::byte> &value, std::uint64_t length_u64) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
             if (length_u64 == 0) {
                 value = {};
                 return status_code::success;
@@ -678,7 +787,15 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (additionalInfo == static_cast<byte>(31)) {
                 return status_code::no_match_for_tstr_on_buffer;
             }
-            value = decode_text(additionalInfo);
+            return decode_definite_tstr(value, decode_unsigned(additionalInfo));
+        }
+    }
+
+    constexpr status_code decode_definite_tstr(std::string_view &value, std::uint64_t text_size) {
+        if constexpr (!IsContiguous<InputBuffer>) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        } else {
+            value = decode_text_payload(text_size);
             return status_code::success;
         }
     }
@@ -709,7 +826,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 #endif
     }
 
-    template <typename... T> constexpr status_code decode(std::variant<T...> &value, major_type major, byte additionalInfo) {
+    template <IsVariant Variant> constexpr status_code decode(Variant &value, major_type major, byte additionalInfo) {
         std::optional<std::uint64_t> tag;
         return decode_variant(value, major, additionalInfo, tag);
     }
@@ -718,15 +835,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::TextString) {
             return status_code::no_match_for_tstr_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
-        return detail::skip_sized_string_payload(reader_, data_, value.size);
+        return decode_definite_tstr(value, decode_unsigned(additionalInfo));
+    }
+    constexpr status_code decode_definite_tstr(as_text_any &value, std::uint64_t text_size) {
+        value.size = text_size;
+        return detail::skip_sized_string_payload(reader_, data_, text_size);
     }
     constexpr status_code decode(as_bstr_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
         }
-        value.size = decode_unsigned(additionalInfo);
-        return detail::skip_sized_string_payload(reader_, data_, value.size);
+        return decode_definite_bstr(value, decode_unsigned(additionalInfo));
+    }
+    constexpr status_code decode_definite_bstr(as_bstr_any &value, std::uint64_t bstring_size) {
+        value.size = bstring_size;
+        return detail::skip_sized_string_payload(reader_, data_, bstring_size);
     }
     constexpr status_code decode(as_array_any &value, major_type major, byte additionalInfo) {
         if (major != major_type::Array) {
@@ -823,7 +946,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C, bool DecodeTag = true>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode_class_impl(C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
@@ -849,18 +972,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         if constexpr (has_transcode) {
             auto result = Access::transcode(*this, value);
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         } else if constexpr (has_decode) {
             auto result = Access::decode(*this, value);
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         } else if constexpr (has_free_decode) {
             /* This requires an indirect call in order for some compilers to find the overload. */
             auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         } else if (has_free_transcode) {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
             auto result = transcode(*this, std::forward<C>(value));
-            return result ? status_code::success : result.error();
+            return result.has_value() ? status_code::success : result.error();
         }
 
         // throw std::runtime_error("This should never happen");
@@ -868,22 +991,49 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode(C &value) {
         return decode_class_impl<C, true>(value);
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode_without_tag(C &value) {
         return decode_class_impl<C, false>(value);
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C>)
+        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode(C &value, major_type, byte) {
         reader_.seek(-1);
         return this->decode(value);
+    }
+
+    template <typename C>
+        requires HasIncompatibleDecodingCustomization<self_t, C>
+    constexpr status_code decode(C &) {
+        static_assert(always_false<C>::value,
+                      "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
+        return status_code::error;
+    }
+
+    template <typename C>
+        requires HasIncompatibleDecodingCustomization<self_t, C>
+    constexpr status_code decode(C &, major_type, byte) {
+        static_assert(always_false<C>::value,
+                      "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
+        return status_code::error;
+    }
+
+    template <typename C>
+        requires HasIncompatibleDecodingCustomization<self_t, C>
+    constexpr status_code decode(C &, std::uint64_t) {
+        static_assert(always_false<C>::value,
+                      "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
+        return status_code::error;
     }
 
     template <typename T> constexpr status_code decode(T &value) {
@@ -892,6 +1042,155 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
         const auto [majorType, additionalInfo] = read_initial_byte();
         return decode(value, majorType, additionalInfo);
+    }
+
+    template <IsBinaryString T>
+    constexpr status_code decode_bounded_bstr(T &wrapped, major_type major, byte additionalInfo, std::size_t min, std::size_t max) {
+        if (major != major_type::ByteString) {
+            return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_bstr_on_buffer;
+            }
+            if constexpr (IsFixedArray<indefinite_value_t<T>>) {
+                return status_code::unexpected_group_size;
+            }
+            return decode_indef_bstr<true>(wrapped.value_, {.min_size = min, .max_size = max});
+        } else {
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsConstView<T>) {
+                    return status_code::no_match_for_bstr_on_buffer;
+                } else if constexpr (IsFixedArray<T>) {
+                    return status_code::unexpected_group_size;
+                } else if constexpr (std::ranges::range<T>) {
+                    return decode_indef_bstr<true>(wrapped, {.min_size = min, .max_size = max});
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status(size, min, max);
+            if (status != status_code::success) {
+                return status;
+            }
+            return decode_definite_bstr(wrapped, size);
+        }
+    }
+
+    template <IsTextString T>
+    constexpr status_code decode_bounded_tstr(T &wrapped, major_type major, byte additionalInfo, std::size_t min, std::size_t max) {
+        static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g tstr_view<std::deque<char>>");
+        if constexpr (IsConstView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        }
+        if (major != major_type::TextString) {
+            return status_code::no_match_for_tstr_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_tstr_on_buffer;
+            }
+            if constexpr (IsFixedArray<indefinite_value_t<T>>) {
+                return status_code::unexpected_group_size;
+            }
+            return decode_indef_tstr<true>(wrapped.value_, {.min_size = min, .max_size = max});
+        } else {
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsConstView<T>) {
+                    return status_code::no_match_for_tstr_on_buffer;
+                } else if constexpr (IsFixedArray<T>) {
+                    return status_code::unexpected_group_size;
+                } else if constexpr (std::ranges::range<T>) {
+                    return decode_indef_tstr<true>(wrapped, {.min_size = min, .max_size = max});
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status(size, min, max);
+            if (status != status_code::success) {
+                return status;
+            }
+            return decode_definite_tstr(wrapped, size);
+        }
+    }
+
+    template <IsArray T>
+    constexpr status_code decode_bounded_array(T &wrapped, major_type major, byte additionalInfo, std::size_t min, std::size_t max) {
+        if (major != major_type::Array) {
+            return status_code::no_match_for_array_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            if constexpr (IsFixedArray<indefinite_value_t<T>>) {
+                return status_code::unexpected_group_size;
+            }
+            return decode_indef_array<true>(wrapped.value_, {.min_size = min, .max_size = max});
+        } else {
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsFixedArray<T>) {
+                    return status_code::unexpected_group_size;
+                } else if constexpr (IsRangeOfCborValues<T>) {
+                    return decode_indef_array<true>(wrapped, {.min_size = min, .max_size = max});
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status(size, min, max);
+            if (status != status_code::success) {
+                return status;
+            }
+            if constexpr (IsArrayHeader<std::remove_cvref_t<T>>) {
+                wrapped.size = size;
+                return status_code::success;
+            } else {
+                return decode_definite_range(wrapped, size);
+            }
+        }
+    }
+
+    template <IsMap T>
+    constexpr status_code decode_bounded_map(T &wrapped, major_type major, byte additionalInfo, std::size_t min, std::size_t max) {
+        if (major != major_type::Map) {
+            return status_code::no_match_for_map_on_buffer;
+        }
+
+        if constexpr (IsIndefiniteWrapper<T>) {
+            if (additionalInfo != static_cast<byte>(31)) {
+                return status_code::no_match_for_map_on_buffer;
+            }
+            return decode_indef_map<true>(wrapped.value_, {.min_size = min, .max_size = max});
+        } else {
+            if (additionalInfo == static_cast<byte>(31)) {
+                if constexpr (IsRangeOfCborValues<T>) {
+                    return decode_indef_map<true>(wrapped, {.min_size = min, .max_size = max});
+                } else {
+                    return decode(wrapped, major, additionalInfo);
+                }
+            }
+
+            const auto size   = decode_unsigned(additionalInfo);
+            const auto status = detail::bounded_size_status(size, min, max);
+            if (status != status_code::success) {
+                return status;
+            }
+            if constexpr (IsMapHeader<std::remove_cvref_t<T>>) {
+                wrapped.size = size;
+                return status_code::success;
+            } else {
+                return decode_definite_range(wrapped, size);
+            }
+        }
     }
 
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
@@ -929,8 +1228,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    constexpr auto decode_text(byte additionalInfo) {
-        const auto length      = decode_unsigned(additionalInfo);
+    constexpr auto decode_text(byte additionalInfo) { return decode_text_payload(decode_unsigned(additionalInfo)); }
+
+    constexpr auto decode_text_payload(std::uint64_t length) {
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
@@ -951,8 +1251,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <typename T> constexpr status_code decode_indef_bstr(T &out) {
-        detail::appender<T> appender_;
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_bstr(T &out, decode_size_bounds bounds = {}) {
+        detail::appender<T>            appender_;
+        [[maybe_unused]] std::uint64_t size{};
         while (true) {
             const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
@@ -963,13 +1264,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             try {
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    return status_code::success;
+                    if constexpr (CheckBounds) {
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                    } else {
+                        return status_code::success;
+                    }
                 }
                 if (major != major_type::ByteString || additionalInfo == static_cast<byte>(31)) {
                     return status_code::no_match_for_bstr_on_buffer;
                 }
 
-                auto chunk = decode_bstring(additionalInfo);
+                const auto chunk_size = decode_unsigned(additionalInfo);
+                if constexpr (CheckBounds) {
+                    if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
+                        return status_code::size_limit_exceeded;
+                    }
+                }
+                auto chunk = decode_bstring_payload(chunk_size);
                 if constexpr (IsContiguous<decltype(chunk)>) {
                     appender_(out, chunk);
                 } else {
@@ -977,6 +1288,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                         appender_(out, static_cast<typename T::value_type>(b));
                     }
                 }
+                if constexpr (CheckBounds) {
+                    size += chunk_size;
+                }
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {
@@ -987,8 +1301,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <typename T> constexpr status_code decode_indef_tstr(T &out) {
-        detail::appender<T> appender_;
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_tstr(T &out, decode_size_bounds bounds = {}) {
+        detail::appender<T>            appender_;
+        [[maybe_unused]] std::uint64_t size{};
         while (true) {
             const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
@@ -999,13 +1314,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             try {
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    return status_code::success;
+                    if constexpr (CheckBounds) {
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                    } else {
+                        return status_code::success;
+                    }
                 }
                 if (major != major_type::TextString || additionalInfo == static_cast<byte>(31)) {
                     return status_code::no_match_for_tstr_on_buffer;
                 }
 
-                auto chunk = decode_text(additionalInfo);
+                const auto chunk_size = decode_unsigned(additionalInfo);
+                if constexpr (CheckBounds) {
+                    if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
+                        return status_code::size_limit_exceeded;
+                    }
+                }
+                auto chunk = decode_text_payload(chunk_size);
                 if constexpr (IsContiguous<decltype(chunk)>) {
                     appender_(out, chunk);
                 } else {
@@ -1013,6 +1338,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                         appender_(out, static_cast<typename T::value_type>(c));
                     }
                 }
+                if constexpr (CheckBounds) {
+                    size += chunk_size;
+                }
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {
@@ -1023,8 +1351,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <typename T> constexpr status_code decode_indef_array(T &value) {
-        detail::appender<T> appender_;
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_array(T &value, decode_size_bounds bounds = {}) {
+        detail::appender<T>            appender_;
+        [[maybe_unused]] std::uint64_t size{};
         while (true) {
             const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
@@ -1035,7 +1364,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             try {
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    return status_code::success;
+                    if constexpr (CheckBounds) {
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                    } else {
+                        return status_code::success;
+                    }
+                }
+                if constexpr (CheckBounds) {
+                    if (size == bounds.max_size) {
+                        return status_code::size_limit_exceeded;
+                    }
                 }
 
                 using value_type = typename T::value_type;
@@ -1045,6 +1383,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     return status;
                 }
                 appender_(value, std::move(result));
+                if constexpr (CheckBounds) {
+                    ++size;
+                }
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
                 if constexpr (!IsContiguous<InputBuffer>) {
@@ -1055,8 +1396,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <typename T> constexpr status_code decode_indef_map(T &value) {
-        detail::appender<T> appender_;
+    template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_map(T &value, decode_size_bounds bounds = {}) {
+        detail::appender<T>            appender_;
+        [[maybe_unused]] std::uint64_t size{};
         while (true) {
             const auto                 start_position = reader_.position_;
             [[maybe_unused]] size_type start_offset{};
@@ -1067,7 +1409,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             try {
                 auto [major, additionalInfo] = read_initial_byte();
                 if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    return status_code::success;
+                    if constexpr (CheckBounds) {
+                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                    } else {
+                        return status_code::success;
+                    }
+                }
+                if constexpr (CheckBounds) {
+                    if (size == bounds.max_size) {
+                        return status_code::size_limit_exceeded;
+                    }
                 }
 
                 using key_type    = typename T::key_type;
@@ -1090,6 +1441,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     }
                     value_type result{std::move(key), std::move(mapped_value)};
                     appender_(value, std::move(result));
+                    if constexpr (CheckBounds) {
+                        ++size;
+                    }
                 } else {
                     value_type result{};
                     auto       status = decode(result.first, major, additionalInfo);
@@ -1104,6 +1458,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                         return status;
                     }
                     appender_(value, std::move(result));
+                    if constexpr (CheckBounds) {
+                        ++size;
+                    }
                 }
             } catch (const parse_incomplete_exception &) {
                 reader_.position_ = start_position;
@@ -1268,6 +1625,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return collect_status.result;
     }
 
+    template <typename... T> constexpr expected_type decode_with_encoded_item_view(T &&...args) {
+        if (reader_.empty(data_)) {
+            return unexpected<status_code>(status_code::incomplete);
+        }
+
+        const auto start        = tell();
+        const auto start_offset = current_offset();
+
+        status_collector<self_t> collect_status{*this};
+        const auto               success = (collect_status(std::forward<T>(args)) && ...);
+        if (!success) {
+            return unexpected<decltype(collect_status.result)>(collect_status.result);
+        }
+
+        const auto            cursor = tell();
+        const auto            size   = current_offset() - start_offset;
+        raw_encoded_item_view encoded_item;
+        assign_encoded_view(encoded_item, start, cursor, size);
+        return expected_type{std::move(encoded_item)};
+    }
+
     constexpr auto tell() const noexcept {
         if constexpr (IsContiguous<InputBuffer>) {
             return /* Iterator */ std::ranges::begin(data_) + static_cast<std::ptrdiff_t>(reader_.position_);
@@ -1281,10 +1659,71 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    [[nodiscard]] constexpr size_type current_offset() const noexcept {
+        if constexpr (IsContiguous<InputBuffer>) {
+            return reader_.position_;
+        } else {
+            return reader_.current_offset_;
+        }
+    }
+
+    template <typename T> constexpr bool string_target_aliases_input(const T &target) const {
+        if constexpr (std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<InputBuffer>>) {
+            if (std::addressof(target) == std::addressof(data_)) {
+                return true;
+            }
+        }
+
+        if constexpr (std::ranges::contiguous_range<const T> && std::ranges::sized_range<const T> &&
+                      std::ranges::contiguous_range<const InputBuffer> && std::ranges::sized_range<const InputBuffer>) {
+            if (std::ranges::empty(target) || std::ranges::empty(data_) || std::is_constant_evaluated()) {
+                return false;
+            }
+
+            const auto *target_data = std::ranges::data(target);
+            const auto *input_data  = std::ranges::data(data_);
+            const auto *target_end  = target_data + std::ranges::size(target);
+            const auto *input_end   = input_data + std::ranges::size(data_);
+
+            const auto before = std::less<const void *>{};
+            return before(input_data, target_end) && before(target_data, input_end);
+        }
+
+        return false;
+    }
+
+    template <typename T, std::ranges::input_range R> constexpr void append_definite_string(T &target, R &&payload) {
+        detail::appender<T> append;
+        if constexpr (detail::AppendReservable<T>) {
+            detail::append_byte_range(append, target, std::forward<R>(payload));
+        } else {
+            static_assert(
+                requires(T &value) { value.pop_back(); }, "non-reservable string targets must support pop_back for failure rollback");
+
+            std::size_t appended = 0;
+            try {
+                for (auto &&value : payload) {
+                    append(target, static_cast<typename T::value_type>(value));
+                    ++appended;
+                }
+            } catch (...) {
+                while (appended != 0) {
+                    target.pop_back();
+                    --appended;
+                }
+                throw;
+            }
+        }
+    }
+
+    // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
                                          std::optional<std::uint64_t> &tag) {
         using namespace detail;
+        static_assert(
+            (!IsDynamicBoundedSizeWrapper<T> && ...),
+            "dynamic_bounded_size cannot be decoded as a variant alternative because variant decoding creates a new unconfigured value");
         static_assert((IsCborMajor<T> && ...),
                       "All types must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the variant.");
 
@@ -1336,8 +1775,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (major == major_type::Tag && result != status_code::no_match_for_tag &&
-                       result != status_code::no_match_for_tag_on_buffer && result != status_code::no_match_in_variant_on_buffer) {
+            } else if (!detail::is_retriable_variant_mismatch(result)) {
                 hard_error = result;
                 return false;
             } else {
@@ -1353,6 +1791,99 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         } else {
             found = (try_decode.template operator()<false, T>() || ...);
+        }
+        if (!found) {
+            if (hard_error != status_code::success) {
+                return hard_error;
+            }
+            if (saw_incomplete) {
+                return status_code::incomplete;
+            }
+            return status_code::no_match_in_variant_on_buffer;
+        }
+        return status_code::success;
+    }
+
+    template <IsVariant Variant>
+    constexpr status_code decode_variant(Variant &value, major_type major, byte additionalInfo, std::optional<std::uint64_t> &tag) {
+        using namespace detail;
+        using variant_type = std::remove_cvref_t<Variant>;
+
+        static_assert(
+            detail::with_variant_alternatives<variant_type>([]<typename... Alternatives>() { return (IsCborMajor<Alternatives> && ...); }),
+            "All variant alternatives must be CBOR major types, most likely you have a struct or class without a \"cbor_tag\" in the "
+            "variant.");
+
+        // TODO: Remove this requirement
+        static_assert(
+            detail::with_variant_alternatives<variant_type>(
+                []<typename... Alternatives>() { return (std::is_default_constructible_v<Alternatives> && ...); }),
+            "All variant alternatives must be default constructible. Because in order to decode into the type, each alternative must be "
+            "default constructed first.");
+
+        // Check ambiguous types in the variant.
+        require_unambiguous_variant_dispatch<variant_type>();
+        // TODO: Revisit variant validity as a separate check from dispatch ambiguity.
+        // Do not restore this as an unmatched-only guard; it misses invalid nested containers
+        // and can drift from IsCborMajor/decoder overload truth.
+        // static_assert(matching_major_types[MajorIndex::Unmatched] == 0, "Unmatched major types in variant");
+
+        bool        saw_incomplete = false;
+        status_code hard_error     = status_code::success;
+
+        auto try_decode = [this, major, additionalInfo, &value, &tag, &saw_incomplete,
+                           &hard_error]<bool CatchAllPass, std::size_t I>() -> bool {
+            using raw_type = detail::variant_alternative_t<I, variant_type>;
+            if (hard_error != status_code::success) {
+                return false;
+            }
+            if (!matches_major_dispatch<raw_type>(major)) {
+                return false;
+            }
+
+            if (major == major_type::Simple && !detail::matches_simple_dispatch<CatchAllPass, raw_type>(additionalInfo)) {
+                return false;
+            }
+
+            raw_type    decoded_value;
+            status_code result;
+            if constexpr (IsVariant<raw_type>) {
+                result = this->decode_variant(decoded_value, major, additionalInfo, tag);
+            } else if constexpr (IsTag<raw_type>) {
+                if (!tag) {
+                    tag = decode_unsigned(additionalInfo);
+                }
+                result = this->decode(decoded_value, *tag);
+            } else {
+                result = this->decode(decoded_value, major, additionalInfo);
+            }
+
+            if (result == status_code::success) {
+                detail::variant_assign<I>(value, std::move(decoded_value));
+                return true;
+            } else if (result == status_code::incomplete) {
+                saw_incomplete = true;
+                return false;
+            } else if (!detail::is_retriable_variant_mismatch(result)) {
+                hard_error = result;
+                return false;
+            } else {
+                return false;
+            }
+        };
+
+        auto try_decode_alternatives = [&]<bool CatchAllPass, std::size_t... Is>(std::index_sequence<Is...>) {
+            return (try_decode.template operator()<CatchAllPass, Is>() || ...);
+        };
+
+        bool found = false;
+        if (major == major_type::Simple) {
+            found = try_decode_alternatives.template operator()<false>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
+            if (!found) {
+                found = try_decode_alternatives.template operator()<true>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
+            }
+        } else {
+            found = try_decode_alternatives.template operator()<false>(std::make_index_sequence<detail::variant_size_v<variant_type>>{});
         }
         if (!found) {
             if (hard_error != status_code::success) {

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 project(tests VERSION 1.0.0)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
@@ -28,6 +28,10 @@ target_link_libraries(tests PUBLIC test_util)
 
 # add link libraries
 target_link_libraries(tests PRIVATE cbor::tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
+if(TARGET cbor_tags_cwt_openssl)
+  target_link_libraries(tests PRIVATE cbor::cwt_openssl)
+  target_compile_definitions(tests PRIVATE CBOR_TAGS_TEST_HAS_CWT_OPENSSL=1)
+endif()
 
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
@@ -49,6 +53,82 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+function(add_dynamic_bounded_size_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_cddl_compile_fails
+  dynamic_bounded_size_cddl_compile_fail.cc
+  "dynamic_bounded_size cannot be represented by type-based CDDL")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_variant_decode_compile_fails
+  dynamic_bounded_size_variant_decode_compile_fail.cc
+  "dynamic_bounded_size cannot be decoded as a variant alternative")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_optional_decode_compile_fails
+  dynamic_bounded_size_optional_decode_compile_fail.cc
+  "generic optional decoding cannot create its bounds")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_container_decode_compile_fails
+  dynamic_bounded_size_container_decode_compile_fail.cc
+  "generic container decoding cannot create its bounds")
+add_dynamic_bounded_size_compile_fail_test(
+  dynamic_bounded_size_nested_compile_fails
+  dynamic_bounded_size_nested_compile_fail.cc
+  "bounded size wrappers cannot directly contain another bounded size wrapper")
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  add_dynamic_bounded_size_compile_fail_test(
+    typed_array_static_bounds_compile_fails
+    typed_array_static_bounds_compile_fail.cc
+    "bounded_size typed-array maximum byte size overflows uint64_t")
+endif()
+
+function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_member_encode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_MEMBER_ENCODE
+  "custom encode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_member_decode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_MEMBER_DECODE
+  "custom decode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_free_encode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_FREE_ENCODE
+  "custom encode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_free_decode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_FREE_DECODE
+  "custom decode/transcode must return a result")
+
 add_executable(cddl_variant_nullable_pointer_compile_fails EXCLUDE_FROM_ALL cddl_variant_nullable_pointer_compile_fail.cc)
 target_link_libraries(cddl_variant_nullable_pointer_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
@@ -58,7 +138,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nullable_pointer_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives containing nullable smart pointers is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -71,7 +151,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_shared_graph_variant_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -84,7 +164,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_shared_graph_variant_array_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives containing nullable smart pointers and array-shaped alternatives is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -110,35 +190,35 @@ add_cddl_shared_graph_compile_fail_test(
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_tag29_compile_fails
   cddl_shared_graph_variant_tag29_compile_fail.cc
-  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_any_tag_compile_fails
   cddl_shared_graph_variant_any_tag_compile_fail.cc
-  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_nested_any_tag_compile_fails
   cddl_shared_graph_variant_nested_any_tag_compile_fail.cc
-  "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
+  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_multiple_pointers_compile_fails
   cddl_shared_graph_variant_multiple_pointers_compile_fail.cc
-  "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing multiple nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_optional_pointer_compile_fails
   cddl_shared_graph_variant_optional_pointer_compile_fail.cc
-  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_nested_pointer_compile_fails
   cddl_shared_graph_variant_nested_pointer_compile_fail.cc
-  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_map_pointer_compile_fails
   cddl_shared_graph_variant_map_pointer_compile_fail.cc
-  "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported")
+  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
 add_cddl_shared_graph_compile_fail_test(
   cddl_shared_graph_variant_vector_array_compile_fails
   cddl_shared_graph_variant_vector_array_compile_fail.cc
-  "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
+  "CDDL for variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
 
 add_executable(cddl_variant_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_duplicate_tags_compile_fail.cc)
 target_link_libraries(cddl_variant_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
@@ -149,7 +229,33 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(cddl_variant_traits_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_traits_duplicate_tags_compile_fail.cc)
+target_link_libraries(cddl_variant_traits_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
+add_test(
+  NAME cddl_variant_traits_duplicate_tags_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_variant_traits_duplicate_tags_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(variant_traits_throwing_index_compile_fails EXCLUDE_FROM_ALL variant_traits_throwing_index_compile_fail.cc)
+target_link_libraries(variant_traits_throwing_index_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME variant_traits_throwing_index_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=variant_traits_throwing_index_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=variant_traits::index must be declared noexcept"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -162,7 +268,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_ref_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -175,7 +281,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nested_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -188,7 +294,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_structural_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -201,7 +307,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_nested_any_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -214,7 +320,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_optional_duplicate_tags_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -227,7 +333,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_any_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -240,7 +346,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_static_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -253,7 +359,7 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=cddl_variant_dynamic_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for std::variant alternatives with dynamic CBOR tags is unsupported"
+    "-DPASS_REGEX=CDDL for variant alternatives with dynamic CBOR tags is unsupported"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -317,6 +423,29 @@ endfunction()
 add_typed_array_variant_compile_fail_test(typed_array_variant_static_tag_compile_fails typed_array_variant_static_tag_compile_fail.cc)
 add_typed_array_variant_compile_fail_test(typed_array_variant_any_tag_compile_fails typed_array_variant_any_tag_compile_fail.cc)
 add_typed_array_variant_compile_fail_test(typed_array_variant_duplicate_tag_compile_fails typed_array_variant_duplicate_tag_compile_fail.cc)
+
+function(add_bounded_fixed_string_compile_fail_test TEST_NAME COMPILE_DEFINITION)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL cddl_bounded_fixed_string_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=bounded_size fixed string extent must be inside the configured CDDL size bounds"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_bounded_fixed_string_compile_fail_test(
+  cddl_bounded_fixed_byte_array_compile_fails
+  CBOR_TAGS_BOUNDED_FIXED_BYTE_ARRAY)
+add_bounded_fixed_string_compile_fail_test(
+  cddl_bounded_fixed_text_span_compile_fails
+  CBOR_TAGS_BOUNDED_FIXED_TEXT_SPAN)
 
 if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
   function(add_named_map_duplicate_keys_compile_fail_test TEST_NAME COMPILE_DEFINITION)

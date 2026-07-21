@@ -31,6 +31,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/float16_ieee754.h"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -71,7 +72,8 @@ enum class status_code : uint8_t {
     no_match_for_simple_on_buffer,
     no_match_for_optional_on_buffer,
     no_match_in_variant_on_buffer,
-    end_no_match_decoding
+    end_no_match_decoding,
+    size_limit_exceeded
 };
 
 template <typename Self> struct cbor_encoder_mixin_base {
@@ -114,6 +116,7 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::no_match_for_optional_on_buffer: return "Unexpected CBOR format: optional value decode failed";
     case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";
     case status_code::end_no_match_decoding: return "Unexpected error at end of CBOR decoding: invalid terminal state";
+    case status_code::size_limit_exceeded: return "CBOR item size limit exceeded";
     default: return "Unknown CBOR status code";
     }
 }
@@ -124,10 +127,10 @@ template <typename T> struct Option {
 };
 
 #if CBOR_TAGS_USE_STD_EXPECTED
-template <typename T, typename E> using expected = std::expected<T, status_code>;
+template <typename T, typename E> using expected = std::expected<T, E>;
 template <typename E> using unexpected           = std::unexpected<E>;
 #else
-template <typename T, typename E> using expected = tl::expected<T, status_code>;
+template <typename T, typename E> using expected = tl::expected<T, E>;
 template <typename E> using unexpected           = tl::unexpected<E>;
 #endif
 using default_expected = Option<expected<void, status_code>>;
@@ -135,14 +138,147 @@ using default_expected = Option<expected<void, status_code>>;
 namespace detail {
 struct wrap_groups {};
 struct strict_integer_decode {};
+struct return_encoded_item_view {};
 }; // namespace detail
 
-using default_wrapping        = Option<detail::wrap_groups>;
-using strict_integer_decoding = Option<detail::strict_integer_decode>;
+using default_wrapping         = Option<detail::wrap_groups>;
+using strict_integer_decoding  = Option<detail::strict_integer_decode>;
+using return_encoded_item_view = Option<detail::return_encoded_item_view>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
 };
+
+template <typename T, std::size_t Min, std::size_t Max> struct bounded_size {
+    static_assert(Min <= Max, "bounded_size<T, Min, Max> requires Min <= Max");
+    static_assert(!IsAnyBoundedSizeWrapper<T>, "bounded size wrappers cannot directly contain another bounded size wrapper");
+
+    using value_type = std::remove_reference_t<T>;
+
+    static constexpr std::size_t min_size = Min;
+    static constexpr std::size_t max_size = Max;
+
+    T value_{};
+
+    constexpr bounded_size()
+        requires(!std::is_reference_v<T> && std::default_initializable<T>)
+    = default;
+
+    constexpr explicit bounded_size(const value_type &value)
+        requires(!std::is_reference_v<T> && std::copy_constructible<value_type>)
+        : value_(value) {}
+
+    constexpr explicit bounded_size(value_type &&value)
+        requires(!std::is_reference_v<T> && std::move_constructible<value_type>)
+        : value_(std::move(value)) {}
+
+    constexpr explicit bounded_size(value_type &value)
+        requires(std::is_lvalue_reference_v<T>)
+        : value_(value) {}
+
+    [[nodiscard]] constexpr decltype(auto) value() & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() const & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+    [[nodiscard]] constexpr decltype(auto) value() const && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+};
+
+template <typename T> struct dynamic_bounded_size {
+    static_assert(!IsAnyBoundedSizeWrapper<T>, "bounded size wrappers cannot directly contain another bounded size wrapper");
+
+    using value_type = std::remove_reference_t<T>;
+
+  private:
+    [[nodiscard]] static constexpr std::size_t checked_max(std::size_t min, std::size_t max) {
+        if (min > max) {
+            throw std::invalid_argument("dynamic_bounded_size<T> requires min <= max");
+        }
+        return max;
+    }
+
+    std::size_t min_size_;
+    std::size_t max_size_;
+
+  public:
+    T value_;
+
+    constexpr explicit dynamic_bounded_size(const value_type &value, std::size_t min, std::size_t max)
+        requires(!std::is_reference_v<T> && std::copy_constructible<value_type>)
+        : min_size_(min), max_size_(checked_max(min, max)), value_(value) {}
+
+    constexpr explicit dynamic_bounded_size(value_type &&value, std::size_t min, std::size_t max)
+        requires(!std::is_reference_v<T> && std::move_constructible<value_type>)
+        : min_size_(min), max_size_(checked_max(min, max)), value_(std::move(value)) {}
+
+    constexpr explicit dynamic_bounded_size(value_type &value, std::size_t min, std::size_t max)
+        requires(std::is_lvalue_reference_v<T>)
+        : min_size_(min), max_size_(checked_max(min, max)), value_(value) {}
+
+    [[nodiscard]] constexpr std::size_t min_size() const noexcept { return min_size_; }
+    [[nodiscard]] constexpr std::size_t max_size() const noexcept { return max_size_; }
+
+    [[nodiscard]] constexpr decltype(auto) value() & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() const & noexcept { return (value_); }
+    [[nodiscard]] constexpr decltype(auto) value() && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+    [[nodiscard]] constexpr decltype(auto) value() const && noexcept {
+        if constexpr (std::is_reference_v<T>) {
+            return (value_);
+        } else {
+            return std::move(value_);
+        }
+    }
+};
+
+template <typename T, std::size_t Max> using max_size = bounded_size<T, 0, Max>;
+template <typename T, std::size_t N> using exact_size = bounded_size<T, N, N>;
+
+namespace detail {
+
+template <typename T> [[nodiscard]] constexpr decltype(auto) unwrap_bounded_size(T &&value) {
+    if constexpr (IsAnyBoundedSizeWrapper<T>) {
+        return unwrap_bounded_size(std::forward<T>(value).value());
+    } else {
+        return std::forward<T>(value);
+    }
+}
+
+template <typename T> using bounded_stored_type_t = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::remove_cvref_t<T>>;
+
+[[nodiscard]] constexpr status_code bounded_size_status(std::uint64_t size, std::size_t min, std::size_t max) noexcept {
+    return size >= static_cast<std::uint64_t>(min) && size <= static_cast<std::uint64_t>(max) ? status_code::success
+                                                                                              : status_code::size_limit_exceeded;
+}
+
+} // namespace detail
+
+template <std::size_t Min, std::size_t Max, typename T> [[nodiscard]] constexpr auto as_bounded_size(T &&value) {
+    auto &&unwrapped  = detail::unwrap_bounded_size(std::forward<T>(value));
+    using stored_type = detail::bounded_stored_type_t<decltype(unwrapped)>;
+    return bounded_size<stored_type, Min, Max>{std::forward<decltype(unwrapped)>(unwrapped)};
+}
+
+template <typename T> [[nodiscard]] constexpr auto as_bounded_size(T &&value, std::size_t min, std::size_t max) {
+    auto &&unwrapped  = detail::unwrap_bounded_size(std::forward<T>(value));
+    using stored_type = detail::bounded_stored_type_t<decltype(unwrapped)>;
+    return dynamic_bounded_size<stored_type>{std::forward<decltype(unwrapped)>(unwrapped), min, max};
+}
 
 template <typename... T> struct ReturnTypeHelper {
     static auto get_return_type() {
@@ -166,12 +302,38 @@ template <typename... T> struct Options {
     static constexpr bool wrap_groups = contains<default_wrapping, T...>();
     // When true, decoding a CBOR integer into a narrower native integer target rejects instead of slicing.
     static constexpr bool strict_integer_decode = contains<strict_integer_decoding, T...>();
+    // When true, decoder call operators return a borrowed view of the exact encoded item on success.
+    static constexpr bool return_encoded_item_view = contains<::cbor::tags::return_encoded_item_view, T...>();
 
     constexpr Options() = default;
 };
 
-using default_options                = Options<default_expected, default_wrapping>;
-using strict_integer_decoder_options = Options<default_expected, default_wrapping, strict_integer_decoding>;
+using default_options                   = Options<default_expected, default_wrapping>;
+using strict_integer_decoder_options    = Options<default_expected, default_wrapping, strict_integer_decoding>;
+using encoded_item_view_decoder_options = Options<default_expected, default_wrapping, return_encoded_item_view>;
+
+namespace detail {
+template <typename T>
+concept HasReturnEncodedItemViewOption = requires {
+    { T::return_encoded_item_view } -> std::convertible_to<bool>;
+};
+
+template <typename T, bool HasOption = HasReturnEncodedItemViewOption<T>> struct return_encoded_item_view_option : std::false_type {};
+
+template <typename T>
+struct return_encoded_item_view_option<T, true> : std::bool_constant<static_cast<bool>(T::return_encoded_item_view)> {};
+
+template <typename T> inline constexpr bool return_encoded_item_view_option_v = return_encoded_item_view_option<T>::value;
+
+template <typename Options, typename InputBuffer, bool ReturnEncodedItemView = return_encoded_item_view_option_v<Options>>
+struct decoder_return_type {
+    using type = typename Options::return_type;
+};
+
+template <typename Options, typename InputBuffer> struct decoder_return_type<Options, InputBuffer, true> {
+    using type = expected<encoded_item_view_for<InputBuffer>, status_code>;
+};
+} // namespace detail
 // ---------
 
 struct binary_array_view {

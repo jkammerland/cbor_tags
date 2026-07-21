@@ -973,9 +973,23 @@ struct struct2 {
 
 // Also works
 template <typename T> constexpr auto transcode([[maybe_unused]] T &transcoder, [[maybe_unused]] struct2 &&obj) {
-    return expected<void, int>{};
+    return expected<void, status_code>{};
 }
 template <typename T> constexpr auto encode([[maybe_unused]] T &encoder, [[maybe_unused]] const struct1 &obj) {
+    return expected<void, status_code>{};
+}
+
+struct incompatible_free_codec {};
+
+template <typename T> constexpr auto transcode([[maybe_unused]] T &transcoder, [[maybe_unused]] incompatible_free_codec &&obj) {
+    return expected<void, int>{};
+}
+
+template <typename T> constexpr auto encode([[maybe_unused]] T &encoder, [[maybe_unused]] const incompatible_free_codec &obj) {
+    return expected<void, int>{};
+}
+
+template <typename T> constexpr auto decode([[maybe_unused]] T &decoder, [[maybe_unused]] incompatible_free_codec &&obj) {
     return expected<void, int>{};
 }
 
@@ -987,6 +1001,14 @@ TEST_SUITE("Classes") {
     struct class1 {
         class1() = default;
 
+      private:
+        friend cbor::tags::Access;
+        template <typename T> constexpr auto transcode([[maybe_unused]] T &transcoder) { return expected<void, status_code>{}; }
+        template <typename T> constexpr auto encode([[maybe_unused]] T &encoder) { return expected<void, status_code>{}; }
+        template <typename T> constexpr auto decode([[maybe_unused]] T &decoder) { return expected<void, status_code>{}; }
+    };
+
+    struct incompatible_member_codec {
       private:
         friend cbor::tags::Access;
         template <typename T> constexpr auto transcode([[maybe_unused]] T &transcoder) { return expected<void, int>{}; }
@@ -1005,6 +1027,16 @@ TEST_SUITE("Classes") {
         static_assert(HasTranscodeFreeFunction<decltype(encoder), struct2>);
 
         static_assert(HasEncodeFreeFunction<decltype(encoder), struct1>);
+        static_assert(!HasTranscodeFreeFunction<decltype(encoder), incompatible_free_codec>);
+        static_assert(!HasEncodeFreeFunction<decltype(encoder), incompatible_free_codec>);
+        static_assert(!HasDecodeFreeFunction<decltype(decoder), incompatible_free_codec>);
+        static_assert(HasRawTranscodeFreeFunction<decltype(encoder), incompatible_free_codec>);
+        static_assert(HasRawEncodeFreeFunction<decltype(encoder), incompatible_free_codec>);
+        static_assert(HasRawDecodeFreeFunction<decltype(decoder), incompatible_free_codec>);
+        static_assert(HasIncompatibleEncodingCustomization<decltype(encoder), incompatible_free_codec>);
+        static_assert(HasIncompatibleDecodingCustomization<decltype(decoder), incompatible_free_codec>);
+        static_assert(!HasIncompatibleEncodingCustomization<decltype(encoder), decltype(encoder)>);
+        static_assert(!HasIncompatibleDecodingCustomization<decltype(decoder), decltype(decoder)>);
     }
 
     TEST_CASE("IsClass") {
@@ -1035,6 +1067,14 @@ TEST_SUITE("Classes") {
         static_assert(!HasTranscodeMethod<decltype(encoder), struct1>);
         static_assert(HasEncodeFreeFunction<decltype(encoder), struct1>);
         static_assert(!HasDecodeMethod<decltype(decoder), struct1>); // Should not work, returns void
+        static_assert(!HasTranscodeMethod<decltype(encoder), incompatible_member_codec>);
+        static_assert(!HasEncodeMethod<decltype(encoder), incompatible_member_codec>);
+        static_assert(!HasDecodeMethod<decltype(decoder), incompatible_member_codec>);
+        static_assert(HasRawTranscodeMethod<decltype(encoder), incompatible_member_codec>);
+        static_assert(HasRawEncodeMethod<decltype(encoder), incompatible_member_codec>);
+        static_assert(HasRawDecodeMethod<decltype(decoder), incompatible_member_codec>);
+        static_assert(HasIncompatibleEncodingCustomization<decltype(encoder), incompatible_member_codec>);
+        static_assert(HasIncompatibleDecodingCustomization<decltype(decoder), incompatible_member_codec>);
     }
 
     struct TrulyTagged0 {

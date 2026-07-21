@@ -416,9 +416,11 @@ TEST_CASE("Test std::greater in std::map<variant,...>") {
     CHECK_EQ(hex1.size(), hex2.size());
 }
 
-TEST_CASE("Unordered maps") {
-    std::unordered_map<variant, variant, variant_hasher> string_map = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
-                                                                       {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+TEST_CASE("unordered maps use standard variant hashing and roundtrip") {
+    using map_t = std::unordered_map<variant, variant>;
+    static_assert(std::is_same_v<typename map_t::hasher, std::hash<variant>>);
+
+    map_t string_map = {{"c", true}, {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}}, {"ab", 5.0f}, {1, 3.0}, {-1, 3.0}};
 
     std::vector<std::byte> data;
     auto                   enc = make_encoder(data);
@@ -428,7 +430,7 @@ TEST_CASE("Unordered maps") {
 
     CBOR_TAGS_TEST_LOG("Unordered map: {}\n", to_hex(data));
 
-    std::unordered_map<variant, variant, variant_hasher> map_result;
+    map_t map_result;
     CHECK(dec(map_result));
 
     CHECK_EQ(map_result.size(), string_map.size());
@@ -436,10 +438,10 @@ TEST_CASE("Unordered maps") {
 }
 
 TEST_CASE("Sanity check equal size map unordered_map") {
-    std::unordered_map<variant, variant, variant_hasher> string_map1 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
-                                                                        {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
-    std::map<variant, variant, variant_comparator<>>     string_map2 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
-                                                                        {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+    std::unordered_map<variant, variant>             string_map1 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+                                                                    {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
+    std::map<variant, variant, variant_comparator<>> string_map2 = {{"c", true},  {"ac", false}, {"b", 3.0}, {"a", std::nullptr_t{}},
+                                                                    {"ab", 5.0f}, {1, 3.0},      {-1, 3.0}};
     CHECK_EQ(string_map1.size(), string_map2.size());
 }
 

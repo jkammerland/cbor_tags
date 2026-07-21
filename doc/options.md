@@ -57,6 +57,59 @@ if (!result) {
 Decode to `integer`, `positive`, or `negative` when the full CBOR integer
 domain matters.
 
+### Wire-domain integer values
+
+`negative` and `integer` preserve values that do not fit any native signed
+integer. Their `value` member is a magnitude: `negative{1}` represents `-1`,
+and `negative{std::numeric_limits<std::uint64_t>::max()}` represents
+`-18446744073709551615`. `negative{0}` is the sentinel for the remaining CBOR
+value, `-18446744073709551616` (`-2^64`):
+
+```cpp
+negative minus_one{1};
+negative cbor_min{0};
+integer  either_sign = cbor_min;
+
+assert(cbor_min < minus_one);
+```
+
+These types support construction, equality, ordering, encoding, and decoding.
+They intentionally do not provide arithmetic because the `negative{0}`
+sentinel has no native unsigned magnitude and arithmetic could silently wrap.
+Convert a non-sentinel value to an application numeric type only after checking
+that the destination can represent it. `positive` remains an alias for
+`std::uint64_t`.
+
+## Return Encoded Item Views
+
+Use `encoded_item_view_decoder_options` when a successful decode should also
+return the exact input bytes consumed by that decoder call.
+
+```cpp
+auto dec = make_decoder_with_options<encoded_item_view_decoder_options>(buffer);
+
+Claims claims{};
+auto encoded = dec(claims);
+if (!encoded) {
+    auto status = encoded.error();
+}
+```
+
+The typed value is still supplied as an output argument. The success value is
+`decltype(dec)::raw_encoded_item_view`, a borrowed view into the decoder input.
+Keep the input buffer alive and unchanged while using it.
+
+The returned range follows the decode expression rather than independently
+validating one complete CBOR item. A variadic call returns the range consumed by
+all its arguments. A call that intentionally decodes only a tag or container
+header returns that consumed prefix. Typed decoding remains single-pass and
+does not pre-scan the input to find a structural item boundary.
+
+Decoding directly into `raw_encoded_item_view`, `raw_encoded_array_view`, or
+`raw_encoded_map_view` is different: no destination type drives consumption, so
+the decoder structurally parses one complete item to locate the end of the raw
+view.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped

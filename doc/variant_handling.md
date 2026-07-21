@@ -23,6 +23,89 @@ Alternative shapes must still be unambiguous. A variant with two alternatives
 that both match the same tag or the same catch-all shape is rejected at compile
 time where the type system exposes that collision.
 
+## Non-Std Variants
+
+Only `std::variant` is recognized automatically. Other union types must opt in
+with `cbor::tags::variant_traits`; structural `index()`/`visit()` lookalikes are
+not treated as variants by default. Without the specialization, normal overload
+resolution applies, so an aggregate wrapper may encode as an aggregate.
+
+```cpp
+#include <boost/variant2/variant.hpp>
+
+template <class... Ts>
+struct cbor::tags::variant_traits<boost::variant2::variant<Ts...>> {
+    using variant_type = boost::variant2::variant<Ts...>;
+
+    static constexpr std::size_t size =
+        boost::variant2::variant_size_v<variant_type>;
+
+    template <std::size_t I>
+    using alternative =
+        boost::variant2::variant_alternative_t<I, variant_type>;
+
+    static std::size_t index(variant_type const& value) noexcept {
+        return value.index();
+    }
+
+    template <std::size_t I, class V>
+    static decltype(auto) get(V&& value) {
+        return boost::variant2::get<I>(std::forward<V>(value));
+    }
+
+    template <class Visitor, class... Vs>
+    static decltype(auto) visit(Visitor&& visitor, Vs&&... values) {
+        return boost::variant2::visit(std::forward<Visitor>(visitor),
+                                      std::forward<Vs>(values)...);
+    }
+
+    template <std::size_t I, class U>
+    static void assign(variant_type& value, U&& decoded) {
+        value.template emplace<I>(std::forward<U>(decoded));
+    }
+};
+```
+
+`index` must be declared `noexcept`. It only reads the active-alternative
+discriminator; types that can fail while determining their active member should
+use an ordinary `encode`/`decode` overload instead of `variant_traits`.
+
+`visit` must support both single-variant and multi-variant calls because
+encoding uses the former and comparison helpers use the latter.
+
+For raw `union` storage with a domain-specific discriminator, prefer an ADL
+`encode`/`decode` overload unless the type can honestly expose the same
+`index`/`get`/`visit`/`assign` operations as a variant.
+
+## Hashing And Migration
+
+`variant_hasher` has been removed. Replace it with the standard variant hasher
+when every alternative is itself hashable:
+
+```cpp
+using key = std::variant<int, std::string>;
+std::unordered_map<key, int> values;
+```
+
+`std::hash<std::variant<T...>>` is enabled only when `std::hash<T>` is enabled
+for every alternative. A variant containing `std::vector`, `std::map`, or
+another non-hashable type therefore still needs an application-specific hasher:
+
+```cpp
+using key = std::variant<int, std::vector<int>>;
+
+struct key_hash {
+    std::size_t operator()(const key &value) const noexcept;
+};
+
+std::unordered_map<key, int, key_hash> values;
+```
+
+This is a source-breaking migration for code that named `variant_hasher`. The
+old helper is not retained as a compatibility alias because its range and map
+branches delegated to unavailable `std::hash` specializations and did not
+provide the recursive hashing its interface implied.
+
 ## Compile-Time Dispatch
 
 Below is "pseudo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows how you can optimize away unused code paths with `if constexpr`; in this case the code paths are constrained by the variant type.

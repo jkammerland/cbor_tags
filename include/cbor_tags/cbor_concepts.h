@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/detail/cbor_range_concepts.h"
+#include "cbor_tags/detail/cbor_variant_traits.h"
 
 #include <array>
 #include <concepts>
@@ -9,12 +10,15 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
 
 namespace cbor::tags {
+
+enum class status_code : std::uint8_t;
 
 enum class major_type : std::uint8_t {
     UnsignedInteger = 0,
@@ -47,6 +51,12 @@ template <typename T> struct strict_integer_decode_option<T, true> : std::bool_c
 
 template <typename T> inline constexpr bool strict_integer_decode_option_v = strict_integer_decode_option<T>::value;
 
+template <typename T>
+concept CodecStatusResult = requires(T result) {
+    { result.has_value() } -> std::convertible_to<bool>;
+    { result.error() } -> std::convertible_to<status_code>;
+};
+
 } // namespace detail
 
 template <typename T>
@@ -71,18 +81,27 @@ template <typename T> constexpr auto cbor_tag() {
 
 // Free function variants of coding functions
 template <typename T, typename Class>
-concept HasTranscodeFreeFunction = requires(T t, Class c) {
-    { transcode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+concept HasRawTranscodeFreeFunction = requires(T t, Class c) { transcode(t, std::forward<Class>(c)); };
+
+template <typename T, typename Class>
+concept HasRawEncodeFreeFunction = requires(T t, Class c) { encode(t, std::forward<Class>(c)); };
+
+template <typename T, typename Class>
+concept HasRawDecodeFreeFunction = requires(T t, Class c) { decode(t, std::forward<Class>(c)); };
+
+template <typename T, typename Class>
+concept HasTranscodeFreeFunction = HasRawTranscodeFreeFunction<T, Class> && requires(T t, Class c) {
+    { transcode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
-concept HasEncodeFreeFunction = requires(T t, Class c) {
-    { encode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+concept HasEncodeFreeFunction = HasRawEncodeFreeFunction<T, Class> && requires(T t, Class c) {
+    { encode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
-concept HasDecodeFreeFunction = requires(T t, Class c) {
-    { decode(t, std::forward<Class>(c)).has_value() } -> std::convertible_to<bool>;
+concept HasDecodeFreeFunction = HasRawDecodeFreeFunction<T, Class> && requires(T t, Class c) {
+    { decode(t, std::forward<Class>(c)) } -> detail::CodecStatusResult;
 };
 
 template <typename T>
@@ -101,6 +120,8 @@ template <typename T> struct as_indefinite;
 template <typename T> struct as_named_map;
 template <typename T> struct as_named_group;
 template <typename T> struct as_named_extension;
+template <typename T, std::size_t Min, std::size_t Max> struct bounded_size;
+template <typename T> struct dynamic_bounded_size;
 
 struct as_text_any {
     std::uint64_t size;
@@ -193,7 +214,17 @@ template <typename T>
 concept IsView = std::ranges::view<T>;
 
 template <typename T>
-concept IsConstView = IsView<T> && std::is_const_v<typename T::element_type>;
+concept IsBasicStringView = requires {
+    typename std::remove_cvref_t<T>::traits_type;
+    requires std::same_as<std::remove_cvref_t<T>, std::basic_string_view<typename std::remove_cvref_t<T>::value_type,
+                                                                         typename std::remove_cvref_t<T>::traits_type>>;
+};
+
+template <typename T>
+concept IsConstView = IsView<T> && (IsBasicStringView<T> || requires {
+                          typename std::remove_cvref_t<T>::element_type;
+                          requires std::is_const_v<typename std::remove_cvref_t<T>::element_type>;
+                      });
 
 template <typename T>
 concept IsConstBinaryView = IsConstView<T> && std::is_same_v<typename T::value_type, std::byte>;
@@ -256,6 +287,26 @@ concept IsNamedExtensionWrapper = !std::is_same_v<typename named_extension_value
 
 template <typename T>
 concept IsNamedWrapper = IsNamedMapWrapper<T> || IsNamedGroupWrapper<T> || IsNamedExtensionWrapper<T>;
+
+namespace detail {
+
+template <typename T> inline constexpr bool is_bounded_size_v = false;
+
+template <typename T, std::size_t Min, std::size_t Max> inline constexpr bool is_bounded_size_v<bounded_size<T, Min, Max>> = true;
+
+template <typename T> inline constexpr bool is_dynamic_bounded_size_v = false;
+
+template <typename T> inline constexpr bool is_dynamic_bounded_size_v<dynamic_bounded_size<T>> = true;
+} // namespace detail
+
+template <typename T>
+concept IsBoundedSizeWrapper = detail::is_bounded_size_v<std::remove_cvref_t<T>>;
+
+template <typename T>
+concept IsDynamicBoundedSizeWrapper = detail::is_dynamic_bounded_size_v<std::remove_cvref_t<T>>;
+
+template <typename T>
+concept IsAnyBoundedSizeWrapper = IsBoundedSizeWrapper<T> || IsDynamicBoundedSizeWrapper<T>;
 
 template <typename T>
 concept IsTextChar = std::is_integral_v<std::remove_cv_t<T>> && sizeof(std::remove_cv_t<T>) == 1 &&
@@ -448,7 +499,7 @@ concept HasInlineTag = requires {
 struct Access {
     // Transcode function
     template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
-        if constexpr (requires { obj.transcode(transcoder).has_value(); }) {
+        if constexpr (requires { obj.transcode(transcoder); }) {
             return obj.transcode(transcoder);
         } else {
             return detail::FalseType{};
@@ -457,7 +508,7 @@ struct Access {
 
     // Encode function
     template <typename T, typename Class> static constexpr auto encode(T &encoder, Class &&obj) {
-        if constexpr (requires { obj.encode(encoder).has_value(); }) {
+        if constexpr (requires { obj.encode(encoder); }) {
             return obj.encode(encoder);
         } else {
             return detail::FalseType{};
@@ -466,7 +517,7 @@ struct Access {
 
     // Decode function
     template <typename T, typename Class> static constexpr auto decode(T &decoder, Class &&obj) {
-        if constexpr (requires { obj.decode(decoder).has_value(); }) {
+        if constexpr (requires { obj.decode(decoder); }) {
             return obj.decode(decoder);
         } else {
             return detail::FalseType{};
@@ -503,19 +554,45 @@ struct Access {
 
 // Overload of coding functions, as member function
 template <typename T, typename Class>
+concept HasRawTranscodeMethod =
+    !std::same_as<std::remove_cvref_t<decltype(Access::transcode(std::declval<T &>(), std::declval<Class &>()))>, detail::FalseType>;
+
+template <typename T, typename Class>
+concept HasRawEncodeMethod =
+    !std::same_as<std::remove_cvref_t<decltype(Access::encode(std::declval<T &>(), std::declval<Class &>()))>, detail::FalseType>;
+
+template <typename T, typename Class>
+concept HasRawDecodeMethod =
+    !std::same_as<std::remove_cvref_t<decltype(Access::decode(std::declval<T &>(), std::declval<Class &>()))>, detail::FalseType>;
+
+template <typename T, typename Class>
 concept HasTranscodeMethod = requires(T t, Class c) {
-    { Access::transcode(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::transcode(t, c) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
 concept HasEncodeMethod = requires(T t, Class c) {
-    { Access::encode(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::encode(t, c) } -> detail::CodecStatusResult;
 };
 
 template <typename T, typename Class>
 concept HasDecodeMethod = requires(T t, Class c) {
-    { Access::decode(t, c).has_value() } -> std::convertible_to<bool>;
+    { Access::decode(t, c) } -> detail::CodecStatusResult;
 };
+
+template <typename T, typename Class>
+concept HasIncompatibleEncodingCustomization =
+    std::is_class_v<Class> && (!std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<Class>>) &&
+    ((HasRawTranscodeMethod<T, Class> && !HasTranscodeMethod<T, Class>) || (HasRawEncodeMethod<T, Class> && !HasEncodeMethod<T, Class>) ||
+     (HasRawTranscodeFreeFunction<T, Class> && !HasTranscodeFreeFunction<T, Class>) ||
+     (HasRawEncodeFreeFunction<T, Class> && !HasEncodeFreeFunction<T, Class>));
+
+template <typename T, typename Class>
+concept HasIncompatibleDecodingCustomization =
+    std::is_class_v<Class> && (!std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<Class>>) &&
+    ((HasRawTranscodeMethod<T, Class> && !HasTranscodeMethod<T, Class>) || (HasRawDecodeMethod<T, Class> && !HasDecodeMethod<T, Class>) ||
+     (HasRawTranscodeFreeFunction<T, Class> && !HasTranscodeFreeFunction<T, Class>) ||
+     (HasRawDecodeFreeFunction<T, Class> && !HasDecodeFreeFunction<T, Class>));
 
 template <typename T>
 concept HasTagNonConstructible = requires(T) {
@@ -563,6 +640,11 @@ concept IsOptional = requires(T t) {
     T{};                    // Must be default constructible (nullopt)
 };
 
+template <typename T> struct is_variant : std::bool_constant<detail::VariantLike<std::remove_cvref_t<T>>> {};
+
+template <typename T>
+concept IsVariant = is_variant<std::remove_cvref_t<T>>::value;
+
 // Type trait to unwrap nested types
 template <typename T> struct unwrap_type {
     using type = T;
@@ -573,10 +655,15 @@ template <typename T> struct unwrap_type<std::optional<T>> {
     using type = typename unwrap_type<T>::type;
 };
 
-// Specialization for std::variant
-template <typename... Ts> struct unwrap_type<std::variant<Ts...>> {
-    // Get the first type's unwrapped version
-    using type = typename unwrap_type<std::tuple_element_t<0, std::tuple<Ts...>>>::type;
+// Specialization for trait-backed variant types. The first alternative is used as the representative type.
+template <typename T>
+    requires IsVariant<T>
+struct unwrap_type<T> {
+    using type = typename unwrap_type<detail::variant_alternative_t<0, T>>::type;
+};
+
+template <typename T, std::size_t Min, std::size_t Max> struct unwrap_type<bounded_size<T, Min, Max>> {
+    using type = typename unwrap_type<std::remove_cvref_t<T>>::type;
 };
 
 // Helper alias
@@ -586,20 +673,29 @@ template <typename... T> constexpr bool contains_signed_integer = (... || IsSign
 template <typename... T> constexpr bool contains_unsigned       = (... || IsUnsigned<unwrap_type_t<T>>);
 template <typename... T> constexpr bool contains_negative       = (... || IsNegative<unwrap_type_t<T>>);
 
-template <typename T> struct is_variant : std::false_type {};
+namespace detail {
 
-template <typename... Args> struct is_variant<std::variant<Args...>> : std::true_type {};
+template <typename Variant, std::size_t... Is> consteval bool variant_contains_signed_integer_impl(std::index_sequence<Is...>) {
+    return contains_signed_integer<variant_alternative_t<Is, Variant>...>;
+}
 
-template <typename T>
-concept IsVariant = is_variant<std::remove_cvref_t<T>>::value;
+template <typename Variant, std::size_t... Is> consteval bool variant_contains_unsigned_or_negative_impl(std::index_sequence<Is...>) {
+    return contains_unsigned<variant_alternative_t<Is, Variant>...> || contains_negative<variant_alternative_t<Is, Variant>...>;
+}
+
+} // namespace detail
 
 template <typename T> struct variant_contains_integer : std::false_type {};
-template <template <typename...> typename V, typename... T>
-struct variant_contains_integer<V<T...>> : std::bool_constant<contains_signed_integer<T...>> {};
+template <typename T>
+    requires IsVariant<T>
+struct variant_contains_integer<T>
+    : std::bool_constant<detail::variant_contains_signed_integer_impl<T>(std::make_index_sequence<detail::variant_size_v<T>>{})> {};
 
 template <typename T> struct variant_contains_unsigned_or_negative : std::false_type {};
-template <template <typename...> typename V, typename... T>
-struct variant_contains_unsigned_or_negative<V<T...>> : std::bool_constant<contains_unsigned<T...> || contains_negative<T...>> {};
+template <typename T>
+    requires IsVariant<T>
+struct variant_contains_unsigned_or_negative<T>
+    : std::bool_constant<detail::variant_contains_unsigned_or_negative_impl<T>(std::make_index_sequence<detail::variant_size_v<T>>{})> {};
 
 template <typename T>
 concept IsVariantWithSignedInteger = IsVariant<T> && variant_contains_integer<T>::value;
@@ -628,7 +724,8 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> && !IsNamedWrapper<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsVariant<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> &&
+                      !IsNamedWrapper<T> && !IsAnyBoundedSizeWrapper<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
@@ -642,22 +739,60 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 
 // TODO: cleanup or simplify
 template <typename T>
-concept IsCborMajor = IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
-                      (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
-                      (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) ||
-                      IsNamedMapWrapper<T> || IsEnum<T> || (IsClassWithTagOverload<T>);
+concept IsCborMajor =
+    IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+    (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
+    (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsNamedMapWrapper<T> ||
+    (IsAnyBoundedSizeWrapper<T> && ContainsCborMajorConcept<T>) || IsEnum<T> || (IsClassWithTagOverload<T>);
 
-template <typename... Ts> struct AllTypesAreCborMajor<std::variant<Ts...>> {
-    static constexpr bool value = (IsCborMajor<Ts> && ...);
+namespace detail {
+
+template <typename Variant, std::size_t... Is> consteval bool all_variant_alternatives_are_cbor_major(std::index_sequence<Is...>) {
+    return (IsCborMajor<variant_alternative_t<Is, Variant>> && ...);
+}
+
+} // namespace detail
+
+template <typename T>
+    requires IsVariant<T>
+struct AllTypesAreCborMajor<T> {
+    static constexpr bool value = detail::all_variant_alternatives_are_cbor_major<T>(std::make_index_sequence<detail::variant_size_v<T>>{});
 };
 
 // Helper for container like types, e.g optional
 template <typename T> struct ContainsCborMajor<T, false> {
-    static constexpr bool value = IsAnyHeader<T> || IsCborMajor<typename T::value_type>;
+    static constexpr bool value = [] {
+        if constexpr (IsAnyHeader<T>) {
+            return true;
+        } else if constexpr (requires { typename T::value_type; }) {
+            return IsCborMajor<typename T::value_type>;
+        } else {
+            return false;
+        }
+    }();
 };
 
 template <typename T> struct ContainsCborMajor<T, true> {
-    static constexpr bool value = IsAnyHeader<T> || (IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>);
+    static constexpr bool value = [] {
+        if constexpr (IsAnyHeader<T>) {
+            return true;
+        } else if constexpr (requires {
+                                 typename T::key_type;
+                                 typename T::mapped_type;
+                             }) {
+            return IsCborMajor<typename T::key_type> && IsCborMajor<typename T::mapped_type>;
+        } else {
+            return false;
+        }
+    }();
+};
+
+template <typename T>
+    requires IsAnyBoundedSizeWrapper<T>
+struct ContainsCborMajor<T, false> {
+    using bounded_type          = std::remove_cvref_t<T>;
+    using wrapped_type          = std::remove_cvref_t<typename bounded_type::value_type>;
+    static constexpr bool value = IsCborMajor<wrapped_type>;
 };
 
 template <typename T>

@@ -3,6 +3,7 @@
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -755,6 +756,54 @@ template <typename ContainerType> void run_decoding_benchmark_roundtrip() {
     run_decoding_benchmarks_roundtrip<ContainerType>(bench);
 }
 
+template <std::size_t N> void run_encoded_view_benchmark() {
+    std::array<std::uint32_t, N> input{};
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        input[index] = static_cast<std::uint32_t>(index);
+    }
+
+    std::vector<std::uint8_t> encoded;
+    auto                      enc = make_encoder(encoded);
+    REQUIRE(enc(input));
+
+    ankerl::nanobench::Bench bench;
+    bench.title(fmt::format("Encoded-view decode, {} fixed-array elements", N));
+    bench.minEpochIterations(1000);
+    bench.unit("byte");
+    bench.batch(encoded.size());
+    bench.performanceCounters(true);
+    bench.relative(true);
+
+    bench.run("Typed decode", [&encoded] {
+        std::array<std::uint32_t, N> output;
+        auto                         dec    = make_decoder(encoded);
+        auto                         result = dec(output);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    });
+
+    bench.run("Typed decode with encoded view", [&encoded] {
+        std::array<std::uint32_t, N> output;
+        auto                         dec    = make_decoder_with_options<encoded_item_view_decoder_options>(encoded);
+        auto                         result = dec(output);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    });
+
+    bench.run("Raw encoded item view", [&encoded] {
+        auto                                          dec = make_decoder(encoded);
+        typename decltype(dec)::raw_encoded_item_view output;
+        auto                                          result = dec(output);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    });
+}
+
+TEST_CASE("Encoded view decoder benchmarks") {
+    run_encoded_view_benchmark<4>();
+    run_encoded_view_benchmark<4096>();
+}
+
 TEST_CASE("Decoding benchmarks") {
     run_decoding_benchmark<std::vector<uint8_t>>();
     run_decoding_benchmark<std::deque<uint8_t>>();
@@ -763,6 +812,90 @@ TEST_CASE("Decoding benchmarks") {
     run_decoding_benchmark_roundtrip<std::vector<uint8_t>>();
     // run_decoding_benchmark_roundtrip<std::deque<uint8_t>>(); // String_view in test, cannot decode on a deque
     run_decoding_benchmark_roundtrip<std::array<uint8_t, 20>>();
+}
+
+namespace {
+
+std::vector<std::byte> make_definite_zero_array(std::size_t count) {
+    std::vector<std::uint64_t> values(count, 0U);
+    std::vector<std::byte>     encoded;
+    auto                       encoder = make_encoder(encoded);
+    REQUIRE(encoder(values));
+    return encoded;
+}
+
+std::vector<std::byte> make_indefinite_zero_array(std::size_t count) {
+    std::vector<std::byte> encoded;
+    encoded.reserve(count + 2U);
+    encoded.push_back(std::byte{0x9F});
+    encoded.insert(encoded.end(), count, std::byte{0x00});
+    encoded.push_back(std::byte{0xFF});
+    return encoded;
+}
+
+void benchmark_bounded_array_decode(std::string_view title, const std::vector<std::byte> &encoded, std::size_t count) {
+    std::vector<std::uint64_t> direct_value;
+    std::vector<std::uint64_t> bounded_value;
+    std::vector<std::uint64_t> dynamic_bounded_value;
+    direct_value.reserve(count);
+    bounded_value.reserve(count);
+    dynamic_bounded_value.reserve(count);
+
+    {
+        auto decoder = make_decoder(encoded);
+        REQUIRE(decoder(direct_value));
+    }
+    {
+        auto decoder = make_decoder(encoded);
+        REQUIRE(decoder(as_bounded_size<0, 4096>(bounded_value)));
+    }
+    {
+        auto decoder = make_decoder(encoded);
+        REQUIRE(decoder(as_bounded_size(dynamic_bounded_value, 0, count)));
+    }
+    REQUIRE(direct_value == bounded_value);
+    REQUIRE(direct_value == dynamic_bounded_value);
+
+    ankerl::nanobench::Bench bench;
+    bench.title(std::string{title});
+    bench.unit("byte");
+    bench.relative(true);
+    bench.performanceCounters(false);
+    bench.epochs(15);
+    bench.minEpochTime(std::chrono::milliseconds{20});
+    bench.minEpochIterations(20);
+
+    bench.batch(encoded.size()).run("direct typed decode", [&] {
+        direct_value.clear();
+        auto decoder = make_decoder(encoded);
+        auto result  = decoder(direct_value);
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(direct_value.data());
+    });
+
+    bench.batch(encoded.size()).run("bounded typed decode", [&] {
+        bounded_value.clear();
+        auto decoder = make_decoder(encoded);
+        auto result  = decoder(as_bounded_size<0, 4096>(bounded_value));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(bounded_value.data());
+    });
+
+    bench.batch(encoded.size()).run("dynamic bounded typed decode", [&] {
+        dynamic_bounded_value.clear();
+        auto decoder = make_decoder(encoded);
+        auto result  = decoder(as_bounded_size(dynamic_bounded_value, 0, count));
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(dynamic_bounded_value.data());
+    });
+}
+
+} // namespace
+
+TEST_CASE("Bounded decode traversal benchmarks") {
+    constexpr std::size_t count = 4096U;
+    benchmark_bounded_array_decode("definite uint array, 4096 elements", make_definite_zero_array(count), count);
+    benchmark_bounded_array_decode("indefinite uint array, 4096 elements", make_indefinite_zero_array(count), count);
 }
 
 // Main function to run tests and benchmarks

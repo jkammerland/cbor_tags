@@ -4,7 +4,6 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cbor_integer.h"
-#include "cbor_tags/cbor_operators.h"
 #include "cbor_tags/cbor_range_encoder.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
@@ -14,6 +13,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <new>
 // #include <fmt/base.h>
 // #include <nameof.hpp>
@@ -84,6 +84,30 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode_major_and_size(value.cbor_tag, static_cast<byte_type>(0xC0));
     }
 
+    template <IsString T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value);
+    }
+
+    template <IsArray T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value);
+    }
+
+    template <IsMap T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value);
+    }
+
+    template <IsString T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        encode_bounded_size(value.value(), value.min_size(), value.max_size());
+    }
+
+    template <IsArray T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        encode_bounded_size(value.value(), value.min_size(), value.max_size());
+    }
+
+    template <IsMap T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        encode_bounded_size(value.value(), value.min_size(), value.max_size());
+    }
+
     template <IsString T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(get_major_3_bit_tag<T>()));
         if constexpr (IsBinaryString<T> && std::ranges::borrowed_range<std::remove_cvref_t<T>> &&
@@ -127,7 +151,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T>)
+        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T> && !HasIncompatibleEncodingCustomization<self_t, T>)
     constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
@@ -157,7 +181,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
     template <typename C>
-        requires(IsClassWithEncodingOverload<self_t, C>)
+        requires(IsClassWithEncodingOverload<self_t, C> && !HasIncompatibleEncodingCustomization<self_t, C>)
     constexpr void encode(const C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_encode         = HasEncodeMethod<self_t, C>;
@@ -184,6 +208,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
             /* Transcode does not require an indirect call, because no other methods exist with the same name (encode)*/
             detail::throw_on_encode_error(transcode(*this, value));
         }
+    }
+
+    template <typename C>
+        requires HasIncompatibleEncodingCustomization<self_t, C>
+    constexpr void encode(const C &) {
+        static_assert(always_false<C>::value,
+                      "custom encode/transcode must return a result with has_value() convertible to bool and error() convertible to "
+                      "cbor::tags::status_code");
     }
 
     template <IsEnum T> constexpr void encode(T value) { this->encode(static_cast<std::underlying_type_t<T>>(value)); }
@@ -217,6 +249,31 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     OutputBuffer                  &data_;
 
   private:
+    template <std::size_t Min, std::size_t Max, typename T> constexpr void encode_bounded_size(const bounded_size<T, Min, Max> &value) {
+        encode_bounded_size(value.value(), Min, Max);
+    }
+
+    template <typename T> constexpr void encode_bounded_size(const T &wrapped, std::size_t min, std::size_t max) {
+        const auto &sized_value = [&]() -> decltype(auto) {
+            if constexpr (IsIndefiniteWrapper<std::remove_cvref_t<T>>) {
+                return (wrapped.value_);
+            } else {
+                return (wrapped);
+            }
+        }();
+
+        static_assert(std::ranges::sized_range<decltype(sized_value)>,
+                      "bounded_size<T, Min, Max> requires a sized range; materialize non-sized input before encoding it");
+        const auto range_size = std::ranges::size(sized_value);
+        if (std::cmp_greater(range_size, std::numeric_limits<std::uint64_t>::max())) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        if (detail::bounded_size_status(static_cast<std::uint64_t>(range_size), min, max) != status_code::success) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        encode(wrapped);
+    }
+
     // Helper method to avoid code duplication
     template <typename Tuple> void aggregate_encode(Tuple &&tuple) {
         std::apply(
@@ -262,9 +319,9 @@ template <typename T> struct cbor_indefinite_encoder {
 };
 
 template <typename T> struct cbor_variant_encoder {
-    template <typename... Ts> constexpr void encode(const std::variant<Ts...> &value) {
+    template <IsVariant Variant> constexpr void encode(const Variant &value) {
         // encoding a variant is less strict than decoding
-        std::visit([this](const auto &v) { detail::underlying<T>(this).encode(v); }, value);
+        detail::variant_visit([this](const auto &v) { detail::underlying<T>(this).encode(v); }, value);
     }
 };
 

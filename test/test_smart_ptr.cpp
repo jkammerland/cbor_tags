@@ -638,6 +638,7 @@ TEST_CASE("shared graph codec rejects cycles") {
     auto                        enc = make_encoder<shared_graph_codec>(buffer);
     shared_graph_encode_session encode_graph;
     const auto                  encode_result = enc(as_shared_graph(encode_graph, link));
+    link->next.reset();
 
     REQUIRE_FALSE(encode_result);
     CHECK_EQ(encode_result.error(), status_code::error);
@@ -651,10 +652,15 @@ TEST_CASE("shared graph codec rejects cycles") {
     std::shared_ptr<smart_ptr_test::graph_link> decoded;
     auto                                        dec = make_decoder<shared_graph_codec>(cycle_bytes);
     shared_graph_decode_session                 decode_graph;
-    const auto                                  decode_result = dec(as_shared_graph(decode_graph, decoded));
+    const auto                                  decode_result      = dec(as_shared_graph(decode_graph, decoded));
+    const bool                                  decoded_cycle_root = static_cast<bool>(decoded);
+    if (decoded) {
+        decoded->next.reset();
+    }
 
     REQUIRE_FALSE(decode_result);
     CHECK_EQ(decode_result.error(), status_code::error);
+    CHECK_FALSE(decoded_cycle_root);
 }
 
 TEST_CASE("shared graph codec rejects malformed wrappers before consuming following items") {
@@ -1028,6 +1034,41 @@ TEST_CASE("nullable pointer codec decodes unambiguous smart pointer variants") {
         REQUIRE(dec(decoded));
         REQUIRE(std::holds_alternative<std::string>(decoded));
         CHECK_EQ(std::get<std::string>(decoded), "ok");
+    }
+}
+
+TEST_CASE("nullable pointer variants preserve bounded alternative size errors") {
+    using bounded_text = bounded_size<std::string, 1, 4>;
+    using value_type   = std::variant<std::shared_ptr<std::uint64_t>, bounded_text>;
+
+    SUBCASE("boundary value roundtrips") {
+        value_type input{bounded_text{std::string{"name"}}};
+
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<nullable_ptr_codec>(buffer);
+        REQUIRE(enc(input));
+
+        value_type output{std::shared_ptr<std::uint64_t>{}};
+        auto       dec = make_decoder<nullable_ptr_codec>(buffer);
+        REQUIRE(dec(output));
+        REQUIRE(std::holds_alternative<bounded_text>(output));
+        CHECK_EQ(std::get<bounded_text>(output).value(), "name");
+    }
+
+    SUBCASE("oversized value reports the bound and preserves the destination") {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(std::string{"names"}));
+
+        auto       original = std::make_shared<std::uint64_t>(9U);
+        value_type output{original};
+        auto       dec    = make_decoder<nullable_ptr_codec>(buffer);
+        auto       result = dec(output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(output));
+        CHECK(std::get<std::shared_ptr<std::uint64_t>>(output) == original);
     }
 }
 

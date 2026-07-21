@@ -40,11 +40,22 @@ template <typename T>
 constexpr bool decodable_shared_pointer_v =
     nullable_pointer_traits<std::remove_cvref_t<T>>::decodable && nullable_pointer_traits<std::remove_cvref_t<T>>::shared;
 
+template <typename Variant>
+constexpr bool variant_has_decodable_shared_pointer_v =
+    cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() { return (decodable_shared_pointer_v<Ts> || ...); });
+
 template <typename... Ts>
 constexpr std::size_t decodable_nullable_pointer_count_v =
     (std::size_t{0} + ... + (decodable_nullable_pointer_v<Ts> ? std::size_t{1} : std::size_t{0}));
 
 template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = decodable_nullable_pointer_count_v<Ts...> > 0U;
+
+template <typename Variant>
+constexpr std::size_t variant_decodable_nullable_pointer_count_v =
+    cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() { return decodable_nullable_pointer_count_v<Ts...>; });
+
+template <typename Variant>
+constexpr bool variant_has_decodable_nullable_pointer_v = variant_decodable_nullable_pointer_count_v<Variant> > 0U;
 
 template <typename T, bool IsVectorOfSharedPtr = cbor::tags::detail::is_std_vector_of_shared_ptr<T>::value>
 struct decodable_shared_graph_vector : std::false_type {};
@@ -67,6 +78,13 @@ constexpr std::size_t decodable_shared_graph_vector_count_v =
 
 template <typename... Ts> constexpr bool has_decodable_shared_graph_vector_v = decodable_shared_graph_vector_count_v<Ts...> > 0U;
 
+template <typename Variant>
+constexpr std::size_t variant_decodable_shared_graph_vector_count_v =
+    cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() { return decodable_shared_graph_vector_count_v<Ts...>; });
+
+template <typename Variant>
+constexpr bool variant_has_decodable_shared_graph_vector_v = variant_decodable_shared_graph_vector_count_v<Variant> > 0U;
+
 template <typename Variant, std::uint64_t Tag>
 constexpr bool variant_contains_static_tag_v = [] {
     constexpr auto tags      = ValidConceptMapping<Variant>::tags;
@@ -86,10 +104,14 @@ constexpr bool variant_has_any_tag_header_v = [] {
     return core_mapping[major_index::AnyTagHeader] != 0U;
 }();
 
+template <typename T, typename... Rest> struct variant_from_pack {
+    using type = std::conditional_t<sizeof...(Rest) == 0U && cbor::tags::IsVariant<T>, std::remove_cvref_t<T>, std::variant<T, Rest...>>;
+};
+
 template <typename... Ts>
 constexpr bool variant_has_shared_graph_tag_collision_v = [] {
-    using variant_type = std::variant<Ts...>;
-    return (decodable_shared_pointer_v<Ts> || ...) &&
+    using variant_type = typename variant_from_pack<Ts...>::type;
+    return variant_has_decodable_shared_pointer_v<variant_type> &&
            (variant_has_any_tag_header_v<variant_type> || variant_contains_static_tag_v<variant_type, shareable_tag> ||
             variant_contains_static_tag_v<variant_type, sharedref_tag>);
 }();

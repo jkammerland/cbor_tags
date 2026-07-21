@@ -102,6 +102,13 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions = {}, Context = {})
 
 namespace detail {
 
+[[nodiscard]] inline std::string negative_diagnostic_text(negative value) {
+    if (value.value == 0U) {
+        return "-18446744073709551616";
+    }
+    return text::format("-{}", value.value);
+}
+
 struct CDDLContext;
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
@@ -256,17 +263,15 @@ void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_b
 template <typename T> constexpr auto getName(const T &);
 template <typename T> constexpr auto getName();
 
-template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames() {
-    std::string result;
-    ((result += std::string(getName<Ts>()) + " / "), ...);
-    return result.substr(0, result.empty() ? 0 : (result.size() - 3));
+template <IsVariant Variant> constexpr auto getVariantNames() {
+    return detail::with_variant_alternatives<Variant>([]<typename... Ts>() {
+        std::string result;
+        ((result += std::string(getName<Ts>()) + " / "), ...);
+        return result.substr(0, result.empty() ? 0 : (result.size() - 3));
+    });
 }
 
-template <template <typename...> typename Variant, typename... Ts> constexpr auto getVariantNames(const Variant<Ts...> &&) {
-    std::string result;
-    ((result += std::string(getName<Ts>()) + " / "), ...);
-    return result.substr(0, result.empty() ? 0 : (result.size() - 3));
-}
+template <IsVariant Variant> constexpr auto getVariantNames(const Variant &) { return getVariantNames<std::remove_cvref_t<Variant>>(); }
 
 template <IsTag T> constexpr auto getTagDef(const T &t) {
     if constexpr (HasInlineTag<T>) {
@@ -329,7 +334,7 @@ template <typename T> constexpr auto getName() {
             auto name = getName<element_type>();
             return std::string("[0] / [1, ") + std::string(name) + "]";
         } else if constexpr (IsVariant<T>) {
-            return getVariantNames(T{});
+            return getVariantNames<T>();
         } else {
             return detail::short_type_name<T>();
         }
@@ -347,7 +352,9 @@ template <typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std
     static constexpr std::size_t size = N;
 };
 
-template <typename T> struct is_std_span : std::false_type {};
+template <typename T> struct is_std_span : std::false_type {
+    static constexpr std::size_t extent = std::dynamic_extent;
+};
 template <typename T, std::size_t Extent> struct is_std_span<std::span<T, Extent>> : std::true_type {
     using value_type                    = T;
     static constexpr std::size_t extent = Extent;
@@ -423,12 +430,12 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             using traits = cddl_multi_dimensional_array_traits<value_type>;
             return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
                    cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
-        } else if constexpr (IsOptional<value_type> || (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
+        } else if constexpr (IsAnyBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
+                             (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
             return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
-            return []<typename... Ts>(std::variant<Ts...> *) consteval {
-                return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...);
-            }(static_cast<value_type *>(nullptr));
+            return detail::with_variant_alternatives<value_type>(
+                []<typename... Ts>() { return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...); });
         } else if constexpr (IsNamedMapWrapper<value_type>) {
             return cddl_contains_nullable_pointer<named_map_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedGroupWrapper<value_type>) {
@@ -437,7 +444,7 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
             return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, next_seen>();
         } else if constexpr (IsIndefiniteWrapper<value_type>) {
             return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, next_seen>();
-        } else if constexpr (IsMap<value_type>) {
+        } else if constexpr (IsMapRangeWrapper<value_type> || IsMap<value_type>) {
             return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
                    cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
         } else if constexpr (IsTuple<value_type>) {
@@ -454,9 +461,8 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
 template <typename T> consteval std::size_t cddl_nullable_pointer_alternative_count() {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *) consteval {
-            return (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>());
-        }(static_cast<value_type *>(nullptr));
+        return detail::with_variant_alternatives<value_type>(
+            []<typename... Ts>() { return (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>()); });
     } else {
         return cddl_contains_nullable_pointer<value_type>() ? std::size_t{1} : std::size_t{0};
     }
@@ -588,6 +594,28 @@ inline std::string parenthesize_choice(std::string value) {
 template <typename T> std::string cddl_tagged_bstr_array_expr() {
     using value_type = std::remove_cvref_t<T>;
     return text::format("#6.{}(bstr)", cddl_tagged_bstr_array_traits<value_type>::tag);
+}
+
+template <std::size_t Min, std::size_t Max> std::string cddl_size_control(std::string_view base);
+
+template <typename T>
+concept CDDLBoundedTaggedByteStringArray = CDDLTaggedByteStringArray<T> && requires {
+    { cddl_tagged_bstr_array_traits<std::remove_cvref_t<T>>::element_byte_size } -> std::convertible_to<std::uint64_t>;
+};
+
+template <typename T, std::size_t Min, std::size_t Max> std::string cddl_bounded_tagged_bstr_array_expr() {
+    using value_type       = std::remove_cvref_t<T>;
+    using traits           = cddl_tagged_bstr_array_traits<value_type>;
+    constexpr auto element = traits::element_byte_size;
+    static_assert(element > 0U, "bounded tagged byte-string array CDDL requires a non-zero element byte size");
+    static_assert(element <= static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()),
+                  "bounded tagged byte-string array element byte size exceeds size_t");
+    constexpr auto element_size = static_cast<std::size_t>(element);
+    static_assert(Min <= (std::numeric_limits<std::size_t>::max() / element_size),
+                  "bounded tagged byte-string array minimum byte size overflows size_t");
+    static_assert(Max <= (std::numeric_limits<std::size_t>::max() / element_size),
+                  "bounded tagged byte-string array maximum byte size overflows size_t");
+    return text::format("#6.{}({})", traits::tag, cddl_size_control<Min * element_size, Max * element_size>("bstr"));
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
@@ -997,6 +1025,136 @@ std::string cddl_map_expr(CDDLContext &context, CDDLOptions options) {
     return text::format("{{* {} => {}}}", key, value);
 }
 
+template <std::size_t Min, std::size_t Max> std::string cddl_occurrence() { return text::format("{}*{}", Min, Max); }
+
+template <std::size_t Min, std::size_t Max> std::string cddl_size_control(std::string_view base) {
+    if constexpr (Min == Max) {
+        return text::format("{} .size {}", base, Min);
+    } else {
+        return text::format("{} .size ({}..{})", base, Min, Max);
+    }
+}
+
+template <std::size_t Min, std::size_t Max, typename T> consteval void validate_bounded_fixed_sequence() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (is_std_array<value_type>::value) {
+        static_assert(Min <= is_std_array<value_type>::size && is_std_array<value_type>::size <= Max,
+                      "bounded_size fixed array extent must be inside the configured CDDL size bounds");
+    } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
+        static_assert(Min <= is_std_span<value_type>::extent && is_std_span<value_type>::extent <= Max,
+                      "bounded_size fixed span extent must be inside the configured CDDL size bounds");
+    }
+}
+
+template <std::size_t Min, std::size_t Max, typename T> consteval void validate_bounded_fixed_string() {
+    using value_type = std::remove_cvref_t<T>;
+    if constexpr (is_std_array<value_type>::value) {
+        static_assert(Min <= is_std_array<value_type>::size && is_std_array<value_type>::size <= Max,
+                      "bounded_size fixed string extent must be inside the configured CDDL size bounds");
+    } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
+        static_assert(Min <= is_std_span<value_type>::extent && is_std_span<value_type>::extent <= Max,
+                      "bounded_size fixed string extent must be inside the configured CDDL size bounds");
+    }
+}
+
+template <std::size_t Min, std::size_t Max, typename T> std::string cddl_bounded_string_expr(std::string_view base) {
+    using value_type = std::remove_cvref_t<T>;
+    validate_bounded_fixed_string<Min, Max, value_type>();
+    if constexpr (is_std_array<value_type>::value) {
+        return cddl_size_control<is_std_array<value_type>::size, is_std_array<value_type>::size>(base);
+    } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
+        return cddl_size_control<is_std_span<value_type>::extent, is_std_span<value_type>::extent>(base);
+    } else {
+        return cddl_size_control<Min, Max>(base);
+    }
+}
+
+template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_bounded_sequence_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    validate_bounded_fixed_sequence<Min, Max, value_type>();
+    if constexpr (is_std_array<value_type>::value ||
+                  (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent)) {
+        return cddl_sequence_expr<value_type, PointerMode>(context, options);
+    } else {
+        using item_type = std::remove_cvref_t<typename value_type::value_type>;
+        auto item       = parenthesize_choice(cddl_type_expr<item_type, PointerMode>(context, options));
+        return text::format("[{} {}]", cddl_occurrence<Min, Max>(), item);
+    }
+}
+
+template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_bounded_map_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type  = std::remove_cvref_t<T>;
+    using key_type    = std::remove_cvref_t<typename value_type::key_type>;
+    using mapped_type = std::remove_cvref_t<typename value_type::mapped_type>;
+    auto key          = parenthesize_choice(cddl_type_expr<key_type, PointerMode>(context, options));
+    auto value        = parenthesize_choice(cddl_type_expr<mapped_type, PointerMode>(context, options));
+    return text::format("{{{} {} => {}}}", cddl_occurrence<Min, Max>(), key, value);
+}
+
+template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_bounded_array_range_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    using item_type  = std::remove_cvref_t<typename value_type::value_type>;
+    auto item        = parenthesize_choice(cddl_type_expr<item_type, PointerMode>(context, options));
+    return text::format("[{} {}]", cddl_occurrence<Min, Max>(), item);
+}
+
+template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_bounded_map_range_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type  = std::remove_cvref_t<T>;
+    using key_type    = std::remove_cvref_t<typename value_type::key_type>;
+    using mapped_type = std::remove_cvref_t<typename value_type::mapped_type>;
+    auto key          = parenthesize_choice(cddl_type_expr<key_type, PointerMode>(context, options));
+    auto value        = parenthesize_choice(cddl_type_expr<mapped_type, PointerMode>(context, options));
+    return text::format("{{{} {} => {}}}", cddl_occurrence<Min, Max>(), key, value);
+}
+
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_array_range_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type = std::remove_cvref_t<T>;
+    using item_type  = std::remove_cvref_t<typename value_type::value_type>;
+    auto item        = parenthesize_choice(cddl_type_expr<item_type, PointerMode>(context, options));
+    return text::format("[* {}]", item);
+}
+
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_map_range_expr(CDDLContext &context, CDDLOptions options) {
+    using value_type  = std::remove_cvref_t<T>;
+    using key_type    = std::remove_cvref_t<typename value_type::key_type>;
+    using mapped_type = std::remove_cvref_t<typename value_type::mapped_type>;
+    auto key          = parenthesize_choice(cddl_type_expr<key_type, PointerMode>(context, options));
+    auto value        = parenthesize_choice(cddl_type_expr<mapped_type, PointerMode>(context, options));
+    return text::format("{{* {} => {}}}", key, value);
+}
+
+template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
+std::string cddl_bounded_size_expr(CDDLContext &context, CDDLOptions options) {
+    using bounded_type = std::remove_cvref_t<T>;
+    using wrapped_type = std::remove_cvref_t<typename bounded_type::value_type>;
+    using render_type  = std::conditional_t<IsIndefiniteWrapper<wrapped_type>, indefinite_value_t<wrapped_type>, wrapped_type>;
+
+    if constexpr (CDDLBoundedTaggedByteStringArray<render_type>) {
+        return cddl_bounded_tagged_bstr_array_expr<render_type, bounded_type::min_size, bounded_type::max_size>();
+    } else if constexpr (IsBinaryString<render_type> || IsBstrRangeWrapper<render_type>) {
+        return cddl_bounded_string_expr<bounded_type::min_size, bounded_type::max_size, render_type>("bstr");
+    } else if constexpr (IsTextString<render_type> || IsTstrRangeWrapper<render_type>) {
+        return cddl_bounded_string_expr<bounded_type::min_size, bounded_type::max_size, render_type>("tstr");
+    } else if constexpr (IsArrayRangeWrapper<render_type>) {
+        return cddl_bounded_array_range_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
+    } else if constexpr (IsMapRangeWrapper<render_type>) {
+        return cddl_bounded_map_range_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
+    } else if constexpr (IsMap<render_type>) {
+        return cddl_bounded_map_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
+    } else if constexpr (IsArray<render_type>) {
+        return cddl_bounded_sequence_expr<render_type, bounded_type::min_size, bounded_type::max_size, PointerMode>(context, options);
+    } else {
+        static_assert(always_false<render_type>::value, "bounded_size CDDL requires a string, array, map, or explicit range wrapper");
+        return {};
+    }
+}
+
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
 inline std::string cddl_row_indent(CDDLOptions options, std::size_t extra_indent = 0) {
     return std::string((options.row_options.current_indent + extra_indent) * options.row_options.offset, ' ');
@@ -1156,6 +1314,20 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     if constexpr (CDDLScopedType<value_type>) {
         static_assert(always_false<value_type>::value, "CDDL scope wrappers are only valid as cddl_schema_to roots");
         return {};
+    } else if constexpr (IsDynamicBoundedSizeWrapper<value_type>) {
+        static_assert(always_false<value_type>::value,
+                      "dynamic_bounded_size cannot be represented by type-based CDDL; use bounded_size<T, Min, Max>");
+        return {};
+    } else if constexpr (IsBoundedSizeWrapper<value_type>) {
+        return cddl_bounded_size_expr<value_type, PointerMode>(context, options);
+    } else if constexpr (IsBstrRangeWrapper<value_type> || IsBinaryString<value_type>) {
+        return "bstr";
+    } else if constexpr (IsTstrRangeWrapper<value_type> || IsTextString<value_type>) {
+        return "tstr";
+    } else if constexpr (IsArrayRangeWrapper<value_type>) {
+        return cddl_array_range_expr<value_type, PointerMode>(context, options);
+    } else if constexpr (IsMapRangeWrapper<value_type>) {
+        return cddl_map_range_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsEnum<value_type>) {
         if constexpr (cddl_enum_entry_count<value_type>() != 0) {
             if (cddl_use_named_enum<value_type>(options)) {
@@ -1172,10 +1344,6 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
         return "nint";
     } else if constexpr (IsSigned<value_type>) {
         return "int";
-    } else if constexpr (IsTextString<value_type>) {
-        return "tstr";
-    } else if constexpr (IsBinaryString<value_type>) {
-        return "bstr";
     } else if constexpr (IsIndefiniteWrapper<value_type>) {
         return cddl_type_expr<indefinite_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsOptional<value_type>) {
@@ -1200,38 +1368,36 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
         return cddl_multi_dimensional_array_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsVariant<value_type>) {
-        return []<typename... Ts>(std::variant<Ts...> *, CDDLContext &variant_context, CDDLOptions variant_options) {
-            constexpr auto matching_major_types = valid_concept_mapping_array_v<std::variant<Ts...>>;
+        return detail::with_variant_alternatives<value_type>([&context, &options]<typename... Ts>() {
+            constexpr auto matching_major_types = valid_concept_mapping_array_v<value_type>;
             static_assert(matching_major_types[MajorIndex::Tag] <= 1,
-                          "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
+                          "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(!cddl_scoped_variant_has_tag_overlap<PointerMode, Ts...>(),
-                          "CDDL for std::variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
+                          "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
-                          "CDDL for std::variant alternatives with dynamic CBOR tags is unsupported");
+                          "CDDL for variant alternatives with dynamic CBOR tags is unsupported");
             if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
                 constexpr auto direct_pointer_alternatives =
                     (std::size_t{0} + ... + (cddl_is_direct_nullable_pointer_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
                 constexpr auto graph_vector_alternatives =
                     (std::size_t{0} + ... + (cddl_is_shared_graph_vector_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
                 static_assert((!cddl_contains_unsupported_shared_graph_variant_pointer<Ts>() && ...),
-                              "CDDL for std::variant alternatives containing indirect nullable smart pointers is unsupported");
+                              "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported");
                 static_assert(direct_pointer_alternatives <= 1U,
-                              "CDDL for std::variant alternatives containing multiple nullable smart pointers is unsupported");
+                              "CDDL for variant alternatives containing multiple nullable smart pointers is unsupported");
                 static_assert(direct_pointer_alternatives == 0U || matching_major_types[MajorIndex::Array] == 0U,
-                              "CDDL for std::variant alternatives containing nullable smart pointers and array-shaped alternatives is "
+                              "CDDL for variant alternatives containing nullable smart pointers and array-shaped alternatives is "
                               "unsupported");
                 static_assert(graph_vector_alternatives == 0U || matching_major_types[MajorIndex::Array] == 1U,
-                              "CDDL for std::variant alternatives containing shared graph vector smart pointers and other array-shaped "
+                              "CDDL for variant alternatives containing shared graph vector smart pointers and other array-shaped "
                               "alternatives is unsupported");
             } else {
-                static_assert(
-                    (!cddl_contains_nullable_pointer<Ts>() && ...),
-                    "CDDL for std::variant alternatives containing nullable smart pointers is unsupported because runtime variant "
-                    "decode is not extension-codec aware");
+                static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
+                              "CDDL for variant alternatives containing nullable smart pointers is unsupported because runtime variant "
+                              "decode is not extension-codec aware");
             }
-            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(variant_context, variant_options)...},
-                             " / ");
-        }(static_cast<value_type *>(nullptr), context, options);
+            return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(context, options)...}, " / ");
+        });
     } else if constexpr (IsArrayHeader<value_type>) {
         return "[* any]";
     } else if constexpr (IsMapHeader<value_type>) {
@@ -1901,10 +2067,7 @@ template <typename OutputBuffer> struct smart_annotator {
     [[nodiscard]] static std::size_t bytes_comment_size(std::size_t length) { return checked_add(3U, checked_mul(length, 2U)); }
 
     [[nodiscard]] static std::string negative_comment(std::uint64_t argument) {
-        if (argument == std::numeric_limits<std::uint64_t>::max()) {
-            return "negative(-18446744073709551616)";
-        }
-        return text::format("negative(-{})", argument + 1U);
+        return text::format("negative({})", detail::negative_diagnostic_text(negative{argument + 1U}));
     }
 
     [[nodiscard]] static std::string tag_comment(std::uint64_t tag) {
@@ -2275,7 +2438,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
             text::format_to(std::back_inserter(output_buffer), "{}", arg);
         } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
-            text::format_to(std::back_inserter(output_buffer), "-{}", arg.value);
+            text::format_to(std::back_inserter(output_buffer), "{}", detail::negative_diagnostic_text(arg));
         } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(arg)>>) {
             check_depth();
             detail::catch_all_variant value;
