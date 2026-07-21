@@ -77,6 +77,35 @@ For raw `union` storage with a domain-specific discriminator, prefer an ADL
 `encode`/`decode` overload unless the type can honestly expose the same
 `index`/`get`/`visit`/`assign` operations as a variant.
 
+## Hashing And Migration
+
+`variant_hasher` has been removed. Replace it with the standard variant hasher
+when every alternative is itself hashable:
+
+```cpp
+using key = std::variant<int, std::string>;
+std::unordered_map<key, int> values;
+```
+
+`std::hash<std::variant<T...>>` is enabled only when `std::hash<T>` is enabled
+for every alternative. A variant containing `std::vector`, `std::map`, or
+another non-hashable type therefore still needs an application-specific hasher:
+
+```cpp
+using key = std::variant<int, std::vector<int>>;
+
+struct key_hash {
+    std::size_t operator()(const key &value) const noexcept;
+};
+
+std::unordered_map<key, int, key_hash> values;
+```
+
+This is a source-breaking migration for code that named `variant_hasher`. The
+old helper is not retained as a compatibility alias because its range and map
+branches delegated to unavailable `std::hash` specializations and did not
+provide the recursive hashing its interface implied.
+
 ## Compile-Time Dispatch
 
 Below is "pseudo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows how you can optimize away unused code paths with `if constexpr`; in this case the code paths are constrained by the variant type.
