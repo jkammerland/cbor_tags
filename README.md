@@ -854,7 +854,7 @@ pattern.
 - Optional C++26 STL-only mode with `CBOR_TAGS_STL_ONLY=ON`; this uses `std::expected`, `std::format`, and `std::meta` and exports no fmt, nameof, or tl::expected dependency.
 - Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
 - Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.7 or newer.
-- CMake 3.23+ for raw `cmake -S/-B` builds, 3.25+ for the doctest suite or an installed CMake package with `CBOR_TAGS_INSTALL=ON`, and 3.31+ for the checked-in preset workflows.
+- CMake 3.23+ for raw `cmake -S/-B` builds, 3.25+ for tests, benchmarks, or an installed CMake package with `CBOR_TAGS_INSTALL=ON`, and 3.31+ for the checked-in preset workflows.
 
 ## 📦 Installation
 
