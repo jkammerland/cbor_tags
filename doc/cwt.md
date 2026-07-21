@@ -44,6 +44,29 @@ label, duplicate map label, or trailing item in a protected-header byte string
 is rejected. Signing and verification also reject `crit` in unprotected
 headers.
 
+Duplicates are rejected within each protected or unprotected map. The current
+`header_map` model does not perform a general duplicate-label check across the
+two buckets. It discards unknown noncritical parameters, so it cannot compare
+their labels after decoding; it also leaves supported parameters such as `kid`
+in their respective protected and unprotected objects. This is a permissive
+policy relative to the recommendation in
+[RFC 9052 Section 3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3)
+that applications check for the same label in both buckets.
+
+Applications that require that recommendation as a strict profile must reject
+cross-bucket duplicates before converting unknown parameters to `header_map`.
+Known `kid` duplication can be checked after decoding:
+
+```cpp
+auto protected_map = cwt::decode_protected_header(message.protected_header);
+if (!protected_map || (protected_map->kid && message.unprotected.kid)) {
+    return reject_message();
+}
+```
+
+The signing and verification helpers remain stricter for security-sensitive
+registered parameters: `alg` and `crit` are rejected in unprotected headers.
+
 ## Targets
 
 ```cmake
