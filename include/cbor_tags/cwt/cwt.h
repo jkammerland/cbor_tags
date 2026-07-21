@@ -475,7 +475,7 @@ struct claims_set {
                 decoded.subject = std::move(value);
             } else if (key->value == 3U) {
                 audience_claim value;
-                const auto  value_status = dec.decode(value);
+                const auto     value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
