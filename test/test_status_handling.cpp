@@ -136,11 +136,11 @@ TEST_CASE("status messages cover every declared status code") {
 }
 
 TEST_CASE("variant mismatch classification uses the no-match status range") {
-    CHECK_FALSE(detail::is_variant_alternative_mismatch(status_code::begin_no_match_decoding));
-    CHECK(detail::is_variant_alternative_mismatch(status_code::no_match_for_tag));
-    CHECK(detail::is_variant_alternative_mismatch(status_code::no_match_in_variant_on_buffer));
-    CHECK_FALSE(detail::is_variant_alternative_mismatch(status_code::end_no_match_decoding));
-    CHECK_FALSE(detail::is_variant_alternative_mismatch(status_code::unexpected_group_size));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::begin_no_match_decoding));
+    CHECK(detail::is_retriable_variant_mismatch(status_code::no_match_for_tag));
+    CHECK(detail::is_retriable_variant_mismatch(status_code::no_match_in_variant_on_buffer));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::end_no_match_decoding));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::unexpected_group_size));
 }
 
 TEST_CASE("nested variants dispatch through core tag alternatives") {
