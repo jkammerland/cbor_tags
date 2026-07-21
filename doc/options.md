@@ -57,6 +57,36 @@ if (!result) {
 Decode to `integer`, `positive`, or `negative` when the full CBOR integer
 domain matters.
 
+## Return Encoded Item Views
+
+Use `encoded_item_view_decoder_options` when a successful decode should also
+return the exact input bytes consumed by that decoder call.
+
+```cpp
+auto dec = make_decoder_with_options<encoded_item_view_decoder_options>(buffer);
+
+Claims claims{};
+auto encoded = dec(claims);
+if (!encoded) {
+    auto status = encoded.error();
+}
+```
+
+The typed value is still supplied as an output argument. The success value is
+`decltype(dec)::raw_encoded_item_view`, a borrowed view into the decoder input.
+Keep the input buffer alive and unchanged while using it.
+
+The returned range follows the decode expression rather than independently
+validating one complete CBOR item. A variadic call returns the range consumed by
+all its arguments. A call that intentionally decodes only a tag or container
+header returns that consumed prefix. Typed decoding remains single-pass and
+does not pre-scan the input to find a structural item boundary.
+
+Decoding directly into `raw_encoded_item_view`, `raw_encoded_array_view`, or
+`raw_encoded_map_view` is different: no destination type drives consumption, so
+the decoder structurally parses one complete item to locate the end of the raw
+view.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped

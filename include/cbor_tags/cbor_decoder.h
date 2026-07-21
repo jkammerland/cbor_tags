@@ -105,22 +105,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using raw_encoded_array_view = encoded_array_view_for<InputBuffer>;
     using raw_encoded_map_view   = encoded_map_view_for<InputBuffer>;
 
-    using expected_type   = typename Options::return_type;
-    using unexpected_type = typename Options::error_type;
+    using expected_type   = typename detail::decoder_return_type<Options, InputBuffer>::type;
+    using unexpected_type = typename expected_type::error_type;
     using options         = Options;
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            status_collector<self_t> collect_status{*this};
+            if constexpr (detail::return_encoded_item_view_option_v<Options>) {
+                return decode_with_encoded_item_view(std::forward<T>(args)...);
+            } else {
+                status_collector<self_t> collect_status{*this};
 
-            auto success = (collect_status(std::forward<T>(args)) && ...);
+                auto success = (collect_status(std::forward<T>(args)) && ...);
 
-            if (!success) {
-                return unexpected<decltype(collect_status.result)>(collect_status.result);
+                if (!success) {
+                    return unexpected<decltype(collect_status.result)>(collect_status.result);
+                }
+                return expected_type{};
             }
-            return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch (const parse_incomplete_exception &) {
@@ -1268,6 +1272,27 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return collect_status.result;
     }
 
+    template <typename... T> constexpr expected_type decode_with_encoded_item_view(T &&...args) {
+        if (reader_.empty(data_)) {
+            return unexpected<status_code>(status_code::incomplete);
+        }
+
+        const auto start        = tell();
+        const auto start_offset = current_offset();
+
+        status_collector<self_t> collect_status{*this};
+        const auto               success = (collect_status(std::forward<T>(args)) && ...);
+        if (!success) {
+            return unexpected<decltype(collect_status.result)>(collect_status.result);
+        }
+
+        const auto            cursor = tell();
+        const auto            size   = current_offset() - start_offset;
+        raw_encoded_item_view encoded_item;
+        assign_encoded_view(encoded_item, start, cursor, size);
+        return expected_type{std::move(encoded_item)};
+    }
+
     constexpr auto tell() const noexcept {
         if constexpr (IsContiguous<InputBuffer>) {
             return /* Iterator */ std::ranges::begin(data_) + static_cast<std::ptrdiff_t>(reader_.position_);
@@ -1281,6 +1306,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    [[nodiscard]] constexpr size_type current_offset() const noexcept {
+        if constexpr (IsContiguous<InputBuffer>) {
+            return reader_.position_;
+        } else {
+            return reader_.current_offset_;
+        }
+    }
+
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,

@@ -17,11 +17,18 @@ class CborTagsConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = {
         "boost_pfr_names": [True, False],
+        "cwt_openssl": [True, False],
         "magic_enum_names": [True, False],
         "std_expected": [True, False],
         "stl_only": [True, False],
     }
-    default_options = {"boost_pfr_names": False, "magic_enum_names": False, "std_expected": False, "stl_only": False}
+    default_options = {
+        "boost_pfr_names": False,
+        "cwt_openssl": False,
+        "magic_enum_names": False,
+        "std_expected": False,
+        "stl_only": False,
+    }
     exports_sources = (
         "CMakeLists.txt",
         "cbor_tags_config.h.in",
@@ -33,6 +40,8 @@ class CborTagsConan(ConanFile):
     )
 
     def requirements(self):
+        if self.options.cwt_openssl:
+            self.requires("openssl/[>=3 <4]")
         if self.options.stl_only:
             return
         self.requires("fmt/[>=11.0.2 <12]")
@@ -82,6 +91,7 @@ class CborTagsConan(ConanFile):
         tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "OFF" if (self.options.std_expected or self.options.stl_only) else "ON"
         tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.variables["CBOR_TAGS_USE_MAGIC_ENUM_NAMES"] = "ON" if self.options.magic_enum_names else "OFF"
+        tc.variables["CBOR_TAGS_ENABLE_CWT_OPENSSL"] = "ON" if self.options.cwt_openssl else "OFF"
         tc.generate()
         deps = CMakeDeps(self)
         deps.generate()
@@ -98,28 +108,48 @@ class CborTagsConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "cbor_tags")
-        self.cpp_info.set_property("cmake_target_name", "cbor::tags")
-        self.cpp_info.requires = []
-        if not self.options.stl_only:
-            self.cpp_info.requires.extend(["fmt::fmt", "nameof::nameof"])
-        if not self.options.std_expected and not self.options.stl_only:
-            self.cpp_info.requires.append("tl-expected::expected")
-        if self.options.boost_pfr_names and not self.options.stl_only:
-            self.cpp_info.requires.append("boost::headers")
-        if self.options.magic_enum_names and not self.options.stl_only:
-            self.cpp_info.requires.append("magic_enum::magic_enum")
-        self.cpp_info.bindirs = []
+        self.cpp_info.set_property("cmake_target_name", "cbor::all")
         self.cpp_info.libdirs = []
+        self.cpp_info.bindirs = []
+        tags = self.cpp_info.components["tags"]
+        tags.set_property("cmake_target_name", "cbor::tags")
+        tags.includedirs = ["include"]
+        tags.libdirs = []
+        tags.bindirs = []
+        tags.requires = []
+        if not self.options.stl_only:
+            tags.requires.extend(["fmt::fmt", "nameof::nameof"])
+        if not self.options.std_expected and not self.options.stl_only:
+            tags.requires.append("tl-expected::expected")
+        if self.options.boost_pfr_names and not self.options.stl_only:
+            tags.requires.append("boost::headers")
+        if self.options.magic_enum_names and not self.options.stl_only:
+            tags.requires.append("magic_enum::magic_enum")
         if self.options.boost_pfr_names:
-            self.cpp_info.defines.append("CBOR_TAGS_USE_BOOST_PFR_NAMES=1")
+            tags.defines.append("CBOR_TAGS_USE_BOOST_PFR_NAMES=1")
         if self.options.magic_enum_names:
-            self.cpp_info.defines.append("CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1")
+            tags.defines.append("CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1")
         if self.options.std_expected or self.options.stl_only:
-            self.cpp_info.defines.append("CBOR_TAGS_USE_STD_EXPECTED=1")
+            tags.defines.append("CBOR_TAGS_USE_STD_EXPECTED=1")
         if self.options.stl_only:
-            self.cpp_info.defines.append("CBOR_TAGS_STL_ONLY=1")
-            self.cpp_info.defines.append("CBOR_TAGS_USE_STD_REFLECTION=1")
-            self.cpp_info.cxxflags.append("-freflection")
+            tags.defines.append("CBOR_TAGS_STL_ONLY=1")
+            tags.defines.append("CBOR_TAGS_USE_STD_REFLECTION=1")
+            tags.cxxflags.append("-freflection")
+
+        cwt = self.cpp_info.components["cwt"]
+        cwt.set_property("cmake_target_name", "cbor::cwt")
+        cwt.includedirs = ["include"]
+        cwt.libdirs = []
+        cwt.bindirs = []
+        cwt.requires = ["tags"]
+
+        if self.options.cwt_openssl:
+            cwt_openssl = self.cpp_info.components["cwt_openssl"]
+            cwt_openssl.set_property("cmake_target_name", "cbor::cwt_openssl")
+            cwt_openssl.includedirs = ["include"]
+            cwt_openssl.libdirs = []
+            cwt_openssl.bindirs = []
+            cwt_openssl.requires = ["cwt", "openssl::crypto"]
 
         # Header-only library
         self.cpp_info.header_only = True

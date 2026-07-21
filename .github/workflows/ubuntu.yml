@@ -188,6 +188,50 @@ jobs:
             ctest --test-dir /tmp/build -C Release --output-on-failure
           '
 
+  cwt-openssl:
+    name: Ubuntu OpenSSL C++${{ matrix.cxx_standard }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cxx_standard: "20", std_expected: "OFF" }
+          - { cxx_standard: "23", std_expected: "ON" }
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Build and test OpenSSL CWT backend
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "${{ github.workspace }}:/work:ro,z" \
+          -w /work \
+          ubuntu:26.04 \
+          bash -euxo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates \
+              cmake \
+              git \
+              ninja-build \
+              gcc-15 \
+              g++-15 \
+              libssl-dev
+            cmake -S /work -B /tmp/build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCBOR_TAGS_BUILD_TESTS=ON \
+              -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON \
+              -DCBOR_TAGS_USE_STD_EXPECTED=${{ matrix.std_expected }} \
+              -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \
+              -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+              -DCMAKE_C_COMPILER=gcc-15 \
+              -DCMAKE_CXX_COMPILER=g++-15
+            cmake --build /tmp/build --parallel
+            ctest --test-dir /tmp/build -C Release --output-on-failure
+          '
+
   gcc-std-reflection:
     name: Fedora 44 GCC C++26 reflection tests
     runs-on: ubuntu-latest
