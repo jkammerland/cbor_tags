@@ -279,7 +279,7 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
 
         CHECK_EQ(static_cast<bool>(decoded_nullable_root), static_cast<bool>(nullable_root));
         if (nullable_root) {
-            REQUIRE(decoded_nullable_root);
+            REQUIRE(static_cast<bool>(decoded_nullable_root));
             CHECK(*decoded_nullable_root == *nullable_root);
         }
     };
