@@ -314,6 +314,7 @@ TEST_CASE("composed shared graph stack rejects cycles and requires nullable fall
         auto                        enc = make_encoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
         shared_graph_encode_session session;
         const auto                  result = enc(as_shared_graph(session, cycle));
+        cycle->next.reset();
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
