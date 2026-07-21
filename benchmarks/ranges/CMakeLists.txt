@@ -12,7 +12,7 @@ target_link_libraries(
           fmt::fmt
           doctest
           nanobench
-          nameof
+          nameof::nameof
           benchmark_util
           test_util)
 cbor_tags_configure_benchmark_target(${PROJECT_NAME})
