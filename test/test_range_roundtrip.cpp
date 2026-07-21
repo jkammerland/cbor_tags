@@ -13,6 +13,7 @@
 #include <map>
 #include <optional>
 #include <ranges>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -131,6 +132,41 @@ TEST_CASE("explicit array range wrappers roundtrip sized and unsized views") {
         roundtrip_through_vector(as_array_range(evens), decoded);
         CHECK_EQ(decoded, (std::vector<int>{0, 2, 4}));
     }
+}
+
+TEST_CASE("explicit array range wrappers consume single-pass non-common ranges once") {
+    std::istringstream stream{"1 2 3"};
+    auto               values = std::ranges::istream_view<int>(stream);
+    static_assert(std::ranges::input_range<decltype(values)>);
+    static_assert(!std::ranges::forward_range<decltype(values)>);
+    static_assert(!std::ranges::common_range<decltype(values)>);
+
+    std::vector<int> decoded;
+    const auto       buffer = roundtrip_through_vector(as_array_range(values), decoded);
+
+    CHECK_EQ(to_hex(buffer), "9f010203ff");
+    CHECK_EQ(decoded, (std::vector<int>{1, 2, 3}));
+}
+
+TEST_CASE("explicit range wrappers roundtrip empty semantic values") {
+    std::vector<int>                 array_values;
+    std::vector<std::pair<int, int>> map_values;
+    std::vector<std::byte>           byte_values;
+    std::string                      text_values;
+
+    std::vector<int>       decoded_array;
+    std::map<int, int>     decoded_map;
+    std::vector<std::byte> decoded_bytes;
+    std::string            decoded_text;
+
+    CHECK_EQ(to_hex(roundtrip_through_vector(as_array_range(array_values), decoded_array)), "80");
+    CHECK_EQ(to_hex(roundtrip_through_vector(as_map_range(map_values), decoded_map)), "a0");
+    CHECK_EQ(to_hex(roundtrip_through_vector(as_bstr_range(byte_values), decoded_bytes)), "40");
+    CHECK_EQ(to_hex(roundtrip_through_vector(as_tstr_range(text_values), decoded_text)), "60");
+    CHECK(decoded_array.empty());
+    CHECK(decoded_map.empty());
+    CHECK(decoded_bytes.empty());
+    CHECK(decoded_text.empty());
 }
 
 TEST_CASE("explicit array range wrappers roundtrip owning and proxy ranges") {
