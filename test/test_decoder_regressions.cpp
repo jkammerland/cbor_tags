@@ -129,6 +129,33 @@ struct ReserveWithoutSizeByteBuffer {
     void               pop_back() { bytes.pop_back(); }
 };
 
+struct ExternalByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    std::byte *storage{};
+    size_type  current_size{};
+    size_type  capacity{};
+
+    [[nodiscard]] auto begin() noexcept { return storage; }
+    [[nodiscard]] auto begin() const noexcept { return static_cast<const std::byte *>(storage); }
+    [[nodiscard]] auto end() noexcept { return storage + current_size; }
+    [[nodiscard]] auto end() const noexcept { return static_cast<const std::byte *>(storage) + current_size; }
+    [[nodiscard]] auto size() const noexcept { return current_size; }
+    void               push_back(value_type value) {
+        if (current_size == capacity) {
+            throw std::length_error("external byte buffer is full");
+        }
+        storage[current_size++] = value;
+    }
+    void insert(std::byte *, const std::byte *first, const std::byte *last) {
+        for (; first != last; ++first) {
+            push_back(*first);
+        }
+    }
+    void pop_back() { --current_size; }
+};
+
 struct controlled_memory_resource : std::pmr::memory_resource {
     std::pmr::memory_resource *upstream{std::pmr::new_delete_resource()};
     std::size_t                allocations_before_failure{std::numeric_limits<std::size_t>::max()};
@@ -161,7 +188,9 @@ static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedB
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
 static_assert(IsBinaryString<ReserveWithoutSizeByteBuffer>);
-static_assert(!HasReserve<ReserveWithoutSizeByteBuffer>);
+static_assert(HasReserve<ReserveWithoutSizeByteBuffer>);
+static_assert(!detail::AppendReservable<ReserveWithoutSizeByteBuffer>);
+static_assert(IsBinaryString<ExternalByteBuffer>);
 
 TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
     CHECK(std::isinf(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7C00)})));
@@ -584,6 +613,41 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         CHECK_EQ(result.error(), status_code::error);
         CHECK_EQ(storage, original);
     }
+
+    SUBCASE("input span starts inside byte vector") {
+        std::vector<std::byte> storage{std::byte{0x00}, std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        const auto             original = storage;
+        const auto             input    = std::span<const std::byte>{storage}.subspan(1);
+        auto                   dec      = make_decoder(input);
+        auto                   result   = dec(storage);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(storage, original);
+    }
+
+    SUBCASE("mutable target starts inside input") {
+        std::vector<std::byte> input{std::byte{0x41}, std::byte{0xAA}, std::byte{0x00}};
+        const auto             original = input;
+        ExternalByteBuffer     target{input.data() + 1, 1, 2};
+        auto                   dec    = make_decoder(input);
+        auto                   result = dec(target);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(input, original);
+    }
+
+    SUBCASE("adjacent input and target ranges do not overlap") {
+        std::vector<std::byte> storage{std::byte{0x41}, std::byte{0xAA}, std::byte{0x00}, std::byte{0x00}};
+        const auto             input = std::span<const std::byte>{storage}.first<2>();
+        ExternalByteBuffer     target{storage.data() + 2, 1, 2};
+        auto                   dec = make_decoder(input);
+
+        REQUIRE(dec(target));
+        REQUIRE_EQ(target.size(), 2);
+        CHECK_EQ(target.storage[1], std::byte{0xAA});
+    }
 }
 
 TEST_CASE("decoder reserves non-contiguous definite text before mutation") {
@@ -619,7 +683,7 @@ TEST_CASE("decoder rolls back non-reservable definite string append failures") {
     CHECK_EQ(decoded.front(), std::byte{0x01});
 }
 
-TEST_CASE("reserve without size falls back to staged definite string append") {
+TEST_CASE("reserve without size falls back to rollback-capable append") {
     const std::deque<std::byte>  input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
     ReserveWithoutSizeByteBuffer decoded{{std::byte{0x01}}};
 
