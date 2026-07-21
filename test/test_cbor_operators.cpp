@@ -1,14 +1,31 @@
 #include "cbor_tags/cbor_operators.h"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <functional>
 #include <map>
 #include <string>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
+
+namespace {
+
+template <typename T>
+concept Hashable = requires(const T &value) {
+    { std::hash<T>{}(value) } -> std::convertible_to<std::size_t>;
+};
+
+using hashable_variant     = std::variant<int, std::string>;
+using non_hashable_variant = std::variant<int, std::vector<int>>;
+
+static_assert(Hashable<hashable_variant>);
+static_assert(!Hashable<non_hashable_variant>);
+
+} // namespace
 
 TEST_CASE("variant comparator orders by variant index") {
     using variant_t = std::variant<std::uint64_t, std::string, std::nullptr_t>;
