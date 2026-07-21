@@ -80,25 +80,25 @@ TEST_CASE("contiguous borrowed views roundtrip aggregate composition") {
         };
 
         CHECK_EQ(output.state, input.state);
-        CHECK_EQ(output.name, input.name);
-        CHECK(std::ranges::equal(output.payload, input.payload));
         require_borrowed_from_buffer(output.name);
         require_borrowed_from_buffer(output.payload);
+        CHECK_EQ(output.name, input.name);
+        CHECK(std::ranges::equal(output.payload, input.payload));
         CHECK_EQ(output.note.has_value(), input.note.has_value());
         if (input.note) {
             REQUIRE(output.note);
-            CHECK_EQ(*output.note, *input.note);
             require_borrowed_from_buffer(*output.note);
+            CHECK_EQ(*output.note, *input.note);
         }
         REQUIRE_EQ(output.result.index(), input.result.index());
         switch (input.result.index()) {
         case 0:
-            CHECK_EQ(std::get<0>(output.result), std::get<0>(input.result));
             require_borrowed_from_buffer(std::get<0>(output.result));
+            CHECK_EQ(std::get<0>(output.result), std::get<0>(input.result));
             break;
         case 1:
-            CHECK(std::ranges::equal(std::get<1>(output.result), std::get<1>(input.result)));
             require_borrowed_from_buffer(std::get<1>(output.result));
+            CHECK(std::ranges::equal(std::get<1>(output.result), std::get<1>(input.result)));
             break;
         default: CHECK_EQ(std::get<2>(output.result), std::get<2>(input.result)); break;
         }
