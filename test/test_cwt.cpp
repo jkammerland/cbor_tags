@@ -280,6 +280,103 @@ TEST_CASE("CWT NumericDate rejects integers outside the int64 domain") {
     }
 }
 
+TEST_CASE("CWT claims consume unknown text claim keys") {
+    SUBCASE("definite text label") {
+        std::vector<std::byte> encoded;
+        auto                   enc = make_encoder(encoded);
+        REQUIRE(enc(as_map{2}, std::string{"private"}, std::vector<int>{1, 2, 3}, std::uint64_t{1}, std::string{"issuer"}));
+
+        claims_set decoded;
+        auto       dec = make_decoder(encoded);
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "issuer");
+        CHECK_FALSE(decoded.subject);
+        CHECK_FALSE(decoded.audience);
+        CHECK_EQ(dec.tell(), encoded.end());
+    }
+
+    SUBCASE("indefinite text label") {
+        auto       input = to_bytes("a27f637072696476617465ff830102030166697373756572");
+        claims_set decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "issuer");
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("indefinite map, label, and value") {
+        auto       input = to_bytes("bf7f637072696476617465ff9f0102ff0163696470ff");
+        claims_set decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "idp");
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("non-contiguous input") {
+        const auto            bytes = to_bytes("a27f637072696476617465ff830102030166697373756572");
+        std::deque<std::byte> input(bytes.begin(), bytes.end());
+        claims_set            decoded;
+        auto                  dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.issuer, "issuer");
+        CHECK_EQ(dec.tell(), input.end());
+    }
+
+    SUBCASE("integer and text labels remain distinct") {
+        auto       input = to_bytes("a20166697373756572613101");
+        claims_set decoded;
+
+        REQUIRE(make_decoder(input)(decoded));
+        CHECK_EQ(decoded.issuer, "issuer");
+    }
+}
+
+TEST_CASE("CWT claims reject duplicate text labels without replacing the destination") {
+    constexpr std::array duplicate_maps{
+        "a2677072697661746501677072697661746502",
+        "a27f637072696476617465ff01677072697661746502",
+    };
+
+    for (const auto hex : duplicate_maps) {
+        CAPTURE(hex);
+        auto       input = to_bytes(hex);
+        claims_set decoded;
+        decoded.issuer = "unchanged";
+        auto result    = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(decoded.issuer, "unchanged");
+    }
+}
+
+TEST_CASE("CWT claims reject truncated indefinite text labels atomically") {
+    auto       input = to_bytes("a17f63707269");
+    claims_set decoded;
+    decoded.issuer = "unchanged";
+    auto result    = make_decoder(input)(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.issuer, "unchanged");
+}
+
+TEST_CASE("encoded item view options retain CWT maps with text labels") {
+    auto       input = to_bytes("a27f637072696476617465ff830102030166697373756572");
+    claims_set decoded;
+    auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options>(input);
+    auto       result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.issuer, "issuer");
+    CHECK_EQ(to_hex(result->bytes()), to_hex(input));
+    CHECK_EQ(dec.tell(), input.end());
+}
+
 TEST_CASE("COSE protected header and Sign1 Sig_structure encode in RFC shape") {
     const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256});
     REQUIRE(protected_header);
