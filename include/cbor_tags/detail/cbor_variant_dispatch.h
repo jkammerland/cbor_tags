@@ -11,23 +11,7 @@
 namespace cbor::tags::detail {
 
 [[nodiscard]] constexpr bool is_variant_alternative_mismatch(status_code status) noexcept {
-    switch (status) {
-    case status_code::no_match_for_tag:
-    case status_code::no_match_for_tag_simple_on_buffer:
-    case status_code::no_match_for_uint_on_buffer:
-    case status_code::no_match_for_nint_on_buffer:
-    case status_code::no_match_for_int_on_buffer:
-    case status_code::no_match_for_enum_on_buffer:
-    case status_code::no_match_for_bstr_on_buffer:
-    case status_code::no_match_for_tstr_on_buffer:
-    case status_code::no_match_for_array_on_buffer:
-    case status_code::no_match_for_map_on_buffer:
-    case status_code::no_match_for_tag_on_buffer:
-    case status_code::no_match_for_simple_on_buffer:
-    case status_code::no_match_for_optional_on_buffer:
-    case status_code::no_match_in_variant_on_buffer: return true;
-    default: return false;
-    }
+    return status > status_code::begin_no_match_decoding && status < status_code::end_no_match_decoding;
 }
 
 template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(std::byte additional_info) {

@@ -243,7 +243,7 @@ template <typename T> constexpr std::uint64_t tag_for(const T &value) {
     } else if constexpr (HasTagMember<type>) {
         return tag_to_uint64(Access::cbor_tag(value));
     } else if constexpr (HasTagNonConstructible<type>) {
-        return tag_to_uint64(cbor::tags::cbor_tag<type>());
+        return tag_to_uint64(cbor_tag<type>());
     } else if constexpr (HasTagFreeFunction<type>) {
         return tag_to_uint64(cbor_tag(value));
     } else {
@@ -277,7 +277,7 @@ template <typename T> constexpr std::remove_cvref_t<T> make_decode_value_for_exi
         return value;
     } else if constexpr (std::is_aggregate_v<type> && !is_std_array_v<type> && !IsMap<type> && !IsRangeOfCborValues<type> &&
                          !IsVariant<type> && !is_text_string_v<type> && !IsBinaryString<type>) {
-        auto tuple       = cbor::tags::to_tuple(value);
+        auto tuple       = to_tuple(value);
         using tuple_type = std::remove_cvref_t<decltype(tuple)>;
         return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
             return type{make_decode_value_for_existing(std::get<Indices>(tuple))...};
@@ -291,7 +291,7 @@ template <typename T> constexpr T make_decode_value_for_existing_optional(std::o
     if (value.has_value()) {
         return make_decode_value_for_existing(*value);
     }
-    return cbor::tags::detail::make_decode_value_for_optional<T>(value);
+    return make_decode_value_for_optional<T>(value);
 }
 
 template <typename T, typename Allocator> constexpr std::remove_cvref_t<T> make_decode_value_with_allocator(const Allocator &allocator) {
@@ -310,7 +310,7 @@ template <typename T, typename Allocator> constexpr std::remove_cvref_t<T> make_
         }(std::make_index_sequence<std::tuple_size_v<type>>{});
     } else if constexpr (std::is_aggregate_v<type> && !is_std_array_v<type> && !IsMap<type> && !IsRangeOfCborValues<type> &&
                          !IsVariant<type> && !is_text_string_v<type> && !IsBinaryString<type>) {
-        using tuple_type = std::remove_cvref_t<decltype(cbor::tags::to_tuple(std::declval<type &>()))>;
+        using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<type &>()))>;
         return [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
             return type{make_decode_value_with_allocator<std::remove_cvref_t<std::tuple_element_t<Indices, tuple_type>>>(allocator)...};
         }(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
@@ -529,7 +529,7 @@ template <typename T> constexpr status_code decode_byte_string(span_reader &read
     if (length > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
         return status_code::error;
     }
-    if constexpr (IsConstBinaryView<type> && cbor::tags::detail::is_static_extent_span_v<type>) {
+    if constexpr (IsConstBinaryView<type> && is_static_extent_span_v<type>) {
         if (length != static_cast<std::uint64_t>(type::extent)) {
             return status_code::unexpected_group_size;
         }
@@ -675,34 +675,34 @@ template <typename T> constexpr status_code decode_optional(span_reader &reader,
 }
 
 template <typename Writer, IsVariant Variant> constexpr void encode_variant(Writer &writer, const Variant &value) {
-    write_varuint(writer, static_cast<std::uint64_t>(cbor::tags::detail::variant_index(value)));
-    cbor::tags::detail::variant_visit([&writer](const auto &alternative) { encode_value(writer, alternative); }, value);
+    write_varuint(writer, static_cast<std::uint64_t>(variant_index(value)));
+    variant_visit([&writer](const auto &alternative) { encode_value(writer, alternative); }, value);
 }
 
 template <std::size_t I = 0, IsVariant Variant>
 constexpr status_code decode_variant_alternative(std::uint64_t index, span_reader &reader, Variant &value) {
     using variant_type = std::remove_cvref_t<Variant>;
 
-    if constexpr (I >= cbor::tags::detail::variant_size_v<variant_type>) {
+    if constexpr (I >= variant_size_v<variant_type>) {
         (void)index;
         (void)reader;
         (void)value;
         return status_code::no_match_in_variant_on_buffer;
     } else {
         if (index == I) {
-            using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
+            using alternative_type = variant_alternative_t<I, variant_type>;
             auto make_alternative  = [&]() -> alternative_type {
                 if constexpr (std::default_initializable<alternative_type>) {
                     return alternative_type{};
                 } else if constexpr (std::copy_constructible<alternative_type>) {
-                    return alternative_type{cbor::tags::detail::variant_get<I>(value)};
+                    return alternative_type{variant_get<I>(value)};
                 } else {
                     static_assert(dependent_false<alternative_type>::value,
                                   "custom_codec_1 variant alternatives must be default-initializable or copy-constructible");
                 }
             };
             if constexpr (!std::default_initializable<alternative_type>) {
-                if (cbor::tags::detail::variant_index(value) != I) {
+                if (variant_index(value) != I) {
                     return status_code::error;
                 }
             }
@@ -711,7 +711,7 @@ constexpr status_code decode_variant_alternative(std::uint64_t index, span_reade
             if (status != status_code::success) {
                 return status;
             }
-            cbor::tags::detail::variant_assign<I>(value, std::move(alternative));
+            variant_assign<I>(value, std::move(alternative));
             return status_code::success;
         }
         return decode_variant_alternative<I + 1>(index, reader, value);
@@ -903,7 +903,7 @@ template <typename Writer, typename T> constexpr void encode_aggregate(Writer &w
     if constexpr (IsUntaggedTuple<std::remove_cvref_t<T>> || IsTaggedTuple<std::remove_cvref_t<T>>) {
         encode_tuple_fields(writer, value);
     } else {
-        const auto tuple = cbor::tags::to_tuple(value);
+        const auto tuple = to_tuple(value);
         encode_tuple_fields(writer, tuple);
     }
 }
@@ -912,7 +912,7 @@ template <typename T> constexpr status_code decode_aggregate(span_reader &reader
     if constexpr (IsUntaggedTuple<std::remove_cvref_t<T>> || IsTaggedTuple<std::remove_cvref_t<T>>) {
         return decode_tuple_fields(reader, value);
     } else {
-        auto tuple = cbor::tags::to_tuple(value);
+        auto tuple = to_tuple(value);
         return decode_tuple_fields(reader, tuple);
     }
 }
@@ -990,9 +990,9 @@ template <typename T> [[nodiscard]] constexpr std::size_t encoded_size(const T &
 }
 
 template <typename Segments, typename T> [[nodiscard]] inline Segments encode_payload_segments_as(const T &value) {
-    Segments                               payload;
-    cbor::tags::detail::appender<Segments> appender;
-    encode_payload_to(appender, payload, value);
+    Segments           payload;
+    appender<Segments> output_appender;
+    encode_payload_to(output_appender, payload, value);
     return payload;
 }
 
@@ -1042,7 +1042,7 @@ template <typename T> struct has_borrowed_decode_refs {
         } else if constexpr (IsOptional<type>) {
             return has_borrowed_decode_refs<typename type::value_type>::value;
         } else if constexpr (IsVariant<type>) {
-            return cbor::tags::detail::with_variant_alternatives<type>(
+            return with_variant_alternatives<type>(
                 []<typename... Ts>() { return (has_borrowed_decode_refs<std::remove_cvref_t<Ts>>::value || ...); });
         } else if constexpr (IsMap<type>) {
             return has_borrowed_decode_refs<typename type::key_type>::value || has_borrowed_decode_refs<typename type::mapped_type>::value;
@@ -1051,7 +1051,7 @@ template <typename T> struct has_borrowed_decode_refs {
         } else if constexpr (IsUntaggedTuple<type> || IsTaggedTuple<type>) {
             return tuple_has_borrowed_decode_refs<type>::value;
         } else if constexpr (std::is_aggregate_v<type>) {
-            using tuple_type = std::remove_cvref_t<decltype(cbor::tags::to_tuple(std::declval<type &>()))>;
+            using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<type &>()))>;
             return tuple_has_borrowed_decode_refs<tuple_type>::value;
         } else {
             return false;
