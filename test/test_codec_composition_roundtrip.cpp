@@ -254,7 +254,7 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
         const auto primary_address = static_cast<const void *>(output.primary.get());
         CHECK(static_cast<const void *>(output.mirrors[0].get()) == primary_address);
         REQUIRE(static_cast<bool>(output.mirrors[1]));
-        CHECK_FALSE(output.mirrors[2]);
+        CHECK_FALSE(static_cast<bool>(output.mirrors[2]));
         CHECK(static_cast<const void *>(output.mirrors[3].get()) == primary_address);
         CHECK(static_cast<const void *>(output.mirrors[4].get()) == static_cast<const void *>(output.mirrors[1].get()));
         CHECK_EQ(output.mirrors[1]->id, input.mirrors[1]->id);
