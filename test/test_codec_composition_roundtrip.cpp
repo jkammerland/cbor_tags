@@ -125,6 +125,11 @@ struct graph_codec_report {
     std::map<std::string, std::vector<int>>                      history;
 };
 
+struct graph_codec_cycle_node {
+    typed_array<std::int16_t>               samples;
+    std::shared_ptr<graph_codec_cycle_node> next;
+};
+
 #ifdef CBOR_TAGS_TEST_HAS_STD_EXPECTED
 
 struct codec_error {
@@ -223,30 +228,39 @@ TEST_CASE("typed array and nullable pointer codecs roundtrip aggregate compositi
 }
 
 TEST_CASE("typed array nullable and shared graph codecs preserve aggregate identity") {
-    auto check_roundtrip = [](graph_codec_report &input, bool selected_is_pointer) {
+    auto check_roundtrip = [](graph_codec_report &input, const std::shared_ptr<codec_owner> &nullable_root, bool selected_is_pointer) {
         std::vector<std::byte>      buffer;
         auto                        enc = make_encoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
         shared_graph_encode_session encode_session;
         REQUIRE(enc(as_shared_graph(encode_session, input)));
+        REQUIRE(enc(nullable_root));
 
-        graph_codec_report          output;
-        auto                        dec = make_decoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
-        shared_graph_decode_session decode_session;
+        graph_codec_report           output;
+        std::shared_ptr<codec_owner> decoded_nullable_root;
+        auto                         dec = make_decoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
+        shared_graph_decode_session  decode_session;
         REQUIRE(dec(as_shared_graph(decode_session, output)));
+        REQUIRE(dec(decoded_nullable_root));
         REQUIRE(dec.tell() == buffer.end());
 
+        CHECK_EQ(output.state, input.state);
         REQUIRE(static_cast<bool>(output.primary));
         CHECK_EQ(output.primary->id, input.primary->id);
         CHECK_EQ(output.primary->name, input.primary->name);
         CHECK_EQ(output.primary->samples.values(), input.primary->samples.values());
         CHECK_EQ(output.primary->note, input.primary->note);
         REQUIRE_EQ(output.mirrors.size(), input.mirrors.size());
-        REQUIRE_EQ(output.mirrors.size(), 3U);
+        REQUIRE_EQ(output.mirrors.size(), 5U);
         const auto primary_address = static_cast<const void *>(output.primary.get());
         CHECK(static_cast<const void *>(output.mirrors[0].get()) == primary_address);
-        CHECK(static_cast<const void *>(output.mirrors[2].get()) == primary_address);
         REQUIRE(static_cast<bool>(output.mirrors[1]));
+        CHECK_FALSE(output.mirrors[2]);
+        CHECK(static_cast<const void *>(output.mirrors[3].get()) == primary_address);
+        CHECK(static_cast<const void *>(output.mirrors[4].get()) == static_cast<const void *>(output.mirrors[1].get()));
         CHECK_EQ(output.mirrors[1]->id, input.mirrors[1]->id);
+        CHECK_EQ(output.mirrors[1]->name, input.mirrors[1]->name);
+        CHECK_EQ(output.mirrors[1]->samples.values(), input.mirrors[1]->samples.values());
+        CHECK_EQ(output.mirrors[1]->note, input.mirrors[1]->note);
         CHECK_EQ(output.history, input.history);
 
         if (selected_is_pointer) {
@@ -262,6 +276,12 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
             REQUIRE(static_cast<bool>(output.fallback));
             CHECK(*output.fallback == *input.fallback);
         }
+
+        CHECK_EQ(static_cast<bool>(decoded_nullable_root), static_cast<bool>(nullable_root));
+        if (nullable_root) {
+            REQUIRE(decoded_nullable_root);
+            CHECK(*decoded_nullable_root == *nullable_root);
+        }
     };
 
     auto primary   = std::make_shared<graph_codec_node>(graph_codec_node{1, "primary", typed_array<std::int16_t>{{1, 2, 3}}, "live"});
@@ -270,17 +290,44 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
     SUBCASE("shared pointer variant and non-null nullable pointer") {
         graph_codec_report input{codec_report_state::active,
                                  primary,
-                                 {primary, secondary, primary},
+                                 {primary, secondary, nullptr, primary, secondary},
                                  primary,
                                  std::make_unique<codec_owner>(codec_owner{3, "fallback", {"read"}}),
                                  {{"recent", {1, 2, 3}}}};
-        check_roundtrip(input, true);
+        check_roundtrip(input, std::make_shared<codec_owner>(codec_owner{4, "outside-graph", {"audit"}}), true);
     }
 
     SUBCASE("text variant and null nullable pointer") {
-        graph_codec_report input{codec_report_state::degraded, primary, {primary, secondary, primary},
+        graph_codec_report input{codec_report_state::degraded, primary, {primary, secondary, nullptr, primary, secondary},
                                  std::string{"manual"},        nullptr, {{"recent", {4, 5}}}};
-        check_roundtrip(input, false);
+        check_roundtrip(input, nullptr, false);
+    }
+}
+
+TEST_CASE("composed shared graph stack rejects cycles and requires nullable fallback") {
+    SUBCASE("typed graph cycle") {
+        auto cycle     = std::make_shared<graph_codec_cycle_node>();
+        cycle->samples = typed_array<std::int16_t>{{1, 2, 3}};
+        cycle->next    = cycle;
+
+        std::vector<std::byte>      buffer;
+        auto                        enc = make_encoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
+        shared_graph_encode_session session;
+        const auto                  result = enc(as_shared_graph(session, cycle));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+
+    SUBCASE("shared pointer outside graph scope") {
+        const auto             value = std::make_shared<codec_owner>(codec_owner{5, "outside", {"read"}});
+        std::vector<std::byte> buffer;
+        auto                   enc    = make_encoder<typed_array_codec, shared_graph_codec>(buffer);
+        const auto             result = enc(value);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(buffer.empty());
     }
 }
 
