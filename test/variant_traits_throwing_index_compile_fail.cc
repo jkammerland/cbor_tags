@@ -1,4 +1,4 @@
-#include "cbor_tags/cbor_variant_traits.h"
+#include "cbor_tags/detail/cbor_variant_traits.h"
 
 #include <cstddef>
 #include <cstdint>
