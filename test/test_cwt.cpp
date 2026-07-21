@@ -125,6 +125,89 @@ TEST_CASE("CWT claims encode with registered integer claim keys") {
     CHECK_EQ(decoded.cwt_id, claims.cwt_id);
 }
 
+TEST_CASE("CWT claims roundtrip array-valued audience") {
+    claims_set claims;
+    claims.audience = std::vector<std::string>{"coap://light.example.com", "coap://sensor.example.com"};
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder(encoded);
+    REQUIRE(enc(claims));
+    CHECK_EQ(to_hex(encoded),
+             "a103827818636f61703a2f2f6c696768742e6578616d706c652e636f6d7819636f61703a2f2f73656e736f722e6578616d706c652e636f6d");
+
+    claims_set decoded;
+    auto       dec = make_decoder(encoded);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded.audience);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(*decoded.audience));
+    CHECK_EQ(std::get<std::vector<std::string>>(*decoded.audience), std::get<std::vector<std::string>>(*claims.audience));
+    CHECK_EQ(dec.tell(), encoded.end());
+}
+
+TEST_CASE("CWT claims accept empty and indefinite audience arrays") {
+    SUBCASE("empty array roundtrip") {
+        claims_set claims;
+        claims.audience = std::vector<std::string>{};
+
+        std::vector<std::byte> encoded;
+        auto                   enc = make_encoder(encoded);
+        REQUIRE(enc(claims));
+        CHECK_EQ(to_hex(encoded), "a10380");
+
+        claims_set decoded;
+        REQUIRE(make_decoder(encoded)(decoded));
+        REQUIRE(decoded.audience);
+        REQUIRE(std::holds_alternative<std::vector<std::string>>(*decoded.audience));
+        CHECK(std::get<std::vector<std::string>>(*decoded.audience).empty());
+    }
+
+    SUBCASE("indefinite map and array") {
+        auto       input = to_bytes("bf039f61616162ffff");
+        claims_set decoded;
+        auto       dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        REQUIRE(decoded.audience);
+        REQUIRE(std::holds_alternative<std::vector<std::string>>(*decoded.audience));
+        CHECK_EQ(std::get<std::vector<std::string>>(*decoded.audience), (std::vector<std::string>{"a", "b"}));
+        CHECK_EQ(dec.tell(), input.end());
+    }
+}
+
+TEST_CASE("CWT claims reject malformed audience arrays atomically") {
+    constexpr std::array malformed{
+        "a103826576616c696401",
+        "a1039f6161",
+    };
+
+    for (const auto hex : malformed) {
+        CAPTURE(hex);
+        auto       input = to_bytes(hex);
+        claims_set decoded;
+        decoded.issuer   = "unchanged";
+        decoded.audience = std::string{"unchanged"};
+        auto result      = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(decoded.issuer, "unchanged");
+        REQUIRE(decoded.audience);
+        CHECK_EQ(*decoded.audience, audience_claim{std::string{"unchanged"}});
+    }
+}
+
+TEST_CASE("encoded item view options retain array-valued audience claims") {
+    auto       input = to_bytes("a1039f61616162ff");
+    claims_set decoded;
+    auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options>(input);
+    auto       result = dec(decoded);
+
+    REQUIRE(result);
+    REQUIRE(decoded.audience);
+    CHECK_EQ(*decoded.audience, (audience_claim{std::vector<std::string>{"a", "b"}}));
+    CHECK_EQ(to_hex(result->bytes()), to_hex(input));
+    CHECK_EQ(dec.tell(), input.end());
+}
+
 TEST_CASE("encoded item view options decode non-empty CWT claims maps") {
     claims_set claims;
     claims.issuer     = "idp";
