@@ -19,6 +19,7 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
+#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
 #include <new>
@@ -38,7 +39,6 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags {
 
@@ -54,7 +54,12 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     return value <= max_cbor_argument;
 }
 
-template <HasReserve T> constexpr void reserve_for_append(T &value, std::uint64_t additional_size) {
+template <typename T>
+concept AppendReservable = HasReserve<T> && requires(const T &value) {
+    { value.size() } -> std::convertible_to<typename T::size_type>;
+};
+
+template <AppendReservable T> constexpr void reserve_for_append(T &value, std::uint64_t additional_size) {
     using size_type = typename T::size_type;
 
     const auto current_size = value.size();
@@ -323,7 +328,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return status_code::error;
             }
         }
-        if constexpr (!IsConstView<T> && !IsFixedArray<T> && HasReserve<T>) {
+        if constexpr (!IsConstView<T> && !IsFixedArray<T> && detail::AppendReservable<T>) {
             detail::reserve_for_append(t, bstring_size);
         }
 
@@ -348,7 +353,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            append_definite_string(t, bstring, bstring_size);
+            append_definite_string(t, bstring);
         }
 
         return status_code::success;
@@ -386,16 +391,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (string_target_aliases_input(t)) {
                 return status_code::error;
             }
-            if constexpr (HasReserve<T>) {
-                detail::reserve_for_append(t, text_size);
-            }
+        }
+        if constexpr (!IsConstView<T> && detail::AppendReservable<T>) {
+            detail::reserve_for_append(t, text_size);
         }
 
         auto text = decode_text_payload(text_size);
         if constexpr (IsConstView<T>) {
             t = std::move(text);
         } else {
-            append_definite_string(t, text, text_size);
+            append_definite_string(t, text);
         }
         return status_code::success;
     }
@@ -727,7 +732,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
         detail::reserve_for_append(value, text_size);
         auto text = decode_text_payload(text_size);
-        append_definite_string(value, text, text_size);
+        append_definite_string(value, text);
         return status_code::success;
     }
 
@@ -1675,49 +1680,30 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return false;
             }
 
-            const auto *target_begin = std::ranges::data(target);
-            const auto *target_end   = target_begin + std::ranges::size(target);
-            const auto *input_begin  = std::ranges::data(data_);
-            const auto *input_end    = input_begin + std::ranges::size(data_);
+            const auto *target_data = std::ranges::data(target);
+            const auto *input_data  = std::ranges::data(data_);
+            const auto *target_end  = target_data + std::ranges::size(target);
+            const auto *input_end   = input_data + std::ranges::size(data_);
 
-            const auto target_begin_address = reinterpret_cast<std::uintptr_t>(target_begin);
-            const auto target_end_address   = reinterpret_cast<std::uintptr_t>(target_end);
-            const auto input_begin_address  = reinterpret_cast<std::uintptr_t>(input_begin);
-            const auto input_end_address    = reinterpret_cast<std::uintptr_t>(input_end);
-            return input_begin_address < target_end_address && target_begin_address < input_end_address;
+            const auto before = std::less<const void *>{};
+            return before(input_data, target_end) && before(target_data, input_end);
         }
 
         return false;
     }
 
-    template <typename T, std::ranges::input_range R>
-    constexpr void append_definite_string(T &target, R &&payload, std::uint64_t payload_size) {
-        detail::appender<T> appender_;
-        if constexpr (HasReserve<T>) {
-            if constexpr (IsContiguous<R>) {
-                appender_(target, payload);
-            } else {
-                for (auto value : payload) {
-                    appender_(target, static_cast<typename T::value_type>(value));
-                }
-            }
+    template <typename T, std::ranges::input_range R> constexpr void append_definite_string(T &target, R &&payload) {
+        detail::appender<T> append;
+        if constexpr (detail::AppendReservable<T>) {
+            detail::append_byte_range(append, target, std::forward<R>(payload));
         } else {
             static_assert(
                 requires(T &value) { value.pop_back(); }, "non-reservable string targets must support pop_back for failure rollback");
 
-            std::vector<typename T::value_type> staged;
-            if (std::cmp_greater(payload_size, staged.max_size())) {
-                throw std::length_error("CBOR string length exceeds staging container max_size");
-            }
-            staged.reserve(static_cast<std::size_t>(payload_size));
-            for (auto value : payload) {
-                staged.push_back(static_cast<typename T::value_type>(value));
-            }
-
             std::size_t appended = 0;
             try {
-                for (const auto value : staged) {
-                    appender_(target, value);
+                for (auto &&value : payload) {
+                    append(target, static_cast<typename T::value_type>(value));
                     ++appended;
                 }
             } catch (...) {
