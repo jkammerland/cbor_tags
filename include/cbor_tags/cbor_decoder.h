@@ -1789,7 +1789,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (!detail::is_variant_alternative_mismatch(result)) {
+            } else if (!detail::is_retriable_variant_mismatch(result)) {
                 hard_error = result;
                 return false;
             } else {
@@ -1878,7 +1878,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else if (result == status_code::incomplete) {
                 saw_incomplete = true;
                 return false;
-            } else if (!detail::is_variant_alternative_mismatch(result)) {
+            } else if (!detail::is_retriable_variant_mismatch(result)) {
                 hard_error = result;
                 return false;
             } else {

@@ -302,7 +302,7 @@ template <bool GraphTagsPossible, typename Self, IsVariant Variant>
             }
             if (result == status_code::incomplete) {
                 saw_incomplete = true;
-            } else if (!cbor::tags::detail::is_variant_alternative_mismatch(result) ||
+            } else if (!cbor::tags::detail::is_retriable_variant_mismatch(result) ||
                        (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>)) {
                 pointer_error = result;
             }

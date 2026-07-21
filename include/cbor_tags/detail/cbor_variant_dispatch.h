@@ -10,7 +10,9 @@
 
 namespace cbor::tags::detail {
 
-[[nodiscard]] constexpr bool is_variant_alternative_mismatch(status_code status) noexcept {
+// Only a structural mismatch may try the next variant alternative. Malformed
+// input and resource failures must be returned to the caller unchanged.
+[[nodiscard]] constexpr bool is_retriable_variant_mismatch(status_code status) noexcept {
     return status > status_code::begin_no_match_decoding && status < status_code::end_no_match_decoding;
 }
 
