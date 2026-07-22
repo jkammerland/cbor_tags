@@ -3,8 +3,14 @@ name: macOS Tests (AppleClang C++20/26)
 on:
   push:
     branches: [ master, integration ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   pull_request:
     branches: [ master, integration ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
 
 jobs:
   build:

@@ -3,8 +3,14 @@ name: Windows Tests (MSVC/Clang-CL C++20/26)
 on:
   push:
     branches: [ master, integration ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   pull_request:
     branches: [ master, integration ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
 
 jobs:
   build:
