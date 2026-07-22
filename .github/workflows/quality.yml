@@ -10,6 +10,92 @@ permissions:
   contents: read
 
 jobs:
+  cmake-compatibility:
+    name: CMake 3.23 Raw + 3.25 Features
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl g++ gcc ninja-build tar unzip zip
+
+    - name: Setup CMake 3.23.5
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.23.5'
+
+    - name: Configure raw CMake 3.23 build
+      shell: bash
+      run: |
+        cmake -S . -B build/minimum-cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCBOR_TAGS_BUILD_CLI=ON \
+          -DCBOR_TAGS_BUILD_EXAMPLES=ON \
+          -DCBOR_TAGS_BUILD_TESTS=OFF
+
+    - name: Build raw CMake 3.23 targets
+      shell: bash
+      run: cmake --build build/minimum-cmake --parallel
+
+    - name: Test raw CMake 3.23 roundtrips
+      shell: bash
+      run: |
+        ./build/minimum-cmake/examples/cbor_tags_basic_roundtrip
+        ./build/minimum-cmake/tools/cbor_tags_cli diagnostic --input hex 01
+
+    - name: Setup CMake 3.25.3
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.25.3'
+
+    - name: Bootstrap vcpkg
+      uses: ./.github/actions/bootstrap-vcpkg
+
+    - name: Configure tests, benchmarks, and install
+      shell: bash
+      run: |
+        cmake -S . -B build/cmake-3.25 -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20 \
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+          -DCMAKE_CXX_EXTENSIONS=OFF \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/cbor-tags-cmake-3.25" \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
+          -DCBOR_TAGS_INSTALL=ON \
+          -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
+
+    - name: Build tests and benchmark target
+      shell: bash
+      run: |
+        cmake --build build/cmake-3.25 \
+          --target tests test_decode_stack_floor test_unsigned_char cbor_tags_cli bench_encoder \
+          --parallel
+
+    - name: Run tests
+      shell: bash
+      run: ctest --test-dir build/cmake-3.25 --exclude-regex '^bench_' --output-on-failure
+
+    - name: Install package
+      shell: bash
+      run: cmake --install build/cmake-3.25
+
+    - name: Build installed package consumer
+      shell: bash
+      run: |
+        cmake -S test_package -B build/cmake-3.25-consumer -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20 \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/cbor-tags-cmake-3.25;${GITHUB_WORKSPACE}/build/cmake-3.25/vcpkg_installed/x64-linux"
+        cmake --build build/cmake-3.25-consumer --parallel
+        ./build/cmake-3.25-consumer/test_package
+
   format-and-tidy:
     name: C++ Format + Clang-Tidy
     runs-on: ubuntu-latest

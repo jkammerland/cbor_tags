@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 project(tests VERSION 1.0.0)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/get_cpm.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)

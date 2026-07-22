@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.25)
 project(benchmarks_new CXX)
 
 add_library(benchmark_util INTERFACE)
