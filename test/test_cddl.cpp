@@ -7,6 +7,7 @@
 #include "cbor_tags/float16_ieee754.h"
 
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
@@ -15,11 +16,13 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
 #include <test_util.h>
 #include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -43,6 +46,13 @@ template <typename T> std::string cddl_schema_with_options(CDDLOptions options) 
 template <typename T> void check_cddl_typed_array_tag(std::uint64_t tag) {
     CHECK_EQ(cddl_schema_inline<T>(), fmt::format("root = #6.{}(bstr)", tag));
 }
+
+template <typename Dec, typename T>
+concept CanDecodeMajor = requires(Dec &dec, T &value, major_type major, std::byte additional_info) {
+    { dec.decode(value, major, additional_info) } -> std::same_as<status_code>;
+};
+
+using CDDLDecoder = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
 
 std::size_t count_occurrences(std::string_view haystack, std::string_view needle) {
     std::size_t count = 0;
@@ -111,6 +121,25 @@ struct CDDLContainers {
     std::optional<CDDLPlainTwo>     maybe_plain;
     std::variant<int, CDDLPlainTwo> either_plain;
 };
+
+struct CDDLBoundedContainers {
+    bounded_size<std::string, 1, 64>                         name;
+    bounded_size<std::vector<std::byte>, 0, 16>              payload;
+    bounded_size<std::vector<int>, 1, 3>                     values;
+    bounded_size<std::map<std::string, std::uint64_t>, 0, 2> counters;
+};
+
+using CDDLArrayRange       = array_range<std::ranges::ref_view<std::vector<int>>>;
+using CDDLMapRange         = map_range<std::ranges::ref_view<std::map<std::string, int>>>;
+using CDDLBstrRange        = bstr_range<std::ranges::ref_view<std::vector<std::byte>>>;
+using CDDLTstrRange        = tstr_range<std::ranges::ref_view<std::string>>;
+using CDDLFilteredIntRange = array_range<std::ranges::filter_view<std::ranges::ref_view<std::vector<int>>, bool (*)(int)>>;
+using CDDLBoundedVariant   = std::variant<bounded_size<std::string, 1, 4>, int>;
+
+static_assert(!CanDecodeMajor<CDDLDecoder, bounded_size<CDDLArrayRange, 0, 3>>);
+static_assert(!CanDecodeMajor<CDDLDecoder, bounded_size<CDDLMapRange, 0, 3>>);
+static_assert(!CanDecodeMajor<CDDLDecoder, bounded_size<CDDLBstrRange, 0, 3>>);
+static_assert(!CanDecodeMajor<CDDLDecoder, bounded_size<CDDLTstrRange, 0, 3>>);
 
 struct CDDLLabelRoot {
     CDDLPlainTwo    child;
@@ -671,6 +700,35 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
     CHECK_EQ(schema.find("map"), std::string::npos);
 }
 
+TEST_CASE("CDDL emits bounded sizes for strings containers and range wrappers") {
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::string, 1, 64>>(), "root = tstr .size (1..64)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::vector<std::byte>, 0, 16>>(), "root = bstr .size (0..16)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::vector<int>, 1, 3>>(), "root = [1*3 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::map<std::string, std::uint64_t>, 0, 2>>(), "root = {0*2 tstr => uint}");
+    CHECK_EQ(cddl_schema_inline<exact_size<std::string, 4>>(), "root = tstr .size 4");
+    CHECK_EQ(cddl_schema_inline<max_size<std::string, 64>>(), "root = tstr .size (0..64)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::array<int, 2>, 1, 3>>(), "root = [2*2 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<int, 2>, 1, 3>>(), "root = [2*2 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::array<std::byte, 2>, 1, 3>>(), "root = bstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<const std::byte, 2>, 1, 3>>(), "root = bstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::span<const char, 2>, 1, 3>>(), "root = tstr .size 2");
+    CHECK_EQ(cddl_schema_inline<bounded_size<as_indefinite<std::vector<int>>, 1, 3>>(), "root = [1*3 int]");
+
+    CHECK_EQ(cddl_schema_inline<CDDLBoundedContainers>(),
+             "CDDLBoundedContainers = [tstr .size (1..64), bstr .size (0..16), [1*3 int], {0*2 tstr => uint}]");
+
+    CHECK_EQ(cddl_schema_inline<CDDLArrayRange>(), "root = [* int]");
+    CHECK_EQ(cddl_schema_inline<CDDLMapRange>(), "root = {* tstr => int}");
+    CHECK_EQ(cddl_schema_inline<CDDLBstrRange>(), "root = bstr");
+    CHECK_EQ(cddl_schema_inline<CDDLTstrRange>(), "root = tstr");
+    CHECK_EQ(cddl_schema_inline<bounded_size<CDDLArrayRange, 2, 5>>(), "root = [2*5 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<CDDLFilteredIntRange, 1, 4>>(), "root = [1*4 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<CDDLMapRange, 0, 3>>(), "root = {0*3 tstr => int}");
+    CHECK_EQ(cddl_schema_inline<bounded_size<CDDLBstrRange, 0, 8>>(), "root = bstr .size (0..8)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<CDDLTstrRange, 1, 8>>(), "root = tstr .size (1..8)");
+    CHECK_EQ(cddl_schema_inline<CDDLBoundedVariant>(), "root = tstr .size (1..4) / int");
+}
+
 TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
     check_cddl_typed_array_tag<rfc8746::typed_array<std::uint8_t>>(64);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<std::uint16_t>>(65);
@@ -686,6 +744,10 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
     check_cddl_typed_array_tag<rfc8746::typed_array_be<std::int64_t>>(75);
     check_cddl_typed_array_tag<rfc8746::typed_array<std::int16_t>>(77);
     CHECK_EQ(cddl_schema_inline<rfc8746::typed_array<std::int32_t>>(), "root = #6.78(bstr)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>>(), "root = #6.78(bstr .size (4..12))");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_ref<std::uint8_t>, 4, 4>>(), "root = #6.64(bstr .size 4)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_be<std::int16_t>, 1, 3>>(), "root = #6.73(bstr .size (2..6))");
+    CHECK_EQ(cddl_schema_inline<bounded_size<rfc8746::typed_array_view<std::int32_t>, 1, 3>>(), "root = #6.78(bstr .size (4..12))");
     check_cddl_typed_array_tag<rfc8746::typed_array<std::int64_t>>(79);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<float16_t>>(80);
     check_cddl_typed_array_tag<rfc8746::typed_array_be<float>>(81);
@@ -1210,7 +1272,7 @@ TEST_CASE("named-map codec scopes nested map extensions") {
     CDDLNestedMapScopedExtensionRoot  input{.rootId = 1,
                                             .child  = as_named_map{child},
                                             .extensions =
-                                               as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
+                                                as_named_extension<std::map<std::string, std::string>>{{{"rootExtra", "outside"}}}};
 
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
@@ -1238,8 +1300,8 @@ TEST_CASE("named-map codec scopes nested map extensions") {
 TEST_CASE("named-map codec handles nested named groups with unique flattened keys") {
     CDDLNestedInlineRoot input{.middle = as_named_group<CDDLNestedInlineMiddle>{CDDLNestedInlineMiddle{
                                    .leaf   = as_named_group<CDDLNestedInlineLeaf>{CDDLNestedInlineLeaf{
-                                         .one = std::string{"first"},
-                                         .two = std::string{"second"},
+                                       .one = std::string{"first"},
+                                       .two = std::string{"second"},
                                    }},
                                    .middle = std::string{"middle"},
                                }},

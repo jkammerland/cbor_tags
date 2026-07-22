@@ -116,6 +116,187 @@ Static tags render as `#6.n(payload)`. Dynamic tag values are not available
 from the type alone, so dynamic tags render as `#6(payload)`. Recursive
 aggregate types are emitted as named CDDL rules.
 
+### Size-Bounded Containers
+
+Use `cbor::tags::bounded_size<T, Min, Max>` when a text string, byte string,
+array-like container, map-like container, or supported extension wrapper has
+protocol size bounds. For materialized strings and containers, the generated
+CDDL includes the bound and the wrapper enforces the same bound while encoding
+and decoding:
+
+```cpp
+namespace ct = cbor::tags;
+
+struct Person {
+    ct::bounded_size<std::string, 1, 64> name;
+    ct::bounded_size<std::vector<int>, 1, 3> scores;
+    ct::bounded_size<std::map<std::string, std::uint64_t>, 0, 2> attrs;
+};
+
+fmt::memory_buffer schema;
+ct::cddl_schema_to<Person>(
+    schema,
+    {.row_options = {.format_by_rows = false}});
+// Person = [tstr .size (1..64), [1*3 int], {0*2 tstr => uint}]
+```
+
+For root values or temporary views, `as_bounded_size<Min, Max>(value)` creates a
+wrapper without changing the owned type:
+
+```cpp
+namespace ct = cbor::tags;
+
+std::vector<int> values{1, 2, 3};
+auto enc = ct::make_encoder(output);
+auto result = enc(ct::as_bounded_size<1, 3>(values));
+```
+
+Explicit range wrappers can be bounded for encode and CDDL generation when the
+wrapped range is a sized range. The encoder reads `size()` before writing:
+
+```cpp
+namespace ct = cbor::tags;
+
+std::vector<int> values{1, 2, 3, 4};
+
+auto view = ct::as_array_range(values);
+auto bounded_view = ct::as_bounded_size<0, 4>(view);
+enc(bounded_view);
+// CDDL: [0*4 int]
+```
+
+Bounded encoding of a non-sized range is unsupported. Checking it before output
+would require a separate counting traversal. The unbounded range wrappers still
+encode non-sized input in one pass:
+
+```cpp
+namespace ct = cbor::tags;
+
+auto evens = values | std::views::filter(is_even);
+
+enc(ct::as_array_range(evens));
+
+// Unsupported: evens has no constant-time size().
+enc(ct::as_bounded_size<0, 4>(ct::as_array_range(evens)));
+```
+
+`as_indefinite(container)` is also supported when the underlying container is a
+sized range. The bound is checked before writing, and the encoded item remains
+indefinite:
+
+```cpp
+namespace ct = cbor::tags;
+
+std::vector<int> values{1, 2, 3};
+enc(ct::as_bounded_size<0, 3>(ct::as_indefinite{values}));
+// 9f 01 02 03 ff
+```
+
+`std::array` and fixed-extent `std::span` keep their exact CDDL sequence shape;
+the configured bound must include that fixed extent. Unwrapped containers still
+render as unbounded `[* value]` or `{* key => value}` and do not get automatic
+schema-size validation.
+
+A bound applies only to the immediately wrapped value. It does not implicitly
+bound nested allocations:
+
+```cpp
+namespace ct = cbor::tags;
+
+using row = std::vector<int>;
+using rows = ct::max_size<std::vector<row>, 16>;
+// Limits the number of rows. Each row remains unbounded.
+
+using bounded_row = ct::max_size<row, 32>;
+using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
+// Limits both the number of rows and the number of values in each row.
+```
+
+The bound describes the cardinality of one encoded or decoded CBOR item. It is
+not a persistent invariant on the backing C++ container. Decoding into an
+existing mutable destination validates only the incoming item, then follows the
+core decoder's append/insert contract:
+
+```cpp
+std::vector<int> incoming{1, 2};
+std::vector<std::byte> input;
+ct::make_encoder(input)(incoming);
+
+std::vector<int> destination{9, 8, 7};
+auto result = ct::make_decoder(input)(ct::as_bounded_size<2, 2>(destination));
+// result succeeds; destination is now {9, 8, 7, 1, 2}.
+// Its final size may exceed Max because Max constrained the incoming CBOR array.
+```
+
+Encoding validates the complete wrapped source value. To encode only a bounded
+slice, make that slice the wrapped value instead of expecting the bound to select
+elements:
+
+```cpp
+std::vector<int> values{1, 2, 3, 4};
+
+auto rejected = enc(ct::as_bounded_size<2, 2>(values)); // size 4: rejected
+auto tail = std::span{values}.last<2>();
+auto accepted = enc(ct::as_bounded_size<2, 2>(ct::as_array_range(tail)));
+```
+
+For definite containers, the decoder validates the declared size before
+reserving target storage, then continues decoding that payload. It does not run
+a validation pre-scan. Indefinite containers are validated while they are
+decoded. If an indefinite value exceeds its maximum, or reaches its break before
+its minimum, decoding returns `status_code::size_limit_exceeded` and leaves the
+successfully decoded prefix in the target.
+
+The core encoder and decoder recognize bounded CBOR text strings, byte strings,
+arrays, and maps. An extension wrapper opts in with an ordinary codec overload;
+no library trait registration is required. When the extension contains a core
+container, its overload can delegate the bound without rereading the CBOR
+header:
+
+```cpp
+struct samples {
+    std::vector<int> values;
+};
+
+template <typename Self>
+struct samples_codec : cbor::tags::cbor_codec_mixin_base<Self> {
+    using cbor::tags::cbor_codec_mixin_base<Self>::decode;
+    using cbor::tags::cbor_codec_mixin_base<Self>::encode;
+
+    template <std::size_t Min, std::size_t Max>
+    void encode(const cbor::tags::bounded_size<samples, Min, Max>& bounded) {
+        static_cast<Self&>(*this).encode(
+            cbor::tags::as_bounded_size<Min, Max>(bounded.value().values));
+    }
+
+    template <std::size_t Min, std::size_t Max>
+    cbor::tags::status_code decode(
+        cbor::tags::bounded_size<samples, Min, Max>& bounded,
+        cbor::tags::major_type major,
+        std::byte additional_info) {
+        auto values = cbor::tags::as_bounded_size<Min, Max>(bounded.value().values);
+        return static_cast<Self&>(*this).decode(values, major, additional_info);
+    }
+};
+```
+
+The RFC 8746 scalar typed-array extension supports `bounded_size` as element
+counts. CDDL renders the corresponding byte-string byte count because the wire
+payload is a `bstr`:
+
+```cpp
+namespace ct = cbor::tags;
+namespace rfc8746 = cbor::tags::ext::rfc8746;
+
+using samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
+
+ct::cddl_schema_to<samples>(schema, {.row_options = {.format_by_rows = false}});
+// root = #6.78(bstr .size (4..12))
+```
+
+Bounds for RFC 8746 `homogeneous_array` and `multi_dimensional_array` wrappers
+are intentionally deferred.
+
 Extension headers may add CDDL support by specializing the public CDDL traits
 in `cbor::tags::cddl`, declared by
 `cbor_tags/extensions/cddl_traits.h`. Simple tagged extension types expose fixed

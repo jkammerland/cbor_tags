@@ -2,10 +2,12 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cbor_raw_view_encoder.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -117,6 +119,16 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
         }
     }
 
+    template <std::size_t Min, std::size_t Max, std::ranges::sized_range R> constexpr void require_bounded_range_size(R &&range) {
+        const auto size = std::ranges::size(range);
+        if (std::cmp_greater(size, std::numeric_limits<std::uint64_t>::max())) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        if (detail::bounded_size_status<Min, Max>(static_cast<std::uint64_t>(size)) != status_code::success) {
+            throw detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+    }
+
   public:
     template <typename R> constexpr void encode_array_range(R &&range) {
         auto *self = this;
@@ -182,6 +194,28 @@ template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<
         requires std::ranges::range<const R>
     constexpr void encode(const tstr_range<R> &value) {
         encode_tstr_range(value.range_, value.chunk_size_);
+    }
+
+    template <detail::SizedExplicitRangeWrapper RangeWrapper, std::size_t Min, std::size_t Max>
+    constexpr void encode(bounded_size<RangeWrapper, Min, Max> &value) {
+        encode_bounded_explicit_range<Min, Max>(value);
+    }
+
+    template <detail::ConstSizedExplicitRangeWrapper RangeWrapper, std::size_t Min, std::size_t Max>
+    constexpr void encode(const bounded_size<RangeWrapper, Min, Max> &value) {
+        encode_bounded_explicit_range<Min, Max>(value);
+    }
+
+    template <detail::SizedExplicitRangeWrapper RangeWrapper, std::size_t Min, std::size_t Max>
+    constexpr void encode(bounded_size<RangeWrapper, Min, Max> &&value) {
+        encode_bounded_explicit_range<Min, Max>(value);
+    }
+
+  private:
+    template <std::size_t Min, std::size_t Max, typename B> constexpr void encode_bounded_explicit_range(B &value) {
+        auto &&wrapped = value.value();
+        require_bounded_range_size<Min, Max>(wrapped.range_);
+        encode(wrapped);
     }
 };
 

@@ -318,6 +318,29 @@ add_typed_array_variant_compile_fail_test(typed_array_variant_static_tag_compile
 add_typed_array_variant_compile_fail_test(typed_array_variant_any_tag_compile_fails typed_array_variant_any_tag_compile_fail.cc)
 add_typed_array_variant_compile_fail_test(typed_array_variant_duplicate_tag_compile_fails typed_array_variant_duplicate_tag_compile_fail.cc)
 
+function(add_bounded_fixed_string_compile_fail_test TEST_NAME COMPILE_DEFINITION)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL cddl_bounded_fixed_string_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=bounded_size fixed string extent must be inside the configured CDDL size bounds"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_bounded_fixed_string_compile_fail_test(
+  cddl_bounded_fixed_byte_array_compile_fails
+  CBOR_TAGS_BOUNDED_FIXED_BYTE_ARRAY)
+add_bounded_fixed_string_compile_fail_test(
+  cddl_bounded_fixed_text_span_compile_fails
+  CBOR_TAGS_BOUNDED_FIXED_TEXT_SPAN)
+
 if(CBOR_TAGS_USE_STD_REFLECTION OR CBOR_TAGS_USE_BOOST_PFR_NAMES)
   function(add_named_map_duplicate_keys_compile_fail_test TEST_NAME COMPILE_DEFINITION)
     add_executable(${TEST_NAME} EXCLUDE_FROM_ALL named_map_duplicate_keys_compile_fail.cc)
