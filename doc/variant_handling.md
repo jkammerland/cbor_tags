@@ -77,6 +77,77 @@ For raw `union` storage with a domain-specific discriminator, prefer an ADL
 `encode`/`decode` overload unless the type can honestly expose the same
 `index`/`get`/`visit`/`assign` operations as a variant.
 
+## Hashing And Migration
+
+`variant_hasher` has been removed. Replace it with the standard variant hasher
+when every alternative is itself hashable:
+
+```cpp
+using key = std::variant<int, std::string>;
+std::unordered_map<key, int> values;
+```
+
+[`std::hash<std::variant<T...>>`](https://en.cppreference.com/cpp/utility/variant/hash)
+is enabled only when `std::hash<T>` is enabled for every alternative, as also
+specified by the C++ standard's [`[variant.hash]`](https://eel.is/c++draft/variant.hash)
+wording. A variant containing `std::vector`, `std::map`, or another non-hashable
+type therefore still needs an application-specific hasher. For example, an
+application using integers and byte strings as keys can define their exact
+hashing policy alongside the key type:
+
+```cpp
+#include <cstddef>
+#include <functional>
+#include <unordered_map>
+#include <variant>
+#include <vector>
+
+using bytes = std::vector<std::byte>;
+using key = std::variant<int, bytes>;
+
+struct key_hash {
+    std::size_t operator()(const key &value) const noexcept {
+        std::size_t seed = std::hash<std::size_t>{}(value.index());
+
+        if (!value.valueless_by_exception()) {
+            mix(seed, std::visit([](const auto &item) noexcept {
+                return key_hash::hash_value(item);
+            }, value));
+        }
+
+        return seed;
+    }
+
+  private:
+    static void mix(std::size_t &seed, std::size_t value) noexcept {
+        seed ^= value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+    }
+
+    static std::size_t hash_value(int value) noexcept {
+        return std::hash<int>{}(value);
+    }
+
+    static std::size_t hash_value(const bytes &value) noexcept {
+        std::size_t seed = std::hash<std::size_t>{}(value.size());
+        for (std::byte byte : value) {
+            mix(seed, std::to_integer<unsigned char>(byte));
+        }
+        return seed;
+    }
+};
+
+std::unordered_map<key, int, key_hash> values;
+```
+
+The overloads intentionally cover only the application's alternatives. Adding
+another alternative to `key` requires adding its hashing policy as well.
+
+This is a source-breaking migration for code that named `variant_hasher`. The
+old helper partially handled byte strings and shallow ranges, but its generic
+interface implied support for arbitrary CBOR-compatible alternatives. Nested
+ranges and maps did not provide that support, and their equality and ordering
+semantics do not admit one universally correct hashing policy.
+
 ## Compile-Time Dispatch
 
 Below is "pseudo code" that can be investigated with [godbolt](https://godbolt.org/). The code shows how you can optimize away unused code paths with `if constexpr`; in this case the code paths are constrained by the variant type.
