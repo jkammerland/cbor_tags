@@ -127,6 +127,31 @@ enc(tagged);
 > [!NOTE]
 > The definition of a tag is a CBOR major type 6 encoded uint, with a concise data definition format of #6.321(any). This allows generic parsers to decode tags without knowing their semantic meaning or the exact order of internal items. It also means the struct implicitly define a cbor array of exact types following the tag, i.e #6.321([int, float64, tstr]). See tuning options for more details.
 
+The core CBOR decoder accumulates into mutable owning sequence destinations. Arrays,
+maps, byte strings, and text strings are appended to or inserted into; it does not
+clear an existing destination. Initialize the destination empty when replacement
+semantics are wanted. Codec extensions can define a different destination contract.
+
+```cpp
+std::string source = "payload";
+std::vector<std::byte> buffer;
+auto enc = make_encoder(buffer);
+enc(source);
+
+std::string destination = "prefix:";
+auto dec = make_decoder(buffer);
+dec(destination);
+assert(destination == "prefix:payload");
+```
+
+A definite string validates its complete payload and any required capacity before
+appending. If a later target allocation fails, its semantic value is restored.
+Mutable destinations that overlap the decoder input are rejected with
+`status_code::error`; use separate input and output storage. For an indefinite
+string or container, successfully decoded chunks or elements remain in the
+destination if a later chunk or element fails. Fixed-size destinations and borrowed
+views retain their exact-size or assignment semantics.
+
 Equivalent to manually encoding the struct in the following example:
 ```cpp
 Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};

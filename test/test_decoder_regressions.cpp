@@ -10,9 +10,12 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -110,6 +113,66 @@ struct SignedSizeDequeByteRange {
     [[nodiscard]] auto end() const noexcept { return bytes.end(); }
     [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
 };
+
+struct ReserveWithoutSizeByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    std::vector<std::byte> bytes;
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    void               reserve(size_type count) { bytes.reserve(count); }
+    void               push_back(value_type value) { bytes.push_back(value); }
+    void               pop_back() { bytes.pop_back(); }
+};
+
+struct ExternalByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    std::byte *storage{};
+    size_type  current_size{};
+    size_type  capacity{};
+
+    [[nodiscard]] auto begin() noexcept { return storage; }
+    [[nodiscard]] auto begin() const noexcept { return static_cast<const std::byte *>(storage); }
+    [[nodiscard]] auto end() noexcept { return storage + current_size; }
+    [[nodiscard]] auto end() const noexcept { return static_cast<const std::byte *>(storage) + current_size; }
+    [[nodiscard]] auto size() const noexcept { return current_size; }
+    void               push_back(value_type value) {
+        if (current_size == capacity) {
+            throw std::length_error("external byte buffer is full");
+        }
+        storage[current_size++] = value;
+    }
+    void insert(std::byte *, const std::byte *first, const std::byte *last) {
+        for (; first != last; ++first) {
+            push_back(*first);
+        }
+    }
+    void pop_back() { --current_size; }
+};
+
+struct controlled_memory_resource : std::pmr::memory_resource {
+    std::pmr::memory_resource *upstream{std::pmr::new_delete_resource()};
+    std::size_t                allocations_before_failure{std::numeric_limits<std::size_t>::max()};
+
+  private:
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        if (allocations_before_failure == 0) {
+            throw std::bad_alloc{};
+        }
+        --allocations_before_failure;
+        return upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *ptr, std::size_t bytes, std::size_t alignment) override { upstream->deallocate(ptr, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
 } // namespace
 
 static_assert(!std::is_default_constructible_v<NonDefaultComparator>);
@@ -124,6 +187,10 @@ static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
+static_assert(IsBinaryString<ReserveWithoutSizeByteBuffer>);
+static_assert(HasReserve<ReserveWithoutSizeByteBuffer>);
+static_assert(!detail::AppendReservable<ReserveWithoutSizeByteBuffer>);
+static_assert(IsBinaryString<ExternalByteBuffer>);
 
 TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
     CHECK(std::isinf(static_cast<float>(float16_t{static_cast<std::uint16_t>(0x7C00)})));
@@ -465,6 +532,166 @@ TEST_CASE("decoder should accept empty text strings") {
 
     CHECK_MESSAGE(result, "Decoding an empty text string should succeed.");
     CHECK(decoded.empty());
+}
+
+TEST_CASE("decoder appends definite strings to mutable targets") {
+    const std::vector<std::byte> source_bytes{std::byte{0xAA}, std::byte{0xBB}};
+    const std::string            source_text{"payload"};
+    std::vector<std::byte>       buffer;
+    auto                         enc = make_encoder(buffer);
+    REQUIRE(enc(source_bytes, source_text, source_text));
+
+    std::vector<std::byte> decoded_bytes{std::byte{0x01}};
+    std::string            decoded_text{"prefix:"};
+    std::pmr::string       decoded_pmr_text{"pmr:"};
+    auto                   dec    = make_decoder(buffer);
+    auto                   result = dec(decoded_bytes, decoded_text, decoded_pmr_text);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded_bytes, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}, std::byte{0xBB}}));
+    CHECK_EQ(decoded_text, "prefix:payload");
+    CHECK_EQ(decoded_pmr_text, "pmr:payload");
+}
+
+TEST_CASE("decoder leaves mutable strings unchanged for truncated definite payloads") {
+    {
+        const std::vector<std::byte> buffer{std::byte{0x43}, std::byte{0xAA}};
+        std::vector<std::byte>       decoded{std::byte{0x01}};
+        auto                         dec    = make_decoder(buffer);
+        auto                         result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}}));
+    }
+
+    {
+        const std::vector<std::byte> buffer{std::byte{0x63}, std::byte{'a'}};
+        std::string                  decoded{"prefix"};
+        auto                         dec    = make_decoder(buffer);
+        auto                         result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, "prefix");
+    }
+}
+
+TEST_CASE("decoder rejects definite string targets that alias input storage") {
+    SUBCASE("same byte vector") {
+        std::vector<std::byte> input{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        const auto             original = input;
+        auto                   dec      = make_decoder(input);
+        auto                   result   = dec(input);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(input, original);
+    }
+
+    SUBCASE("same text string") {
+        std::string input{"\x63"
+                          "abc",
+                          4};
+        const auto  original = input;
+        auto        dec      = make_decoder(input);
+        auto        result   = dec(input);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(input, original);
+    }
+
+    SUBCASE("input span overlaps byte vector") {
+        std::vector<std::byte> storage{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        const auto             original = storage;
+        const auto             input    = std::span<const std::byte>{storage};
+        auto                   dec      = make_decoder(input);
+        auto                   result   = dec(storage);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(storage, original);
+    }
+
+    SUBCASE("input span starts inside byte vector") {
+        std::vector<std::byte> storage{std::byte{0x00}, std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        const auto             original = storage;
+        const auto             input    = std::span<const std::byte>{storage}.subspan(1);
+        auto                   dec      = make_decoder(input);
+        auto                   result   = dec(storage);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(storage, original);
+    }
+
+    SUBCASE("mutable target starts inside input") {
+        std::vector<std::byte> input{std::byte{0x41}, std::byte{0xAA}, std::byte{0x00}};
+        const auto             original = input;
+        ExternalByteBuffer     target{input.data() + 1, 1, 2};
+        auto                   dec    = make_decoder(input);
+        auto                   result = dec(target);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(input, original);
+    }
+
+    SUBCASE("adjacent input and target ranges do not overlap") {
+        std::vector<std::byte> storage{std::byte{0x41}, std::byte{0xAA}, std::byte{0x00}, std::byte{0x00}};
+        const auto             input = std::span<const std::byte>{storage}.first<2>();
+        ExternalByteBuffer     target{storage.data() + 2, 1, 2};
+        auto                   dec = make_decoder(input);
+
+        REQUIRE(dec(target));
+        REQUIRE_EQ(target.size(), 2);
+        CHECK_EQ(target.storage[1], std::byte{0xAA});
+    }
+}
+
+TEST_CASE("decoder reserves non-contiguous definite text before mutation") {
+    std::deque<std::byte> input{std::byte{0x78}, std::byte{0x40}};
+    input.insert(input.end(), 64, std::byte{'x'});
+
+    controlled_memory_resource resource;
+    std::pmr::string           decoded{"prefix", &resource};
+    const auto                 original = std::string{decoded};
+    resource.allocations_before_failure = 0;
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+    CHECK_EQ(std::string_view{decoded}, original);
+}
+
+TEST_CASE("decoder rolls back non-reservable definite string append failures") {
+    const std::vector<std::byte> input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
+    controlled_memory_resource   resource;
+    std::pmr::list<std::byte>    decoded{&resource};
+    decoded.push_back(std::byte{0x01});
+    resource.allocations_before_failure = 1;
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+    REQUIRE_EQ(decoded.size(), 1);
+    CHECK_EQ(decoded.front(), std::byte{0x01});
+}
+
+TEST_CASE("reserve without size falls back to rollback-capable append") {
+    const std::deque<std::byte>  input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
+    ReserveWithoutSizeByteBuffer decoded{{std::byte{0x01}}};
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.bytes, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}}));
 }
 
 TEST_CASE("decoder should preserve text bytes without utf8 validation") {

@@ -18,6 +18,7 @@
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
+#include <functional>
 // #include <fmt/base.h>
 #include <iterator>
 #include <new>
@@ -26,6 +27,7 @@
 #include "cbor_tags/cbor_tags_config.h"
 
 #include <limits>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -49,6 +51,30 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     constexpr auto min_value         = std::numeric_limits<T>::min();
     constexpr auto max_cbor_argument = static_cast<std::uint64_t>(-(min_value + T{1}));
     return value <= max_cbor_argument;
+}
+
+template <typename T>
+concept AppendReservable = HasReserve<T> && requires(const T &value) {
+    { value.size() } -> std::convertible_to<typename T::size_type>;
+};
+
+template <AppendReservable T> constexpr void reserve_for_append(T &value, std::uint64_t additional_size) {
+    using size_type = typename T::size_type;
+
+    const auto current_size = value.size();
+    const auto maximum_size = [&]() {
+        if constexpr (requires { value.max_size(); }) {
+            return value.max_size();
+        } else {
+            return std::numeric_limits<size_type>::max();
+        }
+    }();
+
+    if (std::cmp_greater(current_size, maximum_size) || std::cmp_greater(additional_size, maximum_size - current_size)) {
+        throw std::length_error("CBOR string length exceeds target container max_size");
+    }
+
+    value.reserve(static_cast<size_type>(current_size + static_cast<size_type>(additional_size)));
 }
 
 template <typename InputBuffer, typename Reader>
@@ -243,7 +269,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode to intermediate form
+        // Validate the complete payload and any allocation before exposing a
+        // borrowed payload that target growth could invalidate.
+        require_bytes(bstring_size);
+        if constexpr (!IsConstView<T>) {
+            if (string_target_aliases_input(t)) {
+                return status_code::error;
+            }
+        }
+        if constexpr (!IsConstView<T> && !IsFixedArray<T> && detail::AppendReservable<T>) {
+            detail::reserve_for_append(t, bstring_size);
+        }
+
         auto bstring = decode_bstring_payload(bstring_size);
 
         // Now handle the target assignment based on contiguity constraints
@@ -265,22 +302,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            auto decoded = detail::make_decode_value_for<T>(t);
-            if constexpr (HasReserve<T>) {
-                if (std::cmp_greater(bstring_size, std::numeric_limits<typename T::size_type>::max())) {
-                    throw std::length_error("CBOR byte string length exceeds target container size_type");
-                }
-                decoded.reserve(static_cast<typename T::size_type>(bstring_size));
-            }
-            detail::appender<T> appender_;
-            if constexpr (IsContiguous<decltype(bstring)>) {
-                appender_(decoded, bstring);
-            } else {
-                for (auto byte_value : bstring) {
-                    appender_(decoded, static_cast<typename T::value_type>(byte_value));
-                }
-            }
-            t = std::move(decoded);
+            append_definite_string(t, bstring);
         }
 
         return status_code::success;
@@ -309,8 +331,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Decode the text string
-        t = decode_text(additionalInfo);
+        const auto text_size = decode_unsigned(additionalInfo);
+        require_bytes(text_size);
+        if constexpr (!IsConstView<T>) {
+            if (string_target_aliases_input(t)) {
+                return status_code::error;
+            }
+        }
+        if constexpr (!IsConstView<T> && detail::AppendReservable<T>) {
+            detail::reserve_for_append(t, text_size);
+        }
+
+        auto text = decode_text_payload(text_size);
+        if constexpr (IsConstView<T>) {
+            t = std::move(text);
+        } else {
+            append_definite_string(t, text);
+        }
 
         return status_code::success;
     }
@@ -629,8 +666,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (additionalInfo == static_cast<byte>(31)) {
             return decode_indef_tstr(value);
         }
-        auto text = decode_text(additionalInfo);
-        value     = std::string(text);
+        const auto text_size = decode_unsigned(additionalInfo);
+        require_bytes(text_size);
+        if (string_target_aliases_input(value)) {
+            return status_code::error;
+        }
+        detail::reserve_for_append(value, text_size);
+        auto text = decode_text_payload(text_size);
+        append_definite_string(value, text);
         return status_code::success;
     }
 
@@ -956,8 +999,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    constexpr auto decode_text(byte additionalInfo) {
-        const auto length      = decode_unsigned(additionalInfo);
+    constexpr auto decode_text(byte additionalInfo) { return decode_text_payload(decode_unsigned(additionalInfo)); }
+
+    constexpr auto decode_text_payload(std::uint64_t length) {
         const auto span_length = require_bytes(length);
 
         if constexpr (IsContiguous<InputBuffer>) {
@@ -1308,6 +1352,55 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    template <typename T> constexpr bool string_target_aliases_input(const T &target) const {
+        if constexpr (std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<InputBuffer>>) {
+            if (std::addressof(target) == std::addressof(data_)) {
+                return true;
+            }
+        }
+
+        if constexpr (std::ranges::contiguous_range<const T> && std::ranges::sized_range<const T> &&
+                      std::ranges::contiguous_range<const InputBuffer> && std::ranges::sized_range<const InputBuffer>) {
+            if (std::ranges::empty(target) || std::ranges::empty(data_) || std::is_constant_evaluated()) {
+                return false;
+            }
+
+            const auto *target_data = std::ranges::data(target);
+            const auto *input_data  = std::ranges::data(data_);
+            const auto *target_end  = target_data + std::ranges::size(target);
+            const auto *input_end   = input_data + std::ranges::size(data_);
+
+            const auto before = std::less<const void *>{};
+            return before(input_data, target_end) && before(target_data, input_end);
+        }
+
+        return false;
+    }
+
+    template <typename T, std::ranges::input_range R> constexpr void append_definite_string(T &target, R &&payload) {
+        detail::appender<T> append;
+        if constexpr (detail::AppendReservable<T>) {
+            detail::append_byte_range(append, target, std::forward<R>(payload));
+        } else {
+            static_assert(
+                requires(T &value) { value.pop_back(); }, "non-reservable string targets must support pop_back for failure rollback");
+
+            std::size_t appended = 0;
+            try {
+                for (auto &&value : payload) {
+                    append(target, static_cast<typename T::value_type>(value));
+                    ++appended;
+                }
+            } catch (...) {
+                while (appended != 0) {
+                    target.pop_back();
+                    --appended;
+                }
+                throw;
+            }
+        }
+    }
+
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
     template <typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
