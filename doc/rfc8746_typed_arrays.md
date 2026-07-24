@@ -185,6 +185,26 @@ cddl_schema_to<typed_array_be<double>>(schema_be);
 // root = #6.82(bstr)
 ```
 
+`bounded_size<T, Min, Max>` is supported for scalar typed-array wrappers. `Min`
+and `Max` are element counts in C++ code, while generated CDDL uses byte counts
+because the RFC 8746 payload is a byte string:
+
+```cpp
+namespace ct = cbor::tags;
+namespace rfc8746 = cbor::tags::ext::rfc8746;
+
+std::vector<std::int32_t> values{1, 2, 3};
+enc(ct::as_bounded_size<1, 3>(rfc8746::as_typed_array(values)));
+
+using bounded_samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
+ct::cddl_schema_to<bounded_samples>(schema);
+// root = #6.78(bstr .size (4..12))
+```
+
+All scalar typed-array wrappers render bounded CDDL. `typed_array<T>` supports
+bounded encode and decode, `typed_array_ref<T>` supports bounded encode, and
+`typed_array_view<T>` supports bounded decode.
+
 Structural wrappers render their actual encoded payload:
 
 ```cpp
@@ -211,7 +231,17 @@ the C++ type.
 
 The generated scalar typed-array CDDL uses the RFC data-model spelling
 `#6.N(bstr)`. The decoder accepts definite-length byte strings for typed-array
-payloads and rejects indefinite-length byte strings.
+payloads and rejects indefinite-length byte strings. Bounded scalar typed-array
+CDDL constrains the byte-string payload length; for multi-byte element types,
+the compact `.size (min..max)` interval can still admit byte lengths that are
+not a whole number of elements. Runtime decode validates the payload byte length
+before materializing values or creating a borrowed view, and still rejects
+payload lengths that are not element-aligned.
+
+`bounded_size` support for `homogeneous_array` and `multi_dimensional_array`
+wrappers is intentionally deferred. Their payload validation includes additional
+shape rules, so they should get separate bounds semantics rather than inheriting
+the scalar typed-array byte-string rule.
 
 ## Segmented Output
 
@@ -314,7 +344,8 @@ homogeneous array wrapper.
 - segmented output helpers,
 - variant decode by fixed tag with compile-time collision checks,
 - structural tags `#6.40`, `#6.41`, and `#6.1040`,
-- CDDL rendering for scalar typed arrays and structural wrappers.
+- CDDL rendering for scalar typed arrays and structural wrappers,
+- element-count bounds for scalar typed arrays through `bounded_size`.
 
 ## Validation
 
