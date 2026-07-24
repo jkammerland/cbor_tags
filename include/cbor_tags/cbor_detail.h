@@ -6,6 +6,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <iterator>
 #include <limits>
@@ -25,6 +26,11 @@ template <typename T>
 concept AppendableContainer = requires {
     typename T::value_type;
     typename T::size_type;
+};
+
+template <typename T>
+concept AppendReservable = HasReserve<T> && requires(const T &value) {
+    { value.size() } -> std::convertible_to<typename T::size_type>;
 };
 
 template <typename T, bool IsArray = IsFixedArray<T>>
@@ -82,6 +88,27 @@ concept AssignableInsertOrAssignMap = IsMap<Container> && IsPairLike<Pair> && re
 
 template <typename T> struct appender<T, false> {
     using value_type = T::value_type;
+
+    constexpr void reserve_for_append(T &container, std::uint64_t additional_size) const {
+        if constexpr (AppendReservable<T>) {
+            using size_type = typename T::size_type;
+
+            const auto current_size = container.size();
+            const auto maximum_size = [&]() {
+                if constexpr (requires { container.max_size(); }) {
+                    return container.max_size();
+                } else {
+                    return std::numeric_limits<size_type>::max();
+                }
+            }();
+
+            if (std::cmp_greater(current_size, maximum_size) || std::cmp_greater(additional_size, maximum_size - current_size)) {
+                throw std::length_error("CBOR string length exceeds target container max_size");
+            }
+
+            container.reserve(static_cast<size_type>(current_size + static_cast<size_type>(additional_size)));
+        }
+    }
 
     constexpr void operator()(T &container, const value_type &value)
         requires(!IsMap<T>)
