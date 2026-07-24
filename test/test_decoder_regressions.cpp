@@ -10,7 +10,6 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
-#include <list>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -126,7 +125,34 @@ struct ReserveWithoutSizeByteBuffer {
     [[nodiscard]] auto end() const noexcept { return bytes.end(); }
     void               reserve(size_type count) { bytes.reserve(count); }
     void               push_back(value_type value) { bytes.push_back(value); }
-    void               pop_back() { bytes.pop_back(); }
+};
+
+struct ThrowingReservableByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    std::vector<std::byte> bytes;
+    size_type              appends_before_failure{std::numeric_limits<size_type>::max()};
+
+    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() noexcept { return bytes.end(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto size() const noexcept { return bytes.size(); }
+    [[nodiscard]] auto max_size() const noexcept { return bytes.max_size(); }
+    void               reserve(size_type count) { bytes.reserve(count); }
+    void               push_back(value_type value) {
+        if (appends_before_failure == 0) {
+            throw std::bad_alloc{};
+        }
+        --appends_before_failure;
+        bytes.push_back(value);
+    }
+    void insert(std::vector<std::byte>::iterator, const std::byte *first, const std::byte *last) {
+        for (; first != last; ++first) {
+            push_back(*first);
+        }
+    }
 };
 
 struct ExternalByteBuffer {
@@ -190,6 +216,8 @@ static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSiz
 static_assert(IsBinaryString<ReserveWithoutSizeByteBuffer>);
 static_assert(HasReserve<ReserveWithoutSizeByteBuffer>);
 static_assert(!detail::AppendReservable<ReserveWithoutSizeByteBuffer>);
+static_assert(IsBinaryString<ThrowingReservableByteBuffer>);
+static_assert(detail::AppendReservable<ThrowingReservableByteBuffer>);
 static_assert(IsBinaryString<ExternalByteBuffer>);
 
 TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
@@ -667,23 +695,34 @@ TEST_CASE("decoder reserves non-contiguous definite text before mutation") {
     CHECK_EQ(std::string_view{decoded}, original);
 }
 
-TEST_CASE("decoder rolls back non-reservable definite string append failures") {
+TEST_CASE("decoder does not roll back non-reservable string appends when the destination fails") {
     const std::vector<std::byte> input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
-    controlled_memory_resource   resource;
-    std::pmr::list<std::byte>    decoded{&resource};
-    decoded.push_back(std::byte{0x01});
-    resource.allocations_before_failure = 1;
+    std::array<std::byte, 2>     storage{std::byte{0x01}, std::byte{0x00}};
+    ExternalByteBuffer           decoded{storage.data(), 1, storage.size()};
 
     auto dec    = make_decoder(input);
     auto result = dec(decoded);
 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::out_of_memory);
-    REQUIRE_EQ(decoded.size(), 1);
-    CHECK_EQ(decoded.front(), std::byte{0x01});
+    REQUIRE_EQ(decoded.size(), 2);
+    CHECK_EQ(storage[0], std::byte{0x01});
+    CHECK_EQ(storage[1], std::byte{0xAA});
 }
 
-TEST_CASE("reserve without size falls back to rollback-capable append") {
+TEST_CASE("decoder does not roll back reservable string appends when the destination fails") {
+    const std::vector<std::byte> input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
+    ThrowingReservableByteBuffer decoded{{std::byte{0x01}}, 1};
+
+    auto dec    = make_decoder(input);
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::out_of_memory);
+    CHECK_EQ(decoded.bytes, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}}));
+}
+
+TEST_CASE("reserve without size falls back to direct append") {
     const std::deque<std::byte>  input{std::byte{0x43}, std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
     ReserveWithoutSizeByteBuffer decoded{{std::byte{0x01}}};
 

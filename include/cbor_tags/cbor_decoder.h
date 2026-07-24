@@ -53,30 +53,6 @@ template <typename T> constexpr bool negative_argument_fits(std::uint64_t value)
     return value <= max_cbor_argument;
 }
 
-template <typename T>
-concept AppendReservable = HasReserve<T> && requires(const T &value) {
-    { value.size() } -> std::convertible_to<typename T::size_type>;
-};
-
-template <AppendReservable T> constexpr void reserve_for_append(T &value, std::uint64_t additional_size) {
-    using size_type = typename T::size_type;
-
-    const auto current_size = value.size();
-    const auto maximum_size = [&]() {
-        if constexpr (requires { value.max_size(); }) {
-            return value.max_size();
-        } else {
-            return std::numeric_limits<size_type>::max();
-        }
-    }();
-
-    if (std::cmp_greater(current_size, maximum_size) || std::cmp_greater(additional_size, maximum_size - current_size)) {
-        throw std::length_error("CBOR string length exceeds target container max_size");
-    }
-
-    value.reserve(static_cast<size_type>(current_size + static_cast<size_type>(additional_size)));
-}
-
 template <typename InputBuffer, typename Reader>
 constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffer &data, std::uint64_t length) {
     using size_type = typename Reader::size_type;
@@ -277,8 +253,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return status_code::error;
             }
         }
-        if constexpr (!IsConstView<T> && !IsFixedArray<T> && detail::AppendReservable<T>) {
-            detail::reserve_for_append(t, bstring_size);
+        if constexpr (!IsConstView<T> && !IsFixedArray<T>) {
+            detail::appender<T>{}.reserve_for_append(t, bstring_size);
         }
 
         auto bstring = decode_bstring_payload(bstring_size);
@@ -302,7 +278,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsFixedArray<T>) {
             std::ranges::copy(bstring, t.begin());
         } else {
-            append_definite_string(t, bstring);
+            detail::appender<T> append;
+            detail::append_byte_range(append, t, bstring);
         }
 
         return status_code::success;
@@ -338,15 +315,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 return status_code::error;
             }
         }
-        if constexpr (!IsConstView<T> && detail::AppendReservable<T>) {
-            detail::reserve_for_append(t, text_size);
+        if constexpr (!IsConstView<T>) {
+            detail::appender<T>{}.reserve_for_append(t, text_size);
         }
 
         auto text = decode_text_payload(text_size);
         if constexpr (IsConstView<T>) {
             t = std::move(text);
         } else {
-            append_definite_string(t, text);
+            detail::appender<T> append;
+            detail::append_byte_range(append, t, text);
         }
 
         return status_code::success;
@@ -671,9 +649,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (string_target_aliases_input(value)) {
             return status_code::error;
         }
-        detail::reserve_for_append(value, text_size);
+        detail::appender<std::string> append;
+        append.reserve_for_append(value, text_size);
         auto text = decode_text_payload(text_size);
-        append_definite_string(value, text);
+        detail::append_byte_range(append, value, text);
         return status_code::success;
     }
 
@@ -1375,30 +1354,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         return false;
-    }
-
-    template <typename T, std::ranges::input_range R> constexpr void append_definite_string(T &target, R &&payload) {
-        detail::appender<T> append;
-        if constexpr (detail::AppendReservable<T>) {
-            detail::append_byte_range(append, target, std::forward<R>(payload));
-        } else {
-            static_assert(
-                requires(T &value) { value.pop_back(); }, "non-reservable string targets must support pop_back for failure rollback");
-
-            std::size_t appended = 0;
-            try {
-                for (auto &&value : payload) {
-                    append(target, static_cast<typename T::value_type>(value));
-                    ++appended;
-                }
-            } catch (...) {
-                while (appended != 0) {
-                    target.pop_back();
-                    --appended;
-                }
-                throw;
-            }
-        }
     }
 
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
