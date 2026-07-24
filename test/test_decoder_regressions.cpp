@@ -90,6 +90,22 @@ struct CustomSizeByteBuffer {
     [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
 };
 
+struct CountingSizeByteBuffer {
+    using value_type = std::byte;
+    using size_type  = std::size_t;
+
+    std::vector<std::byte> bytes;
+    mutable size_type      size_calls{};
+
+    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
+    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
+    [[nodiscard]] auto data() const noexcept { return bytes.data(); }
+    [[nodiscard]] auto size() const noexcept {
+        ++size_calls;
+        return bytes.size();
+    }
+};
+
 struct AdlSizedByteRange {
     std::array<std::byte, 4> bytes{};
 
@@ -209,6 +225,7 @@ static_assert(!std::is_default_constructible_v<NonDefaultAllocator<int>>);
 static_assert(CborInputBuffer<CustomSizeByteBuffer>);
 static_assert(
     std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
+static_assert(CborInputBuffer<CountingSizeByteBuffer>);
 static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
@@ -602,6 +619,30 @@ TEST_CASE("decoder leaves mutable strings unchanged for truncated definite paylo
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::incomplete);
         CHECK_EQ(decoded, "prefix");
+    }
+}
+
+TEST_CASE("decoder validates definite string payloads once") {
+    SUBCASE("byte string") {
+        CountingSizeByteBuffer input{{std::byte{0x42}, std::byte{0x01}, std::byte{0x02}}};
+        std::vector<std::byte> decoded;
+        auto                   dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded, (std::vector{std::byte{0x01}, std::byte{0x02}}));
+        // Initial-byte, payload, and alias checks may each query the input size.
+        CHECK(input.size_calls <= 3);
+    }
+
+    SUBCASE("text string") {
+        CountingSizeByteBuffer input{{std::byte{0x62}, std::byte{'o'}, std::byte{'k'}}};
+        std::string            decoded;
+        auto                   dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded, "ok");
+        // Initial-byte, payload, and alias checks may each query the input size.
+        CHECK(input.size_calls <= 3);
     }
 }
 

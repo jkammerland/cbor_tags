@@ -295,7 +295,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         // Validate the complete payload and any allocation before exposing a
         // borrowed payload that target growth could invalidate.
-        require_bytes(bstring_size);
+        const auto payload_size = require_bytes(bstring_size);
         if constexpr (!IsConstView<T> && !IsFixedArray<T>) {
             if (string_target_aliases_input(t)) {
                 return status_code::error;
@@ -305,7 +305,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             detail::appender<T>{}.reserve_for_append(t, bstring_size);
         }
 
-        auto bstring = decode_bstring_payload(bstring_size);
+        auto bstring = take_bstring_payload(payload_size);
 
         // Now handle the target assignment based on contiguity constraints
         if constexpr (std::is_same_v<T, decltype(bstring)>) {
@@ -369,7 +369,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
-        require_bytes(text_size);
+        const auto payload_size = require_bytes(text_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
                 return status_code::error;
@@ -379,7 +379,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             detail::appender<T>{}.reserve_for_append(t, text_size);
         }
 
-        auto text = decode_text_payload(text_size);
+        auto text = take_text_payload(payload_size);
         if constexpr (IsConstView<T>) {
             t = std::move(text);
         } else {
@@ -710,13 +710,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr status_code decode_definite_tstr(std::string &value, std::uint64_t text_size) {
-        require_bytes(text_size);
+        const auto payload_size = require_bytes(text_size);
         if (string_target_aliases_input(value)) {
             return status_code::error;
         }
         detail::appender<std::string> append;
         append.reserve_for_append(value, text_size);
-        auto text = decode_text_payload(text_size);
+        auto text = take_text_payload(payload_size);
         detail::append_byte_range(append, value, text);
         return status_code::success;
     }
@@ -1192,49 +1192,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr auto decode_bstring(byte additionalInfo) { return decode_bstring_payload(decode_unsigned(additionalInfo)); }
 
-    constexpr auto decode_bstring_payload(std::uint64_t length) {
-        const auto span_length = require_bytes(length);
-
-        if constexpr (IsContiguous<InputBuffer>) {
-            auto *begin  = std::ranges::data(data_) + reader_.position_;
-            auto  result = std::span<const byte>(reinterpret_cast<const byte *>(begin), span_length);
-            reader_.position_ += span_length;
-            return result;
-        } else {
-            auto start = reader_.position_;
-            auto it    = start;
-            for (size_type i = 0; i < span_length; ++i) {
-                ++it;
-            }
-            auto result       = subrange(start, it);
-            reader_.position_ = it;
-            reader_.current_offset_ += span_length;
-            return bstr_view_t{result};
-        }
-    }
+    constexpr auto decode_bstring_payload(std::uint64_t length) { return take_bstring_payload(require_bytes(length)); }
 
     constexpr auto decode_text(byte additionalInfo) { return decode_text_payload(decode_unsigned(additionalInfo)); }
 
-    constexpr auto decode_text_payload(std::uint64_t length) {
-        const auto span_length = require_bytes(length);
-
-        if constexpr (IsContiguous<InputBuffer>) {
-            auto *begin  = std::ranges::data(data_) + reader_.position_;
-            auto  result = std::string_view(reinterpret_cast<const char *>(begin), span_length);
-            reader_.position_ += span_length;
-            return result;
-        } else {
-            auto start = reader_.position_;
-            auto it    = start;
-            for (size_type i = 0; i < span_length; ++i) {
-                ++it;
-            }
-            auto result       = subrange(start, it);
-            reader_.position_ = it;
-            reader_.current_offset_ += span_length;
-            return tstr_view_t{result};
-        }
-    }
+    constexpr auto decode_text_payload(std::uint64_t length) { return take_text_payload(require_bytes(length)); }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_bstr(T &out, decode_size_bounds bounds = {}) {
         detail::appender<T>            appender_;
@@ -1623,6 +1585,44 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    constexpr auto take_bstring_payload(size_type span_length) {
+        if constexpr (IsContiguous<InputBuffer>) {
+            auto *begin  = std::ranges::data(data_) + reader_.position_;
+            auto  result = std::span<const byte>(reinterpret_cast<const byte *>(begin), span_length);
+            reader_.position_ += span_length;
+            return result;
+        } else {
+            auto start = reader_.position_;
+            auto it    = start;
+            for (size_type i = 0; i < span_length; ++i) {
+                ++it;
+            }
+            auto result       = subrange(start, it);
+            reader_.position_ = it;
+            reader_.current_offset_ += span_length;
+            return bstr_view_t{result};
+        }
+    }
+
+    constexpr auto take_text_payload(size_type span_length) {
+        if constexpr (IsContiguous<InputBuffer>) {
+            auto *begin  = std::ranges::data(data_) + reader_.position_;
+            auto  result = std::string_view(reinterpret_cast<const char *>(begin), span_length);
+            reader_.position_ += span_length;
+            return result;
+        } else {
+            auto start = reader_.position_;
+            auto it    = start;
+            for (size_type i = 0; i < span_length; ++i) {
+                ++it;
+            }
+            auto result       = subrange(start, it);
+            reader_.position_ = it;
+            reader_.current_offset_ += span_length;
+            return tstr_view_t{result};
+        }
+    }
+
     template <typename T> constexpr bool string_target_aliases_input(const T &target) const {
         if constexpr (std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<InputBuffer>>) {
             if (std::addressof(target) == std::addressof(data_)) {
