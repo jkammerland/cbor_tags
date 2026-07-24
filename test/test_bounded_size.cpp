@@ -14,8 +14,10 @@
 #include <memory_resource>
 #include <optional>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -62,10 +64,18 @@ static_assert(CanEncodeBounded<bounded_size<sized_array_range, 0, 3>>);
 static_assert(CanEncodeBounded<bounded_size<sized_map_range, 0, 3>>);
 static_assert(CanEncodeBounded<bounded_size<sized_bstr_range, 0, 3>>);
 static_assert(CanEncodeBounded<bounded_size<sized_tstr_range, 0, 3>>);
+static_assert(CanEncodeBounded<dynamic_bounded_size<sized_array_range>>);
+static_assert(CanEncodeBounded<dynamic_bounded_size<sized_map_range>>);
+static_assert(CanEncodeBounded<dynamic_bounded_size<sized_bstr_range>>);
+static_assert(CanEncodeBounded<dynamic_bounded_size<sized_tstr_range>>);
 static_assert(!CanEncodeBounded<bounded_size<array_range<filtered_ints>, 0, 3>>);
 static_assert(!CanEncodeBounded<bounded_size<map_range<filtered_pairs>, 0, 3>>);
 static_assert(!CanEncodeBounded<bounded_size<bstr_range<filtered_bytes>, 0, 3>>);
 static_assert(!CanEncodeBounded<bounded_size<tstr_range<filtered_chars>, 0, 3>>);
+static_assert(!CanEncodeBounded<dynamic_bounded_size<array_range<filtered_ints>>>);
+static_assert(!CanEncodeBounded<dynamic_bounded_size<map_range<filtered_pairs>>>);
+static_assert(!CanEncodeBounded<dynamic_bounded_size<bstr_range<filtered_bytes>>>);
+static_assert(!CanEncodeBounded<dynamic_bounded_size<tstr_range<filtered_chars>>>);
 
 struct bounded_document {
     bounded_size<std::string, 1, 16>                         name;
@@ -145,6 +155,65 @@ sensor_report_value semantic_value(const bounded_sensor_report &report) {
     return {report.state, std::move(batches), std::move(result), report.history.value()};
 }
 
+struct dynamic_bounded_document {
+    dynamic_bounded_size<std::string>                          name;
+    dynamic_bounded_size<std::vector<std::byte>>               payload;
+    dynamic_bounded_size<std::vector<int>>                     values;
+    dynamic_bounded_size<std::map<std::string, std::uint64_t>> counters;
+};
+
+enum class dynamic_sensor_state : std::uint8_t { idle, active, fault };
+
+struct dynamic_sample_batch {
+    static constexpr std::uint64_t cbor_tag = 60001;
+
+    std::string                                                 source;
+    std::optional<std::vector<int>>                             readings;
+    std::variant<std::string, std::map<std::string, int>, bool> result;
+
+    bool operator==(const dynamic_sample_batch &) const = default;
+};
+
+struct dynamic_sensor_report {
+    dynamic_sensor_state                                          state{};
+    dynamic_bounded_size<std::string>                             name;
+    dynamic_bounded_size<std::vector<dynamic_sample_batch>>       batches;
+    dynamic_bounded_size<std::map<std::string, std::vector<int>>> history;
+    std::optional<std::string>                                    note;
+};
+
+struct plain_dynamic_sensor_report {
+    dynamic_sensor_state                    state{};
+    std::string                             name;
+    std::vector<dynamic_sample_batch>       batches;
+    std::map<std::string, std::vector<int>> history;
+    std::optional<std::string>              note;
+};
+
+struct dynamic_sensor_report_value {
+    dynamic_sensor_state                    state{};
+    std::string                             name;
+    std::vector<dynamic_sample_batch>       batches;
+    std::map<std::string, std::vector<int>> history;
+    std::optional<std::string>              note;
+
+    bool operator==(const dynamic_sensor_report_value &) const = default;
+};
+
+dynamic_sensor_report make_dynamic_sensor_report_output() {
+    return {
+        dynamic_sensor_state::idle,
+        dynamic_bounded_size<std::string>{std::string{}, 1, 16},
+        dynamic_bounded_size<std::vector<dynamic_sample_batch>>{std::vector<dynamic_sample_batch>{}, 1, 3},
+        dynamic_bounded_size<std::map<std::string, std::vector<int>>>{std::map<std::string, std::vector<int>>{}, 0, 2},
+        std::nullopt,
+    };
+}
+
+dynamic_sensor_report_value semantic_value(const dynamic_sensor_report &report) {
+    return {report.state, report.name.value(), report.batches.value(), report.history.value(), report.note};
+}
+
 struct bounded_extension_value {
     std::vector<int> values;
 };
@@ -168,6 +237,19 @@ template <typename Self> struct bounded_extension_codec : cbor_codec_mixin_base<
         auto values = as_bounded_size<Min, Max>(bounded.value().values);
         return static_cast<Self &>(*this).decode(values, major, additional_info);
     }
+
+    template <typename Value>
+        requires std::same_as<std::remove_cvref_t<Value>, bounded_extension_value>
+    void encode(const dynamic_bounded_size<Value> &bounded) {
+        static_cast<Self &>(*this).encode(as_bounded_size(bounded.value().values, bounded.min_size(), bounded.max_size()));
+    }
+
+    template <typename Value>
+        requires std::same_as<std::remove_cvref_t<Value>, bounded_extension_value>
+    status_code decode(dynamic_bounded_size<Value> &bounded, major_type major, std::byte additional_info) {
+        auto values = as_bounded_size(bounded.value().values, bounded.min_size(), bounded.max_size());
+        return static_cast<Self &>(*this).decode(values, major, additional_info);
+    }
 };
 
 struct counting_memory_resource : std::pmr::memory_resource {
@@ -186,6 +268,387 @@ struct counting_memory_resource : std::pmr::memory_resource {
 };
 
 } // namespace
+
+TEST_CASE("dynamic_bounded_size owns or references and rewrapping replaces bounds") {
+    static_assert(!std::default_initializable<dynamic_bounded_size<std::vector<int>>>);
+
+    std::vector<int> values{1, 2, 3};
+    auto             referenced = as_bounded_size(values, 0, 3);
+    static_assert(std::same_as<decltype(referenced), dynamic_bounded_size<std::vector<int> &>>);
+    CHECK_EQ(&referenced.value_, &values);
+    CHECK_EQ(referenced.min_size(), 0U);
+    CHECK_EQ(referenced.max_size(), 3U);
+
+    auto rebound = as_bounded_size(referenced, 1, 4);
+    static_assert(std::same_as<decltype(rebound), dynamic_bounded_size<std::vector<int> &>>);
+    CHECK_EQ(&rebound.value_, &values);
+    CHECK_EQ(rebound.min_size(), 1U);
+    CHECK_EQ(rebound.max_size(), 4U);
+
+    auto static_rebound = as_bounded_size<2, 5>(rebound);
+    static_assert(std::same_as<decltype(static_rebound), bounded_size<std::vector<int> &, 2, 5>>);
+    CHECK_EQ(&static_rebound.value_, &values);
+
+    auto dynamic_again = as_bounded_size(static_rebound, 0, 6);
+    static_assert(std::same_as<decltype(dynamic_again), dynamic_bounded_size<std::vector<int> &>>);
+    CHECK_EQ(&dynamic_again.value_, &values);
+
+    auto owning = as_bounded_size(std::vector<int>{4, 5}, 0, 2);
+    static_assert(std::same_as<decltype(owning), dynamic_bounded_size<std::vector<int>>>);
+    auto moved = as_bounded_size(std::move(owning), 1, 3);
+    static_assert(std::same_as<decltype(moved), dynamic_bounded_size<std::vector<int>>>);
+    CHECK_EQ(moved.value_, (std::vector<int>{4, 5}));
+    CHECK_EQ(moved.min_size(), 1U);
+    CHECK_EQ(moved.max_size(), 3U);
+
+    CHECK_THROWS_AS((void)as_bounded_size(values, 4, 3), std::invalid_argument);
+}
+
+TEST_CASE("dynamic_bounded_size roundtrips a preconfigured aggregate") {
+    dynamic_bounded_document input{
+        dynamic_bounded_size<std::string>{std::string{"sensor"}, 1, 16},
+        dynamic_bounded_size<std::vector<std::byte>>{std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}}, 0, 4},
+        dynamic_bounded_size<std::vector<int>>{std::vector<int>{1, 2, 3}, 1, 3},
+        dynamic_bounded_size<std::map<std::string, std::uint64_t>>{std::map<std::string, std::uint64_t>{{"ok", 1}}, 0, 2},
+    };
+
+    dynamic_bounded_document output{
+        dynamic_bounded_size<std::string>{std::string{}, 1, 16},
+        dynamic_bounded_size<std::vector<std::byte>>{std::vector<std::byte>{}, 0, 4},
+        dynamic_bounded_size<std::vector<int>>{std::vector<int>{}, 1, 3},
+        dynamic_bounded_size<std::map<std::string, std::uint64_t>>{std::map<std::string, std::uint64_t>{}, 0, 2},
+    };
+    test_support::roundtrip_into(input, output);
+
+    CHECK_EQ(output.name.value(), input.name.value());
+    CHECK_EQ(output.payload.value(), input.payload.value());
+    CHECK_EQ(output.values.value(), input.values.value());
+    CHECK_EQ(output.counters.value(), input.counters.value());
+}
+
+TEST_CASE("dynamic_bounded_size roundtrips nested preconfigured aggregate composition") {
+    auto check_roundtrip = [](const dynamic_sensor_report &input) {
+        auto output = make_dynamic_sensor_report_output();
+        test_support::roundtrip_into(input, output);
+
+        CHECK(semantic_value(output) == semantic_value(input));
+        CHECK_EQ(output.name.min_size(), 1U);
+        CHECK_EQ(output.name.max_size(), 16U);
+        CHECK_EQ(output.batches.min_size(), 1U);
+        CHECK_EQ(output.batches.max_size(), 3U);
+        CHECK_EQ(output.history.min_size(), 0U);
+        CHECK_EQ(output.history.max_size(), 2U);
+    };
+
+    SUBCASE("map alternative and engaged optionals") {
+        dynamic_sensor_report input{
+            dynamic_sensor_state::active,
+            dynamic_bounded_size<std::string>{std::string{"sensor-a"}, 1, 16},
+            dynamic_bounded_size<std::vector<dynamic_sample_batch>>{
+                std::vector<dynamic_sample_batch>{
+                    {"front", std::vector<int>{1, 2, 3, 4, 5, 6}, std::map<std::string, int>{{"accepted", 6}}},
+                    {"rear", std::nullopt, std::string{"offline"}},
+                },
+                1, 3},
+            dynamic_bounded_size<std::map<std::string, std::vector<int>>>{
+                std::map<std::string, std::vector<int>>{{"recent", {1, 2, 3, 4, 5}}, {"older", {6}}}, 0, 2},
+            std::string{"calibrated"},
+        };
+
+        check_roundtrip(input);
+    }
+
+    SUBCASE("text and bool alternatives at outer bounds") {
+        dynamic_sensor_report input{
+            dynamic_sensor_state::fault,
+            dynamic_bounded_size<std::string>{std::string{"x"}, 1, 16},
+            dynamic_bounded_size<std::vector<dynamic_sample_batch>>{std::vector<dynamic_sample_batch>{
+                                                                        {"a", std::vector<int>{}, std::string{"ok"}},
+                                                                        {"b", std::nullopt, false},
+                                                                        {"c", std::vector<int>{7}, true},
+                                                                    },
+                                                                    1, 3},
+            dynamic_bounded_size<std::map<std::string, std::vector<int>>>{std::map<std::string, std::vector<int>>{}, 0, 2},
+            std::nullopt,
+        };
+
+        check_roundtrip(input);
+    }
+}
+
+TEST_CASE("dynamic_bounded_size rejects typed aggregate values outside configured bounds") {
+    auto decode = [](const plain_dynamic_sensor_report &input, dynamic_sensor_report &output) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(input));
+
+        auto dec = make_decoder(buffer);
+        return dec(output);
+    };
+
+    SUBCASE("name exceeds its configured maximum") {
+        plain_dynamic_sensor_report input{
+            dynamic_sensor_state::idle, std::string(17, 'x'), {{"front", std::nullopt, true}}, {}, std::nullopt,
+        };
+        auto output = make_dynamic_sensor_report_output();
+        auto result = decode(input, output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(output.name.value().empty());
+    }
+
+    SUBCASE("outer record array is below its configured minimum") {
+        plain_dynamic_sensor_report input{dynamic_sensor_state::idle, "sensor", {}, {}, std::nullopt};
+        auto                        output = make_dynamic_sensor_report_output();
+        auto                        result = decode(input, output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(output.batches.value().empty());
+    }
+
+    SUBCASE("outer history map exceeds its configured maximum") {
+        plain_dynamic_sensor_report input{
+            dynamic_sensor_state::active,         "sensor",     {{"front", std::vector<int>{1}, std::string{"ok"}}},
+            {{"a", {1}}, {"b", {2}}, {"c", {3}}}, std::nullopt,
+        };
+        auto output = make_dynamic_sensor_report_output();
+        auto result = decode(input, output);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(output.history.value().empty());
+    }
+}
+
+TEST_CASE("dynamic bounded custom codecs opt in with ordinary overloads") {
+    bounded_extension_value input{{1, 2}};
+    bounded_extension_value output;
+    auto                    bounded_input  = as_bounded_size(input, 1, 2);
+    auto                    bounded_output = as_bounded_size(output, 1, 2);
+
+    test_support::roundtrip_into<bounded_extension_codec>(bounded_input, bounded_output);
+    CHECK_EQ(output.values, input.values);
+
+    auto invalid     = to_bytes("83010203");
+    auto invalid_dec = make_decoder<bounded_extension_codec>(invalid);
+    auto result      = invalid_dec(as_bounded_size(output, 1, 2));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(output.values, input.values);
+}
+
+TEST_CASE("dynamic bounds reject definite sizes before output allocation or mutation") {
+    SUBCASE("encode") {
+        std::vector<int>       values{1, 2, 3};
+        std::vector<std::byte> buffer;
+        auto                   enc    = make_encoder(buffer);
+        auto                   result = enc(as_bounded_size(values, 0, 2));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(buffer.empty());
+    }
+
+    SUBCASE("decode") {
+        auto                   buffer = to_bytes("4101");
+        std::vector<std::byte> value{std::byte{0xAA}};
+        auto                   dec    = make_decoder(buffer);
+        auto                   result = dec(as_bounded_size(value, 2, 4));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(value, (std::vector<std::byte>{std::byte{0xAA}}));
+    }
+
+    SUBCASE("reserve") {
+        auto buffer = to_bytes("9a00010000");
+
+        counting_memory_resource resource;
+        std::pmr::vector<int>    values{&resource};
+        auto                     dec    = make_decoder(buffer);
+        auto                     result = dec(as_bounded_size(values, 0, 2));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(resource.allocations, 0);
+        CHECK(values.empty());
+    }
+}
+
+TEST_CASE("dynamic bounded indefinite decoding retains complete prefixes") {
+    SUBCASE("empty array at zero maximum") {
+        auto             buffer = to_bytes("9fff");
+        std::vector<int> value;
+
+        REQUIRE(make_decoder(buffer)(as_bounded_size(value, 0, 0)));
+        CHECK(value.empty());
+    }
+
+    SUBCASE("array maximum") {
+        auto             buffer = to_bytes("9f010203ff");
+        std::vector<int> value;
+        auto             result = make_decoder(buffer)(as_bounded_size(value, 0, 2));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(value, (std::vector<int>{1, 2}));
+    }
+
+    SUBCASE("array minimum") {
+        auto             buffer = to_bytes("9f01ff");
+        std::vector<int> value;
+        auto             result = make_decoder(buffer)(as_bounded_size(value, 2, 4));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(value, (std::vector<int>{1}));
+    }
+
+    SUBCASE("byte string") {
+        auto                   buffer = to_bytes("5f426162426364ff");
+        std::vector<std::byte> value;
+        auto                   result = make_decoder(buffer)(as_bounded_size(value, 0, 3));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(value, (std::vector<std::byte>{std::byte{'a'}, std::byte{'b'}}));
+    }
+
+    SUBCASE("text string") {
+        auto        buffer = to_bytes("7f626162626364ff");
+        std::string value;
+        auto        result = make_decoder(buffer)(as_bounded_size(value, 0, 3));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(value, "ab");
+    }
+
+    SUBCASE("map") {
+        auto                       buffer = to_bytes("bf616101616202ff");
+        std::map<std::string, int> value;
+        auto                       result = make_decoder(buffer)(as_bounded_size(value, 0, 1));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(value, (std::map<std::string, int>{{"a", 1}}));
+    }
+}
+
+TEST_CASE("dynamic bounds preserve fixed container extent") {
+    std::array<int, 2> values{1, 2};
+
+    SUBCASE("encode") {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+
+        REQUIRE(enc(as_bounded_size(values, 2, 2)));
+        CHECK_EQ(to_hex(buffer), "820102");
+
+        buffer.clear();
+        auto result = enc(as_bounded_size(values, 0, 1));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(buffer.empty());
+    }
+
+    SUBCASE("decode") {
+        auto               buffer = to_bytes("820304");
+        std::array<int, 2> decoded{9, 9};
+        auto               dec = make_decoder(buffer);
+
+        REQUIRE(dec(as_bounded_size(decoded, 2, 2)));
+        CHECK_EQ(decoded, (std::array<int, 2>{3, 4}));
+
+        decoded           = {9, 9};
+        auto rejected_dec = make_decoder(buffer);
+        auto result       = rejected_dec(as_bounded_size(decoded, 3, 3));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(decoded, (std::array<int, 2>{9, 9}));
+    }
+}
+
+TEST_CASE("dynamic bounds apply only to the immediate container") {
+    const std::vector<std::vector<int>> input{{1, 2, 3}};
+    std::vector<std::byte>              buffer;
+    auto                                enc = make_encoder(buffer);
+    REQUIRE(enc(input));
+
+    std::vector<std::vector<int>> value;
+    auto                          dec = make_decoder(buffer);
+
+    REQUIRE(dec(as_bounded_size(value, 0, 1)));
+    CHECK_EQ(value, (std::vector<std::vector<int>>{{1, 2, 3}}));
+}
+
+TEST_CASE("dynamic bounds validate item cardinality independently of accumulated destinations") {
+    auto decode_definite = []<typename T>(const T &input, T &destination, std::size_t min, std::size_t max) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder(buffer);
+        REQUIRE(enc(input));
+
+        auto dec = make_decoder(buffer);
+        return dec(as_bounded_size(destination, min, max));
+    };
+
+    std::vector<int> values{9, 8, 7};
+    REQUIRE(decode_definite(std::vector<int>{1, 2}, values, 2, 2));
+    CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2}));
+
+    std::map<std::string, int> mapping{{"existing", 0}};
+    REQUIRE(decode_definite(std::map<std::string, int>{{"a", 1}, {"b", 2}}, mapping, 2, 2));
+    CHECK_EQ(mapping, (std::map<std::string, int>{{"a", 1}, {"b", 2}, {"existing", 0}}));
+
+    std::vector<std::byte> bytes{std::byte{0x00}};
+    REQUIRE(decode_definite(std::vector<std::byte>{std::byte{0xAA}, std::byte{0xBB}}, bytes, 2, 2));
+    CHECK_EQ(bytes, (std::vector<std::byte>{std::byte{0x00}, std::byte{0xAA}, std::byte{0xBB}}));
+
+    std::string text{"prefix:"};
+    REQUIRE(decode_definite(std::string{"ok"}, text, 2, 2));
+    CHECK_EQ(text, "prefix:ok");
+
+    auto one_item_buffer = std::vector<std::byte>{};
+    auto one_item_enc    = make_encoder(one_item_buffer);
+    REQUIRE(one_item_enc(std::vector<int>{1}));
+    auto min_dec    = make_decoder(one_item_buffer);
+    auto min_result = min_dec(as_bounded_size(values, 2, 3));
+    REQUIRE_FALSE(min_result);
+    CHECK_EQ(min_result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2}));
+
+    std::vector<int>       indefinite_input{3, 4};
+    std::vector<std::byte> indefinite_buffer;
+    auto                   indefinite_enc = make_encoder(indefinite_buffer);
+    REQUIRE(indefinite_enc(as_indefinite{indefinite_input}));
+    auto indefinite_dec = make_decoder(indefinite_buffer);
+    REQUIRE(indefinite_dec(as_bounded_size(values, 2, 2)));
+    CHECK_EQ(values, (std::vector<int>{9, 8, 7, 1, 2, 3, 4}));
+
+    std::vector<std::byte> output{std::byte{0x00}};
+    auto                   output_enc = make_encoder(output);
+    REQUIRE(output_enc(as_bounded_size(std::vector<int>{1, 2}, 2, 2)));
+    const auto before_failure = output;
+    auto       encode_result  = output_enc(as_bounded_size(std::vector<int>{1, 2, 3}, 2, 2));
+    REQUIRE_FALSE(encode_result);
+    CHECK_EQ(encode_result.error(), status_code::size_limit_exceeded);
+    CHECK_EQ(output, before_failure);
+}
+
+TEST_CASE("configured dynamic bounds encode safely through variants") {
+    using input_type  = std::variant<dynamic_bounded_size<std::vector<int>>, std::string>;
+    using output_type = std::variant<std::vector<int>, std::string>;
+
+    input_type  input{std::in_place_index<0>, std::vector<int>{1, 2}, 0, 2};
+    output_type output;
+    test_support::roundtrip_into(input, output);
+
+    REQUIRE(std::holds_alternative<std::vector<int>>(output));
+    CHECK_EQ(std::get<std::vector<int>>(output), (std::vector<int>{1, 2}));
+}
 
 TEST_CASE("bounded_size roundtrips a mixed aggregate") {
     bounded_document input{
@@ -756,6 +1219,64 @@ TEST_CASE("bounded explicit range wrappers reject invalid sizes before output") 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::size_limit_exceeded);
     CHECK(buffer.empty());
+}
+
+TEST_CASE("dynamic bounded explicit range wrappers roundtrip semantic values") {
+    {
+        std::vector<int> values{1, 2, 3};
+        std::vector<int> decoded;
+
+        auto input = as_bounded_size(as_array_range(values), 3, 3);
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, values);
+    }
+
+    {
+        std::vector<std::pair<int, int>> values{{1, 2}, {3, 4}};
+        std::map<int, int>               decoded;
+
+        auto input = as_bounded_size(as_map_range(values), 2, 2);
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, (std::map<int, int>{{1, 2}, {3, 4}}));
+    }
+
+    {
+        std::vector<std::byte> values{std::byte{0x01}, std::byte{0x02}};
+        std::vector<std::byte> decoded;
+
+        auto input = as_bounded_size(as_bstr_range(values), 2, 2);
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, values);
+    }
+
+    {
+        std::string values{"hello"};
+        std::string decoded;
+
+        auto input = as_bounded_size(as_tstr_range(values), 1, 5);
+        test_support::roundtrip_into(input, decoded);
+        CHECK_EQ(decoded, values);
+    }
+}
+
+TEST_CASE("dynamic bounded explicit range wrappers reject invalid sizes before output") {
+    std::vector<std::pair<int, int>> values{{1, 2}, {3, 4}};
+    std::vector<std::byte>           buffer;
+    auto                             enc    = make_encoder(buffer);
+    auto                             result = enc(as_bounded_size(as_map_range(values), 0, 1));
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+    CHECK(buffer.empty());
+}
+
+TEST_CASE("dynamic bounded indefinite wrappers preserve their wire shape") {
+    std::vector<int>       values{1, 2, 3};
+    std::vector<std::byte> buffer;
+    auto                   enc = make_encoder(buffer);
+
+    REQUIRE(enc(as_bounded_size(as_indefinite{values}, 0, 3)));
+    CHECK_EQ(to_hex(buffer), "9f010203ff");
 }
 
 TEST_CASE("bounded explicit ranges preserve const iteration requirements") {
