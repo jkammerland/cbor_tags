@@ -1,5 +1,6 @@
 #include "test_util.h"
 
+#include <algorithm>
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_detail.h>
@@ -610,6 +611,59 @@ TEST_CASE("typed decode reads non-contiguous input once without a structural pre
     REQUIRE_EQ(value[0].size(), 1U);
     CHECK_EQ(value[0][0], 0);
     CHECK_EQ(input.increments, input.bytes.size());
+}
+
+TEST_CASE("bounded indefinite decoding traverses non-contiguous input once") {
+    counting_sized_bidirectional_bytes input{4};
+    input.bytes = to_bytes("9f0000ff");
+
+    std::vector<std::uint64_t> values;
+    auto                       dec = make_decoder(input);
+
+    REQUIRE(dec(as_bounded_size<0, 2>(values)));
+    CHECK_EQ(values, (std::vector<std::uint64_t>{0, 0}));
+    CHECK_EQ(input.increments, input.bytes.size());
+}
+
+TEST_CASE("bounded definite decoding adds no input traversal") {
+    SUBCASE("array") {
+        counting_sized_bidirectional_bytes bounded_input{26};
+        bounded_input.bytes[0] = std::byte{0x98};
+        bounded_input.bytes[1] = std::byte{0x18};
+        std::ranges::fill(bounded_input.bytes.begin() + 2, bounded_input.bytes.end(), std::byte{0x00});
+        auto direct_input = bounded_input;
+
+        std::vector<std::uint64_t> direct_values;
+        auto                       direct_dec = make_decoder(direct_input);
+        REQUIRE(direct_dec(direct_values));
+
+        std::vector<std::uint64_t> bounded_values;
+        auto                       bounded_dec = make_decoder(bounded_input);
+        REQUIRE(bounded_dec(as_bounded_size<24, 24>(bounded_values)));
+
+        CHECK_EQ(bounded_values, direct_values);
+        CHECK_EQ(bounded_input.increments, direct_input.increments);
+        CHECK_EQ(bounded_input.increments, bounded_input.bytes.size());
+    }
+
+    SUBCASE("byte string") {
+        counting_sized_bidirectional_bytes bounded_input{26};
+        bounded_input.bytes[0] = std::byte{0x58};
+        bounded_input.bytes[1] = std::byte{0x18};
+        std::ranges::fill(bounded_input.bytes.begin() + 2, bounded_input.bytes.end(), std::byte{0x2a});
+        auto direct_input = bounded_input;
+
+        std::vector<std::byte> direct_value;
+        auto                   direct_dec = make_decoder(direct_input);
+        REQUIRE(direct_dec(direct_value));
+
+        std::vector<std::byte> bounded_value;
+        auto                   bounded_dec = make_decoder(bounded_input);
+        REQUIRE(bounded_dec(as_bounded_size<24, 24>(bounded_value)));
+
+        CHECK_EQ(bounded_value, direct_value);
+        CHECK_EQ(bounded_input.increments, direct_input.increments);
+    }
 }
 
 TEST_CASE("lazy tag scanner applies remaining depth budget to matched payload validation") {
