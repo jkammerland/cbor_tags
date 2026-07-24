@@ -678,6 +678,25 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
     }
 }
 
+TEST_CASE("decoder safely copies overlapping fixed byte string targets") {
+    struct overlapping_input {
+        std::array<std::byte, 3> decoded;
+        std::byte                tail;
+    };
+    static_assert(offsetof(overlapping_input, tail) == 3);
+    static_assert(sizeof(overlapping_input) == 4);
+
+    overlapping_input storage{
+        .decoded = {std::byte{0x43}, std::byte{0x01}, std::byte{0x02}},
+        .tail    = std::byte{0x03},
+    };
+    const auto input = std::as_bytes(std::span{&storage, std::size_t{1}});
+    auto       dec   = make_decoder(input);
+
+    REQUIRE(dec(storage.decoded));
+    CHECK_EQ(storage.decoded, (std::array{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}));
+}
+
 TEST_CASE("decoder reserves non-contiguous definite text before mutation") {
     std::deque<std::byte> input{std::byte{0x78}, std::byte{0x40}};
     input.insert(input.end(), 64, std::byte{'x'});

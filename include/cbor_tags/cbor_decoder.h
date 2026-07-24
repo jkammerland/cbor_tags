@@ -16,6 +16,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 // #include <fmt/base.h>
 // #include <fmt/ranges.h>
 #include <exception>
@@ -295,7 +296,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // Validate the complete payload and any allocation before exposing a
         // borrowed payload that target growth could invalidate.
         require_bytes(bstring_size);
-        if constexpr (!IsConstView<T>) {
+        if constexpr (!IsConstView<T> && !IsFixedArray<T>) {
             if (string_target_aliases_input(t)) {
                 return status_code::error;
             }
@@ -323,7 +324,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsConstView<T>) {
             t = T(std::ranges::data(bstring), std::ranges::size(bstring));
         } else if constexpr (IsFixedArray<T>) {
-            std::ranges::copy(bstring, t.begin());
+            if constexpr (IsContiguous<T> && IsContiguous<decltype(bstring)>) {
+                if (std::is_constant_evaluated()) {
+                    std::ranges::copy(bstring, t.begin());
+                } else {
+                    std::memmove(std::ranges::data(t), std::ranges::data(bstring),
+                                 std::ranges::size(bstring) * sizeof(typename T::value_type));
+                }
+            } else {
+                std::ranges::copy(bstring, t.begin());
+            }
         } else {
             detail::appender<T> append;
             detail::append_byte_range(append, t, bstring);
