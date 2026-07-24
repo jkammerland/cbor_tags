@@ -114,7 +114,7 @@ TEST_CASE("Range encoding benchmarks") {
     auto filtered_values   = values | std::views::filter([](int) { return true; });
     auto transformed_pairs = values | std::views::transform([](int value) { return std::pair{value, value * 2}; });
     auto filtered_pairs    = values | std::views::filter([](int) { return true; }) |
-                          std::views::transform([](int value) { return std::pair{value, value * 2}; });
+                             std::views::transform([](int value) { return std::pair{value, value * 2}; });
     auto transformed_bytes = values | std::views::transform([](int value) { return static_cast<std::uint8_t>(value); });
     auto chunked_bytes     = bytes | std::views::filter([](std::byte) { return true; });
 
@@ -146,8 +146,8 @@ TEST_CASE("Range decoding benchmarks") {
 
     auto filtered_values = values | std::views::filter([](int) { return true; });
     auto filtered_pairs  = values | std::views::filter([](int) { return true; }) |
-                          std::views::transform([](int value) { return std::pair{value, value * 2}; });
-    auto chunked_bytes = bytes | std::views::filter([](std::byte) { return true; });
+                           std::views::transform([](int value) { return std::pair{value, value * 2}; });
+    auto chunked_bytes   = bytes | std::views::filter([](std::byte) { return true; });
 
     auto definite_array    = encode_to_vector(as_array_range(values));
     auto indef_array       = encode_to_vector(as_array_range(filtered_values));

@@ -201,9 +201,30 @@ ct::cddl_schema_to<bounded_samples>(schema);
 // root = #6.78(bstr .size (4..12))
 ```
 
-All scalar typed-array wrappers render bounded CDDL. `typed_array<T>` supports
-bounded encode and decode, `typed_array_ref<T>` supports bounded encode, and
-`typed_array_view<T>` supports bounded decode.
+Use runtime bounds when the element limit comes from application configuration:
+
+```cpp
+std::size_t max_samples = configured_sample_limit();
+
+enc(ct::as_bounded_size(
+    rfc8746::as_typed_array(values), 1, max_samples));
+
+rfc8746::typed_array<std::int32_t> decoded;
+dec(ct::as_bounded_size(decoded, 1, max_samples));
+```
+
+Runtime bounds work for owned scalar typed arrays, borrowed encode wrappers,
+and typed-array decode views. They are still element counts. The decoder checks
+the corresponding payload byte range and element alignment before allocating
+owned values or assigning a view.
+
+`dynamic_bounded_size<T>` cannot be rendered as type-based CDDL because its
+limits belong to an object, not its type. Use `bounded_size<T, Min, Max>` when
+the typed-array limit is part of the schema.
+
+`bounded_size` around any scalar typed-array wrapper renders bounded CDDL.
+`typed_array<T>` supports bounded encode and decode, `typed_array_ref<T>`
+supports bounded encode, and `typed_array_view<T>` supports bounded decode.
 
 Structural wrappers render their actual encoded payload:
 
@@ -345,7 +366,7 @@ homogeneous array wrapper.
 - variant decode by fixed tag with compile-time collision checks,
 - structural tags `#6.40`, `#6.41`, and `#6.1040`,
 - CDDL rendering for scalar typed arrays and structural wrappers,
-- element-count bounds for scalar typed arrays through `bounded_size`.
+- static and runtime element-count bounds for scalar typed arrays.
 
 ## Validation
 
