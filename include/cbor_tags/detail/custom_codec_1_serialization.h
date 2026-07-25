@@ -96,6 +96,10 @@ class span_reader {
     std::size_t                position_{};
 };
 
+[[nodiscard]] constexpr std::uint64_t bounded_reservation_length(std::uint64_t length, std::size_t remaining) noexcept {
+    return std::cmp_less(remaining, length) ? static_cast<std::uint64_t>(remaining) : length;
+}
+
 class size_writer {
   public:
     constexpr void write_byte(std::byte) noexcept { ++size_; }
@@ -327,7 +331,7 @@ template <typename Value, typename Container> constexpr Value make_decode_value_
     }
 }
 
-template <typename T> constexpr status_code reserve_decoded_container(T &value, std::uint64_t length) {
+template <typename T> constexpr status_code reserve_decoded_container(T &value, std::uint64_t length, std::uint64_t reservation_length) {
     using type = std::remove_cvref_t<T>;
     if constexpr (requires { typename type::size_type; }) {
         if (length > static_cast<std::uint64_t>(std::numeric_limits<typename type::size_type>::max())) {
@@ -340,7 +344,10 @@ template <typename T> constexpr status_code reserve_decoded_container(T &value, 
         }
     }
     if constexpr (HasReserve<type>) {
-        value.reserve(static_cast<typename type::size_type>(length));
+        if (reservation_length == 0U) {
+            return status_code::success;
+        }
+        value.reserve(static_cast<typename type::size_type>(reservation_length));
     }
     return status_code::success;
 }
@@ -552,7 +559,7 @@ template <typename T> constexpr status_code decode_byte_string(span_reader &read
         }
     } else {
         auto decoded = make_decode_value_for_existing(value);
-        status       = reserve_decoded_container(decoded, length);
+        status       = reserve_decoded_container(decoded, length, length);
         if (status != status_code::success) {
             return status;
         }
@@ -744,7 +751,7 @@ template <typename T> constexpr status_code decode_map(span_reader &reader, T &v
     if constexpr (requires { value.clear(); }) {
         value.clear();
     }
-    status = reserve_decoded_container(value, length);
+    status = reserve_decoded_container(value, length, bounded_reservation_length(length, reader.remaining()));
     if (status != status_code::success) {
         return status;
     }
@@ -839,6 +846,15 @@ template <typename T> constexpr status_code decode_contiguous_bulk_range(span_re
 }
 
 template <typename T> constexpr status_code decode_resizable_bulk_range(span_reader &reader, T &value, std::uint64_t length) {
+    using element_type = std::ranges::range_value_t<T>;
+    if (byte_size_overflows<element_type>(length)) {
+        return status_code::error;
+    }
+    const auto byte_count = static_cast<std::size_t>(length) * sizeof(element_type);
+    if (byte_count > reader.remaining()) {
+        return status_code::incomplete;
+    }
+
     auto status = resize_decoded_range(value, length);
     if (status != status_code::success) {
         return status;
@@ -878,7 +894,7 @@ template <typename T> constexpr status_code decode_range(span_reader &reader, T 
         } else if constexpr (ResizableRange<T> && is_bulk_little_endian_scalar_v<std::ranges::range_value_t<T>>) {
             return decode_resizable_bulk_range(reader, value, length);
         }
-        status = reserve_decoded_container(value, length);
+        status = reserve_decoded_container(value, length, bounded_reservation_length(length, reader.remaining()));
         if (status != status_code::success) {
             return status;
         }

@@ -492,8 +492,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto decoded_value = dynamic_tag<T>{decode_unsigned(additionalInfo)};
-        if (decoded_value.cbor_tag != value.cbor_tag) {
+        if (decode_unsigned(additionalInfo) != static_cast<std::uint64_t>(value.cbor_tag)) {
             return status_code::no_match_for_tag;
         }
 

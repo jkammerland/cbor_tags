@@ -592,6 +592,29 @@ TEST_SUITE("Decoding the wrong thing") {
         REQUIRE(!result);
         CHECK_EQ(result.error(), status_code::no_match_for_tag);
     }
+
+    TEST_CASE("Decode narrow dynamic tags") {
+        {
+            const auto data = std::vector<std::byte>{std::byte{0xD8}, std::byte{0x18}};
+            auto       dec  = make_decoder(data);
+            auto       tag  = dynamic_tag<std::uint8_t>{24};
+            REQUIRE(dec(tag));
+        }
+        {
+            const auto data   = std::vector<std::byte>{std::byte{0xD9}, std::byte{0x01}, std::byte{0x2C}};
+            auto       dec    = make_decoder(data);
+            auto       tag    = dynamic_tag<std::uint8_t>{44};
+            auto       result = dec(tag);
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::no_match_for_tag);
+        }
+        {
+            const auto data = std::vector<std::byte>{std::byte{0xD9}, std::byte{0x01}, std::byte{0x2C}};
+            auto       dec  = make_decoder(data);
+            auto       tag  = dynamic_tag<std::uint16_t>{300};
+            REQUIRE(dec(tag));
+        }
+    }
 }
 
 TEST_SUITE("Open objects - wrap as etc") {

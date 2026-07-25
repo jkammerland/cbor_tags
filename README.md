@@ -153,11 +153,18 @@ out-of-bounds access and attacker-controlled allocation attempts.
 
 Mutable contiguous destinations whose exposed storage overlaps the decoder input
 are rejected with `status_code::error`; use separate input and output storage.
-Custom destinations must not write into decoder input storage that is not exposed
-by their range. Fixed-size destinations and borrowed views retain their exact-size
-or assignment semantics. Advanced callers that can guarantee separate storage
-can disable the runtime check through `unchecked_aliasing_decoder_options`; see
-[encoder and decoder options](doc/options.md#unchecked-inputoutput-aliasing).
+The runtime check recognizes only direct/common contiguous aliases: input range
+adaptors and views that hide shared storage are unsupported and must also use
+separate storage. Fixed-size destinations and borrowed views retain their
+exact-size or assignment semantics. Advanced callers that can guarantee
+separate storage can disable the runtime check through
+`unchecked_aliasing_decoder_options`; see [encoder and decoder
+options](doc/options.md#unchecked-inputoutput-aliasing).
+
+While encoding, input values must not alias an appendable output buffer. A
+fixed output span may share its backing allocation with a source span only when
+their byte regions do not overlap; see [encoder source/output
+aliasing](doc/options.md#encoder-sourceoutput-aliasing).
 
 Equivalent to manually encoding the struct in the following example:
 ```cpp

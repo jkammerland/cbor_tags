@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -71,4 +72,35 @@ TEST_CASE("variant comparator handles tag alternatives") {
 
 TEST_CASE("variant visitor returns false for different direct types") {
     CHECK_FALSE(cbor_variant_visitor<std::less<>>{}(std::uint64_t{1}, std::string{"1"}));
+}
+
+TEST_CASE("float16 has bitwise equality and a total ordering") {
+    const float16_t positive_zero{std::uint16_t{0x0000}};
+    const float16_t negative_zero{std::uint16_t{0x8000}};
+    const float16_t one{std::uint16_t{0x3C00}};
+    const float16_t quiet_nan{std::uint16_t{0x7E00}};
+    const float16_t other_nan{std::uint16_t{0x7E01}};
+
+    CHECK_NE(positive_zero, negative_zero);
+    CHECK_EQ(quiet_nan, quiet_nan);
+    CHECK_NE(quiet_nan, other_nan);
+    CHECK(negative_zero < positive_zero);
+    CHECK(positive_zero < one);
+    CHECK(one < quiet_nan);
+
+    std::unordered_set<float16_t> values;
+    values.insert(positive_zero);
+    values.insert(negative_zero);
+    values.insert(one);
+    values.insert(one);
+    values.insert(quiet_nan);
+    values.insert(other_nan);
+    CHECK_EQ(values.size(), 5U);
+
+    using variant_t = std::variant<float16_t, int>;
+    std::map<variant_t, int, variant_comparator<>> ordered;
+    ordered.emplace(positive_zero, 1);
+    ordered.emplace(negative_zero, 2);
+    ordered.emplace(one, 3);
+    CHECK_EQ(ordered.size(), 3U);
 }
