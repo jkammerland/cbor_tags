@@ -36,8 +36,8 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [✅ Requirements](#-requirements)
 - [📦 Installation](#-installation)
 - [💡 CMake Integration](#-cmake-integration)
-- [Limiting Decode Allocation With `std::pmr`](#limiting-decode-allocation-with-stdpmr)
-- [✨ WIP Features](#-wip-features)
+- [Decoder Resource Limits](#decoder-resource-limits)
+- [Project Status](#project-status)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
 - [🌟 Practical Use Cases](#-practical-use-cases)
@@ -56,8 +56,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
 - Opt-in [RFC 8746 typed-array](doc/rfc8746_typed_arrays.md) codec for homogeneous numeric payloads.
 - CDDL support for schema and custom data definitions.
-- When using C++26, all features are available with no extra dependencies.
-- Upcoming: resumable encoding and decoding (useful for streaming usecases).
+- C++26 STL-only mode provides the complete feature set with no third-party consumer dependencies.
 
 ## 🔧 Quick Start
 ### Basic Encoding/Decoding Example
@@ -879,19 +878,31 @@ pattern.
 
 ## ✅ Requirements
 
-- tl::expected by default, or C++23 `<expected>` when `CBOR_TAGS_USE_STD_EXPECTED=ON`.
-- fmt 11.0.2 or newer for the default C++20/C++23 formatting and type-name path.
-- nameof 0.10.4 or newer for the default C++20/C++23 type-name path.
-- C++20 compatible compiler, tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL, MSVC-latest, and AppleClang 16/26.
-- Optional C++26 static reflection support, currently tested with GCC 16 using `-std=gnu++26 -freflection`.
-- Optional C++26 STL-only mode with `CBOR_TAGS_STL_ONLY=ON`; this uses `std::expected`, `std::format`, and `std::meta` and exports no fmt, nameof, or tl::expected dependency.
-- Optional C++20 named-map support through Boost.PFR field names, requiring Boost 1.84 or newer, `BOOST_PFR_CORE_NAME_ENABLED`, and a Boost CMake package config when enabled through CMake.
-- Optional CDDL enum-name support through C++26 static reflection or magic_enum 0.9.7 or newer.
-- CMake 3.23+ for raw `cmake -S/-B` builds, 3.25+ for tests, benchmarks, or an installed CMake package with `CBOR_TAGS_INSTALL=ON`, and 3.31+ for the checked-in preset workflows.
+| Mode | Configuration | Third-party consumer dependencies |
+|---|---|---|
+| C++20 (default) | No additional options | `tl::expected`, fmt 11.0.2+, nameof 0.10.4+ |
+| C++23 | `CBOR_TAGS_USE_STD_EXPECTED=ON` | fmt 11.0.2+, nameof 0.10.4+ |
+| C++26 STL-only | `CBOR_TAGS_STL_ONLY=ON` | None |
+
+The C++26 STL-only mode uses `std::expected`, `std::format`, and `std::meta`.
+It currently requires GCC 16 with `-std=gnu++26 -freflection`; the CMake option
+enables the required standard-library backends automatically.
+
+Optional C++20 name support adds dependencies only when enabled:
+
+- Named-map field names use Boost.PFR 1.84+ with
+  `CBOR_TAGS_USE_BOOST_PFR_NAMES=ON`.
+- Named CDDL enum values use magic_enum 0.9.7+ with
+  `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`.
+
+The library is tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL,
+MSVC-latest, and AppleClang 16/26.
+CMake 3.23+ is required for raw `cmake -S/-B` builds, 3.25+ for tests,
+benchmarks, or installed packages, and 3.31+ for the checked-in presets.
 
 ## 📦 Installation
 
-Standard CMake:
+C++20/C++23 with dependencies resolved through FetchContent:
 
 ```cmake
 set(CMAKE_CXX_STANDARD 20)
@@ -937,11 +948,12 @@ cmake -B build \
   -DCBOR_TAGS_USE_STD_EXPECTED=ON
 ```
 
-C++26 STL-only installed package:
+C++26 STL-only package, with no third-party consumer dependencies:
 
 ```bash
 cmake --preset=release-cxx26-stl-only
 cmake --build --preset=release-cxx26-stl-only
+cmake --install build/release-cxx26-stl-only
 ```
 
 This mode requires a compiler with C++26 static reflection support. The current
@@ -970,93 +982,9 @@ find_package(cbor_tags REQUIRED)
 target_link_libraries(your_target PRIVATE cbor::tags)
 ```
 
-## ⚙️ C++20 Requirements Note
+## Decoder Resource Limits
 
-> [!NOTE]
-> This library requires C++20 features. However, you can isolate that requirement by wrapping this library and exposing an API compatible with your target C++ version.
-
-## Limiting Decode Allocation With `std::pmr`
-
-When decoding untrusted CBOR into owning containers, an input can declare very
-large array, map, text-string, or byte-string sizes. Plain containers do not
-impose schema or application size limits for you. Use
-`cbor::tags::bounded_size<T, Min, Max>` for per-field protocol size bounds, and
-`cbor::tags::as_bounded_size(value, min, max)` for limits selected at runtime.
-Use allocator-aware types backed by a bounded `std::pmr::memory_resource` for
-allocation containment.
-
-This assumes the input byte buffer itself is already bounded by your transport,
-framing layer, file-size limit, request-body cap, or another application-level
-guard. A PMR arena limits allocations made while materializing decoded C++
-values; it does not limit how much CBOR input you accept.
-
-```cpp
-#include <array>
-#include <cstddef>
-#include <memory_resource>
-#include <string>
-#include <vector>
-
-#include <cbor_tags/cbor.h>
-
-namespace ct = cbor::tags;
-
-// Example input: ["a", "b"].
-// In production, populate this from a size-capped input path.
-std::vector<std::byte> input{
-    std::byte{0x82}, std::byte{0x61}, std::byte{'a'}, std::byte{0x61}, std::byte{'b'},
-};
-
-std::array<std::byte, 4096> arena_storage{};
-std::pmr::monotonic_buffer_resource arena(
-    arena_storage.data(),
-    arena_storage.size(),
-    std::pmr::null_memory_resource());
-
-std::pmr::vector<std::pmr::string> values{&arena};
-
-auto dec = ct::make_decoder(input);
-std::size_t max_items = 64; // From application configuration.
-auto result = dec(ct::as_bounded_size(values, 0, max_items));
-
-if (!result && result.error() == ct::status_code::out_of_memory) {
-    // The bounded arena was exhausted.
-}
-```
-
-This can limit allocation injection for PMR-aware layouts such as:
-
-```cpp
-std::pmr::vector<std::pmr::string>
-std::pmr::vector<std::pmr::vector<int>>
-std::pmr::map<std::pmr::string, std::pmr::string>
-std::pmr::vector<std::optional<std::pmr::string>>
-```
-
-Important limitations:
-
-- PMR is allocation containment, not schema validation.
-- Static and runtime size bounds validate only the immediately wrapped field.
-  An unwrapped inner container is intentionally unbounded; wrap it separately
-  when it also has a limit.
-- A size bound constrains one incoming or outgoing CBOR item, not the accumulated
-  size of a pre-populated decode destination. Appending a valid item can leave the
-  destination larger than `Max`.
-- `bounded_size<T, Min, Max>` generates matching type-based CDDL.
-  `dynamic_bounded_size<T>` stores instance data and cannot be represented by
-  type-based CDDL.
-- A runtime-bounded decode destination must already have its bounds. Generic
-  variant, optional, and container decoding cannot invent bounds for a value it
-  creates.
-- RFC 8746 scalar typed arrays support static and runtime bounds as element
-  counts. Static bounds generate CDDL constraints on byte-string size.
-- Normal typed decoding is single-pass and has no built-in nesting-depth limit.
-- Input-controlled stack growth is limited to [recursive decode paths](doc/decoder_resource_limits.md#recursive-decode-paths), such as
-  recursively defined destination types or custom codecs that explicitly recurse.
-- `std::variant` alternatives do not currently receive parent PMR allocator context.
-- A bounded arena must use a bounded upstream resource, e.g `std::pmr::null_memory_resource()`.
-
-Apply a message-size limit before decoding:
+Bound untrusted input at the transport or framing layer before decoding:
 
 ```cpp
 if (input.size() > max_message_bytes)
@@ -1065,24 +993,24 @@ if (input.size() > max_message_bytes)
 return cbor::tags::make_decoder(input)(value);
 ```
 
-See [Decoder Resource Limits](doc/decoder_resource_limits.md) for the recursive-path triggers and measured stack-exhaustion depths.
-[`test_decode_stack_floor.cc`](test/test_decode_stack_floor.cc) covers that path at a portable regression floor.
+Use `bounded_size` or `as_bounded_size` for protocol limits and a bounded
+`std::pmr::memory_resource` for allocation containment. These controls address
+different layers: a PMR arena does not limit accepted input, and a field bound
+does not constrain unwrapped nested containers.
 
-Definite container lengths are read once and checked before the decoder calls
-`reserve`; there is no validation pre-scan. Indefinite containers are checked in
-one pass and can retain the successfully decoded prefix when a later item
-exceeds the bound. See
-[CDDL Size-Bounded Containers](doc/cddl_handling.md#size-bounded-containers) for
-nesting and range-wrapper examples.
+See [Decoder Resource Limits](doc/decoder_resource_limits.md) for complete PMR
+examples, size-bound behavior, single-pass decoding, and recursive decode paths.
 
-## ✨ WIP Features
+## Project Status
 
-- Done: `std::variant` support, allowing multiple types to be accepted when seen on the buffer (e.g., tagged types representing a versioned object).
-- WIP / experimental: range wrappers, raw encoded views, lazy tag scanning, and segmented output for zero-copy-oriented encoding. See [Experimental Range And Segment APIs](doc/experimental_ranges.md).
-- TODO: Coroutine support for decoding and encoding, more convenient api wrapper when streaming.
-- TODO: Options for encoder/decoder, such as (un)expected type tuning.
-- TODO: Performance tuning options, such as disabling some checks/safety and non-standard encodings.
-- Done: opt-in nullable `unique_ptr`/`shared_ptr` codec and explicit `shared_ptr` graph codec extensions.
+The core encoder/decoder, tags, variants, CDDL generation, size bounds, and
+opt-in extension codecs are supported and covered by CI.
+
+Range wrappers, borrowed and raw views, lazy tag scanning, and segmented output
+remain experimental; their current contracts are documented in
+[Experimental Range And Segment APIs](doc/experimental_ranges.md). Planned work
+is tracked in [GitHub issues](https://github.com/jkammerland/cbor_tags/issues)
+instead of a static README checklist.
 
 ## 📚 Documentation
 
