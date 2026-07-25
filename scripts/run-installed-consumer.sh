@@ -1,8 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+die() {
+  echo "error: $*" >&2
+  exit 2
+}
+
+canonical_generated_dir() {
+  local requested="$1"
+  local label="$2"
+  local parent name
+
+  case "/$requested/" in
+    *'/./'*|*'/../'*)
+      die "$label must not contain '.' or '..' path components"
+      ;;
+  esac
+
+  name="$(basename -- "$requested")"
+  [[ "$name" != "." && "$name" != ".." && "$name" != "/" ]] ||
+    die "$label must name a directory"
+
+  parent="$(dirname -- "$requested")"
+  mkdir -p -- "$parent"
+  parent="$(cd -- "$parent" && pwd -P)"
+  printf '%s/%s\n' "$parent" "$name"
+}
+
+require_resettable_generated_dir() {
+  local path="$1"
+  local label="$2"
+  local marker="$path/.cbor-tags-generated"
+
+  [[ ! -L "$path" ]] || die "$label must not be a symbolic link: $path"
+  if [[ -e "$path" ]]; then
+    [[ -d "$path" ]] || die "$label must be a directory: $path"
+    [[ -f "$marker" && ! -L "$marker" ]] ||
+      die "refusing to delete unmarked $label: $path (remove it manually once if it is disposable)"
+  fi
+}
+
+reset_generated_dir() {
+  local path="$1"
+
+  require_resettable_generated_dir "$path" "consumer directory"
+  rm -rf -- "$path"
+  mkdir -p -- "$path"
+  : > "$path/.cbor-tags-generated"
+}
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_dir="${CBOR_TAGS_SOURCE_DIR:-$(cd -- "${script_dir}/.." && pwd)}"
+source_dir="$(cd -- "$source_dir" && pwd -P)"
 name="${CBOR_TAGS_CONSUMER_NAME:-local}"
 build_dir="${CBOR_TAGS_BUILD_DIR:-${source_dir}/build/install-consumer-${name}}"
 install_prefix="${CBOR_TAGS_INSTALL_PREFIX:-${build_dir}/prefix}"
@@ -13,6 +62,8 @@ vcpkg_features="${CBOR_TAGS_VCPKG_FEATURES:-}"
 vcpkg_no_default_features="${CBOR_TAGS_VCPKG_NO_DEFAULT_FEATURES:-OFF}"
 consumer_mode="${CBOR_TAGS_CONSUMER_MODE:-default}"
 generator="${CBOR_TAGS_CMAKE_GENERATOR:-${CMAKE_GENERATOR:-Ninja}}"
+consumer_dir="$(canonical_generated_dir "$consumer_dir" "CBOR_TAGS_CONSUMER_DIR")"
+require_resettable_generated_dir "$consumer_dir" "CBOR_TAGS_CONSUMER_DIR"
 
 configure_args=()
 if [[ -n "${configure_flags}" ]]; then
@@ -49,8 +100,7 @@ cmake -S "${source_dir}" -B "${build_dir}" -G "${generator}" \
 cmake --build "${build_dir}" --parallel
 cmake --install "${build_dir}"
 
-rm -rf "${consumer_dir}"
-mkdir -p "${consumer_dir}"
+reset_generated_dir "${consumer_dir}"
 
 cat > "${consumer_dir}/CMakeLists.txt" <<EOF
 cmake_minimum_required(VERSION 3.25)

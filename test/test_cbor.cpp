@@ -182,7 +182,7 @@ TEST_CASE("CBOR Encoder") {
 
         CHECK(enc(as_array{3}, float16_t(3.14f), float(3.14f), double(3.14)));
 
-        REQUIRE_EQ(to_hex(data), "83f94247fa4048f5c3fb40091eb851eb851f");
+        REQUIRE_EQ(to_hex(data), "83f94248fa4048f5c3fb40091eb851eb851f");
 
         std::array<std::variant<float16_t, float, double>, 3> values;
         static_assert(IsSimple<float16_t>);
@@ -318,7 +318,7 @@ TEST_CASE("CBOR Encoder") {
         CHECK(enc(number_and_stuff));
         CBOR_TAGS_TEST_LOG("Number and stuff: {}\n", to_hex(data));
         if (decltype(enc)::options::wrap_groups) {
-            REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901ff82f94247fb40091eb851eb851f");
+            REQUIRE_EQ(to_hex(data), "8601026568656c6c6f03fa40800000d901ff82f94248fb40091eb851eb851f");
         }
         std::vector<variant> number_and_stuff_result;
         CHECK(dec(number_and_stuff_result));

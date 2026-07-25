@@ -16,7 +16,75 @@ Environment:
   CXX          C++ compiler (default: g++)
   GCOVR        gcovr executable (default: gcovr)
   JOBS         build parallelism (default: CMake default)
+
+For safety, an existing report directory is reset only when it contains the
+.cbor-tags-generated marker written by this script.
 EOF
+}
+
+die() {
+    echo "error: $*" >&2
+    exit 2
+}
+
+repo_subdirectory() {
+    local base="$1"
+    local requested="$2"
+    local label="$3"
+    local candidate relative current component
+    local -a components
+
+    while [[ "$requested" == ./* ]]; do
+        requested="${requested#./}"
+    done
+
+    if [[ "$requested" == /* ]]; then
+        candidate="$requested"
+    else
+        candidate="$root/$requested"
+    fi
+
+    [[ "$candidate" == "$base/"* ]] || die "$label must be a subdirectory of $base"
+    [[ ! -L "$base" ]] || die "$label base directory must not be a symbolic link: $base"
+
+    relative="${candidate#"$base"/}"
+    case "/$relative/" in
+        *'//'*|*'/./'*|*'/../'*)
+            die "$label must not contain empty, '.' or '..' path components"
+            ;;
+    esac
+
+    current="$base"
+    local IFS='/'
+    read -r -a components <<< "$relative"
+    for component in "${components[@]}"; do
+        current="$current/$component"
+        [[ ! -L "$current" ]] || die "$label must not traverse a symbolic link: $current"
+    done
+
+    printf '%s\n' "$candidate"
+}
+
+require_resettable_generated_dir() {
+    local path="$1"
+    local label="$2"
+    local marker="$path/.cbor-tags-generated"
+
+    [[ ! -L "$path" ]] || die "$label must not be a symbolic link: $path"
+    if [[ -e "$path" ]]; then
+        [[ -d "$path" ]] || die "$label must be a directory: $path"
+        [[ -f "$marker" && ! -L "$marker" ]] ||
+            die "refusing to delete unmarked $label: $path (remove it manually once if it is disposable)"
+    fi
+}
+
+reset_generated_dir() {
+    local path="$1"
+
+    require_resettable_generated_dir "$path" "report directory"
+    rm -rf -- "$path"
+    mkdir -p -- "$path"
+    : > "$path/.cbor-tags-generated"
 }
 
 case "${1:-}" in
@@ -33,13 +101,15 @@ case "${1:-}" in
 esac
 
 root="$(git rev-parse --show-toplevel)"
+root="$(cd -- "$root" && pwd -P)"
 cd "$root"
 
 cc="${CC:-gcc}"
 cxx="${CXX:-g++}"
 gcovr="${GCOVR:-gcovr}"
-build_dir="${BUILD_DIR:-build/coverage}"
-report_dir="${REPORT_DIR:-coverage-report}"
+build_dir="$(repo_subdirectory "$root/build" "${BUILD_DIR:-build/coverage}" "BUILD_DIR")"
+report_dir="$(repo_subdirectory "$root" "${REPORT_DIR:-coverage-report}" "REPORT_DIR")"
+require_resettable_generated_dir "$report_dir" "REPORT_DIR"
 
 for tool in cmake ctest python3 "$cc" "$cxx" "$gcovr"; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -81,8 +151,7 @@ fi
 cmake "${build_args[@]}"
 ctest --test-dir "$build_dir" --output-on-failure
 
-rm -rf "$report_dir"
-mkdir -p "$report_dir"
+reset_generated_dir "$report_dir"
 
 "$gcovr" \
     --root "$root" \

@@ -21,6 +21,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -200,6 +201,30 @@ struct throwing_memory_resource : std::pmr::memory_resource {
     void *do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc(); }
     void  do_deallocate(void *, std::size_t, std::size_t) override {}
     bool  do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
+
+struct allocation_tracking_memory_resource : std::pmr::memory_resource {
+    std::size_t largest_request{};
+    std::size_t maximum_request{std::numeric_limits<std::size_t>::max()};
+
+    void reject_large_allocations(std::size_t maximum) noexcept {
+        largest_request = 0;
+        maximum_request = maximum;
+    }
+
+  private:
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        largest_request = std::max(largest_request, bytes);
+        if (bytes > maximum_request) {
+            throw std::bad_alloc{};
+        }
+        return std::pmr::get_default_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *pointer, std::size_t bytes, std::size_t alignment) override {
+        std::pmr::get_default_resource()->deallocate(pointer, bytes, alignment);
+    }
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
 };
 
 struct default_memory_resource_guard {
@@ -1158,6 +1183,46 @@ TEST_CASE("compact tagged malformed containers leave destinations unchanged") {
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::incomplete);
         CHECK(decoded == std::map<std::uint8_t, std::string>{{9, "keep"}});
+    }
+}
+
+TEST_CASE("compact tagged truncated containers do not allocate from declared lengths") {
+    constexpr auto truncated_length = "c1488080808080808002";
+
+    SUBCASE("generic range") {
+        allocation_tracking_memory_resource resource;
+        std::pmr::vector<std::string>       decoded{&resource};
+        const auto                          maximum_safe_request = resource.largest_request;
+        resource.reject_large_allocations(maximum_safe_request);
+
+        auto result = decode_compact_hex(truncated_length, as_custom_codec_1(static_tag<1>{}, decoded));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_LE(resource.largest_request, maximum_safe_request);
+    }
+
+    SUBCASE("resizable non-contiguous scalar range") {
+        allocation_tracking_memory_resource resource;
+        std::pmr::deque<std::uint32_t>      decoded{&resource};
+        const auto                          maximum_safe_request = resource.largest_request;
+        resource.reject_large_allocations(maximum_safe_request);
+
+        auto result = decode_compact_hex(truncated_length, as_custom_codec_1(static_tag<1>{}, decoded));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_LE(resource.largest_request, maximum_safe_request);
+    }
+
+    SUBCASE("reservable map") {
+        allocation_tracking_memory_resource                 resource;
+        std::pmr::unordered_map<std::uint8_t, std::uint8_t> decoded{&resource};
+        const auto                                          maximum_safe_request = resource.largest_request;
+        resource.reject_large_allocations(maximum_safe_request);
+
+        auto result = decode_compact_hex(truncated_length, as_custom_codec_1(static_tag<1>{}, decoded));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_LE(resource.largest_request, maximum_safe_request);
     }
 }
 

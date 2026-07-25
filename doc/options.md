@@ -109,8 +109,50 @@ using unchecked_aliasing_decoder_options =
 The option removes the runtime checks at compile time. Violating the caller
 promise can invalidate decoder input and cause undefined behavior. The checked
 mode detects identical input/output objects and overlapping contiguous ranges;
-custom destinations must not write through hidden storage that overlaps the
-input.
+it is not a general alias analysis.
+
+The input must not alias a mutable owning string or byte-string destination
+through an adaptor, proxy, or non-contiguous view, even with the checked mode.
+For example, this is unsupported because the `transform_view` hides the
+vector's storage from the runtime overlap check:
+
+```cpp
+std::vector<std::byte> storage{std::byte{0x42}, std::byte{0x01}, std::byte{0x02}};
+auto input = storage | std::views::transform([](std::byte& byte) -> std::byte& { return byte; });
+
+auto dec = make_decoder(input);
+dec(storage); // Unsupported: input and mutable destination share storage.
+```
+
+Keep decoder input and mutable string destinations in separate storage. This
+contract also applies to `std::ranges::subrange`, segmented ranges, and custom
+views that refer to destination storage.
+
+## Encoder Source/Output Aliasing
+
+Values passed to an encoder must not alias an appendable output buffer. In
+particular, `enc(output)` and encoding a view into `output` are unsupported:
+the encoder writes headers to the output before it copies the value.
+
+Fixed output spans can share a backing allocation with the source only when the
+source region does not overlap bytes the encoder writes. For example, reserve a
+separate source region after the fixed output region:
+
+```cpp
+std::array<std::byte, 5> storage{
+    std::byte{}, std::byte{}, std::byte{}, std::byte{0x01}, std::byte{0x02}};
+std::span<std::byte, 3>       output{storage.data(), 3};
+std::span<const std::byte, 2> source{storage.data() + 3, 2};
+
+auto enc = make_encoder(output);
+enc(source);
+
+// output now contains: 42 01 02
+```
+
+Passing the complete output span as the source, or otherwise overlapping the
+source with bytes the encoder writes, remains unsupported. Use separate storage
+when that layout is not practical.
 
 ## Wrapping Groups
 

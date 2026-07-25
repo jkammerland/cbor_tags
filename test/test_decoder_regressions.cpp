@@ -248,6 +248,15 @@ TEST_CASE("float16 should cover infinity nan and subnormal conversions") {
 
     float16_t underflow{std::numeric_limits<float>::denorm_min()};
     CHECK_EQ(underflow.value, 0);
+
+    CHECK_EQ(float16_t{std::ldexp(1.0F, -24)}.value, std::uint16_t{0x0001});
+    CHECK_EQ(float16_t{std::ldexp(1.0, -24)}.value, std::uint16_t{0x0001});
+    CHECK_EQ(float16_t{std::ldexp(1023.0F, -24)}.value, std::uint16_t{0x03FF});
+    CHECK_EQ(float16_t{std::ldexp(1.0F, -14)}.value, std::uint16_t{0x0400});
+    CHECK_EQ(float16_t{1.00048828125F}.value, std::uint16_t{0x3C00});
+    CHECK_EQ(float16_t{1.0006F}.value, std::uint16_t{0x3C01});
+    CHECK_EQ(float16_t{65504.0F}.value, std::uint16_t{0x7BFF});
+    CHECK_EQ(float16_t{65520.0F}.value, std::uint16_t{0x7C00});
 }
 
 TEST_CASE("decoder should slice unsigned integer overflow") {
