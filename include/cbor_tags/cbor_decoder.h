@@ -293,10 +293,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Validate the complete payload and any allocation before exposing a
-        // borrowed payload that target growth could invalidate.
+        // Validate the complete payload before mutating the destination.
         const auto payload_size = require_bytes(bstring_size);
-        if constexpr (!IsConstView<T> && !IsFixedArray<T>) {
+        if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
                 return status_code::error;
             }

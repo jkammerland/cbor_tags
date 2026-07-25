@@ -792,25 +792,48 @@ TEST_CASE("decoder alias checks can be disabled through compile-time options") {
         CHECK_EQ(storage[5], std::byte{0x01});
         CHECK_EQ(storage[6], std::byte{0x02});
     }
+
+    SUBCASE("fixed byte string") {
+        struct overlapping_input {
+            std::array<std::byte, 3> decoded;
+            std::byte                tail;
+        };
+        static_assert(offsetof(overlapping_input, tail) == 3);
+        static_assert(sizeof(overlapping_input) == 4);
+
+        overlapping_input storage{
+            .decoded = {std::byte{0x43}, std::byte{0x01}, std::byte{0x02}},
+            .tail    = std::byte{0x03},
+        };
+        const auto input = std::as_bytes(std::span{&storage, std::size_t{1}});
+        auto       dec   = make_decoder_with_options<unchecked_aliasing_decoder_options>(input);
+
+        REQUIRE(dec(storage.decoded));
+        CHECK_EQ(storage.decoded, (std::array{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}));
+    }
 }
 
-TEST_CASE("decoder safely copies overlapping fixed byte string targets") {
+TEST_CASE("decoder rejects fixed byte string targets that alias input") {
     struct overlapping_input {
-        std::array<std::byte, 3> decoded;
-        std::byte                tail;
+        std::array<std::byte, 2> prefix;
+        std::array<std::byte, 2> decoded;
     };
-    static_assert(offsetof(overlapping_input, tail) == 3);
+    static_assert(offsetof(overlapping_input, decoded) == 2);
     static_assert(sizeof(overlapping_input) == 4);
 
     overlapping_input storage{
-        .decoded = {std::byte{0x43}, std::byte{0x01}, std::byte{0x02}},
-        .tail    = std::byte{0x03},
+        .prefix  = {std::byte{0x42}, std::byte{0x01}},
+        .decoded = {std::byte{0x02}, std::byte{0x01}},
     };
-    const auto input = std::as_bytes(std::span{&storage, std::size_t{1}});
-    auto       dec   = make_decoder(input);
+    const auto original = storage;
+    const auto input    = std::as_bytes(std::span{&storage, std::size_t{1}});
+    auto       dec      = make_decoder(input);
+    auto       result   = dec(storage.decoded);
 
-    REQUIRE(dec(storage.decoded));
-    CHECK_EQ(storage.decoded, (std::array{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}));
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(storage.prefix, original.prefix);
+    CHECK_EQ(storage.decoded, original.decoded);
 }
 
 TEST_CASE("decoder reserves non-contiguous definite text before mutation") {
