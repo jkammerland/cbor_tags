@@ -108,10 +108,9 @@ using unchecked_aliasing_decoder_options =
 
 The option removes the runtime checks at compile time. Violating the caller
 promise can invalidate decoder input and cause undefined behavior. The checked
-mode detects identical input/output objects and overlapping contiguous ranges.
-Fixed-size byte-string targets may overwrite bytes consumed by the current item,
-but not the unread input suffix. Custom destinations must not write through
-hidden storage that overlaps the input.
+mode detects identical input/output objects and overlapping contiguous ranges;
+custom destinations must not write through hidden storage that overlaps the
+input.
 
 ## Wrapping Groups
 

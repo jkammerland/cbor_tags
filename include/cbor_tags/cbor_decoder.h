@@ -296,12 +296,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // Validate the complete payload and any allocation before exposing a
         // borrowed payload that target growth could invalidate.
         const auto payload_size = require_bytes(bstring_size);
-        if constexpr (!IsConstView<T>) {
-            if constexpr (IsFixedArray<T>) {
-                if (string_target_overwrites_unread_input(t, payload_size)) {
-                    return status_code::error;
-                }
-            } else if (string_target_aliases_input(t)) {
+        if constexpr (!IsConstView<T> && !IsFixedArray<T>) {
+            if (string_target_aliases_input(t)) {
                 return status_code::error;
             }
         }
@@ -1675,29 +1671,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         return false;
-    }
-
-    template <typename T> constexpr bool string_target_overwrites_unread_input(const T &target, size_type payload_size) const {
-        if constexpr (detail::input_output_alias_check_option_v<Options> && std::ranges::contiguous_range<const T> &&
-                      std::ranges::sized_range<const T> && std::ranges::contiguous_range<const InputBuffer> &&
-                      std::ranges::sized_range<const InputBuffer>) {
-            if (std::ranges::empty(target) || std::ranges::empty(data_) || std::is_constant_evaluated()) {
-                return false;
-            }
-
-            const auto *target_data = std::ranges::data(target);
-            const auto *target_end  = target_data + std::ranges::size(target);
-            const auto *input_data  = std::ranges::data(data_);
-            const auto *unread_data = input_data + reader_.position_ + payload_size;
-            const auto *input_end   = input_data + std::ranges::size(data_);
-
-            const auto before = std::less<const void *>{};
-            return before(unread_data, target_end) && before(target_data, input_end);
-        } else {
-            static_cast<void>(target);
-            static_cast<void>(payload_size);
-            return false;
-        }
     }
 
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
