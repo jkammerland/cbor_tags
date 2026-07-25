@@ -80,6 +80,38 @@ Convert a non-sentinel value to an application numeric type only after checking
 that the destination can represent it. `positive` remains an alias for
 `std::uint64_t`.
 
+## Unchecked Input/Output Aliasing
+
+By default, mutable text- and byte-string decoding rejects common cases where
+the destination's exposed storage overlaps the decoder input. Growing an
+overlapping destination can invalidate an input span or overwrite unread CBOR
+bytes.
+
+Use `unchecked_aliasing_decoder_options` only when the caller guarantees that
+the decoder input and every mutable string destination use separate storage:
+
+```cpp
+std::vector<std::byte> input = receive_message();
+std::string            output;
+
+auto dec = make_decoder_with_options<unchecked_aliasing_decoder_options>(input);
+auto result = dec(output);
+```
+
+This option includes the `assume_no_input_output_aliasing` marker:
+
+```cpp
+using unchecked_aliasing_decoder_options =
+    Options<default_expected, default_wrapping,
+            assume_no_input_output_aliasing>;
+```
+
+The option removes the runtime checks at compile time. Violating the caller
+promise can invalidate decoder input and cause undefined behavior. The checked
+mode detects identical input/output objects and overlapping contiguous ranges;
+custom destinations must not write through hidden storage that overlaps the
+input.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped
@@ -105,8 +137,10 @@ struct my_decoder_options {
     using error_type  = status_code;
 
     static constexpr bool wrap_groups = true;
+    static constexpr bool check_input_output_aliasing = true;
 };
 ```
 
 If `strict_integer_decode` is omitted, the decoder uses the default slicing
-integer policy.
+integer policy. If `check_input_output_aliasing` is omitted, runtime alias
+checks remain enabled.

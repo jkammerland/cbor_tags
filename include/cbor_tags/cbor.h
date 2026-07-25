@@ -138,10 +138,12 @@ using default_expected = Option<expected<void, status_code>>;
 namespace detail {
 struct wrap_groups {};
 struct strict_integer_decode {};
+struct assume_no_input_output_aliasing {};
 }; // namespace detail
 
-using default_wrapping        = Option<detail::wrap_groups>;
-using strict_integer_decoding = Option<detail::strict_integer_decode>;
+using default_wrapping                = Option<detail::wrap_groups>;
+using strict_integer_decoding         = Option<detail::strict_integer_decode>;
+using assume_no_input_output_aliasing = Option<detail::assume_no_input_output_aliasing>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
@@ -300,12 +302,15 @@ template <typename... T> struct Options {
     static constexpr bool wrap_groups = contains<default_wrapping, T...>();
     // When true, decoding a CBOR integer into a narrower native integer target rejects instead of slicing.
     static constexpr bool strict_integer_decode = contains<strict_integer_decoding, T...>();
+    // When true, mutable string decode checks common input/output storage overlap at runtime.
+    static constexpr bool check_input_output_aliasing = !contains<assume_no_input_output_aliasing, T...>();
 
     constexpr Options() = default;
 };
 
-using default_options                = Options<default_expected, default_wrapping>;
-using strict_integer_decoder_options = Options<default_expected, default_wrapping, strict_integer_decoding>;
+using default_options                    = Options<default_expected, default_wrapping>;
+using strict_integer_decoder_options     = Options<default_expected, default_wrapping, strict_integer_decoding>;
+using unchecked_aliasing_decoder_options = Options<default_expected, default_wrapping, assume_no_input_output_aliasing>;
 // ---------
 
 struct binary_array_view {
