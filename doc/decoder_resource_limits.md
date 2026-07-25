@@ -12,6 +12,95 @@ return cbor::tags::make_decoder(input)(value);
 
 For streaming or resumable parsing, enforce the same policy against the cumulative bytes received.
 
+## Container And Allocation Limits
+
+Plain owning containers do not impose protocol limits. A transport-level byte
+limit does not express per-field limits for arrays, maps, text strings, or byte
+strings.
+
+Use `cbor::tags::bounded_size<T, Min, Max>` for type-level bounds and
+`cbor::tags::as_bounded_size(value, min, max)` for limits selected at runtime.
+Use allocator-aware containers backed by a bounded `std::pmr::memory_resource`
+when decoded allocations also need a hard ceiling.
+
+These controls are complementary:
+
+- A message-size limit bounds accepted input bytes.
+- A size wrapper validates one CBOR item against protocol limits.
+- A bounded PMR resource contains allocations made while materializing values.
+
+### Bounded PMR Example
+
+```cpp
+#include <array>
+#include <cstddef>
+#include <memory_resource>
+#include <string>
+#include <vector>
+
+#include <cbor_tags/cbor.h>
+
+namespace ct = cbor::tags;
+
+// Example input: ["a", "b"].
+std::vector<std::byte> input{
+    std::byte{0x82}, std::byte{0x61}, std::byte{'a'},
+    std::byte{0x61}, std::byte{'b'},
+};
+
+std::array<std::byte, 4096> arena_storage{};
+std::pmr::monotonic_buffer_resource arena(
+    arena_storage.data(),
+    arena_storage.size(),
+    std::pmr::null_memory_resource());
+
+std::pmr::vector<std::pmr::string> values{&arena};
+
+auto dec = ct::make_decoder(input);
+std::size_t max_items = 64;
+auto result = dec(ct::as_bounded_size(values, 0, max_items));
+
+if (!result && result.error() == ct::status_code::out_of_memory) {
+    // The bounded arena was exhausted.
+}
+```
+
+The same approach works for nested PMR-aware layouts, including:
+
+```cpp
+std::pmr::vector<std::pmr::string>
+std::pmr::vector<std::pmr::vector<int>>
+std::pmr::map<std::pmr::string, std::pmr::string>
+std::pmr::vector<std::optional<std::pmr::string>>
+```
+
+The arena must use a bounded upstream resource such as
+`std::pmr::null_memory_resource()`. PMR contains allocations; it does not perform
+schema validation or limit how much input the application accepts.
+
+### Size-Bound Behavior
+
+- Static and runtime bounds validate only the immediately wrapped field. Wrap
+  nested containers separately when they also require limits.
+- A bound constrains one incoming or outgoing CBOR item, not the accumulated size
+  of a pre-populated destination. Decoding appends to owning containers.
+- `bounded_size<T, Min, Max>` generates matching type-based CDDL.
+  `dynamic_bounded_size<T>` contains instance data and cannot produce type-based
+  CDDL.
+- Runtime-bounded destinations must already contain their bounds. Generic
+  variant, optional, and container decoding cannot invent bounds for values they
+  create.
+- RFC 8746 scalar typed arrays interpret static and runtime bounds as element
+  counts. Static bounds generate corresponding CDDL byte-string constraints.
+- `std::variant` alternatives do not currently receive their parent's PMR
+  allocator context.
+
+Definite container lengths are read once and checked before `reserve`.
+Indefinite containers are decoded in one pass and can retain a successfully
+decoded prefix when a later item exceeds the bound. See
+[CDDL Size-Bounded Containers](cddl_handling.md#size-bounded-containers) for
+nesting and range-wrapper examples.
+
 ## Recursive Decode Paths
 
 Typed decoding follows the destination C++ type. Container elements are processed in loops, so a large flat array does not create one
