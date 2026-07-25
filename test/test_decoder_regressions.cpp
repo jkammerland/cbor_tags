@@ -35,6 +35,9 @@ struct minimal_decoder_options {
 
 static_assert(IsOptions<minimal_decoder_options>);
 static_assert(!cbor::tags::detail::strict_integer_decode_option_v<minimal_decoder_options>);
+static_assert(cbor::tags::detail::input_output_alias_check_option_v<minimal_decoder_options>);
+static_assert(cbor::tags::detail::input_output_alias_check_option_v<default_options>);
+static_assert(!cbor::tags::detail::input_output_alias_check_option_v<unchecked_aliasing_decoder_options>);
 
 struct NonDefaultComparator {
     int tag;
@@ -598,6 +601,18 @@ TEST_CASE("decoder appends definite strings to mutable targets") {
     CHECK_EQ(decoded_pmr_text, "pmr:payload");
 }
 
+TEST_CASE("decoder appends non-contiguous definite text in one pass") {
+    std::deque<std::byte> input{std::byte{0x78}, std::byte{0x40}};
+    input.insert(input.end(), 64, std::byte{'x'});
+
+    std::string decoded{"prefix:"};
+    auto        dec    = make_decoder(input);
+    auto        result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded, "prefix:" + std::string(64, 'x'));
+}
+
 TEST_CASE("decoder leaves mutable strings unchanged for truncated definite payloads") {
     {
         const std::vector<std::byte> buffer{std::byte{0x43}, std::byte{0xAA}};
@@ -716,6 +731,66 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         REQUIRE(dec(target));
         REQUIRE_EQ(target.size(), 2);
         CHECK_EQ(target.storage[1], std::byte{0xAA});
+    }
+}
+
+TEST_CASE("decoder rejects indefinite string targets that alias input storage") {
+    SUBCASE("byte string") {
+        std::vector<std::byte> storage{
+            std::byte{0x5F}, std::byte{0x42}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF},
+        };
+        const auto original = storage;
+        const auto input    = std::span<const std::byte>{storage};
+        auto       dec      = make_decoder(input);
+        auto       result   = dec(storage);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(storage, original);
+    }
+
+    SUBCASE("text string") {
+        std::string storage{
+            static_cast<char>(0x7F), static_cast<char>(0x62), 'o', 'k', static_cast<char>(0xFF),
+        };
+        const auto original = storage;
+        const auto input    = std::as_bytes(std::span<const char>{storage.data(), storage.size()});
+        auto       dec      = make_decoder(input);
+        auto       result   = dec(storage);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(storage, original);
+    }
+}
+
+TEST_CASE("decoder alias checks can be disabled through compile-time options") {
+    SUBCASE("definite byte string") {
+        std::array storage{
+            std::byte{0x42}, std::byte{0x01}, std::byte{0x02}, std::byte{0x00}, std::byte{0x00},
+        };
+        const auto         input = std::span<const std::byte>{storage}.first<3>();
+        ExternalByteBuffer target{storage.data(), 3, storage.size()};
+        auto               dec = make_decoder_with_options<unchecked_aliasing_decoder_options>(input);
+
+        REQUIRE(dec(target));
+        REQUIRE_EQ(target.size(), 5);
+        CHECK_EQ(storage[3], std::byte{0x01});
+        CHECK_EQ(storage[4], std::byte{0x02});
+    }
+
+    SUBCASE("indefinite byte string") {
+        std::array storage{
+            std::byte{0x5F}, std::byte{0x42}, std::byte{0x01}, std::byte{0x02}, std::byte{0xFF}, std::byte{0x00}, std::byte{0x00},
+        };
+        const auto         input = std::span<const std::byte>{storage}.first<5>();
+        ExternalByteBuffer target{storage.data(), 5, storage.size()};
+        auto               dec = make_decoder_with_options<unchecked_aliasing_decoder_options>(input);
+
+        REQUIRE(dec(target));
+        REQUIRE_EQ(target.size(), 7);
+        CHECK_EQ(storage[5], std::byte{0x01});
+        CHECK_EQ(storage[6], std::byte{0x02});
     }
 }
 

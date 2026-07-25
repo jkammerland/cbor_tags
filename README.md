@@ -144,18 +144,21 @@ dec(destination);
 assert(destination == "prefix:payload");
 ```
 
-A definite string validates its complete payload before appending, so malformed or
-truncated input leaves the destination unchanged. Reservable destinations request
-the final capacity before mutation. Once appending begins, successfully appended
-values are not rolled back if the destination itself throws, matching the
-incremental behavior of indefinite strings and containers. A destination may
-provide a stronger insertion guarantee of its own.
+A failed encoder or decoder call is terminal for that encoder or decoder
+instance. The destination or output buffer may be partially modified; discard
+it after failure unless its type documents a stronger guarantee. In particular,
+`status_code::incomplete` reports that the fixed input does not contain a
+complete value and does not make the decoder resumable. Definite strings still
+validate their declared payload before forming a view, which prevents
+out-of-bounds access and attacker-controlled allocation attempts.
 
 Mutable contiguous destinations whose exposed storage overlaps the decoder input
 are rejected with `status_code::error`; use separate input and output storage.
 Custom destinations must not write into decoder input storage that is not exposed
 by their range. Fixed-size destinations and borrowed views retain their exact-size
-or assignment semantics.
+or assignment semantics. Advanced callers that can guarantee separate storage
+can disable the runtime check through `unchecked_aliasing_decoder_options`; see
+[encoder and decoder options](doc/options.md#unchecked-inputoutput-aliasing).
 
 Equivalent to manually encoding the struct in the following example:
 ```cpp

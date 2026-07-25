@@ -52,6 +52,18 @@ template <typename T> struct strict_integer_decode_option<T, true> : std::bool_c
 template <typename T> inline constexpr bool strict_integer_decode_option_v = strict_integer_decode_option<T>::value;
 
 template <typename T>
+concept HasInputOutputAliasCheckOption = requires {
+    { T::check_input_output_aliasing } -> std::convertible_to<bool>;
+};
+
+template <typename T, bool HasOption = HasInputOutputAliasCheckOption<T>> struct input_output_alias_check_option : std::true_type {};
+
+template <typename T>
+struct input_output_alias_check_option<T, true> : std::bool_constant<static_cast<bool>(T::check_input_output_aliasing)> {};
+
+template <typename T> inline constexpr bool input_output_alias_check_option_v = input_output_alias_check_option<T>::value;
+
+template <typename T>
 concept CodecStatusResult = requires(T result) {
     { result.has_value() } -> std::convertible_to<bool>;
     { result.error() } -> std::convertible_to<status_code>;

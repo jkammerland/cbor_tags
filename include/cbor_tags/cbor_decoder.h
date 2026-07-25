@@ -714,10 +714,23 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (string_target_aliases_input(value)) {
             return status_code::error;
         }
-        detail::appender<std::string> append;
-        append.reserve_for_append(value, text_size);
-        auto text = take_text_payload(payload_size);
-        detail::append_byte_range(append, value, text);
+
+        if (value.empty()) {
+            value = std::string(take_text_payload(payload_size));
+        } else if constexpr (IsContiguous<InputBuffer>) {
+            auto text = take_text_payload(payload_size);
+            value.append(text.data(), text.size());
+        } else {
+            const auto old_size = value.size();
+            if (std::cmp_greater(payload_size, value.max_size() - old_size)) {
+                throw std::length_error("CBOR string length exceeds target container max_size");
+            }
+            value.resize(old_size + static_cast<std::string::size_type>(payload_size));
+
+            auto       text        = take_text_payload(payload_size);
+            const auto destination = value.begin() + static_cast<std::string::difference_type>(old_size);
+            std::ranges::copy(text, destination);
+        }
         return status_code::success;
     }
 
@@ -1199,6 +1212,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr auto decode_text_payload(std::uint64_t length) { return take_text_payload(require_bytes(length)); }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_bstr(T &out, decode_size_bounds bounds = {}) {
+        if (string_target_aliases_input(out)) {
+            return status_code::error;
+        }
+
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
@@ -1249,6 +1266,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_tstr(T &out, decode_size_bounds bounds = {}) {
+        if (string_target_aliases_input(out)) {
+            return status_code::error;
+        }
+
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
@@ -1624,25 +1645,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T> constexpr bool string_target_aliases_input(const T &target) const {
-        if constexpr (std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<InputBuffer>>) {
-            if (std::addressof(target) == std::addressof(data_)) {
-                return true;
-            }
-        }
-
-        if constexpr (std::ranges::contiguous_range<const T> && std::ranges::sized_range<const T> &&
-                      std::ranges::contiguous_range<const InputBuffer> && std::ranges::sized_range<const InputBuffer>) {
-            if (std::ranges::empty(target) || std::ranges::empty(data_) || std::is_constant_evaluated()) {
-                return false;
+        if constexpr (detail::input_output_alias_check_option_v<Options>) {
+            if constexpr (std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<InputBuffer>>) {
+                if (std::addressof(target) == std::addressof(data_)) {
+                    return true;
+                }
             }
 
-            const auto *target_data = std::ranges::data(target);
-            const auto *input_data  = std::ranges::data(data_);
-            const auto *target_end  = target_data + std::ranges::size(target);
-            const auto *input_end   = input_data + std::ranges::size(data_);
+            if constexpr (std::ranges::contiguous_range<const T> && std::ranges::sized_range<const T> &&
+                          std::ranges::contiguous_range<const InputBuffer> && std::ranges::sized_range<const InputBuffer>) {
+                if (std::ranges::empty(target) || std::ranges::empty(data_) || std::is_constant_evaluated()) {
+                    return false;
+                }
 
-            const auto before = std::less<const void *>{};
-            return before(input_data, target_end) && before(target_data, input_end);
+                const auto *target_data = std::ranges::data(target);
+                const auto *input_data  = std::ranges::data(data_);
+                const auto *target_end  = target_data + std::ranges::size(target);
+                const auto *input_end   = input_data + std::ranges::size(data_);
+
+                const auto before = std::less<const void *>{};
+                return before(input_data, target_end) && before(target_data, input_end);
+            }
+        } else {
+            static_cast<void>(target);
         }
 
         return false;
