@@ -10,6 +10,7 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -1186,6 +1187,34 @@ TEST_CASE("decoder rejects truncated definite containers before reservation") {
 
     ReservationProbeRange decoded;
     auto                  result = make_decoder(buffer)(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.reserve_calls, 0U);
+    CHECK(decoded.values.empty());
+}
+
+TEST_CASE("decoder skips reservation for unsized input ranges") {
+    const std::list<std::byte> storage{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
+    auto                       input = std::ranges::subrange(storage.cbegin(), storage.cend());
+    static_assert(!std::ranges::sized_range<decltype(input)>);
+
+    ReservationProbeRange decoded;
+    auto                  result = make_decoder(input)(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.reserve_calls, 0U);
+    CHECK_EQ(decoded.values, (std::vector<std::uint8_t>{1U, 2U}));
+}
+
+TEST_CASE("decoder rejects truncated unsized definite containers without reservation") {
+    // array(1,073,741,824) with no element payload
+    const std::list<std::byte> storage{std::byte{0x9A}, std::byte{0x40}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    auto                       input = std::ranges::subrange(storage.cbegin(), storage.cend());
+    static_assert(!std::ranges::sized_range<decltype(input)>);
+
+    ReservationProbeRange decoded;
+    auto                  result = make_decoder(input)(decoded);
 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::incomplete);

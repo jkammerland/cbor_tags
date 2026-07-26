@@ -442,14 +442,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
         if constexpr (HasReserve<T>) {
-            const auto payload_status = detail::require_minimum_container_payload(reader_, data_, length);
-            if (payload_status != status_code::success) {
-                return payload_status;
-            }
-            if (std::cmp_greater(length, std::numeric_limits<typename T::size_type>::max())) {
+            if constexpr (std::ranges::sized_range<const InputBuffer>) {
+                // A known input size permits this lower-bound check without traversing
+                // the input. Do not walk an unsized range merely to reserve from an
+                // untrusted container header.
+                const auto payload_status = detail::require_minimum_container_payload(reader_, data_, length);
+                if (payload_status != status_code::success) {
+                    return payload_status;
+                }
+                if (std::cmp_greater(length, std::numeric_limits<typename T::size_type>::max())) {
+                    throw std::length_error("CBOR array length exceeds target container size_type");
+                }
+                value.reserve(static_cast<typename T::size_type>(length));
+            } else if (std::cmp_greater(length, std::numeric_limits<typename T::size_type>::max())) {
                 throw std::length_error("CBOR array length exceeds target container size_type");
             }
-            value.reserve(static_cast<typename T::size_type>(length));
         }
         detail::appender<T> appender_;
         for (auto i = length; i > 0; --i) {
