@@ -146,6 +146,23 @@ struct ReserveWithoutSizeByteBuffer {
     void               push_back(value_type value) { bytes.push_back(value); }
 };
 
+struct ReservationProbeRange {
+    using value_type = std::uint8_t;
+    using size_type  = std::size_t;
+
+    ReservationProbeRange() {}
+
+    std::vector<value_type> values;
+    size_type               reserve_calls{};
+
+    [[nodiscard]] auto begin() noexcept { return values.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return values.begin(); }
+    [[nodiscard]] auto end() noexcept { return values.end(); }
+    [[nodiscard]] auto end() const noexcept { return values.end(); }
+    void               reserve(size_type) { ++reserve_calls; }
+    void               push_back(value_type value) { values.push_back(value); }
+};
+
 struct ThrowingReservableByteBuffer {
     using value_type = std::byte;
     using size_type  = std::size_t;
@@ -1161,6 +1178,19 @@ TEST_CASE("decoder should decode definite containers without requiring indefinit
     CHECK_EQ(non_default_vector[0], 7);
     CHECK_EQ(non_default_vector[1], 8);
     CHECK_EQ(non_default_vector.get_allocator().tag, 3);
+}
+
+TEST_CASE("decoder rejects truncated definite containers before reservation") {
+    // array(1,073,741,824) with no element payload
+    const std::vector<std::byte> buffer{std::byte{0x9A}, std::byte{0x40}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+
+    ReservationProbeRange decoded;
+    auto                  result = make_decoder(buffer)(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.reserve_calls, 0U);
+    CHECK(decoded.values.empty());
 }
 
 TEST_CASE("decoder should decode indefinite containers without staging through assignable temporaries") {

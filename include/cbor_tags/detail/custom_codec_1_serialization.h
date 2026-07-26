@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <array>
@@ -773,7 +774,15 @@ template <typename T> constexpr status_code decode_map(span_reader &reader, T &v
 }
 
 template <typename Writer, typename T> constexpr void encode_range(Writer &writer, const T &value) {
+    using type       = std::remove_cvref_t<T>;
+    using value_type = std::ranges::range_value_t<T>;
+
     if constexpr (std::ranges::sized_range<const T>) {
+        if constexpr (std::same_as<std::remove_cvref_t<value_type>, std::nullptr_t> && !IsFixedArray<type>) {
+            if (std::ranges::size(value) != 0U) {
+                throw ::cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
+            }
+        }
         write_varuint(writer, static_cast<std::uint64_t>(std::ranges::size(value)));
         if constexpr (is_bulk_little_endian_contiguous_range_v<const T>) {
             encode_bulk_little_endian_range(writer, value);
@@ -783,10 +792,14 @@ template <typename Writer, typename T> constexpr void encode_range(Writer &write
             }
         }
     } else {
-        using value_type = std::ranges::range_value_t<T>;
         std::vector<value_type> materialized;
         for (auto &&element : value) {
             materialized.emplace_back(std::forward<decltype(element)>(element));
+        }
+        if constexpr (std::same_as<std::remove_cvref_t<value_type>, std::nullptr_t>) {
+            if (!materialized.empty()) {
+                throw ::cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
+            }
         }
         write_varuint(writer, static_cast<std::uint64_t>(materialized.size()));
         for (const auto &element : materialized) {
@@ -900,10 +913,14 @@ template <typename T> constexpr status_code decode_range(span_reader &reader, T 
         }
         detail::appender<T> appender;
         for (std::uint64_t i = 0; i < length; ++i) {
-            auto element = make_decode_value_for_container<typename T::value_type>(value);
-            status       = decode_value(reader, element);
+            auto       element          = make_decode_value_for_container<typename T::value_type>(value);
+            const auto remaining_before = reader.remaining();
+            status                      = decode_value(reader, element);
             if (status != status_code::success) {
                 return status;
+            }
+            if (reader.remaining() == remaining_before) {
+                return status_code::size_limit_exceeded;
             }
             if constexpr (requires { value.push_back(std::move(element)); }) {
                 value.push_back(std::move(element));

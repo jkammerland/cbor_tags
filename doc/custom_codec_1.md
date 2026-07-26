@@ -195,10 +195,10 @@ auto segments = cc1::encode_borrowed_segments(static_tag<1001>{}, samples);
 
 ## Known Limitations
 
-- Malformed payloads can currently declare very large variable-size
-  container lengths before the decoder proves the payload is incomplete. Decode
-  `custom_codec_1` data only from inputs that are already bounded by your
-  transport, file-size limit, or application framing.
+- Variable-size ranges with zero-width elements, such as
+  `std::vector<std::nullptr_t>`, are unsupported. Use a fixed-extent
+  `std::span` or `std::array` when the schema must carry such elements; a fixed
+  extent bounds decoding even though each element has no payload bytes.
 - `as_custom_codec_1(...)` stores a reference and encoding observes the value
   through a `const` view. Input ranges that can only be iterated through a
   non-`const` `begin()` still need to be materialized or wrapped before

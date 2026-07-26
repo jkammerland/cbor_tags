@@ -1161,6 +1161,40 @@ TEST_CASE("compact tagged rejects malformed compact lengths and variant indexes"
     }
 }
 
+TEST_CASE("compact tagged requires a fixed extent for zero-width range elements") {
+    SUBCASE("dynamic ranges are rejected by the encoder") {
+        const std::vector<std::nullptr_t> values(2);
+        std::vector<std::byte>            encoded;
+
+        auto result = make_encoder<custom_codec_1>(encoded)(as_custom_codec_1(static_tag<1>{}, values));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(encoded.empty());
+    }
+
+    SUBCASE("dynamic ranges are rejected before a declared count can spin") {
+        std::vector<std::nullptr_t> decoded;
+        auto                        result = decode_compact_hex("c1488080808080808002", as_custom_codec_1(static_tag<1>{}, decoded));
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK(decoded.empty());
+    }
+
+    SUBCASE("fixed-extent spans remain supported") {
+        std::array<std::nullptr_t, 2> backing{};
+        std::span<std::nullptr_t, 2>  values{backing};
+        std::vector<std::byte>        encoded;
+
+        REQUIRE(make_encoder<custom_codec_1>(encoded)(as_custom_codec_1(static_tag<1>{}, values)));
+        CHECK_EQ(to_hex(encoded), "c14102");
+
+        std::array<std::nullptr_t, 2> decoded_backing{};
+        std::span<std::nullptr_t, 2>  decoded{decoded_backing};
+        REQUIRE(decode_compact_hex("c14102", as_custom_codec_1(static_tag<1>{}, decoded)));
+    }
+}
+
 TEST_CASE("compact tagged malformed containers leave destinations unchanged") {
 
     {

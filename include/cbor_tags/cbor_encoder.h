@@ -116,7 +116,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                       requires { appender_.append_borrowed(data_, detail::as_byte_span(value)); }) {
             appender_.append_borrowed(data_, detail::as_byte_span(value));
         } else {
-            appender_(data_, value);
+            detail::append_byte_range(appender_, data_, value);
         }
     }
 

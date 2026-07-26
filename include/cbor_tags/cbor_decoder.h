@@ -87,6 +87,24 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
     return status_code::success;
 }
 
+template <typename InputBuffer, typename Reader>
+constexpr status_code require_minimum_container_payload(Reader &reader, const InputBuffer &data, std::uint64_t length) {
+    using size_type = typename Reader::size_type;
+
+    if (length == 0U) {
+        return status_code::success;
+    }
+
+    if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
+        if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
+            return status_code::incomplete;
+        }
+    }
+
+    const auto minimum_bytes = static_cast<size_type>(length);
+    return reader.empty(data, minimum_bytes - 1U) ? status_code::incomplete : status_code::success;
+}
+
 } // namespace detail
 
 template <typename InputBuffer, IsOptions Options, template <typename> typename... Decoders>
@@ -380,7 +398,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
         auto text = take_text_payload(payload_size);
         if constexpr (IsConstView<T>) {
-            t = std::move(text);
+            using text_char = typename std::remove_cvref_t<T>::value_type;
+            if constexpr (std::same_as<text_char, char>) {
+                t = std::move(text);
+            } else {
+                t = T{reinterpret_cast<const text_char *>(text.data()), text.size()};
+            }
         } else {
             detail::appender<T> append;
             detail::append_byte_range(append, t, text);
@@ -419,6 +442,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
         if constexpr (HasReserve<T>) {
+            const auto payload_status = detail::require_minimum_container_payload(reader_, data_, length);
+            if (payload_status != status_code::success) {
+                return payload_status;
+            }
             if (std::cmp_greater(length, std::numeric_limits<typename T::size_type>::max())) {
                 throw std::length_error("CBOR array length exceeds target container size_type");
             }
