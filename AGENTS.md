@@ -32,26 +32,38 @@ ctest --test-dir build --output-on-failure
 - Use `ctest` for CI parity and `./build/test/tests --test-case="pattern"` to focus on one failure locally.
 - Maintain fast unit tests; move long-running checks into `benchmarks/`.
 
-## One-Shot Decoder Segment Contract
+## Core One-Shot Decoder Segment Contract
 
 This boundary is intentional. Do not reinterpret it while changing decoder or
 codec code:
 
-- The caller owns the input buffer: its lifetime, framing/admission limits,
-  total extent, and any size/extent promise exposed by its range type.
+- The caller owns the input buffer: its lifetime, framing/admission limits, and
+  a stable admitted `[begin, end)` range for the call. The caller also owns the
+  truthfulness of its C++ range semantics, including any
+  `std::ranges::sized_range` extent promise.
 - The library owns parsing a declared CBOR segment from that supplied buffer.
-  A supported input range is not required to expose `size()`.
-- For unsized non-contiguous input, consume a declared payload or container
-  exactly once. Do not add a prewalk, scanner, `distance`, or other traversal
-  merely to prove that bytes declared by a CBOR header exist.
+  Here, "segment" means the next requested CBOR item(s), including a definite
+  item's header-declared payload; it is not transport framing or validation of
+  arbitrary trailing input. A supported input range need not model
+  `std::ranges::sized_range`.
+- For an unsized non-contiguous input, core typed decoding consumes a declared
+  payload or container exactly once. Do not add a prewalk, scanner, `distance`,
+  or other traversal merely to prove that bytes declared by a CBOR header exist.
 - If that one traversal reaches the end, return `status_code::incomplete`.
   One-shot decoding is terminal: do not roll back the reader or destination;
   a decoded prefix may remain.
-- Never reserve from a CBOR length header alone. Reserve only after an O(1)
-  availability confirmation from contiguous or sized input.
-- Keep this contract in extensions too. Use core decoder primitives rather
-  than direct reader walking unless an extension is explicitly a semantic
-  scanner (for example, CDDL or lazy-tag scanning).
+- Never reserve from a CBOR length header alone. For definite strings, reserve
+  only after an exact range-provided availability check from contiguous input
+  or input that models `std::ranges::sized_range`, without an explicit decoder
+  prewalk. For arrays/maps, retain only the existing one-byte/two-byte-per-entry
+  lower-bound guard before reservation; it is not a full payload check.
+- This is the core typed-decoder rule. An extension may expose its own
+  documented terminal availability/status boundary, but that does not authorize
+  a direct-reader prewalk for recovery, ordinary decode validation, or rollback.
+  A scanner is a separate semantic feature, not a generic extension exception:
+  it needs an explicit design, documentation, and tests (for example, CDDL or
+  lazy-tag discovery). It must remain terminal, return an explicit status, and
+  must not be generalized back into core decoding.
 
 ## Commit & Pull Request Guidelines
 - Follow short, imperative commit subjects (e.g., `Fix decode overflow guard`), mirroring recent history.

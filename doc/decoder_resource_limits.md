@@ -17,19 +17,25 @@ For streaming or resumable parsing, enforce the same policy against the cumulati
 The ownership split is deliberately simple:
 
 - **Input buffer:** caller responsibility. The caller owns its lifetime,
-  framing/admission limit, total extent, and any size/extent promise exposed by
-  the range.
+  framing/admission limit, and a stable admitted `[begin, end)` range for the
+  call. The caller also owns the truthfulness of the C++ range semantics it
+  exposes, including any `std::ranges::sized_range` extent promise.
 - **Parsing a given CBOR segment from that buffer:** library responsibility.
-  The decoder accepts supported input ranges that do not expose `size()`.
+  Here, a segment is the next requested CBOR item (or items), including a
+  definite item's header-declared payload. It is not a transport frame or a
+  promise to validate arbitrary trailing input. The decoder accepts supported
+  input ranges that do not model `std::ranges::sized_range`.
 
-An unsized input is not a request for a structural preflight pass. When a CBOR
-header declares a definite byte/text-string payload or container length, the
-decoder consumes that segment once. If it reaches the end before the declared
-segment is complete, it returns `status_code::incomplete`; it does not rewind
-the reader or undo already decoded destination contents.
+An unsized non-contiguous input is not a request for a structural preflight
+pass. When a CBOR header declares a definite byte/text-string payload or
+container length, the core typed decoder consumes that segment once. If it
+reaches the end before the declared segment is complete, it returns
+`status_code::incomplete`; it does not rewind the reader or undo already
+decoded destination contents.
 
 ```cpp
-// `input` is a supported non-contiguous range with no size/extent operation.
+// `input` is a supported non-contiguous range that does not model
+// std::ranges::sized_range.
 // It contains: 0x65, 'o', 'k' -- a tstr header that declares five bytes.
 std::string output{"prefix:"};
 const auto result = cbor::tags::make_decoder(input)(output);
@@ -40,14 +46,26 @@ const auto result = cbor::tags::make_decoder(input)(output);
 
 This is a one-shot decoder contract, not a resumable or transactional one. A
 caller that needs message-size admission checks performs them at its transport
-or framing boundary. A caller that supplies a sized range is responsible for
-that range's size/extent contract.
+or framing boundary. A caller that supplies a `std::ranges::sized_range` is
+responsible for that range's size/extent contract.
 
-For contiguous or sized input, the decoder can confirm that a declared payload
-fits in O(1), then reserve storage where appropriate. For unsized
-non-contiguous input, it deliberately does neither a validation traversal nor
-a header-directed reservation: a CBOR length header alone never justifies
-`reserve`.
+For contiguous input or input that models `std::ranges::sized_range`, the
+decoder uses the range-provided extent to check a definite string payload's
+exact availability before reserving, without an explicit decoder prewalk. For
+definite arrays/maps, it performs only a lower-bound reservation guard: one
+input byte per array item and two input bytes per map entry. That guard does
+not prove a complete or structurally valid container. For unsized
+non-contiguous input, the core decoder deliberately does neither a validation
+traversal nor a header-directed reservation: a CBOR length header alone never
+justifies `reserve`.
+
+This section describes ordinary core typed decoding. An extension may define
+its own documented terminal availability/status boundary, but that does not
+authorize a prewalk for recovery, ordinary decode validation, or rollback. A
+scanner is a separately designed semantic feature (for example, CDDL or
+lazy-tag discovery), not a generic extension escape hatch. Such a feature
+needs its own documentation and tests, returns an explicit terminal status,
+and does not make prewalking or rollback valid in the core decoder.
 
 ## Container And Allocation Limits
 
@@ -132,14 +150,15 @@ schema validation or limit how much input the application accepts.
 - `std::variant` alternatives do not currently receive their parent's PMR
   allocator context.
 
-For a sized input, definite container lengths receive a constant-time lower
-bound check before `reserve`: one byte per array item and two bytes per map
-pair. This caps a header-directed reservation by remaining input bytes; it is
-not a full structural validation. For an unsized input, the decoder does not
-walk the remaining range merely to validate an untrusted length or justify
-reservation; it decodes incrementally and may retain a successfully decoded
-prefix on failure. Indefinite containers also decode in one pass and can retain
-a successfully decoded prefix when a later item exceeds the bound. See
+For an input that models `std::ranges::sized_range`, definite container lengths
+receive a range-provided lower-bound check before `reserve`: one byte per array
+item and two bytes per map pair. This caps a header-directed reservation by
+remaining input bytes; it is not a full structural validation. For an unsized
+input, the decoder does not walk the remaining range merely to validate an
+untrusted length or justify reservation; it decodes incrementally and may
+retain a successfully decoded prefix on failure. Indefinite containers also
+decode in one pass and can retain a successfully decoded prefix when a later
+item exceeds the bound. See
 [CDDL Size-Bounded Containers](cddl_handling.md#size-bounded-containers) for
 nesting and range-wrapper examples.
 

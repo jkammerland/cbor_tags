@@ -72,9 +72,10 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
     const auto needed = static_cast<size_type>(length);
 
     // The caller owns the input range's extent promise; this decoder owns
-    // parsing the declared segment. A sized input can prove availability
-    // without traversing the payload. For unsized non-contiguous input,
-    // consume in place below: incomplete input is terminal, not transactional.
+    // parsing the declared segment. A contiguous or sized input can use its
+    // range-provided extent without an explicit decoder prewalk. For unsized
+    // non-contiguous input, consume in place below: incomplete input is
+    // terminal, not transactional.
     if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
         if (reader.empty(data, needed - 1)) {
             return status_code::incomplete;
@@ -327,7 +328,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Sized input can validate this in O(1). Unsized input deliberately
+        // Contiguous or sized input can validate this from its range-provided
+        // extent without an explicit decoder prewalk. Unsized input deliberately
         // consumes and appends in one pass below; do not reserve from this
         // header alone. Incomplete decodes are terminal and may retain an
         // output prefix.
@@ -423,9 +425,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
-        // Match definite bstr handling: only a sized input can justify a
-        // reservation. Unsized input consumes once below and retains a prefix
-        // if it reaches the end.
+        // Match definite bstr handling: only a range-provided availability
+        // check can justify a reservation. Unsized input consumes once below
+        // and retains a prefix if it reaches the end.
         const auto payload_size = require_bytes(text_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
