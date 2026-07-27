@@ -19,6 +19,7 @@
 #include <new>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1161,38 +1162,36 @@ TEST_CASE("compact tagged rejects malformed compact lengths and variant indexes"
     }
 }
 
-TEST_CASE("compact tagged requires a fixed extent for zero-width range elements") {
-    SUBCASE("dynamic ranges are rejected by the encoder") {
-        const std::vector<std::nullptr_t> values(2);
-        std::vector<std::byte>            encoded;
+TEST_CASE("compact tagged permits zero-width values in fixed-cardinality ranges") {
+    const std::array<std::nullptr_t, 3> values{nullptr, nullptr, nullptr};
 
-        auto result = make_encoder<custom_codec_1>(encoded)(as_custom_codec_1(static_tag<1>{}, values));
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-        CHECK(encoded.empty());
-    }
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<20>{}, values)));
+    CHECK_EQ(to_hex(compact), "d440");
 
-    SUBCASE("dynamic ranges are rejected before a declared count can spin") {
-        std::vector<std::nullptr_t> decoded;
-        auto                        result = decode_compact_hex("c1488080808080808002", as_custom_codec_1(static_tag<1>{}, decoded));
+    std::array<std::nullptr_t, 3> decoded{nullptr, nullptr, nullptr};
+    auto                          dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<20>{}, decoded)));
+    CHECK(decoded == values);
 
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-        CHECK(decoded.empty());
-    }
+    std::array<std::nullptr_t, 2> span_values{nullptr, nullptr};
+    std::span<std::nullptr_t, 2>  fixed_span{span_values};
+    compact.clear();
+    REQUIRE(enc(as_custom_codec_1(static_tag<21>{}, fixed_span)));
+    CHECK_EQ(to_hex(compact), "d54102");
 
-    SUBCASE("fixed-extent spans remain supported") {
-        std::array<std::nullptr_t, 2> backing{};
-        std::span<std::nullptr_t, 2>  values{backing};
-        std::vector<std::byte>        encoded;
+    std::array<std::nullptr_t, 2> span_decoded{nullptr, nullptr};
+    std::span<std::nullptr_t, 2>  decoded_span{span_decoded};
+    auto                          span_dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(span_dec(as_custom_codec_1(static_tag<21>{}, decoded_span)));
+    CHECK(std::ranges::equal(decoded_span, fixed_span));
 
-        REQUIRE(make_encoder<custom_codec_1>(encoded)(as_custom_codec_1(static_tag<1>{}, values)));
-        CHECK_EQ(to_hex(encoded), "c14102");
-
-        std::array<std::nullptr_t, 2> decoded_backing{};
-        std::span<std::nullptr_t, 2>  decoded{decoded_backing};
-        REQUIRE(decode_compact_hex("c14102", as_custom_codec_1(static_tag<1>{}, decoded)));
-    }
+    const std::array<std::nullptr_t, 2>      const_span_values{nullptr, nullptr};
+    const std::span<const std::nullptr_t, 2> const_fixed_span{const_span_values};
+    compact.clear();
+    REQUIRE(enc(as_custom_codec_1(static_tag<22>{}, const_fixed_span)));
+    CHECK_EQ(to_hex(compact), "d64102");
 }
 
 TEST_CASE("compact tagged malformed containers leave destinations unchanged") {

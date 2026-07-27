@@ -113,6 +113,12 @@ as lazy tag matches do.
   char-like value types, including `std::pmr::string`.
 - `std::array` stores its elements directly; its length is part of the C++
   schema, not the payload.
+- Dynamically sized ranges and maps require each element or key/value pair to
+  consume payload bytes. Zero-width values (for example `std::nullptr_t`, or
+  an aggregate made only of tag metadata) are therefore supported only in a
+  fixed-cardinality destination such as `std::array` or a fixed-extent
+  `std::span<T, N>`. A dynamic-extent `std::span<T>` is rejected for this
+  case, even when its runtime size is known.
 - `std::optional<T>` uses a one-byte presence marker followed by `T` when set.
 - `std::variant<...>` stores the selected alternative index followed by that
   alternative.

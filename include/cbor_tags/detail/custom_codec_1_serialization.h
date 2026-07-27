@@ -7,7 +7,6 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/cbor_simple.h"
-#include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <array>
@@ -34,6 +33,12 @@ namespace cbor::tags::detail::custom_codec_1 {
 template <typename T> struct is_std_array : std::false_type {};
 template <typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std::true_type {};
 template <typename T> inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
+
+// `IsFixedArray` answers whether the core decoder can write directly into a
+// range. Compact payloads need a different property here: whether the
+// cardinality is part of the C++ schema. A dynamic-extent span has a bounded
+// destination at runtime, but its cardinality is not encoded in its type.
+template <typename T> inline constexpr bool is_fixed_cardinality_range_v = is_std_array_v<T> || is_static_extent_span_v<T>;
 
 template <typename T> struct is_mutable_byte_span : std::false_type {};
 template <std::size_t Extent> struct is_mutable_byte_span<std::span<std::byte, Extent>> : std::true_type {};
@@ -364,6 +369,52 @@ template <typename T> constexpr bool tuple_first_field_is_tag() {
         return is_static_tag_t<first_type>::value || is_dynamic_tag_t<first_type>;
     }
 }
+
+// A dynamically sized compact range can use its count as the only payload
+// bytes when every element decodes without consuming input. Such a range would
+// turn a small count into an unbounded decode loop, so keep that wire shape for
+// fixed-cardinality destinations only.
+template <typename T> struct has_zero_width_compact_encoding;
+
+template <typename Tuple, std::size_t... Indices>
+consteval bool tuple_payload_has_zero_width_compact_encoding_impl(std::index_sequence<Indices...>) {
+    using tuple_type = std::remove_cvref_t<Tuple>;
+    return (((tuple_first_field_is_tag<tuple_type>() && Indices == 0U) ||
+             has_zero_width_compact_encoding<std::remove_cvref_t<std::tuple_element_t<Indices, tuple_type>>>::value) &&
+            ...);
+}
+
+template <typename Tuple> consteval bool tuple_payload_has_zero_width_compact_encoding() {
+    using tuple_type = std::remove_cvref_t<Tuple>;
+    return tuple_payload_has_zero_width_compact_encoding_impl<tuple_type>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+}
+
+template <typename T> struct has_zero_width_compact_encoding {
+  private:
+    using type = std::remove_cvref_t<T>;
+
+    static consteval bool value_impl() {
+        if constexpr (std::is_same_v<type, std::nullptr_t>) {
+            return true;
+        } else if constexpr (is_std_array_v<type>) {
+            return std::tuple_size_v<type> == 0U || has_zero_width_compact_encoding<typename type::value_type>::value;
+        } else if constexpr (IsUntaggedTuple<type> || IsTaggedTuple<type>) {
+            return tuple_payload_has_zero_width_compact_encoding<type>();
+        } else if constexpr (std::is_aggregate_v<type> && !IsMap<type> && !IsRangeOfCborValues<type> && !IsVariant<type> &&
+                             !is_text_string_v<type> && !IsBinaryString<type>) {
+            using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<type &>()))>;
+            return tuple_payload_has_zero_width_compact_encoding<tuple_type>();
+        } else {
+            return false;
+        }
+    }
+
+  public:
+    static constexpr bool value = value_impl();
+};
+
+template <typename T>
+inline constexpr bool has_zero_width_compact_encoding_v = has_zero_width_compact_encoding<std::remove_cvref_t<T>>::value;
 
 template <typename Tuple, typename Fn> constexpr decltype(auto) visit_tuple_payload(Tuple &&tuple, Fn &&fn) {
     if constexpr (tuple_first_field_is_tag<Tuple>()) {
@@ -736,6 +787,8 @@ template <IsVariant Variant> constexpr status_code decode_variant(span_reader &r
 }
 
 template <typename Writer, typename T> constexpr void encode_map(Writer &writer, const T &value) {
+    static_assert(!(has_zero_width_compact_encoding_v<typename T::key_type> && has_zero_width_compact_encoding_v<typename T::mapped_type>),
+                  "custom_codec_1 dynamically sized maps cannot contain zero-width entries; use a fixed-size std::array or tuple instead");
     write_varuint(writer, static_cast<std::uint64_t>(std::ranges::size(value)));
     for (const auto &entry : value) {
         encode_value(writer, pair_first(entry));
@@ -744,6 +797,8 @@ template <typename Writer, typename T> constexpr void encode_map(Writer &writer,
 }
 
 template <typename T> constexpr status_code decode_map(span_reader &reader, T &value) {
+    static_assert(!(has_zero_width_compact_encoding_v<typename T::key_type> && has_zero_width_compact_encoding_v<typename T::mapped_type>),
+                  "custom_codec_1 dynamically sized maps cannot contain zero-width entries; use a fixed-size std::array or tuple instead");
     std::uint64_t length{};
     auto          status = read_varuint(reader, length);
     if (status != status_code::success) {
@@ -774,15 +829,13 @@ template <typename T> constexpr status_code decode_map(span_reader &reader, T &v
 }
 
 template <typename Writer, typename T> constexpr void encode_range(Writer &writer, const T &value) {
-    using type       = std::remove_cvref_t<T>;
-    using value_type = std::ranges::range_value_t<T>;
-
+    using type = std::remove_cvref_t<T>;
+    if constexpr (!is_fixed_cardinality_range_v<type>) {
+        static_assert(
+            !has_zero_width_compact_encoding_v<std::ranges::range_value_t<T>>,
+            "custom_codec_1 dynamically sized ranges cannot contain zero-width values; use std::array or a fixed-extent std::span instead");
+    }
     if constexpr (std::ranges::sized_range<const T>) {
-        if constexpr (std::same_as<std::remove_cvref_t<value_type>, std::nullptr_t> && !IsFixedArray<type>) {
-            if (std::ranges::size(value) != 0U) {
-                throw ::cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
-        }
         write_varuint(writer, static_cast<std::uint64_t>(std::ranges::size(value)));
         if constexpr (is_bulk_little_endian_contiguous_range_v<const T>) {
             encode_bulk_little_endian_range(writer, value);
@@ -792,14 +845,10 @@ template <typename Writer, typename T> constexpr void encode_range(Writer &write
             }
         }
     } else {
+        using value_type = std::ranges::range_value_t<T>;
         std::vector<value_type> materialized;
         for (auto &&element : value) {
             materialized.emplace_back(std::forward<decltype(element)>(element));
-        }
-        if constexpr (std::same_as<std::remove_cvref_t<value_type>, std::nullptr_t>) {
-            if (!materialized.empty()) {
-                throw ::cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
-            }
         }
         write_varuint(writer, static_cast<std::uint64_t>(materialized.size()));
         for (const auto &element : materialized) {
@@ -882,6 +931,12 @@ template <typename T> constexpr status_code decode_resizable_bulk_range(span_rea
 }
 
 template <typename T> constexpr status_code decode_range(span_reader &reader, T &value) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (!is_fixed_cardinality_range_v<type>) {
+        static_assert(
+            !has_zero_width_compact_encoding_v<std::ranges::range_value_t<T>>,
+            "custom_codec_1 dynamically sized ranges cannot contain zero-width values; use std::array or a fixed-extent std::span instead");
+    }
     std::uint64_t length{};
     auto          status = read_varuint(reader, length);
     if (status != status_code::success) {

@@ -80,6 +80,21 @@ function(add_dynamic_bounded_size_compile_fail_test TEST_NAME SOURCE_FILE PASS_R
       "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 endfunction()
 
+function(add_custom_codec_1_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
 add_incompatible_codec_result_compile_fail_test(
   incompatible_member_encode_result_compile_fails
   CBOR_TAGS_INCOMPATIBLE_MEMBER_ENCODE
@@ -117,6 +132,27 @@ add_dynamic_bounded_size_compile_fail_test(
   dynamic_bounded_size_nested_compile_fails
   dynamic_bounded_size_nested_compile_fail.cc
   "bounded size wrappers cannot directly contain another bounded size wrapper")
+
+add_custom_codec_1_compile_fail_test(
+  custom_codec_1_zero_width_dynamic_range_compile_fails
+  custom_codec_1_zero_width_dynamic_range_compile_fail.cc
+  "custom_codec_1 dynamically sized ranges cannot contain zero-width values")
+add_custom_codec_1_compile_fail_test(
+  custom_codec_1_zero_width_dynamic_array_compile_fails
+  custom_codec_1_zero_width_dynamic_array_compile_fail.cc
+  "custom_codec_1 dynamically sized ranges cannot contain zero-width values")
+add_custom_codec_1_compile_fail_test(
+  custom_codec_1_zero_width_dynamic_range_decode_compile_fails
+  custom_codec_1_zero_width_dynamic_range_decode_compile_fail.cc
+  "custom_codec_1 dynamically sized ranges cannot contain zero-width values")
+add_custom_codec_1_compile_fail_test(
+  custom_codec_1_zero_width_dynamic_span_compile_fails
+  custom_codec_1_zero_width_dynamic_span_compile_fail.cc
+  "custom_codec_1 dynamically sized ranges cannot contain zero-width values")
+add_custom_codec_1_compile_fail_test(
+  custom_codec_1_zero_width_dynamic_map_compile_fails
+  custom_codec_1_zero_width_dynamic_map_compile_fail.cc
+  "custom_codec_1 dynamically sized maps cannot contain zero-width entries")
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   add_dynamic_bounded_size_compile_fail_test(
