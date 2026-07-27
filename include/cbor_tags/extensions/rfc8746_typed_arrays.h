@@ -1120,19 +1120,30 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         }
 
         const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-        status                  = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
-        if (status != status_code::success) {
-            return status;
+        if constexpr (IsContiguous<typename Self::input_buffer_type>) {
+            return cbor::tags::detail::consume_extension_bstring_payload(dec, payload_size_u64, [&](auto &&raw_payload) {
+                if ((payload_size % sizeof(value_type)) != 0U) {
+                    return status_code::unexpected_group_size;
+                }
+                array.values() =
+                    detail::materialize_values<value_type, ByteOrder>(std::forward<decltype(raw_payload)>(raw_payload), payload_size);
+                return status_code::success;
+            });
+        } else {
+            std::vector<std::byte> raw_payload;
+            status = cbor::tags::detail::decode_extension_bstring_payload_into(dec, payload_size_u64, raw_payload);
+            if (status != status_code::success) {
+                return status;
+            }
+            if ((payload_size % sizeof(value_type)) != 0U) {
+                return status_code::unexpected_group_size;
+            }
+            array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
+            return status_code::success;
         }
-        auto raw_payload = dec.decode_bstring_payload(payload_size_u64);
-        if ((payload_size % sizeof(value_type)) != 0U) {
-            return status_code::unexpected_group_size;
-        }
-        array.values() = detail::materialize_values<value_type, ByteOrder>(std::move(raw_payload), payload_size);
-        return status_code::success;
     }
 
-    template <typename Value, typed_array_byte_order ByteOrder, typename Consume>
+    template <typename Value, typed_array_byte_order ByteOrder, bool MaterializeNonContiguousPayload, typename Consume>
     [[nodiscard]] status_code decode_bounded_typed_array_bytes(major_type payload_major, std::byte payload_info, std::size_t min,
                                                                std::size_t max, Consume &&consume) {
         if (payload_major != major_type::ByteString || payload_info == std::byte{31}) {
@@ -1155,14 +1166,21 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
             return status_code::unexpected_group_size;
         }
 
-        status = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
-        if (status != status_code::success) {
-            return status;
-        }
-        auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
         const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-        std::forward<Consume>(consume)(std::move(raw_payload), payload_size);
-        return status_code::success;
+        if constexpr (MaterializeNonContiguousPayload && !IsContiguous<typename Self::input_buffer_type>) {
+            std::vector<std::byte> raw_payload;
+            status = cbor::tags::detail::decode_extension_bstring_payload_into(dec, payload_size_u64, raw_payload);
+            if (status != status_code::success) {
+                return status;
+            }
+            std::forward<Consume>(consume)(std::move(raw_payload), payload_size);
+            return status_code::success;
+        } else {
+            return cbor::tags::detail::consume_extension_bstring_payload(dec, payload_size_u64, [&](auto &&raw_payload) {
+                std::forward<Consume>(consume)(std::forward<decltype(raw_payload)>(raw_payload), payload_size);
+                return status_code::success;
+            });
+        }
     }
 
     template <OwnedTypedArrayTarget Array>
@@ -1171,7 +1189,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         using array_type = std::remove_cvref_t<Array>;
         using value_type = typename array_type::value_type;
 
-        return decode_bounded_typed_array_bytes<value_type, array_type::byte_order>(
+        return decode_bounded_typed_array_bytes<value_type, array_type::byte_order, true>(
             payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
                 array.values() = detail::materialize_values<value_type, array_type::byte_order>(
                     std::forward<decltype(raw_payload)>(raw_payload), payload_size);
@@ -1189,7 +1207,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         if constexpr (std::ranges::contiguous_range<const byte_range> && !IsContiguous<typename Self::input_buffer_type>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            return decode_bounded_typed_array_bytes<value_type, array_type::byte_order>(
+            return decode_bounded_typed_array_bytes<value_type, array_type::byte_order, false>(
                 payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
                     view = array_type{byte_range{std::forward<decltype(raw_payload)>(raw_payload)}, payload_size};
                 });
@@ -1215,17 +1233,15 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                 return status;
             }
 
-            status = cbor::tags::detail::require_extension_payload_bytes(dec, payload_size_u64);
-            if (status != status_code::success) {
-                return status;
-            }
-            auto       raw_payload  = dec.decode_bstring_payload(payload_size_u64);
             const auto payload_size = static_cast<std::size_t>(payload_size_u64);
-            if ((payload_size % sizeof(value_type)) != 0U) {
-                return status_code::unexpected_group_size;
-            }
-            view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::move(raw_payload)}, payload_size};
-            return status_code::success;
+            return cbor::tags::detail::consume_extension_bstring_payload(dec, payload_size_u64, [&](auto &&raw_payload) {
+                if ((payload_size % sizeof(value_type)) != 0U) {
+                    return status_code::unexpected_group_size;
+                }
+                view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::forward<decltype(raw_payload)>(raw_payload)},
+                                                                          payload_size};
+                return status_code::success;
+            });
         }
     }
 

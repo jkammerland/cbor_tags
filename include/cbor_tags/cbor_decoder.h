@@ -70,18 +70,35 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
     }
 
     const auto needed = static_cast<size_type>(length);
-    if (reader.empty(data, needed - 1)) {
-        return status_code::incomplete;
+
+    // The caller owns the input range's extent promise; this decoder owns
+    // parsing the declared segment. A contiguous or sized input can use its
+    // range-provided extent without an explicit decoder prewalk. For unsized
+    // non-contiguous input, consume in place below: incomplete input is
+    // terminal, not transactional.
+    if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
+        if (reader.empty(data, needed - 1)) {
+            return status_code::incomplete;
+        }
     }
 
     if constexpr (IsContiguous<InputBuffer>) {
         reader.position_ += needed;
-    } else {
+    } else if constexpr (std::ranges::sized_range<const InputBuffer>) {
         if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
             return status_code::error;
         }
         reader.position_ = std::next(reader.position_, static_cast<std::ptrdiff_t>(needed));
         reader.current_offset_ += needed;
+    } else {
+        const auto end = std::ranges::end(data);
+        for (auto remaining = needed; remaining != 0; --remaining) {
+            if (reader.position_ == end) {
+                return status_code::incomplete;
+            }
+            ++reader.position_;
+            ++reader.current_offset_;
+        }
     }
 
     return status_code::success;
@@ -311,13 +328,35 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
-        // Validate the complete payload before mutating the destination.
+        // Contiguous or sized input can validate this from its range-provided
+        // extent without an explicit decoder prewalk. Unsized input deliberately
+        // consumes and appends in one pass below; do not reserve from this
+        // header alone. Incomplete decodes are terminal and may retain an
+        // output prefix.
         const auto payload_size = require_bytes(bstring_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
                 return status_code::error;
             }
         }
+
+        if constexpr (!IsConstView<T> && !IsContiguous<InputBuffer>) {
+            if constexpr (!IsFixedArray<T> && std::ranges::sized_range<const InputBuffer>) {
+                detail::appender<T>{}.reserve_for_append(t, bstring_size);
+            }
+
+            detail::appender<T> append;
+            for (auto remaining = payload_size; remaining != 0; --remaining) {
+                if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                    if (reader_.empty(data_)) {
+                        return status_code::incomplete;
+                    }
+                }
+                append(t, static_cast<typename T::value_type>(reader_.read(data_)));
+            }
+            return status_code::success;
+        }
+
         if constexpr (!IsConstView<T> && !IsFixedArray<T>) {
             detail::appender<T>{}.reserve_for_append(t, bstring_size);
         }
@@ -386,12 +425,33 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
+        // Match definite bstr handling: only a range-provided availability
+        // check can justify a reservation. Unsized input consumes once below
+        // and retains a prefix if it reaches the end.
         const auto payload_size = require_bytes(text_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
                 return status_code::error;
             }
         }
+        if constexpr (!IsConstView<T> && !IsContiguous<InputBuffer>) {
+            if constexpr (!IsFixedArray<T> && std::ranges::sized_range<const InputBuffer>) {
+                detail::appender<T>{}.reserve_for_append(t, text_size);
+            }
+
+            detail::appender<T> append;
+            for (auto remaining = payload_size; remaining != 0; --remaining) {
+                if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                    if (reader_.empty(data_)) {
+                        return status_code::incomplete;
+                    }
+                }
+                const auto byte_value = std::to_integer<unsigned char>(reader_.read(data_));
+                append(t, static_cast<typename T::value_type>(byte_value));
+            }
+            return status_code::success;
+        }
+
         if constexpr (!IsConstView<T>) {
             detail::appender<T>{}.reserve_for_append(t, text_size);
         }
@@ -467,6 +527,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 throw std::length_error("CBOR array length exceeds target container size_type");
             }
         }
+        // A header declares the segment to parse; it does not prove that an
+        // unsized input contains it. Keep the element loop one-pass rather
+        // than adding a validation traversal.
         detail::appender<T> appender_;
         for (auto i = length; i > 0; --i) {
             if constexpr (IsMap<T>) {
@@ -751,9 +814,31 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr status_code decode_definite_tstr(std::string &value, std::uint64_t text_size) {
+        // Match the generic text-string path: do not prewalk an unsized input
+        // to validate this header or justify reservation.
         const auto payload_size = require_bytes(text_size);
         if (string_target_aliases_input(value)) {
             return status_code::error;
+        }
+
+        if constexpr (!IsContiguous<InputBuffer>) {
+            if constexpr (std::ranges::sized_range<const InputBuffer>) {
+                const auto old_size = value.size();
+                if (std::cmp_greater(payload_size, value.max_size() - old_size)) {
+                    throw std::length_error("CBOR string length exceeds target container max_size");
+                }
+                value.reserve(old_size + static_cast<std::string::size_type>(payload_size));
+            }
+
+            for (auto remaining = payload_size; remaining != 0; --remaining) {
+                if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                    if (reader_.empty(data_)) {
+                        return status_code::incomplete;
+                    }
+                }
+                value.push_back(static_cast<char>(std::to_integer<unsigned char>(reader_.read(data_))));
+            }
+            return status_code::success;
         }
 
         if (value.empty()) {
@@ -1260,48 +1345,40 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
-            const auto                 start_position = reader_.position_;
-            [[maybe_unused]] size_type start_offset{};
-            if constexpr (!IsContiguous<InputBuffer>) {
-                start_offset = reader_.current_offset_;
+            auto [major, additionalInfo] = read_initial_byte();
+            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                if constexpr (CheckBounds) {
+                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                } else {
+                    return status_code::success;
+                }
+            }
+            if (major != major_type::ByteString || additionalInfo == static_cast<byte>(31)) {
+                return status_code::no_match_for_bstr_on_buffer;
             }
 
-            try {
-                auto [major, additionalInfo] = read_initial_byte();
-                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    if constexpr (CheckBounds) {
-                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                    } else {
-                        return status_code::success;
+            const auto chunk_size = decode_unsigned(additionalInfo);
+            if constexpr (CheckBounds) {
+                if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
+                    return status_code::size_limit_exceeded;
+                }
+            }
+            if constexpr (!IsContiguous<InputBuffer>) {
+                const auto payload_size = require_bytes(chunk_size);
+                for (auto remaining = payload_size; remaining != 0; --remaining) {
+                    if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
                     }
+                    appender_(out, static_cast<typename T::value_type>(reader_.read(data_)));
                 }
-                if (major != major_type::ByteString || additionalInfo == static_cast<byte>(31)) {
-                    return status_code::no_match_for_bstr_on_buffer;
-                }
-
-                const auto chunk_size = decode_unsigned(additionalInfo);
-                if constexpr (CheckBounds) {
-                    if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
-                        return status_code::size_limit_exceeded;
-                    }
-                }
+            } else {
                 auto chunk = decode_bstring_payload(chunk_size);
-                if constexpr (IsContiguous<decltype(chunk)>) {
-                    appender_(out, chunk);
-                } else {
-                    for (auto b : chunk) {
-                        appender_(out, static_cast<typename T::value_type>(b));
-                    }
-                }
-                if constexpr (CheckBounds) {
-                    size += chunk_size;
-                }
-            } catch (const parse_incomplete_exception &) {
-                reader_.position_ = start_position;
-                if constexpr (!IsContiguous<InputBuffer>) {
-                    reader_.current_offset_ = start_offset;
-                }
-                throw;
+                appender_(out, chunk);
+            }
+            if constexpr (CheckBounds) {
+                size += chunk_size;
             }
         }
     }
@@ -1314,48 +1391,41 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
-            const auto                 start_position = reader_.position_;
-            [[maybe_unused]] size_type start_offset{};
-            if constexpr (!IsContiguous<InputBuffer>) {
-                start_offset = reader_.current_offset_;
+            auto [major, additionalInfo] = read_initial_byte();
+            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                if constexpr (CheckBounds) {
+                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                } else {
+                    return status_code::success;
+                }
+            }
+            if (major != major_type::TextString || additionalInfo == static_cast<byte>(31)) {
+                return status_code::no_match_for_tstr_on_buffer;
             }
 
-            try {
-                auto [major, additionalInfo] = read_initial_byte();
-                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    if constexpr (CheckBounds) {
-                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                    } else {
-                        return status_code::success;
+            const auto chunk_size = decode_unsigned(additionalInfo);
+            if constexpr (CheckBounds) {
+                if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
+                    return status_code::size_limit_exceeded;
+                }
+            }
+            if constexpr (!IsContiguous<InputBuffer>) {
+                const auto payload_size = require_bytes(chunk_size);
+                for (auto remaining = payload_size; remaining != 0; --remaining) {
+                    if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
                     }
+                    const auto byte_value = std::to_integer<unsigned char>(reader_.read(data_));
+                    appender_(out, static_cast<typename T::value_type>(byte_value));
                 }
-                if (major != major_type::TextString || additionalInfo == static_cast<byte>(31)) {
-                    return status_code::no_match_for_tstr_on_buffer;
-                }
-
-                const auto chunk_size = decode_unsigned(additionalInfo);
-                if constexpr (CheckBounds) {
-                    if (chunk_size > bounds.max_size || size > bounds.max_size - chunk_size) {
-                        return status_code::size_limit_exceeded;
-                    }
-                }
+            } else {
                 auto chunk = decode_text_payload(chunk_size);
-                if constexpr (IsContiguous<decltype(chunk)>) {
-                    appender_(out, chunk);
-                } else {
-                    for (auto c : chunk) {
-                        appender_(out, static_cast<typename T::value_type>(c));
-                    }
-                }
-                if constexpr (CheckBounds) {
-                    size += chunk_size;
-                }
-            } catch (const parse_incomplete_exception &) {
-                reader_.position_ = start_position;
-                if constexpr (!IsContiguous<InputBuffer>) {
-                    reader_.current_offset_ = start_offset;
-                }
-                throw;
+                appender_(out, chunk);
+            }
+            if constexpr (CheckBounds) {
+                size += chunk_size;
             }
         }
     }
@@ -1364,43 +1434,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
-            const auto                 start_position = reader_.position_;
-            [[maybe_unused]] size_type start_offset{};
-            if constexpr (!IsContiguous<InputBuffer>) {
-                start_offset = reader_.current_offset_;
+            auto [major, additionalInfo] = read_initial_byte();
+            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                if constexpr (CheckBounds) {
+                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                } else {
+                    return status_code::success;
+                }
+            }
+            if constexpr (CheckBounds) {
+                if (size == bounds.max_size) {
+                    return status_code::size_limit_exceeded;
+                }
             }
 
-            try {
-                auto [major, additionalInfo] = read_initial_byte();
-                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    if constexpr (CheckBounds) {
-                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                    } else {
-                        return status_code::success;
-                    }
-                }
-                if constexpr (CheckBounds) {
-                    if (size == bounds.max_size) {
-                        return status_code::size_limit_exceeded;
-                    }
-                }
-
-                using value_type = typename T::value_type;
-                auto result      = detail::make_decode_value_for<value_type>(value);
-                auto status      = decode(result, major, additionalInfo);
-                if (status != status_code::success) {
-                    return status;
-                }
-                appender_(value, std::move(result));
-                if constexpr (CheckBounds) {
-                    ++size;
-                }
-            } catch (const parse_incomplete_exception &) {
-                reader_.position_ = start_position;
-                if constexpr (!IsContiguous<InputBuffer>) {
-                    reader_.current_offset_ = start_offset;
-                }
-                throw;
+            using value_type = typename T::value_type;
+            auto result      = detail::make_decode_value_for<value_type>(value);
+            auto status      = decode(result, major, additionalInfo);
+            if (status != status_code::success) {
+                return status;
+            }
+            appender_(value, std::move(result));
+            if constexpr (CheckBounds) {
+                ++size;
             }
         }
     }
@@ -1409,74 +1465,60 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
-            const auto                 start_position = reader_.position_;
-            [[maybe_unused]] size_type start_offset{};
-            if constexpr (!IsContiguous<InputBuffer>) {
-                start_offset = reader_.current_offset_;
+            auto [major, additionalInfo] = read_initial_byte();
+            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
+                if constexpr (CheckBounds) {
+                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
+                } else {
+                    return status_code::success;
+                }
+            }
+            if constexpr (CheckBounds) {
+                if (size == bounds.max_size) {
+                    return status_code::size_limit_exceeded;
+                }
             }
 
-            try {
-                auto [major, additionalInfo] = read_initial_byte();
-                if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                    if constexpr (CheckBounds) {
-                        return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                    } else {
-                        return status_code::success;
+            using key_type    = typename T::key_type;
+            using mapped_type = typename T::mapped_type;
+            using value_type  = std::pair<key_type, mapped_type>;
+            if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
+                          detail::can_propagate_container_allocator_for<mapped_type, T>()) {
+                auto key          = detail::make_decode_value_for<key_type>(value);
+                auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
+                auto status       = decode(key, major, additionalInfo);
+                if (status == status_code::success) {
+                    auto [mapped_major, mapped_additional_info] = read_initial_byte();
+                    if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
+                        return status_code::no_match_for_map_on_buffer;
                     }
+                    status = decode(mapped_value, mapped_major, mapped_additional_info);
                 }
+                if (status != status_code::success) {
+                    return status;
+                }
+                value_type result{std::move(key), std::move(mapped_value)};
+                appender_(value, std::move(result));
                 if constexpr (CheckBounds) {
-                    if (size == bounds.max_size) {
-                        return status_code::size_limit_exceeded;
-                    }
+                    ++size;
                 }
-
-                using key_type    = typename T::key_type;
-                using mapped_type = typename T::mapped_type;
-                using value_type  = std::pair<key_type, mapped_type>;
-                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
-                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
-                    auto key          = detail::make_decode_value_for<key_type>(value);
-                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                    auto status       = decode(key, major, additionalInfo);
-                    if (status == status_code::success) {
-                        auto [mapped_major, mapped_additional_info] = read_initial_byte();
-                        if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                            return status_code::no_match_for_map_on_buffer;
-                        }
-                        status = decode(mapped_value, mapped_major, mapped_additional_info);
+            } else {
+                value_type result{};
+                auto       status = decode(result.first, major, additionalInfo);
+                if (status == status_code::success) {
+                    auto [mapped_major, mapped_additional_info] = read_initial_byte();
+                    if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
+                        return status_code::no_match_for_map_on_buffer;
                     }
-                    if (status != status_code::success) {
-                        return status;
-                    }
-                    value_type result{std::move(key), std::move(mapped_value)};
-                    appender_(value, std::move(result));
-                    if constexpr (CheckBounds) {
-                        ++size;
-                    }
-                } else {
-                    value_type result{};
-                    auto       status = decode(result.first, major, additionalInfo);
-                    if (status == status_code::success) {
-                        auto [mapped_major, mapped_additional_info] = read_initial_byte();
-                        if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                            return status_code::no_match_for_map_on_buffer;
-                        }
-                        status = decode(result.second, mapped_major, mapped_additional_info);
-                    }
-                    if (status != status_code::success) {
-                        return status;
-                    }
-                    appender_(value, std::move(result));
-                    if constexpr (CheckBounds) {
-                        ++size;
-                    }
+                    status = decode(result.second, mapped_major, mapped_additional_info);
                 }
-            } catch (const parse_incomplete_exception &) {
-                reader_.position_ = start_position;
-                if constexpr (!IsContiguous<InputBuffer>) {
-                    reader_.current_offset_ = start_offset;
+                if (status != status_code::success) {
+                    return status;
                 }
-                throw;
+                appender_(value, std::move(result));
+                if constexpr (CheckBounds) {
+                    ++size;
+                }
             }
         }
     }
@@ -1491,8 +1533,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (needed == 0) {
             return 0;
         }
-        if (reader_.empty(data_, needed - 1)) {
-            throw parse_incomplete_exception("Unexpected end of input");
+        if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
+            if (reader_.empty(data_, needed - 1)) {
+                throw parse_incomplete_exception("Unexpected end of input");
+            }
         }
         return needed;
     }
@@ -1504,13 +1548,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         const auto payload_size = detail::cbor_argument_payload_size(info);
-        if (payload_size > 0U && reader_.empty(data_, payload_size - 1U)) {
-            throw parse_incomplete_exception("Unexpected end of input");
+        if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
+            if (payload_size > 0U && reader_.empty(data_, payload_size - 1U)) {
+                throw parse_incomplete_exception("Unexpected end of input");
+            }
         }
 
         std::uint64_t value{};
         auto          status = status_code::success;
         const auto    ok     = detail::read_cbor_argument(info, value, status, [this](std::uint8_t &byte_value) {
+            if constexpr (!IsContiguous<InputBuffer> && !std::ranges::sized_range<const InputBuffer>) {
+                if (reader_.empty(data_)) {
+                    throw parse_incomplete_exception("Unexpected end of input");
+                }
+            }
             byte_value = static_cast<std::uint8_t>(reader_.read(data_));
             return true;
         });
@@ -1527,40 +1578,31 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return static_cast<uint8_t>(reader_.read(data_));
     }
 
-    constexpr uint16_t read_uint16() {
-        if (reader_.empty(data_, 1)) {
-            throw parse_incomplete_exception("Unexpected end of input");
+    template <typename UInt> constexpr UInt read_fixed_uint() {
+        constexpr auto byte_count = sizeof(UInt);
+        if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
+            if (reader_.empty(data_, byte_count - 1U)) {
+                throw parse_incomplete_exception("Unexpected end of input");
+            }
         }
-        auto byte0 = static_cast<uint16_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint16_t>(reader_.read(data_));
-        return static_cast<uint16_t>(byte0 << 8 | byte1);
+
+        UInt value{};
+        for (std::size_t index = 0; index < byte_count; ++index) {
+            if constexpr (!IsContiguous<InputBuffer> && !std::ranges::sized_range<const InputBuffer>) {
+                if (reader_.empty(data_)) {
+                    throw parse_incomplete_exception("Unexpected end of input");
+                }
+            }
+            value = static_cast<UInt>((value << 8U) | static_cast<UInt>(reader_.read(data_)));
+        }
+        return value;
     }
 
-    constexpr uint32_t read_uint32() {
-        if (reader_.empty(data_, 3)) {
-            throw parse_incomplete_exception("Unexpected end of input");
-        }
-        auto byte0 = static_cast<uint32_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint32_t>(reader_.read(data_));
-        auto byte2 = static_cast<uint32_t>(reader_.read(data_));
-        auto byte3 = static_cast<uint32_t>(reader_.read(data_));
-        return (byte0 << 24) | (byte1 << 16) | (byte2 << 8) | byte3;
-    }
+    constexpr uint16_t read_uint16() { return read_fixed_uint<uint16_t>(); }
 
-    constexpr uint64_t read_uint64() {
-        if (reader_.empty(data_, 7)) {
-            throw parse_incomplete_exception("Unexpected end of input");
-        }
-        auto byte0 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte2 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte3 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte4 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte5 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte6 = static_cast<uint64_t>(reader_.read(data_));
-        auto byte7 = static_cast<uint64_t>(reader_.read(data_));
-        return (byte0 << 56) | (byte1 << 48) | (byte2 << 40) | (byte3 << 32) | (byte4 << 24) | (byte5 << 16) | (byte6 << 8) | (byte7);
-    }
+    constexpr uint32_t read_uint32() { return read_fixed_uint<uint32_t>(); }
+
+    constexpr uint64_t read_uint64() { return read_fixed_uint<uint64_t>(); }
 
     constexpr simple read_simple() {
         if (reader_.empty(data_)) {
@@ -1570,14 +1612,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     // CBOR Float16 decoding function
-    constexpr float16_t read_float16() {
-        if (reader_.empty(data_, 1)) {
-            throw parse_incomplete_exception("Unexpected end of input");
-        }
-        auto byte0 = static_cast<uint16_t>(reader_.read(data_));
-        auto byte1 = static_cast<uint16_t>(reader_.read(data_));
-        return float16_t{static_cast<uint16_t>((byte0 << 8) | byte1)};
-    }
+    constexpr float16_t read_float16() { return float16_t{read_uint16()}; }
 
     constexpr float read_float() {
         uint32_t bits = read_uint32();
@@ -1655,14 +1690,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return result;
         } else {
             auto start = reader_.position_;
-            auto it    = start;
-            for (size_type i = 0; i < span_length; ++i) {
-                ++it;
+            if constexpr (std::ranges::sized_range<const InputBuffer>) {
+                auto it = start;
+                for (size_type i = 0; i < span_length; ++i) {
+                    ++it;
+                }
+                reader_.position_ = it;
+                reader_.current_offset_ += span_length;
+            } else {
+                const auto end = std::ranges::end(data_);
+                for (auto remaining = span_length; remaining != 0; --remaining) {
+                    if (reader_.position_ == end) {
+                        throw parse_incomplete_exception("Unexpected end of input");
+                    }
+                    ++reader_.position_;
+                    ++reader_.current_offset_;
+                }
             }
-            auto result       = subrange(start, it);
-            reader_.position_ = it;
-            reader_.current_offset_ += span_length;
-            return bstr_view_t{result};
+            return bstr_view_t{subrange(start, reader_.position_)};
         }
     }
 
@@ -1674,14 +1719,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return result;
         } else {
             auto start = reader_.position_;
-            auto it    = start;
-            for (size_type i = 0; i < span_length; ++i) {
-                ++it;
+            if constexpr (std::ranges::sized_range<const InputBuffer>) {
+                auto it = start;
+                for (size_type i = 0; i < span_length; ++i) {
+                    ++it;
+                }
+                reader_.position_ = it;
+                reader_.current_offset_ += span_length;
+            } else {
+                const auto end = std::ranges::end(data_);
+                for (auto remaining = span_length; remaining != 0; --remaining) {
+                    if (reader_.position_ == end) {
+                        throw parse_incomplete_exception("Unexpected end of input");
+                    }
+                    ++reader_.position_;
+                    ++reader_.current_offset_;
+                }
             }
-            auto result       = subrange(start, it);
-            reader_.position_ = it;
-            reader_.current_offset_ += span_length;
-            return tstr_view_t{result};
+            return tstr_view_t{subrange(start, reader_.position_)};
         }
     }
 

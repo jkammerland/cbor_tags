@@ -134,6 +134,79 @@ struct SignedSizeDequeByteRange {
     [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
 };
 
+struct CountingUnsizedByteRange {
+    using value_type = std::byte;
+
+    struct iterator {
+        using value_type        = std::byte;
+        using difference_type   = std::ptrdiff_t;
+        using iterator_concept  = std::bidirectional_iterator_tag;
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        std::list<std::byte>::const_iterator current{};
+        std::size_t                         *increments{};
+
+        [[nodiscard]] const std::byte &operator*() const noexcept { return *current; }
+        [[nodiscard]] const std::byte *operator->() const noexcept { return std::addressof(*current); }
+
+        iterator &operator++() noexcept {
+            ++current;
+            ++*increments;
+            return *this;
+        }
+        iterator operator++(int) noexcept {
+            auto copy = *this;
+            ++*this;
+            return copy;
+        }
+        iterator &operator--() noexcept {
+            --current;
+            return *this;
+        }
+        iterator operator--(int) noexcept {
+            auto copy = *this;
+            --*this;
+            return copy;
+        }
+
+        friend bool operator==(const iterator &, const iterator &) = default;
+    };
+
+    std::list<std::byte> bytes;
+    mutable std::size_t  increments{};
+
+    [[nodiscard]] iterator begin() const noexcept { return {bytes.cbegin(), &increments}; }
+    [[nodiscard]] iterator end() const noexcept { return {bytes.cend(), &increments}; }
+};
+
+struct ReserveTrackingIntVector : std::vector<int> {
+    using base_type = std::vector<int>;
+    using size_type = typename base_type::size_type;
+    using base_type::base_type;
+
+    size_type reserve_calls{};
+    size_type last_reserve{};
+
+    void reserve(size_type count) {
+        ++reserve_calls;
+        last_reserve = count;
+    }
+};
+
+struct ReserveTrackingIntMap : std::unordered_map<int, int> {
+    using base_type = std::unordered_map<int, int>;
+    using size_type = typename base_type::size_type;
+    using base_type::base_type;
+
+    size_type reserve_calls{};
+    size_type last_reserve{};
+
+    void reserve(size_type count) {
+        ++reserve_calls;
+        last_reserve = count;
+    }
+};
+
 struct ReserveWithoutSizeByteBuffer {
     using value_type = std::byte;
     using size_type  = std::size_t;
@@ -262,6 +335,10 @@ static_assert(CborInputBuffer<CustomSizeByteBuffer>);
 static_assert(
     std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
 static_assert(CborInputBuffer<CountingSizeByteBuffer>);
+static_assert(CborInputBuffer<CountingUnsizedByteRange>);
+static_assert(!std::ranges::sized_range<const CountingUnsizedByteRange>);
+static_assert(IsRangeOfCborValues<ReserveTrackingIntVector>);
+static_assert(IsMap<ReserveTrackingIntMap>);
 static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
@@ -702,6 +779,197 @@ TEST_CASE("decoder validates definite string payloads once") {
         // Initial-byte, payload, and alias checks may each query the input size.
         CHECK(input.size_calls <= 3);
     }
+}
+
+TEST_CASE("decoder consumes unsized string headers in one destructive traversal") {
+    SUBCASE("byte string header") {
+        CountingUnsizedByteRange input{{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}};
+        as_bstr_any              decoded{};
+        auto                     dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.size, 3);
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("text string header") {
+        CountingUnsizedByteRange input{{std::byte{0x62}, std::byte{'o'}, std::byte{'k'}}};
+        as_text_any              decoded{};
+        auto                     dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.size, 2);
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
+TEST_CASE("decoder consumes unsized indefinite string chunks in one traversal") {
+    SUBCASE("byte string") {
+        CountingUnsizedByteRange input{
+            {std::byte{0x5F}, std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0xFF}}};
+        std::vector<std::byte> decoded;
+        auto                   dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}));
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("text string") {
+        CountingUnsizedByteRange input{{std::byte{0x7F}, std::byte{0x62}, std::byte{'o'}, std::byte{'k'}, std::byte{0xFF}}};
+        std::string              decoded;
+        auto                     dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded, "ok");
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
+TEST_CASE("decoder retains unsized indefinite string chunk prefixes after incomplete input") {
+    SUBCASE("byte string") {
+        CountingUnsizedByteRange input{{std::byte{0x5F}, std::byte{0x43}, std::byte{0x01}, std::byte{0x02}}};
+        std::vector<std::byte>   decoded{std::byte{0x99}};
+        auto                     dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x99}, std::byte{0x01}, std::byte{0x02}}));
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("text string") {
+        CountingUnsizedByteRange input{{std::byte{0x7F}, std::byte{0x62}, std::byte{'o'}}};
+        std::string              decoded{"prefix:"};
+        auto                     dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, "prefix:o");
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
+TEST_CASE("decoder reserves definite containers only after a size confirmation") {
+    SUBCASE("confirmed sized array keeps the reserve fast path") {
+        const std::vector<std::byte> input{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
+        ReserveTrackingIntVector     decoded;
+        auto                         dec = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.reserve_calls, 1U);
+        CHECK_EQ(decoded.last_reserve, 2U);
+        CHECK_EQ(std::vector<int>(decoded.begin(), decoded.end()), (std::vector<int>{1, 2}));
+    }
+
+    SUBCASE("truncated sized array cannot force a reserve") {
+        const std::vector<std::byte> input{std::byte{0x9A}, std::byte{0x00}, std::byte{0x0F}, std::byte{0x42}, std::byte{0x40}};
+        ReserveTrackingIntVector     decoded;
+        auto                         dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.reserve_calls, 0U);
+        CHECK(decoded.empty());
+    }
+
+    SUBCASE("truncated sized map uses a two-item lower bound per pair") {
+        const std::vector<std::byte> input{std::byte{0xA2}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+        ReserveTrackingIntMap        decoded;
+        auto                         dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.reserve_calls, 0U);
+        CHECK(decoded.empty());
+    }
+
+    SUBCASE("unsized input commits a prefix without reservation") {
+        CountingUnsizedByteRange input{{std::byte{0x84}, std::byte{0x01}, std::byte{0x02}}};
+        ReserveTrackingIntVector decoded;
+        auto                     dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.reserve_calls, 0U);
+        CHECK_EQ(std::vector<int>(decoded.begin(), decoded.end()), (std::vector<int>{1, 2}));
+        CHECK_EQ(input.increments, input.bytes.size());
+    }
+
+    SUBCASE("unsized map input commits complete pairs without reservation") {
+        CountingUnsizedByteRange input{{std::byte{0xA2}, std::byte{0x01}, std::byte{0x02}}};
+        ReserveTrackingIntMap    decoded;
+        auto                     dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.reserve_calls, 0U);
+        CHECK_EQ(decoded.size(), 1U);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(input.increments, input.bytes.size());
+    }
+}
+
+TEST_CASE("decoder retains unsized string prefixes after incomplete input") {
+    SUBCASE("header skip is destructive") {
+        CountingUnsizedByteRange input{{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}}};
+        as_bstr_any              decoded{};
+        auto                     dec = make_decoder(input);
+
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.size, 5);
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("owning text string retains the consumed payload prefix") {
+        CountingUnsizedByteRange input{{std::byte{0x65}, std::byte{'o'}, std::byte{'k'}}};
+        std::string              decoded{"prefix:"};
+        auto                     dec = make_decoder(input);
+
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, "prefix:ok");
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
+TEST_CASE("decoder does not roll back incomplete unsized indefinite elements") {
+    CountingUnsizedByteRange input{{std::byte{0x9F}, std::byte{0x18}}};
+    std::vector<int>         decoded;
+    auto                     dec = make_decoder(input);
+
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK(decoded.empty());
+    CHECK_EQ(input.increments, input.bytes.size());
+    CHECK(dec.tell() == input.end());
 }
 
 TEST_CASE("decoder rejects definite string targets that alias input storage") {

@@ -147,9 +147,20 @@ A failed encoder or decoder call is terminal for that encoder or decoder
 instance. The destination or output buffer may be partially modified; discard
 it after failure unless its type documents a stronger guarantee. In particular,
 `status_code::incomplete` reports that the fixed input does not contain a
-complete value and does not make the decoder resumable. Definite strings still
-validate their declared payload before forming a view, which prevents
-out-of-bounds access and attacker-controlled allocation attempts.
+complete value and does not make the decoder resumable. The caller owns the
+input buffer (including its lifetime, admission limit, and C++ range extent
+promise); the library owns parsing the next requested CBOR item(s) from it. On
+an unsized input, the core decoder consumes incrementally rather than first
+walking a declared payload length: completed elements and string bytes may
+remain in the destination, and no reservation is made solely from an
+unverified header. A contiguous input or `std::ranges::sized_range` uses a
+range-provided extent check before reserving, rather than a decoder prewalk;
+for definite arrays/maps this is a one-byte-per-item lower bound (two bytes per
+map pair), not a full structural validation. See
+[Decoder Resource Limits](doc/decoder_resource_limits.md#input-buffer-and-segment-parsing)
+for the complete ownership and one-shot contract.
+Definite views are formed only after their complete payload is available, which
+prevents out-of-bounds views without adding a second traversal.
 
 Mutable owning text- and byte-string destinations whose exposed contiguous
 storage overlaps the decoder input are rejected with `status_code::error`; use
