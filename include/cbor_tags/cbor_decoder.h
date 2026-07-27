@@ -444,9 +444,18 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (HasReserve<T>) {
             if constexpr (std::ranges::sized_range<const InputBuffer>) {
                 // A known input size permits this lower-bound check without traversing
-                // the input. Do not walk an unsized range merely to reserve from an
-                // untrusted container header.
-                const auto payload_status = detail::require_minimum_container_payload(reader_, data_, length);
+                // the input. A map entry has a key and a value, whereas an array
+                // element has only one child. Do not walk an unsized range merely to
+                // reserve from an untrusted container header.
+                auto minimum_payload_length = length;
+                if constexpr (IsMap<T>) {
+                    if (length > std::numeric_limits<std::uint64_t>::max() / 2U) {
+                        return status_code::incomplete;
+                    }
+                    minimum_payload_length = length * 2U;
+                }
+
+                const auto payload_status = detail::require_minimum_container_payload(reader_, data_, minimum_payload_length);
                 if (payload_status != status_code::success) {
                     return payload_status;
                 }
