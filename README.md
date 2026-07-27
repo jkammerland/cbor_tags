@@ -147,9 +147,13 @@ A failed encoder or decoder call is terminal for that encoder or decoder
 instance. The destination or output buffer may be partially modified; discard
 it after failure unless its type documents a stronger guarantee. In particular,
 `status_code::incomplete` reports that the fixed input does not contain a
-complete value and does not make the decoder resumable. Definite strings still
-validate their declared payload before forming a view, which prevents
-out-of-bounds access and attacker-controlled allocation attempts.
+complete value and does not make the decoder resumable. On an unsized input,
+the core decoder consumes incrementally rather than first walking a declared
+payload length: completed elements and string bytes may remain in the
+destination, and no reservation is made solely from an unverified header. A
+sized input may validate remaining bytes in constant time before reserving.
+Definite views are formed only after their complete payload is available, which
+prevents out-of-bounds views without adding a second traversal.
 
 Mutable owning text- and byte-string destinations whose exposed contiguous
 storage overlaps the decoder input are rejected with `status_code::error`; use

@@ -95,13 +95,16 @@ schema validation or limit how much input the application accepts.
 - `std::variant` alternatives do not currently receive their parent's PMR
   allocator context.
 
-Before reserving a dynamic definite container, the decoder confirms that the
-remaining input contains at least one byte per declared array element or two
-bytes per declared map entry. This structural lower bound prevents a truncated
-header from forcing a large allocation; it is not a replacement for an
-application-level size limit.
-Indefinite containers are decoded in one pass and can retain a successfully
-decoded prefix when a later item exceeds the bound. See
+For a sized input, before reserving a dynamic definite container, the decoder
+confirms that the remaining input contains at least one byte per declared array
+element or two bytes per declared map entry. This structural lower bound
+prevents a truncated header from forcing a large allocation; it is not a
+replacement for an application-level size limit. For an unsized input, the
+decoder does not walk the remaining range merely to validate an untrusted length
+or justify reservation; it decodes incrementally and may retain a successfully
+decoded prefix on failure. Indefinite containers also decode in one pass and
+can retain a successfully decoded prefix when a later item exceeds the bound.
+See
 [CDDL Size-Bounded Containers](cddl_handling.md#size-bounded-containers) for
 nesting and range-wrapper examples.
 

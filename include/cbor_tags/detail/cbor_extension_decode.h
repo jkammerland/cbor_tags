@@ -33,12 +33,11 @@ template <typename Decoder>
         return status_code::error;
     }
 
-    const auto payload_size = cbor_argument_payload_size(info);
-    if (payload_size > 0U && dec.reader_.empty(dec.data_, static_cast<typename Decoder::size_type>(payload_size - 1U))) {
+    try {
+        value = dec.decode_unsigned(additional_info);
+    } catch (const parse_incomplete_exception &) {
         return status_code::incomplete;
     }
-
-    value = dec.decode_unsigned(additional_info);
     return status_code::success;
 }
 
