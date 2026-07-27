@@ -92,6 +92,19 @@ struct toy_es256_backend {
     static expected<void, status_code>        verify(void *, std::span<const std::byte>, std::span<const std::byte>) { return {}; }
 };
 
+struct signature_presence_es256_backend {
+    static constexpr algorithm algorithm_id = algorithm::es256;
+
+    static expected<byte_string, status_code> sign(void *, std::span<const std::byte>) { return byte_string{std::byte{0x01}}; }
+
+    static expected<void, status_code> verify(void *, std::span<const std::byte>, std::span<const std::byte> signature) {
+        if (signature.empty()) {
+            return unexpected<status_code>{status_code::error};
+        }
+        return {};
+    }
+};
+
 } // namespace
 
 TEST_CASE("CWT claims encode with registered integer claim keys") {
@@ -277,6 +290,33 @@ TEST_CASE("CWT NumericDate rejects integers outside the int64 domain") {
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::no_match_for_int_on_buffer);
         CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
+    }
+}
+
+TEST_CASE("CWT NumericDate rejects non-finite values") {
+    constexpr std::array malformed_dates{"a104fb7ff0000000000000", "a104fbfff0000000000000", "a104fb7ff8000000000000"};
+    for (const auto hex : malformed_dates) {
+        CAPTURE(hex);
+        auto       input = to_bytes(hex);
+        claims_set decoded;
+        decoded.expiration = std::int64_t{42};
+
+        auto result = make_decoder(input)(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
+    }
+
+    for (const auto value :
+         {std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        claims_set claims;
+        claims.expiration = value;
+
+        std::vector<std::byte> output;
+        auto                   result = make_encoder(output)(claims);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(output.empty());
     }
 }
 
@@ -580,6 +620,203 @@ TEST_CASE("COSE signing structs decode from arrays and CWT tagged wrappers") {
     REQUIRE_EQ(decoded_sign.signatures.size(), 1U);
     CHECK_EQ(decoded_sign.signatures.front().protected_header, signature.protected_header);
     CHECK_EQ(decoded_sign.signatures.front().signature, signature.signature);
+}
+
+TEST_CASE("COSE decoders atomically replace signing state") {
+    SUBCASE("cose_signature and cose_sign replace preseeded containers") {
+        const cose_signature signature_source{};
+        auto                 signature_bytes = encode_to_bytes(signature_source);
+        REQUIRE(signature_bytes);
+
+        cose_signature decoded_signature{
+            .protected_header = byte_string{std::byte{0x10}},
+            .unprotected      = header_map{.kid = byte_string{std::byte{0x11}}},
+            .signature        = byte_string{std::byte{0x12}},
+        };
+        REQUIRE(make_decoder(*signature_bytes)(decoded_signature));
+        CHECK(decoded_signature.protected_header.empty());
+        CHECK(decoded_signature.unprotected.empty());
+        CHECK(decoded_signature.signature.empty());
+
+        const cose_sign source{
+            .protected_header = {},
+            .unprotected      = {},
+            .payload          = byte_string{std::byte{0x21}},
+            .signatures       = {signature_source},
+        };
+        auto sign_bytes = encode_to_bytes(source);
+        REQUIRE(sign_bytes);
+
+        cose_sign decoded_sign{
+            .protected_header = byte_string{std::byte{0x22}},
+            .unprotected      = header_map{.kid = byte_string{std::byte{0x23}}},
+            .payload          = byte_string{std::byte{0x24}},
+            .signatures       = {cose_signature{
+                .protected_header = byte_string{std::byte{0x25}},
+                .unprotected      = header_map{.kid = byte_string{std::byte{0x26}}},
+                .signature        = byte_string{std::byte{0x27}},
+            }},
+        };
+        REQUIRE(make_decoder(*sign_bytes)(decoded_sign));
+        CHECK(decoded_sign.protected_header.empty());
+        CHECK(decoded_sign.unprotected.empty());
+        CHECK_EQ(decoded_sign.payload, source.payload);
+        REQUIRE_EQ(decoded_sign.signatures.size(), 1U);
+        CHECK(decoded_sign.signatures.front().protected_header.empty());
+        CHECK(decoded_sign.signatures.front().unprotected.empty());
+        CHECK(decoded_sign.signatures.front().signature.empty());
+    }
+
+    SUBCASE("cose_sign1 clears authentication bytes absent from the new message") {
+        const byte_string payload{std::byte{0x31}};
+        auto              seeded = sign1<signature_presence_es256_backend>(nullptr, {}, {}, payload);
+        REQUIRE(seeded);
+
+        cose_sign1 decoded      = std::move(*seeded);
+        decoded.unprotected.kid = byte_string{std::byte{0x32}};
+        REQUIRE(verify_sign1<signature_presence_es256_backend>(nullptr, decoded));
+
+        const cose_sign1 source{
+            .protected_header = {},
+            .unprotected      = {},
+            .payload          = payload,
+            .signature        = {},
+        };
+        auto encoded = encode_to_bytes(source);
+        REQUIRE(encoded);
+        REQUIRE(make_decoder(*encoded)(decoded));
+
+        CHECK(decoded.protected_header.empty());
+        CHECK(decoded.unprotected.empty());
+        CHECK_EQ(decoded.payload, source.payload);
+        CHECK(decoded.signature.empty());
+        CHECK_FALSE(verify_sign1<signature_presence_es256_backend>(nullptr, decoded));
+    }
+
+    SUBCASE("truncated cose_sign1 preserves the destination") {
+        const cose_sign1 source{
+            .protected_header = byte_string{std::byte{0x41}},
+            .unprotected      = header_map{.kid = byte_string{std::byte{0x42}}},
+            .payload          = byte_string{std::byte{0x43}},
+            .signature        = byte_string{std::byte{0x44}},
+        };
+        auto encoded = encode_to_bytes(source);
+        REQUIRE(encoded);
+        encoded->pop_back();
+
+        cose_sign1 decoded{
+            .protected_header = byte_string{std::byte{0x51}},
+            .unprotected      = header_map{.kid = byte_string{std::byte{0x52}}},
+            .payload          = byte_string{std::byte{0x53}},
+            .signature        = byte_string{std::byte{0x54}},
+        };
+        auto result = make_decoder(*encoded)(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(decoded.protected_header, byte_string{std::byte{0x51}});
+        CHECK_EQ(decoded.unprotected.kid, byte_string{std::byte{0x52}});
+        CHECK_EQ(decoded.payload, std::optional<byte_string>{byte_string{std::byte{0x53}}});
+        CHECK_EQ(decoded.signature, byte_string{std::byte{0x54}});
+    }
+
+    SUBCASE("sig_structure switches cleanly between four and five element forms") {
+        const sig_structure five{
+            .context        = "Signature",
+            .body_protected = byte_string{std::byte{0x61}},
+            .sign_protected = byte_string{std::byte{0x62}},
+            .external_aad   = byte_string{std::byte{0x63}},
+            .payload        = byte_string{std::byte{0x64}},
+        };
+        auto five_bytes = encode_to_bytes(five);
+        REQUIRE(five_bytes);
+
+        sig_structure decoded{
+            .context        = "old",
+            .body_protected = byte_string{std::byte{0x71}},
+            .sign_protected = byte_string{std::byte{0x72}},
+            .external_aad   = byte_string{std::byte{0x73}},
+            .payload        = byte_string{std::byte{0x74}},
+        };
+        REQUIRE(make_decoder(*five_bytes)(decoded));
+        CHECK_EQ(decoded.context, five.context);
+        CHECK_EQ(decoded.body_protected, five.body_protected);
+        CHECK_EQ(decoded.sign_protected, five.sign_protected);
+        CHECK_EQ(decoded.external_aad, five.external_aad);
+        CHECK_EQ(decoded.payload, five.payload);
+
+        const sig_structure four{
+            .context        = "Signature1",
+            .body_protected = byte_string{std::byte{0x81}},
+            .sign_protected = std::nullopt,
+            .external_aad   = byte_string{std::byte{0x82}},
+            .payload        = byte_string{std::byte{0x83}},
+        };
+        auto four_bytes = encode_to_bytes(four);
+        REQUIRE(four_bytes);
+        REQUIRE(make_decoder(*four_bytes)(decoded));
+        CHECK_EQ(decoded.context, four.context);
+        CHECK_EQ(decoded.body_protected, four.body_protected);
+        CHECK_FALSE(decoded.sign_protected);
+        CHECK_EQ(decoded.external_aad, four.external_aad);
+        CHECK_EQ(decoded.payload, four.payload);
+    }
+
+    SUBCASE("truncated sig_structure preserves the destination") {
+        const sig_structure source{
+            .context        = "Signature",
+            .body_protected = byte_string{std::byte{0x91}},
+            .sign_protected = byte_string{std::byte{0x92}},
+            .external_aad   = byte_string{std::byte{0x93}},
+            .payload        = byte_string{std::byte{0x94}},
+        };
+        auto encoded = encode_to_bytes(source);
+        REQUIRE(encoded);
+        encoded->pop_back();
+
+        sig_structure decoded{
+            .context        = "old",
+            .body_protected = byte_string{std::byte{0xA1}},
+            .sign_protected = byte_string{std::byte{0xA2}},
+            .external_aad   = byte_string{std::byte{0xA3}},
+            .payload        = byte_string{std::byte{0xA4}},
+        };
+        auto result = make_decoder(*encoded)(decoded);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(decoded.context, "old");
+        CHECK_EQ(decoded.body_protected, byte_string{std::byte{0xA1}});
+        CHECK_EQ(decoded.sign_protected, std::optional<byte_string>{byte_string{std::byte{0xA2}}});
+        CHECK_EQ(decoded.external_aad, byte_string{std::byte{0xA3}});
+        CHECK_EQ(decoded.payload, byte_string{std::byte{0xA4}});
+    }
+}
+
+TEST_CASE("COSE Sign requires at least one signature") {
+    cose_sign empty{
+        .protected_header = {},
+        .unprotected      = {},
+        .payload          = byte_string{std::byte{0x01}},
+        .signatures       = {},
+    };
+    std::vector<std::byte> encoded;
+    auto                   encode_result = make_encoder(encoded)(empty);
+    REQUIRE_FALSE(encode_result);
+    CHECK_EQ(encode_result.error(), status_code::unexpected_group_size);
+    CHECK(encoded.empty());
+
+    auto      input = to_bytes("8440a0410180");
+    cose_sign decoded{
+        .protected_header = byte_string{std::byte{0x11}},
+        .unprotected      = header_map{.kid = byte_string{std::byte{0x12}}},
+        .payload          = byte_string{std::byte{0x13}},
+        .signatures       = {cose_signature{.signature = byte_string{std::byte{0x14}}}},
+    };
+    auto decode_result = make_decoder(input)(decoded);
+    REQUIRE_FALSE(decode_result);
+    CHECK_EQ(decode_result.error(), status_code::unexpected_group_size);
+    CHECK_EQ(decoded.protected_header, byte_string{std::byte{0x11}});
+    CHECK_EQ(decoded.unprotected.kid, byte_string{std::byte{0x12}});
+    CHECK_EQ(decoded.payload, std::optional<byte_string>{byte_string{std::byte{0x13}}});
+    REQUIRE_EQ(decoded.signatures.size(), 1U);
+    CHECK_EQ(decoded.signatures.front().signature, byte_string{std::byte{0x14}});
 }
 
 TEST_CASE("COSE Sign1 validates protected header algorithm for backend") {

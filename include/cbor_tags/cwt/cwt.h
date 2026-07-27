@@ -6,6 +6,7 @@
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -237,6 +238,9 @@ template <typename Decoder>
         if (status != status_code::success) {
             return unexpected<status_code>{status};
         }
+        if (!std::isfinite(value)) {
+            return unexpected<status_code>{status_code::error};
+        }
         return numeric_date{value};
     }
 
@@ -256,6 +260,11 @@ template <typename Decoder> [[nodiscard]] status_code decode_numeric_date_field(
     }
     field = std::move(*value);
     return status_code::success;
+}
+
+[[nodiscard]] inline bool is_finite_numeric_date(const numeric_date &value) {
+    const auto *floating = std::get_if<double>(&value);
+    return floating == nullptr || std::isfinite(*floating);
 }
 
 } // namespace detail
@@ -371,6 +380,11 @@ struct claims_set {
     std::optional<byte_string>  cwt_id;
 
     template <typename Encoder> constexpr auto encode(Encoder &enc) const {
+        if ((expiration && !detail::is_finite_numeric_date(*expiration)) || (not_before && !detail::is_finite_numeric_date(*not_before)) ||
+            (issued_at && !detail::is_finite_numeric_date(*issued_at))) {
+            return detail::codec_error<Encoder>(status_code::error);
+        }
+
         std::uint64_t size{};
         if (issuer) {
             ++size;
@@ -515,7 +529,14 @@ struct cose_signature {
         return enc(as_array{3}, protected_header, unprotected, signature);
     }
 
-    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(as_array{3}, protected_header, unprotected, signature); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) {
+        cose_signature decoded{};
+        auto           result = dec(as_array{3}, decoded.protected_header, decoded.unprotected, decoded.signature);
+        if (result) {
+            *this = std::move(decoded);
+        }
+        return result;
+    }
 };
 
 struct cose_sign {
@@ -525,11 +546,23 @@ struct cose_sign {
     std::vector<cose_signature> signatures;
 
     template <typename Encoder> constexpr auto encode(Encoder &enc) const {
+        if (signatures.empty()) {
+            return detail::codec_error<Encoder>(status_code::unexpected_group_size);
+        }
         return enc(as_array{4}, protected_header, unprotected, payload, signatures);
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        return dec(as_array{4}, protected_header, unprotected, payload, signatures);
+        cose_sign decoded{};
+        auto      result = dec(as_array{4}, decoded.protected_header, decoded.unprotected, decoded.payload, decoded.signatures);
+        if (!result) {
+            return result;
+        }
+        if (decoded.signatures.empty()) {
+            return detail::codec_error<Decoder>(status_code::unexpected_group_size);
+        }
+        *this = std::move(decoded);
+        return result;
     }
 };
 
@@ -544,7 +577,12 @@ struct cose_sign1 {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        return dec(as_array{4}, protected_header, unprotected, payload, signature);
+        cose_sign1 decoded{};
+        auto       result = dec(as_array{4}, decoded.protected_header, decoded.unprotected, decoded.payload, decoded.signature);
+        if (result) {
+            *this = std::move(decoded);
+        }
+        return result;
     }
 };
 
@@ -568,15 +606,21 @@ struct sig_structure {
         if (!result) {
             return result;
         }
+
+        sig_structure decoded{};
         if (array.size == 4U) {
-            sign_protected.reset();
-            return dec(context, body_protected, external_aad, payload);
+            result = dec(decoded.context, decoded.body_protected, decoded.external_aad, decoded.payload);
+            if (result) {
+                *this = std::move(decoded);
+            }
+            return result;
         }
         if (array.size == 5U) {
             byte_string decoded_sign_protected;
-            result = dec(context, body_protected, decoded_sign_protected, external_aad, payload);
+            result = dec(decoded.context, decoded.body_protected, decoded_sign_protected, decoded.external_aad, decoded.payload);
             if (result) {
-                sign_protected = std::move(decoded_sign_protected);
+                decoded.sign_protected = std::move(decoded_sign_protected);
+                *this                  = std::move(decoded);
             }
             return result;
         }
