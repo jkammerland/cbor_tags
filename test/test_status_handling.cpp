@@ -273,6 +273,7 @@ TEST_SUITE("Decoding the wrong thing") {
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK(decoded.empty());
     }
 
     TEST_CASE("Decode pmr array append failure returns out_of_memory") {

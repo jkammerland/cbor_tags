@@ -1351,13 +1351,19 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     return status_code::size_limit_exceeded;
                 }
             }
-            auto chunk = decode_bstring_payload(chunk_size);
-            if constexpr (IsContiguous<decltype(chunk)>) {
-                appender_(out, chunk);
-            } else {
-                for (auto b : chunk) {
-                    appender_(out, static_cast<typename T::value_type>(b));
+            if constexpr (!IsContiguous<InputBuffer>) {
+                const auto payload_size = require_bytes(chunk_size);
+                for (auto remaining = payload_size; remaining != 0; --remaining) {
+                    if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
+                    }
+                    appender_(out, static_cast<typename T::value_type>(reader_.read(data_)));
                 }
+            } else {
+                auto chunk = decode_bstring_payload(chunk_size);
+                appender_(out, chunk);
             }
             if constexpr (CheckBounds) {
                 size += chunk_size;
@@ -1391,13 +1397,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     return status_code::size_limit_exceeded;
                 }
             }
-            auto chunk = decode_text_payload(chunk_size);
-            if constexpr (IsContiguous<decltype(chunk)>) {
-                appender_(out, chunk);
-            } else {
-                for (auto c : chunk) {
-                    appender_(out, static_cast<typename T::value_type>(c));
+            if constexpr (!IsContiguous<InputBuffer>) {
+                const auto payload_size = require_bytes(chunk_size);
+                for (auto remaining = payload_size; remaining != 0; --remaining) {
+                    if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
+                    }
+                    const auto byte_value = std::to_integer<unsigned char>(reader_.read(data_));
+                    appender_(out, static_cast<typename T::value_type>(byte_value));
                 }
+            } else {
+                auto chunk = decode_text_payload(chunk_size);
+                appender_(out, chunk);
             }
             if constexpr (CheckBounds) {
                 size += chunk_size;
