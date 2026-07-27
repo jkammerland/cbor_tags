@@ -71,9 +71,10 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
 
     const auto needed = static_cast<size_type>(length);
 
-    // A sized input can prove availability without traversing the payload. For
-    // an unsized non-contiguous input, consume in place below: the decoder is
-    // one-shot, so incomplete input is terminal rather than transactional.
+    // The caller owns the input range's extent promise; this decoder owns
+    // parsing the declared segment. A sized input can prove availability
+    // without traversing the payload. For unsized non-contiguous input,
+    // consume in place below: incomplete input is terminal, not transactional.
     if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
         if (reader.empty(data, needed - 1)) {
             return status_code::incomplete;
@@ -327,8 +328,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
 
         // Sized input can validate this in O(1). Unsized input deliberately
-        // consumes and appends in one pass below; incomplete decodes are
-        // terminal and may retain an output prefix.
+        // consumes and appends in one pass below; do not reserve from this
+        // header alone. Incomplete decodes are terminal and may retain an
+        // output prefix.
         const auto payload_size = require_bytes(bstring_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
@@ -421,6 +423,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
+        // Match definite bstr handling: only a sized input can justify a
+        // reservation. Unsized input consumes once below and retains a prefix
+        // if it reaches the end.
         const auto payload_size = require_bytes(text_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
@@ -520,6 +525,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 throw std::length_error("CBOR array length exceeds target container size_type");
             }
         }
+        // A header declares the segment to parse; it does not prove that an
+        // unsized input contains it. Keep the element loop one-pass rather
+        // than adding a validation traversal.
         detail::appender<T> appender_;
         for (auto i = length; i > 0; --i) {
             if constexpr (IsMap<T>) {
@@ -804,6 +812,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     constexpr status_code decode_definite_tstr(std::string &value, std::uint64_t text_size) {
+        // Match the generic text-string path: do not prewalk an unsized input
+        // to validate this header or justify reservation.
         const auto payload_size = require_bytes(text_size);
         if (string_target_aliases_input(value)) {
             return status_code::error;

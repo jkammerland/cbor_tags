@@ -12,6 +12,43 @@ return cbor::tags::make_decoder(input)(value);
 
 For streaming or resumable parsing, enforce the same policy against the cumulative bytes received.
 
+## Input Buffer And Segment Parsing
+
+The ownership split is deliberately simple:
+
+- **Input buffer:** caller responsibility. The caller owns its lifetime,
+  framing/admission limit, total extent, and any size/extent promise exposed by
+  the range.
+- **Parsing a given CBOR segment from that buffer:** library responsibility.
+  The decoder accepts supported input ranges that do not expose `size()`.
+
+An unsized input is not a request for a structural preflight pass. When a CBOR
+header declares a definite byte/text-string payload or container length, the
+decoder consumes that segment once. If it reaches the end before the declared
+segment is complete, it returns `status_code::incomplete`; it does not rewind
+the reader or undo already decoded destination contents.
+
+```cpp
+// `input` is a supported non-contiguous range with no size/extent operation.
+// It contains: 0x65, 'o', 'k' -- a tstr header that declares five bytes.
+std::string output{"prefix:"};
+const auto result = cbor::tags::make_decoder(input)(output);
+
+// result.error() == cbor::tags::status_code::incomplete
+// output == "prefix:ok"; the input has been consumed to its end.
+```
+
+This is a one-shot decoder contract, not a resumable or transactional one. A
+caller that needs message-size admission checks performs them at its transport
+or framing boundary. A caller that supplies a sized range is responsible for
+that range's size/extent contract.
+
+For contiguous or sized input, the decoder can confirm that a declared payload
+fits in O(1), then reserve storage where appropriate. For unsized
+non-contiguous input, it deliberately does neither a validation traversal nor
+a header-directed reservation: a CBOR length header alone never justifies
+`reserve`.
+
 ## Container And Allocation Limits
 
 Plain owning containers do not impose protocol limits. A transport-level byte
