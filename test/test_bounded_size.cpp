@@ -468,12 +468,13 @@ TEST_CASE("dynamic bounds reject definite sizes before output allocation or muta
 
         counting_memory_resource resource;
         std::pmr::vector<int>    values{&resource};
-        auto                     dec    = make_decoder(buffer);
-        auto                     result = dec(as_bounded_size(values, 0, 2));
+        const auto               allocations_before_decode = resource.allocations;
+        auto                     dec                       = make_decoder(buffer);
+        auto                     result                    = dec(as_bounded_size(values, 0, 2));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-        CHECK_EQ(resource.allocations, 0);
+        CHECK_EQ(resource.allocations, allocations_before_decode);
         CHECK(values.empty());
     }
 }
@@ -932,12 +933,13 @@ TEST_CASE("definite bounded_size rejects length before reserving") {
 
     counting_memory_resource resource;
     std::pmr::vector<int>    values{&resource};
-    auto                     dec    = make_decoder(buffer);
-    auto                     result = dec(as_bounded_size<0, 2>(values));
+    const auto               allocations_before_decode = resource.allocations;
+    auto                     dec                       = make_decoder(buffer);
+    auto                     result                    = dec(as_bounded_size<0, 2>(values));
 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-    CHECK_EQ(resource.allocations, 0);
+    CHECK_EQ(resource.allocations, allocations_before_decode);
     CHECK(values.empty());
 }
 
