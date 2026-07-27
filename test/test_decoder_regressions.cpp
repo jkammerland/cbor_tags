@@ -10,6 +10,7 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -132,6 +133,51 @@ struct SignedSizeDequeByteRange {
     [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
 };
 
+struct CountingUnsizedByteRange {
+    using value_type = std::byte;
+
+    struct iterator {
+        using value_type        = std::byte;
+        using difference_type   = std::ptrdiff_t;
+        using iterator_concept  = std::bidirectional_iterator_tag;
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        std::list<std::byte>::const_iterator current{};
+        std::size_t                          *increments{};
+
+        [[nodiscard]] const std::byte &operator*() const noexcept { return *current; }
+        [[nodiscard]] const std::byte *operator->() const noexcept { return std::addressof(*current); }
+
+        iterator &operator++() noexcept {
+            ++current;
+            ++*increments;
+            return *this;
+        }
+        iterator operator++(int) noexcept {
+            auto copy = *this;
+            ++*this;
+            return copy;
+        }
+        iterator &operator--() noexcept {
+            --current;
+            return *this;
+        }
+        iterator operator--(int) noexcept {
+            auto copy = *this;
+            --*this;
+            return copy;
+        }
+
+        friend bool operator==(const iterator &, const iterator &) = default;
+    };
+
+    std::list<std::byte> bytes;
+    mutable std::size_t  increments{};
+
+    [[nodiscard]] iterator begin() const noexcept { return {bytes.cbegin(), &increments}; }
+    [[nodiscard]] iterator end() const noexcept { return {bytes.cend(), &increments}; }
+};
+
 struct ReserveWithoutSizeByteBuffer {
     using value_type = std::byte;
     using size_type  = std::size_t;
@@ -229,6 +275,8 @@ static_assert(CborInputBuffer<CustomSizeByteBuffer>);
 static_assert(
     std::same_as<typename decltype(make_decoder(std::declval<CustomSizeByteBuffer &>()))::size_type, CustomSizeByteBuffer::size_type>);
 static_assert(CborInputBuffer<CountingSizeByteBuffer>);
+static_assert(CborInputBuffer<CountingUnsizedByteRange>);
+static_assert(!std::ranges::sized_range<const CountingUnsizedByteRange>);
 static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
@@ -668,6 +716,74 @@ TEST_CASE("decoder validates definite string payloads once") {
         // Initial-byte, payload, and alias checks may each query the input size.
         CHECK(input.size_calls <= 3);
     }
+}
+
+TEST_CASE("decoder consumes unsized string headers in one destructive traversal") {
+    SUBCASE("byte string header") {
+        CountingUnsizedByteRange input{{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}};
+        as_bstr_any              decoded{};
+        auto                     dec    = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.size, 3);
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("text string header") {
+        CountingUnsizedByteRange input{{std::byte{0x62}, std::byte{'o'}, std::byte{'k'}}};
+        as_text_any              decoded{};
+        auto                     dec    = make_decoder(input);
+
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.size, 2);
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
+TEST_CASE("decoder retains unsized string prefixes after incomplete input") {
+    SUBCASE("header skip is destructive") {
+        CountingUnsizedByteRange input{{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}}};
+        as_bstr_any              decoded{};
+        auto                     dec    = make_decoder(input);
+
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.size, 5);
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("owning text string retains the consumed payload prefix") {
+        CountingUnsizedByteRange input{{std::byte{0x65}, std::byte{'o'}, std::byte{'k'}}};
+        std::string               decoded{"prefix:"};
+        auto                      dec    = make_decoder(input);
+
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, "prefix:ok");
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
+TEST_CASE("decoder does not roll back incomplete unsized indefinite elements") {
+    CountingUnsizedByteRange input{{std::byte{0x9F}, std::byte{0x18}}};
+    std::vector<int>          decoded;
+    auto                      dec = make_decoder(input);
+
+    auto result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK(decoded.empty());
+    CHECK_EQ(input.increments, input.bytes.size());
+    CHECK(dec.tell() == input.end());
 }
 
 TEST_CASE("decoder rejects definite string targets that alias input storage") {

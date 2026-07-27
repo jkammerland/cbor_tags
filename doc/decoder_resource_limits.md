@@ -95,9 +95,12 @@ schema validation or limit how much input the application accepts.
 - `std::variant` alternatives do not currently receive their parent's PMR
   allocator context.
 
-Definite container lengths are read once and checked before `reserve`.
-Indefinite containers are decoded in one pass and can retain a successfully
-decoded prefix when a later item exceeds the bound. See
+For a sized input, definite container lengths are checked before `reserve`.
+For an unsized input, the decoder does not walk the remaining range merely to
+validate an untrusted length or justify reservation; it decodes incrementally
+and may retain a successfully decoded prefix on failure. Indefinite containers
+also decode in one pass and can retain a successfully decoded prefix when a
+later item exceeds the bound. See
 [CDDL Size-Bounded Containers](cddl_handling.md#size-bounded-containers) for
 nesting and range-wrapper examples.
 
