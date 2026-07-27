@@ -93,7 +93,7 @@ These controls are complementary:
 #include <string>
 #include <vector>
 
-#include <cbor_tags/cbor.h>
+#include <cbor_tags/cbor_decoder.h>
 
 namespace ct = cbor::tags;
 

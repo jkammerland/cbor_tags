@@ -359,6 +359,15 @@ if (matches.failed()) {
 }
 ```
 
+Scanning is incremental, not whole-buffer validation. `failed()` reports only
+work the iterator has already performed, so advance through `matches.end()`
+before treating its status as the result for the complete input segment. If a
+caller stops after the first match, malformed or deeply nested trailing data
+has not been scanned yet. The scanner currently has a fixed nesting boundary:
+depth 255 succeeds, while depth 256 returns `status_code::error`. This is a
+scanner-specific terminal limit, not a core decoder rollback or resumability
+guarantee.
+
 Runtime filters are also supported:
 
 ```cpp

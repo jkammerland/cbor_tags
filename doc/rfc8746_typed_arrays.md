@@ -147,6 +147,11 @@ for (double value : view.values()) {
 }
 ```
 
+`typed_array_view<T>` borrows the encoded payload from the decoder input. Keep
+that input alive and do not mutate, reallocate, or otherwise invalidate it while
+the view is used. Decode into `typed_array<T>` for owning storage, or call
+`view.copy_values()` before releasing the input when values must outlive it.
+
 For big-endian payload views, use `typed_array_view_be<T>`:
 
 ```cpp
@@ -246,9 +251,10 @@ The structural wrappers are shape wrappers, not full semantic validators.
 `homogeneous_array<T>` requires `T` to encode as a CBOR array, and
 `multi_dimensional_array<Dimensions, T>` requires unsigned-integer array
 dimensions plus an array, typed-array, or homogeneous-array payload.
-Multi-dimensional encode/decode rejects zero dimensions and checks
+Multi-dimensional encode/decode rejects zero-valued dimensions and checks
 dimension/product consistency when the payload element count is available from
-the C++ type.
+the C++ type. An empty dimension sequence is accepted as rank zero when the
+payload element count is one.
 
 The generated scalar typed-array CDDL uses the RFC data-model spelling
 `#6.N(bstr)`. The decoder accepts definite-length byte strings for typed-array

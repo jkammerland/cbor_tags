@@ -84,6 +84,12 @@ if (matches.failed()) {
 }
 ```
 
+`find_tags` scans incrementally. Advance to `matches.end()` before treating
+`failed()` as the status for the complete input segment; stopping after the
+first match leaves later malformed or deeply nested data unscanned. Its current
+fixed nesting boundary and terminal scanner contract are documented under
+[Lazy Tag Scanning](experimental_ranges.md#lazy-tag-scanning).
+
 The payload decoder object also accepts the wrapper directly:
 
 ```cpp

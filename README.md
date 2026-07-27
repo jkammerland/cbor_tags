@@ -27,7 +27,6 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
   - [Version Handling with Variants](#version-handling-with-variants)
   - [Manual Tag Parsing](#manual-tag-parsing)
   - [Private class members or explicit overloading](#private-class-members-or-explicit-overloading)
-- [✨ Advanced Features](#-advanced-features)
 - [🎨 Custom Tag Handling](#-custom-tag-handling)
 - [🔄 Automatic Reflection](#-automatic-reflection)
 - [🏷️ Annotating buffers and Diagnostic notation](#️-annotating-cbor-buffers)
@@ -40,7 +39,6 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [Project Status](#project-status)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
-- [🌟 Practical Use Cases](#-practical-use-cases)
 - [ Testing Performance and Benchmarks](#testing-performance-and-benchmarks)
 - [📄 License](#-license)
 
@@ -326,9 +324,9 @@ int main() {
     // Encoding
     auto data          = std::vector<std::byte>{};
     auto enc           = make_encoder(data);
-    auto status = enc(v2::UserProfile{.name = "John Doe", .age = 30, .role = roles::admin});
-    if (!status) {
-        std::cerr << "Encoding status: " << status_message(status.error()) << std::endl;
+    auto encode_status = enc(v2::UserProfile{.name = "John Doe", .age = 30, .role = roles::admin});
+    if (!encode_status) {
+        std::cerr << "Encoding status: " << status_message(encode_status.error()) << std::endl;
         return 1;
     }
     // ...
@@ -336,10 +334,10 @@ int main() {
     // Decoding - supporting multiple versions
     using variant = std::variant<v1::UserProfile, v2::UserProfile>;
     variant user;
-    auto    dec = make_decoder(data);
-    auto    status = dec(user);
-    if (!status) {
-        std::cerr << "Decoding status: " << status_message(status.error()) << std::endl;
+    auto dec           = make_decoder(data);
+    auto decode_status = dec(user);
+    if (!decode_status) {
+        std::cerr << "Decoding status: " << status_message(decode_status.error()) << std::endl;
         return 1;
     }
     // should now hold a v2::UserProfile
@@ -432,8 +430,13 @@ Should the need arise for overloading, or encoding private members, you have two
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include <vector>
+
+#include <cassert>
+#include <cstdint>
+#include <iostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace cbor::tags;
 
@@ -481,7 +484,7 @@ int main() {
     PrivateDataClass obj{123, "Private Data"};
     
     // Encode the object
-    std::vector<uint8_t> buffer;
+    std::vector<std::uint8_t> buffer;
     auto                 enc = make_encoder(buffer);
     { [[maybe_unused]] auto _ = enc(obj); }
 
@@ -502,8 +505,13 @@ Method 2 is to use an overload of encode or decode as free functions. This appro
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include <vector>
+
+#include <cassert>
+#include <cstdint>
+#include <iostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace cbor::tags;
 
@@ -567,7 +575,7 @@ int main() {
     ExternalClass obj{456, "External Data"};
     
     // Encode the object
-    std::vector<uint8_t> buffer;
+    std::vector<std::uint8_t> buffer;
     auto enc = make_encoder(buffer);
     auto result = enc(obj);
     
@@ -1111,14 +1119,15 @@ ctest --test-dir build/interop-tests --output-on-failure
 ```
 
 The benchmarks can be run by configuring with `-DCBOR_TAGS_BUILD_BENCHMARKS=ON`.
-This creates targets for the encoder, decoder, ranges, and the
-`custom_codec_1` comparison suite.
+This creates targets for the encoder, decoder, ranges, RFC 8746 typed arrays,
+and the `custom_codec_1` comparison suite.
 
 ```bash
 cmake -S . -B build-bench -G Ninja -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_BENCHMARKS=ON
 cmake --build build-bench --target bench_encoder
 cmake --build build-bench --target bench_decoder
 cmake --build build-bench --target bench_ranges
+cmake --build build-bench --target bench_typed_arrays
 cmake --build build-bench --target bench_custom_codec_1
 ./build-bench/benchmarks/custom_codec_1/bench_custom_codec_1
 ```
