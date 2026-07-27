@@ -145,7 +145,7 @@ struct return_encoded_item_view {};
 using default_wrapping                = Option<detail::wrap_groups>;
 using strict_integer_decoding         = Option<detail::strict_integer_decode>;
 using assume_no_input_output_aliasing = Option<detail::assume_no_input_output_aliasing>;
-using return_encoded_item_view = Option<detail::return_encoded_item_view>;
+using return_encoded_item_view        = Option<detail::return_encoded_item_view>;
 
 template <typename V1, typename V2, typename T> struct values_equal : std::bool_constant<std::is_same_v<V1, V2>> {
     using type = T;
@@ -315,7 +315,7 @@ template <typename... T> struct Options {
 using default_options                    = Options<default_expected, default_wrapping>;
 using strict_integer_decoder_options     = Options<default_expected, default_wrapping, strict_integer_decoding>;
 using unchecked_aliasing_decoder_options = Options<default_expected, default_wrapping, assume_no_input_output_aliasing>;
-using encoded_item_view_decoder_options = Options<default_expected, default_wrapping, return_encoded_item_view>;
+using encoded_item_view_decoder_options  = Options<default_expected, default_wrapping, return_encoded_item_view>;
 
 namespace detail {
 template <typename T>
