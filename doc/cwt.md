@@ -23,8 +23,9 @@ matches RFC 8949's treatment of duplicate map keys as invalid CBOR.
 
 Unknown integer claims are consumed but not retained. Integer `NumericDate`
 values must fit in `std::int64_t`; values outside that range are rejected rather
-than narrowed. Failed claim-map validation leaves the destination `claims_set`
-unchanged.
+than narrowed. Floating `NumericDate` values must be finite: NaN and infinities
+are rejected during encoding and decoding so expiration checks cannot fail open.
+Failed claim-map validation leaves the destination `claims_set` unchanged.
 
 See [RFC 8392](https://www.rfc-editor.org/rfc/rfc8392.html) for CWT claims and
 [RFC 8949 Section 5.3.1](https://www.rfc-editor.org/rfc/rfc8949.html#section-5.3.1)
@@ -163,6 +164,13 @@ if (message) {
 signature entries can be created with `sign_signature(...)` or appended with
 `add_signature(...)`. For `COSE_Sign`, `alg` may be protected at the body or
 signature level, but `alg` in either unprotected header is rejected.
+`COSE_Sign` requires at least one signature during both encoding and decoding.
+
+The COSE value types stage a complete decode in fresh storage before replacing
+the destination. A malformed or incomplete COSE value therefore leaves an
+existing `cose_signature`, `cose_sign`, `cose_sign1`, or `sig_structure`
+unchanged; this is a semantic CWT/COSE guarantee, not a general core-decoder
+rollback guarantee.
 
 ## Custom Backend Example
 
