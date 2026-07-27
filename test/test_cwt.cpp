@@ -99,7 +99,7 @@ struct signature_presence_es256_backend {
 
     static expected<void, status_code> verify(void *, std::span<const std::byte>, std::span<const std::byte> signature) {
         if (signature.empty()) {
-            return unexpected<status_code>{status_code::error};
+            return cbor::tags::unexpected<status_code>{status_code::error};
         }
         return {};
     }
