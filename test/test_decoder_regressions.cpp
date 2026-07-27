@@ -798,6 +798,36 @@ TEST_CASE("decoder consumes unsized indefinite string chunks in one traversal") 
     }
 }
 
+TEST_CASE("decoder retains unsized indefinite string chunk prefixes after incomplete input") {
+    SUBCASE("byte string") {
+        CountingUnsizedByteRange input{{std::byte{0x5F}, std::byte{0x43}, std::byte{0x01}, std::byte{0x02}}};
+        std::vector<std::byte>   decoded{std::byte{0x99}};
+        auto                     dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x99}, std::byte{0x01}, std::byte{0x02}}));
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+
+    SUBCASE("text string") {
+        CountingUnsizedByteRange input{{std::byte{0x7F}, std::byte{0x62}, std::byte{'o'}}};
+        std::string              decoded{"prefix:"};
+        auto                     dec = make_decoder(input);
+
+        const auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded, "prefix:o");
+        CHECK_EQ(input.increments, input.bytes.size());
+        CHECK(dec.tell() == input.end());
+    }
+}
+
 TEST_CASE("decoder reserves definite containers only after a size confirmation") {
     SUBCASE("confirmed sized array keeps the reserve fast path") {
         const std::vector<std::byte> input{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
