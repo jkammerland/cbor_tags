@@ -19,6 +19,7 @@
 #include <new>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1159,6 +1160,38 @@ TEST_CASE("compact tagged rejects malformed compact lengths and variant indexes"
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::no_match_in_variant_on_buffer);
     }
+}
+
+TEST_CASE("compact tagged permits zero-width values in fixed-cardinality ranges") {
+    const std::array<std::nullptr_t, 3> values{nullptr, nullptr, nullptr};
+
+    std::vector<std::byte> compact;
+    auto                   enc = make_encoder<custom_codec_1>(compact);
+    REQUIRE(enc(as_custom_codec_1(static_tag<20>{}, values)));
+    CHECK_EQ(to_hex(compact), "d440");
+
+    std::array<std::nullptr_t, 3> decoded{nullptr, nullptr, nullptr};
+    auto                          dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(dec(as_custom_codec_1(static_tag<20>{}, decoded)));
+    CHECK(decoded == values);
+
+    std::array<std::nullptr_t, 2> span_values{nullptr, nullptr};
+    std::span<std::nullptr_t, 2>  fixed_span{span_values};
+    compact.clear();
+    REQUIRE(enc(as_custom_codec_1(static_tag<21>{}, fixed_span)));
+    CHECK_EQ(to_hex(compact), "d54102");
+
+    std::array<std::nullptr_t, 2> span_decoded{nullptr, nullptr};
+    std::span<std::nullptr_t, 2>  decoded_span{span_decoded};
+    auto                          span_dec = make_decoder<custom_codec_1>(compact);
+    REQUIRE(span_dec(as_custom_codec_1(static_tag<21>{}, decoded_span)));
+    CHECK(std::ranges::equal(decoded_span, fixed_span));
+
+    const std::array<std::nullptr_t, 2>      const_span_values{nullptr, nullptr};
+    const std::span<const std::nullptr_t, 2> const_fixed_span{const_span_values};
+    compact.clear();
+    REQUIRE(enc(as_custom_codec_1(static_tag<22>{}, const_fixed_span)));
+    CHECK_EQ(to_hex(compact), "d64102");
 }
 
 TEST_CASE("compact tagged malformed containers leave destinations unchanged") {

@@ -263,8 +263,16 @@ TEST_SUITE("Decoding the wrong thing") {
         check_decode_out_of_memory<std::pmr::vector<int>>(data);
     }
 
-    TEST_CASE("Decode bounded pmr array length_error returns out_of_memory") {
-        check_decode_out_of_memory<std::pmr::vector<int>>(uint64_max_array_header());
+    TEST_CASE("Decode truncated max-length array returns incomplete without allocating") {
+        throwing_memory_resource resource;
+        std::pmr::vector<int>    decoded{&resource};
+        const auto               data = uint64_max_array_header();
+
+        auto dec    = make_decoder(data);
+        auto result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
     }
 
     TEST_CASE("Decode pmr array append failure returns out_of_memory") {

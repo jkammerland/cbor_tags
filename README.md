@@ -151,9 +151,10 @@ complete value and does not make the decoder resumable. Definite strings still
 validate their declared payload before forming a view, which prevents
 out-of-bounds access and attacker-controlled allocation attempts.
 
-Mutable contiguous destinations whose exposed storage overlaps the decoder input
-are rejected with `status_code::error`; use separate input and output storage.
-The runtime check recognizes only direct/common contiguous aliases: input range
+Mutable owning text- and byte-string destinations whose exposed contiguous
+storage overlaps the decoder input are rejected with `status_code::error`; use
+separate input and output storage. Other mutable output types must not alias
+the decoder input: the runtime check is not general alias analysis. Input range
 adaptors and views that hide shared storage are unsupported and must also use
 separate storage. Fixed-size destinations and borrowed views retain their
 exact-size or assignment semantics. Advanced callers that can guarantee
@@ -755,10 +756,10 @@ narrow to show data without truncation throw `std::runtime_error`. Set
 Invalid UTF-8 text payloads render as `non-utf8(N)`, where `N` is byte length.
 
 The same visualization helpers are available from the optional CLI tool. Build
-it with `-DCBOR_TAGS_BUILD_TOOLS=ON`:
+it with `-DCBOR_TAGS_BUILD_CLI=ON`:
 
 ```bash
-cmake -B build -G Ninja -DCBOR_TAGS_BUILD_TOOLS=ON
+cmake -B build -G Ninja -DCBOR_TAGS_BUILD_CLI=ON
 cmake --build build --target cbor_tags_cli
 ```
 

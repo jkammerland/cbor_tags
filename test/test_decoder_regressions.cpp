@@ -10,6 +10,7 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -18,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -146,6 +148,37 @@ struct ReserveWithoutSizeByteBuffer {
     void               push_back(value_type value) { bytes.push_back(value); }
 };
 
+struct ReservationProbeRange {
+    using value_type = std::uint8_t;
+    using size_type  = std::size_t;
+
+    ReservationProbeRange() {}
+
+    std::vector<value_type> values;
+    size_type               reserve_calls{};
+
+    [[nodiscard]] auto begin() noexcept { return values.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return values.begin(); }
+    [[nodiscard]] auto end() noexcept { return values.end(); }
+    [[nodiscard]] auto end() const noexcept { return values.end(); }
+    void               reserve(size_type) { ++reserve_calls; }
+    void               push_back(value_type value) { values.push_back(value); }
+};
+
+struct ReservationProbeMap : std::unordered_map<int, int> {
+    using base_type = std::unordered_map<int, int>;
+    using size_type = typename base_type::size_type;
+    using base_type::base_type;
+
+    size_type reserve_calls{};
+    size_type last_reserve{};
+
+    void reserve(size_type count) {
+        ++reserve_calls;
+        last_reserve = count;
+    }
+};
+
 struct ThrowingReservableByteBuffer {
     using value_type = std::byte;
     using size_type  = std::size_t;
@@ -236,6 +269,7 @@ static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSiz
 static_assert(IsBinaryString<ReserveWithoutSizeByteBuffer>);
 static_assert(HasReserve<ReserveWithoutSizeByteBuffer>);
 static_assert(!detail::AppendReservable<ReserveWithoutSizeByteBuffer>);
+static_assert(IsMap<ReservationProbeMap>);
 static_assert(IsBinaryString<ThrowingReservableByteBuffer>);
 static_assert(detail::AppendReservable<ThrowingReservableByteBuffer>);
 static_assert(IsBinaryString<ExternalByteBuffer>);
@@ -1161,6 +1195,82 @@ TEST_CASE("decoder should decode definite containers without requiring indefinit
     CHECK_EQ(non_default_vector[0], 7);
     CHECK_EQ(non_default_vector[1], 8);
     CHECK_EQ(non_default_vector.get_allocator().tag, 3);
+}
+
+TEST_CASE("decoder rejects truncated definite containers before reservation") {
+    // array(1,073,741,824) with no element payload
+    const std::vector<std::byte> buffer{std::byte{0x9A}, std::byte{0x40}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+
+    ReservationProbeRange decoded;
+    auto                  result = make_decoder(buffer)(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.reserve_calls, 0U);
+    CHECK(decoded.values.empty());
+}
+
+TEST_CASE("decoder reserves sized maps only when each pair has a payload lower bound") {
+    SUBCASE("complete map retains the reserve fast path") {
+        const std::vector<std::byte> input{
+            std::byte{0xA2}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
+        };
+        ReservationProbeMap decoded;
+
+        auto result = make_decoder(input)(decoded);
+
+        REQUIRE(result);
+        CHECK_EQ(decoded.reserve_calls, 1U);
+        CHECK_EQ(decoded.last_reserve, 2U);
+        CHECK_EQ(decoded.size(), 2U);
+        CHECK_EQ(decoded.at(1), 2);
+        CHECK_EQ(decoded.at(3), 4);
+    }
+
+    SUBCASE("truncated map cannot force a reserve") {
+        const std::vector<std::byte> input{
+            std::byte{0xA2},
+            std::byte{0x01},
+            std::byte{0x02},
+            std::byte{0x03},
+        };
+        ReservationProbeMap decoded;
+
+        auto result = make_decoder(input)(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(decoded.reserve_calls, 0U);
+        CHECK(decoded.empty());
+    }
+}
+
+TEST_CASE("decoder skips reservation for unsized input ranges") {
+    const std::list<std::byte> storage{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
+    auto                       input = std::ranges::subrange(storage.cbegin(), storage.cend());
+    static_assert(!std::ranges::sized_range<decltype(input)>);
+
+    ReservationProbeRange decoded;
+    auto                  result = make_decoder(input)(decoded);
+
+    REQUIRE(result);
+    CHECK_EQ(decoded.reserve_calls, 0U);
+    CHECK_EQ(decoded.values, (std::vector<std::uint8_t>{1U, 2U}));
+}
+
+TEST_CASE("decoder rejects truncated unsized definite containers without reservation") {
+    // array(1,073,741,824) with no element payload
+    const std::list<std::byte> storage{std::byte{0x9A}, std::byte{0x40}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    auto                       input = std::ranges::subrange(storage.cbegin(), storage.cend());
+    static_assert(!std::ranges::sized_range<decltype(input)>);
+
+    ReservationProbeRange decoded;
+    auto                  result = make_decoder(input)(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    CHECK_EQ(decoded.reserve_calls, 0U);
+    CHECK(decoded.values.empty());
 }
 
 TEST_CASE("decoder should decode indefinite containers without staging through assignable temporaries") {
