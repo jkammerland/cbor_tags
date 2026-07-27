@@ -14,6 +14,7 @@
 #include <doctest/doctest.h>
 #include <iterator>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory_resource>
 #include <new>
@@ -978,6 +979,19 @@ TEST_CASE("compact tagged consumed-initial-byte decode reports malformed envelop
         status_code status{status_code::success};
         CHECK_NOTHROW(status = dec.decode(as_custom_codec_1(static_tag<1>{}, decoded), major, additional_info));
         CHECK(status == status_code::incomplete);
+    }
+    {
+        const auto                 compact_bytes = to_bytes("d900");
+        const std::list<std::byte> compact{compact_bytes.begin(), compact_bytes.end()};
+        const auto                 input = std::ranges::subrange(compact.cbegin(), compact.cend());
+        std::uint16_t              decoded{};
+        auto                       dec = make_decoder<custom_codec_1>(input);
+        auto [major, additional_info]  = dec.read_initial_byte();
+        status_code status{status_code::success};
+
+        CHECK_NOTHROW(status = dec.decode(as_custom_codec_1(static_tag<1>{}, decoded), major, additional_info));
+        CHECK(status == status_code::incomplete);
+        CHECK(dec.tell() == input.end());
     }
 }
 

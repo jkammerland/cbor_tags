@@ -151,7 +151,9 @@ complete value and does not make the decoder resumable. On an unsized input,
 the core decoder consumes incrementally rather than first walking a declared
 payload length: completed elements and string bytes may remain in the
 destination, and no reservation is made solely from an unverified header. A
-sized input may validate remaining bytes in constant time before reserving.
+sized input may validate remaining bytes in constant time before reserving;
+for definite arrays/maps this is a one-byte-per-item lower bound (two bytes per
+map pair), not a full structural validation.
 Definite views are formed only after their complete payload is available, which
 prevents out-of-bounds views without adding a second traversal.
 

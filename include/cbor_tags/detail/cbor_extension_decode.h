@@ -35,9 +35,7 @@ template <typename Decoder>
 
     try {
         value = dec.decode_unsigned(additional_info);
-    } catch (const parse_incomplete_exception &) {
-        return status_code::incomplete;
-    }
+    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
     return status_code::success;
 }
 
