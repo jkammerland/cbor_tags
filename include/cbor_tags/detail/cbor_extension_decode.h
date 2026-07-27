@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <ranges>
 #include <utility>
 
 namespace cbor::tags::detail {
@@ -57,10 +58,40 @@ template <typename Decoder> [[nodiscard]] constexpr status_code require_extensio
             return status_code::error;
         }
     }
-    if (byte_count > 0U && dec.reader_.empty(dec.data_, static_cast<typename Decoder::size_type>(byte_count - 1U))) {
-        return status_code::incomplete;
+    if constexpr (IsContiguous<typename Decoder::input_buffer_type> ||
+                  std::ranges::sized_range<const typename Decoder::input_buffer_type>) {
+        if (byte_count > 0U && dec.reader_.empty(dec.data_, static_cast<typename Decoder::size_type>(byte_count - 1U))) {
+            return status_code::incomplete;
+        }
     }
     return status_code::success;
+}
+
+// The core decoder has the one-pass behavior for unsized non-contiguous byte
+// strings. Extensions consume an already parsed bstr payload through these
+// helpers so they do not reintroduce a look-ahead scan.
+template <typename Decoder, typename Fn>
+[[nodiscard]] constexpr status_code consume_extension_bstring_payload(Decoder &dec, std::uint64_t byte_count, Fn &&consume) {
+    const auto status = require_extension_payload_bytes(dec, byte_count);
+    if (status != status_code::success) {
+        return status;
+    }
+
+    try {
+        return std::forward<Fn>(consume)(dec.decode_bstring_payload(byte_count));
+    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
+}
+
+template <typename Decoder, typename Output>
+[[nodiscard]] constexpr status_code decode_extension_bstring_payload_into(Decoder &dec, std::uint64_t byte_count, Output &output) {
+    const auto status = require_extension_payload_bytes(dec, byte_count);
+    if (status != status_code::success) {
+        return status;
+    }
+
+    try {
+        return dec.decode_definite_bstr(output, byte_count);
+    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
 }
 
 [[nodiscard]] constexpr status_code match_expected_tag(std::uint64_t expected_tag, std::uint64_t actual_tag) {

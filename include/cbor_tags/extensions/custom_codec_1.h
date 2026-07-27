@@ -209,21 +209,22 @@ template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_ba
         if (status != status_code::success) {
             return status;
         }
-        status = cbor_detail::require_extension_payload_bytes(dec, payload_size);
-        if (status != status_code::success) {
-            return status;
-        }
-
         using payload_type = decltype(std::declval<Self &>().decode_bstring_payload(std::declval<std::uint64_t>()));
         if constexpr (!std::ranges::contiguous_range<payload_type> && codec_detail::has_borrowed_decode_refs_v<T>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         }
 
-        auto payload = dec.decode_bstring_payload(payload_size);
-        if constexpr (std::ranges::contiguous_range<decltype(payload)>) {
-            return codec_detail::decode_payload(std::span<const std::byte>(std::ranges::data(payload), std::ranges::size(payload)), value);
+        if constexpr (std::ranges::contiguous_range<payload_type>) {
+            return cbor_detail::consume_extension_bstring_payload(dec, payload_size, [&](auto &&payload) {
+                return codec_detail::decode_payload(std::span<const std::byte>(std::ranges::data(payload), std::ranges::size(payload)),
+                                                    value);
+            });
         } else {
-            std::vector<std::byte> payload_bytes(payload.begin(), payload.end());
+            std::vector<std::byte> payload_bytes;
+            status = cbor_detail::decode_extension_bstring_payload_into(dec, payload_size, payload_bytes);
+            if (status != status_code::success) {
+                return status;
+            }
             return codec_detail::decode_payload(std::span<const std::byte>(payload_bytes.data(), payload_bytes.size()), value);
         }
     }
