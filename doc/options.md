@@ -179,6 +179,9 @@ all its arguments. A call that intentionally decodes only a tag or container
 header returns that consumed prefix. Typed decoding remains single-pass and
 does not pre-scan the input to find a structural item boundary.
 
+A call that deliberately consumes no input returns an empty view and leaves the
+decoder position unchanged.
+
 Decoding directly into `raw_encoded_item_view`, `raw_encoded_array_view`, or
 `raw_encoded_map_view` is different: no destination type drives consumption, so
 the decoder structurally parses one complete item to locate the end of the raw
