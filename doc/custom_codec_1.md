@@ -68,6 +68,8 @@ auto result = enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
 `find_tags` matches the outer CBOR tag and exposes only the tag payload. For
 `custom_codec_1` values, that payload is the definite-length byte string, not the
 whole `#6.<tag>(bstr)` envelope. Decode it with `as_custom_codec_1_payload`.
+The payload decoder object also accepts the wrapper directly, so either form can
+decode the current match:
 
 ```cpp
 auto matches = find_tags<1001>(out);
@@ -79,20 +81,25 @@ if (it != matches.end()) {
     auto    ok          = it->decode<cc1::custom_codec_1>(payload_ref);
 }
 
-if (matches.failed()) {
-    auto status = matches.status();
-}
-```
-
-The payload decoder object also accepts the wrapper directly:
-
-```cpp
 if (it != matches.end()) {
     Message decoded_from_payload{};
     auto    payload_decoder = it->make_decoder<cc1::custom_codec_1>();
     auto    ok = payload_decoder(cc1::as_custom_codec_1_payload(decoded_from_payload));
 }
+
+// Exhaust the scanner before using failed() for the complete input segment.
+for (; it != matches.end(); ++it) {}
+
+if (matches.failed()) {
+    auto status = matches.status();
+}
 ```
+
+`find_tags` scans incrementally. Advance to `matches.end()` before treating
+`failed()` as the status for the complete input segment; stopping after the
+first match leaves later malformed or deeply nested data unscanned. Its current
+fixed nesting boundary and terminal scanner contract are documented under
+[Lazy Tag Scanning](experimental_ranges.md#lazy-tag-scanning).
 
 Use `as_custom_codec_1(...)` for full buffers that still contain the outer tag. Use
 `as_custom_codec_1_payload(...)` only when the decoder starts at the tag payload bstr,

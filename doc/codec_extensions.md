@@ -117,6 +117,8 @@ my_root<T> as_my_root(my_session&, const T&&) = delete;
 
 Current public extension headers:
 
+- `cbor_tags/extensions/custom_codec_1.h`: schema-bound `tag(bstr)` payload
+  codec. See [Custom Codec 1](custom_codec_1.md).
 - `cbor_tags/extensions/smart_ptr.h`: nullable `unique_ptr`/`shared_ptr` values
   and shared `shared_ptr` identity sessions.
 - `cbor_tags/extensions/std_expected.h`: opt-in `std::expected` return type
@@ -125,3 +127,5 @@ Current public extension headers:
   See [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
 - `cbor_tags/extensions/cbor_visualization.h`: CDDL, annotation, and diagnostic
   rendering helpers.
+- `cbor_tags/extensions/cddl_traits.h`: traits for describing custom extension
+  types in generated CDDL.
