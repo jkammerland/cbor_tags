@@ -433,7 +433,6 @@ Should the need arise for overloading, or encoding private members, you have two
 
 #include <cassert>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
