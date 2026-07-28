@@ -44,6 +44,8 @@ static_assert(HasEncodedSpan<encoded_byte_view>);
 
 using list_encoded_byte_view  = encoded_byte_view_for<std::list<std::byte>>;
 using list_encoded_array_view = encoded_array_view_for<std::list<std::byte>>;
+using unsized_list_byte_range =
+    std::ranges::subrange<std::list<std::byte>::const_iterator, std::list<std::byte>::const_iterator, std::ranges::subrange_kind::unsized>;
 
 static_assert(std::ranges::view<list_encoded_byte_view>);
 static_assert(std::ranges::borrowed_range<list_encoded_byte_view>);
@@ -55,6 +57,9 @@ static_assert(CanMakeBstrRange<list_encoded_byte_view>);
 static_assert(IsEncodedArrayView<list_encoded_array_view>);
 static_assert(!HasEncodedSpan<list_encoded_byte_view>);
 static_assert(!HasEncodedSpan<list_encoded_array_view>);
+static_assert(CborInputBuffer<unsized_list_byte_range>);
+static_assert(std::ranges::bidirectional_range<const unsized_list_byte_range>);
+static_assert(!std::ranges::sized_range<const unsized_list_byte_range>);
 
 using default_decoder_type = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
 using returning_decoder_type =
@@ -63,6 +68,14 @@ using returning_decoder_type =
 static_assert(std::same_as<decltype(std::declval<default_decoder_type &>()(std::declval<std::uint64_t &>())), expected<void, status_code>>);
 static_assert(std::same_as<decltype(std::declval<returning_decoder_type &>()(std::declval<std::uint64_t &>())),
                            expected<typename returning_decoder_type::raw_encoded_item_view, status_code>>);
+
+struct zero_consumption_value {};
+
+template <typename Self> struct zero_consumption_decoder : cbor_decoder_mixin_base<Self> {
+    using cbor_decoder_mixin_base<Self>::decode;
+
+    constexpr status_code decode(zero_consumption_value &) { return status_code::success; }
+};
 
 template <typename RawView> std::vector<std::byte> reencode(const RawView &view) {
     std::vector<std::byte> output;
@@ -220,6 +233,38 @@ TEST_CASE("encoded item view decoder option returns all bytes consumed by a vari
     CHECK_EQ(dec.tell(), bytes.end());
 }
 
+TEST_CASE("encoded item view decoder option returns an empty view without input consumption") {
+    {
+        std::vector<std::byte> bytes;
+        auto                   dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+        auto result = dec();
+
+        REQUIRE(result);
+        CHECK_EQ(result->size(), 0U);
+        CHECK_EQ(dec.tell(), bytes.end());
+    }
+
+    {
+        auto bytes = to_bytes("f5");
+        auto dec   = make_decoder_with_options<encoded_item_view_decoder_options, zero_consumption_decoder>(bytes);
+
+        zero_consumption_value value;
+        auto                   result = dec(value);
+
+        REQUIRE(result);
+        CHECK_EQ(result->size(), 0U);
+        CHECK_EQ(dec.tell(), bytes.begin());
+
+        bool trailing{};
+        auto trailing_result = dec(trailing);
+
+        REQUIRE(trailing_result);
+        CHECK(trailing);
+        CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+    }
+}
+
 TEST_CASE("encoded item view decoder option borrows non-contiguous input") {
     auto                 contiguous = to_bytes("83010203f5");
     std::list<std::byte> bytes(contiguous.begin(), contiguous.end());
@@ -240,6 +285,34 @@ TEST_CASE("encoded item view decoder option borrows non-contiguous input") {
     CHECK_EQ(dec.tell(), bytes.end());
 
     auto it = bytes.begin();
+    ++it;
+    *it = std::byte{0x0A};
+
+    CHECK_EQ(to_hex(result->bytes()), "830a0203");
+}
+
+TEST_CASE("encoded item view decoder option borrows unsized non-contiguous input") {
+    auto                    contiguous = to_bytes("83010203f5");
+    std::list<std::byte>    storage(contiguous.begin(), contiguous.end());
+    unsized_list_byte_range bytes{storage.cbegin(), storage.cend()};
+    auto                    dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+
+    std::vector<std::uint64_t> values;
+    auto                       result = dec(values);
+
+    REQUIRE(result);
+    CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
+    CHECK_EQ(to_hex(result->bytes()), "83010203");
+
+    bool trailing{};
+    auto trailing_result = dec(trailing);
+
+    REQUIRE(trailing_result);
+    CHECK(trailing);
+    CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+    CHECK_EQ(dec.tell(), bytes.end());
+
+    auto it = storage.begin();
     ++it;
     *it = std::byte{0x0A};
 

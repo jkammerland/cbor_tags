@@ -1699,10 +1699,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename... T> constexpr expected_type decode_with_encoded_item_view(T &&...args) {
-        if (reader_.empty(data_)) {
-            return unexpected<status_code>(status_code::incomplete);
-        }
-
         const auto start        = tell();
         const auto start_offset = current_offset();
 
