@@ -12,6 +12,52 @@ return cbor::tags::make_decoder(input)(value);
 
 For streaming or resumable parsing, enforce the same policy against the cumulative bytes received.
 
+## Decoder Contract
+
+The core CBOR decoder accumulates into mutable owning sequence destinations.
+Arrays, maps, byte strings, and text strings are appended to or inserted into;
+they are not cleared first. Initialize a destination empty when replacement
+semantics are wanted. Codec extensions can define a different destination
+contract.
+
+```cpp
+std::string source = "payload";
+std::vector<std::byte> buffer;
+auto enc = make_encoder(buffer);
+enc(source);
+
+std::string destination = "prefix:";
+auto dec = make_decoder(buffer);
+dec(destination);
+assert(destination == "prefix:payload");
+```
+
+A failed encoder or decoder call is terminal for that instance. Its destination
+or output buffer may be partially modified; discard it after failure unless its
+type documents a stronger guarantee. In particular, `status_code::incomplete`
+means that the fixed input does not contain a complete value and does not make
+the decoder resumable. The caller owns the input buffer; the next section
+defines the input and segment contract.
+
+Definite borrowed views are formed only after their complete payload is
+available, preventing out-of-bounds views without a second traversal.
+
+Mutable owning text- and byte-string destinations whose exposed contiguous
+storage overlaps the decoder input are rejected with `status_code::error`; use
+separate input and output storage. Other mutable output types must not alias
+the decoder input: the runtime check is not general alias analysis. Input range
+adaptors and views that hide shared storage are unsupported and must also use
+separate storage. Fixed-size destinations and borrowed views retain their
+exact-size or assignment semantics. Advanced callers that can guarantee
+separate storage can disable the runtime check through
+`unchecked_aliasing_decoder_options`; see [encoder and decoder
+options](options.md#unchecked-inputoutput-aliasing).
+
+While encoding, input values must not alias an appendable output buffer. A fixed
+output span may share its backing allocation with a source span only when their
+byte regions do not overlap; see [encoder source/output
+aliasing](options.md#encoder-sourceoutput-aliasing).
+
 ## Input Buffer And Segment Parsing
 
 The ownership split is deliberately simple:
@@ -67,7 +113,7 @@ lazy-tag discovery), not a generic extension escape hatch. Such a feature
 needs its own documentation and tests, returns an explicit terminal status,
 and does not make prewalking or rollback valid in the core decoder.
 
-## Container And Allocation Limits
+## Bounded Objects, PMR, And CDDL
 
 Plain owning containers do not impose protocol limits. A transport-level byte
 limit does not express per-field limits for arrays, maps, text strings, or byte
@@ -132,6 +178,40 @@ std::pmr::vector<std::optional<std::pmr::string>>
 The arena must use a bounded upstream resource such as
 `std::pmr::null_memory_resource()`. PMR contains allocations; it does not perform
 schema validation or limit how much input the application accepts.
+
+### CDDL For Bounded Objects
+
+A PMR allocator is runtime state, so it does not change the CBOR or CDDL shape.
+When a bound belongs to the protocol, put a static `bounded_size` member in the
+object type. The same type then validates the field and describes it in CDDL:
+
+```cpp
+#include <cbor_tags/extensions/cbor_visualization.h>
+
+#include <cstdint>
+#include <memory_resource>
+#include <string>
+#include <vector>
+
+namespace ct = cbor::tags;
+
+struct bounded_request {
+    ct::bounded_size<std::pmr::string, 1, 64> name;
+    ct::bounded_size<std::pmr::vector<std::uint64_t>, 0, 8> samples;
+};
+
+fmt::memory_buffer schema;
+ct::cddl_schema_to<bounded_request>(
+    schema,
+    {.row_options = {.format_by_rows = false}});
+// bounded_request = [tstr .size (1..64), [0*8 uint]]
+```
+
+Use `dynamic_bounded_size` or `as_bounded_size(value, min, max)` when limits
+come from application configuration. Those limits are instance data, so they
+cannot generate type-based CDDL. See [CDDL Size-Bounded
+Containers](cddl_handling.md#size-bounded-containers) for nested fields and
+range-wrapper examples.
 
 ### Size-Bound Behavior
 
