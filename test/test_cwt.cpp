@@ -367,6 +367,29 @@ TEST_CASE("CWT claims reject duplicate text labels without replacing the destina
     }
 }
 
+TEST_CASE("CWT claims decode many unique unknown text labels") {
+    constexpr std::uint64_t label_count = 256;
+
+    std::vector<std::byte> encoded;
+    auto                   enc = make_encoder(encoded);
+    REQUIRE(enc(as_map{label_count + 1U}));
+    for (std::uint64_t index = 0; index < label_count; ++index) {
+        auto       label      = std::string{"private-"} + std::string(128U, 'x');
+        const auto index_text = std::to_string(index);
+        label.append(3U - index_text.size(), '0');
+        label += index_text;
+        REQUIRE(enc(label, index));
+    }
+    REQUIRE(enc(std::uint64_t{1}, std::string{"issuer"}));
+
+    claims_set decoded;
+    auto       dec = make_decoder(encoded);
+
+    REQUIRE(dec(decoded));
+    CHECK_EQ(decoded.issuer, "issuer");
+    CHECK_EQ(dec.tell(), encoded.end());
+}
+
 TEST_CASE("CWT claims reject truncated indefinite text labels atomically") {
     auto       input = to_bytes("a17f63707269");
     claims_set decoded;
