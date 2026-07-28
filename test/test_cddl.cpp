@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -702,8 +703,10 @@ TEST_CASE("CDDL emits typed containers and registers nested definitions once") {
 
 TEST_CASE("CDDL emits bounded sizes for strings containers and range wrappers") {
     CHECK_EQ(cddl_schema_inline<bounded_size<std::string, 1, 64>>(), "root = tstr .size (1..64)");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::pmr::string, 1, 64>>(), "root = tstr .size (1..64)");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::vector<std::byte>, 0, 16>>(), "root = bstr .size (0..16)");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::vector<int>, 1, 3>>(), "root = [1*3 int]");
+    CHECK_EQ(cddl_schema_inline<bounded_size<std::pmr::vector<std::uint64_t>, 0, 8>>(), "root = [0*8 uint]");
     CHECK_EQ(cddl_schema_inline<bounded_size<std::map<std::string, std::uint64_t>, 0, 2>>(), "root = {0*2 tstr => uint}");
     CHECK_EQ(cddl_schema_inline<exact_size<std::string, 4>>(), "root = tstr .size 4");
     CHECK_EQ(cddl_schema_inline<max_size<std::string, 64>>(), "root = tstr .size (0..64)");

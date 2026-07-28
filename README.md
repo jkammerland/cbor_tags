@@ -35,7 +35,6 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [✅ Requirements](#-requirements)
 - [📦 Installation](#-installation)
 - [💡 CMake Integration](#-cmake-integration)
-- [Decoder Resource Limits](#decoder-resource-limits)
 - [Project Status](#project-status)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
@@ -48,7 +47,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 ## 🎯 Key Features
 
 - Support for both contiguous and non-contiguous buffers.
-- Buffer-backed decode views for contiguous and non-contiguous inputs.
+- Buffer-backed decode views (zero-copy) for contiguous and non-contiguous inputs.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
 - noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
@@ -121,70 +120,11 @@ Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
 enc(tagged);
 ```
 
-> [!NOTE]
-> The definition of a tag is a CBOR major type 6 encoded uint, with a concise data definition format of #6.321(any). This allows generic parsers to decode tags without knowing their semantic meaning or the exact order of internal items. It also means the struct implicitly define a cbor array of exact types following the tag, i.e #6.321([int, float64, tstr]). See tuning options for more details.
-
-The core CBOR decoder accumulates into mutable owning sequence destinations. Arrays,
-maps, byte strings, and text strings are appended to or inserted into; it does not
-clear an existing destination. Initialize the destination empty when replacement
-semantics are wanted. Codec extensions can define a different destination contract.
-
-```cpp
-std::string source = "payload";
-std::vector<std::byte> buffer;
-auto enc = make_encoder(buffer);
-enc(source);
-
-std::string destination = "prefix:";
-auto dec = make_decoder(buffer);
-dec(destination);
-assert(destination == "prefix:payload");
-```
-
-A failed encoder or decoder call is terminal for that encoder or decoder
-instance. The destination or output buffer may be partially modified; discard
-it after failure unless its type documents a stronger guarantee. In particular,
-`status_code::incomplete` reports that the fixed input does not contain a
-complete value and does not make the decoder resumable. The caller owns the
-input buffer (including its lifetime, admission limit, and C++ range extent
-promise); the library owns parsing the next requested CBOR item(s) from it. On
-an unsized input, the core decoder consumes incrementally rather than first
-walking a declared payload length: completed elements and string bytes may
-remain in the destination, and no reservation is made solely from an
-unverified header. A contiguous input or `std::ranges::sized_range` uses a
-range-provided extent check before reserving, rather than a decoder prewalk;
-for definite arrays/maps this is a one-byte-per-item lower bound (two bytes per
-map pair), not a full structural validation. See
-[Decoder Resource Limits](doc/decoder_resource_limits.md#input-buffer-and-segment-parsing)
-for the complete ownership and one-shot contract.
-Definite views are formed only after their complete payload is available, which
-prevents out-of-bounds views without adding a second traversal.
-
-Mutable owning text- and byte-string destinations whose exposed contiguous
-storage overlaps the decoder input are rejected with `status_code::error`; use
-separate input and output storage. Other mutable output types must not alias
-the decoder input: the runtime check is not general alias analysis. Input range
-adaptors and views that hide shared storage are unsupported and must also use
-separate storage. Fixed-size destinations and borrowed views retain their
-exact-size or assignment semantics. Advanced callers that can guarantee
-separate storage can disable the runtime check through
-`unchecked_aliasing_decoder_options`; see [encoder and decoder
-options](doc/options.md#unchecked-inputoutput-aliasing).
-
-While encoding, input values must not alias an appendable output buffer. A
-fixed output span may share its backing allocation with a source span only when
-their byte regions do not overlap; see [encoder source/output
-aliasing](doc/options.md#encoder-sourceoutput-aliasing).
-
-Equivalent to manually encoding the struct in the following example:
-```cpp
-Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(static_tag<Tagged::cbor_tag>{}, as_array{3}, tagged.a, tagged.b, tagged.c); // same as enc(tagged);
-// Also equivalent to:
-// enc(static_tag<Tagged::cbor_tag>{}, wrap_as_array{tagged.a, tagged.b, tagged.c});
-// Now the buffer contains the tag(321) followed by a single array with 3 elements
-
-```
+The default wire shape is `#6.321([int, float64, tstr])`: tag 321 identifies
+the application-defined payload, followed by the reflected struct fields. See
+[custom tag handling](#-custom-tag-handling) for other tag forms, and the
+[decoder contract](doc/decoder_resource_limits.md#decoder-contract) for
+destination, failure, input, and aliasing rules.
 
 ### Advanced Type Support
 This can be taken further to any number of members or nesting, e.g a struct with all CBOR major types (and more):
@@ -1008,24 +948,8 @@ find_package(cbor_tags REQUIRED)
 target_link_libraries(your_target PRIVATE cbor::tags)
 ```
 
-## Decoder Resource Limits
-
-Bound untrusted input at the transport or framing layer before decoding:
-
-```cpp
-if (input.size() > max_message_bytes)
-    return input_too_large;
-
-return cbor::tags::make_decoder(input)(value);
-```
-
-Use `bounded_size` or `as_bounded_size` for protocol limits and a bounded
-`std::pmr::memory_resource` for allocation containment. These controls address
-different layers: a PMR arena does not limit accepted input, and a field bound
-does not constrain unwrapped nested containers.
-
-See [Decoder Resource Limits](doc/decoder_resource_limits.md) for complete PMR
-examples, size-bound behavior, single-pass decoding, and recursive decode paths.
+For bounded object fields, PMR allocation containment, and their CDDL, see
+[resource-limited decoding](doc/decoder_resource_limits.md#bounded-objects-pmr-and-cddl).
 
 ## Project Status
 
@@ -1047,7 +971,8 @@ Additional docs:
 - [Codec Extensions](doc/codec_extensions.md)
 - [RFC 8746 Typed Arrays](doc/rfc8746_typed_arrays.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)
-- [Decoder Resource Limits](doc/decoder_resource_limits.md)
+- [Decoder contract](doc/decoder_resource_limits.md#decoder-contract)
+- [Resource-limited decoding: PMR, `bounded_size`, and CDDL](doc/decoder_resource_limits.md#bounded-objects-pmr-and-cddl)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
 - [Testing](doc/testing.md)
 
