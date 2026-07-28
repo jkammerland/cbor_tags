@@ -6,6 +6,7 @@
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -45,28 +46,42 @@ namespace detail {
     return numeric != nullptr && !numeric->is_negative && numeric->value == expected;
 }
 
-template <typename Label> [[nodiscard]] constexpr bool contains_label(const std::vector<Label> &labels, const Label &target) {
-    for (const auto &label : labels) {
-        if (label == target) {
-            return true;
-        }
-    }
-    return false;
-}
+class seen_header_labels {
+  public:
+    constexpr void add(const header_label &label) { labels_.push_back(label); }
 
-[[nodiscard]] constexpr status_code validate_critical_labels(const std::vector<header_label> &labels, bool has_algorithm, bool has_key_id) {
-    for (std::size_t index = 0; index < labels.size(); ++index) {
-        for (std::size_t previous = 0; previous < index; ++previous) {
-            if (labels[index] == labels[previous]) {
-                return status_code::error;
+    [[nodiscard]] constexpr bool has_duplicates() {
+        sorted_indices_.resize(labels_.size());
+        for (std::size_t index = 0; index < labels_.size(); ++index) {
+            sorted_indices_[index] = index;
+        }
+        std::sort(sorted_indices_.begin(), sorted_indices_.end(),
+                  [this](std::size_t lhs, std::size_t rhs) { return labels_[lhs] < labels_[rhs]; });
+        for (std::size_t index = 1; index < sorted_indices_.size(); ++index) {
+            if (labels_[sorted_indices_[index - 1U]] == labels_[sorted_indices_[index]]) {
+                return true;
             }
         }
+        return false;
+    }
 
-        if (is_header_label(labels[index], 1U)) {
+  private:
+    // Keep labels in arrival order and sort only their indices once decoding
+    // finishes. Duplicate validation is O(N log N) without moving strings.
+    std::vector<header_label> labels_;
+    std::vector<std::size_t>  sorted_indices_;
+};
+
+[[nodiscard]] constexpr status_code validate_critical_labels(const std::vector<header_label> &labels, bool has_algorithm, bool has_key_id) {
+    seen_header_labels seen_labels;
+    for (const auto &label : labels) {
+        seen_labels.add(label);
+
+        if (is_header_label(label, 1U)) {
             if (!has_algorithm) {
                 return status_code::error;
             }
-        } else if (is_header_label(labels[index], 4U)) {
+        } else if (is_header_label(label, 4U)) {
             if (!has_key_id) {
                 return status_code::error;
             }
@@ -74,7 +89,7 @@ template <typename Label> [[nodiscard]] constexpr bool contains_label(const std:
             return status_code::error;
         }
     }
-    return status_code::success;
+    return seen_labels.has_duplicates() ? status_code::error : status_code::success;
 }
 
 template <typename Codec> [[nodiscard]] constexpr auto codec_error(status_code code) {
@@ -315,18 +330,15 @@ struct header_map {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        header_map                decoded{};
-        std::vector<header_label> seen_labels;
-        const auto                status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
+        header_map                 decoded{};
+        detail::seen_header_labels seen_labels;
+        const auto                 status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
             auto key_result = detail::decode_header_label(dec, key_major, key_additional_info);
             if (!key_result) {
                 return key_result.error();
             }
             auto key = std::move(*key_result);
-            if (detail::contains_label(seen_labels, key)) {
-                return status_code::error;
-            }
-            seen_labels.push_back(key);
+            seen_labels.add(key);
 
             if (detail::is_header_label(key, 1U)) {
                 auto value = detail::decode_algorithm(dec);
@@ -359,6 +371,9 @@ struct header_map {
         });
         if (status != status_code::success) {
             return detail::codec_error<Decoder>(status);
+        }
+        if (seen_labels.has_duplicates()) {
+            return detail::codec_error<Decoder>(status_code::error);
         }
 
         if (detail::validate_critical_labels(decoded.crit, decoded.alg.has_value(), decoded.kid.has_value()) != status_code::success) {
@@ -455,50 +470,48 @@ struct claims_set {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        claims_set           decoded{};
-        std::vector<integer> seen_labels;
-        const auto           status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
-            integer    key{0};
-            const auto key_status = dec.decode(key, key_major, key_additional_info);
-            if (key_status != status_code::success) {
-                return key_status;
+        claims_set                 decoded{};
+        detail::seen_header_labels seen_labels;
+        const auto                 status = detail::decode_map_entries(dec, [&](major_type key_major, std::byte key_additional_info) {
+            auto key_result = detail::decode_header_label(dec, key_major, key_additional_info);
+            if (!key_result) {
+                return key_result.error();
             }
-            if (detail::contains_label(seen_labels, key)) {
-                return status_code::error;
-            }
-            seen_labels.push_back(key);
+            auto label = std::move(*key_result);
+            seen_labels.add(label);
 
-            if (key.is_negative) {
+            const auto *key = std::get_if<integer>(&label);
+            if (key == nullptr || key->is_negative) {
                 typename Decoder::raw_encoded_item_view ignored;
                 return dec.decode(ignored);
-            } else if (key.value == 1U) {
+            } else if (key->value == 1U) {
                 std::string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
                 decoded.issuer = std::move(value);
-            } else if (key.value == 2U) {
+            } else if (key->value == 2U) {
                 std::string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
                 decoded.subject = std::move(value);
-            } else if (key.value == 3U) {
+            } else if (key->value == 3U) {
                 std::string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
                     return value_status;
                 }
                 decoded.audience = std::move(value);
-            } else if (key.value == 4U) {
+            } else if (key->value == 4U) {
                 return detail::decode_numeric_date_field(dec, decoded.expiration);
-            } else if (key.value == 5U) {
+            } else if (key->value == 5U) {
                 return detail::decode_numeric_date_field(dec, decoded.not_before);
-            } else if (key.value == 6U) {
+            } else if (key->value == 6U) {
                 return detail::decode_numeric_date_field(dec, decoded.issued_at);
-            } else if (key.value == 7U) {
+            } else if (key->value == 7U) {
                 byte_string value;
                 const auto  value_status = dec.decode(value);
                 if (value_status != status_code::success) {
@@ -513,6 +526,9 @@ struct claims_set {
         });
         if (status != status_code::success) {
             return detail::codec_error<Decoder>(status);
+        }
+        if (seen_labels.has_duplicates()) {
+            return detail::codec_error<Decoder>(status_code::error);
         }
 
         *this = std::move(decoded);
