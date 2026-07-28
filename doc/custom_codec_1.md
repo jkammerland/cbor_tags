@@ -79,6 +79,9 @@ if (it != matches.end()) {
     auto    ok          = it->decode<cc1::custom_codec_1>(payload_ref);
 }
 
+// Exhaust the scanner before using failed() for the complete input segment.
+for (; it != matches.end(); ++it) {}
+
 if (matches.failed()) {
     auto status = matches.status();
 }
