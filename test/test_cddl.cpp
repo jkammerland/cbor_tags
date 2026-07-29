@@ -262,6 +262,7 @@ static_assert(detail::is_supported_nullable_pointer_v<std::unique_ptr<int, CDDLC
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<void>>);
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<const int>>);
 static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<int[]>>);
+static_assert(!detail::is_supported_nullable_pointer_v<std::unique_ptr<int[]>>);
 static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithSmartPointer>());
 static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithNestedSmartPointer>());
 static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepSmartPointer>());

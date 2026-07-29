@@ -42,13 +42,13 @@ class encode_table {
                 continue;
             }
             if (entry.state != shared_ptr_entry_state::complete) {
-                return unexpected<status_code>{status_code::error};
+                return cbor::tags::unexpected<status_code>{status_code::error};
             }
             return shared_ptr_observation{shared_ptr_observation_kind::reference, static_cast<std::uint64_t>(index)};
         }
 
         if (entries_.size() >= limit_) {
-            return unexpected<status_code>{status_code::size_limit_exceeded};
+            return cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded};
         }
 
         const auto index = entries_.size();
@@ -72,7 +72,7 @@ class decode_table {
 
     [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) {
         if (entries_.size() >= limit_) {
-            return unexpected<status_code>{status_code::size_limit_exceeded};
+            return cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded};
         }
         const auto index = entries_.size();
         entries_.push_back(entry);
@@ -81,7 +81,7 @@ class decode_table {
 
     [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::uint64_t index) {
         if (index >= entries_.size()) {
-            return unexpected<status_code>{status_code::error};
+            return cbor::tags::unexpected<status_code>{status_code::error};
         }
         return entries_[static_cast<std::size_t>(index)];
     }
@@ -144,8 +144,10 @@ struct counting_deleter {
 
 static_assert(IsSharedPointer<shared_handle<std::uint64_t>>);
 static_assert(IsSharedPointer<std::shared_ptr<std::uint64_t>>);
+static_assert(!IsSharedPointer<std::shared_ptr<std::uint64_t[]>>);
 static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t>>);
 static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t, counting_deleter>>);
+static_assert(!IsUniquePointer<std::unique_ptr<std::uint64_t[]>>);
 static_assert(IsSmartPointer<shared_handle<std::uint64_t>>);
 
 template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr<T> &value) {

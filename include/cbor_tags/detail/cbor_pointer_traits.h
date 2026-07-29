@@ -3,6 +3,7 @@
 #include "cbor_tags/detail/cbor_variant_traits.h"
 
 #include <concepts>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -17,6 +18,7 @@ concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std
 template <typename Pointer>
 concept NullablePointerCore = requires { typename std::remove_cvref_t<Pointer>::element_type; } &&
                               NullablePointerValue<typename std::remove_cvref_t<Pointer>::element_type> &&
+                              (!requires(const std::remove_cvref_t<Pointer> &pointer) { pointer[std::size_t{}]; }) &&
                               requires(std::remove_cvref_t<Pointer> &pointer, const std::remove_cvref_t<Pointer> &const_pointer,
                                        typename std::remove_cvref_t<Pointer>::element_type *raw) {
                                   { const_pointer.get() } -> std::same_as<typename std::remove_cvref_t<Pointer>::element_type *>;

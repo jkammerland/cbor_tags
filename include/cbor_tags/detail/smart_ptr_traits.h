@@ -75,36 +75,44 @@ template <typename Options, typename T> consteval bool encodes_one_cbor_item() {
 
     if constexpr (SmartPointer<type>) {
         return true;
-    } else if constexpr (IsAnyHeader<type> || IsTagOnlyTuple<type> || is_static_tag_t<type>::value || is_dynamic_tag_t<type>) {
+    }
+    if constexpr (IsAnyHeader<type> || IsTagOnlyTuple<type> || is_static_tag_t<type>::value || is_dynamic_tag_t<type>) {
         return false;
-    } else if constexpr (IsOptional<type>) {
+    }
+    if constexpr (IsOptional<type>) {
         return encodes_one_cbor_item<Options, typename type::value_type>();
-    } else if constexpr (IsVariant<type>) {
+    }
+    if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
             []<typename... Ts>() { return (encodes_one_cbor_item<Options, Ts>() && ...); });
-    } else if constexpr (IsMap<type> && requires {
-                             typename type::key_type;
-                             typename type::mapped_type;
-                         }) {
+    }
+    if constexpr (IsMap<type> && requires {
+                      typename type::key_type;
+                      typename type::mapped_type;
+                  }) {
         return encodes_one_cbor_item<Options, typename type::key_type>() && encodes_one_cbor_item<Options, typename type::mapped_type>();
-    } else if constexpr (IsArray<type> && requires { typename type::value_type; }) {
+    }
+    if constexpr (IsArray<type> && requires { typename type::value_type; }) {
         return encodes_one_cbor_item<Options, typename type::value_type>();
-    } else if constexpr (IsTaggedTuple<type>) {
+    }
+    if constexpr (IsTaggedTuple<type>) {
         return tuple_payload_encodes_one_item<Options, type, 1U>();
-    } else if constexpr (IsClassWithTagOverload<type>) {
+    }
+    if constexpr (IsClassWithTagOverload<type>) {
         return true;
-    } else if constexpr (IsAggregate<type> || IsUntaggedTuple<type>) {
+    }
+    if constexpr (IsAggregate<type> || IsUntaggedTuple<type>) {
         using tuple_type = pointer_tuple_t<type>;
         if constexpr (IsTag<type> && !HasInlineTag<type>) {
             return tuple_payload_encodes_one_item<Options, tuple_type, 1U>();
         } else {
             return tuple_payload_encodes_one_item<Options, tuple_type>();
         }
-    } else if constexpr (IsCborMajor<type>) {
-        return true;
-    } else {
-        return false;
     }
+    if constexpr (IsCborMajor<type>) {
+        return true;
+    }
+    return false;
 }
 
 template <typename T> constexpr bool contains_decodable_unique_pointer();
@@ -114,42 +122,48 @@ template <typename T> constexpr bool contains_decodable_unique_pointer() {
     using type = std::remove_cvref_t<T>;
     if constexpr (UniquePointer<type>) {
         return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>>;
-    } else if constexpr (IsOptional<type>) {
+    }
+    if constexpr (IsOptional<type>) {
         return contains_decodable_unique_pointer<typename type::value_type>();
-    } else if constexpr (IsVariant<type>) {
+    }
+    if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
             []<typename... Ts>() { return (contains_decodable_unique_pointer<Ts>() || ...); });
-    } else if constexpr (IsMap<type> && requires {
-                             typename type::key_type;
-                             typename type::mapped_type;
-                         }) {
+    }
+    if constexpr (IsMap<type> && requires {
+                      typename type::key_type;
+                      typename type::mapped_type;
+                  }) {
         return contains_decodable_unique_pointer<typename type::key_type>() ||
                contains_decodable_unique_pointer<typename type::mapped_type>();
-    } else if constexpr (IsArray<type> && requires { typename type::value_type; }) {
-        return contains_decodable_unique_pointer<typename type::value_type>();
-    } else {
-        return false;
     }
+    if constexpr (IsArray<type> && requires { typename type::value_type; }) {
+        return contains_decodable_unique_pointer<typename type::value_type>();
+    }
+    return false;
 }
 
 template <typename T> constexpr bool contains_shared_pointer() {
     using type = std::remove_cvref_t<T>;
     if constexpr (SharedPointer<type>) {
         return true;
-    } else if constexpr (IsOptional<type>) {
-        return contains_shared_pointer<typename type::value_type>();
-    } else if constexpr (IsVariant<type>) {
-        return cbor::tags::detail::with_variant_alternatives<type>([]<typename... Ts>() { return (contains_shared_pointer<Ts>() || ...); });
-    } else if constexpr (IsMap<type> && requires {
-                             typename type::key_type;
-                             typename type::mapped_type;
-                         }) {
-        return contains_shared_pointer<typename type::key_type>() || contains_shared_pointer<typename type::mapped_type>();
-    } else if constexpr (IsArray<type> && requires { typename type::value_type; }) {
-        return contains_shared_pointer<typename type::value_type>();
-    } else {
-        return false;
     }
+    if constexpr (IsOptional<type>) {
+        return contains_shared_pointer<typename type::value_type>();
+    }
+    if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>([]<typename... Ts>() { return (contains_shared_pointer<Ts>() || ...); });
+    }
+    if constexpr (IsMap<type> && requires {
+                      typename type::key_type;
+                      typename type::mapped_type;
+                  }) {
+        return contains_shared_pointer<typename type::key_type>() || contains_shared_pointer<typename type::mapped_type>();
+    }
+    if constexpr (IsArray<type> && requires { typename type::value_type; }) {
+        return contains_shared_pointer<typename type::value_type>();
+    }
+    return false;
 }
 
 template <typename T> inline constexpr bool contains_decodable_unique_pointer_v = contains_decodable_unique_pointer<T>();
