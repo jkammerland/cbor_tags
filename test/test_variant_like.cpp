@@ -304,35 +304,3 @@ TEST_CASE("custom variant traits work with unique pointer codec") {
         CHECK(tags::detail::variant_index(output) == 1U);
     }
 }
-
-TEST_CASE("custom variant traits work with shared pointer codec") {
-    namespace smart = tags::ext::smart_ptr;
-
-    using variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>;
-
-    auto                         shared = std::make_shared<std::uint64_t>(42U);
-    const std::array<variant, 2> input{variant{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{shared}},
-                                       variant{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{shared}}};
-
-    std::vector<std::byte> buffer;
-    auto                   enc = tags::make_encoder<smart::shared_ptr_codec>(buffer);
-
-    REQUIRE(enc(smart::as_shared_ptrs(input)));
-    CHECK_EQ(to_hex(buffer), "d9012882d81c182ad81d00");
-
-    auto                   dec = tags::make_decoder<smart::shared_ptr_codec>(buffer);
-    std::array<variant, 2> output{
-        variant{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{std::string{"first"}}},
-        variant{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{std::string{"second"}}}};
-
-    REQUIRE(dec(smart::as_shared_ptrs(output)));
-    REQUIRE(tags::detail::variant_index(output[0]) == 0U);
-    REQUIRE(tags::detail::variant_index(output[1]) == 0U);
-
-    const auto &first_ptr  = std::get<0>(output[0].storage);
-    const auto &second_ptr = std::get<0>(output[1].storage);
-    REQUIRE(static_cast<bool>(first_ptr));
-    REQUIRE(static_cast<bool>(second_ptr));
-    CHECK_EQ(*first_ptr, 42U);
-    CHECK(first_ptr.get() == second_ptr.get());
-}

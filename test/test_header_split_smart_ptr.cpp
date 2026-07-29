@@ -25,11 +25,11 @@ TEST_CASE("shared pointer split header is directly usable") {
     std::vector<std::byte> encoded;
     auto                   value = std::make_shared<int>(42);
     auto                   enc   = make_encoder<shared_ptr_codec>(encoded);
-    REQUIRE(enc(as_shared_ptrs(value)));
+    REQUIRE(enc(value));
 
     std::shared_ptr<int> decoded;
     auto                 dec = make_decoder<shared_ptr_codec>(encoded);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
+    REQUIRE(dec(decoded));
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, 42);
 }
@@ -45,11 +45,11 @@ TEST_CASE("shared pointer split header roundtrips aggregate payloads") {
 
     auto value = std::make_shared<TestGraphStruct>(TestGraphStruct{.x = 1, .ys = expected_ys});
     auto enc   = make_encoder<shared_ptr_codec>(encoded);
-    REQUIRE(enc(as_shared_ptrs(value)));
+    REQUIRE(enc(value));
 
     std::shared_ptr<TestGraphStruct> decoded;
     auto                             dec = make_decoder<shared_ptr_codec>(encoded);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
+    REQUIRE(dec(decoded));
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(decoded->x, 1);
     CHECK_EQ(decoded->ys, expected_ys);

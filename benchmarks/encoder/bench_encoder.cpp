@@ -244,7 +244,7 @@ template <std::size_t UniqueCount> void run_shared_ptr_encode_benchmarks_for_siz
         data.reserve(values.size() * 8U);
 
         auto enc    = make_encoder<shared_ptr_codec>(data);
-        auto result = enc(as_shared_ptrs(values));
+        auto result = enc(values);
 
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(data);

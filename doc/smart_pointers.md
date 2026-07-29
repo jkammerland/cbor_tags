@@ -1,68 +1,58 @@
 # Smart Pointer Codecs
 
-Smart pointers are opt-in:
+Smart-pointer support is opt-in:
 
 ```cpp
 #include "cbor_tags/extensions/smart_ptr.h"
-
-#include <cassert>
-#include <cstddef>
-#include <memory>
-#include <vector>
 
 using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
 ```
 
-The two codecs have separate jobs:
+There are two codecs because the wire formats do different things:
 
-- `unique_ptr_codec` encodes `std::unique_ptr<T>` as either CBOR `null` or
-  `T`. It does not add a wrapper.
-- `shared_ptr_codec` preserves `std::shared_ptr` identity. Repeated pointers
-  decode to the same object.
+- `unique_ptr_codec` writes an owned value as `T`, or an empty pointer as
+  CBOR `null`.
+- `shared_ptr_codec` writes CBOR shared-reference tags 28 and 29 so repeated
+  pointers decode to the same object.
 
-`shared_ptr_codec` does not encode a `std::shared_ptr` unless it is inside an
-explicit shared-pointer root. This prevents a shared pointer from silently
-falling back to ordinary value-copy behavior.
+Both codecs use structural concepts rather than matching only the standard
+pointer templates. `IsUniquePointer`, `IsSharedPointer`, and `IsSmartPointer`
+therefore accept compatible user-defined pointer types. For a shared pointer,
+copying the pointer must retain and share the same object. This semantic rule
+cannot be checked by a C++ concept.
 
-## `std::unique_ptr`
+## Unique Ownership
 
 ```cpp
 std::vector<std::byte> bytes;
 std::unique_ptr<int> sent = std::make_unique<int>(42);
 
 auto enc = make_encoder<unique_ptr_codec>(bytes);
-enc(sent);                         // same CBOR item as int{42}
+enc(sent); // encodes the same item as int{42}
 
 std::unique_ptr<int> received;
 auto dec = make_decoder<unique_ptr_codec>(bytes);
 dec(received);
 ```
 
-The wire shape is:
+The wire shape is simply:
 
 ```text
-nullptr  -> null
-pointer  -> T
+empty pointer -> null
+pointer       -> T
 ```
 
-`T` must be default-initializable for decoding. It must not itself accept CBOR
-`null`, because `null` would then have two meanings. For example,
-`std::unique_ptr<std::optional<int>>` is rejected.
+Custom deleters are supported. Decoding calls `reset(new T)`, so the
+destination pointer keeps its existing deleter.
 
-For the same reason, an ordinary `std::optional` cannot directly contain a
-smart-pointer null state. For example, `std::optional<std::unique_ptr<int>>`
-and `std::optional<std::shared_ptr<int>>` are rejected. In a named map, an
-optional field is different: omission represents the empty optional, while a
-present key with `null` represents the empty pointer.
+`T` must be default-initializable for decoding and must not itself accept CBOR
+`null`. For example, `std::unique_ptr<std::optional<int>>` is rejected because
+the same `null` item could mean either an empty pointer or an empty optional.
 
-One-shot decode is terminal. For a non-null pointer, the decoder creates the
-pointee before decoding it. If decoding later returns `incomplete`, the pointer
-and any decoded prefix remain in the destination.
+## Shared Ownership
 
-## `std::shared_ptr`
-
-Wrap one complete message root with `as_shared_ptrs`:
+No root wrapper is needed:
 
 ```cpp
 struct message {
@@ -75,79 +65,95 @@ message sent{value, value};
 
 std::vector<std::byte> bytes;
 auto enc = make_encoder<shared_ptr_codec>(bytes);
-enc(as_shared_ptrs(sent));
+enc(sent);
 
 message received;
 auto dec = make_decoder<shared_ptr_codec>(bytes);
-dec(as_shared_ptrs(received));
+dec(received);
 
-// Both fields refer to the same decoded int.
-assert(received.first.get() == received.second.get());
+assert(received.first == received.second);
 ```
 
-`as_shared_ptrs(root)`:
-
-- writes tag 296 around the root;
-- creates a private reference table for that call;
-- writes the first non-null pointer as tag 28 around its value;
-- writes later occurrences as tag 29 around the earlier table index;
-- writes an empty pointer as CBOR `null`;
-- destroys the table when the call returns.
-
-For the example above, the relevant shape is:
+The first non-null pointer is written with tag 28. Later occurrences are tag
+29 plus the earlier table index:
 
 ```text
-#6.296([
+[
   #6.28(42),
   #6.29(0)
-])
+]
 ```
 
-A later call starts a new table. It therefore observes the current pointee
-value rather than referring to an object from an earlier call:
+An empty pointer is ordinary CBOR `null`.
+
+The encoder and decoder each keep one reference table. That table belongs to
+the codec object and remains across calls:
 
 ```cpp
-enc(as_shared_ptrs(sent)); // first independent message
+enc(value);  // #6.28(42)
 *value = 99;
-enc(as_shared_ptrs(sent)); // new table; encodes 99
+enc(value);  // #6.29(0), still refers to the first snapshot
+
+enc.reset_shared_ptr_scope();
+enc(value);  // #6.28(99), first value in a new table
 ```
 
-There are no public lookup strategies or reserve options. The ordinary wrapper
-chooses and owns its internal table.
+The decoder must receive matching segments in the same order and retain its
+table for the same period. Call `reset_shared_ptr_scope()` at the logical
+namespace boundary.
 
-## Reusing a Caller-Owned Table
+The lookup key is the exact pointer type plus `pointer.get()`:
 
-Use `as_shared_ptrs_unscoped(root, table)` only when reference indices must
-continue across calls:
+- the same type and address is one object, even if two pointer values use
+  different control blocks;
+- different addresses are different objects, including aliasing pointers;
+- different pointer types are different objects, even at the same address.
+
+The table does not track pointer generations. Destroying an object and creating
+another object of the same pointer type at the same address before resetting
+the scope can produce a stale tag 29 reference. Reset the scope before pointer
+addresses can be reused.
+
+`scoped_shared_ptr<Pointer>` is also a supported pointer value.
+`as_scoped_shared_ptr(pointer)` copies an lvalue pointer or moves an rvalue
+pointer into that value. It uses the codec's current reference table like the
+underlying pointer.
+
+## User-Owned Reference Tables
+
+Applications may supply their own storage and lookup policy:
 
 ```cpp
-my_encode_table table;
+shared_ptr_encode_scope table;
+table.reserve(64);
 
-enc(as_shared_ptrs_unscoped(first_segment, table));
-enc(as_shared_ptrs_unscoped(second_segment, table));
+enc.set_shared_ptr_scope(table);
+enc(first_segment);
+enc(second_segment);
+
+table.reset();
 ```
 
-The unscoped form omits tag 296 because the reference namespace is not bounded
-by either individual call. The decoder must receive the same segment sequence
-with one matching decode table:
+Use a matching decode scope on the receiver:
 
 ```cpp
-my_decode_table table;
-
-dec(as_shared_ptrs_unscoped(first_output, table));
-dec(as_shared_ptrs_unscoped(second_output, table));
+shared_ptr_decode_scope table;
+dec.set_shared_ptr_scope(table);
+dec(first_output);
+dec(second_output);
 ```
 
-The table types are application-defined. An encode table satisfies:
+`SharedPtrEncodeScope` requires:
 
 ```cpp
 expected<shared_ptr_observation, status_code>
 observe(const shared_ptr_encode_key&);
 
 void mark_complete(std::uint64_t index);
+void reset();
 ```
 
-A decode table satisfies:
+`SharedPtrDecodeScope` requires:
 
 ```cpp
 expected<std::uint64_t, status_code>
@@ -157,75 +163,60 @@ expected<shared_ptr_decode_entry, status_code>
 resolve(std::uint64_t index);
 
 void mark_complete(std::uint64_t index);
+void reset();
 ```
 
-These interfaces are checked by `SharedPtrEncodeTable` and
-`SharedPtrDecodeTable`. The table chooses its storage, lookup algorithm,
-capacity policy, and lifetime.
+The supplied object owns capacity limits, allocation strategy, lookup
+complexity, and lifetime. It must outlive the codec while installed.
+`use_default_shared_ptr_scope()` switches the codec back to its internal table;
+that internal table retains any earlier entries until it is reset.
 
-An encode table must compare `shared_ptr_encode_key::owner` by shared ownership,
-not only by `get()`. It must assign indices in first-observation order and
-reject:
+## Deliberate Restrictions
 
-- a repeated owner with a different `target` (an aliasing pointer);
-- a repeated owner with a different `type`;
-- a reference to an entry that has not been marked complete (a cycle).
-
-A decode table must preserve insertion order, reject invalid indices, and
-return the stored type and completion state unchanged.
-
-External tables provide snapshot semantics. Once a pointee has been observed,
-later occurrences are references; mutating the pointee does not send an update:
+Every non-null pointee must encode as exactly one CBOR item. These are valid:
 
 ```cpp
-enc(as_shared_ptrs_unscoped(value, table)); // tag 28, sends 42
-*value = 99;
-enc(as_shared_ptrs_unscoped(value, table)); // tag 29, still refers to snapshot 42
+std::shared_ptr<int>                 primitive;
+std::shared_ptr<std::vector<int>>    array;
+std::shared_ptr<tagged_record>       tagged_item;
+std::shared_ptr<one_field_struct>    one_item_struct;
+std::shared_ptr<multi_field_struct>  array_wrapped_struct; // default options
 ```
 
-Clear or replace the table to begin a new snapshot.
+An empty aggregate encodes no item and is rejected. A multi-field aggregate is
+also rejected when group wrapping is disabled, because it would encode several
+items under one tag 28.
 
-If an unscoped call fails, the codec does not roll the table back or clear it.
-The decode destination may also contain a partial result. Treat both as
-terminal and discard or explicitly repair the caller-owned state.
-
-## Limits
-
-The shared-pointer codec rejects cycles and aliasing pointers:
+A shared pointer inside `std::variant` requires an application codec:
 
 ```cpp
-struct node {
-    std::shared_ptr<node> next;
-};
+using choice = std::variant<std::shared_ptr<int>, std::string>;
 
-auto n = std::make_shared<node>();
-n->next = n;
-enc(as_shared_ptrs(n)); // status_code::error
+enc(choice{}); // compile-time error
 ```
 
-The first tag 28 entry is installed before its pointee is decoded so partial
-state follows the library's one-shot decoder contract. A tag 29 reference to an
-unfinished entry is still rejected; cycles are not reconstructed.
+The application must choose and encode an unambiguous discriminator, normally
+an application tag. The library does not guess how tag 28/29 should compete
+with the other alternatives. Unique-pointer variants remain supported when
+their wire shapes do not overlap.
 
-The codecs do not prewalk the input or object graph. Input ownership, framing,
-admission limits, and the truthful size semantics of the supplied range remain
-the caller's responsibility. Parsing the requested CBOR segment and returning
-`incomplete` when that segment ends early remain the decoder's responsibility.
+An ordinary `std::optional` cannot directly contain a smart pointer. Both the
+empty optional and the empty pointer would encode as CBOR `null`. A named-map
+field can still distinguish an omitted optional field from a present field
+whose pointer value is `null`.
 
-## Variants
+Cycles are rejected. A tag 29 reference may only target a completed tag 28
+entry. The codec does not prewalk the graph and does not roll back after a
+failure.
 
-Pointer alternatives are decoded from their CBOR wire shape, without probing
-one alternative and rolling back. Alternatives whose wire shapes overlap are
-rejected at compile time:
+One-shot decode is terminal as elsewhere in the library. If a pointee decode
+returns `incomplete`, the allocated pointer and decoded prefix remain in the
+destination, and the scope remains in its terminal failed state. Reset or
+discard both before reuse.
 
-```cpp
-using ok = std::variant<std::unique_ptr<int>, std::string>;
-
-// Rejected: both alternatives accept an integer.
-using ambiguous = std::variant<std::unique_ptr<int>, int>;
-```
-
-Use an application tag or a different data model when alternatives overlap.
+Input ownership, framing, admission limits, and truthful C++ range semantics
+remain the caller's responsibility. The decoder parses the requested CBOR
+segment once and returns `incomplete` if that segment ends early.
 
 ## CDDL
 
@@ -235,25 +226,16 @@ Use an application tag or a different data model when alternatives overlap.
 T / null
 ```
 
-Use a schema root that matches the wrapper used on the wire:
-
-```cpp
-cddl_schema_to<shared_ptr_cddl<message>>(schema);
-cddl_schema_to<shared_ptr_unscoped_cddl<message>>(unscoped_schema);
-```
-
-The scoped root includes tag 296:
-
-```cddl
-#6.296(null / #6.28(T) / #6.29(uint))
-```
-
-The unscoped root omits it:
+A shared pointer renders directly as:
 
 ```cddl
 null / #6.28(T) / #6.29(uint)
 ```
 
-CDDL describes the item shapes. It cannot express whether a tag 29 index
-exists, has the correct pointee type, or belongs to a completed entry; those
-checks are performed by the decode table.
+```cpp
+cddl_schema_to<std::shared_ptr<int>>(schema);
+```
+
+CDDL describes item shapes. It cannot express whether a tag 29 index exists,
+has the requested pointer type, or refers to a completed entry. Those checks
+remain runtime scope checks.

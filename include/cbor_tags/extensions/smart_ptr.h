@@ -7,20 +7,28 @@
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/detail/smart_ptr_traits.h"
-#include "cbor_tags/extensions/cddl_traits.h"
 
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <optional>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
 
 namespace cbor::tags::ext::smart_ptr {
+
+template <typename T>
+concept IsSmartPointer = detail::SmartPointer<T>;
+
+template <typename T>
+concept IsUniquePointer = detail::UniquePointer<T>;
+
+template <typename T>
+concept IsSharedPointer = detail::SharedPointer<T>;
 
 enum class shared_ptr_entry_state : std::uint8_t { encoding, complete };
 enum class shared_ptr_observation_kind : std::uint8_t { first, reference };
@@ -31,147 +39,53 @@ struct shared_ptr_observation {
 };
 
 struct shared_ptr_encode_key {
-    std::weak_ptr<const void> owner{};
-    const void               *target{};
-    const void               *type{};
+    const void *target{};
+    const void *pointer_type{};
+
+    bool operator==(const shared_ptr_encode_key &) const = default;
 };
 
 struct shared_ptr_decode_entry {
-    std::shared_ptr<void>  value{};
-    const void            *type{};
+    std::shared_ptr<void>  pointer{};
+    const void            *pointer_type{};
     shared_ptr_entry_state state{shared_ptr_entry_state::encoding};
 };
 
-template <typename Table>
-concept SharedPtrEncodeTable = requires(Table &table, const shared_ptr_encode_key &key, std::uint64_t index) {
-    { table.observe(key) } -> std::same_as<expected<shared_ptr_observation, status_code>>;
-    { table.mark_complete(index) } -> std::same_as<void>;
+template <typename Scope>
+concept SharedPtrEncodeScope = requires(Scope &scope, const shared_ptr_encode_key &key, std::uint64_t index) {
+    { scope.observe(key) } -> std::same_as<expected<shared_ptr_observation, status_code>>;
+    { scope.mark_complete(index) } -> std::same_as<void>;
+    { scope.reset() } -> std::same_as<void>;
 };
 
-template <typename Table>
-concept SharedPtrDecodeTable = requires(Table &table, const shared_ptr_decode_entry &entry, std::uint64_t index) {
-    { table.insert(entry) } -> std::same_as<expected<std::uint64_t, status_code>>;
-    { table.resolve(index) } -> std::same_as<expected<shared_ptr_decode_entry, status_code>>;
-    { table.mark_complete(index) } -> std::same_as<void>;
+template <typename Scope>
+concept SharedPtrDecodeScope = requires(Scope &scope, const shared_ptr_decode_entry &entry, std::uint64_t index) {
+    { scope.insert(entry) } -> std::same_as<expected<std::uint64_t, status_code>>;
+    { scope.resolve(index) } -> std::same_as<expected<shared_ptr_decode_entry, status_code>>;
+    { scope.mark_complete(index) } -> std::same_as<void>;
+    { scope.reset() } -> std::same_as<void>;
 };
 
-template <typename T> struct shared_ptr_cddl {
-    using value_type = std::remove_cvref_t<T>;
-};
-
-template <typename T> struct shared_ptr_unscoped_cddl {
-    using value_type = std::remove_cvref_t<T>;
-};
-
-template <typename T> class shared_ptr_root {
-  public:
-    shared_ptr_root(const shared_ptr_root &)            = default;
-    shared_ptr_root &operator=(const shared_ptr_root &) = delete;
-    shared_ptr_root(shared_ptr_root &&)                 = default;
-    shared_ptr_root &operator=(shared_ptr_root &&)      = delete;
-
+class shared_ptr_encode_scope {
   private:
-    explicit shared_ptr_root(T &value) : value_(value) {}
+    struct key_hash {
+        [[nodiscard]] std::size_t operator()(const shared_ptr_encode_key &key) const noexcept {
+            const auto target_hash = std::hash<const void *>{}(key.target);
+            const auto type_hash   = std::hash<const void *>{}(key.pointer_type);
+            return target_hash ^ (type_hash + 0x9e3779b9U + (target_hash << 6U) + (target_hash >> 2U));
+        }
+    };
 
-    T &value_;
-
-    template <typename U> friend shared_ptr_root<U> as_shared_ptrs(U &);
-    template <typename Self> friend struct shared_ptr_codec;
-};
-
-template <typename T, typename Table> class shared_ptr_unscoped_root {
-  public:
-    shared_ptr_unscoped_root(const shared_ptr_unscoped_root &)            = default;
-    shared_ptr_unscoped_root &operator=(const shared_ptr_unscoped_root &) = delete;
-    shared_ptr_unscoped_root(shared_ptr_unscoped_root &&)                 = default;
-    shared_ptr_unscoped_root &operator=(shared_ptr_unscoped_root &&)      = delete;
-
-  private:
-    shared_ptr_unscoped_root(T &value, Table &table) : value_(value), table_(table) {}
-
-    T     &value_;
-    Table &table_;
-
-    template <typename U, typename UTable> friend shared_ptr_unscoped_root<U, UTable> as_shared_ptrs_unscoped(U &, UTable &);
-    template <typename Self> friend struct shared_ptr_codec;
-};
-
-template <typename T> [[nodiscard]] shared_ptr_root<T> as_shared_ptrs(T &value) { return shared_ptr_root<T>{value}; }
-
-template <typename T, typename Table> [[nodiscard]] shared_ptr_unscoped_root<T, Table> as_shared_ptrs_unscoped(T &value, Table &table) {
-    return shared_ptr_unscoped_root<T, Table>{value, table};
-}
-
-namespace detail {
-
-struct encode_table_ref {
-    void *table{};
-    expected<shared_ptr_observation, status_code> (*observe_fn)(void *, const shared_ptr_encode_key &){};
-    void (*mark_complete_fn)(void *, std::uint64_t){};
-
-    template <SharedPtrEncodeTable Table>
-    explicit encode_table_ref(Table &value)
-        : table(std::addressof(value)),
-          observe_fn([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Table *>(raw)->observe(key); }),
-          mark_complete_fn([](void *raw, std::uint64_t index) { static_cast<Table *>(raw)->mark_complete(index); }) {}
-
-    [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
-        return observe_fn(table, key);
-    }
-
-    void mark_complete(std::uint64_t index) const { mark_complete_fn(table, index); }
-};
-
-struct decode_table_ref {
-    void *table{};
-    expected<std::uint64_t, status_code> (*insert_fn)(void *, const shared_ptr_decode_entry &){};
-    expected<shared_ptr_decode_entry, status_code> (*resolve_fn)(void *, std::uint64_t){};
-    void (*mark_complete_fn)(void *, std::uint64_t){};
-
-    template <SharedPtrDecodeTable Table>
-    explicit decode_table_ref(Table &value)
-        : table(std::addressof(value)),
-          insert_fn([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Table *>(raw)->insert(entry); }),
-          resolve_fn([](void *raw, std::uint64_t index) { return static_cast<Table *>(raw)->resolve(index); }),
-          mark_complete_fn([](void *raw, std::uint64_t index) { static_cast<Table *>(raw)->mark_complete(index); }) {}
-
-    [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) const {
-        return insert_fn(table, entry);
-    }
-
-    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::uint64_t index) const { return resolve_fn(table, index); }
-
-    void mark_complete(std::uint64_t index) const { mark_complete_fn(table, index); }
-};
-
-template <typename Ref> class active_table_scope {
-  public:
-    active_table_scope(Ref *&active, Ref &next) : active_(active), previous_(active) { active_ = std::addressof(next); }
-
-    active_table_scope(const active_table_scope &)            = delete;
-    active_table_scope &operator=(const active_table_scope &) = delete;
-
-    ~active_table_scope() { active_ = previous_; }
-
-  private:
-    Ref *&active_;
-    Ref  *previous_{};
-};
-
-class default_encode_table {
-  private:
     struct entry {
         shared_ptr_encode_key  key{};
         shared_ptr_entry_state state{shared_ptr_entry_state::encoding};
     };
 
-    using owner_map = std::map<std::weak_ptr<const void>, std::size_t, std::owner_less<std::weak_ptr<const void>>>;
-
   public:
     [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) {
-        if (const auto found = owners_.find(key.owner); found != owners_.end()) {
+        if (const auto found = lookup_.find(key); found != lookup_.end()) {
             const auto &existing = entries_[found->second];
-            if (existing.key.target != key.target || existing.key.type != key.type || existing.state != shared_ptr_entry_state::complete) {
+            if (existing.state != shared_ptr_entry_state::complete) {
                 return unexpected<status_code>{status_code::error};
             }
             return shared_ptr_observation{shared_ptr_observation_kind::reference, static_cast<std::uint64_t>(found->second)};
@@ -180,7 +94,7 @@ class default_encode_table {
         const auto index = entries_.size();
         entries_.push_back(entry{key, shared_ptr_entry_state::encoding});
         try {
-            owners_.emplace(key.owner, index);
+            lookup_.emplace(key, index);
         } catch (...) {
             entries_.pop_back();
             throw;
@@ -194,12 +108,24 @@ class default_encode_table {
         }
     }
 
+    void reset() {
+        entries_.clear();
+        lookup_.clear();
+    }
+
+    void reserve(std::size_t count) {
+        entries_.reserve(count);
+        lookup_.reserve(count);
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
+
   private:
-    std::vector<entry> entries_{};
-    owner_map          owners_{};
+    std::vector<entry>                                               entries_{};
+    std::unordered_map<shared_ptr_encode_key, std::size_t, key_hash> lookup_{};
 };
 
-class default_decode_table {
+class shared_ptr_decode_scope {
   public:
     [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) {
         const auto index = entries_.size();
@@ -220,12 +146,106 @@ class default_decode_table {
         }
     }
 
+    void reset() { entries_.clear(); }
+    void reserve(std::size_t count) { entries_.reserve(count); }
+
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
+
   private:
     std::vector<shared_ptr_decode_entry> entries_{};
 };
 
-template <typename Decoder, PointerValue T>
+static_assert(SharedPtrEncodeScope<shared_ptr_encode_scope>);
+static_assert(SharedPtrDecodeScope<shared_ptr_decode_scope>);
+
+template <IsSharedPointer Pointer> class scoped_shared_ptr {
+  public:
+    using pointer_type = std::remove_cvref_t<Pointer>;
+    using element_type = typename pointer_type::element_type;
+
+    scoped_shared_ptr()
+        requires std::default_initializable<pointer_type>
+    = default;
+
+    explicit scoped_shared_ptr(pointer_type pointer) : pointer_(std::move(pointer)) {}
+
+    [[nodiscard]] element_type *get() const noexcept(noexcept(pointer_.get())) { return pointer_.get(); }
+    [[nodiscard]] element_type &operator*() const noexcept(noexcept(*pointer_)) { return *pointer_; }
+    explicit operator bool() const noexcept(noexcept(static_cast<bool>(pointer_))) { return static_cast<bool>(pointer_); }
+
+    void reset() noexcept(noexcept(pointer_.reset())) { pointer_.reset(); }
+    void reset(element_type *raw) noexcept(noexcept(pointer_.reset(raw))) { pointer_.reset(raw); }
+
+    [[nodiscard]] pointer_type       &value()       &noexcept { return pointer_; }
+    [[nodiscard]] const pointer_type &value() const & noexcept { return pointer_; }
+    [[nodiscard]] pointer_type      &&value()      &&noexcept { return std::move(pointer_); }
+
+  private:
+    pointer_type pointer_;
+};
+
+template <IsSharedPointer Pointer>
+[[nodiscard]] auto as_scoped_shared_ptr(Pointer pointer) -> scoped_shared_ptr<std::remove_cvref_t<Pointer>> {
+    return scoped_shared_ptr<std::remove_cvref_t<Pointer>>{std::move(pointer)};
+}
+
+namespace detail {
+
+class encode_scope_ref {
+  public:
+    template <SharedPtrEncodeScope Scope>
+    explicit encode_scope_ref(Scope &scope)
+        : scope_(std::addressof(scope)),
+          observe_([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Scope *>(raw)->observe(key); }),
+          mark_complete_([](void *raw, std::uint64_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+
+    [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
+        return observe_(scope_, key);
+    }
+    void mark_complete(std::uint64_t index) const { mark_complete_(scope_, index); }
+    void reset() const { reset_(scope_); }
+
+  private:
+    void *scope_{};
+    expected<shared_ptr_observation, status_code> (*observe_)(void *, const shared_ptr_encode_key &){};
+    void (*mark_complete_)(void *, std::uint64_t){};
+    void (*reset_)(void *){};
+};
+
+class decode_scope_ref {
+  public:
+    template <SharedPtrDecodeScope Scope>
+    explicit decode_scope_ref(Scope &scope)
+        : scope_(std::addressof(scope)),
+          insert_([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Scope *>(raw)->insert(entry); }),
+          resolve_([](void *raw, std::uint64_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
+          mark_complete_([](void *raw, std::uint64_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+
+    [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::uint64_t index) const { return resolve_(scope_, index); }
+    void                                                         mark_complete(std::uint64_t index) const { mark_complete_(scope_, index); }
+    void                                                         reset() const { reset_(scope_); }
+
+  private:
+    void *scope_{};
+    expected<std::uint64_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
+    expected<shared_ptr_decode_entry, status_code> (*resolve_)(void *, std::uint64_t){};
+    void (*mark_complete_)(void *, std::uint64_t){};
+    void (*reset_)(void *){};
+};
+
+template <typename Self>
+concept EncoderSelf = requires(Self &self, std::uint64_t value, typename Self::byte_type byte) { self.encode_major_and_size(value, byte); };
+
+template <typename Self>
+concept DecoderSelf = !EncoderSelf<Self>;
+
+template <typename Decoder, typename T>
 [[nodiscard]] status_code decode_transparent_value(Decoder &dec, T &value, major_type major, std::byte additional_info) {
+    static_assert(encodes_one_cbor_item<typename Decoder::options, T>(), "smart pointer pointee must encode exactly one CBOR item");
+
     if constexpr (IsTag<T>) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
@@ -246,8 +266,6 @@ template <typename Decoder, PointerValue T>
         constexpr auto element_count = std::tuple_size_v<tuple_type>;
         constexpr bool wrapped_group = element_count > 1U && Decoder::options::wrap_groups;
 
-        static_assert(element_count > 0U, "unique_ptr<T> cannot transparently encode a zero-width tuple or aggregate");
-
         auto result = status_code::success;
         if constexpr (wrapped_group) {
             std::uint64_t encoded_count{};
@@ -261,9 +279,6 @@ template <typename Decoder, PointerValue T>
             std::apply([&](auto &...members) { ((result == status_code::success ? result = dec.decode(members) : result), ...); }, tuple);
         } else {
             result = dec.decode(std::get<0>(tuple), major, additional_info);
-            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ((result == status_code::success ? result = dec.decode(std::get<Is + 1U>(tuple)) : result), ...);
-            }(std::make_index_sequence<element_count - 1U>{});
         }
         return result;
     } else {
@@ -271,27 +286,34 @@ template <typename Decoder, PointerValue T>
     }
 }
 
-template <typename Decoder, PointerValue T>
-[[nodiscard]] status_code decode_unique_pointer(Decoder &dec, std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
-    static_assert(!known_null_wire_v<T>,
-                  "unique_ptr<T> cannot decode T when T also has a CBOR null state; the pointer states would not round-trip");
+template <typename Pointer> void reset_pointer_to_new(Pointer &value) {
+    using element_type = pointer_element_t<Pointer>;
+    auto allocation    = std::make_unique<element_type>();
+    value.reset(allocation.get());
+    (void)allocation.release();
+}
+
+template <typename Decoder, UniquePointer Pointer>
+[[nodiscard]] status_code decode_unique_pointer(Decoder &dec, Pointer &value, major_type major, std::byte additional_info) {
+    using element_type = pointer_element_t<Pointer>;
+    static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
 
     if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
         value.reset();
         return status_code::success;
     }
 
-    value = std::make_unique<T>();
+    reset_pointer_to_new(value);
     return decode_transparent_value(dec, *value, major, additional_info);
 }
 
-template <typename Decoder, PointerValue T>
-[[nodiscard]] status_code decode_unique_pointer_tag(Decoder &dec, std::unique_ptr<T> &value, std::uint64_t tag) {
-    static_assert(!known_null_wire_v<T>,
-                  "unique_ptr<T> cannot decode T when T also has a CBOR null state; the pointer states would not round-trip");
+template <typename Decoder, UniquePointer Pointer>
+[[nodiscard]] status_code decode_unique_pointer_tag(Decoder &dec, Pointer &value, std::uint64_t tag) {
+    using element_type = pointer_element_t<Pointer>;
+    static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
 
-    if constexpr (IsTag<T>) {
-        value = std::make_unique<T>();
+    if constexpr (IsTag<element_type>) {
+        reset_pointer_to_new(value);
         return dec.decode(*value, tag);
     } else {
         (void)dec;
@@ -301,39 +323,30 @@ template <typename Decoder, PointerValue T>
     }
 }
 
-template <bool AllowUnique, bool AllowShared, typename T> consteval bool pointer_variant_alternative_supported() {
+template <typename T> consteval bool unique_variant_alternative_supported() {
     using type = std::remove_cvref_t<T>;
-    if constexpr (decodable_unique_pointer_v<type>) {
-        return AllowUnique && !known_null_wire_v<typename unique_pointer_traits<type>::element_type>;
-    } else if constexpr (decodable_shared_pointer_v<type>) {
-        return AllowShared;
-    } else if constexpr (IsOptional<type>) {
-        return IsCborMajor<type>;
+    if constexpr (UniquePointer<type>) {
+        return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>> &&
+               !known_null_wire_v<pointer_element_t<type>>;
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
-            []<typename... Ts>() { return (pointer_variant_alternative_supported<AllowUnique, AllowShared, Ts>() && ...); });
+            []<typename... Ts>() { return (unique_variant_alternative_supported<Ts>() && ...); });
     } else {
         return IsCborMajor<type> || IsArray<type> || IsMap<type>;
     }
 }
 
 template <typename T>
-[[nodiscard]] constexpr bool pointer_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
+[[nodiscard]] constexpr bool unique_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
     using type = std::remove_cvref_t<T>;
-    if constexpr (decodable_unique_pointer_v<type>) {
+    if constexpr (UniquePointer<type>) {
         if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
             return true;
         }
-        using element_type = typename unique_pointer_traits<type>::element_type;
-        return pointer_variant_matches<element_type>(major, additional_info, tag);
-    } else if constexpr (decodable_shared_pointer_v<type>) {
-        if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
-            return true;
-        }
-        return major == major_type::Tag && tag.has_value() && (*tag == shareable_tag || *tag == sharedref_tag);
+        return unique_variant_matches<pointer_element_t<type>>(major, additional_info, tag);
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
-            [&]<typename... Ts>() { return (pointer_variant_matches<Ts>(major, additional_info, tag) || ...); });
+            [&]<typename... Ts>() { return (unique_variant_matches<Ts>(major, additional_info, tag) || ...); });
     } else if (major == major_type::Tag) {
         if (!tag.has_value()) {
             return false;
@@ -357,22 +370,17 @@ template <typename T>
     }
 }
 
-template <bool AllowUnique, bool AllowShared, typename Decoder, typename T>
-[[nodiscard]] status_code decode_pointer_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
-                                                             std::optional<std::uint64_t> &tag) {
+template <typename Decoder, typename T>
+[[nodiscard]] status_code decode_unique_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
+                                                            std::optional<std::uint64_t> &tag) {
     using type = std::remove_cvref_t<T>;
-    if constexpr (decodable_unique_pointer_v<type>) {
+    if constexpr (UniquePointer<type>) {
         if (major == major_type::Tag) {
             return decode_unique_pointer_tag(dec, value, *tag);
         }
         return decode_unique_pointer(dec, value, major, additional_info);
-    } else if constexpr (decodable_shared_pointer_v<type>) {
-        if (major == major_type::Tag) {
-            return dec.decode_shared_pointer_after_tag(value, *tag);
-        }
-        return dec.decode(value, major, additional_info);
     } else if constexpr (IsVariant<type>) {
-        return dec.template decode_pointer_variant_impl<AllowUnique, AllowShared>(value, major, additional_info, tag);
+        return dec.decode_unique_pointer_variant_impl(value, major, additional_info, tag);
     } else if constexpr (IsTag<type>) {
         return dec.decode(value, *tag);
     } else {
@@ -380,19 +388,19 @@ template <bool AllowUnique, bool AllowShared, typename Decoder, typename T>
     }
 }
 
-template <bool AllowUnique, bool AllowShared, typename Decoder, IsVariant Variant>
-[[nodiscard]] status_code decode_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
-                                                 std::optional<std::uint64_t> &tag) {
+template <typename Decoder, IsVariant Variant>
+[[nodiscard]] status_code decode_unique_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
+                                                        std::optional<std::uint64_t> &tag) {
     using variant_type = std::remove_cvref_t<Variant>;
 
     static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
-                      []<typename... Ts>() { return (pointer_variant_alternative_supported<AllowUnique, AllowShared, Ts>() && ...); }),
-                  "Pointer variant alternatives must have supported, decodable CBOR wire shapes");
+                      []<typename... Ts>() { return (unique_variant_alternative_supported<Ts>() && ...); }),
+                  "unique pointer variant alternatives must have supported CBOR wire shapes");
     static_assert(pointer_variant_is_unambiguous<variant_type>(),
                   "Pointer variant alternatives overlap on the CBOR wire; add an application tag or choose a different decode type");
     static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
                       []<typename... Ts>() { return (std::default_initializable<Ts> && ...); }),
-                  "Pointer variant alternatives must be default-initializable");
+                  "unique pointer variant alternatives must be default-initializable");
 
     if (major == major_type::Tag && !tag.has_value()) {
         std::uint64_t decoded_tag{};
@@ -409,14 +417,13 @@ template <bool AllowUnique, bool AllowShared, typename Decoder, IsVariant Varian
     cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
         auto select = [&]<std::size_t I>() {
             using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
-            if (selected || !pointer_variant_matches<alternative_type>(major, additional_info, tag)) {
+            if (selected || !unique_variant_matches<alternative_type>(major, additional_info, tag)) {
                 return;
             }
-
             selected = true;
             cbor::tags::detail::variant_assign<I>(value, alternative_type{});
             auto &alternative = cbor::tags::detail::variant_get<I>(value);
-            result            = decode_pointer_variant_alternative<AllowUnique, AllowShared>(dec, alternative, major, additional_info, tag);
+            result            = decode_unique_variant_alternative(dec, alternative, major, additional_info, tag);
         };
         (select.template operator()<Is>(), ...);
     });
@@ -426,94 +433,144 @@ template <bool AllowUnique, bool AllowShared, typename Decoder, IsVariant Varian
 
 } // namespace detail
 
-template <typename Self> struct unique_ptr_codec : detail::unique_ptr_codec_marker, cbor_codec_mixin_base<Self> {
+template <typename Self> struct unique_ptr_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <detail::PointerValue T> void encode(const std::unique_ptr<T> &value) {
-        static_assert(!detail::known_null_wire_v<T>,
-                      "unique_ptr<T> cannot encode T when T also has a CBOR null state; the pointer states would not round-trip");
+    template <IsUniquePointer Pointer> void encode(const Pointer &value) {
+        using element_type = detail::pointer_element_t<Pointer>;
+        static_assert(!detail::known_null_wire_v<element_type>, "unique pointer cannot encode a pointee that also has a CBOR null state");
+        static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
+                      "smart pointer pointee must encode exactly one CBOR item");
         auto &enc = static_cast<Self &>(*this);
-        if (value) {
-            enc.encode(*value);
-        } else {
-            enc.encode(nullptr);
-        }
+        value ? enc.encode(*value) : enc.encode(nullptr);
     }
 
-    template <detail::PointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode(std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
+    template <IsUniquePointer Pointer>
+        requires std::default_initializable<detail::pointer_element_t<Pointer>>
+    [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
         return detail::decode_unique_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
 
     template <typename T>
-        requires(detail::has_pointer_null_wire_v<true, false, T> && !detail::has_shared_ptr_codec_v<Self>)
+        requires detail::has_pointer_null_wire_v<true, false, T>
     void encode(const std::optional<T> &) {
         static_assert(always_false<T>::value,
-                      "std::optional<T> cannot contain a unique_ptr null state because both empty states use CBOR null");
+                      "std::optional<T> cannot contain a unique pointer null state because both empty states use CBOR null");
     }
 
     template <typename T>
-        requires(detail::has_pointer_null_wire_v<true, false, T> && !detail::has_shared_ptr_codec_v<Self>)
+        requires detail::has_pointer_null_wire_v<true, false, T>
     [[nodiscard]] status_code decode(std::optional<T> &, major_type, std::byte) {
         static_assert(always_false<T>::value,
-                      "std::optional<T> cannot contain a unique_ptr null state because both empty states use CBOR null");
+                      "std::optional<T> cannot contain a unique pointer null state because both empty states use CBOR null");
         return status_code::error;
     }
 
     template <IsVariant Variant>
-        requires(detail::contains_decodable_unique_pointer_v<Variant> && !detail::has_shared_ptr_codec_v<Self>)
+        requires(detail::contains_decodable_unique_pointer_v<Variant> && !detail::contains_shared_pointer_v<Variant>)
     [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
         std::optional<std::uint64_t> tag;
-        return detail::decode_pointer_variant<true, false>(static_cast<Self &>(*this), value, major, additional_info, tag);
+        return detail::decode_unique_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
+    }
+
+    template <IsVariant Variant>
+    [[nodiscard]] status_code decode_unique_pointer_variant_impl(Variant &value, major_type major, std::byte additional_info,
+                                                                 std::optional<std::uint64_t> &tag) {
+        return detail::decode_unique_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
     }
 };
 
-template <typename Self> struct shared_ptr_codec : detail::shared_ptr_codec_marker, cbor_codec_mixin_base<Self> {
+template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <typename T> void encode(shared_ptr_root<T> root) {
-        auto &enc = static_cast<Self &>(*this);
-        enc.encode(static_tag<detail::shared_namespace_tag>{});
-
-        detail::default_encode_table table;
-        detail::encode_table_ref     table_ref{table};
-        detail::active_table_scope   scope{active_encode_table_, table_ref};
-        enc.encode(root.value_);
+    template <SharedPtrEncodeScope Scope, typename S = Self>
+        requires detail::EncoderSelf<S>
+    void set_shared_ptr_scope(Scope &scope) {
+        external_encode_scope_.emplace(scope);
     }
 
-    template <typename T> [[nodiscard]] status_code decode(shared_ptr_root<T> root) {
-        auto &dec = static_cast<Self &>(*this);
-
-        const auto tag_status = dec.decode(static_tag<detail::shared_namespace_tag>{});
-        if (tag_status != status_code::success) {
-            return tag_status;
-        }
-
-        detail::default_decode_table table;
-        detail::decode_table_ref     table_ref{table};
-        detail::active_table_scope   scope{active_decode_table_, table_ref};
-        return dec.decode(root.value_);
+    template <SharedPtrDecodeScope Scope, typename S = Self>
+        requires detail::DecoderSelf<S>
+    void set_shared_ptr_scope(Scope &scope) {
+        external_decode_scope_.emplace(scope);
     }
 
-    template <typename T, SharedPtrEncodeTable Table> void encode(shared_ptr_unscoped_root<T, Table> root) {
-        detail::encode_table_ref   table_ref{root.table_};
-        detail::active_table_scope scope{active_encode_table_, table_ref};
-        static_cast<Self &>(*this).encode(root.value_);
+    template <typename S = Self>
+        requires detail::EncoderSelf<S>
+    void use_default_shared_ptr_scope() {
+        external_encode_scope_.reset();
     }
 
-    template <typename T, SharedPtrDecodeTable Table> [[nodiscard]] status_code decode(shared_ptr_unscoped_root<T, Table> root) {
-        detail::decode_table_ref   table_ref{root.table_};
-        detail::active_table_scope scope{active_decode_table_, table_ref};
-        return static_cast<Self &>(*this).decode(root.value_);
+    template <typename S = Self>
+        requires detail::DecoderSelf<S>
+    void use_default_shared_ptr_scope() {
+        external_decode_scope_.reset();
     }
 
-    template <detail::PointerValue T> void encode(const std::shared_ptr<T> &value) {
-        if (active_encode_table_ == nullptr) {
-            throw cbor::tags::detail::encode_status_exception{status_code::error};
-        }
+    template <typename S = Self>
+        requires detail::EncoderSelf<S>
+    void reset_shared_ptr_scope() {
+        current_encode_scope().reset();
+    }
+
+    template <typename S = Self>
+        requires detail::DecoderSelf<S>
+    void reset_shared_ptr_scope() {
+        current_decode_scope().reset();
+    }
+
+    template <IsSharedPointer Pointer> void encode(const Pointer &value) { encode_shared_pointer(value); }
+
+    template <IsSharedPointer Pointer> void encode(const scoped_shared_ptr<Pointer> &value) { encode_shared_pointer(value.value()); }
+
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
+        return decode_shared_pointer(value, major, additional_info);
+    }
+
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode(scoped_shared_ptr<Pointer> &value, major_type major, std::byte additional_info) {
+        return decode_shared_pointer(value.value(), major, additional_info);
+    }
+
+    template <typename T>
+        requires(detail::has_pointer_null_wire_v<false, true, T> && !detail::has_pointer_null_wire_v<true, false, T>)
+    void encode(const std::optional<T> &) {
+        static_assert(always_false<T>::value,
+                      "std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
+    }
+
+    template <typename T>
+        requires(detail::has_pointer_null_wire_v<false, true, T> && !detail::has_pointer_null_wire_v<true, false, T>)
+    [[nodiscard]] status_code decode(std::optional<T> &, major_type, std::byte) {
+        static_assert(always_false<T>::value,
+                      "std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
+        return status_code::error;
+    }
+
+    template <IsVariant Variant>
+        requires detail::contains_shared_pointer_v<Variant>
+    void encode(const Variant &) {
+        static_assert(always_false<Variant>::value, "variants containing shared pointers require an explicit application codec");
+    }
+
+    template <IsVariant Variant>
+        requires detail::contains_shared_pointer_v<Variant>
+    [[nodiscard]] status_code decode(Variant &, major_type, std::byte) {
+        static_assert(always_false<Variant>::value, "variants containing shared pointers require an explicit application codec");
+        return status_code::error;
+    }
+
+  private:
+    template <IsSharedPointer Pointer> void encode_shared_pointer(const Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
+        using element_type = typename pointer_type::element_type;
+        static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
+                      "smart pointer pointee must encode exactly one CBOR item");
 
         auto &enc = static_cast<Self &>(*this);
         if (!value) {
@@ -521,14 +578,12 @@ template <typename Self> struct shared_ptr_codec : detail::shared_ptr_codec_mark
             return;
         }
 
-        const auto erased = std::shared_ptr<const void>{value, static_cast<const void *>(value.get())};
-        const auto key =
-            shared_ptr_encode_key{std::weak_ptr<const void>{erased}, static_cast<const void *>(value.get()), detail::graph_type_id<T>()};
-        auto observation = active_encode_table_->observe(key);
+        auto scope = current_encode_scope();
+        auto observation =
+            scope.observe(shared_ptr_encode_key{static_cast<const void *>(value.get()), detail::graph_type_id<pointer_type>()});
         if (!observation) {
             throw cbor::tags::detail::encode_status_exception{observation.error()};
         }
-
         if (observation->kind == shared_ptr_observation_kind::reference) {
             enc.encode(static_tag<detail::sharedref_tag>{});
             enc.encode(observation->index);
@@ -537,16 +592,12 @@ template <typename Self> struct shared_ptr_codec : detail::shared_ptr_codec_mark
 
         enc.encode(static_tag<detail::shareable_tag>{});
         enc.encode(*value);
-        active_encode_table_->mark_complete(observation->index);
+        scope.mark_complete(observation->index);
     }
 
-    template <detail::PointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
-        if (active_decode_table_ == nullptr) {
-            return status_code::error;
-        }
-
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode_shared_pointer(Pointer &value, major_type major, std::byte additional_info) {
         if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
             value.reset();
             return status_code::success;
@@ -556,46 +607,9 @@ template <typename Self> struct shared_ptr_codec : detail::shared_ptr_codec_mark
         }
 
         std::uint64_t tag{};
-        auto          status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
+        const auto    status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
         if (status != status_code::success) {
             return status;
-        }
-        return decode_shared_pointer_after_tag(value, tag);
-    }
-
-    template <typename T>
-        requires(detail::has_pointer_null_wire_v<detail::has_unique_ptr_codec_v<Self>, true, T>)
-    void encode(const std::optional<T> &) {
-        static_assert(always_false<T>::value,
-                      "std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
-    }
-
-    template <typename T>
-        requires(detail::has_pointer_null_wire_v<detail::has_unique_ptr_codec_v<Self>, true, T>)
-    [[nodiscard]] status_code decode(std::optional<T> &, major_type, std::byte) {
-        static_assert(always_false<T>::value,
-                      "std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
-        return status_code::error;
-    }
-
-    template <IsVariant Variant>
-        requires(detail::contains_decodable_shared_pointer_v<Variant> ||
-                 (detail::has_unique_ptr_codec_v<Self> && detail::contains_decodable_unique_pointer_v<Variant>))
-    [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
-        if (detail::contains_decodable_shared_pointer_v<Variant> && active_decode_table_ == nullptr) {
-            return status_code::error;
-        }
-
-        std::optional<std::uint64_t> tag;
-        return detail::decode_pointer_variant<detail::has_unique_ptr_codec_v<Self>, true>(static_cast<Self &>(*this), value, major,
-                                                                                          additional_info, tag);
-    }
-
-    template <detail::PointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_shared_pointer_after_tag(std::shared_ptr<T> &value, std::uint64_t tag) {
-        if (active_decode_table_ == nullptr) {
-            return status_code::error;
         }
         if (tag == detail::shareable_tag) {
             return decode_shareable(value);
@@ -606,75 +620,66 @@ template <typename Self> struct shared_ptr_codec : detail::shared_ptr_codec_mark
         return status_code::no_match_for_tag;
     }
 
-    template <bool AllowUnique, bool AllowShared, IsVariant Variant>
-    [[nodiscard]] status_code decode_pointer_variant_impl(Variant &value, major_type major, std::byte additional_info,
-                                                          std::optional<std::uint64_t> &tag) {
-        return detail::decode_pointer_variant<AllowUnique, AllowShared>(static_cast<Self &>(*this), value, major, additional_info, tag);
-    }
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode_shareable(Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
+        detail::reset_pointer_to_new(value);
 
-  private:
-    template <detail::PointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_shareable(std::shared_ptr<T> &value) {
-        auto decoded = std::make_shared<T>();
-        value        = decoded;
-
-        auto inserted = active_decode_table_->insert(
-            shared_ptr_decode_entry{std::shared_ptr<void>{decoded}, detail::graph_type_id<T>(), shared_ptr_entry_state::encoding});
+        auto scope    = current_decode_scope();
+        auto stored   = std::make_shared<pointer_type>(value);
+        auto inserted = scope.insert(
+            shared_ptr_decode_entry{std::move(stored), detail::graph_type_id<pointer_type>(), shared_ptr_entry_state::encoding});
         if (!inserted) {
             return inserted.error();
         }
 
-        const auto status = static_cast<Self &>(*this).decode(*decoded);
+        const auto status = static_cast<Self &>(*this).decode(*value);
         if (status != status_code::success) {
             return status;
         }
-
-        active_decode_table_->mark_complete(*inserted);
+        scope.mark_complete(*inserted);
         return status_code::success;
     }
 
-    template <detail::PointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_sharedref(std::shared_ptr<T> &value) {
+    template <IsSharedPointer Pointer> [[nodiscard]] status_code decode_sharedref(Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
         std::uint64_t index{};
         const auto    status = static_cast<Self &>(*this).decode(index);
         if (status != status_code::success) {
             return status;
         }
 
-        auto resolved = active_decode_table_->resolve(index);
+        auto resolved = current_decode_scope().resolve(index);
         if (!resolved) {
             return resolved.error();
         }
-        if (resolved->state != shared_ptr_entry_state::complete || resolved->type != detail::graph_type_id<T>()) {
+        if (resolved->state != shared_ptr_entry_state::complete || resolved->pointer_type != detail::graph_type_id<pointer_type>()) {
             return status_code::error;
         }
 
-        value = std::static_pointer_cast<T>(resolved->value);
+        value = *std::static_pointer_cast<pointer_type>(resolved->pointer);
         return status_code::success;
     }
 
-    detail::encode_table_ref *active_encode_table_{};
-    detail::decode_table_ref *active_decode_table_{};
+    [[nodiscard]] detail::encode_scope_ref current_encode_scope() {
+        if (external_encode_scope_) {
+            return *external_encode_scope_;
+        }
+        return detail::encode_scope_ref{default_encode_scope_};
+    }
+
+    [[nodiscard]] detail::decode_scope_ref current_decode_scope() {
+        if (external_decode_scope_) {
+            return *external_decode_scope_;
+        }
+        return detail::decode_scope_ref{default_decode_scope_};
+    }
+
+    shared_ptr_encode_scope                 default_encode_scope_{};
+    shared_ptr_decode_scope                 default_decode_scope_{};
+    std::optional<detail::encode_scope_ref> external_encode_scope_{};
+    std::optional<detail::decode_scope_ref> external_decode_scope_{};
 };
 
 } // namespace cbor::tags::ext::smart_ptr
-
-namespace cbor::tags::cddl {
-
-template <typename T> struct cddl_scope_traits<ext::smart_ptr::shared_ptr_cddl<T>> {
-    using value_type = typename ext::smart_ptr::shared_ptr_cddl<T>::value_type;
-
-    static constexpr cddl_shared_pointer_mode shared_pointer_mode  = cddl_shared_pointer_mode::shared_graph;
-    static constexpr bool                     tag_shared_namespace = true;
-};
-
-template <typename T> struct cddl_scope_traits<ext::smart_ptr::shared_ptr_unscoped_cddl<T>> {
-    using value_type = typename ext::smart_ptr::shared_ptr_unscoped_cddl<T>::value_type;
-
-    static constexpr cddl_shared_pointer_mode shared_pointer_mode  = cddl_shared_pointer_mode::shared_graph;
-    static constexpr bool                     tag_shared_namespace = false;
-};
-
-} // namespace cbor::tags::cddl

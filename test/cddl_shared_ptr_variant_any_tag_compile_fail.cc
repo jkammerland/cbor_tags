@@ -8,7 +8,7 @@
 #include <variant>
 
 int main() {
-    using value_type = cbor::tags::ext::smart_ptr::shared_ptr_cddl<std::variant<std::shared_ptr<int>, cbor::tags::as_tag_any, std::string>>;
+    using value_type = std::variant<std::shared_ptr<int>, cbor::tags::as_tag_any, std::string>;
 
     fmt::memory_buffer buffer;
     cbor::tags::cddl_schema_to<value_type>(buffer, {.row_options = {.format_by_rows = false}});

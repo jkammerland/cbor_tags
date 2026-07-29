@@ -12,5 +12,5 @@ int main() {
     auto                   dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::shared_ptr_codec>(bytes);
 
     std::variant<std::vector<std::shared_ptr<std::uint64_t>>, std::vector<std::uint64_t>> decoded;
-    return dec(cbor::tags::ext::smart_ptr::as_shared_ptrs(decoded)).has_value() ? 0 : 1;
+    return dec(decoded).has_value() ? 0 : 1;
 }

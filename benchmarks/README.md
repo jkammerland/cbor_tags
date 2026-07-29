@@ -78,13 +78,12 @@ public-preflight rows.
 The encoder suite includes `shared_ptr encode N unique x2` rows. Each row
 encodes a `std::vector<std::shared_ptr<std::uint64_t>>` containing `N`
 first-seen pointers followed by the same `N` pointers again. The benchmark uses
-`as_shared_ptrs(...)`, including its private per-call table construction and
-owner-identity lookup.
+one fresh `shared_ptr_codec` encoder per iteration, including its internal
+address-and-pointer-type lookup.
 
 Lookup strategy and reservation are deliberately not public options. An
-application that needs different storage or state spanning several calls can
-supply its own table through `as_shared_ptrs_unscoped(...)` and benchmark that
-table in the application.
+application that needs different storage can supply its own scope through
+`set_shared_ptr_scope(...)` and benchmark that scope in the application.
 
 ## Custom Codec 1 vs Default CBOR
 

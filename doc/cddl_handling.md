@@ -372,9 +372,8 @@ are intentionally deferred.
 
 Extension headers may add CDDL support by specializing the public CDDL traits
 in `cbor::tags::cddl`, declared by
-`cbor_tags/extensions/cddl_traits.h`. Simple tagged extension types expose fixed
-tag metadata, while scoped wrappers can select a different rendering policy for
-a whole schema root:
+`cbor_tags/extensions/cddl_traits.h`. Tagged extension types expose fixed tag
+metadata:
 
 ```cpp
 namespace cbor::tags::cddl {
@@ -384,9 +383,8 @@ template <> struct cddl_tagged_bstr_array_traits<MyTypedBstrView> {
 }
 ```
 
-For example, `cbor::tags::ext::smart_ptr::shared_ptr_cddl<T>` selects the
-tag-296 shared-pointer namespace for one schema root, while
-`shared_ptr_unscoped_cddl<T>` describes the caller-table form without tag 296.
+For example, the smart-pointer extension renders compatible shared pointer
+types directly as `null / #6.28(T) / #6.29(uint)`.
 
 ### Enum Names
 
@@ -470,24 +468,15 @@ pointer states would be indistinguishable. Outside named maps, an
 the same reason. Named-map omission is distinct from a present key whose value
 is `null`, so optional smart-pointer fields remain representable there.
 
-Direct `std::shared_ptr<T>` CDDL is rejected. Include
-`cbor_tags/extensions/smart_ptr.h` and choose the schema-root wrapper that
-matches the encoded root:
-
-- `shared_ptr_cddl<T>` renders the tag-296 namespace emitted by
-  `as_shared_ptrs(...)`.
-- `shared_ptr_unscoped_cddl<T>` omits tag 296 and matches
-  `as_shared_ptrs_unscoped(..., table)`.
-
-Inside either root, `std::shared_ptr<T>` renders as
-`null / #6.28(T) / #6.29(uint)`. The tagged form wraps the root expression in
-`#6.296(...)`. These are schema-root wrappers; using one as a struct member is
-rejected.
+Include `cbor_tags/extensions/smart_ptr.h` to render compatible shared pointer
+types directly as `null / #6.28(T) / #6.29(uint)`. No schema-root wrapper is
+required.
 
 CDDL cannot express whether a tag 29 index exists, has the requested pointee
 type, or refers to a completed entry. Those remain runtime table checks.
-Pointer-containing variants are generated only when their alternatives have
-distinct CBOR wire shapes; ambiguous alternatives are rejected.
+CDDL can describe pointer-containing choices when their shapes are distinct.
+The runtime shared-pointer codec still requires an explicit application codec
+for any variant containing a shared pointer.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

@@ -96,7 +96,7 @@ template <typename T> consteval bool cddl_contains_shared_pointer() {
     } else if constexpr (IsVariant<value_type>) {
         return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_shared_pointer<Ts>() || ...); });
     } else {
-        return is_std_shared_ptr<value_type>::value;
+        return IsSharedPointer<value_type>;
     }
 }
 

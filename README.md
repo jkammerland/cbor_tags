@@ -820,22 +820,22 @@ auto value = std::make_shared<int>(42);
 std::vector<std::shared_ptr<int>> sent{value, value};
 
 auto enc = make_encoder<shared_ptr_codec>(buffer);
-enc(as_shared_ptrs(sent));
+enc(sent);
 
 std::vector<std::shared_ptr<int>> received;
 auto dec = make_decoder<shared_ptr_codec>(buffer);
-dec(as_shared_ptrs(received));
+dec(received);
 
 // received[0].get() == received[1].get(): both point to the same int.
 ```
 
-The shared wrapper writes tag 296 and uses a private table for that call.
-Advanced callers can supply their own table with `as_shared_ptrs_unscoped` when
-references must continue across calls. Raw `std::shared_ptr` values outside
-either wrapper are rejected.
+The first pointer uses tag 28 and later references use tag 29. The table belongs
+to the encoder or decoder and persists across calls until
+`reset_shared_ptr_scope()` is called. Applications may instead provide a
+user-owned table through `set_shared_ptr_scope()`.
 
-See [Smart Pointer Codecs](doc/smart_pointers.md) for exact CBOR, caller-owned
-table concepts, CDDL, cycles, aliasing, failure state, and variant rules.
+See [Smart Pointer Codecs](doc/smart_pointers.md) for exact CBOR, compatible
+user-defined pointer types, scopes, CDDL, failure state, and variant rules.
 See [Codec Extensions](doc/codec_extensions.md) for the general opt-in extension
 pattern.
 

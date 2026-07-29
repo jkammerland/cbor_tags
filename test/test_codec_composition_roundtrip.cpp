@@ -117,12 +117,12 @@ struct graph_codec_node {
 };
 
 struct graph_codec_report {
-    codec_report_state                                           state{};
-    std::shared_ptr<graph_codec_node>                            primary;
-    std::vector<std::shared_ptr<graph_codec_node>>               mirrors;
-    std::variant<std::shared_ptr<graph_codec_node>, std::string> selected;
-    std::unique_ptr<codec_owner>                                 fallback;
-    std::map<std::string, std::vector<int>>                      history;
+    codec_report_state                             state{};
+    std::shared_ptr<graph_codec_node>              primary;
+    std::vector<std::shared_ptr<graph_codec_node>> mirrors;
+    std::string                                    selected;
+    std::unique_ptr<codec_owner>                   fallback;
+    std::map<std::string, std::vector<int>>        history;
 };
 
 struct graph_codec_cycle_node {
@@ -228,14 +228,14 @@ TEST_CASE("typed array and unique pointer codecs roundtrip aggregate composition
 }
 
 TEST_CASE("typed array unique and shared pointer codecs preserve aggregate identity") {
-    auto check_roundtrip = [](graph_codec_report &input, bool selected_is_pointer) {
+    auto check_roundtrip = [](graph_codec_report &input) {
         std::vector<std::byte> buffer;
         auto                   enc = make_encoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
-        REQUIRE(enc(as_shared_ptrs(input)));
+        REQUIRE(enc(input));
 
         graph_codec_report output;
         auto               dec = make_decoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
-        REQUIRE(dec(as_shared_ptrs(output)));
+        REQUIRE(dec(output));
         REQUIRE(dec.tell() == buffer.end());
 
         CHECK_EQ(output.state, input.state);
@@ -258,13 +258,7 @@ TEST_CASE("typed array unique and shared pointer codecs preserve aggregate ident
         CHECK_EQ(output.mirrors[1]->note, input.mirrors[1]->note);
         CHECK_EQ(output.history, input.history);
 
-        if (selected_is_pointer) {
-            REQUIRE(std::holds_alternative<std::shared_ptr<graph_codec_node>>(output.selected));
-            CHECK(static_cast<const void *>(std::get<std::shared_ptr<graph_codec_node>>(output.selected).get()) == primary_address);
-        } else {
-            REQUIRE(std::holds_alternative<std::string>(output.selected));
-            CHECK_EQ(std::get<std::string>(output.selected), std::get<std::string>(input.selected));
-        }
+        CHECK_EQ(output.selected, input.selected);
 
         CHECK_EQ(static_cast<bool>(output.fallback), static_cast<bool>(input.fallback));
         if (input.fallback) {
@@ -276,24 +270,24 @@ TEST_CASE("typed array unique and shared pointer codecs preserve aggregate ident
     auto primary   = std::make_shared<graph_codec_node>(graph_codec_node{1, "primary", typed_array<std::int16_t>{{1, 2, 3}}, "live"});
     auto secondary = std::make_shared<graph_codec_node>(graph_codec_node{2, "secondary", typed_array<std::int16_t>{{4, 5}}, std::nullopt});
 
-    SUBCASE("shared pointer variant and non-null unique pointer") {
+    SUBCASE("shared pointers and non-null unique pointer") {
         graph_codec_report input{codec_report_state::active,
                                  primary,
                                  {primary, secondary, nullptr, primary, secondary},
-                                 primary,
+                                 "automatic",
                                  std::make_unique<codec_owner>(codec_owner{3, "fallback", {"read"}}),
                                  {{"recent", {1, 2, 3}}}};
-        check_roundtrip(input, true);
+        check_roundtrip(input);
     }
 
     SUBCASE("text variant and null unique pointer") {
         graph_codec_report input{codec_report_state::degraded, primary, {primary, secondary, nullptr, primary, secondary},
                                  std::string{"manual"},        nullptr, {{"recent", {4, 5}}}};
-        check_roundtrip(input, false);
+        check_roundtrip(input);
     }
 }
 
-TEST_CASE("composed shared pointer stack rejects cycles and requires an explicit root") {
+TEST_CASE("composed shared pointer stack rejects cycles") {
     SUBCASE("typed graph cycle") {
         auto cycle     = std::make_shared<graph_codec_cycle_node>();
         cycle->samples = typed_array<std::int16_t>{{1, 2, 3}};
@@ -301,22 +295,11 @@ TEST_CASE("composed shared pointer stack rejects cycles and requires an explicit
 
         std::vector<std::byte> buffer;
         auto                   enc    = make_encoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
-        const auto             result = enc(as_shared_ptrs(cycle));
+        const auto             result = enc(cycle);
         cycle->next.reset();
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
-    }
-
-    SUBCASE("shared pointer outside graph scope") {
-        const auto             value = std::make_shared<codec_owner>(codec_owner{5, "outside", {"read"}});
-        std::vector<std::byte> buffer;
-        auto                   enc    = make_encoder<typed_array_codec, shared_ptr_codec>(buffer);
-        const auto             result = enc(value);
-
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
-        CHECK(buffer.empty());
     }
 }
 

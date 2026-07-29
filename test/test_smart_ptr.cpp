@@ -33,17 +33,15 @@ class encode_table {
     explicit encode_table(std::size_t limit = std::numeric_limits<std::size_t>::max()) : limit_(limit) {}
 
     void reserve(std::size_t count) { entries_.reserve(count); }
-    void clear() { entries_.clear(); }
+    void reset() { entries_.clear(); }
 
     [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) {
-        const auto owner_less = std::owner_less<std::weak_ptr<const void>>{};
         for (std::size_t index = 0; index < entries_.size(); ++index) {
-            auto      &entry = entries_[index];
-            const auto owner = !owner_less(entry.key.owner, key.owner) && !owner_less(key.owner, entry.key.owner);
-            if (!owner) {
+            auto &entry = entries_[index];
+            if (entry.key != key) {
                 continue;
             }
-            if (entry.key.target != key.target || entry.key.type != key.type || entry.state != shared_ptr_entry_state::complete) {
+            if (entry.state != shared_ptr_entry_state::complete) {
                 return unexpected<status_code>{status_code::error};
             }
             return shared_ptr_observation{shared_ptr_observation_kind::reference, static_cast<std::uint64_t>(index)};
@@ -70,7 +68,7 @@ class decode_table {
     explicit decode_table(std::size_t limit = std::numeric_limits<std::size_t>::max()) : limit_(limit) {}
 
     void reserve(std::size_t count) { entries_.reserve(count); }
-    void clear() { entries_.clear(); }
+    void reset() { entries_.clear(); }
 
     [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) {
         if (entries_.size() >= limit_) {
@@ -95,18 +93,60 @@ class decode_table {
     std::size_t                          limit_{};
 };
 
-static_assert(SharedPtrEncodeTable<encode_table>);
-static_assert(SharedPtrDecodeTable<decode_table>);
+static_assert(SharedPtrEncodeScope<encode_table>);
+static_assert(SharedPtrDecodeScope<decode_table>);
 
 struct partial_record {
     std::uint64_t first{};
     std::string   second;
 };
 
+struct single_field_record {
+    std::uint64_t value{};
+};
+
+struct tagged_record {
+    static_tag<42> cbor_tag;
+    std::uint64_t  value{};
+};
+
 struct node {
     std::uint64_t         value{};
     std::shared_ptr<node> next;
 };
+
+template <typename T> class shared_handle {
+  public:
+    using element_type = T;
+
+    shared_handle() = default;
+    explicit shared_handle(std::shared_ptr<T> pointer) : pointer_(std::move(pointer)) {}
+
+    [[nodiscard]] T *get() const noexcept { return pointer_.get(); }
+    [[nodiscard]] T &operator*() const noexcept { return *pointer_; }
+    explicit         operator bool() const noexcept { return static_cast<bool>(pointer_); }
+
+    void reset() noexcept { pointer_.reset(); }
+    void reset(T *raw) { pointer_.reset(raw); }
+
+  private:
+    std::shared_ptr<T> pointer_;
+};
+
+struct counting_deleter {
+    std::size_t *calls{};
+
+    void operator()(std::uint64_t *value) const noexcept {
+        ++*calls;
+        delete value;
+    }
+};
+
+static_assert(IsSharedPointer<shared_handle<std::uint64_t>>);
+static_assert(IsSharedPointer<std::shared_ptr<std::uint64_t>>);
+static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t>>);
+static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t, counting_deleter>>);
+static_assert(IsSmartPointer<shared_handle<std::uint64_t>>);
 
 template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr<T> &value) {
     std::vector<std::byte> bytes;
@@ -169,18 +209,103 @@ TEST_CASE("unique_ptr decode keeps terminal partial pointee state") {
     CHECK_EQ(decoded->first, 7U);
 }
 
-TEST_CASE("shared_ptr root uses IANA namespace and reference tags") {
+TEST_CASE("unique pointer concept accepts a stateful custom deleter") {
+    const auto bytes = to_bytes("182a");
+
+    std::size_t delete_calls{};
+    {
+        std::unique_ptr<std::uint64_t, smart_ptr_test::counting_deleter> decoded{new std::uint64_t{1U},
+                                                                                 smart_ptr_test::counting_deleter{&delete_calls}};
+        auto                                                             dec = make_decoder<unique_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(decoded);
+        CHECK_EQ(*decoded, 42U);
+        CHECK_EQ(delete_calls, 1U);
+    }
+    CHECK_EQ(delete_calls, 2U);
+}
+
+TEST_CASE("shared pointer concept accepts a user-defined pointer type") {
+    auto                                         owner = std::make_shared<std::uint64_t>(42U);
+    smart_ptr_test::shared_handle<std::uint64_t> first{owner};
+    const auto                                   second = first;
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(first, second));
+    CHECK_EQ(to_hex(bytes), "d81c182ad81d00");
+
+    smart_ptr_test::shared_handle<std::uint64_t> decoded_first;
+    smart_ptr_test::shared_handle<std::uint64_t> decoded_second;
+    auto                                         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded_first, decoded_second));
+    REQUIRE(decoded_first);
+    REQUIRE(decoded_second);
+    CHECK_EQ(*decoded_first, 42U);
+    CHECK(decoded_first.get() == decoded_second.get());
+}
+
+TEST_CASE("shared pointer pointees may be one-field and tagged aggregates") {
+    auto one_field = std::make_shared<smart_ptr_test::single_field_record>(smart_ptr_test::single_field_record{.value = 7U});
+    auto tagged    = std::make_shared<smart_ptr_test::tagged_record>(smart_ptr_test::tagged_record{.cbor_tag = {}, .value = 9U});
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(one_field, tagged));
+    CHECK_EQ(to_hex(bytes), "d81c07d81cd82a09");
+
+    std::shared_ptr<smart_ptr_test::single_field_record> decoded_one_field;
+    std::shared_ptr<smart_ptr_test::tagged_record>       decoded_tagged;
+    auto                                                 dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded_one_field, decoded_tagged));
+    REQUIRE(decoded_one_field);
+    REQUIRE(decoded_tagged);
+    CHECK_EQ(decoded_one_field->value, 7U);
+    CHECK_EQ(decoded_tagged->value, 9U);
+}
+
+TEST_CASE("shared pointer identity includes the exact pointer type") {
+    auto                                         owner = std::make_shared<std::uint64_t>(7U);
+    smart_ptr_test::shared_handle<std::uint64_t> custom{owner};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(owner, custom));
+    CHECK_EQ(to_hex(bytes), "d81c07d81c07");
+}
+
+TEST_CASE("scoped shared pointer wrapper copies lvalues and moves rvalues") {
+    auto pointer = std::make_shared<std::uint64_t>(9U);
+    auto copied  = as_scoped_shared_ptr(pointer);
+    REQUIRE(pointer);
+
+    auto moved = as_scoped_shared_ptr(std::move(pointer));
+    CHECK_FALSE(pointer);
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(copied, moved));
+    CHECK_EQ(to_hex(bytes), "d81c09d81d00");
+
+    scoped_shared_ptr<std::shared_ptr<std::uint64_t>> decoded_first;
+    scoped_shared_ptr<std::shared_ptr<std::uint64_t>> decoded_second;
+    auto                                              dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded_first, decoded_second));
+    CHECK(decoded_first.value() == decoded_second.value());
+}
+
+TEST_CASE("shared_ptr codec uses IANA reference tags") {
     const auto                                        value = std::make_shared<std::uint64_t>(42U);
     const std::vector<std::shared_ptr<std::uint64_t>> sent{value, value};
 
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs(sent)));
-    CHECK_EQ(to_hex(bytes), "d9012882d81c182ad81d00");
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "82d81c182ad81d00");
 
     std::vector<std::shared_ptr<std::uint64_t>> decoded;
     auto                                        dec = make_decoder<shared_ptr_codec>(bytes);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
+    REQUIRE(dec(decoded));
     REQUIRE(decoded.size() == 2U);
     REQUIRE(decoded[0]);
     REQUIRE(decoded[1]);
@@ -188,86 +313,84 @@ TEST_CASE("shared_ptr root uses IANA namespace and reference tags") {
     CHECK(decoded[0] == decoded[1]);
 }
 
-TEST_CASE("shared_ptr null uses native CBOR null inside the namespace") {
+TEST_CASE("shared_ptr null uses native CBOR null") {
     const std::shared_ptr<std::uint64_t> value;
 
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs(value)));
-    CHECK_EQ(to_hex(bytes), "d90128f6");
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "f6");
 
     auto decoded = std::make_shared<std::uint64_t>(1U);
     auto dec     = make_decoder<shared_ptr_codec>(bytes);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
+    REQUIRE(dec(decoded));
     CHECK_FALSE(decoded);
 }
 
-TEST_CASE("private shared_ptr tables do not retain cross-call state") {
+TEST_CASE("default shared_ptr scope persists until explicitly reset") {
     auto p = std::make_shared<std::uint64_t>(1U);
 
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs(p)));
+    REQUIRE(enc(p));
     *p = 2U;
-    REQUIRE(enc(as_shared_ptrs(p)));
-    CHECK_EQ(to_hex(bytes), "d90128d81c01d90128d81c02");
+    REQUIRE(enc(p));
+    CHECK_EQ(to_hex(bytes), "d81c01d81d00");
+
+    enc.reset_shared_ptr_scope();
+    REQUIRE(enc(p));
+    CHECK_EQ(to_hex(bytes), "d81c01d81d00d81c02");
 
     std::shared_ptr<std::uint64_t> first;
     std::shared_ptr<std::uint64_t> second;
     auto                           dec = make_decoder<shared_ptr_codec>(bytes);
-    REQUIRE(dec(as_shared_ptrs(first)));
-    REQUIRE(dec(as_shared_ptrs(second)));
+    REQUIRE(dec(first));
+    REQUIRE(dec(second));
     REQUIRE(first);
     REQUIRE(second);
     CHECK_EQ(*first, 1U);
+    CHECK_EQ(*second, 1U);
+    CHECK(first == second);
+
+    dec.reset_shared_ptr_scope();
+    REQUIRE(dec(second));
+    REQUIRE(second);
     CHECK_EQ(*second, 2U);
     CHECK(first != second);
 }
 
-TEST_CASE("shared_ptr use outside an explicit root fails") {
+TEST_CASE("shared_ptr use needs no root wrapper") {
     auto value = std::make_shared<std::uint64_t>(1U);
 
     std::vector<std::byte> bytes;
-    auto                   enc           = make_encoder<shared_ptr_codec>(bytes);
-    const auto             encode_result = enc(value);
-    REQUIRE_FALSE(encode_result);
-    CHECK_EQ(encode_result.error(), status_code::error);
-    CHECK(bytes.empty());
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "d81c01");
 
-    bytes                    = to_bytes("d81c01");
-    auto       dec           = make_decoder<shared_ptr_codec>(bytes);
-    const auto decode_result = dec(value);
-    REQUIRE_FALSE(decode_result);
-    CHECK_EQ(decode_result.error(), status_code::error);
+    std::shared_ptr<std::uint64_t> decoded;
+    auto                           dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded);
+    CHECK_EQ(*decoded, 1U);
 }
 
-TEST_CASE("shared_ptr root requires tag 296") {
-    const auto bytes = to_bytes("d81c01");
-    auto       dec   = make_decoder<shared_ptr_codec>(bytes);
-
-    std::shared_ptr<std::uint64_t> value;
-    const auto                     result = dec(as_shared_ptrs(value));
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::no_match_for_tag);
-}
-
-TEST_CASE("shared_ptr root rejects cycles without rolling back the destination") {
+TEST_CASE("shared_ptr codec rejects cycles without rolling back the destination") {
     auto value   = std::make_shared<smart_ptr_test::node>();
     value->value = 7U;
     value->next  = value;
 
     std::vector<std::byte> bytes;
     auto                   enc    = make_encoder<shared_ptr_codec>(bytes);
-    const auto             result = enc(as_shared_ptrs(value));
+    const auto             result = enc(value);
     value->next.reset();
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::error);
     CHECK_FALSE(bytes.empty());
 
-    const auto                            cycle_bytes = to_bytes("d90128d81c8207d81d00");
+    const auto                            cycle_bytes = to_bytes("d81c8207d81d00");
     auto                                  dec         = make_decoder<shared_ptr_codec>(cycle_bytes);
     std::shared_ptr<smart_ptr_test::node> decoded;
-    const auto                            decode_result = dec(as_shared_ptrs(decoded));
+    const auto                            decode_result = dec(decoded);
     REQUIRE_FALSE(decode_result);
     CHECK_EQ(decode_result.error(), status_code::error);
     REQUIRE(decoded);
@@ -275,7 +398,7 @@ TEST_CASE("shared_ptr root rejects cycles without rolling back the destination")
     CHECK_FALSE(decoded->next);
 }
 
-TEST_CASE("shared_ptr root rejects aliasing pointers") {
+TEST_CASE("shared_ptr identity uses the exact pointer type and target address") {
     struct pair {
         std::uint64_t first{};
         std::uint64_t second{};
@@ -287,13 +410,12 @@ TEST_CASE("shared_ptr root rejects aliasing pointers") {
     const std::vector<std::shared_ptr<std::uint64_t>> values{first, second};
 
     std::vector<std::byte> bytes;
-    auto                   enc    = make_encoder<shared_ptr_codec>(bytes);
-    const auto             result = enc(as_shared_ptrs(values));
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(values));
+    CHECK_EQ(to_hex(bytes), "82d81c01d81c02");
 }
 
-TEST_CASE("distinct shared_ptr owners with the same target remain distinct definitions") {
+TEST_CASE("same typed address collapses even with different control blocks") {
     std::uint64_t                                     raw    = 7U;
     const auto                                        noop   = [](std::uint64_t *) {};
     auto                                              first  = std::shared_ptr<std::uint64_t>{&raw, noop};
@@ -302,25 +424,26 @@ TEST_CASE("distinct shared_ptr owners with the same target remain distinct defin
 
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs(values)));
-    CHECK_EQ(to_hex(bytes), "d9012882d81c07d81c07");
+    REQUIRE(enc(values));
+    CHECK_EQ(to_hex(bytes), "82d81c07d81d00");
 
     std::vector<std::shared_ptr<std::uint64_t>> decoded;
     auto                                        dec = make_decoder<shared_ptr_codec>(bytes);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
+    REQUIRE(dec(decoded));
     REQUIRE(decoded.size() == 2U);
-    CHECK(decoded[0] != decoded[1]);
+    CHECK(decoded[0] == decoded[1]);
 }
 
-TEST_CASE("external tables preserve references across unscoped calls") {
+TEST_CASE("external scopes preserve references across calls") {
     auto value = std::make_shared<std::uint64_t>(1U);
 
     smart_ptr_test::encode_table encode_table;
     encode_table.reserve(4U);
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs_unscoped(value, encode_table)));
-    REQUIRE(enc(as_shared_ptrs_unscoped(value, encode_table)));
+    enc.set_shared_ptr_scope(encode_table);
+    REQUIRE(enc(value));
+    REQUIRE(enc(value));
     CHECK_EQ(to_hex(bytes), "d81c01d81d00");
 
     smart_ptr_test::decode_table decode_table;
@@ -328,27 +451,29 @@ TEST_CASE("external tables preserve references across unscoped calls") {
     std::shared_ptr<std::uint64_t> first;
     std::shared_ptr<std::uint64_t> second;
     auto                           dec = make_decoder<shared_ptr_codec>(bytes);
-    REQUIRE(dec(as_shared_ptrs_unscoped(first, decode_table)));
-    REQUIRE(dec(as_shared_ptrs_unscoped(second, decode_table)));
+    dec.set_shared_ptr_scope(decode_table);
+    REQUIRE(dec(first));
+    REQUIRE(dec(second));
     REQUIRE(first);
     REQUIRE(second);
     CHECK(first == second);
     CHECK_EQ(*first, 1U);
 }
 
-TEST_CASE("external tables deliberately retain the first cross-call snapshot") {
+TEST_CASE("external scopes deliberately retain the first cross-call snapshot") {
     auto value = std::make_shared<std::uint64_t>(1U);
 
     smart_ptr_test::encode_table table;
     std::vector<std::byte>       bytes;
     auto                         enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs_unscoped(value, table)));
+    enc.set_shared_ptr_scope(table);
+    REQUIRE(enc(value));
     *value = 2U;
-    REQUIRE(enc(as_shared_ptrs_unscoped(value, table)));
+    REQUIRE(enc(value));
     CHECK_EQ(to_hex(bytes), "d81c01d81d00");
 
-    table.clear();
-    REQUIRE(enc(as_shared_ptrs_unscoped(value, table)));
+    table.reset();
+    REQUIRE(enc(value));
     CHECK_EQ(to_hex(bytes), "d81c01d81d00d81c02");
 }
 
@@ -357,8 +482,9 @@ TEST_CASE("external table status failures propagate unchanged") {
 
     smart_ptr_test::encode_table table{0U};
     std::vector<std::byte>       bytes;
-    auto                         enc    = make_encoder<shared_ptr_codec>(bytes);
-    const auto                   result = enc(as_shared_ptrs_unscoped(value, table));
+    auto                         enc = make_encoder<shared_ptr_codec>(bytes);
+    enc.set_shared_ptr_scope(table);
+    const auto result = enc(value);
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::size_limit_exceeded);
     CHECK(bytes.empty());
@@ -372,41 +498,45 @@ TEST_CASE("failed external encode calls leave caller-owned table state terminal"
     smart_ptr_test::encode_table table;
     std::vector<std::byte>       bytes;
     auto                         enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE_FALSE(enc(as_shared_ptrs_unscoped(value, table)));
+    enc.set_shared_ptr_scope(table);
+    REQUIRE_FALSE(enc(value));
 
-    const auto retained_failure = enc(as_shared_ptrs_unscoped(value, table));
+    const auto retained_failure = enc(value);
     REQUIRE_FALSE(retained_failure);
     CHECK_EQ(retained_failure.error(), status_code::error);
 
-    table.clear();
+    table.reset();
     value->next.reset();
-    REQUIRE(enc(as_shared_ptrs_unscoped(value, table)));
+    REQUIRE(enc(value));
 }
 
 TEST_CASE("failed external decode calls leave caller-owned table state terminal") {
     smart_ptr_test::decode_table table;
 
-    const auto                                      incomplete_bytes = to_bytes("d81c8207");
-    auto                                            incomplete_dec   = make_decoder<shared_ptr_codec>(incomplete_bytes);
+    const auto incomplete_bytes = to_bytes("d81c8207");
+    auto       incomplete_dec   = make_decoder<shared_ptr_codec>(incomplete_bytes);
+    incomplete_dec.set_shared_ptr_scope(table);
     std::shared_ptr<smart_ptr_test::partial_record> partial;
-    const auto                                      incomplete_result = incomplete_dec(as_shared_ptrs_unscoped(partial, table));
+    const auto                                      incomplete_result = incomplete_dec(partial);
     REQUIRE_FALSE(incomplete_result);
     CHECK_EQ(incomplete_result.error(), status_code::incomplete);
     REQUIRE(partial);
     CHECK_EQ(partial->first, 7U);
 
-    const auto                                      reference_bytes = to_bytes("d81d00");
-    auto                                            reference_dec   = make_decoder<shared_ptr_codec>(reference_bytes);
+    const auto reference_bytes = to_bytes("d81d00");
+    auto       reference_dec   = make_decoder<shared_ptr_codec>(reference_bytes);
+    reference_dec.set_shared_ptr_scope(table);
     std::shared_ptr<smart_ptr_test::partial_record> reference;
-    const auto                                      reference_result = reference_dec(as_shared_ptrs_unscoped(reference, table));
+    const auto                                      reference_result = reference_dec(reference);
     REQUIRE_FALSE(reference_result);
     CHECK_EQ(reference_result.error(), status_code::error);
     CHECK_FALSE(reference);
 
-    table.clear();
+    table.reset();
     const auto complete_bytes = to_bytes("d81c82076178");
     auto       complete_dec   = make_decoder<shared_ptr_codec>(complete_bytes);
-    REQUIRE(complete_dec(as_shared_ptrs_unscoped(reference, table)));
+    complete_dec.set_shared_ptr_scope(table);
+    REQUIRE(complete_dec(reference));
     REQUIRE(reference);
     CHECK_EQ(reference->first, 7U);
     CHECK_EQ(reference->second, "x");
@@ -415,15 +545,17 @@ TEST_CASE("failed external decode calls leave caller-owned table state terminal"
 TEST_CASE("external decode tables reject references with a different pointee type") {
     smart_ptr_test::decode_table table;
 
-    const auto                     first_bytes = to_bytes("d81c01");
-    auto                           first_dec   = make_decoder<shared_ptr_codec>(first_bytes);
+    const auto first_bytes = to_bytes("d81c01");
+    auto       first_dec   = make_decoder<shared_ptr_codec>(first_bytes);
+    first_dec.set_shared_ptr_scope(table);
     std::shared_ptr<std::uint64_t> first;
-    REQUIRE(first_dec(as_shared_ptrs_unscoped(first, table)));
+    REQUIRE(first_dec(first));
 
-    const auto                   reference_bytes = to_bytes("d81d00");
-    auto                         reference_dec   = make_decoder<shared_ptr_codec>(reference_bytes);
+    const auto reference_bytes = to_bytes("d81d00");
+    auto       reference_dec   = make_decoder<shared_ptr_codec>(reference_bytes);
+    reference_dec.set_shared_ptr_scope(table);
     std::shared_ptr<std::string> wrong_type;
-    const auto                   result = reference_dec(as_shared_ptrs_unscoped(wrong_type, table));
+    const auto                   result = reference_dec(wrong_type);
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::error);
     CHECK_FALSE(wrong_type);
@@ -431,10 +563,10 @@ TEST_CASE("external decode tables reject references with a different pointee typ
 
 TEST_CASE("shared_ptr decoder rejects invalid and incomplete references") {
     SUBCASE("reference is outside the table") {
-        const auto                     bytes = to_bytes("d90128d81d00");
+        const auto                     bytes = to_bytes("d81d00");
         auto                           dec   = make_decoder<shared_ptr_codec>(bytes);
         std::shared_ptr<std::uint64_t> value;
-        const auto                     result = dec(as_shared_ptrs(value));
+        const auto                     result = dec(value);
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
     }
@@ -443,12 +575,12 @@ TEST_CASE("shared_ptr decoder rejects invalid and incomplete references") {
         auto source = std::make_shared<smart_ptr_test::partial_record>(smart_ptr_test::partial_record{.first = 11U, .second = "Ada"});
         std::vector<std::byte> bytes;
         auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-        REQUIRE(enc(as_shared_ptrs(source)));
+        REQUIRE(enc(source));
         bytes.pop_back();
 
         auto                                            dec = make_decoder<shared_ptr_codec>(bytes);
         std::shared_ptr<smart_ptr_test::partial_record> value;
-        const auto                                      result = dec(as_shared_ptrs(value));
+        const auto                                      result = dec(value);
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::incomplete);
         REQUIRE(value);
@@ -462,7 +594,7 @@ TEST_CASE("smart pointer codecs decode unsized non-contiguous input") {
 
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs(sent)));
+    REQUIRE(enc(sent));
 
     const std::list<std::byte> storage(bytes.begin(), bytes.end());
     auto                       input = std::ranges::subrange(storage.begin(), storage.end());
@@ -471,7 +603,7 @@ TEST_CASE("smart pointer codecs decode unsized non-contiguous input") {
 
     std::vector<std::shared_ptr<std::uint64_t>> decoded;
     auto                                        dec = make_decoder<shared_ptr_codec>(input);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
+    REQUIRE(dec(decoded));
     REQUIRE(decoded.size() == 2U);
     CHECK(decoded[0] == decoded[1]);
 }
@@ -501,32 +633,12 @@ TEST_CASE("unambiguous unique_ptr variants dispatch by wire shape once") {
     }
 }
 
-TEST_CASE("unambiguous shared_ptr variants work only inside shared roots") {
-    using variant_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
-
-    variant_type           sent = std::make_shared<std::uint64_t>(6U);
-    std::vector<std::byte> bytes;
-    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(as_shared_ptrs(sent)));
-
-    variant_type decoded;
-    auto         dec = make_decoder<shared_ptr_codec>(bytes);
-    REQUIRE(dec(as_shared_ptrs(decoded)));
-    REQUIRE(std::holds_alternative<std::shared_ptr<std::uint64_t>>(decoded));
-    REQUIRE(std::get<std::shared_ptr<std::uint64_t>>(decoded));
-    CHECK_EQ(*std::get<std::shared_ptr<std::uint64_t>>(decoded), 6U);
-}
-
-TEST_CASE("CDDL uses native null and explicit shared namespaces") {
+TEST_CASE("CDDL uses native null and shared-reference tags") {
     std::string unique_schema;
     cddl_schema_to<std::unique_ptr<int>>(unique_schema);
     CHECK_EQ(unique_schema, "root = int / null");
 
-    std::string tagged_schema;
-    cddl_schema_to<shared_ptr_cddl<std::shared_ptr<int>>>(tagged_schema);
-    CHECK_EQ(tagged_schema, "root = #6.296(null / #6.28(int) / #6.29(uint))");
-
-    std::string unscoped_schema;
-    cddl_schema_to<shared_ptr_unscoped_cddl<std::shared_ptr<int>>>(unscoped_schema);
-    CHECK_EQ(unscoped_schema, "root = null / #6.28(int) / #6.29(uint)");
+    std::string shared_schema;
+    cddl_schema_to<std::shared_ptr<int>>(shared_schema);
+    CHECK_EQ(shared_schema, "root = null / #6.28(int) / #6.29(uint)");
 }
