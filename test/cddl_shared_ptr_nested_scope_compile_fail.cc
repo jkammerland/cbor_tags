@@ -5,7 +5,7 @@
 #include <memory>
 
 struct BadScopedMember {
-    cbor::tags::ext::smart_ptr::shared_graph_cddl<std::shared_ptr<int>> value;
+    cbor::tags::ext::smart_ptr::shared_ptr_cddl<std::shared_ptr<int>> value;
 };
 
 int main() {

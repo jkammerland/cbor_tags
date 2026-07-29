@@ -73,29 +73,18 @@ are regression-direction measurements rather than release claims. As a
 cross-check, the current emulated-preflight rows stayed close to the historical
 public-preflight rows.
 
-## Shared Graph Encode Lookup Rows
+## Shared Pointer Encode Rows
 
-The encoder suite includes `shared_graph encode N unique x2 unordered_map`,
-`unordered_map_reserved`, `vector_scan_o_n`, and `vector_scan_o_n_reserved`
-rows. They encode the same `std::vector<std::shared_ptr<std::uint64_t>>`: `N`
-first-seen pointers followed by a second pass of references to the same
-pointers. Reserved rows reuse a pre-reserved `shared_graph_encode_session` and
-call `reset()` before each measured encode so table growth is separated from
-lookup cost. These rows isolate the encode-side identity lookup tradeoff: hash
-lookup is the default for large graphs, while `linear_scan` avoids the hash table
-for small or allocation-sensitive graph scopes.
+The encoder suite includes `shared_ptr encode N unique x2` rows. Each row
+encodes a `std::vector<std::shared_ptr<std::uint64_t>>` containing `N`
+first-seen pointers followed by the same `N` pointers again. The benchmark uses
+`as_shared_ptrs(...)`, including its private per-call table construction and
+owner-identity lookup.
 
-Historical fixed-array lookup experiments were removed from the public API and
-benchmark target. The directional numbers below were captured with CPU governor
-warnings enabled, so they should be treated as design evidence rather than
-release performance data:
-
-| unique | unordered reserved | vector reserved | safe array | typed unsafe array |
-|-------:|-------------------:|----------------:|-----------:|-------------------:|
-|      4 |          148.08 ns |       100.84 ns |  104.34 ns |           62.69 ns |
-|     16 |          606.52 ns |       442.95 ns |  505.33 ns |          287.79 ns |
-|     64 |         3326.37 ns |      2665.20 ns | 3038.04 ns |         2596.25 ns |
-|    256 |        14721.68 ns |     23152.88 ns | 24786.15 ns |        18851.49 ns |
+Lookup strategy and reservation are deliberately not public options. An
+application that needs different storage or state spanning several calls can
+supply its own table through `as_shared_ptrs_unscoped(...)` and benchmark that
+table in the application.
 
 ## Custom Codec 1 vs Default CBOR
 

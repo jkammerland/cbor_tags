@@ -1,8 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <type_traits>
-#include <vector>
+#include <variant>
 
 namespace cbor::tags::detail {
 
@@ -17,17 +18,27 @@ template <typename T> struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_t
     using element_type = T;
 };
 
-template <typename T> struct is_std_vector_of_shared_ptr : std::false_type {};
-template <typename T, typename Allocator> struct is_std_vector_of_shared_ptr<std::vector<std::shared_ptr<T>, Allocator>> : std::true_type {
-    using element_type   = T;
-    using allocator_type = Allocator;
-};
-
 template <typename T>
 concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
 
 template <typename T>
 concept IsNullablePointer = is_std_unique_ptr<std::remove_cvref_t<T>>::value || is_std_shared_ptr<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsUniquePointer = is_std_unique_ptr<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept IsSharedPointer = is_std_shared_ptr<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct has_known_null_wire : std::false_type {};
+template <> struct has_known_null_wire<std::nullptr_t> : std::true_type {};
+template <typename T> struct has_known_null_wire<std::optional<T>> : std::true_type {};
+template <typename T, typename Deleter> struct has_known_null_wire<std::unique_ptr<T, Deleter>> : std::true_type {};
+template <typename T> struct has_known_null_wire<std::shared_ptr<T>> : std::true_type {};
+template <typename... Ts>
+struct has_known_null_wire<std::variant<Ts...>> : std::bool_constant<(has_known_null_wire<std::remove_cvref_t<Ts>>::value || ...)> {};
+
+template <typename T> inline constexpr bool has_known_null_wire_v = has_known_null_wire<std::remove_cvref_t<T>>::value;
 
 template <typename T> struct nullable_pointer_element;
 template <typename T, typename Deleter> struct nullable_pointer_element<std::unique_ptr<T, Deleter>> {

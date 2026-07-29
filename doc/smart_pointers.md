@@ -1,253 +1,259 @@
 # Smart Pointer Codecs
 
-Smart pointer support is explicit. Include `cbor_tags/extensions/smart_ptr.h`
-and choose how pointers should be stored:
+Smart pointers are opt-in:
 
 ```cpp
-#include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/extensions/smart_ptr.h"
 
+#include <cassert>
+#include <cstddef>
 #include <memory>
+#include <vector>
 
 using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
 ```
 
-## Why There Are Two Codecs
+The two codecs have separate jobs:
 
-The codecs solve different problems:
+- `unique_ptr_codec` encodes `std::unique_ptr<T>` as either CBOR `null` or
+  `T`. It does not add a wrapper.
+- `shared_ptr_codec` preserves `std::shared_ptr` identity. Repeated pointers
+  decode to the same object.
 
-| If you need... | Use | Meaning |
-|---|---|---|
-| A pointer that may be empty | `nullable_ptr_codec` | “Nullable” means it may be `nullptr`. |
-| Several `std::shared_ptr`s to keep pointing to one object after decoding | `shared_graph_codec` | “Shared” means one object has more than one pointer. |
+`shared_ptr_codec` does not encode a `std::shared_ptr` unless it is inside an
+explicit shared-pointer root. This prevents a shared pointer from silently
+falling back to ordinary value-copy behavior.
 
-Use the first codec unless keeping that “same object” relationship matters.
-
-## Pointers That May Be Empty
-
-`nullable_ptr_codec` stores whether a `std::unique_ptr<T>` or
-`std::shared_ptr<T>` is empty. It supports ordinary object types that the
-decoder can create with `T{}`.
+## `std::unique_ptr`
 
 ```cpp
 std::vector<std::byte> bytes;
-auto enc = make_encoder<nullable_ptr_codec>(bytes);
+std::unique_ptr<int> sent = std::make_unique<int>(42);
 
-std::unique_ptr<int> value = std::make_unique<int>(42);
-enc(value);
+auto enc = make_encoder<unique_ptr_codec>(bytes);
+enc(sent);                         // same CBOR item as int{42}
 
-std::unique_ptr<int> decoded;
-auto dec = make_decoder<nullable_ptr_codec>(bytes);
-dec(decoded);
+std::unique_ptr<int> received;
+auto dec = make_decoder<unique_ptr_codec>(bytes);
+dec(received);
 ```
 
-Wire shape:
+The wire shape is:
 
-```cddl
-nullable<T> = [0] / [1, T]
+```text
+nullptr  -> null
+pointer  -> T
 ```
 
-Null pointers encode as `[0]`. Non-null pointers encode as `[1, value]`, where
-`value` is the pointed-to object.
+`T` must be default-initializable for decoding. It must not itself accept CBOR
+`null`, because `null` would then have two meanings. For example,
+`std::unique_ptr<std::optional<int>>` is rejected.
 
-If the same `shared_ptr` appears twice, this codec writes two values. After
-decoding they have the same contents, but they are two separate objects. Use
-`shared_graph_codec` when both pointers must still point to one object.
+For the same reason, an ordinary `std::optional` cannot directly contain a
+smart-pointer null state. For example, `std::optional<std::unique_ptr<int>>`
+and `std::optional<std::shared_ptr<int>>` are rejected. In a named map, an
+optional field is different: omission represents the empty optional, while a
+present key with `null` represents the empty pointer.
 
-## Keep Repeated `shared_ptr`s Pointing To One Object
+One-shot decode is terminal. For a non-null pointer, the decoder creates the
+pointee before decoding it. If decoding later returns `incomplete`, the pointer
+and any decoded prefix remain in the destination.
 
-`shared_graph_codec` is for that second case. Wrap the value in
-`as_shared_graph(...)` so the library knows to keep track of repeated
-`std::shared_ptr`s. The classes named `...session` are small “already seen”
-lists: one for writing and one for reading.
+## `std::shared_ptr`
+
+Wrap one complete message root with `as_shared_ptrs`:
 
 ```cpp
-std::vector<std::byte> bytes;
-
-auto item = std::make_shared<int>(42);
-std::vector<std::shared_ptr<int>> sent{item, item};
-
-shared_graph_encode_session write_state;
-auto enc = make_encoder<shared_graph_codec>(bytes);
-enc(as_shared_graph(write_state, sent));
-
-std::vector<std::shared_ptr<int>> received;
-auto dec = make_decoder<shared_graph_codec>(bytes);
-shared_graph_decode_session read_state;
-dec(as_shared_graph(read_state, received));
-
-// received[0].get() == received[1].get()
-```
-
-While one message is being written or read:
-
-- Null `shared_ptr<T>` values encode as `[0]`.
-- The first pointer to an object uses CBOR tag 28, `#6.28(value)`.
-- A later pointer to that object uses CBOR tag 29, `#6.29(id)`.
-- `id` is the number assigned to the first object in that tracker.
-
-Tags 28 and 29 are the CBOR value-sharing tags registered in the
-[IANA CBOR Tags registry](https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml)
-and specified by the linked
-[value-sharing tag definition](http://cbor.schmorp.de/value-sharing).
-
-## One Tracker Per Message
-
-Reuse the same tracker if one message is written or read as several CBOR values:
-
-```cpp
-auto shared = std::make_shared<int>(42);
-shared_graph_encode_session graph;
-
-enc(as_shared_graph(graph, shared));
-enc(as_shared_graph(graph, std::vector{shared, shared}));
-```
-
-Call `reset()` or make a new tracker for the next independent message. CBOR does
-not write a reset marker, so the writer and reader must agree on that message
-boundary.
-
-If `as_shared_graph(...)` fails, discard or reset the tracker before using it
-again. It may already contain part of the failed message.
-
-## Choosing The Tracker
-
-The default is suitable for most messages. For a small message or when you need
-to control memory use, choose `shared_graph_encode_lookup::linear_scan`:
-
-```cpp
-shared_graph_encode_session graph{shared_graph_encode_lookup::linear_scan};
-graph.reserve_unique(32);
-enc(as_shared_graph(graph, shared));
-```
-
-`reserve_unique(n)` prepares room for `n` different non-empty `shared_ptr`s.
-Call it before encoding.
-
-## Using Both Codecs
-
-`nullable_ptr_codec` and `shared_graph_codec` can be installed together:
-
-```cpp
-auto enc = make_encoder<nullable_ptr_codec, shared_graph_codec>(bytes);
-auto dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
-```
-
-Install both only when a message has both kinds of use. Outside
-`as_shared_graph(...)`, `std::shared_ptr<T>` uses the simple empty-or-value
-form. Inside `as_shared_graph(...)`, repeated pointers keep pointing to the
-same object.
-
-## Variants
-
-Nullable smart pointer alternatives use the array shape `[0]` / `[1, value]`.
-For that reason, variant support rejects ambiguous shapes at compile time:
-
-```cpp
-// Error: both alternatives use the nullable pointer shape.
-std::variant<std::unique_ptr<int>, std::shared_ptr<int>> value;
-
-// Error: the pointer alternative collides with another array-shaped alternative.
-std::variant<std::shared_ptr<int>, std::vector<int>> other;
-```
-
-In graph wrappers, `std::shared_ptr<T>` contributes virtual tag alternatives 28
-and 29. Non-colliding static tags can coexist:
-
-```cpp
-using ok = std::variant<std::shared_ptr<int>, static_tag<42>, std::string>;
-```
-
-Graph-mode variants can also dispatch a direct vector of shared pointers by its
-top-level array shape:
-
-```cpp
-using ok_vector = std::variant<std::vector<std::shared_ptr<int>>, std::string>;
-```
-
-Tag 28, tag 29, and catch-all tag alternatives are ambiguous in graph mode and
-fail graph-mode decode when a direct `std::shared_ptr<T>` alternative is present:
-
-```cpp
-using bad_shareable = std::variant<std::shared_ptr<int>, static_tag<28>>;
-using bad_ref       = std::variant<std::shared_ptr<int>, static_tag<29>>;
-using bad_catch_all = std::variant<std::shared_ptr<int>, as_tag_any>;
-```
-
-The same rejection applies when the colliding tag alternative is nested in
-another variant. A graph vector alternative is also rejected if any other
-alternative is array-shaped, and broader indirect pointer forms are not variant
-dispatch targets:
-
-```cpp
-using bad_array = std::variant<std::vector<std::shared_ptr<int>>, std::vector<int>>;
-using bad_nested = std::variant<std::optional<std::shared_ptr<int>>, std::string>;
-```
-
-## CDDL
-
-CDDL generation renders nullable pointer shapes as `[0] / [1, T]`, matching
-`nullable_ptr_codec`.
-
-```cpp
-#include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/smart_ptr.h"
-
-std::string schema;
-cddl_schema_to<std::shared_ptr<int>>(schema);
-// root = [0] / [1, int]
-```
-
-Use `shared_graph_cddl<T>` when the schema should describe values encoded
-through `as_shared_graph(...)`. In that scoped schema, `std::shared_ptr<T>`
-renders as the graph wire shape: null pointer, first shareable value, or later
-shared reference.
-
-```cpp
-std::string schema;
-cddl_schema_to<shared_graph_cddl<std::shared_ptr<int>>>(schema);
-// root = [0] / #6.28(int) / #6.29(uint)
-```
-
-The wrapper is only valid at the schema root. For aggregate roots the scope
-applies recursively:
-
-```cpp
-struct Root {
-    std::shared_ptr<Person> owner;
-    std::vector<std::shared_ptr<Person>> reviewers;
+struct message {
+    std::shared_ptr<int> first;
+    std::shared_ptr<int> second;
 };
 
-cddl_schema_to<shared_graph_cddl<Root>>(schema);
-// Root = [[0] / #6.28(Person) / #6.29(uint), [* ([0] / #6.28(Person) / #6.29(uint))]]
-// Person = ...
+auto value = std::make_shared<int>(42);
+message sent{value, value};
+
+std::vector<std::byte> bytes;
+auto enc = make_encoder<shared_ptr_codec>(bytes);
+enc(as_shared_ptrs(sent));
+
+message received;
+auto dec = make_decoder<shared_ptr_codec>(bytes);
+dec(as_shared_ptrs(received));
+
+// Both fields refer to the same decoded int.
+assert(received.first.get() == received.second.get());
 ```
 
-The generated CDDL describes the wire shape. It cannot prove that a
-`#6.29(uint)` reference points to an earlier tag 28 item in the same graph
-session; that remains decoder session validation. `std::variant` alternatives
-inside `shared_graph_cddl<T>` reject tag 28/29 and catch-all tag collisions when
-a direct `std::shared_ptr<T>` alternative is present. A direct
-`std::vector<std::shared_ptr<T>>` alternative is supported when no other
-alternative is array-shaped.
+`as_shared_ptrs(root)`:
+
+- writes tag 296 around the root;
+- creates a private reference table for that call;
+- writes the first non-null pointer as tag 28 around its value;
+- writes later occurrences as tag 29 around the earlier table index;
+- writes an empty pointer as CBOR `null`;
+- destroys the table when the call returns.
+
+For the example above, the relevant shape is:
+
+```text
+#6.296([
+  #6.28(42),
+  #6.29(0)
+])
+```
+
+A later call starts a new table. It therefore observes the current pointee
+value rather than referring to an object from an earlier call:
+
+```cpp
+enc(as_shared_ptrs(sent)); // first independent message
+*value = 99;
+enc(as_shared_ptrs(sent)); // new table; encodes 99
+```
+
+There are no public lookup strategies or reserve options. The ordinary wrapper
+chooses and owns its internal table.
+
+## Reusing a Caller-Owned Table
+
+Use `as_shared_ptrs_unscoped(root, table)` only when reference indices must
+continue across calls:
+
+```cpp
+my_encode_table table;
+
+enc(as_shared_ptrs_unscoped(first_segment, table));
+enc(as_shared_ptrs_unscoped(second_segment, table));
+```
+
+The unscoped form omits tag 296 because the reference namespace is not bounded
+by either individual call. The decoder must receive the same segment sequence
+with one matching decode table:
+
+```cpp
+my_decode_table table;
+
+dec(as_shared_ptrs_unscoped(first_output, table));
+dec(as_shared_ptrs_unscoped(second_output, table));
+```
+
+The table types are application-defined. An encode table satisfies:
+
+```cpp
+expected<shared_ptr_observation, status_code>
+observe(const shared_ptr_encode_key&);
+
+void mark_complete(std::uint64_t index);
+```
+
+A decode table satisfies:
+
+```cpp
+expected<std::uint64_t, status_code>
+insert(const shared_ptr_decode_entry&);
+
+expected<shared_ptr_decode_entry, status_code>
+resolve(std::uint64_t index);
+
+void mark_complete(std::uint64_t index);
+```
+
+These interfaces are checked by `SharedPtrEncodeTable` and
+`SharedPtrDecodeTable`. The table chooses its storage, lookup algorithm,
+capacity policy, and lifetime.
+
+An encode table must compare `shared_ptr_encode_key::owner` by shared ownership,
+not only by `get()`. It must assign indices in first-observation order and
+reject:
+
+- a repeated owner with a different `target` (an aliasing pointer);
+- a repeated owner with a different `type`;
+- a reference to an entry that has not been marked complete (a cycle).
+
+A decode table must preserve insertion order, reject invalid indices, and
+return the stored type and completion state unchanged.
+
+External tables provide snapshot semantics. Once a pointee has been observed,
+later occurrences are references; mutating the pointee does not send an update:
+
+```cpp
+enc(as_shared_ptrs_unscoped(value, table)); // tag 28, sends 42
+*value = 99;
+enc(as_shared_ptrs_unscoped(value, table)); // tag 29, still refers to snapshot 42
+```
+
+Clear or replace the table to begin a new snapshot.
+
+If an unscoped call fails, the codec does not roll the table back or clear it.
+The decode destination may also contain a partial result. Treat both as
+terminal and discard or explicitly repair the caller-owned state.
 
 ## Limits
 
-`shared_graph_codec` is an acyclic shared-reference codec. Cycles are rejected:
+The shared-pointer codec rejects cycles and aliasing pointers:
 
 ```cpp
-struct Node {
-    std::shared_ptr<Node> next;
+struct node {
+    std::shared_ptr<node> next;
 };
 
-auto n = std::make_shared<Node>();
+auto n = std::make_shared<node>();
 n->next = n;
-
-enc(as_shared_graph(graph, n)); // error: cycles unsupported
+enc(as_shared_ptrs(n)); // status_code::error
 ```
 
-Graph identity is keyed by `shared_ptr::get()` and one static pointer type per
-object. Cross-static-type identity, aliasing-pointer identity, and cycles are
-not supported.
+The first tag 28 entry is installed before its pointee is decoded so partial
+state follows the library's one-shot decoder contract. A tag 29 reference to an
+unfinished entry is still rejected; cycles are not reconstructed.
+
+The codecs do not prewalk the input or object graph. Input ownership, framing,
+admission limits, and the truthful size semantics of the supplied range remain
+the caller's responsibility. Parsing the requested CBOR segment and returning
+`incomplete` when that segment ends early remain the decoder's responsibility.
+
+## Variants
+
+Pointer alternatives are decoded from their CBOR wire shape, without probing
+one alternative and rolling back. Alternatives whose wire shapes overlap are
+rejected at compile time:
+
+```cpp
+using ok = std::variant<std::unique_ptr<int>, std::string>;
+
+// Rejected: both alternatives accept an integer.
+using ambiguous = std::variant<std::unique_ptr<int>, int>;
+```
+
+Use an application tag or a different data model when alternatives overlap.
+
+## CDDL
+
+`std::unique_ptr<T>` renders as:
+
+```cddl
+T / null
+```
+
+Use a schema root that matches the wrapper used on the wire:
+
+```cpp
+cddl_schema_to<shared_ptr_cddl<message>>(schema);
+cddl_schema_to<shared_ptr_unscoped_cddl<message>>(unscoped_schema);
+```
+
+The scoped root includes tag 296:
+
+```cddl
+#6.296(null / #6.28(T) / #6.29(uint))
+```
+
+The unscoped root omits it:
+
+```cddl
+null / #6.28(T) / #6.29(uint)
+```
+
+CDDL describes the item shapes. It cannot express whether a tag 29 index
+exists, has the correct pointee type, or belongs to a completed entry; those
+checks are performed by the decode table.

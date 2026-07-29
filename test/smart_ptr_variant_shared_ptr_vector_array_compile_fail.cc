@@ -9,9 +9,8 @@
 
 int main() {
     std::vector<std::byte> bytes;
-    auto                   dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::shared_graph_codec>(bytes);
+    auto                   dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::shared_ptr_codec>(bytes);
 
-    cbor::tags::ext::smart_ptr::shared_graph_decode_session                               graph;
     std::variant<std::vector<std::shared_ptr<std::uint64_t>>, std::vector<std::uint64_t>> decoded;
-    return dec(cbor::tags::ext::smart_ptr::as_shared_graph(graph, decoded)).has_value() ? 0 : 1;
+    return dec(cbor::tags::ext::smart_ptr::as_shared_ptrs(decoded)).has_value() ? 0 : 1;
 }

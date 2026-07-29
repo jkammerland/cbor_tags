@@ -14,16 +14,16 @@ using namespace cbor::tags::ext::smart_ptr;
 
 std::vector<std::byte> bytes;
 
-auto enc = make_encoder<nullable_ptr_codec>(bytes);
-auto dec = make_decoder<nullable_ptr_codec>(bytes);
+auto enc = make_encoder<unique_ptr_codec>(bytes);
+auto dec = make_decoder<unique_ptr_codec>(bytes);
 ```
 
 Multiple extensions can be installed together when their overloads are designed
 to compose:
 
 ```cpp
-auto enc = make_encoder<nullable_ptr_codec, shared_graph_codec>(bytes);
-auto dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+auto enc = make_encoder<unique_ptr_codec, shared_ptr_codec>(bytes);
+auto dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(bytes);
 ```
 
 Extension codecs are class-template mixins over the final encoder or decoder

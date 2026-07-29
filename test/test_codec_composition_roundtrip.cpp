@@ -74,7 +74,7 @@ struct nullable_typed_report {
     typed_array<std::int32_t>                            samples;
     std::variant<typed_array<double>, std::string>       result;
     std::unique_ptr<codec_owner>                         owner;
-    std::shared_ptr<codec_owner>                         observer;
+    std::unique_ptr<codec_owner>                         observer;
     std::map<std::string, std::vector<std::vector<int>>> groups;
 };
 
@@ -198,9 +198,9 @@ TEST_CASE("custom codec roundtrips realistic aggregate composition") {
     SUBCASE("simple result") { check_roundtrip({codec_report_state::degraded, std::string{"fault"}, events, false, history}); }
 }
 
-TEST_CASE("typed array and nullable pointer codecs roundtrip aggregate composition") {
+TEST_CASE("typed array and unique pointer codecs roundtrip aggregate composition") {
     auto check_roundtrip = [](const nullable_typed_report &input) {
-        const auto output = test_support::roundtrip<typed_array_codec, nullable_ptr_codec>(input);
+        const auto output = test_support::roundtrip<typed_array_codec, unique_ptr_codec>(input);
         CHECK(semantic_value(output) == semantic_value(input));
     };
 
@@ -211,7 +211,7 @@ TEST_CASE("typed array and nullable pointer codecs roundtrip aggregate compositi
             typed_array<std::int32_t>{{1, -2, 3}},
             typed_array<double>{{1.5, -2.25}},
             std::make_unique<codec_owner>(codec_owner{1, "primary", {"write", "read"}}),
-            std::make_shared<codec_owner>(codec_owner{2, "observer", {"read"}}),
+            std::make_unique<codec_owner>(codec_owner{2, "observer", {"read"}}),
             {{"primary", {{1, 2}, {3}}}, {"secondary", {{4, 5, 6}}}},
         };
 
@@ -227,20 +227,15 @@ TEST_CASE("typed array and nullable pointer codecs roundtrip aggregate compositi
     }
 }
 
-TEST_CASE("typed array nullable and shared graph codecs preserve aggregate identity") {
-    auto check_roundtrip = [](graph_codec_report &input, const std::shared_ptr<codec_owner> &nullable_root, bool selected_is_pointer) {
-        std::vector<std::byte>      buffer;
-        auto                        enc = make_encoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
-        shared_graph_encode_session encode_session;
-        REQUIRE(enc(as_shared_graph(encode_session, input)));
-        REQUIRE(enc(nullable_root));
+TEST_CASE("typed array unique and shared pointer codecs preserve aggregate identity") {
+    auto check_roundtrip = [](graph_codec_report &input, bool selected_is_pointer) {
+        std::vector<std::byte> buffer;
+        auto                   enc = make_encoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
+        REQUIRE(enc(as_shared_ptrs(input)));
 
-        graph_codec_report           output;
-        std::shared_ptr<codec_owner> decoded_nullable_root;
-        auto                         dec = make_decoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
-        shared_graph_decode_session  decode_session;
-        REQUIRE(dec(as_shared_graph(decode_session, output)));
-        REQUIRE(dec(decoded_nullable_root));
+        graph_codec_report output;
+        auto               dec = make_decoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
+        REQUIRE(dec(as_shared_ptrs(output)));
         REQUIRE(dec.tell() == buffer.end());
 
         CHECK_EQ(output.state, input.state);
@@ -276,44 +271,37 @@ TEST_CASE("typed array nullable and shared graph codecs preserve aggregate ident
             REQUIRE(static_cast<bool>(output.fallback));
             CHECK(*output.fallback == *input.fallback);
         }
-
-        CHECK_EQ(static_cast<bool>(decoded_nullable_root), static_cast<bool>(nullable_root));
-        if (nullable_root) {
-            REQUIRE(static_cast<bool>(decoded_nullable_root));
-            CHECK(*decoded_nullable_root == *nullable_root);
-        }
     };
 
     auto primary   = std::make_shared<graph_codec_node>(graph_codec_node{1, "primary", typed_array<std::int16_t>{{1, 2, 3}}, "live"});
     auto secondary = std::make_shared<graph_codec_node>(graph_codec_node{2, "secondary", typed_array<std::int16_t>{{4, 5}}, std::nullopt});
 
-    SUBCASE("shared pointer variant and non-null nullable pointer") {
+    SUBCASE("shared pointer variant and non-null unique pointer") {
         graph_codec_report input{codec_report_state::active,
                                  primary,
                                  {primary, secondary, nullptr, primary, secondary},
                                  primary,
                                  std::make_unique<codec_owner>(codec_owner{3, "fallback", {"read"}}),
                                  {{"recent", {1, 2, 3}}}};
-        check_roundtrip(input, std::make_shared<codec_owner>(codec_owner{4, "outside-graph", {"audit"}}), true);
+        check_roundtrip(input, true);
     }
 
-    SUBCASE("text variant and null nullable pointer") {
+    SUBCASE("text variant and null unique pointer") {
         graph_codec_report input{codec_report_state::degraded, primary, {primary, secondary, nullptr, primary, secondary},
                                  std::string{"manual"},        nullptr, {{"recent", {4, 5}}}};
-        check_roundtrip(input, nullptr, false);
+        check_roundtrip(input, false);
     }
 }
 
-TEST_CASE("composed shared graph stack rejects cycles and requires nullable fallback") {
+TEST_CASE("composed shared pointer stack rejects cycles and requires an explicit root") {
     SUBCASE("typed graph cycle") {
         auto cycle     = std::make_shared<graph_codec_cycle_node>();
         cycle->samples = typed_array<std::int16_t>{{1, 2, 3}};
         cycle->next    = cycle;
 
-        std::vector<std::byte>      buffer;
-        auto                        enc = make_encoder<typed_array_codec, nullable_ptr_codec, shared_graph_codec>(buffer);
-        shared_graph_encode_session session;
-        const auto                  result = enc(as_shared_graph(session, cycle));
+        std::vector<std::byte> buffer;
+        auto                   enc    = make_encoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
+        const auto             result = enc(as_shared_ptrs(cycle));
         cycle->next.reset();
 
         REQUIRE_FALSE(result);
@@ -323,7 +311,7 @@ TEST_CASE("composed shared graph stack rejects cycles and requires nullable fall
     SUBCASE("shared pointer outside graph scope") {
         const auto             value = std::make_shared<codec_owner>(codec_owner{5, "outside", {"read"}});
         std::vector<std::byte> buffer;
-        auto                   enc    = make_encoder<typed_array_codec, shared_graph_codec>(buffer);
+        auto                   enc    = make_encoder<typed_array_codec, shared_ptr_codec>(buffer);
         const auto             result = enc(value);
 
         REQUIRE_FALSE(result);

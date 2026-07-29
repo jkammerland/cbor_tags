@@ -9,8 +9,8 @@
 
 int main() {
     std::vector<std::byte> bytes;
-    auto                   dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::nullable_ptr_codec>(bytes);
+    auto                   dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::unique_ptr_codec>(bytes);
 
-    std::variant<std::unique_ptr<std::uint64_t>, std::shared_ptr<std::uint64_t>> decoded;
+    std::variant<std::unique_ptr<std::uint64_t>, std::uint64_t> decoded;
     return dec(decoded).has_value() ? 0 : 1;
 }
