@@ -798,9 +798,22 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 
 ### Smart Pointer Codecs
 Smart pointer support is opt-in through `cbor_tags/extensions/smart_ptr.h`.
-Use `nullable_ptr_codec` for nullable ownership values, or `shared_graph_codec`
-when repeated `std::shared_ptr<T>` identity must be preserved across one logical
-graph session:
+There are two choices because “a pointer may be empty” and “two pointers mean
+the same object” are different jobs:
+
+| If you need... | Use | In plain words |
+|---|---|---|
+| A pointer that may be empty | `nullable_ptr_codec` | “Nullable” means it may be `nullptr`. |
+| Repeated `std::shared_ptr`s to stay attached to one object after decoding | `shared_graph_codec` | “Shared” means several pointers refer to that one object. |
+
+`nullable_ptr_codec` works with `std::unique_ptr<T>` and ordinary
+`std::shared_ptr<T>`. It writes an empty pointer as `[0]` and a pointer with an
+object as `[1, value]`. It does not remember that two `shared_ptr`s once pointed
+to the same object.
+
+Use `shared_graph_codec` only when that relationship matters. Its
+`...session` objects are small “already seen” lists: use the same one while
+reading or writing one message, then reset or replace it for the next message.
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
@@ -814,30 +827,23 @@ using namespace cbor::tags::ext::smart_ptr;
 
 std::vector<std::byte> buffer;
 
-auto shared = std::make_shared<int>(42);
-shared_graph_encode_session encode_graph;
+auto item = std::make_shared<int>(42);
+std::vector<std::shared_ptr<int>> sent{item, item};
+
+shared_graph_encode_session write_state;
 auto enc = make_encoder<shared_graph_codec>(buffer);
+enc(as_shared_graph(write_state, sent));
 
-enc(as_shared_graph(encode_graph, shared));
-enc(as_shared_graph(encode_graph, shared));
-
-std::shared_ptr<int> first;
-std::shared_ptr<int> second;
-
+std::vector<std::shared_ptr<int>> received;
 auto dec = make_decoder<shared_graph_codec>(buffer);
-shared_graph_decode_session decode_graph;
+shared_graph_decode_session read_state;
+dec(as_shared_graph(read_state, received));
 
-dec(as_shared_graph(decode_graph, first));
-dec(as_shared_graph(decode_graph, second));
+// received[0].get() == received[1].get(): both point to the same int.
 ```
 
-`nullable_ptr_codec` encodes null pointers as `[0]` and values as `[1, value]`.
-`shared_graph_codec` uses CBOR value-sharing tags 28/29 inside
-`as_shared_graph(...)` roots. Use `shared_graph_cddl<T>` when generated CDDL
-should describe that graph shape, rendering `std::shared_ptr<T>` as
-`[0] / #6.28(T) / #6.29(uint)`. See
-[Smart Pointer Codecs](doc/smart_pointers.md) for wire shapes, limitations,
-value-sharing spec links, CDDL examples, and variant behavior.
+See [Smart Pointer Codecs](doc/smart_pointers.md) for the exact CBOR form,
+CDDL, unsupported cycles, and variant rules.
 See [Codec Extensions](doc/codec_extensions.md) for the general opt-in extension
 pattern.
 
