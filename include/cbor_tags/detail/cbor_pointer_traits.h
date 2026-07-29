@@ -3,7 +3,6 @@
 #include "cbor_tags/detail/cbor_variant_traits.h"
 
 #include <concepts>
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -15,18 +14,24 @@ namespace cbor::tags::detail {
 template <typename T>
 concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
 
+template <typename T> void                   match_standard_array_smart_pointer(const std::shared_ptr<T[]> *);
+template <typename T, typename Deleter> void match_standard_array_smart_pointer(const std::unique_ptr<T[], Deleter> *);
+
 template <typename Pointer>
-concept NullablePointerCore = requires { typename std::remove_cvref_t<Pointer>::element_type; } &&
-                              NullablePointerValue<typename std::remove_cvref_t<Pointer>::element_type> &&
-                              (!requires(const std::remove_cvref_t<Pointer> &pointer) { pointer[std::size_t{}]; }) &&
-                              requires(std::remove_cvref_t<Pointer> &pointer, const std::remove_cvref_t<Pointer> &const_pointer,
-                                       typename std::remove_cvref_t<Pointer>::element_type *raw) {
-                                  { const_pointer.get() } -> std::same_as<typename std::remove_cvref_t<Pointer>::element_type *>;
-                                  { *const_pointer } -> std::same_as<typename std::remove_cvref_t<Pointer>::element_type &>;
-                                  { static_cast<bool>(const_pointer) } -> std::same_as<bool>;
-                                  { pointer.reset() } -> std::same_as<void>;
-                                  { pointer.reset(raw) } -> std::same_as<void>;
-                              };
+concept StandardArraySmartPointer = requires(const std::remove_cvref_t<Pointer> *pointer) { match_standard_array_smart_pointer(pointer); };
+
+template <typename Pointer>
+concept NullablePointerCore =
+    requires { typename std::remove_cvref_t<Pointer>::element_type; } &&
+    NullablePointerValue<typename std::remove_cvref_t<Pointer>::element_type> && (!StandardArraySmartPointer<Pointer>) &&
+    requires(std::remove_cvref_t<Pointer> &pointer, const std::remove_cvref_t<Pointer> &const_pointer,
+             typename std::remove_cvref_t<Pointer>::element_type *raw) {
+        { const_pointer.get() } -> std::same_as<typename std::remove_cvref_t<Pointer>::element_type *>;
+        { *const_pointer } -> std::same_as<typename std::remove_cvref_t<Pointer>::element_type &>;
+        { static_cast<bool>(const_pointer) } -> std::same_as<bool>;
+        { pointer.reset() } -> std::same_as<void>;
+        { pointer.reset(raw) } -> std::same_as<void>;
+    };
 
 template <typename Pointer>
 concept IsSharedPointer = NullablePointerCore<Pointer> && std::copy_constructible<std::remove_cvref_t<Pointer>> &&
