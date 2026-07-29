@@ -142,12 +142,25 @@ struct counting_deleter {
     }
 };
 
+namespace adl_probe {
+
+struct value {};
+
+void match_standard_array_smart_pointer(const std::shared_ptr<value> *);
+
+} // namespace adl_probe
+
 static_assert(IsSharedPointer<shared_handle<std::uint64_t>>);
 static_assert(IsSharedPointer<std::shared_ptr<std::uint64_t>>);
 static_assert(!IsSharedPointer<std::shared_ptr<std::uint64_t[]>>);
+static_assert(!IsSharedPointer<std::shared_ptr<std::uint64_t[4]>>);
+static_assert(!IsSharedPointer<const std::shared_ptr<std::uint64_t[]> &>);
+static_assert(IsSharedPointer<std::shared_ptr<adl_probe::value>>);
 static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t>>);
 static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t, counting_deleter>>);
 static_assert(!IsUniquePointer<std::unique_ptr<std::uint64_t[]>>);
+static_assert(!IsUniquePointer<std::unique_ptr<std::uint64_t[], counting_deleter>>);
+static_assert(!IsUniquePointer<const std::unique_ptr<std::uint64_t[]> &>);
 static_assert(IsSmartPointer<shared_handle<std::uint64_t>>);
 
 template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr<T> &value) {

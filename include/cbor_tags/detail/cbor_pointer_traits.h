@@ -3,6 +3,7 @@
 #include "cbor_tags/detail/cbor_variant_traits.h"
 
 #include <concepts>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -14,11 +15,16 @@ namespace cbor::tags::detail {
 template <typename T>
 concept NullablePointerValue = !std::is_void_v<T> && !std::is_array_v<T> && !std::is_const_v<T>;
 
-template <typename T> void                   match_standard_array_smart_pointer(const std::shared_ptr<T[]> *);
-template <typename T, typename Deleter> void match_standard_array_smart_pointer(const std::unique_ptr<T[], Deleter> *);
+template <typename Pointer> struct is_standard_array_smart_pointer : std::false_type {};
+
+template <typename T> struct is_standard_array_smart_pointer<std::shared_ptr<T[]>> : std::true_type {};
+
+template <typename T, std::size_t Size> struct is_standard_array_smart_pointer<std::shared_ptr<T[Size]>> : std::true_type {};
+
+template <typename T, typename Deleter> struct is_standard_array_smart_pointer<std::unique_ptr<T[], Deleter>> : std::true_type {};
 
 template <typename Pointer>
-concept StandardArraySmartPointer = requires(const std::remove_cvref_t<Pointer> *pointer) { match_standard_array_smart_pointer(pointer); };
+concept StandardArraySmartPointer = is_standard_array_smart_pointer<std::remove_cvref_t<Pointer>>::value;
 
 template <typename Pointer>
 concept NullablePointerCore =
