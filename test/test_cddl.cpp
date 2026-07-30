@@ -253,24 +253,24 @@ struct CDDLCustomDeleter {
     void operator()(int *) const noexcept {}
 };
 
-static_assert(detail::IsNullablePointer<std::unique_ptr<int>>);
-static_assert(detail::IsNullablePointer<std::unique_ptr<int, CDDLCustomDeleter>>);
-static_assert(detail::IsNullablePointer<std::shared_ptr<int>>);
-static_assert(detail::is_supported_nullable_pointer_v<std::unique_ptr<int>>);
-static_assert(detail::is_supported_nullable_pointer_v<std::shared_ptr<int>>);
-static_assert(detail::is_supported_nullable_pointer_v<std::unique_ptr<int, CDDLCustomDeleter>>);
-static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<void>>);
-static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<const int>>);
-static_assert(!detail::is_supported_nullable_pointer_v<std::shared_ptr<int[]>>);
-static_assert(!detail::is_supported_nullable_pointer_v<std::unique_ptr<int[]>>);
-static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithSmartPointer>());
-static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithNestedSmartPointer>());
-static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepSmartPointer>());
-static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithTaggedSmartPointer>());
-static_assert(detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveSmartPointer>());
-static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithDeepValue>());
-static_assert(!detail::cddl_contains_nullable_pointer<CDDLVariantWithRecursiveValue>());
-static_assert(!detail::cddl_contains_nullable_pointer<std::variant<int, std::string>>());
+static_assert(detail::IsSmartPointer<std::unique_ptr<int>>);
+static_assert(detail::IsSmartPointer<std::unique_ptr<int, CDDLCustomDeleter>>);
+static_assert(detail::IsSmartPointer<std::shared_ptr<int>>);
+static_assert(detail::is_supported_smart_pointer_v<std::unique_ptr<int>>);
+static_assert(detail::is_supported_smart_pointer_v<std::shared_ptr<int>>);
+static_assert(detail::is_supported_smart_pointer_v<std::unique_ptr<int, CDDLCustomDeleter>>);
+static_assert(!detail::is_supported_smart_pointer_v<std::shared_ptr<void>>);
+static_assert(!detail::is_supported_smart_pointer_v<std::shared_ptr<const int>>);
+static_assert(!detail::is_supported_smart_pointer_v<std::shared_ptr<int[]>>);
+static_assert(!detail::is_supported_smart_pointer_v<std::unique_ptr<int[]>>);
+static_assert(detail::cddl_contains_smart_pointer<CDDLVariantWithSmartPointer>());
+static_assert(detail::cddl_contains_smart_pointer<CDDLVariantWithNestedSmartPointer>());
+static_assert(detail::cddl_contains_smart_pointer<CDDLVariantWithDeepSmartPointer>());
+static_assert(detail::cddl_contains_smart_pointer<CDDLVariantWithTaggedSmartPointer>());
+static_assert(detail::cddl_contains_smart_pointer<CDDLVariantWithRecursiveSmartPointer>());
+static_assert(!detail::cddl_contains_smart_pointer<CDDLVariantWithDeepValue>());
+static_assert(!detail::cddl_contains_smart_pointer<CDDLVariantWithRecursiveValue>());
+static_assert(!detail::cddl_contains_smart_pointer<std::variant<int, std::string>>());
 
 enum class CDDLUnsignedEnum : std::uint8_t {};
 enum class CDDLSignedEnum : std::int8_t {};

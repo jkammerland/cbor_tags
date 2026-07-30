@@ -327,9 +327,9 @@ template <typename T> constexpr auto getName() {
                           "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
             auto name = getName<value_type>();
             return std::string(name) + " / null";
-        } else if constexpr (detail::IsNullablePointer<T>) {
-            using element_type = detail::nullable_pointer_element_t<T>;
-            static_assert(detail::is_supported_nullable_pointer_v<T>,
+        } else if constexpr (detail::IsSmartPointer<T>) {
+            using element_type = detail::smart_pointer_element_t<T>;
+            static_assert(detail::is_supported_smart_pointer_v<T>,
                           "CDDL smart pointer support requires a structurally compatible unique or shared pointer, and T must be "
                           "non-const, non-void, and non-array");
             static_assert(std::default_initializable<element_type>,
@@ -403,16 +403,15 @@ template <typename... Seen, typename T> struct cddl_seen_append<cddl_seen_types<
 
 template <typename Seen, typename T> using cddl_seen_append_t = typename cddl_seen_append<Seen, T>::type;
 
-template <typename T, typename Seen = cddl_seen_types<>> consteval bool cddl_contains_nullable_pointer();
+template <typename T, typename Seen = cddl_seen_types<>> consteval bool cddl_contains_smart_pointer();
 
-template <typename Tuple, typename Seen, std::size_t... Is>
-consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) {
-    return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
+template <typename Tuple, typename Seen, std::size_t... Is> consteval bool cddl_tuple_contains_smart_pointer(std::index_sequence<Is...>) {
+    return (cddl_contains_smart_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
 }
 
-template <typename T, typename Seen> consteval bool cddl_contains_nullable_pointer() {
+template <typename T, typename Seen> consteval bool cddl_contains_smart_pointer() {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsNullablePointer<value_type>) {
+    if constexpr (IsSmartPointer<value_type>) {
         return true;
     } else if constexpr (cddl_seen_contains<value_type, Seen>::value) {
         return false;
@@ -420,33 +419,33 @@ template <typename T, typename Seen> consteval bool cddl_contains_nullable_point
         using next_seen = cddl_seen_append_t<Seen, value_type>;
         if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
-            return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
+            return cddl_contains_smart_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
             using traits = cddl_multi_dimensional_array_traits<value_type>;
-            return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
-                   cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
+            return cddl_contains_smart_pointer<typename traits::dimensions_type, next_seen>() ||
+                   cddl_contains_smart_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (IsAnyBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
                              (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
-            return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
+            return cddl_contains_smart_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
             return detail::with_variant_alternatives<value_type>(
-                []<typename... Ts>() { return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...); });
+                []<typename... Ts>() { return (cddl_contains_smart_pointer<Ts, next_seen>() || ...); });
         } else if constexpr (IsNamedMapWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_map_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<named_map_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedGroupWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_group_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<named_group_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedExtensionWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<named_extension_value_t<value_type>, next_seen>();
         } else if constexpr (IsIndefiniteWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<indefinite_value_t<value_type>, next_seen>();
         } else if constexpr (IsMapRangeWrapper<value_type> || IsMap<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
-                   cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
+            return cddl_contains_smart_pointer<typename value_type::key_type, next_seen>() ||
+                   cddl_contains_smart_pointer<typename value_type::mapped_type, next_seen>();
         } else if constexpr (IsTuple<value_type>) {
-            return cddl_tuple_contains_nullable_pointer<value_type, next_seen>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
+            return cddl_tuple_contains_smart_pointer<value_type, next_seen>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
         } else if constexpr (IsAggregate<value_type>) {
             using tuple_type = aggregate_tuple_t<value_type>;
-            return cddl_tuple_contains_nullable_pointer<tuple_type, next_seen>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+            return cddl_tuple_contains_smart_pointer<tuple_type, next_seen>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
         } else {
             return false;
         }
@@ -1323,9 +1322,9 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
         static_assert(!ext::smart_ptr::detail::has_pointer_null_wire_v<true, true, typename value_type::value_type>,
                       "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
         return text::format("{} / null", cddl_type_expr<typename value_type::value_type, PointerMode>(context, options));
-    } else if constexpr (IsNullablePointer<value_type>) {
-        using element_type = nullable_pointer_element_t<value_type>;
-        static_assert(is_supported_nullable_pointer_v<value_type>,
+    } else if constexpr (IsSmartPointer<value_type>) {
+        using element_type = smart_pointer_element_t<value_type>;
+        static_assert(is_supported_smart_pointer_v<value_type>,
                       "CDDL smart pointer support requires a structurally compatible unique or shared pointer, and T must be "
                       "non-const, non-void, and non-array");
         static_assert(std::default_initializable<element_type>,
@@ -1354,7 +1353,7 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
                           "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                           "CDDL for variant alternatives with dynamic CBOR tags is unsupported");
-            if constexpr ((cddl_contains_nullable_pointer<Ts>() || ...)) {
+            if constexpr ((cddl_contains_smart_pointer<Ts>() || ...)) {
                 static_assert(ext::smart_ptr::detail::pointer_variant_is_unambiguous<value_type>(),
                               "CDDL pointer variant alternatives overlap on the CBOR wire");
             }

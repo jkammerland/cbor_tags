@@ -165,6 +165,34 @@ template <typename T> class shared_handle {
     std::shared_ptr<T> pointer_;
 };
 
+template <typename T> class unique_handle {
+  public:
+    using element_type = T;
+
+    unique_handle()                                     = default;
+    unique_handle(unique_handle &&) noexcept            = default;
+    unique_handle &operator=(unique_handle &&) noexcept = default;
+    unique_handle(const unique_handle &)                = delete;
+    unique_handle &operator=(const unique_handle &)     = delete;
+
+    [[nodiscard]] T *get() const noexcept { return pointer_.get(); }
+    [[nodiscard]] T &operator*() const noexcept { return *pointer_; }
+    explicit         operator bool() const noexcept { return static_cast<bool>(pointer_); }
+
+    void reset() noexcept { pointer_.reset(); }
+    void reset(T *raw) { pointer_.reset(raw); }
+
+  private:
+    std::unique_ptr<T> pointer_;
+};
+
+template <typename T> class indexable_shared_handle : public shared_handle<T> {
+  public:
+    using shared_handle<T>::shared_handle;
+
+    [[nodiscard]] T &operator[](std::size_t) const noexcept { return **this; }
+};
+
 struct counting_deleter {
     std::size_t *calls{};
 
@@ -183,17 +211,20 @@ void match_standard_array_smart_pointer(const std::shared_ptr<value> *);
 } // namespace adl_probe
 
 static_assert(IsSharedPointer<shared_handle<std::uint64_t>>);
+static_assert(IsSharedPointer<indexable_shared_handle<std::uint64_t>>);
 static_assert(IsSharedPointer<std::shared_ptr<std::uint64_t>>);
 static_assert(!IsSharedPointer<std::shared_ptr<std::uint64_t[]>>);
 static_assert(!IsSharedPointer<std::shared_ptr<std::uint64_t[4]>>);
 static_assert(!IsSharedPointer<const std::shared_ptr<std::uint64_t[]> &>);
 static_assert(IsSharedPointer<std::shared_ptr<adl_probe::value>>);
 static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t>>);
+static_assert(IsUniquePointer<unique_handle<std::uint64_t>>);
 static_assert(IsUniquePointer<std::unique_ptr<std::uint64_t, counting_deleter>>);
 static_assert(!IsUniquePointer<std::unique_ptr<std::uint64_t[]>>);
 static_assert(!IsUniquePointer<std::unique_ptr<std::uint64_t[], counting_deleter>>);
 static_assert(!IsUniquePointer<const std::unique_ptr<std::uint64_t[]> &>);
 static_assert(IsSmartPointer<shared_handle<std::uint64_t>>);
+static_assert(IsSmartPointer<unique_handle<std::uint64_t>>);
 
 template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr<T> &value) {
     std::vector<std::byte> bytes;
@@ -285,6 +316,22 @@ TEST_CASE("unique pointer concept accepts a stateful custom deleter") {
         CHECK_EQ(delete_calls, 1U);
     }
     CHECK_EQ(delete_calls, 2U);
+}
+
+TEST_CASE("unique pointer concept accepts a user-defined pointer type") {
+    smart_ptr_test::unique_handle<std::uint64_t> sent;
+    sent.reset(new std::uint64_t{42U});
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "182a");
+
+    smart_ptr_test::unique_handle<std::uint64_t> decoded;
+    auto                                         dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded);
+    CHECK_EQ(*decoded, 42U);
 }
 
 TEST_CASE("shared pointer concept accepts a user-defined pointer type") {

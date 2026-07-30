@@ -19,7 +19,7 @@ inline constexpr std::uint64_t shareable_tag = 28U;
 inline constexpr std::uint64_t sharedref_tag = 29U;
 
 template <typename T>
-concept PointerValue = cbor::tags::detail::NullablePointerValue<T>;
+concept PointerValue = cbor::tags::detail::SmartPointerElement<T>;
 
 template <typename T>
 concept UniquePointer = cbor::tags::detail::IsUniquePointer<T>;
@@ -28,9 +28,9 @@ template <typename T>
 concept SharedPointer = cbor::tags::detail::IsSharedPointer<T>;
 
 template <typename T>
-concept SmartPointer = cbor::tags::detail::IsNullablePointer<T>;
+concept SmartPointer = cbor::tags::detail::IsSmartPointer<T>;
 
-template <SmartPointer Pointer> using pointer_element_t = cbor::tags::detail::nullable_pointer_element_t<Pointer>;
+template <SmartPointer Pointer> using pointer_element_t = cbor::tags::detail::smart_pointer_element_t<Pointer>;
 
 template <typename T> inline constexpr bool known_null_wire_v = cbor::tags::detail::has_known_null_wire_v<T>;
 
