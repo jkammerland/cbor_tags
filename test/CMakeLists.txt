@@ -463,6 +463,38 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+add_executable(
+  cddl_smart_ptr_empty_pointee_compile_fails
+  EXCLUDE_FROM_ALL
+  cddl_smart_ptr_empty_pointee_compile_fail.cc)
+target_link_libraries(cddl_smart_ptr_empty_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME cddl_smart_ptr_empty_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_smart_ptr_empty_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=CDDL smart pointer pointee must encode exactly one CBOR item"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  cddl_smart_ptr_tag_header_pointee_compile_fails
+  EXCLUDE_FROM_ALL
+  cddl_smart_ptr_tag_header_pointee_compile_fail.cc)
+target_link_libraries(cddl_smart_ptr_tag_header_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME cddl_smart_ptr_tag_header_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_smart_ptr_tag_header_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=CDDL smart pointer pointee must encode exactly one CBOR item"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 add_executable(smart_ptr_tag_header_pointee_compile_fails EXCLUDE_FROM_ALL smart_ptr_tag_header_pointee_compile_fail.cc)
 target_link_libraries(smart_ptr_tag_header_pointee_compile_fails PRIVATE cbor::tags)
 add_test(

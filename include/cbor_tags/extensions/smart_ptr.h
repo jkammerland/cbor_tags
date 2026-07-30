@@ -242,11 +242,28 @@ concept EncoderSelf = requires(Self &self, std::uint64_t value, typename Self::b
 template <typename Self>
 concept DecoderSelf = !EncoderSelf<Self>;
 
+template <typename T, typename Decoder> struct extension_decodes_with_major : std::false_type {};
+
+template <typename T, typename InputBuffer, typename Options, template <typename> typename... Decoders>
+struct extension_decodes_with_major<T, cbor::tags::decoder<InputBuffer, Options, Decoders...>> {
+    using decoder_type = cbor::tags::decoder<InputBuffer, Options, Decoders...>;
+
+    static constexpr bool value = (requires(Decoders<decoder_type> &extension, T &value, major_type major, std::byte additional_info) {
+        { extension.decode(value, major, additional_info) } -> std::same_as<status_code>;
+    } || ...);
+};
+
+template <typename T, typename Decoder>
+inline constexpr bool extension_decodes_with_major_v =
+    extension_decodes_with_major<std::remove_cvref_t<T>, std::remove_cvref_t<Decoder>>::value;
+
 template <typename Decoder, typename T>
 [[nodiscard]] status_code decode_transparent_value(Decoder &dec, T &value, major_type major, std::byte additional_info) {
     static_assert(encodes_one_cbor_item<typename Decoder::options, T>(), "smart pointer pointee must encode exactly one CBOR item");
 
-    if constexpr (IsTag<T>) {
+    if constexpr (IsClassWithDecodingOverload<Decoder, T> || extension_decodes_with_major_v<T, Decoder>) {
+        return dec.decode(value, major, additional_info);
+    } else if constexpr (IsTag<T>) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }

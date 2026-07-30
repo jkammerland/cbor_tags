@@ -110,6 +110,38 @@ struct tagged_record {
     std::uint64_t  value{};
 };
 
+struct custom_record {
+    std::uint64_t value{};
+};
+
+template <typename Self> struct custom_record_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::decode;
+    using cbor_codec_mixin_base<Self>::encode;
+
+    void encode(const custom_record &value) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode(static_tag<100>{});
+        enc.encode(value.value);
+    }
+
+    [[nodiscard]] status_code decode(custom_record &value, major_type major, std::byte additional_info) {
+        if (major != major_type::Tag) {
+            return status_code::no_match_for_tag_on_buffer;
+        }
+
+        auto         &dec = static_cast<Self &>(*this);
+        std::uint64_t tag{};
+        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (tag != 100U) {
+            return status_code::no_match_for_tag;
+        }
+        return dec.decode(value.value);
+    }
+};
+
 struct node {
     std::uint64_t         value{};
     std::shared_ptr<node> next;
@@ -206,6 +238,21 @@ TEST_CASE("unique_ptr wire interoperates with optional values") {
     REQUIRE(pointer_dec(pointer));
     REQUIRE(pointer);
     CHECK_EQ(*pointer, 9U);
+}
+
+TEST_CASE("unique_ptr codec delegates aggregate pointees to composed codecs") {
+    const auto value = std::make_unique<smart_ptr_test::custom_record>(smart_ptr_test::custom_record{42U});
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec, smart_ptr_test::custom_record_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "d864182a");
+
+    std::unique_ptr<smart_ptr_test::custom_record> decoded;
+    auto                                           dec = make_decoder<unique_ptr_codec, smart_ptr_test::custom_record_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded);
+    CHECK_EQ(decoded->value, 42U);
 }
 
 TEST_CASE("unique_ptr decode keeps terminal partial pointee state") {

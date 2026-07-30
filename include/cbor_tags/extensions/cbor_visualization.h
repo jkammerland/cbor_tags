@@ -1330,6 +1330,8 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
                       "non-const, non-void, and non-array");
         static_assert(std::default_initializable<element_type>,
                       "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
+        static_assert(ext::smart_ptr::detail::encodes_one_cbor_item<default_options, element_type>(),
+                      "CDDL smart pointer pointee must encode exactly one CBOR item");
         if constexpr (IsSharedPointer<value_type>) {
             return text::format("null / #6.28({}) / #6.29(uint)",
                                 parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
