@@ -1026,6 +1026,52 @@ TEST_CASE("ADL-tagged aggregates keep their outer tag profile") {
     CHECK_EQ(*record.value, 18U);
 }
 
+TEST_CASE("optional pointer variant alternatives reuse an already-consumed tag") {
+    using optional_type = std::optional<smart_ptr_test::adl_tagged_shared_record>;
+    using variant_type  = std::variant<optional_type, std::string>;
+
+    SUBCASE("populated optional") {
+        variant_type sent{optional_type{smart_ptr_test::adl_tagged_shared_record{.value = std::make_shared<std::uint64_t>(18U)}}};
+
+        std::vector<std::byte> bytes;
+        auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+        REQUIRE(enc(sent));
+        CHECK_EQ(to_hex(bytes), "d82bd81c12");
+
+        variant_type decoded{std::string{"before"}};
+        auto         dec = make_decoder<shared_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<optional_type>(decoded));
+        const auto &optional = std::get<optional_type>(decoded);
+        REQUIRE(optional);
+        REQUIRE(optional->value);
+        CHECK_EQ(*optional->value, 18U);
+    }
+
+    SUBCASE("empty optional") {
+        const auto   bytes = to_bytes("f6");
+        variant_type decoded{std::string{"before"}};
+        auto         dec = make_decoder<shared_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<optional_type>(decoded));
+        CHECK_FALSE(std::get<optional_type>(decoded));
+    }
+
+    SUBCASE("incomplete populated optional remains terminal") {
+        const auto   bytes = to_bytes("d82bd81c");
+        variant_type decoded{std::string{"before"}};
+        auto         dec    = make_decoder<shared_ptr_codec>(bytes);
+        const auto   result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::incomplete);
+        REQUIRE(std::holds_alternative<optional_type>(decoded));
+        const auto &optional = std::get<optional_type>(decoded);
+        REQUIRE(optional);
+        REQUIRE(optional->value);
+    }
+}
+
 TEST_CASE("bounded array alternatives expose nested shared pointers") {
     using array_type   = std::vector<std::shared_ptr<std::uint64_t>>;
     using bounded_type = bounded_size<array_type, 0U, 4U>;

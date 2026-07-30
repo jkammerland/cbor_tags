@@ -418,6 +418,11 @@ template <typename Decoder, typename T> [[nodiscard]] status_code decode_pointer
         auto                known_tag = std::optional<std::uint64_t>{tag};
         constexpr std::byte unused_additional_info{};
         return decode_pointer_variant(dec, value, major_type::Tag, unused_additional_info, known_tag);
+    } else if constexpr (IsOptional<type>) {
+        using value_type = std::remove_cvref_t<typename type::value_type>;
+        auto decoded     = cbor::tags::detail::make_decode_value_for_optional<value_type>(value);
+        value            = std::move(decoded);
+        return decode_pointer_known_tag(dec, value.value(), tag);
     } else if constexpr (IsTag<type>) {
         return dec.decode(value, tag);
     } else if constexpr (IsAggregate<type> || IsUntaggedTuple<type>) {
@@ -456,6 +461,11 @@ template <typename Decoder, typename T>
     } else if constexpr (SharedPointer<type>) {
         if (major == major_type::Tag) {
             return dec.decode_shared_pointer_tag_impl(value, *tag);
+        }
+        return dec.decode(value, major, additional_info);
+    } else if constexpr (IsOptional<type>) {
+        if (major == major_type::Tag) {
+            return decode_pointer_known_tag(dec, value, *tag);
         }
         return dec.decode(value, major, additional_info);
     } else if constexpr (IsVariant<type>) {
