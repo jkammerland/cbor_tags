@@ -88,18 +88,19 @@ class shared_ptr_encode_scope {
             if (existing.state != shared_ptr_entry_state::complete) {
                 return unexpected<status_code>{status_code::error};
             }
-            return shared_ptr_observation{shared_ptr_observation_kind::reference, static_cast<std::uint64_t>(found->second)};
+            return shared_ptr_observation{.kind  = shared_ptr_observation_kind::reference,
+                                          .index = static_cast<std::uint64_t>(found->second)};
         }
 
         const auto index = entries_.size();
-        entries_.push_back(entry{key, shared_ptr_entry_state::encoding});
+        entries_.push_back(entry{.key = key, .state = shared_ptr_entry_state::encoding});
         try {
             lookup_.emplace(key, index);
         } catch (...) {
             entries_.pop_back();
             throw;
         }
-        return shared_ptr_observation{shared_ptr_observation_kind::first, static_cast<std::uint64_t>(index)};
+        return shared_ptr_observation{.kind = shared_ptr_observation_kind::first, .index = static_cast<std::uint64_t>(index)};
     }
 
     void mark_complete(std::uint64_t index) {
