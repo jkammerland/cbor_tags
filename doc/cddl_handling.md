@@ -475,8 +475,10 @@ required.
 CDDL cannot express whether a tag 29 index exists, has the requested pointee
 type, or refers to a completed entry. Those remain runtime table checks.
 CDDL can describe pointer-containing choices when their shapes are distinct.
-The runtime codec accepts those same distinct shared-pointer variants and
-rejects overlapping outer shapes at compile time.
+The runtime codec accepts those same distinct structural shared-pointer
+variants and rejects overlapping outer shapes during decoding. Encoding an
+already-selected alternative is unaffected. If another composed codec defines
+an alternative's outer wire policy, provide an explicit whole-variant decoder.
 
 Generated CDDL is unavailable for registered polymorphic smart-pointer
 pointees because the pointer registration identifies tagged subclasses but

@@ -14,6 +14,14 @@
 #include <utility>
 #include <variant>
 
+namespace cbor::tags {
+
+template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
+    requires CborOutputBuffer<OutputBuffer>
+struct encoder;
+
+} // namespace cbor::tags
+
 namespace cbor::tags::ext::smart_ptr {
 
 template <typename Pointer> struct pointee_types_for {
@@ -52,14 +60,60 @@ template <typename Pointer>
 using registered_pointee_types_t =
     typename decltype(cbor_smart_pointer_pointee_types(pointee_types_for<std::remove_cvref_t<Pointer>>{}))::type;
 
+template <typename T> struct static_tag_value;
+
+template <std::uint64_t Tag> struct static_tag_value<static_tag<Tag>> : std::integral_constant<std::uint64_t, Tag> {};
+
+template <typename T>
+concept HasTypeLevelAdlTag =
+    requires(const std::remove_cvref_t<T> &value) { requires is_static_tag_t<std::remove_cvref_t<decltype(cbor_tag(value))>>::value; };
+
+template <typename T>
+concept HasTypeLevelFunctionTag =
+    requires { requires is_static_tag_t<std::remove_cvref_t<decltype(cbor::tags::cbor_tag<std::remove_cvref_t<T>>())>>::value; };
+
+template <typename T>
+concept HasTypeLevelMemberTag =
+    requires { requires is_static_tag_t<std::remove_cvref_t<decltype(std::declval<std::remove_cvref_t<T> &>().cbor_tag)>>::value; };
+
+template <typename T> consteval bool has_type_level_registered_tag() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (HasStaticTag<type> || HasInlineTag<type> || HasTypeLevelAdlTag<type> || HasTypeLevelFunctionTag<type> ||
+                  HasTypeLevelMemberTag<type>) {
+        return true;
+    } else if constexpr (IsTaggedTuple<type>) {
+        using tag_type = std::remove_cvref_t<std::tuple_element_t<0, type>>;
+        return is_static_tag_t<tag_type>::value;
+    } else {
+        return false;
+    }
+}
+
 template <typename T> consteval bool has_fixed_registered_tag() {
     using type = std::remove_cvref_t<T>;
     return IsTag<type> && !IsTagHeader<type> && !is_dynamic_tag_t<type> && !HasDynamicTag<type> &&
-           !cbor::tags::detail::is_dynamic_tagged_tuple_v<type>;
+           !cbor::tags::detail::is_dynamic_tagged_tuple_v<type> && has_type_level_registered_tag<type>();
 }
 
 template <typename T> consteval std::uint64_t registered_pointee_tag() {
-    return static_cast<std::uint64_t>(cbor::tags::detail::get_tag_from_any<std::remove_cvref_t<T>>());
+    using type = std::remove_cvref_t<T>;
+    static_assert(has_fixed_registered_tag<type>(), "registered pointee tag must be fixed by its type");
+
+    if constexpr (HasStaticTag<type> || HasInlineTag<type>) {
+        return static_cast<std::uint64_t>(type::cbor_tag);
+    } else if constexpr (HasTypeLevelAdlTag<type>) {
+        using tag_type = std::remove_cvref_t<decltype(cbor_tag(std::declval<const type &>()))>;
+        return static_tag_value<tag_type>::value;
+    } else if constexpr (HasTypeLevelFunctionTag<type>) {
+        using tag_type = std::remove_cvref_t<decltype(cbor::tags::cbor_tag<type>())>;
+        return static_tag_value<tag_type>::value;
+    } else if constexpr (HasTypeLevelMemberTag<type>) {
+        using tag_type = std::remove_cvref_t<decltype(std::declval<type &>().cbor_tag)>;
+        return static_tag_value<tag_type>::value;
+    } else {
+        using tag_type = std::remove_cvref_t<std::tuple_element_t<0, type>>;
+        return static_tag_value<tag_type>::value;
+    }
 }
 
 template <typename Tuple, std::size_t I = 0U, std::size_t J = 1U> consteval bool registered_pointee_tags_are_unique() {
@@ -80,14 +134,22 @@ template <typename Pointer, std::size_t... Is> consteval bool registered_pointee
     using element_type = pointer_element_t<pointer_type>;
     using tuple_type   = registered_pointee_types_t<pointer_type>;
 
-    return sizeof...(Is) != 0U && std::is_polymorphic_v<element_type> &&
-           (!UniquePointer<pointer_type> || std::has_virtual_destructor_v<element_type>) &&
-           (std::derived_from<std::tuple_element_t<Is, tuple_type>, element_type> && ...) &&
-           ((!std::same_as<std::tuple_element_t<Is, tuple_type>, element_type>) && ...) &&
-           (std::default_initializable<std::tuple_element_t<Is, tuple_type>> && ...) &&
-           (has_fixed_registered_tag<std::tuple_element_t<Is, tuple_type>>() && ...) &&
-           (requires(pointer_type &pointer, std::tuple_element_t<Is, tuple_type> *raw) { pointer.reset(raw); } && ...) &&
-           registered_pointee_tags_are_unique<tuple_type>();
+    constexpr bool structurally_valid =
+        sizeof...(Is) != 0U && std::is_polymorphic_v<element_type> && std::has_virtual_destructor_v<element_type> &&
+        (std::derived_from<std::tuple_element_t<Is, tuple_type>, element_type> && ...) &&
+        ((!std::same_as<std::tuple_element_t<Is, tuple_type>, element_type>) && ...) &&
+        (std::default_initializable<std::tuple_element_t<Is, tuple_type>> && ...) &&
+        (requires(pointer_type &pointer, std::tuple_element_t<Is, tuple_type> *raw) { pointer.reset(raw); } && ...);
+    constexpr bool tags_are_fixed = (has_fixed_registered_tag<std::tuple_element_t<Is, tuple_type>>() && ...);
+
+    if constexpr (!structurally_valid || !tags_are_fixed) {
+        return false;
+    } else {
+        return (((registered_pointee_tag<std::tuple_element_t<Is, tuple_type>>() != shareable_tag) &&
+                 (registered_pointee_tag<std::tuple_element_t<Is, tuple_type>>() != sharedref_tag)) &&
+                ...) &&
+               registered_pointee_tags_are_unique<tuple_type>();
+    }
 }
 
 template <typename Pointer> consteval bool registered_pointee_types_are_valid() {
@@ -182,6 +244,45 @@ template <typename Options, typename T> consteval bool encodes_one_cbor_item() {
     return false;
 }
 
+template <typename Codec, typename T>
+concept CodecDecodesWithMajor = requires(Codec &codec, T &value, major_type major, std::byte additional_info) {
+    { codec.decode(value, major, additional_info) } -> std::same_as<status_code>;
+};
+
+template <typename T, typename Decoder> struct extension_decodes_with_major : std::false_type {};
+
+template <typename T, typename InputBuffer, typename Options, template <typename> typename... Decoders>
+struct extension_decodes_with_major<T, cbor::tags::decoder<InputBuffer, Options, Decoders...>> {
+    using decoder_type = cbor::tags::decoder<InputBuffer, Options, Decoders...>;
+
+    template <template <typename> typename Codec> static consteval bool codec_decodes_with_major() {
+        using codec_type = Codec<decoder_type>;
+        if constexpr (requires { typename codec_type::smart_pointer_codec_marker; }) {
+            return false;
+        } else {
+            return CodecDecodesWithMajor<codec_type, T>;
+        }
+    }
+
+    static constexpr bool value = (codec_decodes_with_major<Decoders>() || ...);
+};
+
+template <typename T, typename Decoder>
+inline constexpr bool extension_decodes_with_major_v =
+    extension_decodes_with_major<std::remove_cvref_t<T>, std::remove_cvref_t<Decoder>>::value;
+
+template <typename T, typename Encoder> struct extension_encodes_value : std::false_type {};
+
+template <typename T, typename OutputBuffer, typename Options, template <typename> typename... Encoders>
+struct extension_encodes_value<T, cbor::tags::encoder<OutputBuffer, Options, Encoders...>> {
+    using encoder_type = cbor::tags::encoder<OutputBuffer, Options, Encoders...>;
+
+    static constexpr bool value = (requires(Encoders<encoder_type> &extension, const T &value) { extension.encode(value); } || ...);
+};
+
+template <typename T, typename Encoder>
+inline constexpr bool extension_encodes_value_v = extension_encodes_value<std::remove_cvref_t<T>, std::remove_cvref_t<Encoder>>::value;
+
 enum class pointer_variant_support : std::uint8_t { supported, unsupported };
 
 struct pointer_variant_profile {
@@ -244,30 +345,40 @@ template <typename... Seen, typename T> struct pointer_profile_seen_append<point
 
 template <typename Seen, typename T> using pointer_profile_seen_append_t = typename pointer_profile_seen_append<Seen, T>::type;
 
-template <typename Options, typename T, typename Seen = pointer_profile_seen_types<>>
+template <typename Options, typename T, typename Decoder = void, typename Seen = pointer_profile_seen_types<>>
 consteval pointer_variant_profile collect_pointer_variant_profile();
 
-template <typename Options, typename Tuple, typename Seen, std::size_t... Is>
+template <typename Options, typename Decoder, typename Tuple, typename Seen, std::size_t... Is>
 consteval pointer_variant_profile collect_registered_pointee_profile(std::index_sequence<Is...>) {
     pointer_variant_profile result;
-    (result.merge(collect_pointer_variant_profile<Options, std::tuple_element_t<Is, std::remove_cvref_t<Tuple>>, Seen>()), ...);
+    if constexpr ((has_fixed_registered_tag<std::tuple_element_t<Is, std::remove_cvref_t<Tuple>>>() && ...)) {
+        (result.add_tag(registered_pointee_tag<std::tuple_element_t<Is, std::remove_cvref_t<Tuple>>>()), ...);
+    } else {
+        result.support = pointer_variant_support::unsupported;
+    }
+    if constexpr (!std::same_as<Decoder, void> &&
+                  (extension_decodes_with_major_v<std::tuple_element_t<Is, std::remove_cvref_t<Tuple>>, Decoder> || ...)) {
+        result.support = pointer_variant_support::unsupported;
+    }
     return result;
 }
 
-template <typename Options, typename Pointer, typename Seen> consteval pointer_variant_profile collect_registered_pointee_profile() {
+template <typename Options, typename Decoder, typename Pointer, typename Seen>
+consteval pointer_variant_profile collect_registered_pointee_profile() {
     using tuple_type = registered_pointee_types_t<std::remove_cvref_t<Pointer>>;
-    return collect_registered_pointee_profile<Options, tuple_type, Seen>(
+    return collect_registered_pointee_profile<Options, Decoder, tuple_type, Seen>(
         std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<tuple_type>>>{});
 }
 
-template <typename Options, typename Tuple, std::size_t Offset, typename Seen, std::size_t... Is>
+template <typename Options, typename Decoder, typename Tuple, std::size_t Offset, typename Seen, std::size_t... Is>
 consteval pointer_variant_profile collect_tuple_payload_profile(std::index_sequence<Is...>) {
     pointer_variant_profile result;
-    (result.merge(collect_pointer_variant_profile<Options, std::tuple_element_t<Offset + Is, std::remove_cvref_t<Tuple>>, Seen>()), ...);
+    (result.merge(collect_pointer_variant_profile<Options, std::tuple_element_t<Offset + Is, std::remove_cvref_t<Tuple>>, Decoder, Seen>()),
+     ...);
     return result;
 }
 
-template <typename Options, typename Tuple, std::size_t Offset, typename Seen>
+template <typename Options, typename Decoder, typename Tuple, std::size_t Offset, typename Seen>
 consteval pointer_variant_profile collect_tuple_payload_profile() {
     using tuple_type     = std::remove_cvref_t<Tuple>;
     constexpr auto total = std::tuple_size_v<tuple_type>;
@@ -276,7 +387,7 @@ consteval pointer_variant_profile collect_tuple_payload_profile() {
         result.support = pointer_variant_support::unsupported;
         return result;
     } else {
-        return collect_tuple_payload_profile<Options, tuple_type, Offset, Seen>(std::make_index_sequence<total - Offset>{});
+        return collect_tuple_payload_profile<Options, Decoder, tuple_type, Offset, Seen>(std::make_index_sequence<total - Offset>{});
     }
 }
 
@@ -306,7 +417,8 @@ template <typename T> consteval pointer_variant_profile collect_core_pointer_var
     return result;
 }
 
-template <typename Options, typename T, typename Seen> consteval pointer_variant_profile collect_pointer_variant_profile() {
+template <typename Options, typename T, typename Decoder, typename Seen>
+consteval pointer_variant_profile collect_pointer_variant_profile() {
     using type = std::remove_cvref_t<T>;
     if constexpr (pointer_profile_seen_contains<type, Seen>::value) {
         return {};
@@ -316,9 +428,9 @@ template <typename Options, typename T, typename Seen> consteval pointer_variant
         if constexpr (UniquePointer<type>) {
             auto result = [&] {
                 if constexpr (HasRegisteredPointeeTypes<type>) {
-                    return collect_registered_pointee_profile<Options, type, next_seen>();
+                    return collect_registered_pointee_profile<Options, Decoder, type, next_seen>();
                 } else {
-                    return collect_pointer_variant_profile<Options, pointer_element_t<type>, next_seen>();
+                    return collect_pointer_variant_profile<Options, pointer_element_t<type>, Decoder, next_seen>();
                 }
             }();
             result.buckets[cbor::tags::detail::MajorIndex::Null] = true;
@@ -347,9 +459,19 @@ template <typename Options, typename T, typename Seen> consteval pointer_variant
             if constexpr (HasRegisteredPointeeTypes<type> && !registered_pointee_types_are_valid<type>()) {
                 result.support = pointer_variant_support::unsupported;
             }
+            if constexpr (HasRegisteredPointeeTypes<type>) {
+                const auto pointees = collect_registered_pointee_profile<Options, Decoder, type, next_seen>();
+                if (pointees.support == pointer_variant_support::unsupported) {
+                    result.support = pointer_variant_support::unsupported;
+                }
+            }
+            return result;
+        } else if constexpr (!std::same_as<Decoder, void> && extension_decodes_with_major_v<type, Decoder>) {
+            pointer_variant_profile result;
+            result.support = pointer_variant_support::unsupported;
             return result;
         } else if constexpr (IsOptional<type>) {
-            auto result = collect_pointer_variant_profile<Options, typename type::value_type, next_seen>();
+            auto result = collect_pointer_variant_profile<Options, typename type::value_type, Decoder, next_seen>();
             result.buckets[cbor::tags::detail::MajorIndex::Null] = true;
             if (result.unique_pointer_null || result.shared_pointer_null) {
                 result.support = pointer_variant_support::unsupported;
@@ -358,15 +480,30 @@ template <typename Options, typename T, typename Seen> consteval pointer_variant
         } else if constexpr (IsVariant<type>) {
             pointer_variant_profile result;
             cbor::tags::detail::with_variant_alternatives<type>(
-                [&result]<typename... Ts>() { (result.merge(collect_pointer_variant_profile<Options, Ts, next_seen>()), ...); });
+                [&result]<typename... Ts>() { (result.merge(collect_pointer_variant_profile<Options, Ts, Decoder, next_seen>()), ...); });
+            return result;
+        } else if constexpr (IsBoundedSizeWrapper<type>) {
+            auto result                    = collect_core_pointer_variant_profile<type>();
+            auto wrapped                   = collect_pointer_variant_profile<Options, typename type::value_type, Decoder, next_seen>();
+            result.contains_unique_pointer = wrapped.contains_unique_pointer;
+            result.contains_shared_pointer = wrapped.contains_shared_pointer;
+            if (wrapped.support == pointer_variant_support::unsupported) {
+                result.support = pointer_variant_support::unsupported;
+            } else {
+                result.support = pointer_variant_support::supported;
+            }
+            return result;
+        } else if constexpr (IsDynamicBoundedSizeWrapper<type>) {
+            auto result    = collect_core_pointer_variant_profile<type>();
+            result.support = pointer_variant_support::unsupported;
             return result;
         } else if constexpr (IsMap<type> && requires {
                                  typename type::key_type;
                                  typename type::mapped_type;
                              }) {
             auto result = collect_core_pointer_variant_profile<type>();
-            auto key    = collect_pointer_variant_profile<Options, typename type::key_type, next_seen>();
-            auto mapped = collect_pointer_variant_profile<Options, typename type::mapped_type, next_seen>();
+            auto key    = collect_pointer_variant_profile<Options, typename type::key_type, Decoder, next_seen>();
+            auto mapped = collect_pointer_variant_profile<Options, typename type::mapped_type, Decoder, next_seen>();
 
             result.contains_unique_pointer = key.contains_unique_pointer || mapped.contains_unique_pointer;
             result.contains_shared_pointer = key.contains_shared_pointer || mapped.contains_shared_pointer;
@@ -378,18 +515,29 @@ template <typename Options, typename T, typename Seen> consteval pointer_variant
             return result;
         } else if constexpr (IsArray<type> && requires { typename type::value_type; }) {
             auto result  = collect_core_pointer_variant_profile<type>();
-            auto element = collect_pointer_variant_profile<Options, typename type::value_type, next_seen>();
+            auto element = collect_pointer_variant_profile<Options, typename type::value_type, Decoder, next_seen>();
 
             result.contains_unique_pointer = element.contains_unique_pointer;
             result.contains_shared_pointer = element.contains_shared_pointer;
             result.support                 = element.support;
             return result;
+        } else if constexpr (!std::same_as<Decoder, void> && IsClassWithDecodingOverload<Decoder, type> && !IsTag<type>) {
+            pointer_variant_profile result;
+            result.support = pointer_variant_support::unsupported;
+            return result;
         } else if constexpr (IsAggregate<type> || IsUntaggedTuple<type> || IsTaggedTuple<type> || IsTagOnlyTuple<type>) {
             using tuple_type             = pointer_tuple_t<type>;
-            constexpr std::size_t offset = IsTag<type> && !HasInlineTag<type> ? 1U : 0U;
-            constexpr std::size_t count  = std::tuple_size_v<tuple_type> - offset;
+            constexpr std::size_t offset = [] {
+                if constexpr (std::tuple_size_v<tuple_type> == 0U) {
+                    return 0U;
+                } else {
+                    using first_type = std::remove_cvref_t<std::tuple_element_t<0, tuple_type>>;
+                    return IsTag<type> && (is_static_tag_t<first_type>::value || is_dynamic_tag_t<first_type>) ? 1U : 0U;
+                }
+            }();
+            constexpr std::size_t count = std::tuple_size_v<tuple_type> - offset;
 
-            auto payload = collect_tuple_payload_profile<Options, tuple_type, offset, next_seen>();
+            auto payload = collect_tuple_payload_profile<Options, Decoder, tuple_type, offset, next_seen>();
             if constexpr (count == 0U) {
                 if constexpr (IsTag<type>) {
                     auto result    = collect_core_pointer_variant_profile<type>();
@@ -426,6 +574,10 @@ template <typename Options, typename T, typename Seen> consteval pointer_variant
 template <typename T, typename Options = default_options>
 inline constexpr auto pointer_variant_profile_v = collect_pointer_variant_profile<Options, T>();
 
+template <typename T, typename Decoder>
+inline constexpr auto pointer_decoder_variant_profile_v =
+    collect_pointer_variant_profile<typename std::remove_cvref_t<Decoder>::options, T, std::remove_cvref_t<Decoder>>();
+
 template <typename T> inline constexpr bool contains_decodable_unique_pointer_v = pointer_variant_profile_v<T>.contains_unique_pointer;
 template <typename T> inline constexpr bool contains_shared_pointer_v           = pointer_variant_profile_v<T>.contains_shared_pointer;
 template <typename T> inline constexpr bool contains_decodable_shared_pointer_v = contains_shared_pointer_v<T>;
@@ -434,8 +586,13 @@ template <bool AllowUnique, bool AllowShared, typename T>
 inline constexpr bool has_pointer_null_wire_v =
     (AllowUnique && pointer_variant_profile_v<T>.unique_pointer_null) || (AllowShared && pointer_variant_profile_v<T>.shared_pointer_null);
 
+template <bool CatchAllPass>
 [[nodiscard]] constexpr bool pointer_profile_matches_simple(const pointer_variant_profile &profile, std::byte additional_info) {
     using index = cbor::tags::detail::MajorIndex;
+    if constexpr (CatchAllPass) {
+        return profile.buckets[index::SimpleValued] &&
+               std::to_integer<std::uint8_t>(additional_info) <= static_cast<std::uint8_t>(SimpleType::Simple);
+    }
     if (additional_info == static_cast<std::byte>(SimpleType::Bool_False) ||
         additional_info == static_cast<std::byte>(SimpleType::Bool_True)) {
         return profile.buckets[index::Boolean];
@@ -452,10 +609,7 @@ inline constexpr bool has_pointer_null_wire_v =
     if (additional_info == static_cast<std::byte>(SimpleType::Float64)) {
         return profile.buckets[index::float64];
     }
-    const auto value = std::to_integer<std::uint8_t>(additional_info);
-    return profile.buckets[index::SimpleValued] &&
-           (value < static_cast<std::uint8_t>(SimpleType::Bool_False) || value == static_cast<std::uint8_t>(SimpleType::Undefined) ||
-            value == static_cast<std::uint8_t>(SimpleType::Simple));
+    return false;
 }
 
 [[nodiscard]] constexpr bool pointer_profile_matches_tag(const pointer_variant_profile &profile, std::uint64_t tag) {
@@ -470,9 +624,9 @@ inline constexpr bool has_pointer_null_wire_v =
     return false;
 }
 
-template <typename T, typename Options = default_options>
+template <bool CatchAllPass, typename T, typename Decoder>
 [[nodiscard]] constexpr bool pointer_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
-    constexpr auto profile = pointer_variant_profile_v<T, Options>;
+    constexpr auto profile = pointer_decoder_variant_profile_v<T, Decoder>;
     using index            = cbor::tags::detail::MajorIndex;
 
     switch (major) {
@@ -483,7 +637,7 @@ template <typename T, typename Options = default_options>
     case major_type::Array: return profile.buckets[index::Array];
     case major_type::Map: return profile.buckets[index::Map];
     case major_type::Tag: return tag.has_value() && pointer_profile_matches_tag(profile, *tag);
-    case major_type::Simple: return pointer_profile_matches_simple(profile, additional_info);
+    case major_type::Simple: return pointer_profile_matches_simple<CatchAllPass>(profile, additional_info);
     }
     return false;
 }
@@ -534,6 +688,31 @@ consteval bool pointer_variant_is_unambiguous() {
 template <typename Variant, typename Options = default_options> consteval bool pointer_variant_is_supported() {
     return cbor::tags::detail::with_variant_alternatives<Variant>(
         []<typename... Ts>() { return ((pointer_variant_profile_v<Ts, Options>.support == pointer_variant_support::supported) && ...); });
+}
+
+template <typename A, typename B, typename Decoder> consteval bool pointer_decoder_wire_shapes_overlap() {
+    return pointer_profiles_overlap(pointer_decoder_variant_profile_v<A, Decoder>, pointer_decoder_variant_profile_v<B, Decoder>);
+}
+
+template <typename Variant, typename Decoder, std::size_t I = 0U, std::size_t J = 1U>
+consteval bool pointer_decoder_variant_is_unambiguous() {
+    constexpr auto count = cbor::tags::detail::variant_size_v<Variant>;
+    if constexpr (I >= count) {
+        return true;
+    } else if constexpr (J >= count) {
+        return pointer_decoder_variant_is_unambiguous<Variant, Decoder, I + 1U, I + 2U>();
+    } else {
+        using left  = cbor::tags::detail::variant_alternative_t<I, Variant>;
+        using right = cbor::tags::detail::variant_alternative_t<J, Variant>;
+        return !pointer_decoder_wire_shapes_overlap<left, right, Decoder>() &&
+               pointer_decoder_variant_is_unambiguous<Variant, Decoder, I, J + 1U>();
+    }
+}
+
+template <typename Variant, typename Decoder> consteval bool pointer_decoder_variant_is_supported() {
+    return cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() {
+        return ((pointer_decoder_variant_profile_v<Ts, Decoder>.support == pointer_variant_support::supported) && ...);
+    });
 }
 
 } // namespace detail

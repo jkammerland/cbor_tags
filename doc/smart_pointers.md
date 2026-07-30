@@ -20,7 +20,9 @@ Both codecs use structural concepts rather than matching only the standard
 pointer templates. `IsUniquePointer`, `IsSharedPointer`, and `IsSmartPointer`
 therefore accept compatible user-defined pointer types. For a shared pointer,
 copying the pointer must retain and share the same object. This semantic rule
-cannot be checked by a C++ concept.
+cannot be checked by a C++ concept. On decode, `reset(raw)` must either adopt
+`raw` or destroy it before throwing, as `std::shared_ptr::reset(raw)` does.
+Otherwise a failed reset can leak the newly allocated object.
 
 ## Unique Ownership
 
@@ -188,7 +190,7 @@ also rejected when group wrapping is disabled, because it would encode several
 items under one tag 28.
 
 Smart pointers work inside a variant when each alternative has a distinct
-outer CBOR shape:
+outer CBOR shape that follows the library's normal structural encoding:
 
 ```cpp
 using choice = std::variant<std::shared_ptr<int>, std::string>;
@@ -217,7 +219,8 @@ wrapped array shape under the default options. With group wrapping disabled, a
 multi-field aggregate emits multiple items and is not a valid variant
 alternative.
 
-Overlapping alternatives are rejected at compile time:
+Overlapping alternatives are rejected at compile time for decoding and CDDL
+generation. Encoding an already-selected alternative remains valid:
 
 ```cpp
 std::variant<std::shared_ptr<int>, std::nullptr_t> bad_null;
@@ -233,6 +236,30 @@ std::variant<std::vector<std::shared_ptr<int>>, std::vector<int>> bad_array;
 Add an application tag or an application codec when the outer wire shapes
 overlap. Variant selection uses a compile-time profile of each alternative; it
 does not inspect or walk the input payload.
+
+An alternative whose outer wire shape is defined by another composed codec is
+also rejected by automatic smart-pointer variant decoding. The smart-pointer
+codec cannot safely predict another codec's private wire policy after the
+initial byte has been consumed. Give the whole variant an application decode
+overload instead:
+
+```cpp
+using choice = std::variant<std::shared_ptr<int>, application_record>;
+
+template <typename Self>
+struct choice_codec : cbor_decoder_mixin_base<Self> {
+    using cbor_decoder_mixin_base<Self>::decode;
+
+    status_code decode(choice& value, major_type major, std::byte ai) {
+        // Select the application wire format, assign one alternative, and
+        // decode it from this already-consumed initial byte.
+    }
+};
+```
+
+This is an explicit dispatch boundary, not a retry mechanism. The overload
+must select once and return the selected decode result; it must not prewalk,
+rewind, or restore the destination.
 
 ## Tagged Subclasses
 
@@ -272,8 +299,9 @@ Define the function in a namespace associated with the pointer or pointee so
 argument-dependent lookup can find it. Register `std::unique_ptr<animal>`
 separately if both pointer kinds are used.
 
-On encode, the codec finds the listed dynamic type and writes its application
-tag. On decode, that fixed tag selects and allocates the subclass. Shared
+On encode, the codec matches the exact listed dynamic type and writes its
+application tag. A listed ancestor does not capture an unlisted descendant.
+On decode, that fixed tag selects and allocates the subclass. Shared
 pointers still use tag 28 around the first value and tag 29 for later
 references:
 
@@ -282,12 +310,29 @@ references:
 #6.29(0)
 ```
 
-The base must be polymorphic. Each listed type must be a public derived type,
-default-initializable, have a distinct fixed CBOR tag, and be accepted by
-`Pointer::reset(Derived*)`. A unique-pointer base must also have a virtual
-destructor. Encoding an unlisted dynamic type or decoding an unlisted tag
-returns an error. Encoding uses `dynamic_cast`, so this opt-in feature requires
-RTTI. The codec never guesses from member layout.
+The base must be polymorphic and have a virtual destructor for both ownership
+models. Each listed type must be a public derived type, default-initializable,
+have a distinct fixed CBOR tag other than 28 or 29, and be accepted by
+`Pointer::reset(Derived*)`. The reset ownership rule described above applies
+here too.
+
+A registered tag must be fixed by the type. Supported forms include
+`static_tag<N>` returned by `cbor_tag(const T&)`, a static
+`static_tag<N>`/integer `T::cbor_tag`, and a leading `static_tag<N>` in a
+tagged tuple or reflected object. A raw integer returned from
+`cbor_tag(const T&)` is rejected because it may depend on object state. The
+validator reads the tag from its type and does not construct a sample `T`.
+
+Encoding an unlisted dynamic type or decoding an unlisted tag returns an
+error. Encoding uses RTTI to require an exact dynamic type before
+`dynamic_cast`, so an earlier registered base class cannot silently win.
+The codec never guesses from member layout.
+
+Registered subclass bodies must use the type's own normal encode/decode
+customization. A separately composed codec for a registered subclass is
+rejected because pointer dispatch has already consumed its application tag.
+If that wire policy is required, provide an application codec for the whole
+pointer instead.
 
 An ordinary `std::optional` cannot directly contain a smart pointer. Both the
 empty optional and the empty pointer would encode as CBOR `null`. A named-map

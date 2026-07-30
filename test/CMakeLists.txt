@@ -427,6 +427,99 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+function(add_smart_ptr_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${PASS_REGEX}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_smart_ptr_compile_fail_test(
+  smart_ptr_registered_duplicate_tag_decode_compile_fails
+  smart_ptr_registered_duplicate_tag_decode_compile_fail.cc
+  "registered smart pointer pointees must be")
+add_smart_ptr_compile_fail_test(
+  smart_ptr_registered_value_tag_compile_fails
+  smart_ptr_registered_value_tag_compile_fail.cc
+  "registered smart pointer pointees must be")
+add_smart_ptr_compile_fail_test(
+  smart_ptr_registered_reserved_tag_compile_fails
+  smart_ptr_registered_reserved_tag_compile_fail.cc
+  "tags 28 and 29 are reserved")
+add_smart_ptr_compile_fail_test(
+  smart_ptr_registered_nonvirtual_base_compile_fails
+  smart_ptr_registered_nonvirtual_base_compile_fail.cc
+  "polymorphic base must have a virtual")
+add_smart_ptr_compile_fail_test(
+  smart_ptr_variant_composed_codec_compile_fails
+  smart_ptr_variant_composed_codec_compile_fail.cc
+  "composed codecs must decode the whole variant explicitly")
+add_smart_ptr_compile_fail_test(
+  smart_ptr_registered_composed_codec_compile_fails
+  smart_ptr_registered_composed_codec_compile_fail.cc
+  "registered smart pointer pointees cannot use a composed decoder codec")
+
+add_executable(
+  smart_ptr_registered_composed_encode_codec_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_registered_composed_codec_compile_fail.cc)
+target_compile_definitions(
+  smart_ptr_registered_composed_encode_codec_compile_fails
+  PRIVATE CBOR_TAGS_REGISTERED_COMPOSED_ENCODE)
+target_link_libraries(smart_ptr_registered_composed_encode_codec_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_registered_composed_encode_codec_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_registered_composed_encode_codec_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=registered smart pointer pointees cannot use a composed encoder codec"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_variant_missing_unique_codec_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_missing_codec_compile_fail.cc)
+target_compile_definitions(smart_ptr_variant_missing_unique_codec_compile_fails PRIVATE CBOR_TAGS_ONLY_SHARED_CODEC)
+target_link_libraries(smart_ptr_variant_missing_unique_codec_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_missing_unique_codec_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_missing_unique_codec_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=a variant containing unique and shared pointers requires both"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_variant_missing_shared_codec_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_missing_codec_compile_fail.cc)
+target_compile_definitions(smart_ptr_variant_missing_shared_codec_compile_fails PRIVATE CBOR_TAGS_ONLY_UNIQUE_CODEC)
+target_link_libraries(smart_ptr_variant_missing_shared_codec_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_missing_shared_codec_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_missing_shared_codec_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=a variant containing unique and shared pointers requires both"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 add_executable(smart_ptr_nested_null_compile_fails EXCLUDE_FROM_ALL smart_ptr_nested_null_compile_fail.cc)
 target_link_libraries(smart_ptr_nested_null_compile_fails PRIVATE cbor::tags)
 add_test(

@@ -119,6 +119,19 @@ struct tagged_record {
     std::uint64_t  value{};
 };
 
+struct tagged_box {
+    tagged_record value;
+};
+
+struct adl_tagged_shared_record {
+    std::shared_ptr<std::uint64_t> value;
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(value); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(value); }
+};
+
+constexpr auto cbor_tag(const adl_tagged_shared_record &) { return static_tag<43>{}; }
+
 struct custom_record {
     std::uint64_t value{};
 };
@@ -191,6 +204,54 @@ struct fox final : animal {
 constexpr auto cbor_tag(const dog &) { return static_tag<100>{}; }
 constexpr auto cbor_tag(const cat &) { return static_tag<101>{}; }
 constexpr auto cbor_tag(const fox &) { return static_tag<102>{}; }
+
+struct hierarchy_base {
+    virtual ~hierarchy_base() = default;
+};
+
+struct hierarchy_middle : hierarchy_base {
+    std::uint64_t middle{};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(middle); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(middle); }
+};
+
+struct hierarchy_leaf final : hierarchy_middle {
+    std::uint64_t leaf{};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(leaf); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(leaf); }
+};
+
+constexpr auto cbor_tag(const hierarchy_middle &) { return static_tag<110>{}; }
+constexpr auto cbor_tag(const hierarchy_leaf &) { return static_tag<111>{}; }
+
+constexpr auto cbor_smart_pointer_pointee_types(pointee_types_for<std::shared_ptr<hierarchy_base>>) {
+    return std::type_identity<std::tuple<hierarchy_middle, hierarchy_leaf>>{};
+}
+
+constexpr auto cbor_smart_pointer_pointee_types(pointee_types_for<std::unique_ptr<hierarchy_base>>) {
+    return std::type_identity<std::tuple<hierarchy_leaf, hierarchy_middle>>{};
+}
+
+struct non_constexpr_base {
+    virtual ~non_constexpr_base() = default;
+};
+
+struct non_constexpr_child final : non_constexpr_base {
+    non_constexpr_child() : value(0U) {}
+
+    std::uint64_t value;
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(value); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(value); }
+};
+
+constexpr auto cbor_tag(const non_constexpr_child &) { return static_tag<112>{}; }
+
+constexpr auto cbor_smart_pointer_pointee_types(pointee_types_for<std::unique_ptr<non_constexpr_base>>) {
+    return std::type_identity<std::tuple<non_constexpr_child>>{};
+}
 
 template <typename Pointer>
     requires std::same_as<typename Pointer::element_type, animal>
@@ -280,7 +341,10 @@ static_assert(cbor::tags::ext::smart_ptr::detail::HasRegisteredPointeeTypes<std:
 static_assert(cbor::tags::ext::smart_ptr::detail::HasRegisteredPointeeTypes<std::unique_ptr<animal>>);
 static_assert(cbor::tags::ext::smart_ptr::detail::registered_pointee_types_are_valid<std::shared_ptr<animal>>());
 static_assert(cbor::tags::ext::smart_ptr::detail::registered_pointee_types_are_valid<std::unique_ptr<animal>>());
+static_assert(cbor::tags::ext::smart_ptr::detail::registered_pointee_types_are_valid<std::unique_ptr<non_constexpr_base>>());
 static_assert(cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<single_shared_record>.contains_shared_pointer);
+static_assert(
+    cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<bounded_size<std::vector<std::shared_ptr<std::uint64_t>>, 0U, 4U>>.contains_shared_pointer);
 static_assert(
     cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<grouped_shared_record>.buckets[cbor::tags::detail::MajorIndex::Array]);
 static_assert(cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<grouped_shared_record, Options<default_expected>>.support ==
@@ -924,6 +988,111 @@ TEST_CASE("pointer variants classify transparent and array-wrapped aggregates") 
     }
 }
 
+TEST_CASE("pointer variants propagate known tags through transparent aggregates") {
+    using pointer_type = std::unique_ptr<smart_ptr_test::tagged_box>;
+    using variant_type = std::variant<pointer_type, std::string>;
+
+    auto box         = std::make_unique<smart_ptr_test::tagged_box>();
+    box->value.value = 17U;
+    variant_type sent{pointer_type{std::move(box)}};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "d82a11");
+
+    variant_type decoded;
+    auto         dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    const auto &pointer = std::get<pointer_type>(decoded);
+    REQUIRE(pointer);
+    CHECK_EQ(pointer->value.value, 17U);
+}
+
+TEST_CASE("ADL-tagged aggregates keep their outer tag profile") {
+    using variant_type = std::variant<smart_ptr_test::adl_tagged_shared_record, std::string>;
+
+    variant_type           sent{smart_ptr_test::adl_tagged_shared_record{.value = std::make_shared<std::uint64_t>(18U)}};
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "d82bd81c12");
+
+    variant_type decoded;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    const auto &record = std::get<smart_ptr_test::adl_tagged_shared_record>(decoded);
+    REQUIRE(record.value);
+    CHECK_EQ(*record.value, 18U);
+}
+
+TEST_CASE("bounded array alternatives expose nested shared pointers") {
+    using array_type   = std::vector<std::shared_ptr<std::uint64_t>>;
+    using bounded_type = bounded_size<array_type, 0U, 4U>;
+    using variant_type = std::variant<bounded_type, std::string>;
+
+    auto         pointer = std::make_shared<std::uint64_t>(19U);
+    variant_type sent{bounded_type{array_type{pointer, pointer}}};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "82d81c13d81d00");
+
+    variant_type decoded;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    const auto &values = std::get<bounded_type>(decoded).value();
+    REQUIRE(values.size() == 2U);
+    CHECK(values[0] == values[1]);
+    CHECK_EQ(*values[0], 19U);
+}
+
+TEST_CASE("smart pointer variants use exact simple matches before the simple catch-all") {
+    using variant_type = std::variant<std::shared_ptr<std::uint64_t>, bool, simple>;
+
+    {
+        const auto   bytes = to_bytes("f5");
+        variant_type decoded;
+        auto         dec = make_decoder<shared_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<bool>(decoded));
+        CHECK(std::get<bool>(decoded));
+    }
+
+    {
+        const auto   bytes = to_bytes("f0");
+        variant_type decoded;
+        auto         dec = make_decoder<shared_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        REQUIRE(std::holds_alternative<simple>(decoded));
+        CHECK_EQ(std::get<simple>(decoded), simple{16U});
+    }
+}
+
+TEST_CASE("mixed unique and shared pointer variants require and use both codecs") {
+    using unique_array = std::vector<std::unique_ptr<std::uint64_t>>;
+    using shared_map   = std::map<std::string, std::shared_ptr<std::string>>;
+    using variant_type = std::variant<unique_array, shared_map>;
+
+    const auto   unique_bytes = to_bytes("8107");
+    variant_type unique_value;
+    auto         unique_dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(unique_bytes);
+    REQUIRE(unique_dec(unique_value));
+    REQUIRE(std::holds_alternative<unique_array>(unique_value));
+    REQUIRE(std::get<unique_array>(unique_value).size() == 1U);
+    REQUIRE(std::get<unique_array>(unique_value)[0]);
+    CHECK_EQ(*std::get<unique_array>(unique_value)[0], 7U);
+
+    const auto   shared_bytes = to_bytes("a16178d81c63616461");
+    variant_type shared_value;
+    auto         shared_dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(shared_bytes);
+    REQUIRE(shared_dec(shared_value));
+    REQUIRE(std::holds_alternative<shared_map>(shared_value));
+    REQUIRE(std::get<shared_map>(shared_value).at("x"));
+    CHECK_EQ(*std::get<shared_map>(shared_value).at("x"), "ada");
+}
+
 TEST_CASE("registered tagged subclasses retain shared pointer wire semantics") {
     using pointer_type = std::shared_ptr<smart_ptr_test::animal>;
     using variant_type = std::variant<pointer_type, std::string>;
@@ -951,6 +1120,62 @@ TEST_CASE("registered tagged subclasses retain shared pointer wire semantics") {
     const auto decoded_dog = std::dynamic_pointer_cast<smart_ptr_test::dog>(first_pointer);
     REQUIRE(decoded_dog);
     CHECK_EQ(decoded_dog->age, 7U);
+}
+
+TEST_CASE("registered subclass encoding selects the exact dynamic type") {
+    using pointer_type = std::shared_ptr<smart_ptr_test::hierarchy_base>;
+
+    auto leaf         = std::make_shared<smart_ptr_test::hierarchy_leaf>();
+    leaf->leaf        = 20U;
+    pointer_type sent = leaf;
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "d81cd86f14");
+
+    pointer_type decoded;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    const auto decoded_leaf = std::dynamic_pointer_cast<smart_ptr_test::hierarchy_leaf>(decoded);
+    REQUIRE(decoded_leaf);
+    CHECK_EQ(decoded_leaf->leaf, 20U);
+
+    auto unique_leaf  = std::make_unique<smart_ptr_test::hierarchy_leaf>();
+    unique_leaf->leaf = 21U;
+    std::unique_ptr<smart_ptr_test::hierarchy_base> unique_sent{std::move(unique_leaf)};
+
+    std::vector<std::byte> unique_bytes;
+    auto                   unique_enc = make_encoder<unique_ptr_codec>(unique_bytes);
+    REQUIRE(unique_enc(unique_sent));
+    CHECK_EQ(to_hex(unique_bytes), "d86f15");
+
+    std::unique_ptr<smart_ptr_test::hierarchy_base> unique_decoded;
+    auto                                            unique_dec = make_decoder<unique_ptr_codec>(unique_bytes);
+    REQUIRE(unique_dec(unique_decoded));
+    const auto *unique_decoded_leaf = dynamic_cast<const smart_ptr_test::hierarchy_leaf *>(unique_decoded.get());
+    REQUIRE(unique_decoded_leaf != nullptr);
+    CHECK_EQ(unique_decoded_leaf->leaf, 21U);
+}
+
+TEST_CASE("registered fixed ADL tags do not require constexpr construction") {
+    using pointer_type = std::unique_ptr<smart_ptr_test::non_constexpr_base>;
+
+    auto child   = std::make_unique<smart_ptr_test::non_constexpr_child>();
+    child->value = 21U;
+    pointer_type sent{std::move(child)};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "d87015");
+
+    pointer_type decoded;
+    auto         dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    const auto *decoded_child = dynamic_cast<const smart_ptr_test::non_constexpr_child *>(decoded.get());
+    REQUIRE(decoded_child != nullptr);
+    CHECK_EQ(decoded_child->value, 21U);
 }
 
 TEST_CASE("scoped shared pointer variants reuse registered subclass handling") {
