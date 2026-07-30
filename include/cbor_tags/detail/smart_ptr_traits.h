@@ -273,11 +273,14 @@ inline constexpr bool extension_decodes_with_major_v =
 
 template <typename T, typename Encoder> struct extension_encodes_value : std::false_type {};
 
+template <typename Codec, typename T>
+concept CodecEncodesValue = requires(Codec &codec, const T &value) { codec.encode(value); };
+
 template <typename T, typename OutputBuffer, typename Options, template <typename> typename... Encoders>
 struct extension_encodes_value<T, cbor::tags::encoder<OutputBuffer, Options, Encoders...>> {
     using encoder_type = cbor::tags::encoder<OutputBuffer, Options, Encoders...>;
 
-    static constexpr bool value = (requires(Encoders<encoder_type> &extension, const T &value) { extension.encode(value); } || ...);
+    static constexpr bool value = (CodecEncodesValue<Encoders<encoder_type>, T> || ...);
 };
 
 template <typename T, typename Encoder>

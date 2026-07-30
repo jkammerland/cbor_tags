@@ -167,9 +167,14 @@ template <typename Self> struct custom_record_codec : cbor_codec_mixin_base<Self
 using smart_ptr_only_decoder = decltype(make_decoder<unique_ptr_codec>(std::declval<std::vector<std::byte> &>()));
 using composed_custom_record_decoder =
     decltype(make_decoder<unique_ptr_codec, custom_record_codec>(std::declval<std::vector<std::byte> &>()));
+using smart_ptr_only_encoder = decltype(make_encoder<unique_ptr_codec>(std::declval<std::vector<std::byte> &>()));
+using composed_custom_record_encoder =
+    decltype(make_encoder<unique_ptr_codec, custom_record_codec>(std::declval<std::vector<std::byte> &>()));
 
 static_assert(!cbor::tags::ext::smart_ptr::detail::extension_decodes_with_major_v<custom_record, smart_ptr_only_decoder>);
 static_assert(cbor::tags::ext::smart_ptr::detail::extension_decodes_with_major_v<custom_record, composed_custom_record_decoder>);
+static_assert(!cbor::tags::ext::smart_ptr::detail::extension_encodes_value_v<custom_record, smart_ptr_only_encoder>);
+static_assert(cbor::tags::ext::smart_ptr::detail::extension_encodes_value_v<custom_record, composed_custom_record_encoder>);
 
 struct node {
     std::uint64_t         value{};
