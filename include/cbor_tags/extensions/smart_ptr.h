@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -190,6 +191,12 @@ template <IsSharedPointer Pointer>
     return scoped_shared_ptr<std::remove_cvref_t<Pointer>>{std::move(pointer)};
 }
 
+template <IsSharedPointer Pointer>
+    requires detail::HasRegisteredPointeeTypes<Pointer>
+constexpr auto cbor_smart_pointer_pointee_types(pointee_types_for<scoped_shared_ptr<Pointer>>) {
+    return cbor_smart_pointer_pointee_types(pointee_types_for<std::remove_cvref_t<Pointer>>{});
+}
+
 namespace detail {
 
 class encode_scope_ref {
@@ -309,9 +316,66 @@ template <typename Decoder, typename T>
 
 template <typename Pointer> void reset_pointer_to_new(Pointer &value) {
     using element_type = pointer_element_t<Pointer>;
-    auto allocation    = std::make_unique<element_type>();
-    value.reset(allocation.get());
-    (void)allocation.release();
+    value.reset(new element_type{});
+}
+
+template <typename Encoder, SmartPointer Pointer> void encode_registered_pointee(Encoder &enc, const Pointer &value) {
+    using pointer_type = std::remove_cvref_t<Pointer>;
+    using tuple_type   = registered_pointee_types_t<pointer_type>;
+
+    static_assert(registered_pointee_types_are_valid<pointer_type>(),
+                  "registered smart pointer pointees must be non-empty, uniquely fixed-tagged, default-initializable public derived "
+                  "types accepted by Pointer::reset; the base type must be polymorphic, and a unique pointer base needs a virtual "
+                  "destructor");
+
+    bool encoded = false;
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        auto try_encode = [&]<std::size_t I>() {
+            using pointee_type = std::tuple_element_t<I, tuple_type>;
+            if (encoded) {
+                return;
+            }
+            if (const auto *pointee = dynamic_cast<const pointee_type *>(value.get())) {
+                static_assert(encodes_one_cbor_item<typename Encoder::options, pointee_type>(),
+                              "registered smart pointer pointee must encode exactly one CBOR item");
+                enc.encode(*pointee);
+                encoded = true;
+            }
+        };
+        (try_encode.template operator()<Is>(), ...);
+    }(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+
+    if (!encoded) {
+        throw cbor::tags::detail::encode_status_exception{status_code::error};
+    }
+}
+
+template <typename Decoder, SmartPointer Pointer>
+[[nodiscard]] status_code decode_registered_pointee(Decoder &dec, Pointer &value, std::uint64_t tag) {
+    using pointer_type = std::remove_cvref_t<Pointer>;
+    using tuple_type   = registered_pointee_types_t<pointer_type>;
+
+    static_assert(registered_pointee_types_are_valid<pointer_type>(),
+                  "registered smart pointer pointees must be non-empty, uniquely fixed-tagged, default-initializable public derived "
+                  "types accepted by Pointer::reset; the base type must be polymorphic, and a unique pointer base needs a virtual "
+                  "destructor");
+
+    status_code result   = status_code::no_match_for_tag;
+    bool        selected = false;
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        auto try_decode = [&]<std::size_t I>() {
+            using pointee_type = std::tuple_element_t<I, tuple_type>;
+            if (selected || tag != registered_pointee_tag<pointee_type>()) {
+                return;
+            }
+            selected          = true;
+            auto *new_pointee = new pointee_type{};
+            value.reset(new_pointee);
+            result = dec.decode(*new_pointee, tag);
+        };
+        (try_decode.template operator()<Is>(), ...);
+    }(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+    return result;
 }
 
 template <typename Decoder, UniquePointer Pointer>
@@ -324,8 +388,17 @@ template <typename Decoder, UniquePointer Pointer>
         return status_code::success;
     }
 
-    reset_pointer_to_new(value);
-    return decode_transparent_value(dec, *value, major, additional_info);
+    if constexpr (HasRegisteredPointeeTypes<Pointer>) {
+        if (major != major_type::Tag) {
+            return status_code::no_match_for_tag_on_buffer;
+        }
+        std::uint64_t tag{};
+        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        return status == status_code::success ? decode_registered_pointee(dec, value, tag) : status;
+    } else {
+        reset_pointer_to_new(value);
+        return decode_transparent_value(dec, *value, major, additional_info);
+    }
 }
 
 template <typename Decoder, UniquePointer Pointer>
@@ -333,7 +406,9 @@ template <typename Decoder, UniquePointer Pointer>
     using element_type = pointer_element_t<Pointer>;
     static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
 
-    if constexpr (IsTag<element_type>) {
+    if constexpr (HasRegisteredPointeeTypes<Pointer>) {
+        return decode_registered_pointee(dec, value, tag);
+    } else if constexpr (IsTag<element_type>) {
         reset_pointer_to_new(value);
         return dec.decode(*value, tag);
     } else {
@@ -344,84 +419,63 @@ template <typename Decoder, UniquePointer Pointer>
     }
 }
 
-template <typename T> consteval bool unique_variant_alternative_supported() {
-    using type = std::remove_cvref_t<T>;
-    if constexpr (UniquePointer<type>) {
-        return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>> &&
-               !known_null_wire_v<pointer_element_t<type>>;
-    } else if constexpr (IsVariant<type>) {
-        return cbor::tags::detail::with_variant_alternatives<type>(
-            []<typename... Ts>() { return (unique_variant_alternative_supported<Ts>() && ...); });
-    } else {
-        return IsCborMajor<type> || IsArray<type> || IsMap<type>;
-    }
-}
+template <typename Decoder, typename T>
+[[nodiscard]] status_code decode_pointer_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
+                                                             std::optional<std::uint64_t> &tag);
 
-template <typename T>
-[[nodiscard]] constexpr bool unique_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
-    using type = std::remove_cvref_t<T>;
-    if constexpr (UniquePointer<type>) {
-        if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
-            return true;
-        }
-        return unique_variant_matches<pointer_element_t<type>>(major, additional_info, tag);
-    } else if constexpr (IsVariant<type>) {
-        return cbor::tags::detail::with_variant_alternatives<type>(
-            [&]<typename... Ts>() { return (unique_variant_matches<Ts>(major, additional_info, tag) || ...); });
-    } else if (major == major_type::Tag) {
-        if (!tag.has_value()) {
-            return false;
-        }
-        if constexpr (IsTagHeader<type>) {
-            return true;
-        } else if constexpr (IsTag<type>) {
-            return static_cast<std::uint64_t>(cbor::tags::detail::get_tag_from_any<type>()) == *tag;
-        } else {
-            return false;
-        }
-    } else {
-        if (!cbor::tags::detail::matches_major_dispatch<type>(major)) {
-            return false;
-        }
-        if (major == major_type::Simple) {
-            return cbor::tags::detail::matches_simple_dispatch<false, type>(additional_info) ||
-                   cbor::tags::detail::matches_simple_dispatch<true, type>(additional_info);
-        }
-        return true;
-    }
-}
+template <typename Decoder, IsVariant Variant>
+[[nodiscard]] status_code decode_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
+                                                 std::optional<std::uint64_t> &tag);
 
 template <typename Decoder, typename T>
-[[nodiscard]] status_code decode_unique_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
-                                                            std::optional<std::uint64_t> &tag) {
+[[nodiscard]] status_code decode_pointer_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
+                                                             std::optional<std::uint64_t> &tag) {
     using type = std::remove_cvref_t<T>;
     if constexpr (UniquePointer<type>) {
         if (major == major_type::Tag) {
             return decode_unique_pointer_tag(dec, value, *tag);
         }
         return decode_unique_pointer(dec, value, major, additional_info);
+    } else if constexpr (SharedPointer<type>) {
+        if (major == major_type::Tag) {
+            return dec.decode_shared_pointer_tag_impl(value, *tag);
+        }
+        return dec.decode(value, major, additional_info);
     } else if constexpr (IsVariant<type>) {
-        return dec.decode_unique_pointer_variant_impl(value, major, additional_info, tag);
+        return decode_pointer_variant(dec, value, major, additional_info, tag);
     } else if constexpr (IsTag<type>) {
         return dec.decode(value, *tag);
+    } else if constexpr (IsAggregate<type> || IsUntaggedTuple<type>) {
+        auto &&tuple = [&]() -> decltype(auto) {
+            if constexpr (IsAggregate<type>) {
+                return to_tuple(value);
+            } else {
+                return (value);
+            }
+        }();
+        using tuple_type = std::remove_cvref_t<decltype(tuple)>;
+        if constexpr (std::tuple_size_v<tuple_type> == 1U) {
+            return decode_pointer_variant_alternative(dec, std::get<0>(tuple), major, additional_info, tag);
+        } else {
+            return decode_transparent_value(dec, value, major, additional_info);
+        }
     } else {
         return dec.decode(value, major, additional_info);
     }
 }
 
 template <typename Decoder, IsVariant Variant>
-[[nodiscard]] status_code decode_unique_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
-                                                        std::optional<std::uint64_t> &tag) {
+[[nodiscard]] status_code decode_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
+                                                 std::optional<std::uint64_t> &tag) {
     using variant_type = std::remove_cvref_t<Variant>;
 
-    static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
-                      []<typename... Ts>() { return (unique_variant_alternative_supported<Ts>() && ...); }),
-                  "unique pointer variant alternatives must have supported CBOR wire shapes");
-    static_assert(pointer_variant_is_unambiguous<variant_type>(),
+    static_assert(pointer_variant_is_supported<variant_type, typename Decoder::options>(),
+                  "smart pointer variant has an unsupported alternative; use a core CBOR type or add an application codec");
+    static_assert(pointer_variant_is_unambiguous<variant_type, typename Decoder::options>(),
                   "Pointer variant alternatives overlap on the CBOR wire; add an application tag or choose a different decode type");
     static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
                       []<typename... Ts>() { return (std::default_initializable<Ts> && ...); }),
-                  "unique pointer variant alternatives must be default-initializable");
+                  "smart pointer variant alternatives must be default-initializable");
 
     if (major == major_type::Tag && !tag.has_value()) {
         std::uint64_t decoded_tag{};
@@ -438,13 +492,13 @@ template <typename Decoder, IsVariant Variant>
     cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
         auto select = [&]<std::size_t I>() {
             using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
-            if (selected || !unique_variant_matches<alternative_type>(major, additional_info, tag)) {
+            if (selected || !pointer_variant_matches<alternative_type, typename Decoder::options>(major, additional_info, tag)) {
                 return;
             }
             selected = true;
             cbor::tags::detail::variant_assign<I>(value, alternative_type{});
             auto &alternative = cbor::tags::detail::variant_get<I>(value);
-            result            = decode_unique_variant_alternative(dec, alternative, major, additional_info, tag);
+            result            = decode_pointer_variant_alternative(dec, alternative, major, additional_info, tag);
         };
         (select.template operator()<Is>(), ...);
     });
@@ -461,14 +515,20 @@ template <typename Self> struct unique_ptr_codec : cbor_codec_mixin_base<Self> {
     template <IsUniquePointer Pointer> void encode(const Pointer &value) {
         using element_type = detail::pointer_element_t<Pointer>;
         static_assert(!detail::known_null_wire_v<element_type>, "unique pointer cannot encode a pointee that also has a CBOR null state");
-        static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
-                      "smart pointer pointee must encode exactly one CBOR item");
         auto &enc = static_cast<Self &>(*this);
-        value ? enc.encode(*value) : enc.encode(nullptr);
+        if (!value) {
+            enc.encode(nullptr);
+        } else if constexpr (detail::HasRegisteredPointeeTypes<Pointer>) {
+            detail::encode_registered_pointee(enc, value);
+        } else {
+            static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
+                          "smart pointer pointee must encode exactly one CBOR item");
+            enc.encode(*value);
+        }
     }
 
     template <IsUniquePointer Pointer>
-        requires std::default_initializable<detail::pointer_element_t<Pointer>>
+        requires(std::default_initializable<detail::pointer_element_t<Pointer>> || detail::HasRegisteredPointeeTypes<Pointer>)
     [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
         return detail::decode_unique_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
@@ -492,13 +552,7 @@ template <typename Self> struct unique_ptr_codec : cbor_codec_mixin_base<Self> {
         requires(detail::contains_decodable_unique_pointer_v<Variant> && !detail::contains_shared_pointer_v<Variant>)
     [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
         std::optional<std::uint64_t> tag;
-        return detail::decode_unique_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
-    }
-
-    template <IsVariant Variant>
-    [[nodiscard]] status_code decode_unique_pointer_variant_impl(Variant &value, major_type major, std::byte additional_info,
-                                                                 std::optional<std::uint64_t> &tag) {
-        return detail::decode_unique_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
+        return detail::decode_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
     }
 };
 
@@ -547,15 +601,37 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
     template <IsSharedPointer Pointer> void encode(const scoped_shared_ptr<Pointer> &value) { encode_shared_pointer(value.value()); }
 
     template <IsSharedPointer Pointer>
-        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
     [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
         return decode_shared_pointer(value, major, additional_info);
     }
 
     template <IsSharedPointer Pointer>
-        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
     [[nodiscard]] status_code decode(scoped_shared_ptr<Pointer> &value, major_type major, std::byte additional_info) {
         return decode_shared_pointer(value.value(), major, additional_info);
+    }
+
+    template <IsSharedPointer Pointer>
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
+    [[nodiscard]] status_code decode_shared_pointer_tag_impl(Pointer &value, std::uint64_t tag) {
+        if (tag == detail::shareable_tag) {
+            return decode_shareable(value);
+        }
+        if (tag == detail::sharedref_tag) {
+            return decode_sharedref(value);
+        }
+        return status_code::no_match_for_tag;
+    }
+
+    template <IsSharedPointer Pointer>
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
+    [[nodiscard]] status_code decode_shared_pointer_tag_impl(scoped_shared_ptr<Pointer> &value, std::uint64_t tag) {
+        return decode_shared_pointer_tag_impl(value.value(), tag);
     }
 
     template <typename T>
@@ -575,23 +651,15 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
 
     template <IsVariant Variant>
         requires detail::contains_shared_pointer_v<Variant>
-    void encode(const Variant &) {
-        static_assert(always_false<Variant>::value, "variants containing shared pointers require an explicit application codec");
-    }
-
-    template <IsVariant Variant>
-        requires detail::contains_shared_pointer_v<Variant>
-    [[nodiscard]] status_code decode(Variant &, major_type, std::byte) {
-        static_assert(always_false<Variant>::value, "variants containing shared pointers require an explicit application codec");
-        return status_code::error;
+    [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
+        std::optional<std::uint64_t> tag;
+        return detail::decode_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
     }
 
   private:
     template <IsSharedPointer Pointer> void encode_shared_pointer(const Pointer &value) {
         using pointer_type = std::remove_cvref_t<Pointer>;
         using element_type = typename pointer_type::element_type;
-        static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
-                      "smart pointer pointee must encode exactly one CBOR item");
 
         auto &enc = static_cast<Self &>(*this);
         if (!value) {
@@ -612,12 +680,19 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         }
 
         enc.encode(static_tag<detail::shareable_tag>{});
-        enc.encode(*value);
+        if constexpr (detail::HasRegisteredPointeeTypes<pointer_type>) {
+            detail::encode_registered_pointee(enc, value);
+        } else {
+            static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
+                          "smart pointer pointee must encode exactly one CBOR item");
+            enc.encode(*value);
+        }
         scope.mark_complete(observation->index);
     }
 
     template <IsSharedPointer Pointer>
-        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
     [[nodiscard]] status_code decode_shared_pointer(Pointer &value, major_type major, std::byte additional_info) {
         if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
             value.reset();
@@ -632,20 +707,14 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         if (status != status_code::success) {
             return status;
         }
-        if (tag == detail::shareable_tag) {
-            return decode_shareable(value);
-        }
-        if (tag == detail::sharedref_tag) {
-            return decode_sharedref(value);
-        }
-        return status_code::no_match_for_tag;
+        return decode_shared_pointer_tag_impl(value, tag);
     }
 
     template <IsSharedPointer Pointer>
-        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
-    [[nodiscard]] status_code decode_shareable(Pointer &value) {
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
+    [[nodiscard]] status_code insert_and_decode_shareable(Pointer &value, auto &&decode_pointee) {
         using pointer_type = std::remove_cvref_t<Pointer>;
-        detail::reset_pointer_to_new(value);
 
         auto scope    = current_decode_scope();
         auto stored   = std::make_shared<pointer_type>(value);
@@ -655,12 +724,52 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
             return inserted.error();
         }
 
-        const auto status = static_cast<Self &>(*this).decode(*value);
+        const auto status = decode_pointee();
         if (status != status_code::success) {
             return status;
         }
         scope.mark_complete(*inserted);
         return status_code::success;
+    }
+
+    template <IsSharedPointer Pointer>
+        requires(std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type> ||
+                 detail::HasRegisteredPointeeTypes<Pointer>)
+    [[nodiscard]] status_code decode_shareable(Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
+        if constexpr (detail::HasRegisteredPointeeTypes<pointer_type>) {
+            const auto [major, additional_info] = static_cast<Self &>(*this).read_initial_byte();
+            if (major != major_type::Tag) {
+                return status_code::no_match_for_tag_on_buffer;
+            }
+
+            std::uint64_t tag{};
+            const auto    tag_status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
+            if (tag_status != status_code::success) {
+                return tag_status;
+            }
+
+            using tuple_type     = detail::registered_pointee_types_t<pointer_type>;
+            status_code result   = status_code::no_match_for_tag;
+            bool        selected = false;
+            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                auto try_decode = [&]<std::size_t I>() {
+                    using pointee_type = std::tuple_element_t<I, tuple_type>;
+                    if (selected || tag != detail::registered_pointee_tag<pointee_type>()) {
+                        return;
+                    }
+                    selected          = true;
+                    auto *new_pointee = new pointee_type{};
+                    value.reset(new_pointee);
+                    result = insert_and_decode_shareable(value, [&]() { return static_cast<Self &>(*this).decode(*new_pointee, tag); });
+                };
+                (try_decode.template operator()<Is>(), ...);
+            }(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+            return result;
+        } else {
+            detail::reset_pointer_to_new(value);
+            return insert_and_decode_shareable(value, [&]() { return static_cast<Self &>(*this).decode(*value); });
+        }
     }
 
     template <IsSharedPointer Pointer> [[nodiscard]] status_code decode_sharedref(Pointer &value) {

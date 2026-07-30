@@ -187,18 +187,107 @@ An empty aggregate encodes no item and is rejected. A multi-field aggregate is
 also rejected when group wrapping is disabled, because it would encode several
 items under one tag 28.
 
-A shared pointer inside `std::variant` requires an application codec:
+Smart pointers work inside a variant when each alternative has a distinct
+outer CBOR shape:
 
 ```cpp
 using choice = std::variant<std::shared_ptr<int>, std::string>;
 
-enc(choice{}); // compile-time error
+choice sent = std::make_shared<int>(42);
+enc(sent); // #6.28(42)
+
+choice received;
+dec(received);
 ```
 
-The application must choose and encode an unambiguous discriminator, normally
-an application tag. The library does not guess how tag 28/29 should compete
-with the other alternatives. Unique-pointer variants remain supported when
-their wire shapes do not overlap.
+The pointer alternative accepts `null`, tag 28, and tag 29. The string accepts
+a text string, so decoding is unambiguous. The same applies to containers:
+
+```cpp
+using choice =
+    std::variant<std::vector<std::shared_ptr<int>>, std::string>;
+```
+
+Here the first alternative is selected by the outer array. Its elements then
+use the shared-pointer codec.
+
+Reflected aggregates follow their actual encoding: a one-field aggregate is
+transparent and uses its field's shape, while a multi-field aggregate uses the
+wrapped array shape under the default options. With group wrapping disabled, a
+multi-field aggregate emits multiple items and is not a valid variant
+alternative.
+
+Overlapping alternatives are rejected at compile time:
+
+```cpp
+std::variant<std::shared_ptr<int>, std::nullptr_t> bad_null;
+// Both alternatives accept null.
+
+std::variant<std::shared_ptr<int>, tagged_with_28> bad_tag;
+// Both alternatives accept tag 28.
+
+std::variant<std::vector<std::shared_ptr<int>>, std::vector<int>> bad_array;
+// Both alternatives accept an array.
+```
+
+Add an application tag or an application codec when the outer wire shapes
+overlap. Variant selection uses a compile-time profile of each alternative; it
+does not inspect or walk the input payload.
+
+## Tagged Subclasses
+
+A pointer to a base class does not reveal which subclass is on the wire.
+`std::derived_from` can validate inheritance, but it cannot choose a subclass
+from bytes. Register the allowed tagged subclasses for the exact pointer type:
+
+```cpp
+namespace model {
+
+struct animal {
+    virtual ~animal() = default;
+};
+
+struct dog : animal {
+    int age{};
+    // encode/decode overloads omitted
+};
+
+struct cat : animal {
+    std::string name;
+    // encode/decode overloads omitted
+};
+
+constexpr auto cbor_tag(const dog&) { return static_tag<100>{}; }
+constexpr auto cbor_tag(const cat&) { return static_tag<101>{}; }
+
+constexpr auto cbor_smart_pointer_pointee_types(
+    pointee_types_for<std::shared_ptr<animal>>) {
+    return std::type_identity<std::tuple<dog, cat>>{};
+}
+
+} // namespace model
+```
+
+Define the function in a namespace associated with the pointer or pointee so
+argument-dependent lookup can find it. Register `std::unique_ptr<animal>`
+separately if both pointer kinds are used.
+
+On encode, the codec finds the listed dynamic type and writes its application
+tag. On decode, that fixed tag selects and allocates the subclass. Shared
+pointers still use tag 28 around the first value and tag 29 for later
+references:
+
+```text
+#6.28(#6.100(dog-payload))
+#6.29(0)
+```
+
+The base must be polymorphic. Each listed type must be a public derived type,
+default-initializable, have a distinct fixed CBOR tag, and be accepted by
+`Pointer::reset(Derived*)`. A unique-pointer base must also have a virtual
+destructor. Encoding an unlisted dynamic type or decoding an unlisted tag
+returns an error. Encoding uses `dynamic_cast`, so this opt-in feature requires
+RTTI. The codec never guesses from member layout.
 
 An ordinary `std::optional` cannot directly contain a smart pointer. Both the
 empty optional and the empty pointer would encode as CBOR `null`. A named-map
@@ -239,3 +328,7 @@ cddl_schema_to<std::shared_ptr<int>>(schema);
 CDDL describes item shapes. It cannot express whether a tag 29 index exists,
 has the requested pointer type, or refers to a completed entry. Those checks
 remain runtime scope checks.
+
+Generated CDDL is not available for registered polymorphic pointees because a
+subclass's custom codec body cannot be inferred from the pointer registration.
+Provide the application schema for that pointer type.

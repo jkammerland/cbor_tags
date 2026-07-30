@@ -105,6 +105,15 @@ struct single_field_record {
     std::uint64_t value{};
 };
 
+struct single_shared_record {
+    std::shared_ptr<std::uint64_t> value;
+};
+
+struct grouped_shared_record {
+    std::shared_ptr<std::uint64_t> value;
+    std::string                    name;
+};
+
 struct tagged_record {
     static_tag<42> cbor_tag;
     std::uint64_t  value{};
@@ -153,6 +162,41 @@ struct node {
     std::uint64_t         value{};
     std::shared_ptr<node> next;
 };
+
+struct animal {
+    virtual ~animal() = default;
+};
+
+struct dog final : animal {
+    std::uint64_t age{};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(age); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(age); }
+};
+
+struct cat final : animal {
+    std::string name;
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(name); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(name); }
+};
+
+struct fox final : animal {
+    std::uint64_t tails{};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(tails); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(tails); }
+};
+
+constexpr auto cbor_tag(const dog &) { return static_tag<100>{}; }
+constexpr auto cbor_tag(const cat &) { return static_tag<101>{}; }
+constexpr auto cbor_tag(const fox &) { return static_tag<102>{}; }
+
+template <typename Pointer>
+    requires std::same_as<typename Pointer::element_type, animal>
+constexpr auto cbor_smart_pointer_pointee_types(pointee_types_for<Pointer>) {
+    return std::type_identity<std::tuple<dog, cat>>{};
+}
 
 template <typename T> class shared_handle {
   public:
@@ -232,6 +276,15 @@ static_assert(!IsUniquePointer<std::unique_ptr<std::uint64_t[], counting_deleter
 static_assert(!IsUniquePointer<const std::unique_ptr<std::uint64_t[]> &>);
 static_assert(IsSmartPointer<shared_handle<std::uint64_t>>);
 static_assert(IsSmartPointer<unique_handle<std::uint64_t>>);
+static_assert(cbor::tags::ext::smart_ptr::detail::HasRegisteredPointeeTypes<std::shared_ptr<animal>>);
+static_assert(cbor::tags::ext::smart_ptr::detail::HasRegisteredPointeeTypes<std::unique_ptr<animal>>);
+static_assert(cbor::tags::ext::smart_ptr::detail::registered_pointee_types_are_valid<std::shared_ptr<animal>>());
+static_assert(cbor::tags::ext::smart_ptr::detail::registered_pointee_types_are_valid<std::unique_ptr<animal>>());
+static_assert(cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<single_shared_record>.contains_shared_pointer);
+static_assert(
+    cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<grouped_shared_record>.buckets[cbor::tags::detail::MajorIndex::Array]);
+static_assert(cbor::tags::ext::smart_ptr::detail::pointer_variant_profile_v<grouped_shared_record, Options<default_expected>>.support ==
+              cbor::tags::ext::smart_ptr::detail::pointer_variant_support::unsupported);
 
 template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr<T> &value) {
     std::vector<std::byte> bytes;
@@ -747,6 +800,254 @@ TEST_CASE("unambiguous unique_ptr variants dispatch by wire shape once") {
         REQUIRE(dec(value));
         CHECK_EQ(std::get<std::string>(value), "Ada");
     }
+}
+
+TEST_CASE("unambiguous shared pointer variants preserve reference identity") {
+    using variant_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+    auto         pointer = std::make_shared<std::uint64_t>(42U);
+    variant_type first{pointer};
+    variant_type second{pointer};
+    variant_type text{std::string{"Ada"}};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(first, second, text));
+    CHECK_EQ(to_hex(bytes), "d81c182ad81d0063416461");
+
+    variant_type decoded_first;
+    variant_type decoded_second;
+    variant_type decoded_text;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded_first, decoded_second, decoded_text));
+
+    const auto &first_pointer  = std::get<std::shared_ptr<std::uint64_t>>(decoded_first);
+    const auto &second_pointer = std::get<std::shared_ptr<std::uint64_t>>(decoded_second);
+    REQUIRE(first_pointer);
+    CHECK_EQ(*first_pointer, 42U);
+    CHECK(first_pointer == second_pointer);
+    CHECK_EQ(std::get<std::string>(decoded_text), "Ada");
+}
+
+TEST_CASE("shared pointer variants accept null when no other alternative does") {
+    using variant_type = std::variant<std::shared_ptr<std::uint64_t>, std::string>;
+
+    const variant_type     value{std::shared_ptr<std::uint64_t>{}};
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "f6");
+
+    variant_type decoded{std::string{"before"}};
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    CHECK(std::holds_alternative<std::shared_ptr<std::uint64_t>>(decoded));
+    CHECK_FALSE(std::get<std::shared_ptr<std::uint64_t>>(decoded));
+}
+
+TEST_CASE("shared pointer variants distinguish unrelated application tags") {
+    using variant_type = std::variant<std::shared_ptr<std::uint64_t>, smart_ptr_test::tagged_record>;
+
+    variant_type           value{smart_ptr_test::tagged_record{.cbor_tag = {}, .value = 9U}};
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "d82a09");
+
+    variant_type decoded;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    CHECK_EQ(std::get<smart_ptr_test::tagged_record>(decoded).value, 9U);
+}
+
+TEST_CASE("variant containers with shared pointers dispatch by their outer shape") {
+    using pointer_array = std::vector<std::shared_ptr<std::uint64_t>>;
+    using variant_type  = std::variant<pointer_array, std::string>;
+
+    auto         pointer = std::make_shared<std::uint64_t>(7U);
+    variant_type value{pointer_array{pointer, pointer}};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "82d81c07d81d00");
+
+    const std::list<std::byte> storage(bytes.begin(), bytes.end());
+    auto                       input = std::ranges::subrange(storage.begin(), storage.end());
+    static_assert(!std::ranges::sized_range<decltype(input)>);
+    static_assert(!std::ranges::contiguous_range<decltype(input)>);
+
+    variant_type decoded;
+    auto         dec = make_decoder<shared_ptr_codec>(input);
+    REQUIRE(dec(decoded));
+
+    const auto &array = std::get<pointer_array>(decoded);
+    REQUIRE(array.size() == 2U);
+    CHECK(array[0] == array[1]);
+    CHECK_EQ(*array[0], 7U);
+}
+
+TEST_CASE("pointer variants classify transparent and array-wrapped aggregates") {
+    SUBCASE("one field is transparent") {
+        using variant_type = std::variant<smart_ptr_test::single_shared_record, std::string>;
+
+        variant_type           value{smart_ptr_test::single_shared_record{.value = std::make_shared<std::uint64_t>(12U)}};
+        std::vector<std::byte> bytes;
+        auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+        REQUIRE(enc(value));
+        CHECK_EQ(to_hex(bytes), "d81c0c");
+
+        variant_type decoded;
+        auto         dec = make_decoder<shared_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        const auto &record = std::get<smart_ptr_test::single_shared_record>(decoded);
+        REQUIRE(record.value);
+        CHECK_EQ(*record.value, 12U);
+    }
+
+    SUBCASE("multiple fields use the wrapped array") {
+        using variant_type = std::variant<smart_ptr_test::grouped_shared_record, std::string>;
+
+        variant_type           value{smart_ptr_test::grouped_shared_record{.value = std::make_shared<std::uint64_t>(13U), .name = "Ada"}};
+        std::vector<std::byte> bytes;
+        auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+        REQUIRE(enc(value));
+        CHECK_EQ(to_hex(bytes), "82d81c0d63416461");
+
+        variant_type decoded;
+        auto         dec = make_decoder<shared_ptr_codec>(bytes);
+        REQUIRE(dec(decoded));
+        const auto &record = std::get<smart_ptr_test::grouped_shared_record>(decoded);
+        REQUIRE(record.value);
+        CHECK_EQ(*record.value, 13U);
+        CHECK_EQ(record.name, "Ada");
+    }
+}
+
+TEST_CASE("registered tagged subclasses retain shared pointer wire semantics") {
+    using pointer_type = std::shared_ptr<smart_ptr_test::animal>;
+    using variant_type = std::variant<pointer_type, std::string>;
+
+    auto dog            = std::make_shared<smart_ptr_test::dog>();
+    dog->age            = 7U;
+    pointer_type animal = dog;
+
+    variant_type first{animal};
+    variant_type second{animal};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(first, second));
+    CHECK_EQ(to_hex(bytes), "d81cd86407d81d00");
+
+    variant_type decoded_first;
+    variant_type decoded_second;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded_first, decoded_second));
+
+    const auto &first_pointer  = std::get<pointer_type>(decoded_first);
+    const auto &second_pointer = std::get<pointer_type>(decoded_second);
+    CHECK(first_pointer == second_pointer);
+    const auto decoded_dog = std::dynamic_pointer_cast<smart_ptr_test::dog>(first_pointer);
+    REQUIRE(decoded_dog);
+    CHECK_EQ(decoded_dog->age, 7U);
+}
+
+TEST_CASE("scoped shared pointer variants reuse registered subclass handling") {
+    using pointer_type = std::shared_ptr<smart_ptr_test::animal>;
+    using scoped_type  = scoped_shared_ptr<pointer_type>;
+    using variant_type = std::variant<scoped_type, std::string>;
+
+    auto dog = std::make_shared<smart_ptr_test::dog>();
+    dog->age = 8U;
+    variant_type value{as_scoped_shared_ptr(pointer_type{dog})};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "d81cd86408");
+
+    variant_type decoded;
+    auto         dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+
+    const auto &pointer     = std::get<scoped_type>(decoded).value();
+    const auto  decoded_dog = std::dynamic_pointer_cast<smart_ptr_test::dog>(pointer);
+    REQUIRE(decoded_dog);
+    CHECK_EQ(decoded_dog->age, 8U);
+}
+
+TEST_CASE("registered tagged subclasses work with unique pointers") {
+    using pointer_type = std::unique_ptr<smart_ptr_test::animal>;
+    using variant_type = std::variant<pointer_type, std::string>;
+
+    auto dog = std::make_unique<smart_ptr_test::dog>();
+    dog->age = 9U;
+    variant_type value{pointer_type{std::move(dog)}};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "d86409");
+
+    variant_type decoded;
+    auto         dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+
+    const auto &pointer = std::get<pointer_type>(decoded);
+    const auto *dog_ptr = dynamic_cast<const smart_ptr_test::dog *>(pointer.get());
+    REQUIRE(dog_ptr != nullptr);
+    CHECK_EQ(dog_ptr->age, 9U);
+}
+
+TEST_CASE("registered subclass lists reject unregistered dynamic values and wire tags") {
+    using pointer_type = std::shared_ptr<smart_ptr_test::animal>;
+
+    SUBCASE("encode") {
+        auto fox           = std::make_shared<smart_ptr_test::fox>();
+        fox->tails         = 1U;
+        pointer_type value = fox;
+
+        std::vector<std::byte> bytes;
+        auto                   enc    = make_encoder<shared_ptr_codec>(bytes);
+        const auto             result = enc(value);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+    }
+
+    SUBCASE("decode") {
+        const auto bytes = to_bytes("d81cd86601");
+
+        pointer_type value;
+        auto         dec    = make_decoder<shared_ptr_codec>(bytes);
+        const auto   result = dec(value);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::no_match_for_tag);
+        CHECK_FALSE(value);
+    }
+}
+
+TEST_CASE("shared pointer variant decode keeps terminal partial pointee state") {
+    using variant_type = std::variant<std::shared_ptr<smart_ptr_test::partial_record>, std::string>;
+
+    auto         source = std::make_shared<smart_ptr_test::partial_record>(smart_ptr_test::partial_record{.first = 11U, .second = "Ada"});
+    variant_type value{source};
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    bytes.pop_back();
+
+    variant_type decoded{std::string{"before"}};
+    auto         dec    = make_decoder<shared_ptr_codec>(bytes);
+    const auto   result = dec(decoded);
+
+    REQUIRE_FALSE(result);
+    CHECK_EQ(result.error(), status_code::incomplete);
+    REQUIRE(std::holds_alternative<std::shared_ptr<smart_ptr_test::partial_record>>(decoded));
+    const auto &pointer = std::get<std::shared_ptr<smart_ptr_test::partial_record>>(decoded);
+    REQUIRE(pointer);
+    CHECK_EQ(pointer->first, 11U);
 }
 
 TEST_CASE("CDDL uses native null and shared-reference tags") {

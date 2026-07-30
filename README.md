@@ -832,7 +832,9 @@ dec(received);
 The first pointer uses tag 28 and later references use tag 29. The table belongs
 to the encoder or decoder and persists across calls until
 `reset_shared_ptr_scope()` is called. Applications may instead provide a
-user-owned table through `set_shared_ptr_scope()`.
+user-owned table through `set_shared_ptr_scope()`. Shared pointers may appear
+in variants whose outer CBOR shapes are distinct, and an opt-in tagged-subclass
+list supports pointers to polymorphic bases.
 
 See [Smart Pointer Codecs](doc/smart_pointers.md) for exact CBOR, compatible
 user-defined pointer types, scopes, CDDL, failure state, and variant rules.

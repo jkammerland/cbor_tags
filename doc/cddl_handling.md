@@ -475,8 +475,13 @@ required.
 CDDL cannot express whether a tag 29 index exists, has the requested pointee
 type, or refers to a completed entry. Those remain runtime table checks.
 CDDL can describe pointer-containing choices when their shapes are distinct.
-The runtime shared-pointer codec still requires an explicit application codec
-for any variant containing a shared pointer.
+The runtime codec accepts those same distinct shared-pointer variants and
+rejects overlapping outer shapes at compile time.
+
+Generated CDDL is unavailable for registered polymorphic smart-pointer
+pointees because the pointer registration identifies tagged subclasses but
+does not describe each subclass's custom payload codec. Supply that application
+schema explicitly.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

@@ -332,15 +332,22 @@ template <typename T> constexpr auto getName() {
             static_assert(detail::is_supported_smart_pointer_v<T>,
                           "CDDL smart pointer support requires a structurally compatible unique or shared pointer, and T must be "
                           "non-const, non-void, and non-array");
-            static_assert(std::default_initializable<element_type>,
-                          "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
-            auto name = getName<element_type>();
-            if constexpr (detail::IsSharedPointer<T>) {
-                return "null / #6.28(" + std::string(name) + ") / #6.29(uint)";
+            if constexpr (ext::smart_ptr::detail::HasRegisteredPointeeTypes<T>) {
+                static_assert(always_false<T>::value,
+                              "CDDL cannot infer registered polymorphic smart pointer payloads; provide an application schema");
+                return std::string{};
             } else {
-                static_assert(!detail::has_known_null_wire_v<element_type>,
-                              "CDDL unique pointer cannot use T when T also has a CBOR null state");
-                return std::string(name) + " / null";
+                static_assert(std::default_initializable<element_type>,
+                              "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs "
+                              "T");
+                auto name = getName<element_type>();
+                if constexpr (detail::IsSharedPointer<T>) {
+                    return "null / #6.28(" + std::string(name) + ") / #6.29(uint)";
+                } else {
+                    static_assert(!detail::has_known_null_wire_v<element_type>,
+                                  "CDDL unique pointer cannot use T when T also has a CBOR null state");
+                    return std::string(name) + " / null";
+                }
             }
         } else if constexpr (IsVariant<T>) {
             return getVariantNames<T>();
@@ -1327,16 +1334,22 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
         static_assert(is_supported_smart_pointer_v<value_type>,
                       "CDDL smart pointer support requires a structurally compatible unique or shared pointer, and T must be "
                       "non-const, non-void, and non-array");
-        static_assert(std::default_initializable<element_type>,
-                      "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
-        static_assert(ext::smart_ptr::detail::encodes_one_cbor_item<default_options, element_type>(),
-                      "CDDL smart pointer pointee must encode exactly one CBOR item");
-        if constexpr (IsSharedPointer<value_type>) {
-            return text::format("null / #6.28({}) / #6.29(uint)",
-                                parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+        if constexpr (ext::smart_ptr::detail::HasRegisteredPointeeTypes<value_type>) {
+            static_assert(always_false<value_type>::value,
+                          "CDDL cannot infer registered polymorphic smart pointer payloads; provide an application schema");
+            return {};
         } else {
-            static_assert(!has_known_null_wire_v<element_type>, "CDDL unique pointer cannot use T when T also has a CBOR null state");
-            return text::format("{} / null", cddl_type_expr<element_type, PointerMode>(context, options));
+            static_assert(std::default_initializable<element_type>,
+                          "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
+            static_assert(ext::smart_ptr::detail::encodes_one_cbor_item<default_options, element_type>(),
+                          "CDDL smart pointer pointee must encode exactly one CBOR item");
+            if constexpr (IsSharedPointer<value_type>) {
+                return text::format("null / #6.28({}) / #6.29(uint)",
+                                    parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+            } else {
+                static_assert(!has_known_null_wire_v<element_type>, "CDDL unique pointer cannot use T when T also has a CBOR null state");
+                return text::format("{} / null", cddl_type_expr<element_type, PointerMode>(context, options));
+            }
         }
     } else if constexpr (CDDLTaggedByteStringArray<value_type>) {
         return cddl_tagged_bstr_array_expr<value_type>();
