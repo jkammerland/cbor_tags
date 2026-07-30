@@ -242,15 +242,18 @@ concept EncoderSelf = requires(Self &self, std::uint64_t value, typename Self::b
 template <typename Self>
 concept DecoderSelf = !EncoderSelf<Self>;
 
+template <typename Codec, typename T>
+concept CodecDecodesWithMajor = requires(Codec &codec, T &value, major_type major, std::byte additional_info) {
+    { codec.decode(value, major, additional_info) } -> std::same_as<status_code>;
+};
+
 template <typename T, typename Decoder> struct extension_decodes_with_major : std::false_type {};
 
 template <typename T, typename InputBuffer, typename Options, template <typename> typename... Decoders>
 struct extension_decodes_with_major<T, cbor::tags::decoder<InputBuffer, Options, Decoders...>> {
     using decoder_type = cbor::tags::decoder<InputBuffer, Options, Decoders...>;
 
-    static constexpr bool value = (requires(Decoders<decoder_type> &extension, T &value, major_type major, std::byte additional_info) {
-        { extension.decode(value, major, additional_info) } -> std::same_as<status_code>;
-    } || ...);
+    static constexpr bool value = (CodecDecodesWithMajor<Decoders<decoder_type>, T> || ...);
 };
 
 template <typename T, typename Decoder>
