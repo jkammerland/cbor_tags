@@ -44,7 +44,7 @@ class encode_table {
             if (entry.state != shared_ptr_entry_state::complete) {
                 return cbor::tags::unexpected<status_code>{status_code::error};
             }
-            return shared_ptr_observation{shared_ptr_observation_kind::reference, static_cast<std::uint64_t>(index)};
+            return shared_ptr_observation{shared_ptr_observation_kind::reference, index};
         }
 
         if (entries_.size() >= limit_) {
@@ -53,10 +53,10 @@ class encode_table {
 
         const auto index = entries_.size();
         entries_.push_back(entry{key, shared_ptr_entry_state::encoding});
-        return shared_ptr_observation{shared_ptr_observation_kind::first, static_cast<std::uint64_t>(index)};
+        return shared_ptr_observation{shared_ptr_observation_kind::first, index};
     }
 
-    void mark_complete(std::uint64_t index) { entries_.at(static_cast<std::size_t>(index)).state = shared_ptr_entry_state::complete; }
+    void mark_complete(std::size_t index) { entries_.at(index).state = shared_ptr_entry_state::complete; }
 
   private:
     std::vector<entry> entries_{};
@@ -70,23 +70,23 @@ class decode_table {
     void reserve(std::size_t count) { entries_.reserve(count); }
     void reset() { entries_.clear(); }
 
-    [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) {
+    [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) {
         if (entries_.size() >= limit_) {
             return cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded};
         }
         const auto index = entries_.size();
         entries_.push_back(entry);
-        return static_cast<std::uint64_t>(index);
+        return index;
     }
 
-    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::uint64_t index) {
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) {
         if (index >= entries_.size()) {
             return cbor::tags::unexpected<status_code>{status_code::error};
         }
-        return entries_[static_cast<std::size_t>(index)];
+        return entries_[index];
     }
 
-    void mark_complete(std::uint64_t index) { entries_.at(static_cast<std::size_t>(index)).state = shared_ptr_entry_state::complete; }
+    void mark_complete(std::size_t index) { entries_.at(index).state = shared_ptr_entry_state::complete; }
 
   private:
     std::vector<shared_ptr_decode_entry> entries_{};
@@ -685,6 +685,16 @@ TEST_CASE("shared_ptr decoder rejects invalid and incomplete references") {
         const auto                     result = dec(value);
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::error);
+    }
+
+    SUBCASE("wire reference does not narrow to the host table index") {
+        const auto                     bytes = to_bytes("d81d1bffffffffffffffff");
+        auto                           dec   = make_decoder<shared_ptr_codec>(bytes);
+        std::shared_ptr<std::uint64_t> value;
+        const auto                     result = dec(value);
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_FALSE(value);
     }
 
     SUBCASE("shareable pointee is incomplete but remains assigned") {

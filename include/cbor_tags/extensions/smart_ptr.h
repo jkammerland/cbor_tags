@@ -35,7 +35,7 @@ enum class shared_ptr_observation_kind : std::uint8_t { first, reference };
 
 struct shared_ptr_observation {
     shared_ptr_observation_kind kind{};
-    std::uint64_t               index{};
+    std::size_t                 index{};
 };
 
 struct shared_ptr_encode_key {
@@ -52,15 +52,15 @@ struct shared_ptr_decode_entry {
 };
 
 template <typename Scope>
-concept SharedPtrEncodeScope = requires(Scope &scope, const shared_ptr_encode_key &key, std::uint64_t index) {
+concept SharedPtrEncodeScope = requires(Scope &scope, const shared_ptr_encode_key &key, std::size_t index) {
     { scope.observe(key) } -> std::same_as<expected<shared_ptr_observation, status_code>>;
     { scope.mark_complete(index) } -> std::same_as<void>;
     { scope.reset() } -> std::same_as<void>;
 };
 
 template <typename Scope>
-concept SharedPtrDecodeScope = requires(Scope &scope, const shared_ptr_decode_entry &entry, std::uint64_t index) {
-    { scope.insert(entry) } -> std::same_as<expected<std::uint64_t, status_code>>;
+concept SharedPtrDecodeScope = requires(Scope &scope, const shared_ptr_decode_entry &entry, std::size_t index) {
+    { scope.insert(entry) } -> std::same_as<expected<std::size_t, status_code>>;
     { scope.resolve(index) } -> std::same_as<expected<shared_ptr_decode_entry, status_code>>;
     { scope.mark_complete(index) } -> std::same_as<void>;
     { scope.reset() } -> std::same_as<void>;
@@ -88,8 +88,7 @@ class shared_ptr_encode_scope {
             if (existing.state != shared_ptr_entry_state::complete) {
                 return unexpected<status_code>{status_code::error};
             }
-            return shared_ptr_observation{.kind  = shared_ptr_observation_kind::reference,
-                                          .index = static_cast<std::uint64_t>(found->second)};
+            return shared_ptr_observation{.kind = shared_ptr_observation_kind::reference, .index = found->second};
         }
 
         const auto index = entries_.size();
@@ -100,12 +99,12 @@ class shared_ptr_encode_scope {
             entries_.pop_back();
             throw;
         }
-        return shared_ptr_observation{.kind = shared_ptr_observation_kind::first, .index = static_cast<std::uint64_t>(index)};
+        return shared_ptr_observation{.kind = shared_ptr_observation_kind::first, .index = index};
     }
 
-    void mark_complete(std::uint64_t index) {
+    void mark_complete(std::size_t index) {
         if (index < entries_.size()) {
-            entries_[static_cast<std::size_t>(index)].state = shared_ptr_entry_state::complete;
+            entries_[index].state = shared_ptr_entry_state::complete;
         }
     }
 
@@ -128,22 +127,22 @@ class shared_ptr_encode_scope {
 
 class shared_ptr_decode_scope {
   public:
-    [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) {
+    [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) {
         const auto index = entries_.size();
         entries_.push_back(entry);
-        return static_cast<std::uint64_t>(index);
+        return index;
     }
 
-    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::uint64_t index) {
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) {
         if (index >= entries_.size()) {
             return unexpected<status_code>{status_code::error};
         }
-        return entries_[static_cast<std::size_t>(index)];
+        return entries_[index];
     }
 
-    void mark_complete(std::uint64_t index) {
+    void mark_complete(std::size_t index) {
         if (index < entries_.size()) {
-            entries_[static_cast<std::size_t>(index)].state = shared_ptr_entry_state::complete;
+            entries_[index].state = shared_ptr_entry_state::complete;
         }
     }
 
@@ -198,19 +197,19 @@ class encode_scope_ref {
     explicit encode_scope_ref(Scope &scope)
         : scope_(std::addressof(scope)),
           observe_([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Scope *>(raw)->observe(key); }),
-          mark_complete_([](void *raw, std::uint64_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
           reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
 
     [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
         return observe_(scope_, key);
     }
-    void mark_complete(std::uint64_t index) const { mark_complete_(scope_, index); }
+    void mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
     void reset() const { reset_(scope_); }
 
   private:
     void *scope_{};
     expected<shared_ptr_observation, status_code> (*observe_)(void *, const shared_ptr_encode_key &){};
-    void (*mark_complete_)(void *, std::uint64_t){};
+    void (*mark_complete_)(void *, std::size_t){};
     void (*reset_)(void *){};
 };
 
@@ -220,20 +219,20 @@ class decode_scope_ref {
     explicit decode_scope_ref(Scope &scope)
         : scope_(std::addressof(scope)),
           insert_([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Scope *>(raw)->insert(entry); }),
-          resolve_([](void *raw, std::uint64_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
-          mark_complete_([](void *raw, std::uint64_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          resolve_([](void *raw, std::size_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
+          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
           reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
 
-    [[nodiscard]] expected<std::uint64_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
-    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::uint64_t index) const { return resolve_(scope_, index); }
-    void                                                         mark_complete(std::uint64_t index) const { mark_complete_(scope_, index); }
+    [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) const { return resolve_(scope_, index); }
+    void                                                         mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
     void                                                         reset() const { reset_(scope_); }
 
   private:
     void *scope_{};
-    expected<std::uint64_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
-    expected<shared_ptr_decode_entry, status_code> (*resolve_)(void *, std::uint64_t){};
-    void (*mark_complete_)(void *, std::uint64_t){};
+    expected<std::size_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
+    expected<shared_ptr_decode_entry, status_code> (*resolve_)(void *, std::size_t){};
+    void (*mark_complete_)(void *, std::size_t){};
     void (*reset_)(void *){};
 };
 
@@ -607,7 +606,10 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         }
         if (observation->kind == shared_ptr_observation_kind::reference) {
             enc.encode(static_tag<detail::sharedref_tag>{});
-            enc.encode(observation->index);
+            if (!std::in_range<std::uint64_t>(observation->index)) {
+                throw cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
+            }
+            enc.encode(static_cast<std::uint64_t>(observation->index));
             return;
         }
 
@@ -665,13 +667,16 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
 
     template <IsSharedPointer Pointer> [[nodiscard]] status_code decode_sharedref(Pointer &value) {
         using pointer_type = std::remove_cvref_t<Pointer>;
-        std::uint64_t index{};
-        const auto    status = static_cast<Self &>(*this).decode(index);
+        std::uint64_t wire_index{};
+        const auto    status = static_cast<Self &>(*this).decode(wire_index);
         if (status != status_code::success) {
             return status;
         }
+        if (!std::in_range<std::size_t>(wire_index)) {
+            return status_code::error;
+        }
 
-        auto resolved = current_decode_scope().resolve(index);
+        auto resolved = current_decode_scope().resolve(static_cast<std::size_t>(wire_index));
         if (!resolved) {
             return resolved.error();
         }

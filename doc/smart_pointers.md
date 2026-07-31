@@ -149,22 +149,26 @@ dec(second_output);
 expected<shared_ptr_observation, status_code>
 observe(const shared_ptr_encode_key&);
 
-void mark_complete(std::uint64_t index);
+void mark_complete(std::size_t index);
 void reset();
 ```
 
 `SharedPtrDecodeScope` requires:
 
 ```cpp
-expected<std::uint64_t, status_code>
+expected<std::size_t, status_code>
 insert(const shared_ptr_decode_entry&);
 
 expected<shared_ptr_decode_entry, status_code>
-resolve(std::uint64_t index);
+resolve(std::size_t index);
 
-void mark_complete(std::uint64_t index);
+void mark_complete(std::size_t index);
 void reset();
 ```
+
+Scope indices are host table positions, so their type is `std::size_t`. The
+codec converts them to and from CBOR unsigned integers at the tag 29 wire
+boundary and rejects a decoded value that the host index type cannot represent.
 
 The supplied object owns capacity limits, allocation strategy, lookup
 complexity, and lifetime. It must outlive the codec while installed.
