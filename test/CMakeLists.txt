@@ -524,6 +524,31 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+function(add_smart_ptr_single_item_compile_fail_test TEST_NAME SOURCE_FILE)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=${TEST_NAME}"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=smart pointer pointee must encode exactly one CBOR item"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endfunction()
+
+add_smart_ptr_single_item_compile_fail_test(
+  smart_ptr_tag_only_class_pointee_compile_fails
+  smart_ptr_tag_only_class_pointee_compile_fail.cc)
+add_smart_ptr_single_item_compile_fail_test(
+  smart_ptr_unwrapped_tagged_class_pointee_compile_fails
+  smart_ptr_unwrapped_tagged_class_pointee_compile_fail.cc)
+add_smart_ptr_single_item_compile_fail_test(
+  smart_ptr_custom_multi_item_pointee_compile_fails
+  smart_ptr_custom_multi_item_pointee_compile_fail.cc)
+
 function(add_typed_array_variant_compile_fail_test TEST_NAME SOURCE_FILE)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
   target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
