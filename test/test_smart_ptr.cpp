@@ -824,6 +824,24 @@ TEST_CASE("unique pointer codec supports nested variants") {
     CHECK_EQ(*pointer, 7U);
 }
 
+TEST_CASE("unique pointer variant prefers exact simple values over simple catch-all") {
+    using choice = std::variant<simple, std::unique_ptr<bool>>;
+    choice sent  = std::make_unique<bool>(true);
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "f5");
+
+    choice decoded;
+    auto   dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE_EQ(decoded.index(), 1U);
+    const auto &pointer = std::get<1>(decoded);
+    REQUIRE(pointer);
+    CHECK(*pointer);
+}
+
 TEST_CASE("unique_ptr decode keeps terminal partial pointee state") {
     const auto value = std::make_unique<smart_ptr_test::partial_record>(smart_ptr_test::partial_record{.first = 7U, .second = "Ada"});
     auto       bytes = smart_ptr_test::encode_unique(value);
