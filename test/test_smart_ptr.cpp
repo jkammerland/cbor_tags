@@ -114,6 +114,14 @@ struct custom_record {
     std::uint64_t value{};
 };
 
+struct custom_single_item_record {
+    std::uint64_t first{};
+    std::uint64_t second{};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(wrap_as_array{first, second}); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(wrap_as_array{first, second}); }
+};
+
 template <typename Self> struct custom_record_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
@@ -438,6 +446,9 @@ template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr
 }
 
 } // namespace smart_ptr_test
+
+template <>
+inline constexpr bool cbor::tags::ext::smart_ptr::enable_custom_pointee_single_item<smart_ptr_test::custom_single_item_record> = true;
 
 TEST_CASE("application shared pointer overload selects derived types with RTTI") {
     using namespace smart_ptr_test::rtti_polymorphism;
@@ -825,6 +836,23 @@ TEST_CASE("shared pointer pointees may be one-field and tagged aggregates") {
     REQUIRE(decoded_tagged);
     CHECK_EQ(decoded_one_field->value, 7U);
     CHECK_EQ(decoded_tagged->value, 9U);
+}
+
+TEST_CASE("custom pointee may explicitly promise one complete CBOR item") {
+    auto sent =
+        std::make_shared<smart_ptr_test::custom_single_item_record>(smart_ptr_test::custom_single_item_record{.first = 3U, .second = 4U});
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "d81c820304");
+
+    std::shared_ptr<smart_ptr_test::custom_single_item_record> decoded;
+    auto                                                       dec = make_decoder<shared_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded);
+    CHECK_EQ(decoded->first, 3U);
+    CHECK_EQ(decoded->second, 4U);
 }
 
 TEST_CASE("shared pointer identity includes the exact pointer type") {

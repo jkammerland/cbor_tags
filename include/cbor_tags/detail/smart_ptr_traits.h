@@ -13,7 +13,14 @@
 #include <utility>
 #include <variant>
 
-namespace cbor::tags::ext::smart_ptr::detail {
+namespace cbor::tags::ext::smart_ptr {
+
+// Custom class encoders are opaque to structural wire-shape inspection. Users
+// may opt in only when every encoding customization for T emits one complete
+// CBOR item.
+template <typename T> inline constexpr bool enable_custom_pointee_single_item = false;
+
+namespace detail {
 
 inline constexpr std::uint64_t shareable_tag = 28U;
 inline constexpr std::uint64_t sharedref_tag = 29U;
@@ -37,7 +44,13 @@ template <typename T> inline constexpr bool known_null_wire_v = cbor::tags::deta
 template <typename T> inline constexpr char graph_type_token{};
 template <typename T> constexpr const void *graph_type_id() noexcept { return &graph_type_token<std::remove_cvref_t<T>>; }
 
-template <typename Options, typename T> consteval bool encodes_one_cbor_item();
+struct pointee_shape_probe_encoder {
+    using expected_type = expected<void, status_code>;
+
+    template <typename... Ts> constexpr expected_type operator()(Ts &&...) const { return {}; }
+};
+
+template <typename Options, typename T, bool CheckCustomization = true> consteval bool encodes_one_cbor_item();
 
 template <typename T, bool = IsAggregate<std::remove_cvref_t<T>>> struct pointer_tuple {
     using type = std::remove_cvref_t<T>;
@@ -52,7 +65,7 @@ template <typename T> using pointer_tuple_t = typename pointer_tuple<T>::type;
 template <typename Options, typename Tuple, std::size_t Offset, std::size_t... Is>
 consteval bool tuple_members_encode_one_item(std::index_sequence<Is...>) {
     using tuple_type = std::remove_cvref_t<Tuple>;
-    return (encodes_one_cbor_item<Options, std::tuple_element_t<Offset + Is, tuple_type>>() && ...);
+    return (encodes_one_cbor_item<Options, std::tuple_element_t<Offset + Is, tuple_type>, false>() && ...);
 }
 
 template <typename Options, typename Tuple, std::size_t Offset = 0U> consteval bool tuple_payload_encodes_one_item() {
@@ -70,9 +83,19 @@ template <typename Options, typename Tuple, std::size_t Offset = 0U> consteval b
     }
 }
 
-template <typename Options, typename T> consteval bool encodes_one_cbor_item() {
+template <typename Options, typename T, bool CheckCustomization> consteval bool encodes_one_cbor_item() {
     using type = std::remove_cvref_t<T>;
 
+    if constexpr (IsClassWithEncodingOverload<pointee_shape_probe_encoder, type>) {
+        if constexpr (CheckCustomization) {
+            return enable_custom_pointee_single_item<type>;
+        } else {
+            // A nested custom value remains one member of its containing
+            // aggregate. Only a customization on the pointer's pointee can
+            // change the number of top-level items wrapped by tag 28.
+            return true;
+        }
+    }
     if constexpr (SmartPointer<type>) {
         return true;
     }
@@ -80,34 +103,45 @@ template <typename Options, typename T> consteval bool encodes_one_cbor_item() {
         return false;
     }
     if constexpr (IsOptional<type>) {
-        return encodes_one_cbor_item<Options, typename type::value_type>();
+        return encodes_one_cbor_item<Options, typename type::value_type, false>();
     }
     if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
-            []<typename... Ts>() { return (encodes_one_cbor_item<Options, Ts>() && ...); });
+            []<typename... Ts>() { return (encodes_one_cbor_item<Options, Ts, false>() && ...); });
     }
     if constexpr (IsMap<type> && requires {
                       typename type::key_type;
                       typename type::mapped_type;
                   }) {
-        return encodes_one_cbor_item<Options, typename type::key_type>() && encodes_one_cbor_item<Options, typename type::mapped_type>();
+        return encodes_one_cbor_item<Options, typename type::key_type, false>() &&
+               encodes_one_cbor_item<Options, typename type::mapped_type, false>();
     }
     if constexpr (IsArray<type> && requires { typename type::value_type; }) {
-        return encodes_one_cbor_item<Options, typename type::value_type>();
+        return encodes_one_cbor_item<Options, typename type::value_type, false>();
     }
     if constexpr (IsTaggedTuple<type>) {
         return tuple_payload_encodes_one_item<Options, type, 1U>();
     }
-    if constexpr (IsClassWithTagOverload<type>) {
-        return true;
-    }
     if constexpr (IsAggregate<type> || IsUntaggedTuple<type>) {
         using tuple_type = pointer_tuple_t<type>;
-        if constexpr (IsTag<type> && !HasInlineTag<type>) {
-            return tuple_payload_encodes_one_item<Options, tuple_type, 1U>();
+        if constexpr (IsClassWithTagOverload<type>) {
+            constexpr auto total = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+            if constexpr (total == 0U) {
+                return false;
+            } else {
+                using first_type          = std::remove_cvref_t<std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>;
+                constexpr bool stored_tag = is_static_tag_t<first_type>::value || is_dynamic_tag_t<first_type>;
+                return tuple_payload_encodes_one_item<Options, tuple_type, stored_tag ? 1U : 0U>();
+            }
         } else {
             return tuple_payload_encodes_one_item<Options, tuple_type>();
         }
+    }
+    if constexpr (IsClassWithTagOverload<type>) {
+        // Non-aggregate tagged types are emitted by an explicit codec. The tag
+        // and that codec's payload form one item; aggregate tag-only and
+        // unwrapped multi-item cases were handled above.
+        return true;
     }
     if constexpr (IsCborMajor<type>) {
         return true;
@@ -260,4 +294,5 @@ template <typename Variant, std::size_t I = 0U, std::size_t J = 1U> consteval bo
     }
 }
 
-} // namespace cbor::tags::ext::smart_ptr::detail
+} // namespace detail
+} // namespace cbor::tags::ext::smart_ptr

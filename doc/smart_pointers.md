@@ -351,6 +351,20 @@ An empty aggregate encodes no item and is rejected. A multi-field aggregate is
 also rejected when group wrapping is disabled, because it would encode several
 items under one tag 28.
 
+The codec cannot inspect the body of a member/free `encode` or `transcode`
+customization. Such pointees are rejected unless the application explicitly
+declares that the customization always emits one complete item:
+
+```cpp
+template <>
+inline constexpr bool
+    cbor::tags::ext::smart_ptr::enable_custom_pointee_single_item<record> = true;
+```
+
+This declaration is a wire-format promise. For example,
+`return enc(wrap_as_array{a, b});` satisfies it, while `return enc(a, b);` does
+not.
+
 A shared pointer inside `std::variant` requires an application codec:
 
 ```cpp
