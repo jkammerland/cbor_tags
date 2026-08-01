@@ -84,6 +84,12 @@ The first non-null pointer is written with tag 28. Later occurrences are tag
 ]
 ```
 
+Indices count every tag 28 item decoded through the typed codec, including tag
+28 on an ordinary or nested non-pointer value. The table records those items as
+untracked positions so later pointer indices stay aligned. Opaque encoded-item
+views are not walked; a reference namespace must not cross an opaque item whose
+contents may contain tag 28.
+
 An empty pointer is ordinary CBOR `null`.
 
 ### Polymorphic base pointers
@@ -309,6 +315,8 @@ dec(second_output);
 expected<shared_ptr_observation, status_code>
 observe(const shared_ptr_encode_key&);
 
+expected<void, status_code> observe_untracked();
+
 void mark_complete(std::size_t index);
 void reset();
 ```
@@ -318,6 +326,8 @@ void reset();
 ```cpp
 expected<std::size_t, status_code>
 insert(const shared_ptr_decode_entry&);
+
+expected<void, status_code> insert_untracked();
 
 expected<shared_ptr_decode_entry, status_code>
 resolve(std::size_t index);

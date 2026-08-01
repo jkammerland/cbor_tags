@@ -56,6 +56,14 @@ class encode_table {
         return shared_ptr_observation{shared_ptr_observation_kind::first, index};
     }
 
+    [[nodiscard]] expected<void, status_code> observe_untracked() {
+        if (entries_.size() >= limit_) {
+            return cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded};
+        }
+        entries_.push_back({});
+        return {};
+    }
+
     void mark_complete(std::size_t index) { entries_.at(index).state = shared_ptr_entry_state::complete; }
 
   private:
@@ -77,6 +85,14 @@ class decode_table {
         const auto index = entries_.size();
         entries_.push_back(entry);
         return index;
+    }
+
+    [[nodiscard]] expected<void, status_code> insert_untracked() {
+        if (entries_.size() >= limit_) {
+            return cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded};
+        }
+        entries_.push_back({});
+        return {};
     }
 
     [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) {

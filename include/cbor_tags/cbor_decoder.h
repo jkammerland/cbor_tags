@@ -575,7 +575,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
-        if (decode_unsigned(additionalInfo) != N) {
+        std::uint64_t tag{};
+        const auto    status = decode_tag_argument(additionalInfo, tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (tag != N) {
             return status_code::no_match_for_tag;
         }
         return status_code::success;
@@ -598,7 +603,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        if (decode_unsigned(additionalInfo) != static_cast<std::uint64_t>(value.cbor_tag)) {
+        std::uint64_t tag{};
+        const auto    status = decode_tag_argument(additionalInfo, tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (tag != static_cast<std::uint64_t>(value.cbor_tag)) {
             return status_code::no_match_for_tag;
         }
 
@@ -615,7 +625,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto tag = decode_unsigned(additionalInfo);
+        std::uint64_t tag{};
+        const auto    tag_status = decode_tag_argument(additionalInfo, tag);
+        if (tag_status != status_code::success) {
+            return tag_status;
+        }
         if (tag != std::get<0>(t)) {
             return status_code::no_match_for_tag;
         }
@@ -684,8 +698,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::no_match_for_tag_on_buffer;
         }
 
-        auto &&tuple = to_tuple(value);
-        auto   tag   = decode_unsigned(additionalInfo);
+        auto        &&tuple = to_tuple(value);
+        std::uint64_t tag{};
+        const auto    status = decode_tag_argument(additionalInfo, tag);
+        if (status != status_code::success) {
+            return status;
+        }
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
@@ -993,8 +1011,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
-        value.tag = decode_unsigned(additionalInfo);
-        return status_code::success;
+        return decode_tag_argument(additionalInfo, value.tag);
     }
     constexpr status_code decode(as_tag_any &value, std::uint64_t tag) {
         value.tag = tag;
@@ -1322,6 +1339,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return static_cast<uint64_t>(additionalInfo);
         }
         return read_unsigned(additionalInfo);
+    }
+
+    constexpr status_code decode_tag_argument(byte additionalInfo, std::uint64_t &tag) {
+        tag = decode_unsigned(additionalInfo);
+        if constexpr (requires(self_t &self) {
+                          { self.observe_decoded_cbor_tag(tag) } -> std::same_as<status_code>;
+                      }) {
+            return static_cast<self_t &>(*this).observe_decoded_cbor_tag(tag);
+        }
+        return status_code::success;
     }
 
     constexpr int64_t decode_integer(byte additionalInfo) {
@@ -1815,7 +1842,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 result = this->decode_variant(decoded_value, major, additionalInfo, tag);
             } else if constexpr (IsTag<raw_type>) {
                 if (!tag) {
-                    tag = decode_unsigned(additionalInfo);
+                    std::uint64_t decoded_tag{};
+                    const auto    tag_status = decode_tag_argument(additionalInfo, decoded_tag);
+                    if (tag_status != status_code::success) {
+                        hard_error = tag_status;
+                        return false;
+                    }
+                    tag = decoded_tag;
                 }
                 result = this->decode(decoded_value, *tag);
             } else {
@@ -1904,7 +1937,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 result = this->decode_variant(decoded_value, major, additionalInfo, tag);
             } else if constexpr (IsTag<raw_type>) {
                 if (!tag) {
-                    tag = decode_unsigned(additionalInfo);
+                    std::uint64_t decoded_tag{};
+                    const auto    tag_status = decode_tag_argument(additionalInfo, decoded_tag);
+                    if (tag_status != status_code::success) {
+                        hard_error = tag_status;
+                        return false;
+                    }
+                    tag = decoded_tag;
                 }
                 result = this->decode(decoded_value, *tag);
             } else {

@@ -54,6 +54,11 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
+        if (majorType == static_cast<byte_type>(0xC0)) {
+            if constexpr (requires(self_t &self) { self.observe_encoded_cbor_tag(value); }) {
+                static_cast<self_t &>(*this).observe_encoded_cbor_tag(value);
+            }
+        }
         detail::append_cbor_major_argument(appender_, data_, value, majorType);
     }
 
