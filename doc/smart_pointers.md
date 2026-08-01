@@ -364,6 +364,11 @@ an application tag. The library does not guess how tag 28/29 should compete
 with the other alternatives. Unique-pointer variants remain supported when
 their wire shapes do not overlap.
 
+Automatic unique-pointer variant dispatch also requires every alternative's
+outer wire shape to be independent of an installed custom codec. If a codec
+changes an alternative's outer tag or major type, define an explicit codec for
+the whole variant so it can apply that protocol-specific discriminator.
+
 An ordinary `std::optional` cannot directly contain a smart pointer. Both the
 empty optional and the empty pointer would encode as CBOR `null`. A named-map
 field can still distinguish an omitted optional field from a present field

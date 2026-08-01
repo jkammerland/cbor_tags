@@ -343,30 +343,43 @@ template <typename Decoder, UniquePointer Pointer>
     }
 }
 
-template <typename T> consteval bool unique_variant_alternative_supported() {
+template <typename Decoder, typename T> consteval bool unique_variant_alternative_supported() {
     using type = std::remove_cvref_t<T>;
+
     if constexpr (UniquePointer<type>) {
         return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>> &&
-               !known_null_wire_v<pointer_element_t<type>>;
+               !known_null_wire_v<pointer_element_t<type>> && unique_variant_alternative_supported<Decoder, pointer_element_t<type>>();
+    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder>) {
+        return false;
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
-            []<typename... Ts>() { return (unique_variant_alternative_supported<Ts>() && ...); });
+            []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); });
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count > 1U) {
+            return Decoder::options::wrap_groups;
+        } else {
+            return unique_variant_alternative_supported<Decoder, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>();
+        }
     } else {
         return IsCborMajor<type> || IsArray<type> || IsMap<type>;
     }
 }
 
-template <typename T>
+template <typename Decoder, typename T>
 [[nodiscard]] constexpr bool unique_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
     using type = std::remove_cvref_t<T>;
     if constexpr (UniquePointer<type>) {
         if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
             return true;
         }
-        return unique_variant_matches<pointer_element_t<type>>(major, additional_info, tag);
+        return unique_variant_matches<Decoder, pointer_element_t<type>>(major, additional_info, tag);
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
-            [&]<typename... Ts>() { return (unique_variant_matches<Ts>(major, additional_info, tag) || ...); });
+            [&]<typename... Ts>() { return (unique_variant_matches<Decoder, Ts>(major, additional_info, tag) || ...); });
     } else if (major == major_type::Tag) {
         if (!tag.has_value()) {
             return false;
@@ -375,6 +388,16 @@ template <typename T>
             return true;
         } else if constexpr (IsTag<type>) {
             return static_cast<std::uint64_t>(cbor::tags::detail::get_tag_from_any<type>()) == *tag;
+        } else {
+            return false;
+        }
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count > 1U && Decoder::options::wrap_groups) {
+            return major == major_type::Array;
+        } else if constexpr (item_count == 1U) {
+            return unique_variant_matches<Decoder, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>(major, additional_info, tag);
         } else {
             return false;
         }
@@ -414,8 +437,9 @@ template <typename Decoder, IsVariant Variant>
     using variant_type = std::remove_cvref_t<Variant>;
 
     static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
-                      []<typename... Ts>() { return (unique_variant_alternative_supported<Ts>() && ...); }),
-                  "unique pointer variant alternatives must have supported CBOR wire shapes");
+                      []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); }),
+                  "unique pointer variant alternatives must have codec-independent CBOR wire shapes; add an explicit codec for the "
+                  "whole variant");
     static_assert(pointer_variant_is_unambiguous<variant_type>(),
                   "Pointer variant alternatives overlap on the CBOR wire; add an application tag or choose a different decode type");
     static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
@@ -437,7 +461,7 @@ template <typename Decoder, IsVariant Variant>
     cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
         auto select = [&]<std::size_t I>() {
             using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
-            if (selected || !unique_variant_matches<alternative_type>(major, additional_info, tag)) {
+            if (selected || !unique_variant_matches<Decoder, alternative_type>(major, additional_info, tag)) {
                 return;
             }
             selected = true;
