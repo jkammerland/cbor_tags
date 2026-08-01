@@ -392,7 +392,12 @@ template <typename T> static constexpr auto get_major_6_tag_from_class() {
     } else if constexpr (HasTagNonConstructible<T>) {
         return cbor::tags::cbor_tag<T>();
     } else if constexpr (HasTagFreeFunction<T>) {
-        return cbor_tag(T{});
+        using tag_type = std::remove_cvref_t<decltype(cbor_tag(std::declval<const T &>()))>;
+        if constexpr (is_static_tag_t<tag_type>::value) {
+            return tag_type{};
+        } else {
+            return cbor_tag(T{});
+        }
     } else {
         return -1;
         // return detail::FalseType{}; // This doesn't work so well across compilers
