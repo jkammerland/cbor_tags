@@ -49,6 +49,10 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
+target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
+add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
+
 function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
   target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
