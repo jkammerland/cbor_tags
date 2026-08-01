@@ -840,6 +840,13 @@ TEST_CASE("unique pointer variant prefers exact simple values over simple catch-
     const auto &pointer = std::get<1>(decoded);
     REQUIRE(pointer);
     CHECK(*pointer);
+
+    const auto null_bytes = to_bytes("f6");
+    choice     decoded_null;
+    auto       null_dec = make_decoder<unique_ptr_codec>(null_bytes);
+    REQUIRE(null_dec(decoded_null));
+    REQUIRE_EQ(decoded_null.index(), 1U);
+    CHECK_FALSE(std::get<1>(decoded_null));
 }
 
 TEST_CASE("unique_ptr decode keeps terminal partial pointee state") {
