@@ -740,6 +740,25 @@ TEST_CASE("unique_ptr codec delegates aggregate pointees to composed codecs") {
     CHECK_EQ(decoded->value, 42U);
 }
 
+TEST_CASE("unique pointer variant matches an array-wrapped aggregate pointee") {
+    using choice = std::variant<std::unique_ptr<smart_ptr_test::partial_record>, std::string>;
+    choice sent  = std::make_unique<smart_ptr_test::partial_record>(smart_ptr_test::partial_record{.first = 7U, .second = "Ada"});
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(sent));
+    CHECK_EQ(to_hex(bytes), "820763416461");
+
+    choice decoded;
+    auto   dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE_EQ(decoded.index(), 0U);
+    const auto &pointer = std::get<0>(decoded);
+    REQUIRE(pointer);
+    CHECK_EQ(pointer->first, 7U);
+    CHECK_EQ(pointer->second, "Ada");
+}
+
 TEST_CASE("unique_ptr decode keeps terminal partial pointee state") {
     const auto value = std::make_unique<smart_ptr_test::partial_record>(smart_ptr_test::partial_record{.first = 7U, .second = "Ada"});
     auto       bytes = smart_ptr_test::encode_unique(value);
