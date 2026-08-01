@@ -69,6 +69,34 @@ struct Class4 {
     Class4(Class3 &&c, double d) : c0(std::move(c)), d_{d} {}
 };
 
+struct StaticTaggedNonDefault {
+    explicit StaticTaggedNonDefault(std::uint64_t initial_value) : value(initial_value) {}
+
+    std::uint64_t value{};
+
+    template <typename Encoder> constexpr auto encode(Encoder &enc) const { return enc(value); }
+    template <typename Decoder> constexpr auto decode(Decoder &dec) { return dec(value); }
+};
+
+constexpr auto cbor_tag(const StaticTaggedNonDefault &) { return static_tag<60000>{}; }
+
+static_assert(!std::is_default_constructible_v<StaticTaggedNonDefault>);
+
+TEST_CASE("free static tags do not require default construction") {
+    using value_type = std::variant<std::string, StaticTaggedNonDefault>;
+
+    value_type                value{std::in_place_type<StaticTaggedNonDefault>, 7U};
+    std::vector<std::uint8_t> buffer;
+    auto                      enc = make_encoder(buffer);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(buffer), "d9ea6007");
+
+    StaticTaggedNonDefault decoded{0U};
+    auto                   dec = make_decoder(buffer);
+    REQUIRE(dec(decoded));
+    CHECK_EQ(decoded.value, 7U);
+}
+
 // template <typename Encoder> constexpr auto encode(Encoder &enc, const Class4 &c) { return enc(wrap_as_array{c.c0, c.d_}); }
 
 template <typename Transcoder> constexpr auto transcode(Transcoder &tc, Class4 &&c) { return tc(wrap_as_array{c.c0, c.d_}); }

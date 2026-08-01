@@ -86,6 +86,166 @@ The first non-null pointer is written with tag 28. Later occurrences are tag
 
 An empty pointer is ordinary CBOR `null`.
 
+### Polymorphic base pointers
+
+The library does not choose which derived type a `std::shared_ptr<animal>`
+represents on the wire. Define that choice in the application. Put the overload
+in the same namespace as `animal` so the normal encoder and decoder find it,
+and do not install `shared_ptr_codec` for this value format.
+
+With RTTI, encoding can select the concrete type with `dynamic_cast`:
+
+```cpp
+namespace app {
+
+constexpr std::uint64_t dog_tag = 60010;
+constexpr std::uint64_t cat_tag = 60011;
+
+struct animal { virtual ~animal() = default; };
+struct dog final : animal { std::uint64_t age{}; };
+struct cat final : animal { std::string name; };
+
+template <typename Encoder>
+typename Encoder::expected_type
+encode(Encoder& enc, const std::shared_ptr<animal>& value) {
+    if (!value) return enc(nullptr);
+    if (auto* dog_value = dynamic_cast<const dog*>(value.get()))
+        return enc(static_tag<dog_tag>{}, wrap_as_array{dog_value->age});
+    if (auto* cat_value = dynamic_cast<const cat*>(value.get()))
+        return enc(static_tag<cat_tag>{}, wrap_as_array{cat_value->name});
+    return unexpected<status_code>{status_code::error};
+}
+
+} // namespace app
+```
+
+For a closed hierarchy without RTTI, replace the hierarchy and encoder above
+with a virtual discriminator. Each final class must return its own kind:
+
+```cpp
+enum class animal_kind { dog, cat };
+
+struct animal {
+    virtual ~animal() = default;
+    virtual animal_kind kind() const noexcept = 0;
+};
+struct dog final : animal {
+    std::uint64_t age{};
+    animal_kind kind() const noexcept final { return animal_kind::dog; }
+};
+struct cat final : animal {
+    std::string name;
+    animal_kind kind() const noexcept final { return animal_kind::cat; }
+};
+
+template <typename Encoder>
+typename Encoder::expected_type
+encode(Encoder& enc, const std::shared_ptr<animal>& value) {
+    if (!value) return enc(nullptr);
+    switch (value->kind()) {
+    case animal_kind::dog: {
+        auto& dog_value = static_cast<const dog&>(*value);
+        return enc(static_tag<dog_tag>{}, wrap_as_array{dog_value.age});
+    }
+    case animal_kind::cat: {
+        auto& cat_value = static_cast<const cat&>(*value);
+        return enc(static_tag<cat_tag>{}, wrap_as_array{cat_value.name});
+    }
+    }
+    return unexpected<status_code>{status_code::error};
+}
+```
+
+A third option is to support one exact encoder type and make `encode` virtual:
+
+```cpp
+using buffer_type = std::vector<std::byte>;
+using app_encoder = decltype(make_encoder(std::declval<buffer_type&>()));
+using result_type = app_encoder::expected_type;
+
+struct cbor_encodable {
+    virtual ~cbor_encodable() = default;
+    virtual result_type encode(app_encoder&) const = 0;
+};
+struct animal : cbor_encodable { ~animal() override = default; };
+struct dog final : animal {
+    std::uint64_t age{};
+    result_type encode(app_encoder& enc) const final {
+        return enc(static_tag<dog_tag>{}, wrap_as_array{age});
+    }
+};
+struct cat final : animal {
+    std::string name;
+    result_type encode(app_encoder& enc) const final {
+        return enc(static_tag<cat_tag>{}, wrap_as_array{name});
+    }
+};
+
+inline result_type
+encode(app_encoder& enc, const std::shared_ptr<animal>& value) {
+    return value ? enc(*value) : enc(nullptr); // virtual dispatch
+}
+```
+
+This performs one virtual call without RTTI or casts. It intentionally supports
+only `app_encoder`; changing its buffer, options, or codec pack creates a
+different encoder type.
+
+Keep each alternative in the same application namespace. All three can use
+the same decoder policy: read `null` or the application tag once, allocate the
+final object, then decode its body directly into that object:
+
+```cpp
+template <typename Decoder>
+typename Decoder::expected_type
+decode(Decoder& dec, std::shared_ptr<animal>&& value) {
+    value.reset();
+
+    std::optional<as_tag_any> tag;
+    auto result = dec(tag);
+    if (!result || !tag) return result; // error, or CBOR null
+
+    switch (tag->tag) {
+    case dog_tag: {
+        auto dog_value = std::make_shared<dog>();
+        value = dog_value; // keep it even if the body is incomplete
+        return dec(wrap_as_array{dog_value->age});
+    }
+    case cat_tag: {
+        auto cat_value = std::make_shared<cat>();
+        value = cat_value;
+        return dec(wrap_as_array{cat_value->name});
+    }
+    default:
+        return unexpected<status_code>{status_code::no_match_for_tag};
+    }
+}
+
+std::vector<std::byte> bytes;
+auto dog_value = std::make_shared<dog>();
+dog_value->age = 7;
+std::shared_ptr<animal> sent = dog_value;
+
+auto enc = make_encoder(bytes); // no shared_ptr_codec
+assert(enc(sent));
+
+std::shared_ptr<animal> received;
+auto dec = make_decoder(bytes);
+assert(dec(received));
+assert(static_cast<dog&>(*received).age == 7);
+```
+
+The application wire choice is therefore:
+
+```cddl
+animal = null / #6.60010([uint]) / #6.60011([tstr])
+```
+
+Use tags assigned by the application protocol. These overloads encode values,
+not shared identity: encoding the same pointer twice produces two complete
+items and decoding produces two objects. An application that needs both
+derived-type selection and tags 28/29 must implement those rules together.
+
 The encoder and decoder each keep one reference table. That table belongs to
 the codec object and remains across calls:
 
