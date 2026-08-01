@@ -890,6 +890,21 @@ TEST_CASE("shared_ptr null uses native CBOR null") {
     CHECK_FALSE(decoded);
 }
 
+TEST_CASE("unique pointer rejects simple values that use the null wire") {
+    auto value = std::make_unique<simple>(static_cast<simple::value_type>(SimpleType::Null));
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec>(bytes);
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "f6");
+
+    std::unique_ptr<simple> decoded;
+    auto                    dec = make_decoder<unique_ptr_codec>(bytes);
+    REQUIRE(dec(decoded));
+    REQUIRE(decoded);
+    CHECK_EQ(decoded->value, static_cast<simple::value_type>(SimpleType::Null));
+}
+
 TEST_CASE("default shared_ptr scope persists until explicitly reset") {
     auto p = std::make_shared<std::uint64_t>(1U);
 
