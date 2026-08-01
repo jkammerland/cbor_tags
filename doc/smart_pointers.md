@@ -156,9 +156,44 @@ encode(Encoder& enc, const std::shared_ptr<animal>& value) {
 }
 ```
 
-Keep this alternative in the same application namespace. Decoding does not
-need RTTI in either version. Read `null` or the application tag once, allocate
-the final object, then decode its body directly into that object:
+A third option is to support one exact encoder type and make `encode` virtual:
+
+```cpp
+using buffer_type = std::vector<std::byte>;
+using app_encoder = decltype(make_encoder(std::declval<buffer_type&>()));
+using result_type = app_encoder::expected_type;
+
+struct cbor_encodable {
+    virtual ~cbor_encodable() = default;
+    virtual result_type encode(app_encoder&) const = 0;
+};
+struct animal : cbor_encodable { ~animal() override = default; };
+struct dog final : animal {
+    std::uint64_t age{};
+    result_type encode(app_encoder& enc) const final {
+        return enc(static_tag<dog_tag>{}, wrap_as_array{age});
+    }
+};
+struct cat final : animal {
+    std::string name;
+    result_type encode(app_encoder& enc) const final {
+        return enc(static_tag<cat_tag>{}, wrap_as_array{name});
+    }
+};
+
+inline result_type
+encode(app_encoder& enc, const std::shared_ptr<animal>& value) {
+    return value ? enc(*value) : enc(nullptr); // virtual dispatch
+}
+```
+
+This performs one virtual call without RTTI or casts. It intentionally supports
+only `app_encoder`; changing its buffer, options, or codec pack creates a
+different encoder type.
+
+Keep each alternative in the same application namespace. All three can use
+the same decoder policy: read `null` or the application tag once, allocate the
+final object, then decode its body directly into that object:
 
 ```cpp
 template <typename Decoder>
@@ -187,8 +222,17 @@ decode(Decoder& dec, std::shared_ptr<animal>&& value) {
 }
 
 std::vector<std::byte> bytes;
+auto dog_value = std::make_shared<dog>();
+dog_value->age = 7;
+std::shared_ptr<animal> sent = dog_value;
+
 auto enc = make_encoder(bytes); // no shared_ptr_codec
+assert(enc(sent));
+
+std::shared_ptr<animal> received;
 auto dec = make_decoder(bytes);
+assert(dec(received));
+assert(static_cast<dog&>(*received).age == 7);
 ```
 
 The application wire choice is therefore:

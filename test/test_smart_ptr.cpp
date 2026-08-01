@@ -369,6 +369,67 @@ template <typename Decoder> typename Decoder::expected_type decode(Decoder &dec,
 
 } // namespace no_rtti_polymorphism
 
+namespace virtual_encoder_polymorphism {
+
+using buffer_type  = std::vector<std::byte>;
+using encoder_type = decltype(make_encoder(std::declval<buffer_type &>()));
+using result_type  = typename encoder_type::expected_type;
+
+inline constexpr std::uint64_t dog_tag = 60030U;
+inline constexpr std::uint64_t cat_tag = 60031U;
+
+struct cbor_encodable {
+    virtual ~cbor_encodable() = default;
+
+    virtual result_type encode(encoder_type &) const = 0;
+};
+
+struct animal : cbor_encodable {
+    ~animal() override = default;
+};
+
+struct dog final : animal {
+    std::uint64_t age{};
+    std::string   name;
+
+    result_type encode(encoder_type &enc) const final { return enc(static_tag<dog_tag>{}, wrap_as_array{age, name}); }
+};
+
+struct cat final : animal {
+    std::string   name;
+    std::uint64_t lives{};
+
+    result_type encode(encoder_type &enc) const final { return enc(static_tag<cat_tag>{}, wrap_as_array{name, lives}); }
+};
+
+inline result_type encode(encoder_type &enc, const std::shared_ptr<animal> &value) { return value ? enc(*value) : enc(nullptr); }
+
+template <typename Decoder> typename Decoder::expected_type decode(Decoder &dec, std::shared_ptr<animal> &&value) {
+    value.reset();
+
+    std::optional<as_tag_any> tag;
+    auto                      result = dec(tag);
+    if (!result || !tag) {
+        return result;
+    }
+
+    switch (tag->tag) {
+    case dog_tag: {
+        auto dog_value = std::make_shared<dog>();
+        value          = dog_value;
+        return dec(wrap_as_array{dog_value->age, dog_value->name});
+    }
+    case cat_tag: {
+        auto cat_value = std::make_shared<cat>();
+        value          = cat_value;
+        return dec(wrap_as_array{cat_value->name, cat_value->lives});
+    }
+    default: return typename Decoder::expected_type{cbor::tags::unexpected<status_code>{status_code::no_match_for_tag}};
+    }
+}
+
+} // namespace virtual_encoder_polymorphism
+
 template <typename T> std::vector<std::byte> encode_unique(const std::unique_ptr<T> &value) {
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<unique_ptr_codec>(bytes);
@@ -490,6 +551,62 @@ TEST_CASE("application shared pointer overload selects derived types without RTT
         auto dec     = make_decoder(bytes);
         REQUIRE(dec(decoded));
         CHECK_FALSE(decoded);
+    }
+}
+
+TEST_CASE("fixed virtual encoder interface roundtrips derived pointers") {
+    using namespace smart_ptr_test::virtual_encoder_polymorphism;
+
+    {
+        auto dog_value               = std::make_shared<dog>();
+        dog_value->age               = 4U;
+        dog_value->name              = "Fido";
+        std::shared_ptr<animal> sent = dog_value;
+
+        buffer_type  bytes;
+        encoder_type enc{bytes};
+        REQUIRE(enc(sent));
+
+        std::shared_ptr<animal> received;
+        auto                    dec = make_decoder(bytes);
+        REQUIRE(dec(received));
+        REQUIRE(received);
+
+        const auto received_dog = std::static_pointer_cast<dog>(received);
+        CHECK_EQ(received_dog->age, 4U);
+        CHECK_EQ(received_dog->name, "Fido");
+    }
+
+    {
+        auto cat_value               = std::make_shared<cat>();
+        cat_value->name              = "Luna";
+        cat_value->lives             = 8U;
+        std::shared_ptr<animal> sent = cat_value;
+
+        buffer_type  bytes;
+        encoder_type enc{bytes};
+        REQUIRE(enc(sent));
+
+        std::shared_ptr<animal> received;
+        auto                    dec = make_decoder(bytes);
+        REQUIRE(dec(received));
+        REQUIRE(received);
+
+        const auto received_cat = std::static_pointer_cast<cat>(received);
+        CHECK_EQ(received_cat->name, "Luna");
+        CHECK_EQ(received_cat->lives, 8U);
+    }
+
+    {
+        const std::shared_ptr<animal> sent;
+        buffer_type                   bytes;
+        encoder_type                  enc{bytes};
+        REQUIRE(enc(sent));
+
+        auto received = std::shared_ptr<animal>{std::make_shared<dog>()};
+        auto dec      = make_decoder(bytes);
+        REQUIRE(dec(received));
+        CHECK_FALSE(received);
     }
 }
 
