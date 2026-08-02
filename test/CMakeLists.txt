@@ -52,6 +52,7 @@ add_test(NAME tests COMMAND tests)
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
+add_dependencies(tests test_smart_ptr_allocation_failure)
 
 function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
@@ -647,15 +648,16 @@ set_tests_properties(test_decode_stack_floor PROPERTIES LABELS resource TIMEOUT 
 
 check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
-add_executable(test_unsigned_char test_unsigned_char.cc)
+  add_executable(test_unsigned_char test_unsigned_char.cc)
   target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
   target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
-add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
+  add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
+endif()
 
 add_executable(test_smart_ptr_decode_allocations test_smart_ptr_decode_allocations.cc)
 target_link_libraries(test_smart_ptr_decode_allocations PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_decode_allocations COMMAND test_smart_ptr_decode_allocations)
-endif()
+add_dependencies(tests test_smart_ptr_decode_allocations)
 
 if(TARGET cbor_tags_cli)
   add_test(
