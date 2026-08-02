@@ -686,6 +686,16 @@ if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
 
+add_executable(test_smart_ptr_expected_classification test_smart_ptr_expected_classification.cc)
+target_link_libraries(test_smart_ptr_expected_classification PRIVATE cbor::tags)
+set_target_properties(
+  test_smart_ptr_expected_classification
+  PROPERTIES CXX_STANDARD 23
+             CXX_STANDARD_REQUIRED ON
+             CXX_EXTENSIONS OFF)
+add_test(NAME test_smart_ptr_expected_classification COMMAND test_smart_ptr_expected_classification)
+add_dependencies(tests test_smart_ptr_expected_classification)
+
 add_executable(test_smart_ptr_decode_allocations test_smart_ptr_decode_allocations.cc)
 target_link_libraries(test_smart_ptr_decode_allocations PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_decode_allocations COMMAND test_smart_ptr_decode_allocations)

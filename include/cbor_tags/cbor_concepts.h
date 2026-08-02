@@ -656,10 +656,11 @@ concept IsTag = HasDynamicTag<T> || HasStaticTag<T> || HasInlineTag<T> || IsTagg
 
 template <typename T>
 concept IsOptional = requires(T t) {
-    typename T::value_type; // Must have a value_type
-    t.has_value();          // Must have has_value() method
-    t.value();              // Must have value() method
-    T{};                    // Must be default constructible (nullopt)
+    typename T::value_type;              // Must have a value_type
+    t.has_value();                       // Must have has_value() method
+    t.value();                           // Must have value() method
+    { t.reset() } -> std::same_as<void>; // Must support an explicit empty state
+    T{};                                 // Must be default constructible (nullopt)
 };
 
 template <typename T> struct is_variant : std::bool_constant<detail::VariantLike<std::remove_cvref_t<T>>> {};
