@@ -131,6 +131,28 @@ struct ordinary_shareable {
     std::uint64_t  value{};
 };
 
+struct extension_shareable {
+    explicit extension_shareable(std::uint64_t initial_value = 0U) : value(initial_value) {}
+
+    std::uint64_t value{};
+};
+
+template <typename Self> struct extension_shareable_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::decode;
+    using cbor_codec_mixin_base<Self>::encode;
+
+    void encode(const extension_shareable &value) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode(static_tag<28>{});
+        enc.encode(value.value);
+    }
+
+    [[nodiscard]] status_code decode(extension_shareable &value, major_type major, std::byte additional_info) {
+        auto &dec = static_cast<Self &>(*this);
+        return cbor::tags::detail::decode_tagged_payload(dec, 28U, major, additional_info, [&] { return dec.decode(value.value); });
+    }
+};
+
 struct custom_record {
     std::uint64_t value{};
 };
@@ -911,6 +933,44 @@ TEST_CASE("sharedref indices count ordinary tag 28 items") {
     auto                               dec = make_decoder<shared_ptr_codec>(bytes);
     REQUIRE(dec(wrap_as_array{first, decoded_pointer, decoded_reference}));
     CHECK_EQ(first.value, 1U);
+    REQUIRE(decoded_pointer);
+    CHECK(decoded_pointer == decoded_reference);
+}
+
+TEST_CASE("sharedref indices count tag 28 pointees decoded through unique_ptr codec") {
+    const auto first   = std::make_unique<smart_ptr_test::ordinary_shareable>(smart_ptr_test::ordinary_shareable{.value = 1U});
+    const auto pointer = std::make_shared<std::uint64_t>(2U);
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<unique_ptr_codec, shared_ptr_codec>(bytes);
+    REQUIRE(enc(wrap_as_array{first, pointer, pointer}));
+    REQUIRE_EQ(to_hex(bytes), "83d81c01d81c02d81d01");
+
+    std::unique_ptr<smart_ptr_test::ordinary_shareable> decoded_first;
+    std::shared_ptr<std::uint64_t>                      decoded_pointer;
+    std::shared_ptr<std::uint64_t>                      decoded_reference;
+    auto                                                dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(bytes);
+    REQUIRE(dec(wrap_as_array{decoded_first, decoded_pointer, decoded_reference}));
+    REQUIRE(decoded_first);
+    CHECK_EQ(decoded_first->value, 1U);
+    REQUIRE(decoded_pointer);
+    CHECK(decoded_pointer == decoded_reference);
+}
+
+TEST_CASE("sharedref indices count tag 28 values decoded through extension helpers") {
+    const auto pointer = std::make_shared<std::uint64_t>(2U);
+
+    std::vector<std::byte> bytes;
+    auto                   enc = make_encoder<shared_ptr_codec, smart_ptr_test::extension_shareable_codec>(bytes);
+    REQUIRE(enc(wrap_as_array{smart_ptr_test::extension_shareable{1U}, pointer, pointer}));
+    REQUIRE_EQ(to_hex(bytes), "83d81c01d81c02d81d01");
+
+    smart_ptr_test::extension_shareable decoded_first;
+    std::shared_ptr<std::uint64_t>      decoded_pointer;
+    std::shared_ptr<std::uint64_t>      decoded_reference;
+    auto                                dec = make_decoder<shared_ptr_codec, smart_ptr_test::extension_shareable_codec>(bytes);
+    REQUIRE(dec(wrap_as_array{decoded_first, decoded_pointer, decoded_reference}));
+    CHECK_EQ(decoded_first.value, 1U);
     REQUIRE(decoded_pointer);
     CHECK(decoded_pointer == decoded_reference);
 }
