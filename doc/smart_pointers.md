@@ -351,6 +351,11 @@ An empty aggregate encodes no item and is rejected. A multi-field aggregate is
 also rejected when group wrapping is disabled, because it would encode several
 items under one tag 28.
 
+`std::unique_ptr<simple>` is rejected because `simple{22}` and an empty unique
+pointer both encode as CBOR `null`; decoding cannot distinguish them. A shared
+pointer does not have that ambiguity because a non-null value is wrapped in tag
+28.
+
 A shared pointer inside `std::variant` requires an application codec:
 
 ```cpp

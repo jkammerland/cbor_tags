@@ -74,7 +74,7 @@ template <typename Pointer> using smart_pointer_element_t = typename std::remove
 
 template <typename T> consteval bool has_known_null_wire_impl() {
     using type = std::remove_cvref_t<T>;
-    if constexpr (std::same_as<type, std::nullptr_t> || IsSmartPointer<type> || IsOptional<type>) {
+    if constexpr (std::same_as<type, std::nullptr_t> || std::same_as<type, simple> || IsSmartPointer<type> || IsOptional<type>) {
         return true;
     } else if constexpr (IsVariant<type>) {
         return with_variant_alternatives<type>([]<typename... Ts>() { return (has_known_null_wire_impl<Ts>() || ...); });
