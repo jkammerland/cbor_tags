@@ -235,21 +235,21 @@ TEST_CASE("custom codec variant serialization uses custom variant traits") {
     CHECK(std::get<1>(output.storage) == "hi");
 }
 
-TEST_CASE("custom variant traits work with nullable smart pointer codec") {
+TEST_CASE("custom variant traits work with unique pointer codec") {
     namespace smart = tags::ext::smart_ptr;
 
-    using variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, std::string>;
+    using variant = variant_traits_test::manual_variant<std::unique_ptr<std::uint64_t>, std::string>;
 
     {
-        variant input{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::make_shared<std::uint64_t>(42U)}};
+        variant input{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::make_unique<std::uint64_t>(42U)}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = tags::make_encoder<smart::nullable_ptr_codec>(buffer);
+        auto                   enc = tags::make_encoder<smart::unique_ptr_codec>(buffer);
         REQUIRE(enc(input));
-        CHECK_EQ(to_hex(buffer), "8201182a");
+        CHECK_EQ(to_hex(buffer), "182a");
 
-        variant output{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
-        auto    dec = tags::make_decoder<smart::nullable_ptr_codec>(buffer);
+        variant output{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
+        auto    dec = tags::make_decoder<smart::unique_ptr_codec>(buffer);
         REQUIRE(dec(output));
 
         REQUIRE(tags::detail::variant_index(output) == 0U);
@@ -259,15 +259,15 @@ TEST_CASE("custom variant traits work with nullable smart pointer codec") {
     }
 
     {
-        variant input{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::shared_ptr<std::uint64_t>{}}};
+        variant input{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::unique_ptr<std::uint64_t>{}}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = tags::make_encoder<smart::nullable_ptr_codec>(buffer);
+        auto                   enc = tags::make_encoder<smart::unique_ptr_codec>(buffer);
         REQUIRE(enc(input));
-        CHECK_EQ(to_hex(buffer), "8100");
+        CHECK_EQ(to_hex(buffer), "f6");
 
-        variant output{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
-        auto    dec = tags::make_decoder<smart::nullable_ptr_codec>(buffer);
+        variant output{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
+        auto    dec = tags::make_decoder<smart::unique_ptr_codec>(buffer);
         REQUIRE(dec(output));
 
         REQUIRE(tags::detail::variant_index(output) == 0U);
@@ -275,15 +275,15 @@ TEST_CASE("custom variant traits work with nullable smart pointer codec") {
     }
 
     {
-        variant input{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::string{"ok"}}};
+        variant input{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::string{"ok"}}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = tags::make_encoder<smart::nullable_ptr_codec>(buffer);
+        auto                   enc = tags::make_encoder<smart::unique_ptr_codec>(buffer);
         REQUIRE(enc(input));
         CHECK_EQ(to_hex(buffer), "626f6b");
 
-        variant output{std::variant<std::shared_ptr<std::uint64_t>, std::string>{std::shared_ptr<std::uint64_t>{}}};
-        auto    dec = tags::make_decoder<smart::nullable_ptr_codec>(buffer);
+        variant output{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::unique_ptr<std::uint64_t>{}}};
+        auto    dec = tags::make_decoder<smart::unique_ptr_codec>(buffer);
         REQUIRE(dec(output));
 
         REQUIRE(tags::detail::variant_index(output) == 1U);
@@ -291,52 +291,16 @@ TEST_CASE("custom variant traits work with nullable smart pointer codec") {
     }
 
     {
-        using fixed_bstr_variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, std::array<std::byte, 2>>;
+        using fixed_bstr_variant = variant_traits_test::manual_variant<std::unique_ptr<std::uint64_t>, std::array<std::byte, 2>>;
 
         const std::vector<std::byte> wrong_sized_bstr{std::byte{0x41}, std::byte{0xaa}};
-        auto                         original = std::make_shared<std::uint64_t>(9U);
-        fixed_bstr_variant           output{std::variant<std::shared_ptr<std::uint64_t>, std::array<std::byte, 2>>{original}};
-        auto                         dec    = tags::make_decoder<smart::nullable_ptr_codec>(wrong_sized_bstr);
-        auto                         result = dec(output);
+        fixed_bstr_variant           output{
+            std::variant<std::unique_ptr<std::uint64_t>, std::array<std::byte, 2>>{std::make_unique<std::uint64_t>(9U)}};
+        auto dec    = tags::make_decoder<smart::unique_ptr_codec>(wrong_sized_bstr);
+        auto result = dec(output);
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), tags::status_code::unexpected_group_size);
-        REQUIRE(tags::detail::variant_index(output) == 0U);
-        CHECK(std::get<0>(output.storage) == original);
+        CHECK(tags::detail::variant_index(output) == 1U);
     }
-}
-
-TEST_CASE("custom variant traits work with shared graph smart pointer codec") {
-    namespace smart = tags::ext::smart_ptr;
-
-    using variant = variant_traits_test::manual_variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>;
-
-    auto          shared = std::make_shared<std::uint64_t>(42U);
-    const variant first{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{shared}};
-    const variant second{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{shared}};
-
-    std::vector<std::byte>             buffer;
-    auto                               enc = tags::make_encoder<smart::shared_graph_codec>(buffer);
-    smart::shared_graph_encode_session encode_graph;
-
-    REQUIRE(enc(smart::as_shared_graph(encode_graph, first)));
-    REQUIRE(enc(smart::as_shared_graph(encode_graph, second)));
-    CHECK_EQ(to_hex(buffer), "d81c182ad81d00");
-
-    auto                               dec = tags::make_decoder<smart::shared_graph_codec>(buffer);
-    smart::shared_graph_decode_session decode_graph;
-    variant decoded_first{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{std::string{"first"}}};
-    variant decoded_second{std::variant<std::shared_ptr<std::uint64_t>, tags::static_tag<42>, std::string>{std::string{"second"}}};
-
-    REQUIRE(dec(smart::as_shared_graph(decode_graph, decoded_first)));
-    REQUIRE(dec(smart::as_shared_graph(decode_graph, decoded_second)));
-    REQUIRE(tags::detail::variant_index(decoded_first) == 0U);
-    REQUIRE(tags::detail::variant_index(decoded_second) == 0U);
-
-    const auto &first_ptr  = std::get<0>(decoded_first.storage);
-    const auto &second_ptr = std::get<0>(decoded_second.storage);
-    REQUIRE(static_cast<bool>(first_ptr));
-    REQUIRE(static_cast<bool>(second_ptr));
-    CHECK_EQ(*first_ptr, 42U);
-    CHECK(first_ptr.get() == second_ptr.get());
 }

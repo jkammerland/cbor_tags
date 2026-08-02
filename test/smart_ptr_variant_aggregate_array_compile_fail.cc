@@ -7,10 +7,15 @@
 #include <variant>
 #include <vector>
 
+struct record {
+    std::uint64_t first{};
+    std::uint64_t second{};
+};
+
 int main() {
     std::vector<std::byte> bytes;
     auto                   dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::unique_ptr_codec>(bytes);
 
-    std::variant<std::unique_ptr<std::vector<std::uint64_t>>, std::vector<std::uint64_t>> decoded;
+    std::variant<std::unique_ptr<record>, std::vector<std::uint64_t>> decoded;
     return dec(decoded).has_value() ? 0 : 1;
 }

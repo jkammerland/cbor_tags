@@ -7,6 +7,7 @@
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_pointer_traits.h"
+#include "cbor_tags/detail/smart_ptr_traits.h"
 #include "cbor_tags/detail/text_format.h"
 #include "cbor_tags/detail/type_name.h"
 #include "cbor_tags/extensions/cddl_traits.h"
@@ -322,17 +323,25 @@ template <typename T> constexpr auto getName() {
     } else {
         if constexpr (IsOptional<T>) {
             using value_type = typename T::value_type;
-            auto name        = getName<value_type>();
+            static_assert(!ext::smart_ptr::detail::has_pointer_null_wire_v<true, true, value_type>,
+                          "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
+            auto name = getName<value_type>();
             return std::string(name) + " / null";
-        } else if constexpr (detail::IsNullablePointer<T>) {
-            using element_type = detail::nullable_pointer_element_t<T>;
-            static_assert(detail::is_supported_nullable_pointer_v<T>,
-                          "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or "
-                          "std::shared_ptr<T>, and T must be non-const, non-void, and non-array");
+        } else if constexpr (detail::IsSmartPointer<T>) {
+            using element_type = detail::smart_pointer_element_t<T>;
+            static_assert(detail::is_supported_smart_pointer_v<T>,
+                          "CDDL smart pointer support requires a structurally compatible unique or shared pointer, and T must be "
+                          "non-const, non-void, and non-array");
             static_assert(std::default_initializable<element_type>,
-                          "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
+                          "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
             auto name = getName<element_type>();
-            return std::string("[0] / [1, ") + std::string(name) + "]";
+            if constexpr (detail::IsSharedPointer<T>) {
+                return "null / #6.28(" + std::string(name) + ") / #6.29(uint)";
+            } else {
+                static_assert(!detail::has_known_null_wire_v<element_type>,
+                              "CDDL unique pointer cannot use T when T also has a CBOR null state");
+                return std::string(name) + " / null";
+            }
         } else if constexpr (IsVariant<T>) {
             return getVariantNames<T>();
         } else {
@@ -379,12 +388,6 @@ std::string cddl_named_map_expr(CDDLContext &context, CDDLOptions options);
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_named_group_expr(CDDLContext &context, CDDLOptions options);
 
-template <typename T>
-concept CDDLScopedType = requires {
-    typename cddl_scope_traits<std::remove_cvref_t<T>>::value_type;
-    { cddl_scope_traits<std::remove_cvref_t<T>>::shared_pointer_mode } -> std::convertible_to<cddl_shared_pointer_mode>;
-};
-
 template <typename... Ts> struct cddl_seen_types {};
 
 template <typename T, typename Seen> struct cddl_seen_contains;
@@ -400,80 +403,52 @@ template <typename... Seen, typename T> struct cddl_seen_append<cddl_seen_types<
 
 template <typename Seen, typename T> using cddl_seen_append_t = typename cddl_seen_append<Seen, T>::type;
 
-template <typename T, typename Seen = cddl_seen_types<>> consteval bool cddl_contains_nullable_pointer();
+template <typename T, typename Seen = cddl_seen_types<>> consteval bool cddl_contains_smart_pointer();
 
-template <typename Tuple, typename Seen, std::size_t... Is>
-consteval bool cddl_tuple_contains_nullable_pointer(std::index_sequence<Is...>) {
-    return (cddl_contains_nullable_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
+template <typename Tuple, typename Seen, std::size_t... Is> consteval bool cddl_tuple_contains_smart_pointer(std::index_sequence<Is...>) {
+    return (cddl_contains_smart_pointer<std::tuple_element_t<Is, Tuple>, Seen>() || ...);
 }
 
-template <typename T> consteval bool cddl_scoped_type_contains_nullable_pointer() {
-    // Scope wrappers are root-only. Treat nested wrappers as opaque here; rendering
-    // produces the user-facing diagnostic.
-    return false;
-}
-
-template <typename T, typename Seen> consteval bool cddl_contains_nullable_pointer() {
+template <typename T, typename Seen> consteval bool cddl_contains_smart_pointer() {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsNullablePointer<value_type>) {
+    if constexpr (IsSmartPointer<value_type>) {
         return true;
     } else if constexpr (cddl_seen_contains<value_type, Seen>::value) {
         return false;
     } else {
         using next_seen = cddl_seen_append_t<Seen, value_type>;
-        if constexpr (CDDLScopedType<value_type>) {
-            return cddl_scoped_type_contains_nullable_pointer<value_type>();
-        } else if constexpr (CDDLHomogeneousArray<value_type>) {
+        if constexpr (CDDLHomogeneousArray<value_type>) {
             using traits = cddl_homogeneous_array_traits<value_type>;
-            return cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
+            return cddl_contains_smart_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
             using traits = cddl_multi_dimensional_array_traits<value_type>;
-            return cddl_contains_nullable_pointer<typename traits::dimensions_type, next_seen>() ||
-                   cddl_contains_nullable_pointer<typename traits::array_type, next_seen>();
+            return cddl_contains_smart_pointer<typename traits::dimensions_type, next_seen>() ||
+                   cddl_contains_smart_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (IsAnyBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
                              (IsArray<value_type> && !IsIndefiniteWrapper<value_type>)) {
-            return cddl_contains_nullable_pointer<typename value_type::value_type, next_seen>();
+            return cddl_contains_smart_pointer<typename value_type::value_type, next_seen>();
         } else if constexpr (IsVariant<value_type>) {
             return detail::with_variant_alternatives<value_type>(
-                []<typename... Ts>() { return (cddl_contains_nullable_pointer<Ts, next_seen>() || ...); });
+                []<typename... Ts>() { return (cddl_contains_smart_pointer<Ts, next_seen>() || ...); });
         } else if constexpr (IsNamedMapWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_map_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<named_map_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedGroupWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_group_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<named_group_value_t<value_type>, next_seen>();
         } else if constexpr (IsNamedExtensionWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<named_extension_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<named_extension_value_t<value_type>, next_seen>();
         } else if constexpr (IsIndefiniteWrapper<value_type>) {
-            return cddl_contains_nullable_pointer<indefinite_value_t<value_type>, next_seen>();
+            return cddl_contains_smart_pointer<indefinite_value_t<value_type>, next_seen>();
         } else if constexpr (IsMapRangeWrapper<value_type> || IsMap<value_type>) {
-            return cddl_contains_nullable_pointer<typename value_type::key_type, next_seen>() ||
-                   cddl_contains_nullable_pointer<typename value_type::mapped_type, next_seen>();
+            return cddl_contains_smart_pointer<typename value_type::key_type, next_seen>() ||
+                   cddl_contains_smart_pointer<typename value_type::mapped_type, next_seen>();
         } else if constexpr (IsTuple<value_type>) {
-            return cddl_tuple_contains_nullable_pointer<value_type, next_seen>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
+            return cddl_tuple_contains_smart_pointer<value_type, next_seen>(std::make_index_sequence<std::tuple_size_v<value_type>>{});
         } else if constexpr (IsAggregate<value_type>) {
             using tuple_type = aggregate_tuple_t<value_type>;
-            return cddl_tuple_contains_nullable_pointer<tuple_type, next_seen>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
+            return cddl_tuple_contains_smart_pointer<tuple_type, next_seen>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
         } else {
             return false;
         }
-    }
-}
-
-template <typename T> consteval std::size_t cddl_nullable_pointer_alternative_count() {
-    using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsVariant<value_type>) {
-        return detail::with_variant_alternatives<value_type>(
-            []<typename... Ts>() { return (std::size_t{0} + ... + cddl_nullable_pointer_alternative_count<Ts>()); });
-    } else {
-        return cddl_contains_nullable_pointer<value_type>() ? std::size_t{1} : std::size_t{0};
-    }
-}
-
-template <typename T> consteval bool cddl_contains_unsupported_shared_graph_variant_pointer() {
-    using value_type = std::remove_cvref_t<T>;
-    if constexpr (cddl_is_direct_nullable_pointer_alternative<value_type>() || cddl_is_shared_graph_vector_alternative<value_type>()) {
-        return false;
-    } else {
-        return cddl_contains_nullable_pointer<value_type>();
     }
 }
 
@@ -520,7 +495,7 @@ inline std::string sanitize_cddl_id(std::string_view raw) {
 
 template <cddl_shared_pointer_mode PointerMode> constexpr std::string_view cddl_scope_key_prefix() {
     if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
-        return "__cddl_shared_graph:";
+        return "__cddl_shared_ptr:";
     } else {
         return "";
     }
@@ -1311,10 +1286,7 @@ std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, st
 
 template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (CDDLScopedType<value_type>) {
-        static_assert(always_false<value_type>::value, "CDDL scope wrappers are only valid as cddl_schema_to roots");
-        return {};
-    } else if constexpr (IsDynamicBoundedSizeWrapper<value_type>) {
+    if constexpr (IsDynamicBoundedSizeWrapper<value_type>) {
         static_assert(always_false<value_type>::value,
                       "dynamic_bounded_size cannot be represented by type-based CDDL; use bounded_size<T, Min, Max>");
         return {};
@@ -1347,19 +1319,24 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     } else if constexpr (IsIndefiniteWrapper<value_type>) {
         return cddl_type_expr<indefinite_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsOptional<value_type>) {
+        static_assert(!ext::smart_ptr::detail::has_pointer_null_wire_v<true, true, typename value_type::value_type>,
+                      "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
         return text::format("{} / null", cddl_type_expr<typename value_type::value_type, PointerMode>(context, options));
-    } else if constexpr (IsNullablePointer<value_type>) {
-        using element_type = nullable_pointer_element_t<value_type>;
-        static_assert(is_supported_nullable_pointer_v<value_type>,
-                      "CDDL nullable pointer support requires std::unique_ptr<T> with the default deleter or std::shared_ptr<T>, and "
-                      "T must be non-const, non-void, and non-array");
+    } else if constexpr (IsSmartPointer<value_type>) {
+        using element_type = smart_pointer_element_t<value_type>;
+        static_assert(is_supported_smart_pointer_v<value_type>,
+                      "CDDL smart pointer support requires a structurally compatible unique or shared pointer, and T must be "
+                      "non-const, non-void, and non-array");
         static_assert(std::default_initializable<element_type>,
-                      "CDDL nullable pointer support requires default-initializable pointee types because pointer decode constructs T");
-        if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph && is_std_shared_ptr<value_type>::value) {
-            return text::format("[0] / #6.28({}) / #6.29(uint)",
+                      "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
+        static_assert(ext::smart_ptr::detail::encodes_one_cbor_item<default_options, element_type>(),
+                      "CDDL smart pointer pointee must encode exactly one CBOR item");
+        if constexpr (IsSharedPointer<value_type>) {
+            return text::format("null / #6.28({}) / #6.29(uint)",
                                 parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
         } else {
-            return text::format("[0] / [1, {}]", parenthesize_choice(cddl_type_expr<element_type, PointerMode>(context, options)));
+            static_assert(!has_known_null_wire_v<element_type>, "CDDL unique pointer cannot use T when T also has a CBOR null state");
+            return text::format("{} / null", cddl_type_expr<element_type, PointerMode>(context, options));
         }
     } else if constexpr (CDDLTaggedByteStringArray<value_type>) {
         return cddl_tagged_bstr_array_expr<value_type>();
@@ -1376,25 +1353,9 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
                           "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported");
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                           "CDDL for variant alternatives with dynamic CBOR tags is unsupported");
-            if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
-                constexpr auto direct_pointer_alternatives =
-                    (std::size_t{0} + ... + (cddl_is_direct_nullable_pointer_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
-                constexpr auto graph_vector_alternatives =
-                    (std::size_t{0} + ... + (cddl_is_shared_graph_vector_alternative<Ts>() ? std::size_t{1} : std::size_t{0}));
-                static_assert((!cddl_contains_unsupported_shared_graph_variant_pointer<Ts>() && ...),
-                              "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported");
-                static_assert(direct_pointer_alternatives <= 1U,
-                              "CDDL for variant alternatives containing multiple nullable smart pointers is unsupported");
-                static_assert(direct_pointer_alternatives == 0U || matching_major_types[MajorIndex::Array] == 0U,
-                              "CDDL for variant alternatives containing nullable smart pointers and array-shaped alternatives is "
-                              "unsupported");
-                static_assert(graph_vector_alternatives == 0U || matching_major_types[MajorIndex::Array] == 1U,
-                              "CDDL for variant alternatives containing shared graph vector smart pointers and other array-shaped "
-                              "alternatives is unsupported");
-            } else {
-                static_assert((!cddl_contains_nullable_pointer<Ts>() && ...),
-                              "CDDL for variant alternatives containing nullable smart pointers is unsupported because runtime variant "
-                              "decode is not extension-codec aware");
+            if constexpr ((cddl_contains_smart_pointer<Ts>() || ...)) {
+                static_assert(ext::smart_ptr::detail::pointer_variant_is_unambiguous<value_type>(),
+                              "CDDL pointer variant alternatives overlap on the CBOR wire");
             }
             return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(context, options)...}, " / ");
         });
@@ -1483,6 +1444,10 @@ template <typename T> std::string tag_marker_root_expr(CDDLContext &context, CDD
     return text::format("{}(any)", cddl_tag_prefix<std::remove_cvref_t<T>>());
 }
 
+template <typename OutputBuffer> void emit_cddl_root_definition(OutputBuffer &output_buffer, std::string_view definition) {
+    text::format_to(std::back_inserter(output_buffer), "{}", definition);
+}
+
 template <typename T, typename OutputBuffer, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 void cddl_schema_root_expr_to(OutputBuffer &output_buffer, CDDLContext &cddl_context, CDDLOptions options) {
     using value_type       = std::remove_cvref_t<T>;
@@ -1522,7 +1487,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         }
         (void)ensure_cddl_named_map_definition<named_value_type, PointerMode>(cddl_context, options, requested_root_name);
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-            text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+            emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         }
     } else if constexpr (IsNamedGroupWrapper<value_type>) {
         using named_value_type = named_group_value_t<value_type>;
@@ -1534,7 +1499,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         }
         (void)ensure_cddl_named_group_definition<named_value_type, PointerMode>(cddl_context, options, requested_root_name);
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-            text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+            emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         }
     } else if constexpr (IsEnum<value_type>) {
         if constexpr (cddl_enum_entry_count<value_type>() != 0) {
@@ -1547,7 +1512,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
                 }
                 (void)ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
                 if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-                    text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+                    emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
                 }
             } else {
                 cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
@@ -1565,14 +1530,15 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         const auto  root_name = ensure_cddl_definition<value_type, PointerMode>(cddl_context, options, requested_root_name);
         const auto *root_def  = cddl_context.find_by_key(root_key);
         if (root_def != nullptr) {
-            text::format_to(std::back_inserter(output_buffer), "{}", root_def->cddl);
+            emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         } else {
-            text::format_to(std::back_inserter(output_buffer), "{} = {}", root_name,
-                            cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
+            const auto definition = text::format("{} = {}", root_name, cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
+            emit_cddl_root_definition(output_buffer, definition);
         }
     } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
-        text::format_to(std::back_inserter(output_buffer), "{} = {}", root_rule_name<value_type>(options),
-                        tag_marker_root_expr<value_type>(cddl_context, options));
+        const auto definition =
+            text::format("{} = {}", root_rule_name<value_type>(options), tag_marker_root_expr<value_type>(cddl_context, options));
+        emit_cddl_root_definition(output_buffer, definition);
     } else {
         cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
     }
@@ -1607,12 +1573,7 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
     detail::reject_unavailable_cddl_array_field_labels(options);
 
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (detail::CDDLScopedType<value_type>) {
-        using traits = detail::cddl_scope_traits<value_type>;
-        return detail::cddl_schema_to_impl<typename traits::value_type, traits::shared_pointer_mode>(output_buffer, options, context);
-    } else {
-        return detail::cddl_schema_to_impl<value_type, detail::cddl_shared_pointer_mode::nullable>(output_buffer, options, context);
-    }
+    return detail::cddl_schema_to_impl<value_type, detail::cddl_shared_pointer_mode::nullable>(output_buffer, options, context);
 }
 
 template <typename CborBuffer, typename OutputBuffer>

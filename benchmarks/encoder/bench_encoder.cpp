@@ -221,7 +221,7 @@ template <typename Buffer> void run_encoding_benchmarks(ankerl::nanobench::Bench
     });
 }
 
-std::vector<std::shared_ptr<std::uint64_t>> make_shared_graph_values(std::size_t unique_count, std::size_t repeat_count) {
+std::vector<std::shared_ptr<std::uint64_t>> make_shared_ptr_values(std::size_t unique_count, std::size_t repeat_count) {
     std::vector<std::shared_ptr<std::uint64_t>> unique_values;
     unique_values.reserve(unique_count);
     for (std::size_t index = 0; index < unique_count; ++index) {
@@ -236,69 +236,26 @@ std::vector<std::shared_ptr<std::uint64_t>> make_shared_graph_values(std::size_t
     return values;
 }
 
-template <std::size_t UniqueCount> void run_shared_graph_encode_lookup_benchmarks_for_size(ankerl::nanobench::Bench &bench) {
-    const auto values = make_shared_graph_values(UniqueCount, 2U);
+template <std::size_t UniqueCount> void run_shared_ptr_encode_benchmarks_for_size(ankerl::nanobench::Bench &bench) {
+    const auto values = make_shared_ptr_values(UniqueCount, 2U);
 
-    bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map", UniqueCount), [&values]() {
+    bench.run(fmt::format("shared_ptr encode {} unique x2", UniqueCount), [&values]() {
         std::vector<std::uint8_t> data;
         data.reserve(values.size() * 8U);
 
-        auto                        enc = make_encoder<shared_graph_codec>(data);
-        shared_graph_encode_session graph{shared_graph_encode_lookup::unordered_map};
-        auto                        result = enc(as_shared_graph(graph, values));
-
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(data);
-    });
-
-    shared_graph_encode_session reserved_unordered_graph{shared_graph_encode_lookup::unordered_map};
-    reserved_unordered_graph.reserve_unique(UniqueCount);
-
-    bench.run(fmt::format("shared_graph encode {} unique x2 unordered_map_reserved", UniqueCount), [&values, &reserved_unordered_graph]() {
-        std::vector<std::uint8_t> data;
-        data.reserve(values.size() * 8U);
-
-        auto enc = make_encoder<shared_graph_codec>(data);
-        reserved_unordered_graph.reset();
-        auto result = enc(as_shared_graph(reserved_unordered_graph, values));
-
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(data);
-    });
-
-    bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n", UniqueCount), [&values]() {
-        std::vector<std::uint8_t> data;
-        data.reserve(values.size() * 8U);
-
-        auto                        enc = make_encoder<shared_graph_codec>(data);
-        shared_graph_encode_session graph{shared_graph_encode_lookup::linear_scan};
-        auto                        result = enc(as_shared_graph(graph, values));
-
-        ankerl::nanobench::doNotOptimizeAway(result);
-        ankerl::nanobench::doNotOptimizeAway(data);
-    });
-
-    shared_graph_encode_session reserved_linear_graph{shared_graph_encode_lookup::linear_scan};
-    reserved_linear_graph.reserve_unique(UniqueCount);
-
-    bench.run(fmt::format("shared_graph encode {} unique x2 vector_scan_o_n_reserved", UniqueCount), [&values, &reserved_linear_graph]() {
-        std::vector<std::uint8_t> data;
-        data.reserve(values.size() * 8U);
-
-        auto enc = make_encoder<shared_graph_codec>(data);
-        reserved_linear_graph.reset();
-        auto result = enc(as_shared_graph(reserved_linear_graph, values));
+        auto enc    = make_encoder<shared_ptr_codec>(data);
+        auto result = enc(values);
 
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(data);
     });
 }
 
-void run_shared_graph_encode_lookup_benchmarks(ankerl::nanobench::Bench &bench) {
-    run_shared_graph_encode_lookup_benchmarks_for_size<4U>(bench);
-    run_shared_graph_encode_lookup_benchmarks_for_size<16U>(bench);
-    run_shared_graph_encode_lookup_benchmarks_for_size<64U>(bench);
-    run_shared_graph_encode_lookup_benchmarks_for_size<256U>(bench);
+void run_shared_ptr_encode_benchmarks(ankerl::nanobench::Bench &bench) {
+    run_shared_ptr_encode_benchmarks_for_size<4U>(bench);
+    run_shared_ptr_encode_benchmarks_for_size<16U>(bench);
+    run_shared_ptr_encode_benchmarks_for_size<64U>(bench);
+    run_shared_ptr_encode_benchmarks_for_size<256U>(bench);
 }
 
 template <typename ContainerType> void run_benchmark() {
@@ -324,13 +281,13 @@ TEST_CASE("Shared graph encode lookup benchmarks") {
     ankerl::nanobench::Bench bench;
     benchmark_options        options;
 
-    bench.title("shared_graph encode lookup");
+    bench.title("shared_ptr encode");
     bench.minEpochIterations(20);
     bench.unit(options.unit.data());
     bench.performanceCounters(true);
     bench.relative(options.relative);
 
-    run_shared_graph_encode_lookup_benchmarks(bench);
+    run_shared_ptr_encode_benchmarks(bench);
 }
 
 // Main function to run tests and benchmarks

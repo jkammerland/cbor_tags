@@ -3,17 +3,16 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/detail/smart_ptr_traits.h"
-#include "cbor_tags/extensions/cddl_traits.h"
 
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -22,641 +21,699 @@
 
 namespace cbor::tags::ext::smart_ptr {
 
-class shared_graph_encode_session;
-class shared_graph_decode_session;
+template <typename T>
+concept IsSmartPointer = detail::SmartPointer<T>;
 
-enum class shared_graph_encode_lookup { unordered_map, linear_scan };
+template <typename T>
+concept IsUniquePointer = detail::UniquePointer<T>;
 
-template <typename T> struct shared_graph_encode_root;
-template <typename T> struct shared_graph_decode_root;
+template <typename T>
+concept IsSharedPointer = detail::SharedPointer<T>;
 
-template <typename T> struct shared_graph_cddl {
-    using value_type = std::remove_cvref_t<T>;
+enum class shared_ptr_entry_state : std::uint8_t { encoding, complete };
+enum class shared_ptr_observation_kind : std::uint8_t { first, reference };
+
+struct shared_ptr_observation {
+    shared_ptr_observation_kind kind{};
+    std::size_t                 index{};
 };
 
-template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &session, const T &value);
-template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value);
+struct shared_ptr_encode_key {
+    const void *target{};
+    const void *pointer_type{};
 
-template <typename T> struct shared_graph_encode_root {
-    shared_graph_encode_session &session;
-    const T                     &value;
+    bool operator==(const shared_ptr_encode_key &) const = default;
+};
+
+struct shared_ptr_decode_entry {
+    std::shared_ptr<void>  pointer{};
+    const void            *pointer_type{};
+    shared_ptr_entry_state state{shared_ptr_entry_state::encoding};
+};
+
+template <typename Scope>
+concept SharedPtrEncodeScope = requires(Scope &scope, const shared_ptr_encode_key &key, std::size_t index) {
+    { scope.observe(key) } -> std::same_as<expected<shared_ptr_observation, status_code>>;
+    { scope.observe_untracked() } -> std::same_as<expected<void, status_code>>;
+    { scope.mark_complete(index) } -> std::same_as<void>;
+    { scope.reset() } -> std::same_as<void>;
+};
+
+template <typename Scope>
+concept SharedPtrDecodeScope = requires(Scope &scope, const shared_ptr_decode_entry &entry, std::size_t index) {
+    { scope.insert(entry) } -> std::same_as<expected<std::size_t, status_code>>;
+    { scope.insert_untracked() } -> std::same_as<expected<void, status_code>>;
+    { scope.resolve(index) } -> std::same_as<expected<shared_ptr_decode_entry, status_code>>;
+    { scope.mark_complete(index) } -> std::same_as<void>;
+    { scope.reset() } -> std::same_as<void>;
+};
+
+class shared_ptr_encode_scope {
+  private:
+    struct key_hash {
+        [[nodiscard]] std::size_t operator()(const shared_ptr_encode_key &key) const noexcept {
+            const auto target_hash = std::hash<const void *>{}(key.target);
+            const auto type_hash   = std::hash<const void *>{}(key.pointer_type);
+            return target_hash ^ (type_hash + 0x9e3779b9U + (target_hash << 6U) + (target_hash >> 2U));
+        }
+    };
+
+    struct entry {
+        shared_ptr_encode_key  key{};
+        shared_ptr_entry_state state{shared_ptr_entry_state::encoding};
+    };
+
+  public:
+    [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) {
+        if (const auto found = lookup_.find(key); found != lookup_.end()) {
+            const auto &existing = entries_[found->second];
+            if (existing.state != shared_ptr_entry_state::complete) {
+                return unexpected<status_code>{status_code::error};
+            }
+            return shared_ptr_observation{.kind = shared_ptr_observation_kind::reference, .index = found->second};
+        }
+
+        const auto index = entries_.size();
+        entries_.push_back(entry{.key = key, .state = shared_ptr_entry_state::encoding});
+        try {
+            lookup_.emplace(key, index);
+        } catch (...) {
+            entries_.pop_back();
+            throw;
+        }
+        return shared_ptr_observation{.kind = shared_ptr_observation_kind::first, .index = index};
+    }
+
+    [[nodiscard]] expected<void, status_code> observe_untracked() {
+        entries_.push_back({});
+        return {};
+    }
+
+    void mark_complete(std::size_t index) {
+        if (index < entries_.size()) {
+            entries_[index].state = shared_ptr_entry_state::complete;
+        }
+    }
+
+    void reset() {
+        entries_.clear();
+        lookup_.clear();
+    }
+
+    void reserve(std::size_t count) {
+        entries_.reserve(count);
+        lookup_.reserve(count);
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
 
   private:
-    shared_graph_encode_root(shared_graph_encode_session &session_, const T &value_) : session(session_), value(value_) {}
-
-    friend shared_graph_encode_root<T> as_shared_graph<T>(shared_graph_encode_session &, const T &);
+    std::vector<entry>                                               entries_{};
+    std::unordered_map<shared_ptr_encode_key, std::size_t, key_hash> lookup_{};
 };
 
-template <typename T> struct shared_graph_decode_root {
-    shared_graph_decode_session &session;
-    T                           &value;
+class shared_ptr_decode_scope {
+  public:
+    [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) {
+        const auto index = entries_.size();
+        entries_.push_back(entry);
+        return index;
+    }
+
+    [[nodiscard]] expected<void, status_code> insert_untracked() {
+        entries_.push_back({});
+        return {};
+    }
+
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) {
+        if (index >= entries_.size()) {
+            return unexpected<status_code>{status_code::error};
+        }
+        return entries_[index];
+    }
+
+    void mark_complete(std::size_t index) {
+        if (index < entries_.size()) {
+            entries_[index].state = shared_ptr_entry_state::complete;
+        }
+    }
+
+    void reset() { entries_.clear(); }
+    void reserve(std::size_t count) { entries_.reserve(count); }
+
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
 
   private:
-    shared_graph_decode_root(shared_graph_decode_session &session_, T &value_) : session(session_), value(value_) {}
-
-    friend shared_graph_decode_root<T> as_shared_graph<T>(shared_graph_decode_session &, T &);
+    std::vector<shared_ptr_decode_entry> entries_{};
 };
 
-template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &session, const T &value) {
-    return shared_graph_encode_root<T>{session, value};
-}
+static_assert(SharedPtrEncodeScope<shared_ptr_encode_scope>);
+static_assert(SharedPtrDecodeScope<shared_ptr_decode_scope>);
 
-template <typename T> shared_graph_encode_root<T> as_shared_graph(shared_graph_encode_session &, const T &&) = delete;
+template <IsSharedPointer Pointer> class scoped_shared_ptr {
+  public:
+    using pointer_type = std::remove_cvref_t<Pointer>;
+    using element_type = typename pointer_type::element_type;
 
-template <typename T> shared_graph_decode_root<T> as_shared_graph(shared_graph_decode_session &session, T &value) {
-    return shared_graph_decode_root<T>{session, value};
+    scoped_shared_ptr()
+        requires std::default_initializable<pointer_type>
+    = default;
+
+    explicit scoped_shared_ptr(pointer_type pointer) : pointer_(std::move(pointer)) {}
+
+    [[nodiscard]] element_type *get() const noexcept(noexcept(pointer_.get())) { return pointer_.get(); }
+    [[nodiscard]] element_type &operator*() const noexcept(noexcept(*pointer_)) { return *pointer_; }
+    explicit operator bool() const noexcept(noexcept(static_cast<bool>(pointer_))) { return static_cast<bool>(pointer_); }
+
+    void reset() noexcept(noexcept(pointer_.reset())) { pointer_.reset(); }
+    void reset(element_type *raw) noexcept(noexcept(pointer_.reset(raw))) { pointer_.reset(raw); }
+
+    [[nodiscard]] pointer_type       &value()       &noexcept { return pointer_; }
+    [[nodiscard]] const pointer_type &value() const & noexcept { return pointer_; }
+    [[nodiscard]] pointer_type      &&value()      &&noexcept { return std::move(pointer_); }
+
+  private:
+    pointer_type pointer_;
+};
+
+template <IsSharedPointer Pointer>
+[[nodiscard]] auto as_scoped_shared_ptr(Pointer pointer) -> scoped_shared_ptr<std::remove_cvref_t<Pointer>> {
+    return scoped_shared_ptr<std::remove_cvref_t<Pointer>>{std::move(pointer)};
 }
 
 namespace detail {
 
-template <typename T> inline constexpr char graph_type_token{};
+class encode_scope_ref {
+  public:
+    template <SharedPtrEncodeScope Scope>
+    explicit encode_scope_ref(Scope &scope)
+        : scope_(std::addressof(scope)),
+          observe_([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Scope *>(raw)->observe(key); }),
+          observe_untracked_([](void *raw) { return static_cast<Scope *>(raw)->observe_untracked(); }),
+          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
 
-template <typename T> constexpr const void *graph_type_id() noexcept { return &graph_type_token<std::remove_cvref_t<T>>; }
-
-template <typename Encoder, typename Pointer> void encode_nullable_pointer(Encoder &enc, const Pointer &value) {
-    if (!value) {
-        enc.encode(as_array{1});
-        enc.encode(std::uint64_t{0});
-        return;
+    [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
+        return observe_(scope_, key);
     }
+    [[nodiscard]] expected<void, status_code> observe_untracked() const { return observe_untracked_(scope_); }
+    void                                      mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
+    void                                      reset() const { reset_(scope_); }
 
-    enc.encode(as_array{2});
-    enc.encode(std::uint64_t{1});
-    enc.encode(*value);
+  private:
+    void *scope_{};
+    expected<shared_ptr_observation, status_code> (*observe_)(void *, const shared_ptr_encode_key &){};
+    expected<void, status_code> (*observe_untracked_)(void *){};
+    void (*mark_complete_)(void *, std::size_t){};
+    void (*reset_)(void *){};
+};
+
+class decode_scope_ref {
+  public:
+    template <SharedPtrDecodeScope Scope>
+    explicit decode_scope_ref(Scope &scope)
+        : scope_(std::addressof(scope)),
+          insert_([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Scope *>(raw)->insert(entry); }),
+          insert_untracked_([](void *raw) { return static_cast<Scope *>(raw)->insert_untracked(); }),
+          resolve_([](void *raw, std::size_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
+          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+
+    [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
+    [[nodiscard]] expected<void, status_code>        insert_untracked() const { return insert_untracked_(scope_); }
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) const { return resolve_(scope_, index); }
+    void                                                         mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
+    void                                                         reset() const { reset_(scope_); }
+
+  private:
+    void *scope_{};
+    expected<std::size_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
+    expected<void, status_code> (*insert_untracked_)(void *){};
+    expected<shared_ptr_decode_entry, status_code> (*resolve_)(void *, std::size_t){};
+    void (*mark_complete_)(void *, std::size_t){};
+    void (*reset_)(void *){};
+};
+
+template <typename Self>
+concept EncoderSelf = requires(Self &self, std::uint64_t value, typename Self::byte_type byte) { self.encode_major_and_size(value, byte); };
+
+template <typename Self>
+concept DecoderSelf = !EncoderSelf<Self>;
+
+template <typename Codec, typename T>
+concept CodecDecodesWithMajor = requires(Codec &codec, T &value, major_type major, std::byte additional_info) {
+    { codec.decode(value, major, additional_info) } -> std::same_as<status_code>;
+};
+
+template <typename T, typename Decoder> struct extension_decodes_with_major : std::false_type {};
+
+template <typename T, typename InputBuffer, typename Options, template <typename> typename... Decoders>
+struct extension_decodes_with_major<T, cbor::tags::decoder<InputBuffer, Options, Decoders...>> {
+    using decoder_type = cbor::tags::decoder<InputBuffer, Options, Decoders...>;
+
+    static constexpr bool value = (CodecDecodesWithMajor<Decoders<decoder_type>, T> || ...);
+};
+
+template <typename T, typename Decoder>
+inline constexpr bool extension_decodes_with_major_v =
+    extension_decodes_with_major<std::remove_cvref_t<T>, std::remove_cvref_t<Decoder>>::value;
+
+template <typename Decoder, typename T>
+[[nodiscard]] status_code decode_transparent_value(Decoder &dec, T &value, major_type major, std::byte additional_info) {
+    static_assert(encodes_one_cbor_item<typename Decoder::options, T>(), "smart pointer pointee must encode exactly one CBOR item");
+
+    if constexpr (IsClassWithDecodingOverload<Decoder, T> || extension_decodes_with_major_v<T, Decoder>) {
+        return dec.decode(value, major, additional_info);
+    } else if constexpr (IsTag<T>) {
+        if (major != major_type::Tag) {
+            return status_code::no_match_for_tag_on_buffer;
+        }
+
+        std::uint64_t tag{};
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, tag);
+        return status == status_code::success ? dec.decode(value, tag) : status;
+    } else if constexpr (IsAggregate<T> || IsUntaggedTuple<T>) {
+        auto &&tuple = [&]() -> decltype(auto) {
+            if constexpr (IsAggregate<T>) {
+                return to_tuple(value);
+            } else {
+                return (value);
+            }
+        }();
+        using tuple_type             = std::remove_cvref_t<decltype(tuple)>;
+        constexpr auto element_count = std::tuple_size_v<tuple_type>;
+        constexpr bool wrapped_group = element_count > 1U && Decoder::options::wrap_groups;
+
+        auto result = status_code::success;
+        if constexpr (wrapped_group) {
+            std::uint64_t encoded_count{};
+            result = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, encoded_count);
+            if (result != status_code::success) {
+                return result;
+            }
+            if (encoded_count != element_count) {
+                return status_code::unexpected_group_size;
+            }
+            std::apply([&](auto &...members) { ((result == status_code::success ? result = dec.decode(members) : result), ...); }, tuple);
+        } else {
+            result = dec.decode(std::get<0>(tuple), major, additional_info);
+        }
+        return result;
+    } else {
+        return dec.decode(value, major, additional_info);
+    }
 }
 
-template <typename Decoder, NullablePointerValue T>
-[[nodiscard]] status_code decode_nullable_pointer(Decoder &dec, std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
-    std::uint64_t size{};
-    auto          status = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, size);
-    if (status != status_code::success) {
-        return status;
+template <typename Pointer> void reset_pointer_to_new(Pointer &value) {
+    using element_type = pointer_element_t<Pointer>;
+    if constexpr (SharedPointer<Pointer> && std::constructible_from<std::remove_cvref_t<Pointer>, std::shared_ptr<element_type>>) {
+        // Establish ownership before converting to the structural pointer.
+        // shared_ptr(raw) deletes raw if its control-block allocation fails.
+        auto allocation = std::shared_ptr<element_type>{new element_type{}};
+        value           = std::remove_cvref_t<Pointer>{std::move(allocation)};
+    } else {
+        auto  allocation = std::make_unique<element_type>();
+        auto *raw        = allocation.release();
+        value.reset(raw);
     }
-    if (size != 1U && size != 2U) {
-        return status_code::unexpected_group_size;
-    }
+}
 
-    std::uint64_t kind{};
-    status = dec.decode(kind);
-    if (status != status_code::success) {
-        return status;
-    }
+template <typename Decoder, UniquePointer Pointer>
+[[nodiscard]] status_code decode_unique_pointer(Decoder &dec, Pointer &value, major_type major, std::byte additional_info) {
+    using element_type = pointer_element_t<Pointer>;
+    static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
 
-    if (kind == 0U) {
-        if (size != 1U) {
-            return status_code::unexpected_group_size;
-        }
+    if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
         value.reset();
         return status_code::success;
     }
-    if (kind != 1U) {
-        return status_code::error;
-    }
-    if (size != 2U) {
-        return status_code::unexpected_group_size;
-    }
 
-    auto decoded = std::make_unique<T>();
-    status       = dec.decode(*decoded);
-    if (status == status_code::success) {
-        value = std::move(decoded);
-    }
-    return status;
+    reset_pointer_to_new(value);
+    return decode_transparent_value(dec, *value, major, additional_info);
 }
 
-template <typename Decoder, NullablePointerValue T>
-[[nodiscard]] status_code decode_nullable_pointer(Decoder &dec, std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
-    std::uint64_t size{};
-    auto          status = decode_definite_array_size(dec, major, additional_info, size);
-    if (status != status_code::success) {
-        return status;
-    }
-    if (size != 1U && size != 2U) {
-        return status_code::unexpected_group_size;
-    }
+template <typename Decoder, UniquePointer Pointer>
+[[nodiscard]] status_code decode_unique_pointer_tag(Decoder &dec, Pointer &value, std::uint64_t tag) {
+    using element_type = pointer_element_t<Pointer>;
+    static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
 
-    std::uint64_t kind{};
-    status = dec.decode(kind);
-    if (status != status_code::success) {
-        return status;
+    if constexpr (IsTag<element_type>) {
+        reset_pointer_to_new(value);
+        return dec.decode(*value, tag);
+    } else {
+        (void)dec;
+        (void)value;
+        (void)tag;
+        return status_code::no_match_for_tag;
     }
+}
 
-    if (kind == 0U) {
-        if (size != 1U) {
-            return status_code::unexpected_group_size;
+template <typename Decoder, typename T> consteval bool unique_variant_alternative_supported() {
+    using type = std::remove_cvref_t<T>;
+
+    if constexpr (UniquePointer<type>) {
+        return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>> &&
+               !known_null_wire_v<pointer_element_t<type>> && unique_variant_alternative_supported<Decoder, pointer_element_t<type>>();
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); });
+    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder>) {
+        return false;
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count > 1U) {
+            return Decoder::options::wrap_groups;
+        } else {
+            return unique_variant_alternative_supported<Decoder, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>();
         }
-        value.reset();
-        return status_code::success;
+    } else {
+        return IsCborMajor<type> || IsArray<type> || IsMap<type>;
     }
-    if (kind != 1U) {
-        return status_code::error;
-    }
-    if (size != 2U) {
-        return status_code::unexpected_group_size;
-    }
-
-    auto decoded = std::make_shared<T>();
-    status       = dec.decode(*decoded);
-    if (status == status_code::success) {
-        value = std::move(decoded);
-    }
-    return status;
 }
 
-template <typename Decoder>
-[[nodiscard]] constexpr status_code decode_cached_tag_argument(Decoder &dec, std::byte additional_info,
-                                                               std::optional<std::uint64_t> &cached_tag, std::uint64_t &tag_value) {
-    if (!cached_tag.has_value()) {
+template <typename Decoder, bool CatchAllPass, typename T>
+[[nodiscard]] constexpr bool unique_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
+            return true;
+        }
+        return unique_variant_matches<Decoder, CatchAllPass, pointer_element_t<type>>(major, additional_info, tag);
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            [&]<typename... Ts>() { return (unique_variant_matches<Decoder, CatchAllPass, Ts>(major, additional_info, tag) || ...); });
+    } else if (major == major_type::Tag) {
+        if (!tag.has_value()) {
+            return false;
+        }
+        if constexpr (IsTagHeader<type>) {
+            return true;
+        } else if constexpr (IsTag<type>) {
+            return static_cast<std::uint64_t>(cbor::tags::detail::get_tag_from_any<type>()) == *tag;
+        } else {
+            return false;
+        }
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count > 1U && Decoder::options::wrap_groups) {
+            return major == major_type::Array;
+        } else if constexpr (item_count == 1U) {
+            return unique_variant_matches<Decoder, CatchAllPass, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>(
+                major, additional_info, tag);
+        } else {
+            return false;
+        }
+    } else {
+        if (!cbor::tags::detail::matches_major_dispatch<type>(major)) {
+            return false;
+        }
+        if (major == major_type::Simple) {
+            return cbor::tags::detail::matches_simple_dispatch<CatchAllPass, type>(additional_info);
+        }
+        return true;
+    }
+}
+
+template <typename Decoder, typename T>
+[[nodiscard]] status_code decode_unique_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
+                                                            std::optional<std::uint64_t> &tag) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        if (major == major_type::Tag) {
+            return decode_unique_pointer_tag(dec, value, *tag);
+        }
+        return decode_unique_pointer(dec, value, major, additional_info);
+    } else if constexpr (IsVariant<type>) {
+        return dec.decode_unique_pointer_variant_impl(value, major, additional_info, tag);
+    } else if constexpr (IsTag<type>) {
+        return dec.decode(value, *tag);
+    } else {
+        return dec.decode(value, major, additional_info);
+    }
+}
+
+template <typename Decoder, IsVariant Variant>
+[[nodiscard]] status_code decode_unique_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
+                                                        std::optional<std::uint64_t> &tag) {
+    using variant_type = std::remove_cvref_t<Variant>;
+
+    static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
+                      []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); }),
+                  "unique pointer variant alternatives must have codec-independent CBOR wire shapes; add an explicit codec for the "
+                  "whole variant");
+    static_assert(pointer_variant_is_unambiguous<variant_type, typename Decoder::options>(),
+                  "Pointer variant alternatives overlap on the CBOR wire; add an application tag or choose a different decode type");
+    static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
+                      []<typename... Ts>() { return (std::default_initializable<Ts> && ...); }),
+                  "unique pointer variant alternatives must be default-initializable");
+
+    if (major == major_type::Tag && !tag.has_value()) {
         std::uint64_t decoded_tag{};
-        auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, decoded_tag);
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, decoded_tag);
         if (status != status_code::success) {
             return status;
         }
-        cached_tag = decoded_tag;
+        tag = decoded_tag;
     }
-    tag_value = *cached_tag;
-    return status_code::success;
-}
 
-template <bool GraphTagsPossible, typename Self, IsVariant Variant>
-[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers_impl(Self &dec, Variant &value, major_type major,
-                                                                               std::byte                     additional_info,
-                                                                               std::optional<std::uint64_t> &tag) {
-    using variant_type = std::remove_cvref_t<Variant>;
+    status_code result   = status_code::no_match_in_variant_on_buffer;
+    bool        selected = false;
 
-    static_assert(
-        cbor::tags::detail::with_variant_alternatives<variant_type>([]<typename... Alternatives>() {
-            return ((IsCborMajor<Alternatives> || decodable_nullable_pointer_v<Alternatives> ||
-                     (GraphTagsPossible && decodable_shared_graph_vector_v<Alternatives>)) &&
-                    ...);
-        }),
-        "Variant alternatives must be core CBOR types, decodable nullable smart pointers, or shared graph vectors for this codec.");
-    static_assert(variant_decodable_nullable_pointer_count_v<variant_type> <= 1U,
-                  "Variant nullable smart pointer alternatives are ambiguous because they share the same [0] / [1, value] shape.");
-
-    using major_index           = cbor::tags::detail::MajorIndex;
-    constexpr auto core_mapping = valid_concept_mapping_array_v<variant_type>;
-    static_assert(variant_decodable_nullable_pointer_count_v<variant_type> == 0U || core_mapping[major_index::Array] == 0,
-                  "Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives.");
-    static_assert(variant_decodable_shared_graph_vector_count_v<variant_type> == 0U || core_mapping[major_index::Array] == 1U,
-                  "Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives.");
-    static_assert(!GraphTagsPossible || !variant_has_shared_graph_tag_collision_v<variant_type>,
-                  "Variant shared_ptr alternatives in a shared graph collide with tags 28/29 or a catch-all tag alternative.");
-    cbor::tags::detail::require_unambiguous_variant_dispatch_without_array<variant_type>();
-    static_assert(valid_concept_mapping_v<variant_type>,
-                  "Variant has ambiguous major types; only one alternative may match each core CBOR dispatch shape.");
-
-    bool                       saw_incomplete = false;
-    std::optional<status_code> pointer_error;
-
-    auto try_decode = [&dec, major, additional_info, &value, &tag, &saw_incomplete,
-                       &pointer_error]<bool CatchAllPass, std::size_t I>() -> bool {
-        using raw_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
-
-        if (pointer_error.has_value()) {
-            return false;
-        }
-
-        if constexpr (decodable_nullable_pointer_v<raw_type>) {
-            const auto pointer_major =
-                major == major_type::Array || (GraphTagsPossible && decodable_shared_pointer_v<raw_type> && major == major_type::Tag);
-            if (!pointer_major) {
-                return false;
-            }
-
-            raw_type    decoded_value{};
-            status_code result;
-            if constexpr (GraphTagsPossible) {
-                if constexpr (decodable_shared_pointer_v<raw_type>) {
-                    if (major == major_type::Tag) {
-                        std::uint64_t tag_value{};
-                        const auto    tag_status = decode_cached_tag_argument(dec, additional_info, tag, tag_value);
-                        if (tag_status != status_code::success) {
-                            if (tag_status == status_code::incomplete) {
-                                saw_incomplete = true;
-                            } else {
-                                pointer_error = tag_status;
-                            }
-                            return false;
-                        }
-                        if (tag_value != shareable_tag && tag_value != sharedref_tag) {
-                            return false;
-                        }
-                        result = dec.decode_shared_graph_pointer(decoded_value, tag_value);
-                    } else {
-                        result = dec.decode(decoded_value, major, additional_info);
-                    }
-                } else {
-                    result = dec.decode(decoded_value, major, additional_info);
+    auto select_pass = [&]<bool CatchAllPass>() {
+        cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
+            auto select = [&]<std::size_t I>() {
+                using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
+                if (selected || !unique_variant_matches<Decoder, CatchAllPass, alternative_type>(major, additional_info, tag)) {
+                    return;
                 }
-            } else {
-                result = dec.decode(decoded_value, major, additional_info);
-            }
-            if (result == status_code::success) {
-                cbor::tags::detail::variant_assign<I>(value, std::move(decoded_value));
-                return true;
-            }
-            if (result == status_code::incomplete) {
-                saw_incomplete = true;
-            } else {
-                pointer_error = result;
-            }
-            return false;
-        } else {
-            if (!cbor::tags::detail::matches_major_dispatch<raw_type>(major)) {
-                return false;
-            }
-            if (major == major_type::Simple && !cbor::tags::detail::matches_simple_dispatch<CatchAllPass, raw_type>(additional_info)) {
-                return false;
-            }
-
-            raw_type    decoded_value{};
-            status_code result;
-            if constexpr (IsVariant<raw_type>) {
-                result = decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, decoded_value, major, additional_info, tag);
-            } else if constexpr (IsTag<raw_type>) {
-                std::uint64_t tag_value{};
-                const auto    tag_status = decode_cached_tag_argument(dec, additional_info, tag, tag_value);
-                if (tag_status != status_code::success) {
-                    if (tag_status == status_code::incomplete) {
-                        saw_incomplete = true;
-                    } else {
-                        pointer_error = tag_status;
-                    }
-                    return false;
-                }
-                result = dec.decode(decoded_value, tag_value);
-            } else if constexpr (GraphTagsPossible) {
-                if constexpr (decodable_shared_graph_vector_v<raw_type>) {
-                    result = dec.decode_shared_graph_vector_variant_alternative(decoded_value, major, additional_info);
-                } else {
-                    result = dec.decode(decoded_value, major, additional_info);
-                }
-            } else {
-                result = dec.decode(decoded_value, major, additional_info);
-            }
-
-            if (result == status_code::success) {
-                cbor::tags::detail::variant_assign<I>(value, std::move(decoded_value));
-                return true;
-            }
-            if (result == status_code::incomplete) {
-                saw_incomplete = true;
-            } else if (!cbor::tags::detail::is_retriable_variant_mismatch(result) ||
-                       (GraphTagsPossible && decodable_shared_graph_vector_v<raw_type>)) {
-                pointer_error = result;
-            }
-            return false;
-        }
+                selected = true;
+                cbor::tags::detail::variant_assign<I>(value, alternative_type{});
+                auto &alternative = cbor::tags::detail::variant_get<I>(value);
+                result            = decode_unique_variant_alternative(dec, alternative, major, additional_info, tag);
+            };
+            (select.template operator()<Is>(), ...);
+        });
     };
 
-    auto try_decode_alternatives = [&]<bool CatchAllPass, std::size_t... Is>(std::index_sequence<Is...>) {
-        return (try_decode.template operator()<CatchAllPass, Is>() || ...);
-    };
+    select_pass.template operator()<false>();
+    if (!selected && major == major_type::Simple) {
+        select_pass.template operator()<true>();
+    }
 
-    bool found = false;
-    if (major == major_type::Simple) {
-        found = try_decode_alternatives.template operator()<false>(
-            std::make_index_sequence<cbor::tags::detail::variant_size_v<variant_type>>{});
-        if (!found) {
-            found = try_decode_alternatives.template operator()<true>(
-                std::make_index_sequence<cbor::tags::detail::variant_size_v<variant_type>>{});
-        }
-    } else {
-        found = try_decode_alternatives.template operator()<false>(
-            std::make_index_sequence<cbor::tags::detail::variant_size_v<variant_type>>{});
-    }
-    if (!found) {
-        if (pointer_error.has_value()) {
-            return *pointer_error;
-        }
-        if (saw_incomplete) {
-            return status_code::incomplete;
-        }
-        return status_code::no_match_in_variant_on_buffer;
-    }
-    return status_code::success;
+    return result;
 }
-
-template <bool GraphTagsPossible, typename Self, IsVariant Variant>
-[[nodiscard]] constexpr status_code decode_variant_with_nullable_pointers(Self &dec, Variant &value, major_type major,
-                                                                          std::byte additional_info) {
-    std::optional<std::uint64_t> tag;
-    return decode_variant_with_nullable_pointers_impl<GraphTagsPossible>(dec, value, major, additional_info, tag);
-}
-
-enum class graph_entry_state { encoding, complete };
-
-struct encoded_shared_object {
-    const void                 *address{};
-    std::uint64_t               id{};
-    const void                 *type{};
-    graph_entry_state           state{graph_entry_state::encoding};
-    std::shared_ptr<const void> keepalive{};
-};
-
-template <typename Session> class scoped_graph_session {
-  public:
-    scoped_graph_session(Session *&active, Session &next) : active_(active), previous_(active), session_(&next) {
-        if (previous_ != nullptr && previous_ != &next) {
-            throw std::runtime_error("nested shared graph sessions must use the same session object");
-        }
-        session_->begin_use();
-        active_ = &next;
-    }
-
-    scoped_graph_session(const scoped_graph_session &)            = delete;
-    scoped_graph_session &operator=(const scoped_graph_session &) = delete;
-
-    ~scoped_graph_session() {
-        active_ = previous_;
-        session_->end_use();
-    }
-
-  private:
-    Session *&active_;
-    Session  *previous_;
-    Session  *session_;
-};
 
 } // namespace detail
 
-class shared_graph_encode_session {
-  public:
-    explicit shared_graph_encode_session(shared_graph_encode_lookup lookup = shared_graph_encode_lookup::unordered_map) noexcept
-        : lookup_(lookup) {}
-
-    shared_graph_encode_session(const shared_graph_encode_session &)            = delete;
-    shared_graph_encode_session &operator=(const shared_graph_encode_session &) = delete;
-    shared_graph_encode_session(shared_graph_encode_session &&)                 = delete;
-    shared_graph_encode_session &operator=(shared_graph_encode_session &&)      = delete;
-
-    [[nodiscard]] shared_graph_encode_lookup lookup() const noexcept { return lookup_; }
-
-    void reserve_unique(std::size_t unique_count) {
-        if (active_depth_ != 0U) {
-            throw std::runtime_error("shared graph sessions cannot reserve while an encode operation is active");
-        }
-        encoded_shared_objects_.reserve(unique_count);
-        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
-            encoded_shared_ids_.reserve(unique_count);
-        }
-    }
-
-    void reset() {
-        if (active_depth_ != 0U) {
-            throw std::runtime_error("shared graph sessions cannot reset while an encode operation is active");
-        }
-        reset_unchecked();
-    }
-
-  private:
-    void reset_unchecked() {
-        encoded_shared_ids_.clear();
-        encoded_shared_objects_.clear();
-    }
-
-    std::vector<detail::encoded_shared_object>    encoded_shared_objects_{};
-    std::unordered_map<const void *, std::size_t> encoded_shared_ids_{};
-    shared_graph_encode_lookup                    lookup_{shared_graph_encode_lookup::unordered_map};
-    std::size_t                                   active_depth_{0};
-
-    void begin_use() { ++active_depth_; }
-    void end_use() { --active_depth_; }
-
-    [[nodiscard]] std::optional<std::size_t> find_encoded_index(const void *address) const {
-        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
-            if (const auto existing = encoded_shared_ids_.find(address); existing != encoded_shared_ids_.end()) {
-                return existing->second;
-            }
-            return std::nullopt;
-        }
-
-        for (std::size_t index = 0; index < encoded_shared_objects_.size(); ++index) {
-            if (encoded_shared_objects_[index].address == address) {
-                return index;
-            }
-        }
-        return std::nullopt;
-    }
-
-    void index_encoded_address(const void *address, std::size_t index) {
-        if (lookup_ == shared_graph_encode_lookup::unordered_map) {
-            encoded_shared_ids_.emplace(address, index);
-        }
-    }
-
-    template <typename Self> friend struct shared_graph_codec;
-    template <typename Session> friend class detail::scoped_graph_session;
-};
-
-class shared_graph_decode_session {
-  public:
-    shared_graph_decode_session() = default;
-
-    shared_graph_decode_session(const shared_graph_decode_session &)            = delete;
-    shared_graph_decode_session &operator=(const shared_graph_decode_session &) = delete;
-    shared_graph_decode_session(shared_graph_decode_session &&)                 = delete;
-    shared_graph_decode_session &operator=(shared_graph_decode_session &&)      = delete;
-
-    void reset() {
-        if (active_depth_ != 0U) {
-            throw std::runtime_error("shared graph sessions cannot reset while a decode operation is active");
-        }
-        reset_unchecked();
-    }
-
-  private:
-    void reset_unchecked() { decoded_shared_objects_.clear(); }
-
-    struct decoded_shared_object {
-        std::shared_ptr<void>     value{};
-        const void               *type{};
-        detail::graph_entry_state state{detail::graph_entry_state::encoding};
-    };
-
-    std::vector<decoded_shared_object> decoded_shared_objects_{};
-    std::size_t                        active_depth_{0};
-
-    void rollback_to(std::size_t checkpoint) { decoded_shared_objects_.resize(checkpoint); }
-
-    void begin_use() { ++active_depth_; }
-    void end_use() { --active_depth_; }
-
-    template <typename Self> friend struct shared_graph_codec;
-    template <typename Session> friend class detail::scoped_graph_session;
-};
-
-template <typename Self> struct nullable_ptr_codec : detail::nullable_ptr_codec_marker, cbor_codec_mixin_base<Self> {
+template <typename Self> struct unique_ptr_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <detail::NullablePointerValue T>
-        requires(!detail::has_shared_graph_codec_v<Self>)
-    void encode(const std::unique_ptr<T> &value) {
-        detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
+    template <IsUniquePointer Pointer> void encode(const Pointer &value) {
+        using element_type = detail::pointer_element_t<Pointer>;
+        static_assert(!detail::known_null_wire_v<element_type>, "unique pointer cannot encode a pointee that also has a CBOR null state");
+        static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
+                      "smart pointer pointee must encode exactly one CBOR item");
+        auto &enc = static_cast<Self &>(*this);
+        value ? enc.encode(*value) : enc.encode(nullptr);
     }
 
-    template <detail::NullablePointerValue T>
-        requires(!detail::has_shared_graph_codec_v<Self>)
-    void encode(const std::shared_ptr<T> &value) {
-        detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
+    template <IsUniquePointer Pointer>
+        requires std::default_initializable<detail::pointer_element_t<Pointer>>
+    [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
+        return detail::decode_unique_pointer(static_cast<Self &>(*this), value, major, additional_info);
     }
 
-    template <detail::NullablePointerValue T>
-        requires(std::default_initializable<T> && !detail::has_shared_graph_codec_v<Self>)
-    [[nodiscard]] status_code decode(std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
-        return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
+    template <typename T>
+        requires detail::has_pointer_null_wire_v<true, false, T>
+    void encode(const std::optional<T> &) {
+        static_assert(always_false<T>::value,
+                      "std::optional<T> cannot contain a unique pointer null state because both empty states use CBOR null");
     }
 
-    template <detail::NullablePointerValue T>
-        requires(std::default_initializable<T> && !detail::has_shared_graph_codec_v<Self>)
-    [[nodiscard]] status_code decode(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
-        return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
+    template <typename T>
+        requires detail::has_pointer_null_wire_v<true, false, T>
+    [[nodiscard]] status_code decode(std::optional<T> &, major_type, std::byte) {
+        static_assert(always_false<T>::value,
+                      "std::optional<T> cannot contain a unique pointer null state because both empty states use CBOR null");
+        return status_code::error;
     }
 
     template <IsVariant Variant>
-        requires(detail::variant_has_decodable_nullable_pointer_v<Variant> && !detail::has_shared_graph_codec_v<Self>)
+        requires(detail::contains_decodable_unique_pointer_v<Variant> && !detail::contains_shared_pointer_v<Variant>)
     [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
-        return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
+        std::optional<std::uint64_t> tag;
+        return detail::decode_unique_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
+    }
+
+    template <IsVariant Variant>
+    [[nodiscard]] status_code decode_unique_pointer_variant_impl(Variant &value, major_type major, std::byte additional_info,
+                                                                 std::optional<std::uint64_t> &tag) {
+        return detail::decode_unique_pointer_variant(static_cast<Self &>(*this), value, major, additional_info, tag);
     }
 };
 
-template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_marker, cbor_codec_mixin_base<Self> {
+template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
     using cbor_codec_mixin_base<Self>::decode;
     using cbor_codec_mixin_base<Self>::encode;
 
-    template <typename T> void encode(shared_graph_encode_root<T> root) {
-        detail::scoped_graph_session scope{active_encode_session_, root.session};
-        static_cast<Self &>(*this).encode(root.value);
+    template <SharedPtrEncodeScope Scope, typename S = Self>
+        requires detail::EncoderSelf<S>
+    void set_shared_ptr_scope(Scope &scope) {
+        external_encode_scope_.emplace(scope);
     }
 
-    template <typename T> [[nodiscard]] status_code decode(shared_graph_decode_root<T> root) {
-        detail::scoped_graph_session scope{active_decode_session_, root.session};
-        return static_cast<Self &>(*this).decode(root.value);
+    template <SharedPtrDecodeScope Scope, typename S = Self>
+        requires detail::DecoderSelf<S>
+    void set_shared_ptr_scope(Scope &scope) {
+        external_decode_scope_.emplace(scope);
     }
 
-    template <detail::NullablePointerValue T> void encode(const std::unique_ptr<T> &value) {
-        detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
+    template <typename S = Self>
+        requires detail::EncoderSelf<S>
+    void use_default_shared_ptr_scope() {
+        external_encode_scope_.reset();
     }
 
-    template <detail::NullablePointerValue T> void encode(const std::shared_ptr<T> &value) {
-        if (active_encode_session_ == nullptr) {
-            if constexpr (detail::has_nullable_ptr_codec_v<Self>) {
-                detail::encode_nullable_pointer(static_cast<Self &>(*this), value);
-                return;
-            } else {
-                throw std::runtime_error("shared_ptr graph encoding requires as_shared_graph(...)");
-            }
+    template <typename S = Self>
+        requires detail::DecoderSelf<S>
+    void use_default_shared_ptr_scope() {
+        external_decode_scope_.reset();
+    }
+
+    template <typename S = Self>
+        requires detail::EncoderSelf<S>
+    void reset_shared_ptr_scope() {
+        current_encode_scope().reset();
+    }
+
+    template <typename S = Self>
+        requires detail::DecoderSelf<S>
+    void reset_shared_ptr_scope() {
+        current_decode_scope().reset();
+    }
+
+    template <typename S = Self>
+        requires detail::EncoderSelf<S>
+    void observe_encoded_cbor_tag(std::uint64_t tag) {
+        if (tag != detail::shareable_tag) {
+            return;
         }
+        auto observed = current_encode_scope().observe_untracked();
+        if (!observed) {
+            throw cbor::tags::detail::encode_status_exception{observed.error()};
+        }
+    }
+
+    template <typename S = Self>
+        requires detail::DecoderSelf<S>
+    [[nodiscard]] status_code observe_decoded_cbor_tag(std::uint64_t tag) {
+        if (tag != detail::shareable_tag) {
+            return status_code::success;
+        }
+        auto inserted = current_decode_scope().insert_untracked();
+        return inserted ? status_code::success : inserted.error();
+    }
+
+    template <IsSharedPointer Pointer> void encode(const Pointer &value) { encode_shared_pointer(value); }
+
+    template <IsSharedPointer Pointer> void encode(const scoped_shared_ptr<Pointer> &value) { encode_shared_pointer(value.value()); }
+
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
+        return decode_shared_pointer(value, major, additional_info);
+    }
+
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode(scoped_shared_ptr<Pointer> &value, major_type major, std::byte additional_info) {
+        return decode_shared_pointer(value.value(), major, additional_info);
+    }
+
+    template <typename T>
+        requires(detail::has_pointer_null_wire_v<false, true, T> && !detail::has_pointer_null_wire_v<true, false, T>)
+    void encode(const std::optional<T> &) {
+        static_assert(always_false<T>::value,
+                      "std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
+    }
+
+    template <typename T>
+        requires(detail::has_pointer_null_wire_v<false, true, T> && !detail::has_pointer_null_wire_v<true, false, T>)
+    [[nodiscard]] status_code decode(std::optional<T> &, major_type, std::byte) {
+        static_assert(always_false<T>::value,
+                      "std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
+        return status_code::error;
+    }
+
+    template <IsVariant Variant>
+        requires detail::contains_shared_pointer_v<Variant>
+    void encode(const Variant &) {
+        static_assert(always_false<Variant>::value, "variants containing shared pointers require an explicit application codec");
+    }
+
+    template <IsVariant Variant>
+        requires detail::contains_shared_pointer_v<Variant>
+    [[nodiscard]] status_code decode(Variant &, major_type, std::byte) {
+        static_assert(always_false<Variant>::value, "variants containing shared pointers require an explicit application codec");
+        return status_code::error;
+    }
+
+  private:
+    template <IsSharedPointer Pointer> void encode_shared_pointer(const Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
+        using element_type = typename pointer_type::element_type;
+        static_assert(detail::encodes_one_cbor_item<typename Self::options, element_type>(),
+                      "smart pointer pointee must encode exactly one CBOR item");
 
         auto &enc = static_cast<Self &>(*this);
         if (!value) {
-            enc.encode(as_array{1});
-            enc.encode(std::uint64_t{0});
+            enc.encode(nullptr);
             return;
         }
 
-        auto       &session = *active_encode_session_;
-        const auto *address = static_cast<const void *>(value.get());
-        if (const auto existing = session.find_encoded_index(address)) {
-            auto &entry = session.encoded_shared_objects_[*existing];
-            if (entry.type != detail::graph_type_id<T>()) {
-                throw std::runtime_error("shared_ptr graph references must use one static pointer type per object");
-            }
-            if (entry.state == detail::graph_entry_state::encoding) {
-                throw std::runtime_error("shared_ptr graph cycles are unsupported");
-            }
-
+        auto scope = current_encode_scope();
+        auto observation =
+            scope.observe(shared_ptr_encode_key{static_cast<const void *>(value.get()), detail::graph_type_id<pointer_type>()});
+        if (!observation) {
+            throw cbor::tags::detail::encode_status_exception{observation.error()};
+        }
+        if (observation->kind == shared_ptr_observation_kind::reference) {
             enc.encode(static_tag<detail::sharedref_tag>{});
-            enc.encode(entry.id);
+            if (!std::in_range<std::uint64_t>(observation->index)) {
+                throw cbor::tags::detail::encode_status_exception{status_code::size_limit_exceeded};
+            }
+            enc.encode(static_cast<std::uint64_t>(observation->index));
             return;
         }
 
-        const auto id        = static_cast<std::uint64_t>(session.encoded_shared_objects_.size());
-        auto       keepalive = std::shared_ptr<const void>{value, static_cast<const void *>(value.get())};
-
-        session.encoded_shared_objects_.push_back(detail::encoded_shared_object{address, id, detail::graph_type_id<T>(),
-                                                                                detail::graph_entry_state::encoding, std::move(keepalive)});
-        try {
-            session.index_encoded_address(address, session.encoded_shared_objects_.size() - 1U);
-        } catch (...) {
-            session.encoded_shared_objects_.pop_back();
-            throw;
-        }
-
-        try {
-            enc.encode(static_tag<detail::shareable_tag>{});
-            enc.encode(*value);
-            session.encoded_shared_objects_[id].state = detail::graph_entry_state::complete;
-        } catch (...) {
-            session.reset_unchecked();
-            throw;
-        }
+        // observe() already reserved this tag 28 index.
+        enc.encode_major_and_size(detail::shareable_tag, static_cast<typename Self::byte_type>(0xC0));
+        enc.encode(*value);
+        scope.mark_complete(observation->index);
     }
 
-    template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode(std::unique_ptr<T> &value, major_type major, std::byte additional_info) {
-        return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
-    }
-
-    template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
-        if (active_decode_session_ == nullptr) {
-            if constexpr (detail::has_nullable_ptr_codec_v<Self>) {
-                return detail::decode_nullable_pointer(static_cast<Self &>(*this), value, major, additional_info);
-            } else {
-                return status_code::error;
-            }
-        }
-
-        auto &dec = static_cast<Self &>(*this);
-
-        if (major == major_type::Array) {
-            return decode_null(value, major, additional_info);
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode_shared_pointer(Pointer &value, major_type major, std::byte additional_info) {
+        if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
+            value.reset();
+            return status_code::success;
         }
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
         }
 
         std::uint64_t tag{};
-        auto          status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        // Tag 28 is registered by decode_shareable() with the pointer entry itself.
+        // Observing it here would also insert an untracked entry and shift every reference index.
+        const auto status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
         if (status != status_code::success) {
             return status;
-        }
-        return decode_shared_graph_pointer(value, tag);
-    }
-
-    template <IsVariant Variant>
-        requires(detail::variant_has_decodable_nullable_pointer_v<Variant> || detail::variant_has_decodable_shared_graph_vector_v<Variant>)
-    [[nodiscard]] status_code decode(Variant &value, major_type major, std::byte additional_info) {
-        if (active_decode_session_ == nullptr) {
-            if constexpr (detail::has_nullable_ptr_codec_v<Self> && detail::variant_has_decodable_nullable_pointer_v<Variant> &&
-                          !detail::variant_has_decodable_shared_graph_vector_v<Variant>) {
-                return detail::decode_variant_with_nullable_pointers<false>(static_cast<Self &>(*this), value, major, additional_info);
-            } else {
-                return status_code::error;
-            }
-        }
-        if constexpr (detail::variant_has_shared_graph_tag_collision_v<Variant>) {
-            return status_code::error;
-        } else {
-            return detail::decode_variant_with_nullable_pointers<true>(static_cast<Self &>(*this), value, major, additional_info);
-        }
-    }
-
-  private:
-    template <bool GraphTagsPossible, typename FriendSelf, IsVariant FriendVariant>
-    friend constexpr status_code detail::decode_variant_with_nullable_pointers_impl(FriendSelf &, FriendVariant &, major_type, std::byte,
-                                                                                    std::optional<std::uint64_t> &);
-
-    template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_shared_graph_pointer(std::shared_ptr<T> &value, std::uint64_t tag) {
-        if (active_decode_session_ == nullptr) {
-            return status_code::error;
         }
         if (tag == detail::shareable_tag) {
             return decode_shareable(value);
@@ -667,120 +724,82 @@ template <typename Self> struct shared_graph_codec : detail::shared_graph_codec_
         return status_code::no_match_for_tag;
     }
 
-    template <typename Vector>
-    [[nodiscard]] status_code decode_shared_graph_vector_variant_alternative(Vector &value, major_type major, std::byte additional_info) {
-        if (active_decode_session_ == nullptr) {
-            return status_code::error;
+    template <IsSharedPointer Pointer>
+        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
+    [[nodiscard]] status_code decode_shareable(Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
+        using element_type = typename pointer_type::element_type;
+
+        std::shared_ptr<void> stored;
+        if constexpr (std::constructible_from<pointer_type, std::shared_ptr<element_type>>) {
+            auto owner = std::make_shared<element_type>();
+            value      = pointer_type{owner};
+            stored     = std::move(owner);
+        } else {
+            detail::reset_pointer_to_new(value);
+            stored = std::make_shared<pointer_type>(value);
         }
 
-        auto      &session    = *active_decode_session_;
-        const auto checkpoint = session.decoded_shared_objects_.size();
-        try {
-            auto status = static_cast<Self &>(*this).decode(value, major, additional_info);
-            if (status != status_code::success) {
-                session.rollback_to(checkpoint);
-            }
-            return status;
-        } catch (...) {
-            session.rollback_to(checkpoint);
-            throw;
+        auto scope    = current_decode_scope();
+        auto inserted = scope.insert(
+            shared_ptr_decode_entry{std::move(stored), detail::graph_type_id<pointer_type>(), shared_ptr_entry_state::encoding});
+        if (!inserted) {
+            return inserted.error();
         }
-    }
 
-    template <detail::NullablePointerValue T>
-    [[nodiscard]] status_code decode_null(std::shared_ptr<T> &value, major_type major, std::byte additional_info) {
-        auto &dec = static_cast<Self &>(*this);
-
-        std::uint64_t size{};
-        auto          status = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, size);
+        const auto status = static_cast<Self &>(*this).decode(*value);
         if (status != status_code::success) {
             return status;
         }
-        if (size != 1U) {
-            return status_code::unexpected_group_size;
-        }
-
-        std::uint64_t kind{};
-        status = dec.decode(kind);
-        if (status != status_code::success) {
-            return status;
-        }
-        if (kind != 0U) {
-            return status_code::error;
-        }
-
-        value.reset();
+        scope.mark_complete(*inserted);
         return status_code::success;
     }
 
-    template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_shareable(std::shared_ptr<T> &value) {
-        auto &dec = static_cast<Self &>(*this);
-
-        auto      &session    = *active_decode_session_;
-        const auto checkpoint = session.decoded_shared_objects_.size();
-        const auto id         = session.decoded_shared_objects_.size();
-
-        try {
-            session.decoded_shared_objects_.push_back(
-                shared_graph_decode_session::decoded_shared_object{{}, detail::graph_type_id<T>(), detail::graph_entry_state::encoding});
-
-            auto decoded = std::make_shared<T>();
-            auto status  = dec.decode(*decoded);
-            if (status != status_code::success) {
-                session.rollback_to(checkpoint);
-                return status;
-            }
-
-            auto &entry = session.decoded_shared_objects_[id];
-            entry.value = std::shared_ptr<void>{decoded};
-            entry.state = detail::graph_entry_state::complete;
-            value       = std::move(decoded);
-            return status_code::success;
-        } catch (...) {
-            session.rollback_to(checkpoint);
-            throw;
-        }
-    }
-
-    template <detail::NullablePointerValue T>
-        requires std::default_initializable<T>
-    [[nodiscard]] status_code decode_sharedref(std::shared_ptr<T> &value) {
-        auto &dec = static_cast<Self &>(*this);
-
-        std::uint64_t id{};
-        auto          status = dec.decode(id);
+    template <IsSharedPointer Pointer> [[nodiscard]] status_code decode_sharedref(Pointer &value) {
+        using pointer_type = std::remove_cvref_t<Pointer>;
+        std::uint64_t wire_index{};
+        const auto    status = static_cast<Self &>(*this).decode(wire_index);
         if (status != status_code::success) {
             return status;
         }
-
-        auto &session = *active_decode_session_;
-        if (id >= session.decoded_shared_objects_.size()) {
+        if (!std::in_range<std::size_t>(wire_index)) {
             return status_code::error;
         }
 
-        const auto &existing = session.decoded_shared_objects_[id];
-        if (existing.state != detail::graph_entry_state::complete || existing.type != detail::graph_type_id<T>()) {
+        auto resolved = current_decode_scope().resolve(static_cast<std::size_t>(wire_index));
+        if (!resolved) {
+            return resolved.error();
+        }
+        if (resolved->state != shared_ptr_entry_state::complete || resolved->pointer_type != detail::graph_type_id<pointer_type>()) {
             return status_code::error;
         }
 
-        value = std::static_pointer_cast<T>(existing.value);
+        if constexpr (std::constructible_from<pointer_type, std::shared_ptr<typename pointer_type::element_type>>) {
+            value = pointer_type{std::static_pointer_cast<typename pointer_type::element_type>(resolved->pointer)};
+        } else {
+            value = *std::static_pointer_cast<pointer_type>(resolved->pointer);
+        }
         return status_code::success;
     }
 
-    shared_graph_encode_session *active_encode_session_{};
-    shared_graph_decode_session *active_decode_session_{};
+    [[nodiscard]] detail::encode_scope_ref current_encode_scope() {
+        if (external_encode_scope_) {
+            return *external_encode_scope_;
+        }
+        return detail::encode_scope_ref{default_encode_scope_};
+    }
+
+    [[nodiscard]] detail::decode_scope_ref current_decode_scope() {
+        if (external_decode_scope_) {
+            return *external_decode_scope_;
+        }
+        return detail::decode_scope_ref{default_decode_scope_};
+    }
+
+    shared_ptr_encode_scope                 default_encode_scope_{};
+    shared_ptr_decode_scope                 default_decode_scope_{};
+    std::optional<detail::encode_scope_ref> external_encode_scope_{};
+    std::optional<detail::decode_scope_ref> external_decode_scope_{};
 };
 
 } // namespace cbor::tags::ext::smart_ptr
-
-namespace cbor::tags::cddl {
-
-template <typename T> struct cddl_scope_traits<ext::smart_ptr::shared_graph_cddl<T>> {
-    using value_type = typename ext::smart_ptr::shared_graph_cddl<T>::value_type;
-
-    static constexpr cddl_shared_pointer_mode shared_pointer_mode = cddl_shared_pointer_mode::shared_graph;
-};
-
-} // namespace cbor::tags::cddl

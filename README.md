@@ -798,46 +798,44 @@ Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_stan
 
 ### Smart Pointer Codecs
 Smart pointer support is opt-in through `cbor_tags/extensions/smart_ptr.h`.
-Use `nullable_ptr_codec` for nullable ownership values, or `shared_graph_codec`
-when repeated `std::shared_ptr<T>` identity must be preserved across one logical
-graph session:
+`unique_ptr_codec` writes a `std::unique_ptr<T>` as plain `null` or `T`.
+`shared_ptr_codec` preserves shared identity: repeated pointers decode to the
+same object.
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/extensions/smart_ptr.h"
 
+#include <cstddef>
 #include <memory>
+#include <vector>
 
 using namespace cbor::tags;
 using namespace cbor::tags::ext::smart_ptr;
 
 std::vector<std::byte> buffer;
 
-auto shared = std::make_shared<int>(42);
-shared_graph_encode_session encode_graph;
-auto enc = make_encoder<shared_graph_codec>(buffer);
+auto value = std::make_shared<int>(42);
+std::vector<std::shared_ptr<int>> sent{value, value};
 
-enc(as_shared_graph(encode_graph, shared));
-enc(as_shared_graph(encode_graph, shared));
+auto enc = make_encoder<shared_ptr_codec>(buffer);
+enc(sent);
 
-std::shared_ptr<int> first;
-std::shared_ptr<int> second;
+std::vector<std::shared_ptr<int>> received;
+auto dec = make_decoder<shared_ptr_codec>(buffer);
+dec(received);
 
-auto dec = make_decoder<shared_graph_codec>(buffer);
-shared_graph_decode_session decode_graph;
-
-dec(as_shared_graph(decode_graph, first));
-dec(as_shared_graph(decode_graph, second));
+// received[0].get() == received[1].get(): both point to the same int.
 ```
 
-`nullable_ptr_codec` encodes null pointers as `[0]` and values as `[1, value]`.
-`shared_graph_codec` uses CBOR value-sharing tags 28/29 inside
-`as_shared_graph(...)` roots. Use `shared_graph_cddl<T>` when generated CDDL
-should describe that graph shape, rendering `std::shared_ptr<T>` as
-`[0] / #6.28(T) / #6.29(uint)`. See
-[Smart Pointer Codecs](doc/smart_pointers.md) for wire shapes, limitations,
-value-sharing spec links, CDDL examples, and variant behavior.
+The first pointer uses tag 28 and later references use tag 29. The table belongs
+to the encoder or decoder and persists across calls until
+`reset_shared_ptr_scope()` is called. Applications may instead provide a
+user-owned table through `set_shared_ptr_scope()`.
+
+See [Smart Pointer Codecs](doc/smart_pointers.md) for exact CBOR, compatible
+user-defined pointer types, scopes, CDDL, failure state, and variant rules.
 See [Codec Extensions](doc/codec_extensions.md) for the general opt-in extension
 pattern.
 
@@ -879,7 +877,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.21.0 # or a newer release/commit for newer extension features
+  GIT_TAG v0.22.0 # or a newer release/commit for newer extension features
 )
 
 FetchContent_MakeAvailable(cbor_tags)

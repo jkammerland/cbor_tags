@@ -1,15 +1,17 @@
 #pragma once
 
 #include "cbor_tags/cbor_concepts_checking.h"
+#include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/detail/cbor_pointer_traits.h"
 
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <optional>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 #include <variant>
-#include <vector>
 
 namespace cbor::tags::ext::smart_ptr::detail {
 
@@ -17,110 +19,284 @@ inline constexpr std::uint64_t shareable_tag = 28U;
 inline constexpr std::uint64_t sharedref_tag = 29U;
 
 template <typename T>
-concept NullablePointerValue = cbor::tags::detail::NullablePointerValue<T>;
-
-template <typename T> struct nullable_pointer_traits {
-    static constexpr bool decodable = false;
-    static constexpr bool shared    = false;
-};
-
-template <NullablePointerValue T> struct nullable_pointer_traits<std::unique_ptr<T>> {
-    static constexpr bool decodable = std::default_initializable<T>;
-    static constexpr bool shared    = false;
-};
-
-template <NullablePointerValue T> struct nullable_pointer_traits<std::shared_ptr<T>> {
-    static constexpr bool decodable = std::default_initializable<T>;
-    static constexpr bool shared    = true;
-};
-
-template <typename T> constexpr bool decodable_nullable_pointer_v = nullable_pointer_traits<std::remove_cvref_t<T>>::decodable;
+concept PointerValue = cbor::tags::detail::SmartPointerElement<T>;
 
 template <typename T>
-constexpr bool decodable_shared_pointer_v =
-    nullable_pointer_traits<std::remove_cvref_t<T>>::decodable && nullable_pointer_traits<std::remove_cvref_t<T>>::shared;
+concept UniquePointer = cbor::tags::detail::IsUniquePointer<T>;
 
-template <typename Variant>
-constexpr bool variant_has_decodable_shared_pointer_v =
-    cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() { return (decodable_shared_pointer_v<Ts> || ...); });
+template <typename T>
+concept SharedPointer = cbor::tags::detail::IsSharedPointer<T>;
 
-template <typename... Ts>
-constexpr std::size_t decodable_nullable_pointer_count_v =
-    (std::size_t{0} + ... + (decodable_nullable_pointer_v<Ts> ? std::size_t{1} : std::size_t{0}));
+template <typename T>
+concept SmartPointer = cbor::tags::detail::IsSmartPointer<T>;
 
-template <typename... Ts> constexpr bool has_decodable_nullable_pointer_v = decodable_nullable_pointer_count_v<Ts...> > 0U;
+template <SmartPointer Pointer> using pointer_element_t = cbor::tags::detail::smart_pointer_element_t<Pointer>;
 
-template <typename Variant>
-constexpr std::size_t variant_decodable_nullable_pointer_count_v =
-    cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() { return decodable_nullable_pointer_count_v<Ts...>; });
+template <typename T> inline constexpr bool known_null_wire_v = cbor::tags::detail::has_known_null_wire_v<T>;
 
-template <typename Variant>
-constexpr bool variant_has_decodable_nullable_pointer_v = variant_decodable_nullable_pointer_count_v<Variant> > 0U;
+template <typename T> inline constexpr char graph_type_token{};
+template <typename T> constexpr const void *graph_type_id() noexcept { return &graph_type_token<std::remove_cvref_t<T>>; }
 
-template <typename T, bool IsVectorOfSharedPtr = cbor::tags::detail::is_std_vector_of_shared_ptr<T>::value>
-struct decodable_shared_graph_vector : std::false_type {};
+template <typename Options, typename T> consteval bool encodes_one_cbor_item();
 
-template <typename T> struct decodable_shared_graph_vector<T, true> {
-  private:
-    using traits     = cbor::tags::detail::is_std_vector_of_shared_ptr<T>;
-    using value_type = T;
-
-  public:
-    static constexpr bool value = NullablePointerValue<typename traits::element_type> &&
-                                  std::default_initializable<typename traits::element_type> && std::default_initializable<value_type>;
+template <typename T, bool = IsAggregate<std::remove_cvref_t<T>>> struct pointer_tuple {
+    using type = std::remove_cvref_t<T>;
 };
 
-template <typename T> constexpr bool decodable_shared_graph_vector_v = decodable_shared_graph_vector<std::remove_cvref_t<T>>::value;
+template <typename T> struct pointer_tuple<T, true> {
+    using type = std::remove_cvref_t<decltype(to_tuple(std::declval<std::remove_cvref_t<T> &>()))>;
+};
 
-template <typename... Ts>
-constexpr std::size_t decodable_shared_graph_vector_count_v =
-    (std::size_t{0} + ... + (decodable_shared_graph_vector_v<Ts> ? std::size_t{1} : std::size_t{0}));
+template <typename T> using pointer_tuple_t = typename pointer_tuple<T>::type;
 
-template <typename... Ts> constexpr bool has_decodable_shared_graph_vector_v = decodable_shared_graph_vector_count_v<Ts...> > 0U;
+template <typename Options, typename Tuple, std::size_t Offset, std::size_t... Is>
+consteval bool tuple_members_encode_one_item(std::index_sequence<Is...>) {
+    using tuple_type = std::remove_cvref_t<Tuple>;
+    return (encodes_one_cbor_item<Options, std::tuple_element_t<Offset + Is, tuple_type>>() && ...);
+}
 
-template <typename Variant>
-constexpr std::size_t variant_decodable_shared_graph_vector_count_v =
-    cbor::tags::detail::with_variant_alternatives<Variant>([]<typename... Ts>() { return decodable_shared_graph_vector_count_v<Ts...>; });
-
-template <typename Variant>
-constexpr bool variant_has_decodable_shared_graph_vector_v = variant_decodable_shared_graph_vector_count_v<Variant> > 0U;
-
-template <typename Variant, std::uint64_t Tag>
-constexpr bool variant_contains_static_tag_v = [] {
-    constexpr auto tags      = ValidConceptMapping<Variant>::tags;
-    constexpr auto tags_size = ValidConceptMapping<Variant>::number_of_tags;
-    for (std::uint64_t index = 0; index < tags_size; ++index) {
-        if (tags[index] == Tag) {
-            return true;
+template <typename Options, typename Tuple, std::size_t Offset = 0U> consteval bool tuple_payload_encodes_one_item() {
+    using tuple_type     = std::remove_cvref_t<Tuple>;
+    constexpr auto total = std::tuple_size_v<tuple_type>;
+    if constexpr (total <= Offset) {
+        return false;
+    } else {
+        constexpr auto count = total - Offset;
+        if constexpr (count > 1U && !Options::wrap_groups) {
+            return false;
+        } else {
+            return tuple_members_encode_one_item<Options, tuple_type, Offset>(std::make_index_sequence<count>{});
         }
     }
+}
+
+template <typename Options, typename T> consteval bool encodes_one_cbor_item() {
+    using type = std::remove_cvref_t<T>;
+
+    if constexpr (SmartPointer<type>) {
+        return true;
+    }
+    if constexpr (IsAnyHeader<type> || IsTagOnlyTuple<type> || is_static_tag_t<type>::value || is_dynamic_tag_t<type>) {
+        return false;
+    }
+    if constexpr (IsOptional<type>) {
+        return encodes_one_cbor_item<Options, typename type::value_type>();
+    }
+    if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (encodes_one_cbor_item<Options, Ts>() && ...); });
+    }
+    if constexpr (IsMap<type> && requires {
+                      typename type::key_type;
+                      typename type::mapped_type;
+                  }) {
+        return encodes_one_cbor_item<Options, typename type::key_type>() && encodes_one_cbor_item<Options, typename type::mapped_type>();
+    }
+    if constexpr (IsArray<type> && requires { typename type::value_type; }) {
+        return encodes_one_cbor_item<Options, typename type::value_type>();
+    }
+    if constexpr (IsTaggedTuple<type>) {
+        return tuple_payload_encodes_one_item<Options, type, 1U>();
+    }
+    if constexpr (IsClassWithTagOverload<type>) {
+        return true;
+    }
+    if constexpr (IsAggregate<type> || IsUntaggedTuple<type>) {
+        using tuple_type = pointer_tuple_t<type>;
+        if constexpr (IsTag<type> && !HasInlineTag<type>) {
+            return tuple_payload_encodes_one_item<Options, tuple_type, 1U>();
+        } else {
+            return tuple_payload_encodes_one_item<Options, tuple_type>();
+        }
+    }
+    if constexpr (IsCborMajor<type>) {
+        return true;
+    }
     return false;
-}();
+}
 
-template <typename Variant>
-constexpr bool variant_has_any_tag_header_v = [] {
-    using major_index           = cbor::tags::detail::MajorIndex;
-    constexpr auto core_mapping = valid_concept_mapping_array_v<Variant>;
-    return core_mapping[major_index::AnyTagHeader] != 0U;
-}();
+template <typename T> constexpr bool contains_decodable_unique_pointer();
+template <typename T> constexpr bool contains_shared_pointer();
 
-template <typename T, typename... Rest> struct variant_from_pack {
-    using type = std::conditional_t<sizeof...(Rest) == 0U && cbor::tags::IsVariant<T>, std::remove_cvref_t<T>, std::variant<T, Rest...>>;
-};
+template <typename T> constexpr bool contains_decodable_unique_pointer() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>>;
+    }
+    if constexpr (IsOptional<type>) {
+        return contains_decodable_unique_pointer<typename type::value_type>();
+    }
+    if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (contains_decodable_unique_pointer<Ts>() || ...); });
+    }
+    if constexpr (IsMap<type> && requires {
+                      typename type::key_type;
+                      typename type::mapped_type;
+                  }) {
+        return contains_decodable_unique_pointer<typename type::key_type>() ||
+               contains_decodable_unique_pointer<typename type::mapped_type>();
+    }
+    if constexpr (IsArray<type> && requires { typename type::value_type; }) {
+        return contains_decodable_unique_pointer<typename type::value_type>();
+    }
+    return false;
+}
 
-template <typename... Ts>
-constexpr bool variant_has_shared_graph_tag_collision_v = [] {
-    using variant_type = typename variant_from_pack<Ts...>::type;
-    return variant_has_decodable_shared_pointer_v<variant_type> &&
-           (variant_has_any_tag_header_v<variant_type> || variant_contains_static_tag_v<variant_type, shareable_tag> ||
-            variant_contains_static_tag_v<variant_type, sharedref_tag>);
-}();
+template <typename T> constexpr bool contains_shared_pointer() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (SharedPointer<type>) {
+        return true;
+    }
+    if constexpr (IsOptional<type>) {
+        return contains_shared_pointer<typename type::value_type>();
+    }
+    if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>([]<typename... Ts>() { return (contains_shared_pointer<Ts>() || ...); });
+    }
+    if constexpr (IsMap<type> && requires {
+                      typename type::key_type;
+                      typename type::mapped_type;
+                  }) {
+        return contains_shared_pointer<typename type::key_type>() || contains_shared_pointer<typename type::mapped_type>();
+    }
+    if constexpr (IsArray<type> && requires { typename type::value_type; }) {
+        return contains_shared_pointer<typename type::value_type>();
+    }
+    return false;
+}
 
-struct nullable_ptr_codec_marker {};
-struct shared_graph_codec_marker {};
+template <typename T> inline constexpr bool contains_decodable_unique_pointer_v = contains_decodable_unique_pointer<T>();
+template <typename T> inline constexpr bool contains_shared_pointer_v           = contains_shared_pointer<T>();
+template <typename T> inline constexpr bool contains_decodable_shared_pointer_v = contains_shared_pointer<T>();
 
-template <typename T> constexpr bool has_nullable_ptr_codec_v = std::is_base_of_v<nullable_ptr_codec_marker, std::remove_cvref_t<T>>;
+template <bool AllowUnique, bool AllowShared, typename T> consteval bool has_pointer_null_wire() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        return AllowUnique;
+    } else if constexpr (SharedPointer<type>) {
+        return AllowShared;
+    } else if constexpr (IsOptional<type>) {
+        return has_pointer_null_wire<AllowUnique, AllowShared, typename type::value_type>();
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (has_pointer_null_wire<AllowUnique, AllowShared, Ts>() || ...); });
+    } else {
+        return false;
+    }
+}
 
-template <typename T> constexpr bool has_shared_graph_codec_v = std::is_base_of_v<shared_graph_codec_marker, std::remove_cvref_t<T>>;
+template <bool AllowUnique, bool AllowShared, typename T>
+inline constexpr bool has_pointer_null_wire_v = has_pointer_null_wire<AllowUnique, AllowShared, T>();
+
+template <typename T> consteval bool wire_matches_null() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (SmartPointer<type>) {
+        return true;
+    } else {
+        using one_type_variant = std::variant<type>;
+        constexpr auto mapping = valid_concept_mapping_array_v<one_type_variant>;
+        return mapping[cbor::tags::detail::MajorIndex::Null] != 0U;
+    }
+}
+
+template <typename T, std::uint64_t Tag> consteval bool wire_matches_tag() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        return wire_matches_tag<pointer_element_t<type>, Tag>();
+    } else if constexpr (SharedPointer<type>) {
+        return Tag == shareable_tag || Tag == sharedref_tag;
+    } else {
+        using one_type_variant    = std::variant<type>;
+        constexpr auto mapping    = valid_concept_mapping_array_v<one_type_variant>;
+        constexpr auto tags       = ValidConceptMapping<one_type_variant>::tags;
+        constexpr auto tags_count = ValidConceptMapping<one_type_variant>::number_of_tags;
+        if constexpr (mapping[cbor::tags::detail::MajorIndex::AnyTagHeader] != 0U) {
+            return true;
+        }
+        for (std::uint64_t index = 0; index < tags_count; ++index) {
+            if (tags[index] == Tag) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+template <typename Options, typename T> consteval bool wire_matches_array() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        return wire_matches_array<Options, pointer_element_t<type>>();
+    } else if constexpr (SharedPointer<type>) {
+        return false;
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (wire_matches_array<Options, Ts>() || ...); });
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count == 1U) {
+            return wire_matches_array<Options, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>();
+        } else {
+            return Options::wrap_groups;
+        }
+    } else {
+        using one_type_variant = std::variant<type>;
+        constexpr auto mapping = valid_concept_mapping_array_v<one_type_variant>;
+        return mapping[cbor::tags::detail::MajorIndex::Array] != 0U;
+    }
+}
+
+template <typename Options, typename A, typename B> consteval bool wire_shapes_overlap() {
+    using a_type = std::remove_cvref_t<A>;
+    using b_type = std::remove_cvref_t<B>;
+    if constexpr (UniquePointer<a_type>) {
+        return wire_matches_null<b_type>() || wire_shapes_overlap<Options, pointer_element_t<a_type>, b_type>();
+    } else if constexpr (UniquePointer<b_type>) {
+        return wire_matches_null<a_type>() || wire_shapes_overlap<Options, a_type, pointer_element_t<b_type>>();
+    } else if constexpr (SharedPointer<a_type>) {
+        return wire_matches_null<b_type>() || wire_matches_tag<b_type, shareable_tag>() || wire_matches_tag<b_type, sharedref_tag>();
+    } else if constexpr (SharedPointer<b_type>) {
+        return wire_matches_null<a_type>() || wire_matches_tag<a_type, shareable_tag>() || wire_matches_tag<a_type, sharedref_tag>();
+    } else if constexpr ((IsAggregate<a_type> || IsUntaggedTuple<a_type>) && !IsTag<a_type>) {
+        using tuple_type          = pointer_tuple_t<a_type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count == 1U) {
+            return wire_shapes_overlap<Options, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>, b_type>();
+        } else {
+            return Options::wrap_groups && wire_matches_array<Options, b_type>();
+        }
+    } else if constexpr ((IsAggregate<b_type> || IsUntaggedTuple<b_type>) && !IsTag<b_type>) {
+        return wire_shapes_overlap<Options, b_type, a_type>();
+    } else {
+        using pair_variant          = std::variant<a_type, b_type>;
+        constexpr auto mapping      = valid_concept_mapping_array_v<pair_variant>;
+        constexpr auto unmatched_ix = cbor::tags::detail::MajorIndex::Unmatched;
+        for (std::size_t index = 0; index < mapping.size(); ++index) {
+            if (index != unmatched_ix && mapping[index] > 1U) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+template <typename Variant, typename Options = default_options, std::size_t I = 0U, std::size_t J = 1U>
+consteval bool pointer_variant_is_unambiguous() {
+    constexpr auto count = cbor::tags::detail::variant_size_v<Variant>;
+    if constexpr (I >= count) {
+        return true;
+    } else if constexpr (J >= count) {
+        return pointer_variant_is_unambiguous<Variant, Options, I + 1U, I + 2U>();
+    } else {
+        using left  = cbor::tags::detail::variant_alternative_t<I, Variant>;
+        using right = cbor::tags::detail::variant_alternative_t<J, Variant>;
+        return !wire_shapes_overlap<Options, left, right>() && pointer_variant_is_unambiguous<Variant, Options, I, J + 1U>();
+    }
+}
 
 } // namespace cbor::tags::ext::smart_ptr::detail

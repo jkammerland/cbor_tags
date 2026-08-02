@@ -89,25 +89,19 @@ template <typename T, std::uint64_t Tag> consteval bool cddl_contains_fixed_tag_
     }
 }
 
-template <typename T> consteval bool cddl_contains_shared_graph_pointer() {
+template <typename T> consteval bool cddl_contains_shared_pointer() {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (IsOptional<value_type>) {
-        return cddl_contains_shared_graph_pointer<typename value_type::value_type>();
+        return cddl_contains_shared_pointer<typename value_type::value_type>();
     } else if constexpr (IsVariant<value_type>) {
-        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_shared_graph_pointer<Ts>() || ...); });
+        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_shared_pointer<Ts>() || ...); });
     } else {
-        return is_std_shared_ptr<value_type>::value;
+        return IsSharedPointer<value_type>;
     }
 }
 
-template <typename T> consteval bool cddl_contains_shared_graph_collision_tag() {
+template <typename T> consteval bool cddl_contains_shared_pointer_collision_tag() {
     return cddl_contains_tag_header<T>() || cddl_contains_fixed_tag_value<T, 28U>() || cddl_contains_fixed_tag_value<T, 29U>();
-}
-
-template <typename T> consteval bool cddl_is_direct_nullable_pointer_alternative() { return IsNullablePointer<std::remove_cvref_t<T>>; }
-
-template <typename T> consteval bool cddl_is_shared_graph_vector_alternative() {
-    return is_std_vector_of_shared_ptr<std::remove_cvref_t<T>>::value;
 }
 
 template <typename A, typename B> consteval bool cddl_fixed_tags_overlap() {
@@ -137,9 +131,9 @@ template <typename A, typename B> consteval bool cddl_tag_alternatives_overlap()
 template <cddl_shared_pointer_mode PointerMode, typename A, typename B> consteval bool cddl_scoped_tag_alternatives_overlap() {
     if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
         return cddl_tag_alternatives_overlap<A, B>() ||
-               (cddl_contains_shared_graph_pointer<A>() && cddl_contains_shared_graph_collision_tag<B>()) ||
-               (cddl_contains_shared_graph_pointer<B>() && cddl_contains_shared_graph_collision_tag<A>()) ||
-               (cddl_contains_shared_graph_pointer<A>() && cddl_contains_shared_graph_pointer<B>());
+               (cddl_contains_shared_pointer<A>() && cddl_contains_shared_pointer_collision_tag<B>()) ||
+               (cddl_contains_shared_pointer<B>() && cddl_contains_shared_pointer_collision_tag<A>()) ||
+               (cddl_contains_shared_pointer<A>() && cddl_contains_shared_pointer<B>());
     } else {
         return cddl_tag_alternatives_overlap<A, B>();
     }

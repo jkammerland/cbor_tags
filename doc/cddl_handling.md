@@ -372,9 +372,8 @@ are intentionally deferred.
 
 Extension headers may add CDDL support by specializing the public CDDL traits
 in `cbor::tags::cddl`, declared by
-`cbor_tags/extensions/cddl_traits.h`. Simple tagged extension types expose fixed
-tag metadata, while scoped wrappers can select a different rendering policy for
-a whole schema root:
+`cbor_tags/extensions/cddl_traits.h`. Tagged extension types expose fixed tag
+metadata:
 
 ```cpp
 namespace cbor::tags::cddl {
@@ -384,10 +383,8 @@ template <> struct cddl_tagged_bstr_array_traits<MyTypedBstrView> {
 }
 ```
 
-For example,
-`cbor::tags::ext::smart_ptr::shared_graph_cddl<T>` switches only that schema
-root to the shared-graph `std::shared_ptr<T>` shape without changing the default
-nullable pointer schema.
+For example, the smart-pointer extension renders compatible shared pointer
+types directly as `null / #6.28(T) / #6.29(uint)`.
 
 ### Enum Names
 
@@ -462,27 +459,24 @@ scoped maps and may have their own extension field. Fixed field names must also
 be unique after flattening all `as_named_group` members; duplicate fixed names
 are rejected at compile time.
 
-`std::unique_ptr<T>` and `std::shared_ptr<T>` with default-initializable,
-non-const, non-void, non-array pointee types render as `[0] / [1, T]`, matching
-the opt-in `cbor::tags::ext::smart_ptr::nullable_ptr_codec` wire shape. Pointer
-fields remain required in named maps unless the field type itself is
-`std::optional`; a null pointer is an explicit `[0]`, not an omitted member.
-For `shared_graph_codec` schemas, include `cbor_tags/extensions/smart_ptr.h` and
-wrap the schema root in `cbor::tags::ext::smart_ptr::shared_graph_cddl<T>`.
-Inside that scope, `std::shared_ptr<T>` renders as
-`[0] / #6.28(T) / #6.29(uint)`, matching `as_shared_graph(...)` roots.
-`shared_graph_cddl<T>` is a schema-root wrapper only; using it as a struct
-member type is rejected.
-Reference-table validity is still a runtime decoder-session rule and cannot be
-fully expressed in CDDL. In the default nullable scope, `std::variant`
-alternatives that contain nullable smart pointers are rejected by the CDDL
-generator. In `shared_graph_cddl<T>`, variants may contain one direct nullable
-smart pointer alternative when no array-shaped alternative or tag 28/29
-collision is present. A direct `std::vector<std::shared_ptr<T>>` alternative is
-also supported when it is the only array-shaped alternative, for example
-`std::variant<std::vector<std::shared_ptr<T>>, std::string>`. Indirect forms
-such as `std::optional<std::shared_ptr<T>>`, nested variants, maps, or vectors of
-optionals remain unsupported inside `std::variant`.
+`std::unique_ptr<T>` renders as `T / null`, matching `unique_ptr_codec`.
+Pointer fields remain required in named maps unless the field type itself is
+`std::optional`; a null pointer is an explicit CBOR `null`, not an omitted
+member. A pointee type that also accepts `null` is rejected because the two
+pointer states would be indistinguishable. Outside named maps, an
+`std::optional` directly containing a smart-pointer null state is rejected for
+the same reason. Named-map omission is distinct from a present key whose value
+is `null`, so optional smart-pointer fields remain representable there.
+
+Include `cbor_tags/extensions/smart_ptr.h` to render compatible shared pointer
+types directly as `null / #6.28(T) / #6.29(uint)`. No schema-root wrapper is
+required.
+
+CDDL cannot express whether a tag 29 index exists, has the requested pointee
+type, or refers to a completed entry. Those remain runtime table checks.
+CDDL can describe pointer-containing choices when their shapes are distinct.
+The runtime shared-pointer codec still requires an explicit application codec
+for any variant containing a shared pointer.
 
 ### `buffer_annotate(cbor_buffer, output, options)`
 Creates annotated hex view of CBOR data

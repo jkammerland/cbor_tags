@@ -49,6 +49,11 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
+target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
+add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
+add_dependencies(tests test_smart_ptr_allocation_failure)
+
 function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
   target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
@@ -161,46 +166,20 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     "bounded_size typed-array maximum byte size overflows uint64_t")
 endif()
 
-add_executable(cddl_variant_nullable_pointer_compile_fails EXCLUDE_FROM_ALL cddl_variant_nullable_pointer_compile_fail.cc)
-target_link_libraries(cddl_variant_nullable_pointer_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
+add_executable(cddl_shared_ptr_variant_tag_compile_fails EXCLUDE_FROM_ALL cddl_shared_ptr_variant_tag_compile_fail.cc)
+target_link_libraries(cddl_shared_ptr_variant_tag_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
-  NAME cddl_variant_nullable_pointer_compile_fails
+  NAME cddl_shared_ptr_variant_tag_compile_fails
   COMMAND
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-    "-DTEST_TARGET=cddl_variant_nullable_pointer_compile_fails"
+    "-DTEST_TARGET=cddl_shared_ptr_variant_tag_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for variant alternatives containing nullable smart pointers is unsupported"
+    "-DPASS_REGEX=CDDL pointer variant alternatives overlap on the CBOR wire"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
-add_executable(cddl_shared_graph_variant_tag_compile_fails EXCLUDE_FROM_ALL cddl_shared_graph_variant_tag_compile_fail.cc)
-target_link_libraries(cddl_shared_graph_variant_tag_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
-add_test(
-  NAME cddl_shared_graph_variant_tag_compile_fails
-  COMMAND
-    ${CMAKE_COMMAND}
-    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-    "-DTEST_TARGET=cddl_shared_graph_variant_tag_compile_fails"
-    "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported"
-    -P
-    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
-
-add_executable(cddl_shared_graph_variant_array_compile_fails EXCLUDE_FROM_ALL cddl_shared_graph_variant_array_compile_fail.cc)
-target_link_libraries(cddl_shared_graph_variant_array_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
-add_test(
-  NAME cddl_shared_graph_variant_array_compile_fails
-  COMMAND
-    ${CMAKE_COMMAND}
-    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-    "-DTEST_TARGET=cddl_shared_graph_variant_array_compile_fails"
-    "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=CDDL for variant alternatives containing nullable smart pointers and array-shaped alternatives is unsupported"
-    -P
-    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
-
-function(add_cddl_shared_graph_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
+function(add_smart_ptr_cddl_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGEX)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
   target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
   add_test(
@@ -215,43 +194,30 @@ function(add_cddl_shared_graph_compile_fail_test TEST_NAME SOURCE_FILE PASS_REGE
       "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 endfunction()
 
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_nested_scope_compile_fails
-  cddl_shared_graph_nested_scope_compile_fail.cc
-  "CDDL scope wrappers are only valid as cddl_schema_to roots")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_tag29_compile_fails
-  cddl_shared_graph_variant_tag29_compile_fail.cc
-  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_any_tag_compile_fails
-  cddl_shared_graph_variant_any_tag_compile_fail.cc
-  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_nested_any_tag_compile_fails
-  cddl_shared_graph_variant_nested_any_tag_compile_fail.cc
-  "CDDL for variant alternatives with duplicate or catch-all CBOR tag matches is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_multiple_pointers_compile_fails
-  cddl_shared_graph_variant_multiple_pointers_compile_fail.cc
-  "CDDL for variant alternatives containing multiple nullable smart pointers is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_optional_pointer_compile_fails
-  cddl_shared_graph_variant_optional_pointer_compile_fail.cc
-  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_nested_pointer_compile_fails
-  cddl_shared_graph_variant_nested_pointer_compile_fail.cc
-  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_map_pointer_compile_fails
-  cddl_shared_graph_variant_map_pointer_compile_fail.cc
-  "CDDL for variant alternatives containing indirect nullable smart pointers is unsupported")
-add_cddl_shared_graph_compile_fail_test(
-  cddl_shared_graph_variant_vector_array_compile_fails
-  cddl_shared_graph_variant_vector_array_compile_fail.cc
-  "CDDL for variant alternatives containing shared graph vector smart pointers and other array-shaped alternatives is unsupported")
-
+add_smart_ptr_cddl_compile_fail_test(
+  cddl_shared_ptr_variant_tag29_compile_fails
+  cddl_shared_ptr_variant_tag29_compile_fail.cc
+  "CDDL pointer variant alternatives overlap on the CBOR wire")
+add_smart_ptr_cddl_compile_fail_test(
+  cddl_shared_ptr_variant_any_tag_compile_fails
+  cddl_shared_ptr_variant_any_tag_compile_fail.cc
+  "CDDL pointer variant alternatives overlap on the CBOR wire")
+add_smart_ptr_cddl_compile_fail_test(
+  cddl_shared_ptr_variant_nested_any_tag_compile_fails
+  cddl_shared_ptr_variant_nested_any_tag_compile_fail.cc
+  "CDDL pointer variant alternatives overlap on the CBOR wire")
+add_smart_ptr_cddl_compile_fail_test(
+  cddl_unique_ptr_nested_null_compile_fails
+  cddl_unique_ptr_nested_null_compile_fail.cc
+  "CDDL unique pointer cannot use T when T also has a CBOR null state")
+add_smart_ptr_cddl_compile_fail_test(
+  cddl_unique_ptr_variant_overlap_compile_fails
+  cddl_unique_ptr_variant_overlap_compile_fail.cc
+  "CDDL pointer variant alternatives overlap on the CBOR wire")
+add_smart_ptr_cddl_compile_fail_test(
+  cddl_optional_smart_ptr_compile_fails
+  cddl_optional_smart_ptr_compile_fail.cc
+  "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null")
 add_executable(cddl_variant_duplicate_tags_compile_fails EXCLUDE_FROM_ALL cddl_variant_duplicate_tags_compile_fail.cc)
 target_link_libraries(cddl_variant_duplicate_tags_compile_fails PRIVATE cbor::tags fmt::fmt nameof::nameof)
 add_test(
@@ -395,16 +361,16 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
-add_executable(smart_ptr_variant_two_nullable_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_two_nullable_compile_fail.cc)
-target_link_libraries(smart_ptr_variant_two_nullable_compile_fails PRIVATE cbor::tags)
+add_executable(smart_ptr_variant_unique_value_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_unique_value_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_unique_value_compile_fails PRIVATE cbor::tags)
 add_test(
-  NAME smart_ptr_variant_two_nullable_compile_fails
+  NAME smart_ptr_variant_unique_value_compile_fails
   COMMAND
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-    "-DTEST_TARGET=smart_ptr_variant_two_nullable_compile_fails"
+    "-DTEST_TARGET=smart_ptr_variant_unique_value_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous because they share the same \\[0\\] / \\[1, value\\] shape\\."
+    "-DPASS_REGEX=Pointer variant alternatives overlap on the CBOR wire"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -417,23 +383,194 @@ add_test(
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DTEST_TARGET=smart_ptr_variant_array_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=Variant nullable smart pointer alternatives are ambiguous with other array-shaped alternatives\\."
+    "-DPASS_REGEX=Pointer variant alternatives overlap on the CBOR wire"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
 add_executable(
-  smart_ptr_variant_shared_graph_vector_array_compile_fails
+  smart_ptr_variant_aggregate_array_compile_fails
   EXCLUDE_FROM_ALL
-  smart_ptr_variant_shared_graph_vector_array_compile_fail.cc)
-target_link_libraries(smart_ptr_variant_shared_graph_vector_array_compile_fails PRIVATE cbor::tags)
+  smart_ptr_variant_aggregate_array_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_aggregate_array_compile_fails PRIVATE cbor::tags)
 add_test(
-  NAME smart_ptr_variant_shared_graph_vector_array_compile_fails
+  NAME smart_ptr_variant_aggregate_array_compile_fails
   COMMAND
     ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-    "-DTEST_TARGET=smart_ptr_variant_shared_graph_vector_array_compile_fails"
+    "-DTEST_TARGET=smart_ptr_variant_aggregate_array_compile_fails"
     "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=Variant shared graph vector alternatives are ambiguous with other array-shaped alternatives\\."
+    "-DPASS_REGEX=Pointer variant alternatives overlap on the CBOR wire"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_variant_shared_ptr_vector_array_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_shared_ptr_vector_array_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_shared_ptr_vector_array_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_shared_ptr_vector_array_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_shared_ptr_vector_array_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=variants containing shared pointers require an explicit application codec"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_variant_shared_pointer_compile_fails EXCLUDE_FROM_ALL smart_ptr_variant_shared_pointer_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_shared_pointer_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_shared_pointer_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_shared_pointer_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=variants containing shared pointers require an explicit application codec"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_variant_composed_codec_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_composed_codec_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_composed_codec_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_composed_codec_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_composed_codec_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=unique pointer variant alternatives must have codec-independent CBOR wire shapes"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_nested_null_compile_fails EXCLUDE_FROM_ALL smart_ptr_nested_null_compile_fail.cc)
+target_link_libraries(smart_ptr_nested_null_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_nested_null_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_nested_null_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=unique pointer cannot encode a pointee that also has a CBOR null state"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_optional_pointer_compile_fails EXCLUDE_FROM_ALL smart_ptr_optional_pointer_compile_fail.cc)
+target_link_libraries(smart_ptr_optional_pointer_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_optional_pointer_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_optional_pointer_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=std::optional<T> cannot contain a unique pointer null state because both empty states use CBOR null"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_optional_shared_pointer_compile_fails EXCLUDE_FROM_ALL smart_ptr_optional_shared_pointer_compile_fail.cc)
+target_link_libraries(smart_ptr_optional_shared_pointer_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_optional_shared_pointer_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_optional_shared_pointer_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_empty_pointee_compile_fails EXCLUDE_FROM_ALL smart_ptr_empty_pointee_compile_fail.cc)
+target_link_libraries(smart_ptr_empty_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_empty_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_empty_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=smart pointer pointee must encode exactly one CBOR item"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_simple_null_compile_fails EXCLUDE_FROM_ALL smart_ptr_simple_null_compile_fail.cc)
+target_link_libraries(smart_ptr_simple_null_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_simple_null_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_simple_null_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=unique pointer cannot encode a pointee that also has a CBOR null state"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  cddl_smart_ptr_empty_pointee_compile_fails
+  EXCLUDE_FROM_ALL
+  cddl_smart_ptr_empty_pointee_compile_fail.cc)
+target_link_libraries(cddl_smart_ptr_empty_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME cddl_smart_ptr_empty_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_smart_ptr_empty_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=CDDL smart pointer pointee must encode exactly one CBOR item"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  cddl_smart_ptr_tag_header_pointee_compile_fails
+  EXCLUDE_FROM_ALL
+  cddl_smart_ptr_tag_header_pointee_compile_fail.cc)
+target_link_libraries(cddl_smart_ptr_tag_header_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME cddl_smart_ptr_tag_header_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=cddl_smart_ptr_tag_header_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=CDDL smart pointer pointee must encode exactly one CBOR item"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(smart_ptr_tag_header_pointee_compile_fails EXCLUDE_FROM_ALL smart_ptr_tag_header_pointee_compile_fail.cc)
+target_link_libraries(smart_ptr_tag_header_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_tag_header_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_tag_header_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=smart pointer pointee must encode exactly one CBOR item"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_unwrapped_multi_item_pointee_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_unwrapped_multi_item_pointee_compile_fail.cc)
+target_link_libraries(smart_ptr_unwrapped_multi_item_pointee_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_unwrapped_multi_item_pointee_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_unwrapped_multi_item_pointee_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=smart pointer pointee must encode exactly one CBOR item"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
@@ -548,6 +685,21 @@ if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
+
+add_executable(test_smart_ptr_expected_classification test_smart_ptr_expected_classification.cc)
+target_link_libraries(test_smart_ptr_expected_classification PRIVATE cbor::tags)
+set_target_properties(
+  test_smart_ptr_expected_classification
+  PROPERTIES CXX_STANDARD 23
+             CXX_STANDARD_REQUIRED ON
+             CXX_EXTENSIONS OFF)
+add_test(NAME test_smart_ptr_expected_classification COMMAND test_smart_ptr_expected_classification)
+add_dependencies(tests test_smart_ptr_expected_classification)
+
+add_executable(test_smart_ptr_decode_allocations test_smart_ptr_decode_allocations.cc)
+target_link_libraries(test_smart_ptr_decode_allocations PRIVATE cbor::tags)
+add_test(NAME test_smart_ptr_decode_allocations COMMAND test_smart_ptr_decode_allocations)
+add_dependencies(tests test_smart_ptr_decode_allocations)
 
 if(TARGET cbor_tags_cli)
   add_test(

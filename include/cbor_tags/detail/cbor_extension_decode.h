@@ -27,6 +27,8 @@ template <typename Decoder>
     return status_code::success;
 }
 
+// This is a raw CBOR argument parser and does not notify tag observers. Use
+// decode_tag_argument() for a tag header unless the codec registers that tag itself.
 template <typename Decoder>
 [[nodiscard]] constexpr status_code decode_unsigned_argument(Decoder &dec, std::byte additional_info, std::uint64_t &value) {
     const auto info = std::to_integer<std::uint8_t>(additional_info);
@@ -38,6 +40,18 @@ template <typename Decoder>
         value = dec.decode_unsigned(additional_info);
     } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
     return status_code::success;
+}
+
+template <typename Decoder>
+[[nodiscard]] constexpr status_code decode_tag_argument(Decoder &dec, std::byte additional_info, std::uint64_t &value) {
+    const auto info = std::to_integer<std::uint8_t>(additional_info);
+    if (!is_valid_cbor_argument_info(info)) {
+        return status_code::error;
+    }
+
+    try {
+        return dec.decode_tag_argument(additional_info, value);
+    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
 }
 
 template <typename Decoder>
@@ -118,7 +132,7 @@ template <typename Decoder, typename Fn>
     }
 
     std::uint64_t actual_tag{};
-    auto          status = decode_unsigned_argument(dec, additional_info, actual_tag);
+    auto          status = decode_tag_argument(dec, additional_info, actual_tag);
     if (status != status_code::success) {
         return status;
     }
@@ -151,7 +165,7 @@ template <typename Decoder, typename Fn>
     }
 
     std::uint64_t actual_tag{};
-    auto          status = decode_unsigned_argument(dec, additional_info, actual_tag);
+    auto          status = decode_tag_argument(dec, additional_info, actual_tag);
     if (status != status_code::success) {
         return status;
     }
@@ -182,7 +196,7 @@ template <typename Decoder, typename Fn>
     }
 
     std::uint64_t actual_tag{};
-    auto          status = decode_unsigned_argument(dec, additional_info, actual_tag);
+    auto          status = decode_tag_argument(dec, additional_info, actual_tag);
     if (status != status_code::success) {
         return status;
     }

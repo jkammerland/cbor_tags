@@ -14,16 +14,16 @@ using namespace cbor::tags::ext::smart_ptr;
 
 std::vector<std::byte> bytes;
 
-auto enc = make_encoder<nullable_ptr_codec>(bytes);
-auto dec = make_decoder<nullable_ptr_codec>(bytes);
+auto enc = make_encoder<unique_ptr_codec>(bytes);
+auto dec = make_decoder<unique_ptr_codec>(bytes);
 ```
 
 Multiple extensions can be installed together when their overloads are designed
 to compose:
 
 ```cpp
-auto enc = make_encoder<nullable_ptr_codec, shared_graph_codec>(bytes);
-auto dec = make_decoder<nullable_ptr_codec, shared_graph_codec>(bytes);
+auto enc = make_encoder<unique_ptr_codec, shared_ptr_codec>(bytes);
+auto dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(bytes);
 ```
 
 Extension codecs are class-template mixins over the final encoder or decoder
@@ -119,8 +119,8 @@ Current public extension headers:
 
 - `cbor_tags/extensions/custom_codec_1.h`: schema-bound `tag(bstr)` payload
   codec. See [Custom Codec 1](custom_codec_1.md).
-- `cbor_tags/extensions/smart_ptr.h`: nullable `unique_ptr`/`shared_ptr` values
-  and shared `shared_ptr` identity sessions.
+- `cbor_tags/extensions/smart_ptr.h`: unique ownership as `T / null` and shared
+  ownership through tags 28/29 with codec-owned or user-owned reference tables.
 - `cbor_tags/extensions/std_expected.h`: opt-in `std::expected` return type
   support in C++23 and newer builds.
 - `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.
