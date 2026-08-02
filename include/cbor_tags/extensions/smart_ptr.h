@@ -349,11 +349,11 @@ template <typename Decoder, typename T> consteval bool unique_variant_alternativ
     if constexpr (UniquePointer<type>) {
         return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>> &&
                !known_null_wire_v<pointer_element_t<type>> && unique_variant_alternative_supported<Decoder, pointer_element_t<type>>();
-    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder>) {
-        return false;
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
             []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); });
+    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder>) {
+        return false;
     } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
         using tuple_type          = pointer_tuple_t<type>;
         constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
@@ -440,7 +440,7 @@ template <typename Decoder, IsVariant Variant>
                       []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); }),
                   "unique pointer variant alternatives must have codec-independent CBOR wire shapes; add an explicit codec for the "
                   "whole variant");
-    static_assert(pointer_variant_is_unambiguous<variant_type>(),
+    static_assert(pointer_variant_is_unambiguous<variant_type, typename Decoder::options>(),
                   "Pointer variant alternatives overlap on the CBOR wire; add an application tag or choose a different decode type");
     static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
                       []<typename... Ts>() { return (std::default_initializable<Ts> && ...); }),
