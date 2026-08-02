@@ -308,9 +308,16 @@ template <typename Decoder, typename T>
 
 template <typename Pointer> void reset_pointer_to_new(Pointer &value) {
     using element_type = pointer_element_t<Pointer>;
-    auto allocation    = std::make_unique<element_type>();
-    value.reset(allocation.get());
-    (void)allocation.release();
+    if constexpr (SharedPointer<Pointer> && std::constructible_from<std::remove_cvref_t<Pointer>, std::shared_ptr<element_type>>) {
+        // Establish ownership before converting to the structural pointer.
+        // shared_ptr(raw) deletes raw if its control-block allocation fails.
+        auto allocation = std::shared_ptr<element_type>{new element_type{}};
+        value           = std::remove_cvref_t<Pointer>{std::move(allocation)};
+    } else {
+        auto  allocation = std::make_unique<element_type>();
+        auto *raw        = allocation.release();
+        value.reset(raw);
+    }
 }
 
 template <typename Decoder, UniquePointer Pointer>

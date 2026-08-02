@@ -43,8 +43,14 @@ empty pointer -> null
 pointer       -> T
 ```
 
-Custom deleters are supported. Decoding calls `reset(new T)`, so the
-destination pointer keeps its existing deleter.
+Custom deleters are supported when they can safely destroy a `T` allocated by
+`new T`. Decoding retains the destination pointer's deleter and transfers such
+an allocation through `reset(T*)`. This allocation/deleter compatibility is a
+semantic requirement and cannot be checked by the structural pointer concept.
+For a user-defined pointer, `reset(T*)` must take responsibility for either
+owning or deleting the supplied pointer even if it reports an error. Use an
+application codec for pointers whose deleter requires a pool or another
+allocation source.
 
 `T` must be default-initializable for decoding and must not itself accept CBOR
 `null`. For example, `std::unique_ptr<std::optional<int>>` is rejected because
