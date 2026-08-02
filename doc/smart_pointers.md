@@ -387,6 +387,10 @@ outer wire shape to be independent of an installed custom codec. If a codec
 changes an alternative's outer tag or major type, define an explicit codec for
 the whole variant so it can apply that protocol-specific discriminator.
 
+For major type 7, exact alternatives such as `bool`, `nullptr_t`, and
+pointer-null are selected before the `simple` catch-all, regardless of variant
+order.
+
 An ordinary `std::optional` cannot directly contain a smart pointer. Both the
 empty optional and the empty pointer would encode as CBOR `null`. A named-map
 field can still distinguish an omitted optional field from a present field

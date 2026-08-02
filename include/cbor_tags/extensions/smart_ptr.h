@@ -394,17 +394,17 @@ template <typename Decoder, typename T> consteval bool unique_variant_alternativ
     }
 }
 
-template <typename Decoder, typename T>
+template <typename Decoder, bool CatchAllPass, typename T>
 [[nodiscard]] constexpr bool unique_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
     using type = std::remove_cvref_t<T>;
     if constexpr (UniquePointer<type>) {
         if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
             return true;
         }
-        return unique_variant_matches<Decoder, pointer_element_t<type>>(major, additional_info, tag);
+        return unique_variant_matches<Decoder, CatchAllPass, pointer_element_t<type>>(major, additional_info, tag);
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
-            [&]<typename... Ts>() { return (unique_variant_matches<Decoder, Ts>(major, additional_info, tag) || ...); });
+            [&]<typename... Ts>() { return (unique_variant_matches<Decoder, CatchAllPass, Ts>(major, additional_info, tag) || ...); });
     } else if (major == major_type::Tag) {
         if (!tag.has_value()) {
             return false;
@@ -422,7 +422,8 @@ template <typename Decoder, typename T>
         if constexpr (item_count > 1U && Decoder::options::wrap_groups) {
             return major == major_type::Array;
         } else if constexpr (item_count == 1U) {
-            return unique_variant_matches<Decoder, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>(major, additional_info, tag);
+            return unique_variant_matches<Decoder, CatchAllPass, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>(
+                major, additional_info, tag);
         } else {
             return false;
         }
@@ -431,8 +432,7 @@ template <typename Decoder, typename T>
             return false;
         }
         if (major == major_type::Simple) {
-            return cbor::tags::detail::matches_simple_dispatch<false, type>(additional_info) ||
-                   cbor::tags::detail::matches_simple_dispatch<true, type>(additional_info);
+            return cbor::tags::detail::matches_simple_dispatch<CatchAllPass, type>(additional_info);
         }
         return true;
     }
@@ -483,19 +483,26 @@ template <typename Decoder, IsVariant Variant>
     status_code result   = status_code::no_match_in_variant_on_buffer;
     bool        selected = false;
 
-    cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
-        auto select = [&]<std::size_t I>() {
-            using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
-            if (selected || !unique_variant_matches<Decoder, alternative_type>(major, additional_info, tag)) {
-                return;
-            }
-            selected = true;
-            cbor::tags::detail::variant_assign<I>(value, alternative_type{});
-            auto &alternative = cbor::tags::detail::variant_get<I>(value);
-            result            = decode_unique_variant_alternative(dec, alternative, major, additional_info, tag);
-        };
-        (select.template operator()<Is>(), ...);
-    });
+    auto select_pass = [&]<bool CatchAllPass>() {
+        cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
+            auto select = [&]<std::size_t I>() {
+                using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
+                if (selected || !unique_variant_matches<Decoder, CatchAllPass, alternative_type>(major, additional_info, tag)) {
+                    return;
+                }
+                selected = true;
+                cbor::tags::detail::variant_assign<I>(value, alternative_type{});
+                auto &alternative = cbor::tags::detail::variant_get<I>(value);
+                result            = decode_unique_variant_alternative(dec, alternative, major, additional_info, tag);
+            };
+            (select.template operator()<Is>(), ...);
+        });
+    };
+
+    select_pass.template operator()<false>();
+    if (!selected && major == major_type::Simple) {
+        select_pass.template operator()<true>();
+    }
 
     return result;
 }
