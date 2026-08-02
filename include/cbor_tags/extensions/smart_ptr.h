@@ -290,7 +290,7 @@ template <typename Decoder, typename T>
         }
 
         std::uint64_t tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, tag);
         return status == status_code::success ? dec.decode(value, tag) : status;
     } else if constexpr (IsAggregate<T> || IsUntaggedTuple<T>) {
         auto &&tuple = [&]() -> decltype(auto) {
@@ -442,7 +442,7 @@ template <typename Decoder, IsVariant Variant>
 
     if (major == major_type::Tag && !tag.has_value()) {
         std::uint64_t decoded_tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, decoded_tag);
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, decoded_tag);
         if (status != status_code::success) {
             return status;
         }
@@ -671,7 +671,9 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         }
 
         std::uint64_t tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
+        // Tag 28 is registered by decode_shareable() with the pointer entry itself.
+        // Observing it here would also insert an untracked entry and shift every reference index.
+        const auto status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
         if (status != status_code::success) {
             return status;
         }

@@ -174,7 +174,7 @@ template <typename Self> struct custom_record_codec : cbor_codec_mixin_base<Self
 
         auto         &dec = static_cast<Self &>(*this);
         std::uint64_t tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, tag);
         if (status != status_code::success) {
             return status;
         }
