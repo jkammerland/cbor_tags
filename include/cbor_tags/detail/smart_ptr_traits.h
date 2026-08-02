@@ -223,17 +223,55 @@ template <typename T, std::uint64_t Tag> consteval bool wire_matches_tag() {
     }
 }
 
-template <typename A, typename B> consteval bool wire_shapes_overlap() {
+template <typename Options, typename T> consteval bool wire_matches_array() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        return wire_matches_array<Options, pointer_element_t<type>>();
+    } else if constexpr (SharedPointer<type>) {
+        return false;
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (wire_matches_array<Options, Ts>() || ...); });
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count == 1U) {
+            return wire_matches_array<Options, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>();
+        } else {
+            return Options::wrap_groups;
+        }
+    } else {
+        using one_type_variant = std::variant<type>;
+        constexpr auto mapping = valid_concept_mapping_array_v<one_type_variant>;
+        return mapping[cbor::tags::detail::MajorIndex::Array] != 0U;
+    }
+}
+
+template <typename Options, typename A, typename B> consteval bool wire_shapes_overlap() {
     using a_type = std::remove_cvref_t<A>;
     using b_type = std::remove_cvref_t<B>;
     if constexpr (UniquePointer<a_type>) {
-        return wire_matches_null<b_type>() || wire_shapes_overlap<pointer_element_t<a_type>, b_type>();
+        return wire_matches_null<b_type>() || wire_shapes_overlap<Options, pointer_element_t<a_type>, b_type>();
     } else if constexpr (UniquePointer<b_type>) {
-        return wire_matches_null<a_type>() || wire_shapes_overlap<a_type, pointer_element_t<b_type>>();
+        return wire_matches_null<a_type>() || wire_shapes_overlap<Options, a_type, pointer_element_t<b_type>>();
     } else if constexpr (SharedPointer<a_type>) {
         return wire_matches_null<b_type>() || wire_matches_tag<b_type, shareable_tag>() || wire_matches_tag<b_type, sharedref_tag>();
     } else if constexpr (SharedPointer<b_type>) {
         return wire_matches_null<a_type>() || wire_matches_tag<a_type, shareable_tag>() || wire_matches_tag<a_type, sharedref_tag>();
+    } else if constexpr ((IsAggregate<a_type> || IsUntaggedTuple<a_type>) && !IsTag<a_type>) {
+        using tuple_type          = pointer_tuple_t<a_type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count == 1U) {
+            return wire_shapes_overlap<Options, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>, b_type>();
+        } else {
+            return Options::wrap_groups && wire_matches_array<Options, b_type>();
+        }
+    } else if constexpr ((IsAggregate<b_type> || IsUntaggedTuple<b_type>) && !IsTag<b_type>) {
+        return wire_shapes_overlap<Options, b_type, a_type>();
     } else {
         using pair_variant          = std::variant<a_type, b_type>;
         constexpr auto mapping      = valid_concept_mapping_array_v<pair_variant>;
@@ -247,16 +285,17 @@ template <typename A, typename B> consteval bool wire_shapes_overlap() {
     }
 }
 
-template <typename Variant, std::size_t I = 0U, std::size_t J = 1U> consteval bool pointer_variant_is_unambiguous() {
+template <typename Variant, typename Options = default_options, std::size_t I = 0U, std::size_t J = 1U>
+consteval bool pointer_variant_is_unambiguous() {
     constexpr auto count = cbor::tags::detail::variant_size_v<Variant>;
     if constexpr (I >= count) {
         return true;
     } else if constexpr (J >= count) {
-        return pointer_variant_is_unambiguous<Variant, I + 1U, I + 2U>();
+        return pointer_variant_is_unambiguous<Variant, Options, I + 1U, I + 2U>();
     } else {
         using left  = cbor::tags::detail::variant_alternative_t<I, Variant>;
         using right = cbor::tags::detail::variant_alternative_t<J, Variant>;
-        return !wire_shapes_overlap<left, right>() && pointer_variant_is_unambiguous<Variant, I, J + 1U>();
+        return !wire_shapes_overlap<Options, left, right>() && pointer_variant_is_unambiguous<Variant, Options, I, J + 1U>();
     }
 }
 

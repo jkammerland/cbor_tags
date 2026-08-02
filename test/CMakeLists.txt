@@ -388,6 +388,22 @@ add_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
 add_executable(
+  smart_ptr_variant_aggregate_array_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_aggregate_array_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_aggregate_array_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_aggregate_array_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_aggregate_array_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=Pointer variant alternatives overlap on the CBOR wire"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
   smart_ptr_variant_shared_ptr_vector_array_compile_fails
   EXCLUDE_FROM_ALL
   smart_ptr_variant_shared_ptr_vector_array_compile_fail.cc)
@@ -413,6 +429,22 @@ add_test(
     "-DTEST_TARGET=smart_ptr_variant_shared_pointer_compile_fails"
     "-DCONFIG=$<CONFIG>"
     "-DPASS_REGEX=variants containing shared pointers require an explicit application codec"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
+add_executable(
+  smart_ptr_variant_composed_codec_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_composed_codec_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_composed_codec_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_composed_codec_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_composed_codec_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=unique pointer variant alternatives must have codec-independent CBOR wire shapes"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
