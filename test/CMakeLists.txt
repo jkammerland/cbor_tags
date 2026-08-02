@@ -647,10 +647,14 @@ set_tests_properties(test_decode_stack_floor PROPERTIES LABELS resource TIMEOUT 
 
 check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
-  add_executable(test_unsigned_char test_unsigned_char.cc)
+add_executable(test_unsigned_char test_unsigned_char.cc)
   target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
   target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
-  add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
+add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
+
+add_executable(test_smart_ptr_decode_allocations test_smart_ptr_decode_allocations.cc)
+target_link_libraries(test_smart_ptr_decode_allocations PRIVATE cbor::tags)
+add_test(NAME test_smart_ptr_decode_allocations COMMAND test_smart_ptr_decode_allocations)
 endif()
 
 if(TARGET cbor_tags_cli)

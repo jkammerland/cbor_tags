@@ -654,10 +654,19 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
     [[nodiscard]] status_code decode_shareable(Pointer &value) {
         using pointer_type = std::remove_cvref_t<Pointer>;
-        detail::reset_pointer_to_new(value);
+        using element_type = typename pointer_type::element_type;
+
+        std::shared_ptr<void> stored;
+        if constexpr (std::constructible_from<pointer_type, std::shared_ptr<element_type>>) {
+            auto owner = std::make_shared<element_type>();
+            value      = pointer_type{owner};
+            stored     = std::move(owner);
+        } else {
+            detail::reset_pointer_to_new(value);
+            stored = std::make_shared<pointer_type>(value);
+        }
 
         auto scope    = current_decode_scope();
-        auto stored   = std::make_shared<pointer_type>(value);
         auto inserted = scope.insert(
             shared_ptr_decode_entry{std::move(stored), detail::graph_type_id<pointer_type>(), shared_ptr_entry_state::encoding});
         if (!inserted) {
@@ -691,7 +700,11 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
             return status_code::error;
         }
 
-        value = *std::static_pointer_cast<pointer_type>(resolved->pointer);
+        if constexpr (std::constructible_from<pointer_type, std::shared_ptr<typename pointer_type::element_type>>) {
+            value = pointer_type{std::static_pointer_cast<typename pointer_type::element_type>(resolved->pointer)};
+        } else {
+            value = *std::static_pointer_cast<pointer_type>(resolved->pointer);
+        }
         return status_code::success;
     }
 
