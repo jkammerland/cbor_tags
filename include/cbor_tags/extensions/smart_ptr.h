@@ -54,6 +54,7 @@ struct shared_ptr_decode_entry {
 template <typename Scope>
 concept SharedPtrEncodeScope = requires(Scope &scope, const shared_ptr_encode_key &key, std::size_t index) {
     { scope.observe(key) } -> std::same_as<expected<shared_ptr_observation, status_code>>;
+    { scope.observe_untracked() } -> std::same_as<expected<void, status_code>>;
     { scope.mark_complete(index) } -> std::same_as<void>;
     { scope.reset() } -> std::same_as<void>;
 };
@@ -61,6 +62,7 @@ concept SharedPtrEncodeScope = requires(Scope &scope, const shared_ptr_encode_ke
 template <typename Scope>
 concept SharedPtrDecodeScope = requires(Scope &scope, const shared_ptr_decode_entry &entry, std::size_t index) {
     { scope.insert(entry) } -> std::same_as<expected<std::size_t, status_code>>;
+    { scope.insert_untracked() } -> std::same_as<expected<void, status_code>>;
     { scope.resolve(index) } -> std::same_as<expected<shared_ptr_decode_entry, status_code>>;
     { scope.mark_complete(index) } -> std::same_as<void>;
     { scope.reset() } -> std::same_as<void>;
@@ -102,6 +104,11 @@ class shared_ptr_encode_scope {
         return shared_ptr_observation{.kind = shared_ptr_observation_kind::first, .index = index};
     }
 
+    [[nodiscard]] expected<void, status_code> observe_untracked() {
+        entries_.push_back({});
+        return {};
+    }
+
     void mark_complete(std::size_t index) {
         if (index < entries_.size()) {
             entries_[index].state = shared_ptr_entry_state::complete;
@@ -131,6 +138,11 @@ class shared_ptr_decode_scope {
         const auto index = entries_.size();
         entries_.push_back(entry);
         return index;
+    }
+
+    [[nodiscard]] expected<void, status_code> insert_untracked() {
+        entries_.push_back({});
+        return {};
     }
 
     [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) {
@@ -197,18 +209,21 @@ class encode_scope_ref {
     explicit encode_scope_ref(Scope &scope)
         : scope_(std::addressof(scope)),
           observe_([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Scope *>(raw)->observe(key); }),
+          observe_untracked_([](void *raw) { return static_cast<Scope *>(raw)->observe_untracked(); }),
           mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
           reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
 
     [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
         return observe_(scope_, key);
     }
-    void mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
-    void reset() const { reset_(scope_); }
+    [[nodiscard]] expected<void, status_code> observe_untracked() const { return observe_untracked_(scope_); }
+    void                                      mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
+    void                                      reset() const { reset_(scope_); }
 
   private:
     void *scope_{};
     expected<shared_ptr_observation, status_code> (*observe_)(void *, const shared_ptr_encode_key &){};
+    expected<void, status_code> (*observe_untracked_)(void *){};
     void (*mark_complete_)(void *, std::size_t){};
     void (*reset_)(void *){};
 };
@@ -219,11 +234,13 @@ class decode_scope_ref {
     explicit decode_scope_ref(Scope &scope)
         : scope_(std::addressof(scope)),
           insert_([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Scope *>(raw)->insert(entry); }),
+          insert_untracked_([](void *raw) { return static_cast<Scope *>(raw)->insert_untracked(); }),
           resolve_([](void *raw, std::size_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
           mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
           reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
 
     [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
+    [[nodiscard]] expected<void, status_code>        insert_untracked() const { return insert_untracked_(scope_); }
     [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) const { return resolve_(scope_, index); }
     void                                                         mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
     void                                                         reset() const { reset_(scope_); }
@@ -231,6 +248,7 @@ class decode_scope_ref {
   private:
     void *scope_{};
     expected<std::size_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
+    expected<void, status_code> (*insert_untracked_)(void *){};
     expected<shared_ptr_decode_entry, status_code> (*resolve_)(void *, std::size_t){};
     void (*mark_complete_)(void *, std::size_t){};
     void (*reset_)(void *){};
@@ -272,7 +290,7 @@ template <typename Decoder, typename T>
         }
 
         std::uint64_t tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, tag);
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, tag);
         return status == status_code::success ? dec.decode(value, tag) : status;
     } else if constexpr (IsAggregate<T> || IsUntaggedTuple<T>) {
         auto &&tuple = [&]() -> decltype(auto) {
@@ -431,7 +449,7 @@ template <typename Decoder, IsVariant Variant>
 
     if (major == major_type::Tag && !tag.has_value()) {
         std::uint64_t decoded_tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, decoded_tag);
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, decoded_tag);
         if (status != status_code::success) {
             return status;
         }
@@ -548,6 +566,28 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         current_decode_scope().reset();
     }
 
+    template <typename S = Self>
+        requires detail::EncoderSelf<S>
+    void observe_encoded_cbor_tag(std::uint64_t tag) {
+        if (tag != detail::shareable_tag) {
+            return;
+        }
+        auto observed = current_encode_scope().observe_untracked();
+        if (!observed) {
+            throw cbor::tags::detail::encode_status_exception{observed.error()};
+        }
+    }
+
+    template <typename S = Self>
+        requires detail::DecoderSelf<S>
+    [[nodiscard]] status_code observe_decoded_cbor_tag(std::uint64_t tag) {
+        if (tag != detail::shareable_tag) {
+            return status_code::success;
+        }
+        auto inserted = current_decode_scope().insert_untracked();
+        return inserted ? status_code::success : inserted.error();
+    }
+
     template <IsSharedPointer Pointer> void encode(const Pointer &value) { encode_shared_pointer(value); }
 
     template <IsSharedPointer Pointer> void encode(const scoped_shared_ptr<Pointer> &value) { encode_shared_pointer(value.value()); }
@@ -620,7 +660,8 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
             return;
         }
 
-        enc.encode(static_tag<detail::shareable_tag>{});
+        // observe() already reserved this tag 28 index.
+        enc.encode_major_and_size(detail::shareable_tag, static_cast<typename Self::byte_type>(0xC0));
         enc.encode(*value);
         scope.mark_complete(observation->index);
     }
@@ -637,7 +678,9 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         }
 
         std::uint64_t tag{};
-        const auto    status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
+        // Tag 28 is registered by decode_shareable() with the pointer entry itself.
+        // Observing it here would also insert an untracked entry and shift every reference index.
+        const auto status = cbor::tags::detail::decode_unsigned_argument(static_cast<Self &>(*this), additional_info, tag);
         if (status != status_code::success) {
             return status;
         }

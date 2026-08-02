@@ -69,6 +69,16 @@ concept CodecStatusResult = requires(T result) {
     { result.error() } -> std::convertible_to<status_code>;
 };
 
+template <typename T>
+concept HasEncodedCborTagObserver = requires(T &observer, std::uint64_t tag) {
+    { observer.observe_encoded_cbor_tag(tag) } -> std::same_as<void>;
+};
+
+template <typename T>
+concept HasDecodedCborTagObserver = requires(T &observer, std::uint64_t tag) {
+    { observer.observe_decoded_cbor_tag(tag) } -> std::same_as<status_code>;
+};
+
 } // namespace detail
 
 template <typename T>
