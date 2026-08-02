@@ -1343,9 +1343,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     constexpr status_code decode_tag_argument(byte additionalInfo, std::uint64_t &tag) {
         tag = decode_unsigned(additionalInfo);
-        if constexpr (requires(self_t &self) {
-                          { self.observe_decoded_cbor_tag(tag) } -> std::same_as<status_code>;
-                      }) {
+        if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
             return static_cast<self_t &>(*this).observe_decoded_cbor_tag(tag);
         }
         return status_code::success;

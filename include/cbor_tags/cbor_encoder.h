@@ -54,12 +54,14 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
-        if (majorType == static_cast<byte_type>(0xC0)) {
-            if constexpr (requires(self_t &self) { self.observe_encoded_cbor_tag(value); }) {
-                static_cast<self_t &>(*this).observe_encoded_cbor_tag(value);
-            }
-        }
         detail::append_cbor_major_argument(appender_, data_, value, majorType);
+    }
+
+    constexpr void encode_tag_argument(std::uint64_t value) {
+        if constexpr (detail::HasEncodedCborTagObserver<self_t>) {
+            static_cast<self_t &>(*this).observe_encoded_cbor_tag(value);
+        }
+        encode_major_and_size(value, static_cast<byte_type>(0xC0));
     }
 
     template <IsUnsigned T> constexpr void encode(T value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
@@ -84,10 +86,8 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
     }
 
-    template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_major_and_size(N, static_cast<byte_type>(0xC0)); }
-    template <IsUnsigned T> constexpr void    encode(dynamic_tag<T> value) {
-        encode_major_and_size(value.cbor_tag, static_cast<byte_type>(0xC0));
-    }
+    template <std::uint64_t N> constexpr void encode(static_tag<N>) { encode_tag_argument(N); }
+    template <IsUnsigned T> constexpr void    encode(dynamic_tag<T> value) { encode_tag_argument(value.cbor_tag); }
 
     template <IsString T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
         encode_bounded_size(value);
@@ -160,7 +160,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
-            encode_major_and_size(T::cbor_tag, static_cast<byte_type>(0xC0));
+            encode_tag_argument(T::cbor_tag);
             std::apply(
                 [this](const auto &...args) {
                     constexpr auto   size_        = sizeof...(args);
@@ -175,7 +175,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         } else if constexpr (IsTag<T>) {
             const auto &&tuple = to_tuple(value);
             static_assert(IsTag<std::remove_cvref_t<decltype(std::get<0>(tuple))>>, "Tag must be first element of tuple");
-            encode_major_and_size(std::get<0>(tuple), static_cast<byte_type>(0xC0));
+            encode_tag_argument(std::get<0>(tuple));
             aggregate_encode(detail::tuple_tail(tuple));
         } else {
             const auto &&tuple = to_tuple(value);

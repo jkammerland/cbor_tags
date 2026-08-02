@@ -565,10 +565,6 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         if (tag != detail::shareable_tag) {
             return;
         }
-        if (encoding_tracked_shareable_) {
-            encoding_tracked_shareable_ = false;
-            return;
-        }
         auto observed = current_encode_scope().observe_untracked();
         if (!observed) {
             throw cbor::tags::detail::encode_status_exception{observed.error()};
@@ -657,8 +653,8 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
             return;
         }
 
-        encoding_tracked_shareable_ = true;
-        enc.encode(static_tag<detail::shareable_tag>{});
+        // observe() already reserved this tag 28 index.
+        enc.encode_major_and_size(detail::shareable_tag, static_cast<typename Self::byte_type>(0xC0));
         enc.encode(*value);
         scope.mark_complete(observation->index);
     }
@@ -751,7 +747,6 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
     shared_ptr_decode_scope                 default_decode_scope_{};
     std::optional<detail::encode_scope_ref> external_encode_scope_{};
     std::optional<detail::decode_scope_ref> external_decode_scope_{};
-    bool                                    encoding_tracked_shareable_{};
 };
 
 } // namespace cbor::tags::ext::smart_ptr

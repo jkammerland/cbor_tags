@@ -84,11 +84,8 @@ The first non-null pointer is written with tag 28. Later occurrences are tag
 ]
 ```
 
-Indices count every tag 28 item decoded through the typed codec, including tag
-28 on an ordinary or nested non-pointer value. The table records those items as
-untracked positions so later pointer indices stay aligned. Opaque encoded-item
-views are not walked; a reference namespace must not cross an opaque item whose
-contents may contain tag 28.
+Every tag 28 in the active reference scope consumes an index, including tags not
+produced by `shared_ptr_codec`.
 
 An empty pointer is ordinary CBOR `null`.
 
