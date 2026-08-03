@@ -585,16 +585,25 @@ template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
         external_decode_scope_.reset();
     }
 
+    // MSVC 19.50 miscompiles reset through the temporary erased wrapper returned by current_*_scope() in optimized builds.
     template <typename S = Self>
         requires detail::EncoderSelf<S>
     void reset_shared_ptr_scope() {
-        current_encode_scope().reset();
+        if (external_encode_scope_) {
+            external_encode_scope_->reset();
+        } else {
+            default_encode_scope_.reset();
+        }
     }
 
     template <typename S = Self>
         requires detail::DecoderSelf<S>
     void reset_shared_ptr_scope() {
-        current_decode_scope().reset();
+        if (external_decode_scope_) {
+            external_decode_scope_->reset();
+        } else {
+            default_decode_scope_.reset();
+        }
     }
 
     template <typename S = Self>

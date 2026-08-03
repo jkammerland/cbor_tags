@@ -1087,6 +1087,34 @@ TEST_CASE("default shared_ptr scope persists until explicitly reset") {
     CHECK(first != second);
 }
 
+TEST_CASE("external shared_ptr scope resets through the codec") {
+    auto value = std::make_shared<std::uint64_t>(1U);
+
+    smart_ptr_test::encode_table encode_table;
+    std::vector<std::byte>       bytes;
+    auto                         enc = make_encoder<shared_ptr_codec>(bytes);
+    enc.set_shared_ptr_scope(encode_table);
+    REQUIRE(enc(value));
+    enc.reset_shared_ptr_scope();
+    *value = 2U;
+    REQUIRE(enc(value));
+    CHECK_EQ(to_hex(bytes), "d81c01d81c02");
+
+    smart_ptr_test::decode_table   decode_table;
+    std::shared_ptr<std::uint64_t> first;
+    std::shared_ptr<std::uint64_t> second;
+    auto                           dec = make_decoder<shared_ptr_codec>(bytes);
+    dec.set_shared_ptr_scope(decode_table);
+    REQUIRE(dec(first));
+    dec.reset_shared_ptr_scope();
+    REQUIRE(dec(second));
+    REQUIRE(first);
+    REQUIRE(second);
+    CHECK_EQ(*first, 1U);
+    CHECK_EQ(*second, 2U);
+    CHECK(first != second);
+}
+
 TEST_CASE("shared_ptr use needs no root wrapper") {
     auto value = std::make_shared<std::uint64_t>(1U);
 
