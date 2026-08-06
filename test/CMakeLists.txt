@@ -28,6 +28,10 @@ target_link_libraries(tests PUBLIC test_util)
 
 # add link libraries
 target_link_libraries(tests PRIVATE cbor::tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
+if(TARGET cbor_tags_cwt_openssl)
+  target_link_libraries(tests PRIVATE cbor::cwt_openssl)
+  target_compile_definitions(tests PRIVATE CBOR_TAGS_TEST_HAS_CWT_OPENSSL=1)
+endif()
 
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
