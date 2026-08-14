@@ -1120,6 +1120,20 @@ TEST_CASE("rfc8746 typed array values view is safe when created from a temporary
     CHECK(it == values.end());
 }
 
+TEST_CASE("rfc8746 typed array values view supports non-common payload ranges") {
+    const std::array payload{std::byte{0x01}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    using payload_iterator = std::counted_iterator<const std::byte *>;
+    using payload_range    = std::ranges::subrange<payload_iterator, std::default_sentinel_t>;
+    static_assert(std::ranges::forward_range<const payload_range>);
+    static_assert(!std::ranges::common_range<const payload_range>);
+
+    const auto bytes = payload_range{payload_iterator{payload.data(), static_cast<std::ptrdiff_t>(payload.size())}, std::default_sentinel};
+    const auto view  = typed_array_view<std::uint32_t, payload_range>{bytes};
+
+    REQUIRE_EQ(view.size(), 1U);
+    CHECK_EQ(view.copy_values(), std::vector<std::uint32_t>{1U});
+}
+
 TEST_CASE("rfc8746 typed array views reject inconsistent payload extents") {
     const std::array payload{std::byte{0x01}};
     const auto       bytes = std::span<const std::byte>{payload};

@@ -489,7 +489,7 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
         using iterator_concept  = std::forward_iterator_tag;
 
         iterator() = default;
-        constexpr iterator(std::ranges::iterator_t<const ByteRange> current, std::ranges::iterator_t<const ByteRange> end,
+        constexpr iterator(std::ranges::iterator_t<const ByteRange> current, std::ranges::sentinel_t<const ByteRange> end,
                            std::size_t remaining)
             : current_(std::move(current)), end_(std::move(end)), remaining_(remaining) {}
 
@@ -532,7 +532,7 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
 
       private:
         std::ranges::iterator_t<const ByteRange> current_{};
-        std::ranges::iterator_t<const ByteRange> end_{};
+        std::ranges::sentinel_t<const ByteRange> end_{};
         std::size_t                              remaining_{};
     };
 
