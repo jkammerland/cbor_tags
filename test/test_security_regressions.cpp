@@ -9,6 +9,8 @@
 #include <doctest/doctest.h>
 #include <functional>
 #include <limits>
+#include <list>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -44,6 +46,15 @@ struct SecurityRootItem {
 
 struct SecurityRecursiveNode {
     std::vector<SecurityRecursiveNode> children;
+};
+
+struct SecurityZeroProgressValue {
+    friend constexpr bool operator<(SecurityZeroProgressValue, SecurityZeroProgressValue) noexcept { return false; }
+
+  private:
+    friend cbor::tags::Access;
+
+    template <typename Decoder> constexpr auto decode(Decoder &) { return typename Decoder::expected_type{}; }
 };
 } // namespace cbor_tags_test_security
 
@@ -143,6 +154,85 @@ TEST_CASE("security regression: non-contiguous byte view iterators are not produ
 
     using transformed_view_t = decltype(view.view());
     CHECK(std::ranges::borrowed_range<transformed_view_t>);
+}
+
+TEST_CASE("security regression: standalone zero-progress custom decode remains supported") {
+    std::vector<std::byte>    input{std::byte{0x00}};
+    auto                      dec = make_decoder(input);
+    SecurityZeroProgressValue decoded;
+    const auto                begin = dec.tell();
+
+    const auto result = dec(decoded);
+
+    REQUIRE(result);
+    CHECK(dec.tell() == begin);
+}
+
+TEST_CASE("security regression: dynamic arrays reject successful zero-progress elements") {
+    SUBCASE("definite array") {
+        std::vector<std::byte>                 input{std::byte{0x81}, std::byte{0x00}};
+        auto                                   dec = make_decoder(input);
+        std::vector<SecurityZeroProgressValue> decoded;
+        const auto                             result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(decoded.empty());
+        CHECK(dec.tell() == std::next(input.cbegin()));
+    }
+
+    SUBCASE("indefinite array") {
+        std::vector<std::byte>                 input{std::byte{0x9F}, std::byte{0x00}, std::byte{0xFF}};
+        auto                                   dec = make_decoder(input);
+        std::vector<SecurityZeroProgressValue> decoded;
+        const auto                             result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(decoded.empty());
+        CHECK(dec.tell() == std::next(input.cbegin()));
+    }
+
+    SUBCASE("large definite array on unsized input") {
+        std::list<std::byte>                 input{std::byte{0x9B}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
+                                                   std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+        auto                                 dec = make_decoder(input);
+        std::list<SecurityZeroProgressValue> decoded;
+        const auto                           result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(decoded.empty());
+        CHECK(dec.tell() == input.cend());
+    }
+}
+
+TEST_CASE("security regression: dynamic maps reject successful zero-progress entries") {
+    using zero_progress_map = std::map<SecurityZeroProgressValue, SecurityZeroProgressValue>;
+
+    SUBCASE("definite map") {
+        std::vector<std::byte> input{std::byte{0xA1}, std::byte{0x00}};
+        auto                   dec = make_decoder(input);
+        zero_progress_map      decoded;
+        const auto             result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(decoded.empty());
+        CHECK(dec.tell() == std::next(input.cbegin()));
+    }
+
+    SUBCASE("indefinite map") {
+        std::vector<std::byte> input{std::byte{0xBF}, std::byte{0x00}, std::byte{0xFF}};
+        auto                   dec = make_decoder(input);
+        zero_progress_map      decoded;
+        const auto             result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK(decoded.empty());
+        CHECK(dec.tell() == std::next(input.cbegin()));
+    }
 }
 
 TEST_CASE("security regression: variant simple accepts cbor undefined") {

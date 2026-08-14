@@ -95,6 +95,12 @@ caller that needs message-size admission checks performs them at its transport
 or framing boundary. A caller that supplies a `std::ranges::sized_range` is
 responsible for that range's size/extent contract.
 
+A custom decoder may successfully consume zero bytes when invoked as a
+standalone value. When a custom value is repeated as an array element, map key,
+or map value, however, each successful decode must advance the input. The core
+decoder returns `status_code::error` before inserting a zero-progress item so a
+runtime container length cannot repeat the same input indefinitely.
+
 For contiguous input or input that models `std::ranges::sized_range`, the
 decoder uses the range-provided extent to check a definite string payload's
 exact availability before reserving, without an explicit decoder prewalk. For

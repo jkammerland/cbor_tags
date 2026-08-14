@@ -495,6 +495,24 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return decode_definite_range(value, decode_unsigned(additionalInfo));
     }
 
+    template <typename Value> constexpr status_code decode_repeated_item(Value &value) {
+        const auto item_begin = tell();
+        const auto status     = decode(value);
+        if (status == status_code::success && tell() == item_begin) {
+            return status_code::error;
+        }
+        return status;
+    }
+
+    template <typename Value>
+    constexpr status_code decode_repeated_item(Value &value, major_type major, byte additional_info, iterator_t item_begin) {
+        const auto status = decode(value, major, additional_info);
+        if (status == status_code::success && tell() == item_begin) {
+            return status_code::error;
+        }
+        return status;
+    }
+
     template <IsRangeOfCborValues T> constexpr status_code decode_definite_range(T &value, std::uint64_t length) {
         if constexpr (IsFixedArray<T>) {
             if (length != static_cast<std::uint64_t>(value.size())) {
@@ -540,8 +558,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                               detail::can_propagate_container_allocator_for<mapped_type, T>()) {
                     auto key          = detail::make_decode_value_for<key_type>(value);
                     auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                    auto status       = decode(key);
-                    status            = status == status_code::success ? decode(mapped_value) : status;
+                    auto status       = decode_repeated_item(key);
+                    status            = status == status_code::success ? decode_repeated_item(mapped_value) : status;
                     if (status != status_code::success) {
                         return status;
                     }
@@ -550,8 +568,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 } else {
                     value_type result;
                     auto &[key, mapped_value] = result;
-                    auto status               = decode(key);
-                    status                    = status == status_code::success ? decode(mapped_value) : status;
+                    auto status               = decode_repeated_item(key);
+                    status                    = status == status_code::success ? decode_repeated_item(mapped_value) : status;
                     if (status != status_code::success) {
                         return status;
                     }
@@ -560,7 +578,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             } else {
                 using value_type = typename T::value_type;
                 auto result      = detail::make_decode_value_for<value_type>(value);
-                auto status      = decode(result);
+                auto status      = decode_repeated_item(result);
                 if (status != status_code::success) {
                     return status;
                 }
@@ -1459,6 +1477,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
+            const auto item_begin        = tell();
             auto [major, additionalInfo] = read_initial_byte();
             if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
                 if constexpr (CheckBounds) {
@@ -1475,7 +1494,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
             using value_type = typename T::value_type;
             auto result      = detail::make_decode_value_for<value_type>(value);
-            auto status      = decode(result, major, additionalInfo);
+            auto status      = decode_repeated_item(result, major, additionalInfo, item_begin);
             if (status != status_code::success) {
                 return status;
             }
@@ -1490,6 +1509,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         detail::appender<T>            appender_;
         [[maybe_unused]] std::uint64_t size{};
         while (true) {
+            const auto key_begin         = tell();
             auto [major, additionalInfo] = read_initial_byte();
             if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
                 if constexpr (CheckBounds) {
@@ -1511,13 +1531,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                           detail::can_propagate_container_allocator_for<mapped_type, T>()) {
                 auto key          = detail::make_decode_value_for<key_type>(value);
                 auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                auto status       = decode(key, major, additionalInfo);
+                auto status       = decode_repeated_item(key, major, additionalInfo, key_begin);
                 if (status == status_code::success) {
+                    const auto mapped_begin                     = tell();
                     auto [mapped_major, mapped_additional_info] = read_initial_byte();
                     if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
                         return status_code::no_match_for_map_on_buffer;
                     }
-                    status = decode(mapped_value, mapped_major, mapped_additional_info);
+                    status = decode_repeated_item(mapped_value, mapped_major, mapped_additional_info, mapped_begin);
                 }
                 if (status != status_code::success) {
                     return status;
@@ -1529,13 +1550,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 }
             } else {
                 value_type result{};
-                auto       status = decode(result.first, major, additionalInfo);
+                auto       status = decode_repeated_item(result.first, major, additionalInfo, key_begin);
                 if (status == status_code::success) {
+                    const auto mapped_begin                     = tell();
                     auto [mapped_major, mapped_additional_info] = read_initial_byte();
                     if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
                         return status_code::no_match_for_map_on_buffer;
                     }
-                    status = decode(result.second, mapped_major, mapped_additional_info);
+                    status = decode_repeated_item(result.second, mapped_major, mapped_additional_info, mapped_begin);
                 }
                 if (status != status_code::success) {
                     return status;
