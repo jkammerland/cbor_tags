@@ -12,6 +12,7 @@
 #include <deque>
 #include <doctest/doctest.h>
 #include <limits>
+#include <list>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -203,9 +204,26 @@ static_assert(!IsTag<multi_dimensional_array_ref<std::vector<std::uint64_t>, typ
 
 using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
 using extension_encoder = decltype(make_encoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
+
+class truncating_byte_view : public std::ranges::view_base {
+  public:
+    truncating_byte_view() = default;
+    constexpr explicit truncating_byte_view(std::span<const std::byte> payload)
+        : payload_(payload.first(std::min<std::size_t>(payload.size(), 1U))) {}
+
+    [[nodiscard]] constexpr auto begin() const noexcept { return payload_.begin(); }
+    [[nodiscard]] constexpr auto end() const noexcept { return payload_.end(); }
+    [[nodiscard]] constexpr auto size() const noexcept { return payload_.size(); }
+
+  private:
+    std::span<const std::byte> payload_{};
+};
+
 using bad_payload_range = std::ranges::iota_view<unsigned char, unsigned char>;
 static_assert(rfc8746_detail::TypedArrayPayloadRange<bad_payload_range>);
 static_assert(!CanDecode<extension_decoder, typed_array_view<std::int32_t, bad_payload_range>>);
+static_assert(rfc8746_detail::TypedArrayPayloadRange<truncating_byte_view>);
+static_assert(CanDecode<extension_decoder, typed_array_view<std::uint32_t, truncating_byte_view>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view<std::int32_t>>);
 static_assert(!CanEncode<extension_encoder, typed_array_view_be<double>>);
 static_assert(IsCborMajor<bounded_size<typed_array<std::int32_t>, 1, 3>>);
@@ -1102,6 +1120,50 @@ TEST_CASE("rfc8746 typed array values view is safe when created from a temporary
     CHECK(it == values.end());
 }
 
+TEST_CASE("rfc8746 typed array views reject inconsistent payload extents") {
+    const std::array payload{std::byte{0x01}};
+    const auto       bytes = std::span<const std::byte>{payload};
+
+    CHECK_THROWS_AS((typed_array_view<std::uint32_t>{bytes, sizeof(std::uint32_t)}), std::invalid_argument);
+    CHECK_THROWS_AS((typed_array_view<std::uint32_t>{bytes}), std::invalid_argument);
+    CHECK_THROWS_AS((typed_array_values_view<std::uint32_t, std::span<const std::byte>>{bytes, 1U}), std::invalid_argument);
+
+    const std::list<std::byte> list_payload{std::byte{0x01}};
+    auto                       unsized_payload = std::ranges::subrange(list_payload.cbegin(), list_payload.cend());
+    static_assert(!std::ranges::sized_range<decltype(unsized_payload)>);
+
+    const auto values = typed_array_values_view<std::uint32_t, decltype(unsized_payload)>{unsized_payload, 1U};
+    const auto it     = values.begin();
+    REQUIRE(it != values.end());
+    CHECK_THROWS_AS((void)*it, std::out_of_range);
+}
+
+TEST_CASE("rfc8746 typed array decode rejects payload ranges that discard bytes") {
+    const auto input = to_bytes("d8464401020304");
+
+    {
+        typed_array_view<std::uint32_t, truncating_byte_view> decoded;
+        auto                                                  dec    = make_decoder<typed_array_codec>(input);
+        const auto                                            result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(decoded.size(), 0U);
+        CHECK(dec.tell() == input.end());
+    }
+
+    {
+        bounded_size<typed_array_view<std::uint32_t, truncating_byte_view>, 1, 1> decoded;
+        auto                                                                      dec    = make_decoder<typed_array_codec>(input);
+        const auto                                                                result = dec(decoded);
+
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(decoded.value().size(), 0U);
+        CHECK(dec.tell() == input.end());
+    }
+}
+
 TEST_CASE("rfc8746 typed array view reads unaligned payload bytes without a native span") {
     std::array<std::byte, sizeof(std::int32_t) + alignof(std::int32_t)> storage{};
     storage[0] = std::byte{0xCC};
@@ -1166,6 +1228,17 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
         using contiguous_view = typed_array_view_for<std::int32_t, decltype(dec)>;
         static_assert(std::same_as<typename contiguous_view::payload_range_type, std::span<const std::byte>>);
         static_assert(HasTypedArrayPayloadBytes<contiguous_view>);
+    }
+
+    {
+        const auto unsized_input = std::list<std::byte>{encoded.begin(), encoded.end()};
+        auto       dec           = make_decoder<typed_array_codec>(unsized_input);
+        using unsized_view       = typed_array_view_for<std::int32_t, decltype(dec)>;
+        static_assert(!std::ranges::sized_range<const typename unsized_view::payload_range_type>);
+
+        unsized_view decoded;
+        REQUIRE(dec(decoded));
+        CHECK_EQ(decoded.copy_values(), std::vector<std::int32_t>{1, -2, 3});
     }
 
     {
