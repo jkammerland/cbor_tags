@@ -32,6 +32,7 @@ namespace cbor::tags::ext::rfc8746 {
 enum class typed_array_byte_order { little, big };
 
 template <typename T, typed_array_byte_order ByteOrder = typed_array_byte_order::little> struct typed_array_traits;
+template <typename Self> struct typed_array_codec;
 
 enum class uint8_clamped : std::uint8_t {};
 
@@ -200,8 +201,19 @@ concept TypedArrayPayloadRange =
 
 template <typename Decoder, typename R>
 concept DecodableTypedArrayPayloadRange =
-    TypedArrayPayloadRange<R> && ((std::ranges::contiguous_range<const R> && !IsContiguous<typename Decoder::input_buffer_type>) ||
-                                  requires(Decoder &dec, std::uint64_t length) { R{dec.decode_bstring_payload(length)}; });
+    TypedArrayPayloadRange<R> &&
+    ((std::ranges::contiguous_range<const R> && !IsContiguous<typename Decoder::input_buffer_type>) ||
+     (requires(Decoder &dec, std::uint64_t length) { R{dec.decode_bstring_payload(length)}; } &&
+      (std::ranges::sized_range<const R> ||
+       std::same_as<R, std::remove_cvref_t<decltype(std::declval<Decoder &>().decode_bstring_payload(std::uint64_t{}))>>)));
+
+template <TypedArrayPayloadRange R> [[nodiscard]] constexpr bool payload_range_size_matches(const R &payload, std::size_t expected_size) {
+    if constexpr (std::ranges::sized_range<const R>) {
+        return static_cast<std::size_t>(std::ranges::size(payload)) == expected_size;
+    } else {
+        return true;
+    }
+}
 
 template <typed_array_byte_order ByteOrder>
 inline constexpr bool native_matches_byte_order =
@@ -477,13 +489,17 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
         using iterator_concept  = std::forward_iterator_tag;
 
         iterator() = default;
-        constexpr iterator(std::ranges::iterator_t<const ByteRange> current, std::size_t remaining)
-            : current_(std::move(current)), remaining_(remaining) {}
+        constexpr iterator(std::ranges::iterator_t<const ByteRange> current, std::ranges::sentinel_t<const ByteRange> end,
+                           std::size_t remaining)
+            : current_(std::move(current)), end_(std::move(end)), remaining_(remaining) {}
 
         [[nodiscard]] value_type operator*() const {
             std::array<std::byte, sizeof(value_type)> bytes{};
             auto                                      it = current_;
             for (auto &byte : bytes) {
+                if (it == end_) {
+                    throw std::out_of_range("RFC 8746 typed-array payload range is shorter than its declared element count");
+                }
                 byte = static_cast<std::byte>(*it);
                 ++it;
             }
@@ -492,6 +508,9 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
 
         constexpr iterator &operator++() {
             for (std::size_t i = 0; i < sizeof(value_type); ++i) {
+                if (current_ == end_) {
+                    throw std::out_of_range("RFC 8746 typed-array payload range is shorter than its declared element count");
+                }
                 ++current_;
             }
             --remaining_;
@@ -513,6 +532,7 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
 
       private:
         std::ranges::iterator_t<const ByteRange> current_{};
+        std::ranges::sentinel_t<const ByteRange> end_{};
         std::size_t                              remaining_{};
     };
 
@@ -520,13 +540,27 @@ class typed_array_values_view : public std::ranges::view_interface<typed_array_v
         requires std::default_initializable<ByteRange>
     = default;
     constexpr typed_array_values_view(ByteRange payload, std::size_t value_count)
-        : payload_(std::move(payload)), value_count_(value_count) {}
+        : payload_(std::move(payload)), value_count_(validate_value_count(payload_, value_count)) {}
 
-    [[nodiscard]] constexpr iterator                begin() const { return iterator{std::ranges::begin(payload_), value_count_}; }
+    [[nodiscard]] constexpr iterator begin() const {
+        return iterator{std::ranges::begin(payload_), std::ranges::end(payload_), value_count_};
+    }
     [[nodiscard]] constexpr std::default_sentinel_t end() const noexcept { return {}; }
     [[nodiscard]] constexpr std::size_t             size() const noexcept { return value_count_; }
 
   private:
+    [[nodiscard]] static constexpr std::size_t validate_value_count(const ByteRange &payload, std::size_t value_count) {
+        if (value_count > (std::numeric_limits<std::size_t>::max() / sizeof(value_type))) {
+            throw std::invalid_argument("RFC 8746 typed-array element count exceeds the addressable payload size");
+        }
+        if constexpr (std::ranges::sized_range<const ByteRange>) {
+            if (static_cast<std::size_t>(std::ranges::size(payload)) != value_count * sizeof(value_type)) {
+                throw std::invalid_argument("RFC 8746 typed-array payload size does not match its declared element count");
+            }
+        }
+        return value_count;
+    }
+
     ByteRange   payload_;
     std::size_t value_count_{};
 };
@@ -543,8 +577,10 @@ class typed_array_view {
     static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
 
     constexpr typed_array_view() = default;
-    constexpr explicit typed_array_view(ByteRange payload) : payload_(std::move(payload)), payload_size_(payload_size(payload_)) {}
-    constexpr typed_array_view(ByteRange payload, std::size_t payload_size) : payload_(std::move(payload)), payload_size_(payload_size) {}
+    constexpr explicit typed_array_view(ByteRange payload)
+        : payload_(std::move(payload)), payload_size_(validate_payload_size(payload_, payload_size(payload_))) {}
+    constexpr typed_array_view(ByteRange payload, std::size_t expected_payload_size)
+        : payload_(std::move(payload)), payload_size_(validate_payload_size(payload_, expected_payload_size)) {}
 
     [[nodiscard]] constexpr const ByteRange &payload_range() const noexcept { return payload_; }
 
@@ -569,6 +605,25 @@ class typed_array_view {
     }
 
   private:
+    template <typename Self> friend struct typed_array_codec;
+
+    struct decoded_payload_t {};
+
+    constexpr typed_array_view(decoded_payload_t, ByteRange payload, std::size_t payload_size)
+        : payload_(std::move(payload)), payload_size_(payload_size) {}
+
+    [[nodiscard]] static constexpr typed_array_view from_decoded_payload(ByteRange payload, std::size_t payload_size) {
+        return typed_array_view{decoded_payload_t{}, std::move(payload), payload_size};
+    }
+
+    [[nodiscard]] static constexpr std::size_t validate_payload_size(const ByteRange &payload, std::size_t expected_payload_size) {
+        const auto actual_payload_size = payload_size(payload);
+        if (actual_payload_size != expected_payload_size || (actual_payload_size % sizeof(value_type)) != 0U) {
+            throw std::invalid_argument("RFC 8746 typed-array payload size is inconsistent with the supplied byte range");
+        }
+        return actual_payload_size;
+    }
+
     [[nodiscard]] static constexpr std::size_t payload_size(const ByteRange &payload) {
         if constexpr (std::ranges::sized_range<const ByteRange>) {
             return static_cast<std::size_t>(std::ranges::size(payload));
@@ -1173,12 +1228,10 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
             if (status != status_code::success) {
                 return status;
             }
-            std::forward<Consume>(consume)(std::move(raw_payload), payload_size);
-            return status_code::success;
+            return std::forward<Consume>(consume)(std::move(raw_payload), payload_size);
         } else {
             return cbor::tags::detail::consume_extension_bstring_payload(dec, payload_size_u64, [&](auto &&raw_payload) {
-                std::forward<Consume>(consume)(std::forward<decltype(raw_payload)>(raw_payload), payload_size);
-                return status_code::success;
+                return std::forward<Consume>(consume)(std::forward<decltype(raw_payload)>(raw_payload), payload_size);
             });
         }
     }
@@ -1193,6 +1246,7 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
             payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
                 array.values() = detail::materialize_values<value_type, array_type::byte_order>(
                     std::forward<decltype(raw_payload)>(raw_payload), payload_size);
+                return status_code::success;
             });
     }
 
@@ -1209,7 +1263,12 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
         } else {
             return decode_bounded_typed_array_bytes<value_type, array_type::byte_order, false>(
                 payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
-                    view = array_type{byte_range{std::forward<decltype(raw_payload)>(raw_payload)}, payload_size};
+                    auto payload = byte_range{std::forward<decltype(raw_payload)>(raw_payload)};
+                    if (!detail::payload_range_size_matches(payload, payload_size)) {
+                        return status_code::error;
+                    }
+                    view = array_type::from_decoded_payload(std::move(payload), payload_size);
+                    return status_code::success;
                 });
         }
     }
@@ -1238,8 +1297,11 @@ template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> 
                 if ((payload_size % sizeof(value_type)) != 0U) {
                     return status_code::unexpected_group_size;
                 }
-                view = typed_array_view<value_type, ByteRange, ByteOrder>{ByteRange{std::forward<decltype(raw_payload)>(raw_payload)},
-                                                                          payload_size};
+                auto payload = ByteRange{std::forward<decltype(raw_payload)>(raw_payload)};
+                if (!detail::payload_range_size_matches(payload, payload_size)) {
+                    return status_code::error;
+                }
+                view = typed_array_view<value_type, ByteRange, ByteOrder>::from_decoded_payload(std::move(payload), payload_size);
                 return status_code::success;
             });
         }
