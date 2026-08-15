@@ -60,7 +60,10 @@ struct status_only_encoder_codec {
   private:
     friend cbor::tags::Access;
 
-    template <typename Encoder> auto encode(Encoder &) const { return status_result_without_bool{true, status_code::success}; }
+    template <typename Encoder> auto encode(Encoder &enc) const {
+        const auto result = enc(std::uint64_t{0});
+        return status_result_without_bool{result.has_value(), result.has_value() ? status_code::success : result.error()};
+    }
 };
 
 struct status_only_member_transcode {
@@ -79,8 +82,10 @@ template <typename Decoder> auto decode(Decoder &, status_only_free_decode &&) {
 
 struct status_only_free_transcode {};
 
-template <typename Decoder> auto transcode(Decoder &, status_only_free_transcode &&) {
-    return status_result_without_bool{true, status_code::success};
+template <typename Decoder> auto transcode(Decoder &dec, status_only_free_transcode &&) {
+    std::uint64_t value{};
+    const auto    result = dec(value);
+    return status_result_without_bool{result.has_value(), result.has_value() ? status_code::success : result.error()};
 }
 
 #if CBOR_TAGS_USE_STD_EXPECTED
@@ -172,6 +177,7 @@ TEST_CASE("custom codec results do not require contextual bool conversion") {
     std::vector<std::byte> output;
     auto                   enc = make_encoder(output);
     REQUIRE(enc(status_only_encoder_codec{}));
+    CHECK_EQ(to_hex(output), "00");
 
     const auto input = to_bytes("00");
 
@@ -196,4 +202,5 @@ TEST_CASE("custom codec results do not require contextual bool conversion") {
     status_only_free_transcode free_transcode;
     auto                       free_transcode_dec = make_decoder(input);
     REQUIRE(free_transcode_dec(free_transcode));
+    CHECK(free_transcode_dec.tell() == input.end());
 }

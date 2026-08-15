@@ -92,6 +92,47 @@ struct my_decoder_only : cbor::tags::cbor_decoder_mixin_base<Self> {
 };
 ```
 
+## Custom Decoder Success Contract
+
+This contract applies to member and free `decode`/`transcode`
+customizations as well as opt-in decoder mixins:
+
+- Success means that the customization accepted and consumed the complete CBOR
+  representation assigned to it. For an ordinary custom type, that is exactly
+  one CBOR payload item unless an API explicitly handles an enclosing tag,
+  header, or other structural wrapper.
+- A user-facing `decode(Decoder&)` or `transcode(Decoder&)` customization starts
+  at the payload it owns (after any framework-managed tag) and must consume it
+  through the decoder. Returning success without decoding that payload is a
+  customization bug.
+- A codec overload receiving `(value, major, additional_info)` runs after the
+  initial byte has already been consumed. It must validate that header and
+  consume the remaining payload. A valid one-byte item may require no
+  additional read inside this overload; the already-consumed header is still
+  its CBOR representation.
+- On malformed, incomplete, or non-matching input, return and propagate the
+  corresponding non-success status. Do not report success to make the caller
+  retry or advance.
+
+The library does not infer, repair, or sandbox the semantics of user-provided
+customization code. For example, this zero-item decoder violates the contract:
+
+```cpp
+template <typename Decoder>
+auto decode(Decoder&, my_type&&) {
+    return typename Decoder::expected_type{}; // Invalid: no CBOR item decoded.
+}
+```
+
+Delegate to the decoder so success represents an actual item:
+
+```cpp
+template <typename Decoder>
+auto decode(Decoder& dec, my_type&& value) {
+    return dec(value.payload);
+}
+```
+
 Decode overloads receive the already-read initial byte split into `major` and
 `additional_info`. Validate both, consume exactly the payload for the type, and
 return `status_code` for malformed CBOR. Encode overloads may throw for API
