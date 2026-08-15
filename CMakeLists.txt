@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.23)
+if(POLICY CMP0206)
+  cmake_policy(SET CMP0206 NEW)
+endif()
 project(
   cbor_tags
   VERSION 0.22.0
@@ -185,13 +188,6 @@ option(CBOR_TAGS_BUILD_EXAMPLES "Build examples" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
 option(CBOR_TAGS_ENABLE_CPACK "Configure TGZ and ZIP release packages" OFF)
 option(CBOR_TAGS_ENABLE_SBOM "Install SPDX SBOM metadata" OFF)
-option(CBOR_TAGS_REQUIRE_SIGNING "Require GPG signing for release packages" OFF)
-set(GPG_SIGNING_KEY
-    ""
-    CACHE STRING "GPG key fingerprint or key id used to sign release packages")
-set(GPG_PASSPHRASE_FILE
-    ""
-    CACHE FILEPATH "File containing the GPG key passphrase for noninteractive release signing")
 if(CBOR_TAGS_BUILD_INTEROP_TESTS AND NOT CBOR_TAGS_BUILD_TESTS)
   message(FATAL_ERROR "CBOR_TAGS_BUILD_INTEROP_TESTS requires CBOR_TAGS_BUILD_TESTS=ON.")
 endif()
@@ -201,11 +197,11 @@ endif()
 if(CBOR_TAGS_INSTALL AND CMAKE_VERSION VERSION_LESS 3.25)
   message(FATAL_ERROR "CBOR_TAGS_INSTALL requires CMake 3.25 or newer because target_install_package.cmake v7 requires it.")
 endif()
-if((CBOR_TAGS_ENABLE_CPACK OR CBOR_TAGS_ENABLE_SBOM OR CBOR_TAGS_REQUIRE_SIGNING) AND NOT CBOR_TAGS_INSTALL)
+if((CBOR_TAGS_ENABLE_CPACK OR CBOR_TAGS_ENABLE_SBOM) AND NOT CBOR_TAGS_INSTALL)
   message(FATAL_ERROR "Release packaging options require CBOR_TAGS_INSTALL=ON.")
 endif()
-if(CBOR_TAGS_REQUIRE_SIGNING AND NOT CBOR_TAGS_ENABLE_CPACK)
-  message(FATAL_ERROR "CBOR_TAGS_REQUIRE_SIGNING requires CBOR_TAGS_ENABLE_CPACK=ON.")
+if(CBOR_TAGS_ENABLE_SBOM AND CMAKE_VERSION VERSION_LESS 4.4)
+  message(FATAL_ERROR "CBOR_TAGS_ENABLE_SBOM requires CMake 4.4 or newer.")
 endif()
 
 # Expected return backend
@@ -362,6 +358,17 @@ if(CBOR_TAGS_BUILD_TESTS)
   if(UNIX)
     find_program(CBOR_TAGS_BASH_EXECUTABLE bash REQUIRED)
     add_test(NAME release_verifier COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_test.sh)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
+      find_program(CBOR_TAGS_JQ_EXECUTABLE jq)
+      find_program(CBOR_TAGS_SHA256SUM_EXECUTABLE sha256sum)
+      if(CBOR_TAGS_GPG_EXECUTABLE)
+        add_test(NAME release_verifier_integration COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_integration_test.sh)
+      endif()
+      if(CBOR_TAGS_JQ_EXECUTABLE AND CBOR_TAGS_SHA256SUM_EXECUTABLE)
+        add_test(NAME release_state_machine COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_state_test.sh)
+      endif()
+    endif()
   endif()
 endif()
 
@@ -375,28 +382,24 @@ if(CBOR_TAGS_BUILD_EXAMPLES)
 endif()
 
 if(CBOR_TAGS_INSTALL)
+  # GitHub locks v7.0.8 and its signed tag as an immutable release.
   cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.8)
   set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
   endif()
-  if(CBOR_TAGS_ENABLE_SBOM)
-    list(
-      APPEND
-      CBOR_TAGS_INSTALL_PACKAGE_ARGS
-      SBOM
-      SBOM_NAME
-      ${PROJECT_NAME}
-      SBOM_DESTINATION
-      share/sbom/${PROJECT_NAME}
-      SBOM_LICENSE
-      ${cbor_tags_SPDX_LICENSE}
-      SBOM_DESCRIPTION
-      "${PROJECT_DESCRIPTION}"
-      SBOM_HOMEPAGE_URL
-      "${PROJECT_HOMEPAGE_URL}")
-  endif()
   target_install_package(${CBOR_TAGS_INSTALL_PACKAGE_ARGS})
+
+  if(CBOR_TAGS_ENABLE_SBOM)
+    install(
+      SBOM ${PROJECT_NAME}
+      EXPORTS ${PROJECT_NAME}
+      DESTINATION share/sbom/${PROJECT_NAME}
+      VERSION ${PROJECT_VERSION}
+      LICENSE ${cbor_tags_SPDX_LICENSE}
+      DESCRIPTION "${PROJECT_DESCRIPTION}"
+      HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
+  endif()
 
   install(
     FILES ${CMAKE_CURRENT_LIST_DIR}/LICENSE
@@ -404,24 +407,6 @@ if(CBOR_TAGS_INSTALL)
     COMPONENT Development)
 
   if(CBOR_TAGS_ENABLE_CPACK)
-    set(_cbor_tags_cpack_signing_args GENERATE_CHECKSUMS ON)
-    set(_cbor_tags_signing_key_available FALSE)
-    if(GPG_SIGNING_KEY OR (DEFINED ENV{GPG_SIGNING_KEY} AND NOT "$ENV{GPG_SIGNING_KEY}" STREQUAL ""))
-      set(_cbor_tags_signing_key_available TRUE)
-    endif()
-    if(CBOR_TAGS_REQUIRE_SIGNING AND NOT _cbor_tags_signing_key_available)
-      message(FATAL_ERROR "CBOR_TAGS_REQUIRE_SIGNING requires GPG_SIGNING_KEY to name an imported private key.")
-    endif()
-    if(CBOR_TAGS_REQUIRE_SIGNING OR _cbor_tags_signing_key_available)
-      list(APPEND _cbor_tags_cpack_signing_args SIGNING_METHOD detached)
-      if(GPG_SIGNING_KEY)
-        list(APPEND _cbor_tags_cpack_signing_args GPG_SIGNING_KEY "${GPG_SIGNING_KEY}")
-      endif()
-      if(GPG_PASSPHRASE_FILE)
-        list(APPEND _cbor_tags_cpack_signing_args GPG_PASSPHRASE_FILE "${GPG_PASSPHRASE_FILE}")
-      endif()
-    endif()
-
     export_cpack(
       PACKAGE_NAME
       "${PROJECT_NAME}"
@@ -442,12 +427,17 @@ if(CBOR_TAGS_INSTALL)
       GENERATORS
       TGZ
       ZIP
-      ${_cbor_tags_cpack_signing_args}
+      GENERATE_CHECKSUMS
+      ON
       ADDITIONAL_CPACK_VARS
       CPACK_PACKAGE_FILE_NAME
       "${PROJECT_NAME}-${PROJECT_VERSION}-cmake"
       CPACK_SYSTEM_NAME
-      "cmake")
+      "cmake"
+      CPACK_ARCHIVE_UID
+      "0"
+      CPACK_ARCHIVE_GID
+      "0")
   endif()
 endif()
 
