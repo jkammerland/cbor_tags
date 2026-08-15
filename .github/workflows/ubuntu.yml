@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     name: ${{ matrix.config.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -100,10 +100,9 @@ jobs:
     - name: Install LLVM/Clang (Ubuntu)
       if: matrix.config.family == 'llvm'
       run: |
-        wget -q https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh ${{ matrix.config.version }}
-        sudo apt-get install -y clang-${{ matrix.config.version }}
+        .github/scripts/install-llvm-apt.sh \
+          "${{ matrix.config.version }}" \
+          "clang-${{ matrix.config.version }}"
 
     - name: Configure CMake
       shell: bash

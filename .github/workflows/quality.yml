@@ -104,7 +104,7 @@ jobs:
 
   format-and-tidy:
     name: C++ Format + Clang-Tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v6.0.2
@@ -117,12 +117,13 @@ jobs:
     - name: Install LLVM 22 tools
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y ca-certificates ccache gnupg ninja-build wget
-        wget -q https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 22
-        sudo apt-get install -y clang-format-22 clang-tidy-22
+        .github/scripts/install-llvm-apt.sh \
+          22 \
+          ccache \
+          clang-22 \
+          clang-format-22 \
+          clang-tidy-22 \
+          ninja-build
 
     - name: Run lint
       shell: bash
@@ -247,7 +248,7 @@ jobs:
 
   benchmark-build:
     name: C++ Benchmark Compile (${{ matrix.config.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -285,12 +286,11 @@ jobs:
       if: matrix.config.family == 'llvm'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y ca-certificates ccache gnupg ninja-build wget
-        wget -q https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh ${{ matrix.config.version }}
-        sudo apt-get install -y clang-${{ matrix.config.version }}
+        .github/scripts/install-llvm-apt.sh \
+          "${{ matrix.config.version }}" \
+          ccache \
+          "clang-${{ matrix.config.version }}" \
+          ninja-build
 
     - name: Configure benchmarks
       shell: bash
