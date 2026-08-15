@@ -24,10 +24,12 @@ boundaries:
 - Extension codecs may implement additional RFCs or application profiles. Their
   conformance and opt-in requirements are documented separately.
 
-Core decoding is a one-shot, terminal operation. It parses the requested item or
-sequence and does not require the supplied buffer to end afterward. Consequently,
-a successful typed decode does not prove that an entire buffer contains exactly
-one conforming CBOR item. See the
+Each core decoder call parses the requested item or sequence and does not require
+the supplied buffer to end afterward. A successful call advances the decoder, so
+the same decoder may consume subsequent items. A failed call is terminal for that
+decoder instance and must not be retried. Consequently, a successful typed
+decode does not prove that an entire buffer contains exactly one conforming CBOR
+item. See the
 [decoder contract](decoder_resource_limits.md#decoder-contract) for input,
 failure, and destination-state guarantees.
 
@@ -56,7 +58,7 @@ scanning.
 The core decoder preserves the payload bytes of a CBOR text string and does not
 validate that they form UTF-8. This keeps byte handling separate from application
 text policy. The visualization extension can validate text with
-`CDDLOptions::check_tstr_utf8`.
+`DiagnosticOptions::check_tstr_utf8`.
 
 Applications that require RFC-valid text strings must validate UTF-8 at their
 admission boundary or use a codec that enforces that policy.
