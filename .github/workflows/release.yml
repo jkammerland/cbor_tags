@@ -1,0 +1,307 @@
+name: Tagged Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing signed release tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Signed Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.verify.outputs.release_tag }}
+      release_commit: ${{ steps.verify.outputs.release_commit }}
+      release_version: ${{ steps.verify.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Fetch candidate tag from trusted workflow ref
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          expected_workflow_ref="refs/heads/${DEFAULT_BRANCH}"
+          if [[ "${GITHUB_REF}" != "${expected_workflow_ref}" ]]; then
+            echo "Release workflow must be dispatched from ${expected_workflow_ref}, got ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          if [[ "${RELEASE_TAG}" != v* ]] || ! git check-ref-format "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          git fetch --force origin "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git fetch origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+
+      - name: Verify tag signature, ancestry, and versions
+        id: verify
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          verification_output="$(
+            bash scripts/release.sh verify-tag \
+              --tag "${RELEASE_TAG}" \
+              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}"
+          )"
+          printf '%s\n' "${verification_output}"
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              release_tag|release_commit|release_version)
+                printf '%s=%s\n' "${key}" "${value}" >> "${GITHUB_OUTPUT}"
+                ;;
+              *)
+                echo "Unexpected verifier output key: ${key}" >&2
+                exit 1
+                ;;
+            esac
+          done <<< "${verification_output}"
+
+      - name: Require immutable releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          immutable_enabled="$(gh api "repos/${GITHUB_REPOSITORY}/immutable-releases" --jq .enabled)"
+          if [[ "${immutable_enabled}" != "true" ]]; then
+            echo "Immutable releases must be enabled before publishing" >&2
+            exit 1
+          fi
+
+  release:
+    name: Build Signed Release
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.verify.outputs.release_tag }}
+    permissions:
+      contents: write
+    env:
+      RELEASE_COMMIT: ${{ needs.verify.outputs.release_commit }}
+      RELEASE_TAG: ${{ needs.verify.outputs.release_tag }}
+      RELEASE_VERSION: ${{ needs.verify.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify.outputs.release_commit }}
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@f57d5c55bca331a49bdc52a6069f211f1363a275 # v4.3.2
+        with:
+          cmakeVersion: '4.3.2'
+
+      - name: Install release tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl diffutils gpg jq ninja-build tar unzip zip
+
+      - name: Bootstrap vcpkg
+        uses: ./.github/actions/bootstrap-vcpkg
+
+      - name: Import release signing key
+        shell: bash
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_SIGNING_KEY_SECRET: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          expected_fingerprint="7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D"
+          if [[ -z "${GPG_PRIVATE_KEY}" ]]; then
+            echo "GPG_PRIVATE_KEY environment secret is required for releases" >&2
+            exit 1
+          fi
+
+          mkdir -p "${HOME}/.gnupg"
+          chmod 700 "${HOME}/.gnupg"
+          printf '%s\n' "allow-loopback-pinentry" >> "${HOME}/.gnupg/gpg-agent.conf"
+          gpgconf --kill gpg-agent || true
+          printf '%s\n' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+
+          signing_selector="${GPG_SIGNING_KEY_SECRET:-${expected_fingerprint}}"
+          signing_fingerprint="$(
+            gpg --batch --with-colons --list-secret-keys "${signing_selector}" \
+              | awk -F: '/^fpr:/ { print toupper($10); exit }'
+          )"
+          if [[ "${signing_fingerprint}" != "${expected_fingerprint}" ]]; then
+            echo "Imported secret key fingerprint ${signing_fingerprint:-missing} does not match ${expected_fingerprint}" >&2
+            exit 1
+          fi
+          printf 'GPG_SIGNING_KEY=%s\n' "${expected_fingerprint}" >> "${GITHUB_ENV}"
+
+          if [[ -n "${GPG_PASSPHRASE}" ]]; then
+            passphrase_file="${RUNNER_TEMP}/cbor-tags-gpg-passphrase"
+            umask 077
+            printf '%s' "${GPG_PASSPHRASE}" > "${passphrase_file}"
+            printf 'GPG_PASSPHRASE_FILE=%s\n' "${passphrase_file}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Recheck tag before building
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force origin "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          actual_commit="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")"
+          if [[ "${actual_commit}" != "${RELEASE_COMMIT}" ]]; then
+            echo "Release tag moved from ${RELEASE_COMMIT} to ${actual_commit}" >&2
+            exit 1
+          fi
+          git verify-tag --raw "refs/tags/${RELEASE_TAG}"
+
+      - name: Build signed release artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          bash scripts/release.sh build \
+            --require-signing \
+            --package-dir build/release-packages
+
+      - name: Write release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          generated_notes="$(
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${RELEASE_TAG}" \
+              -f target_commitish="${RELEASE_COMMIT}" \
+              --jq .body
+          )"
+          {
+            echo "Signed cbor_tags ${RELEASE_TAG} install packages."
+            echo
+            echo "Assets include TGZ and ZIP CMake install trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the default C++20 package configuration; fmt, nameof, and tl::expected remain consumer dependencies."
+            echo
+            echo "Verify an archive and the SBOM with:"
+            echo
+            echo '```sh'
+            echo "gpg --import cbor_tags-release-public-key.asc"
+            echo "gpg --verify cbor_tags-${RELEASE_VERSION}-cmake.tar.gz.sig cbor_tags-${RELEASE_VERSION}-cmake.tar.gz"
+            echo "gpg --verify cbor_tags-${RELEASE_VERSION}-cmake.spdx.json.sig cbor_tags-${RELEASE_VERSION}-cmake.spdx.json"
+            echo "sha256sum -c cbor_tags-${RELEASE_VERSION}-cmake.tar.gz.sha256"
+            echo '```'
+            echo
+            printf '%s\n' "${generated_notes}"
+          } > build/release-notes.md
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cbor-tags-${{ needs.verify.outputs.release_tag }}
+          path: |
+            build/release-packages/*.tar.gz
+            build/release-packages/*.zip
+            build/release-packages/*.sig
+            build/release-packages/*.sha256
+            build/release-packages/*.sha512
+            build/release-packages/*.asc
+            build/release-packages/*.spdx.json
+            build/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish immutable GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t release_assets < <(
+            find build/release-packages -maxdepth 1 -type f \
+              \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.spdx.json' -o -name '*.sig' -o -name '*.sha256' -o -name '*.sha512' -o -name '*.asc' \) \
+              | sort
+          )
+          if (( ${#release_assets[@]} != 13 )); then
+            printf 'Expected exactly 13 release assets, found %s:\n' "${#release_assets[@]}" >&2
+            printf '%s\n' "${release_assets[@]}" >&2
+            exit 1
+          fi
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            release_metadata="$(gh release view "${RELEASE_TAG}" --json isDraft,targetCommitish)"
+            is_draft="$(jq -r .isDraft <<< "${release_metadata}")"
+            target_commitish="$(jq -r .targetCommitish <<< "${release_metadata}")"
+            if [[ "${is_draft}" != "true" ]]; then
+              echo "Published release ${RELEASE_TAG} already exists; refusing to replace its assets" >&2
+              exit 1
+            fi
+            if [[ "${target_commitish}" != "${RELEASE_COMMIT}" ]]; then
+              echo "Draft release ${RELEASE_TAG} targets ${target_commitish}, expected ${RELEASE_COMMIT}" >&2
+              exit 1
+            fi
+          else
+            gh release create "${RELEASE_TAG}" \
+              --draft \
+              --verify-tag \
+              --target "${RELEASE_COMMIT}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file build/release-notes.md
+          fi
+
+          gh release upload "${RELEASE_TAG}" "${release_assets[@]}" --clobber
+
+          mapfile -t expected_asset_names < <(
+            for release_asset in "${release_assets[@]}"; do
+              basename "${release_asset}"
+            done | sort
+          )
+          mapfile -t uploaded_asset_names < <(
+            gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name' | sort
+          )
+          if ! diff -u \
+            <(printf '%s\n' "${expected_asset_names[@]}") \
+            <(printf '%s\n' "${uploaded_asset_names[@]}"); then
+            echo "Draft release ${RELEASE_TAG} does not contain the exact expected asset set" >&2
+            exit 1
+          fi
+
+          gh release edit "${RELEASE_TAG}" \
+            --title "${RELEASE_TAG}" \
+            --notes-file build/release-notes.md \
+            --draft=false
+
+          release_verification_output=""
+          for attempt in {1..30}; do
+            if release_verification_output="$(gh release verify "${RELEASE_TAG}" 2>&1)"; then
+              printf '%s\n' "${release_verification_output}"
+              break
+            fi
+
+            printf '%s\n' "${release_verification_output}" >&2
+            if [[ "${release_verification_output}" != *"no attestations for tag"* ]]; then
+              exit 1
+            fi
+            if (( attempt == 30 )); then
+              echo "Release attestation was unavailable after 5 minutes" >&2
+              exit 1
+            fi
+
+            echo "Release attestation is not available yet; retrying in 10 seconds (${attempt}/30)" >&2
+            sleep 10
+          done
+
+          for release_asset in "${release_assets[@]}"; do
+            gh release verify-asset "${RELEASE_TAG}" "${release_asset}"
+          done

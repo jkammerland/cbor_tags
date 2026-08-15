@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.23)
-project(cbor_tags VERSION 0.22.0)
+project(
+  cbor_tags
+  VERSION 0.22.0
+  DESCRIPTION "RFC 8949 CBOR implementation with automatic C++ reflection"
+  HOMEPAGE_URL "https://github.com/jkammerland/cbor_tags")
+set(cbor_tags_SPDX_LICENSE "MIT")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
@@ -50,6 +55,7 @@ endif()
 # THE LIBRARY
 file(GLOB_RECURSE CBOR_HEADERS CONFIGURE_DEPENDS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
+set_target_properties(${PROJECT_NAME} PROPERTIES SPDX_LICENSE "${cbor_tags_SPDX_LICENSE}")
 target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 target_sources(
   ${PROJECT_NAME}
@@ -177,6 +183,15 @@ option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is r
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(CBOR_TAGS_BUILD_EXAMPLES "Build examples" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
+option(CBOR_TAGS_ENABLE_CPACK "Configure TGZ and ZIP release packages" OFF)
+option(CBOR_TAGS_ENABLE_SBOM "Install SPDX SBOM metadata" OFF)
+option(CBOR_TAGS_REQUIRE_SIGNING "Require GPG signing for release packages" OFF)
+set(GPG_SIGNING_KEY
+    ""
+    CACHE STRING "GPG key fingerprint or key id used to sign release packages")
+set(GPG_PASSPHRASE_FILE
+    ""
+    CACHE FILEPATH "File containing the GPG key passphrase for noninteractive release signing")
 if(CBOR_TAGS_BUILD_INTEROP_TESTS AND NOT CBOR_TAGS_BUILD_TESTS)
   message(FATAL_ERROR "CBOR_TAGS_BUILD_INTEROP_TESTS requires CBOR_TAGS_BUILD_TESTS=ON.")
 endif()
@@ -185,6 +200,12 @@ if(CBOR_TAGS_STL_ONLY AND CBOR_TAGS_BUILD_TOOLS)
 endif()
 if(CBOR_TAGS_INSTALL AND CMAKE_VERSION VERSION_LESS 3.25)
   message(FATAL_ERROR "CBOR_TAGS_INSTALL requires CMake 3.25 or newer because target_install_package.cmake v7 requires it.")
+endif()
+if((CBOR_TAGS_ENABLE_CPACK OR CBOR_TAGS_ENABLE_SBOM OR CBOR_TAGS_REQUIRE_SIGNING) AND NOT CBOR_TAGS_INSTALL)
+  message(FATAL_ERROR "Release packaging options require CBOR_TAGS_INSTALL=ON.")
+endif()
+if(CBOR_TAGS_REQUIRE_SIGNING AND NOT CBOR_TAGS_ENABLE_CPACK)
+  message(FATAL_ERROR "CBOR_TAGS_REQUIRE_SIGNING requires CBOR_TAGS_ENABLE_CPACK=ON.")
 endif()
 
 # Expected return backend
@@ -338,6 +359,10 @@ endif()
 # add tests
 if(CBOR_TAGS_BUILD_TESTS)
   add_subdirectory(test)
+  if(UNIX)
+    find_program(CBOR_TAGS_BASH_EXECUTABLE bash REQUIRED)
+    add_test(NAME release_verifier COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_test.sh)
+  endif()
 endif()
 
 # add benchmarks
@@ -350,12 +375,80 @@ if(CBOR_TAGS_BUILD_EXAMPLES)
 endif()
 
 if(CBOR_TAGS_INSTALL)
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.6)
+  cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.8)
   set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
   endif()
+  if(CBOR_TAGS_ENABLE_SBOM)
+    list(
+      APPEND
+      CBOR_TAGS_INSTALL_PACKAGE_ARGS
+      SBOM
+      SBOM_NAME
+      ${PROJECT_NAME}
+      SBOM_DESTINATION
+      share/sbom/${PROJECT_NAME}
+      SBOM_LICENSE
+      ${cbor_tags_SPDX_LICENSE}
+      SBOM_DESCRIPTION
+      "${PROJECT_DESCRIPTION}"
+      SBOM_HOMEPAGE_URL
+      "${PROJECT_HOMEPAGE_URL}")
+  endif()
   target_install_package(${CBOR_TAGS_INSTALL_PACKAGE_ARGS})
+
+  install(
+    FILES ${CMAKE_CURRENT_LIST_DIR}/LICENSE
+    DESTINATION share/doc/${PROJECT_NAME}
+    COMPONENT Development)
+
+  if(CBOR_TAGS_ENABLE_CPACK)
+    set(_cbor_tags_cpack_signing_args GENERATE_CHECKSUMS ON)
+    set(_cbor_tags_signing_key_available FALSE)
+    if(GPG_SIGNING_KEY OR (DEFINED ENV{GPG_SIGNING_KEY} AND NOT "$ENV{GPG_SIGNING_KEY}" STREQUAL ""))
+      set(_cbor_tags_signing_key_available TRUE)
+    endif()
+    if(CBOR_TAGS_REQUIRE_SIGNING AND NOT _cbor_tags_signing_key_available)
+      message(FATAL_ERROR "CBOR_TAGS_REQUIRE_SIGNING requires GPG_SIGNING_KEY to name an imported private key.")
+    endif()
+    if(CBOR_TAGS_REQUIRE_SIGNING OR _cbor_tags_signing_key_available)
+      list(APPEND _cbor_tags_cpack_signing_args SIGNING_METHOD detached)
+      if(GPG_SIGNING_KEY)
+        list(APPEND _cbor_tags_cpack_signing_args GPG_SIGNING_KEY "${GPG_SIGNING_KEY}")
+      endif()
+      if(GPG_PASSPHRASE_FILE)
+        list(APPEND _cbor_tags_cpack_signing_args GPG_PASSPHRASE_FILE "${GPG_PASSPHRASE_FILE}")
+      endif()
+    endif()
+
+    export_cpack(
+      PACKAGE_NAME
+      "${PROJECT_NAME}"
+      PACKAGE_VERSION
+      "${PROJECT_VERSION}"
+      PACKAGE_VENDOR
+      "jkammerland"
+      PACKAGE_CONTACT
+      "https://github.com/jkammerland/cbor_tags/issues"
+      PACKAGE_DESCRIPTION
+      "${PROJECT_DESCRIPTION}"
+      PACKAGE_HOMEPAGE_URL
+      "${PROJECT_HOMEPAGE_URL}"
+      PACKAGE_LICENSE
+      "${cbor_tags_SPDX_LICENSE}"
+      LICENSE_FILE
+      "${CMAKE_CURRENT_LIST_DIR}/LICENSE"
+      GENERATORS
+      TGZ
+      ZIP
+      ${_cbor_tags_cpack_signing_args}
+      ADDITIONAL_CPACK_VARS
+      CPACK_PACKAGE_FILE_NAME
+      "${PROJECT_NAME}-${PROJECT_VERSION}-cmake"
+      CPACK_SYSTEM_NAME
+      "cmake")
+  endif()
 endif()
 
 # CMake Presets are available for this project
