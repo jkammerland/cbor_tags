@@ -17,6 +17,7 @@ python-bindings/testenv/*
 out/
 CMakeSettings.json
 CLAUDE.md
+AGENTS.md
 a.out
 *.pdf
 build*/

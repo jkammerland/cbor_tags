@@ -1,5 +1,12 @@
 # Security Policy
 
+## Reporting A Vulnerability
+
+Report suspected vulnerabilities privately to
+[jkammerland@gmail.com](mailto:jkammerland@gmail.com). Include a minimal
+reproducer, affected versions, impact, and any known mitigations. Please do not
+open a public issue for an undisclosed vulnerability.
+
 ## Ownership Boundary
 
 `cbor_tags` owns parsing the requested CBOR segment from the stable input range
