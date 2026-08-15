@@ -367,6 +367,10 @@ int main() {
 ### Private Class Members or explicit overloading
 Should the need arise for overloading, or encoding private members, you have two options. The first is to use the `Access` friend class as shown in the example above. This will allow you to access private members of your class for encoding/decoding purposes.
 
+Custom decoders must consume the complete CBOR representation before reporting
+success. See the [Custom Decoder Success Contract](doc/codec_extensions.md#custom-decoder-success-contract)
+for the user-facing and already-consumed-header forms of this rule.
+
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
