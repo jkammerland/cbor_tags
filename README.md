@@ -14,6 +14,9 @@ See standard specifications for more information:
 - CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
 - CBOR Typed Arrays [RFC8746](https://datatracker.ietf.org/doc/html/rfc8746)
 
+See [CBOR Conformance](doc/conformance.md) for the library's interoperability
+profile, intentional permissive behavior, and validation boundaries.
+
 The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bits) and [bitsery](https://github.com/fraillt/bitsery), but uses the CBOR standard as binary format instead of a custom one. It also provides intuitive error handling and gives full control over memory layouts and buffer management. By supporting all standard containers and abstractions, the API for handling the data before/after encoding/decoding should be familiar without requiring detailed knowledge of the CBOR format.
 
 
@@ -964,6 +967,7 @@ instead of a static README checklist.
 
 Additional docs:
 
+- [CBOR Conformance](doc/conformance.md)
 - [Custom Codec 1](doc/custom_codec_1.md)
 - [Encoder And Decoder Options](doc/options.md)
 - [Codec Extensions](doc/codec_extensions.md)
