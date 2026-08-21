@@ -146,6 +146,7 @@ jobs:
               cmake \
               git \
               ninja-build \
+              python3 \
               gcc-${{ matrix.gcc }} \
               g++-${{ matrix.gcc }}
             cmake -S /work -B /tmp/build -G Ninja \
@@ -179,6 +180,7 @@ jobs:
               cmake \
               git \
               ninja-build \
+              python3 \
               gcc-15 \
               g++-15
             cmake -S /work -B /tmp/build -G Ninja \

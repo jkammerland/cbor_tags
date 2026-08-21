@@ -27,7 +27,11 @@ jobs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y curl g++ gcc ninja-build tar unzip zip
+        sudo apt-get install -y curl g++ gcc gpg ninja-build tar unzip zip
+
+    - name: Verify signed CMake packaging dependency
+      shell: bash
+      run: bash scripts/verify-target-install-package-release.sh
 
     - name: Setup CMake 3.23.5
       uses: lukka/get-cmake@v4.3.2

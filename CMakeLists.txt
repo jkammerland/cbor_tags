@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.23)
-project(cbor_tags VERSION 0.22.0)
+if(POLICY CMP0206)
+  cmake_policy(SET CMP0206 NEW)
+endif()
+project(
+  cbor_tags
+  VERSION 0.23.0
+  DESCRIPTION "RFC 8949 CBOR implementation with automatic C++ reflection"
+  HOMEPAGE_URL "https://github.com/jkammerland/cbor_tags")
+set(cbor_tags_SPDX_LICENSE "MIT")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
@@ -50,6 +58,7 @@ endif()
 # THE LIBRARY
 file(GLOB_RECURSE CBOR_HEADERS CONFIGURE_DEPENDS include/*.h include/*.hpp)
 add_library(${PROJECT_NAME} INTERFACE)
+set_target_properties(${PROJECT_NAME} PROPERTIES SPDX_LICENSE "${cbor_tags_SPDX_LICENSE}")
 target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 target_sources(
   ${PROJECT_NAME}
@@ -177,6 +186,8 @@ option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is r
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(CBOR_TAGS_BUILD_EXAMPLES "Build examples" OFF)
 option(CBOR_TAGS_INSTALL "Install the library" OFF)
+option(CBOR_TAGS_ENABLE_CPACK "Configure TGZ and ZIP release packages" OFF)
+option(CBOR_TAGS_ENABLE_SBOM "Install SPDX SBOM metadata" OFF)
 if(CBOR_TAGS_BUILD_INTEROP_TESTS AND NOT CBOR_TAGS_BUILD_TESTS)
   message(FATAL_ERROR "CBOR_TAGS_BUILD_INTEROP_TESTS requires CBOR_TAGS_BUILD_TESTS=ON.")
 endif()
@@ -185,6 +196,12 @@ if(CBOR_TAGS_STL_ONLY AND CBOR_TAGS_BUILD_TOOLS)
 endif()
 if(CBOR_TAGS_INSTALL AND CMAKE_VERSION VERSION_LESS 3.25)
   message(FATAL_ERROR "CBOR_TAGS_INSTALL requires CMake 3.25 or newer because target_install_package.cmake v7 requires it.")
+endif()
+if((CBOR_TAGS_ENABLE_CPACK OR CBOR_TAGS_ENABLE_SBOM) AND NOT CBOR_TAGS_INSTALL)
+  message(FATAL_ERROR "Release packaging options require CBOR_TAGS_INSTALL=ON.")
+endif()
+if(CBOR_TAGS_ENABLE_SBOM AND CMAKE_VERSION VERSION_LESS 4.4)
+  message(FATAL_ERROR "CBOR_TAGS_ENABLE_SBOM requires CMake 4.4 or newer.")
 endif()
 
 # Expected return backend
@@ -338,6 +355,37 @@ endif()
 # add tests
 if(CBOR_TAGS_BUILD_TESTS)
   add_subdirectory(test)
+  if(UNIX)
+    find_program(CBOR_TAGS_BASH_EXECUTABLE bash REQUIRED)
+    add_test(NAME release_verifier COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_test.sh)
+    add_test(
+      NAME target_install_package_release_verifier
+      COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/target_install_package_release_test.sh)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
+      find_program(CBOR_TAGS_JQ_EXECUTABLE jq)
+      find_program(CBOR_TAGS_SHA256SUM_EXECUTABLE sha256sum)
+      find_program(CBOR_TAGS_ZIP_EXECUTABLE zip)
+      add_test(
+        NAME release_commit_checks
+        COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_commit_checks_test.sh)
+      if(CBOR_TAGS_GPG_EXECUTABLE)
+        add_test(NAME release_verifier_integration COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_integration_test.sh)
+        add_test(
+          NAME release_asset_verifier_integration
+          COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_asset_verifier_integration_test.sh)
+        set_tests_properties(release_asset_verifier_integration PROPERTIES SKIP_RETURN_CODE 77)
+      endif()
+      if(CBOR_TAGS_JQ_EXECUTABLE AND CBOR_TAGS_SHA256SUM_EXECUTABLE)
+        add_test(NAME release_state_machine COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_state_test.sh)
+      endif()
+      if(CBOR_TAGS_ZIP_EXECUTABLE)
+        add_test(
+          NAME release_zip_timezone
+          COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_zip_timezone_test.sh)
+      endif()
+    endif()
+  endif()
 endif()
 
 # add benchmarks
@@ -350,12 +398,75 @@ if(CBOR_TAGS_BUILD_EXAMPLES)
 endif()
 
 if(CBOR_TAGS_INSTALL)
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.6)
+  # This exact archive is an asset of the signed immutable v7.1.0 release.
+  cpmaddpackage(
+    NAME
+    target_install_package_release
+    URL
+    https://github.com/jkammerland/target_install_package.cmake/releases/download/v7.1.0/target_install_package-7.1.0-cmake.tar.gz
+    URL_HASH
+    SHA256=e248e05d4b0c1ce8e9649fc83331a548487fa0be86aab2e331f27a2cd6609e31
+    DOWNLOAD_ONLY
+    YES)
+  find_package(
+    target_install_package 7.1.0 EXACT CONFIG REQUIRED
+    PATHS "${target_install_package_release_SOURCE_DIR}/usr/share/cmake/target_install_package"
+    NO_DEFAULT_PATH)
   set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
   endif()
   target_install_package(${CBOR_TAGS_INSTALL_PACKAGE_ARGS})
+
+  if(CBOR_TAGS_ENABLE_SBOM)
+    install(
+      SBOM ${PROJECT_NAME}
+      EXPORTS ${PROJECT_NAME}
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/sbom/${PROJECT_NAME}
+      VERSION ${PROJECT_VERSION}
+      LICENSE ${cbor_tags_SPDX_LICENSE}
+      DESCRIPTION "${PROJECT_DESCRIPTION}"
+      HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
+  endif()
+
+  install(
+    FILES ${CMAKE_CURRENT_LIST_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PROJECT_NAME}
+    COMPONENT Development)
+
+  if(CBOR_TAGS_ENABLE_CPACK)
+    export_cpack(
+      PACKAGE_NAME
+      "${PROJECT_NAME}"
+      PACKAGE_VERSION
+      "${PROJECT_VERSION}"
+      PACKAGE_VENDOR
+      "jkammerland"
+      PACKAGE_CONTACT
+      "https://github.com/jkammerland/cbor_tags/issues"
+      PACKAGE_DESCRIPTION
+      "${PROJECT_DESCRIPTION}"
+      PACKAGE_HOMEPAGE_URL
+      "${PROJECT_HOMEPAGE_URL}"
+      PACKAGE_LICENSE
+      "${cbor_tags_SPDX_LICENSE}"
+      LICENSE_FILE
+      "${CMAKE_CURRENT_LIST_DIR}/LICENSE"
+      GENERATORS
+      TGZ
+      ZIP
+      GENERATE_CHECKSUMS
+      ON
+      ADDITIONAL_CPACK_VARS
+      CPACK_PACKAGE_FILE_NAME
+      "${PROJECT_NAME}-${PROJECT_VERSION}-cmake"
+      CPACK_SYSTEM_NAME
+      "cmake"
+      CPACK_ARCHIVE_UID
+      "0"
+      CPACK_ARCHIVE_GID
+      "0")
+  endif()
 endif()
 
 # CMake Presets are available for this project

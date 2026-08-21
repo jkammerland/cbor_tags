@@ -37,6 +37,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - [Smart Pointer Codecs](#smart-pointer-codecs)
 - [✅ Requirements](#-requirements)
 - [📦 Installation](#-installation)
+  - [Release Artifacts](#release-artifacts)
 - [💡 CMake Integration](#-cmake-integration)
 - [Project Status](#project-status)
 - [📚 Documentation](#-documentation)
@@ -880,7 +881,7 @@ include(FetchContent)
 FetchContent_Declare(
   cbor_tags
   GIT_REPOSITORY https://github.com/jkammerland/cbor_tags.git
-  GIT_TAG v0.22.0 # or a newer release/commit for newer extension features
+  GIT_TAG v0.23.0 # or a newer release/commit for newer extension features
 )
 
 FetchContent_MakeAvailable(cbor_tags)
@@ -942,6 +943,13 @@ vcpkg install --x-feature=magic-enum-names
 The package features install the optional dependencies; still configure
 `cbor_tags` with the matching CMake option when building an enabled install.
 
+### Release Artifacts
+
+New releases provide signed TGZ and ZIP CMake install trees, SHA-256 and
+SHA-512 checksums, an SPDX SBOM, and the public verification key. See
+[Releases](doc/releases.md) for the asset contract, verification model,
+repository setup, and publishing procedure.
+
 ## 💡 CMake Integration
 
 ```cmake
@@ -976,6 +984,7 @@ Additional docs:
 - [Decoder contract](doc/decoder_resource_limits.md#decoder-contract)
 - [Resource-limited decoding: PMR, `bounded_size`, and CDDL](doc/decoder_resource_limits.md#bounded-objects-pmr-and-cddl)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
+- [Releases](doc/releases.md)
 - [Testing](doc/testing.md)
 
 There are many types of cbor objects defined, the major types are:
