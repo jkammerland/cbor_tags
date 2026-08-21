@@ -864,9 +864,10 @@ Optional C++20 name support adds dependencies only when enabled:
   `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`.
 
 The library is tested with GCC 12-16, LLVM/Clang 17-22, Visual Studio Clang-CL,
-MSVC-latest, and AppleClang 16/26.
+MSVC-latest, AppleClang 16/26, and QCC 12.2 for QNX SDP 8.
 CMake 3.23+ is required for raw `cmake -S/-B` builds, 3.25+ for tests,
 benchmarks, or installed packages, and 3.31+ for the checked-in presets.
+QNX SDP 8 cross-compilation is documented in the [QNX guide](doc/qnx.md).
 
 ## 📦 Installation
 
@@ -984,6 +985,7 @@ Additional docs:
 - [Decoder contract](doc/decoder_resource_limits.md#decoder-contract)
 - [Resource-limited decoding: PMR, `bounded_size`, and CDDL](doc/decoder_resource_limits.md#bounded-objects-pmr-and-cddl)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)
+- [QNX 8 cross-compilation](doc/qnx.md)
 - [Releases](doc/releases.md)
 - [Testing](doc/testing.md)
 
