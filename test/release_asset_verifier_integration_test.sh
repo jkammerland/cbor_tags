@@ -7,7 +7,10 @@ generated_root="${repo_root}/build/release-asset-verifier-test-$$"
 trap 'rm -rf -- "${test_root}" "${generated_root}"' EXIT
 
 package_dir="${generated_root}/packages"
-mkdir -p -- "${package_dir}"
+if ! mkdir -p -- "${package_dir}" 2>/dev/null; then
+    echo "release asset verifier integration requires a writable repository build directory"
+    exit 77
+fi
 
 readonly version=0.23.0
 readonly stem="cbor_tags-${version}-cmake"

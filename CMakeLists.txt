@@ -374,6 +374,7 @@ if(CBOR_TAGS_BUILD_TESTS)
         add_test(
           NAME release_asset_verifier_integration
           COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_asset_verifier_integration_test.sh)
+        set_tests_properties(release_asset_verifier_integration PROPERTIES SKIP_RETURN_CODE 77)
       endif()
       if(CBOR_TAGS_JQ_EXECUTABLE AND CBOR_TAGS_SHA256SUM_EXECUTABLE)
         add_test(NAME release_state_machine COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_state_test.sh)
