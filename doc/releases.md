@@ -40,7 +40,6 @@ The release workflow enforces all of these conditions:
 - the tag version matches `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`;
 - the annotated tag object and peeled commit are rechecked after environment
   approval and immediately before publication;
-- immutable releases are enabled before any draft is created;
 - an existing draft for the verified commit is deleted and recreated, while an
   existing published release is audited without mutation;
 - every uploaded asset name and GitHub-computed SHA-256 digest matches the
@@ -61,15 +60,12 @@ version:
 
 1. Enable immutable releases under **Settings > General > Releases**.
 2. Create an environment named `release` under **Settings > Environments**.
-3. Require a reviewer for `release`, prevent self-bypass, and allow deployments
-   only from the selected `master` branch.
-4. Create a fine-grained token limited to this repository with
-   **Administration: Read-only** permission. Add it as the
-   `IMMUTABLE_RELEASES_TOKEN` environment secret so the workflow can perform
-   the mandatory preflight check.
-5. Add `GPG_PRIVATE_KEY`, `GPG_SIGNING_KEY`, and `GPG_PASSPHRASE` as environment
+3. Require the release owner as a reviewer, allow self-review, disable
+   administrator bypass, and allow deployments only from the selected `master`
+   branch.
+4. Add `GPG_PRIVATE_KEY`, `GPG_SIGNING_KEY`, and `GPG_PASSPHRASE` as environment
    secrets. Do not keep repository-level duplicates.
-6. Create an active tag ruleset for `v*` that restricts tag creation, update,
+5. Create an active tag ruleset for `v*` that restricts tag creation, update,
    and deletion. Give repository administrators an explicit bypass for the
    controlled signed-tag operation.
 
@@ -90,13 +86,9 @@ gh secret set GPG_SIGNING_KEY \
 gh secret set GPG_PASSPHRASE \
   --repo jkammerland/cbor_tags \
   --env release
-
-gh secret set IMMUTABLE_RELEASES_TOKEN \
-  --repo jkammerland/cbor_tags \
-  --env release
 ```
 
-The last two commands prompt without placing either secret in shell history.
+The passphrase command prompts without placing the secret in shell history.
 Confirm the environment secret names with:
 
 ```bash

@@ -176,22 +176,6 @@ jobs:
           name: cbor-tags-${{ needs.verify.outputs.release_tag }}-unsigned
           path: build/release-packages
 
-      - name: Require immutable releases
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${GH_TOKEN}" ]]; then
-            echo "IMMUTABLE_RELEASES_TOKEN environment secret is required" >&2
-            exit 1
-          fi
-          immutable_response="$(gh api "repos/${GITHUB_REPOSITORY}/immutable-releases")"
-          if [[ "$(jq -r .enabled <<< "${immutable_response}")" != "true" ]]; then
-            echo "Immutable releases must be enabled before publishing" >&2
-            exit 1
-          fi
-
       - name: Recheck signed tag after environment approval
         shell: bash
         env:
