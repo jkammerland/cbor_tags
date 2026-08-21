@@ -1,4 +1,4 @@
-name: Tagged Release
+name: Prepare Tagged Release
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -74,6 +75,18 @@ jobs:
                 ;;
             esac
           done <<< "${verification_output}"
+
+      - name: Verify release commit checks
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.verify.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/verify-release-commit-checks.sh \
+            --commit "${RELEASE_COMMIT}" \
+            --branch "${DEFAULT_BRANCH}"
 
   build:
     name: Build Reproducible Release Assets
@@ -142,7 +155,7 @@ jobs:
           retention-days: 30
 
   release:
-    name: Sign, Publish, and Verify Release
+    name: Sign and Verify Release Candidate
     needs: [verify, build]
     runs-on: ubuntu-latest
     environment:
@@ -150,7 +163,7 @@ jobs:
       url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.verify.outputs.release_tag }}
     permissions:
       actions: read
-      contents: write
+      contents: read
     env:
       RELEASE_COMMIT: ${{ needs.verify.outputs.release_commit }}
       RELEASE_TAG: ${{ needs.verify.outputs.release_tag }}
@@ -269,36 +282,9 @@ jobs:
           bash scripts/release.sh sign \
             --package-dir build/release-packages \
             --require-release-key
-
-      - name: Write release notes
-        if: steps.state.outputs.release_state != 'published'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          generated_notes="$(
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-              -f tag_name="${RELEASE_TAG}" \
-              -f target_commitish="${RELEASE_COMMIT}" \
-              --jq .body
-          )"
-          {
-            echo "Signed cbor_tags ${RELEASE_TAG} install packages."
-            echo
-            echo "Assets include TGZ and ZIP CMake install trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the default C++20 package configuration; fmt, nameof, and tl::expected remain consumer dependencies."
-            echo
-            echo "Verify an archive and the SBOM with:"
-            echo
-            echo '```sh'
-            echo "gpg --import cbor_tags-release-public-key.asc"
-            echo "gpg --verify cbor_tags-${RELEASE_VERSION}-cmake.tar.gz.sig cbor_tags-${RELEASE_VERSION}-cmake.tar.gz"
-            echo "gpg --verify cbor_tags-${RELEASE_VERSION}-cmake.spdx.json.sig cbor_tags-${RELEASE_VERSION}-cmake.spdx.json"
-            echo "sha256sum -c cbor_tags-${RELEASE_VERSION}-cmake.tar.gz.sha256"
-            echo '```'
-            echo
-            printf '%s\n' "${generated_notes}"
-          } > build/release-notes.md
+          bash scripts/release.sh verify-assets \
+            --package-dir build/release-packages \
+            --version "${RELEASE_VERSION}"
 
       - name: Upload signed workflow artifacts
         if: steps.state.outputs.release_state != 'published'
@@ -307,21 +293,5 @@ jobs:
           name: cbor-tags-${{ needs.verify.outputs.release_tag }}-signed
           path: |
             build/release-packages/*
-            build/release-notes.md
           if-no-files-found: error
           retention-days: 30
-
-      - name: Publish and verify immutable GitHub release
-        if: steps.state.outputs.release_state != 'published'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          bash scripts/publish-release.sh publish \
-            --tag "${RELEASE_TAG}" \
-            --tag-object "${RELEASE_TAG_OBJECT}" \
-            --commit "${RELEASE_COMMIT}" \
-            --version "${RELEASE_VERSION}" \
-            --package-dir build/release-packages \
-            --notes-file build/release-notes.md

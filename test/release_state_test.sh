@@ -42,19 +42,43 @@ cat >"${fake_bin}/release-driver" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'release-driver %s\n' "$*" >>"${FAKE_STATE_DIR}/operations"
+if [[ "$1" == verify-tag ]]; then
+    printf 'release_tag=%s\n' "${FAKE_TAG}"
+    printf 'release_tag_object=%s\n' "${FAKE_TAG_OBJECT}"
+    printf 'release_commit=%s\n' "${FAKE_TAG_COMMIT}"
+    printf 'release_version=%s\n' "${FAKE_VERSION}"
+fi
 EOF
 
 cat >"${fake_bin}/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1" == ls-remote ]]
-printf '%s\trefs/tags/%s\n' "${FAKE_TAG_OBJECT}" "${FAKE_TAG}"
-printf '%s\trefs/tags/%s^{}\n' "${FAKE_TAG_COMMIT}" "${FAKE_TAG}"
+if [[ "$1" == -C ]]; then
+    shift 2
+    case "$1" in
+        rev-parse)
+            printf '%s\n' "${FAKE_HEAD:-${FAKE_TAG_COMMIT}}"
+            ;;
+        status)
+            [[ "${FAKE_DIRTY:-0}" != 1 ]] || printf ' M scripts/publish-release.sh\n'
+            ;;
+        *)
+            exit 2
+            ;;
+    esac
+elif [[ "$1" == ls-remote ]]; then
+    [[ "$2" == "https://github.com/${GITHUB_REPOSITORY}.git" ]]
+    printf '%s\trefs/tags/%s\n' "${FAKE_TAG_OBJECT}" "${FAKE_TAG}"
+    printf '%s\trefs/tags/%s^{}\n' "${FAKE_TAG_COMMIT}" "${FAKE_TAG}"
+else
+    exit 2
+fi
 EOF
 
 cat >"${fake_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "${GH_REPO:-}" == "${GITHUB_REPOSITORY}" ]]
 
 state_file="${FAKE_STATE_DIR}/release-state"
 target_file="${FAKE_STATE_DIR}/target"
@@ -69,6 +93,21 @@ if [[ "${command_name}" == api ]]; then
         [[ "${argument}" == repos/* ]] && api_path="${argument}"
     done
     case "${api_path}" in
+        */releases/generate-notes)
+            printf 'Generated fixture notes\n'
+            ;;
+        */immutable-releases)
+            immutable_count_file="${FAKE_STATE_DIR}/immutable-check-count"
+            immutable_count=0
+            [[ ! -f "${immutable_count_file}" ]] || immutable_count="$(<"${immutable_count_file}")"
+            immutable_count=$((immutable_count + 1))
+            printf '%s\n' "${immutable_count}" >"${immutable_count_file}"
+            if [[ "${FAKE_IMMUTABLE_DISABLE_AFTER_FIRST:-0}" == 1 && ${immutable_count} -gt 1 ]]; then
+                printf 'false\n'
+            else
+                printf '%s\n' "${FAKE_IMMUTABLE_RELEASES_ENABLED:-true}"
+            fi
+            ;;
         */releases/tags/*)
             printf '42\n'
             ;;
@@ -167,6 +206,8 @@ export FAKE_STATE_DIR="${state_dir}"
 export FAKE_TAG="${tag}"
 export FAKE_TAG_OBJECT="${tag_object}"
 export FAKE_TAG_COMMIT="${commit}"
+export FAKE_VERSION="${version}"
+export FAKE_IMMUTABLE_RELEASES_ENABLED=true
 export GITHUB_REPOSITORY=jkammerland/cbor_tags
 export RELEASE_DRIVER="${fake_bin}/release-driver"
 
@@ -189,11 +230,30 @@ audit_args=(
     --expected-unsigned-dir "${package_dir}"
 )
 
+generated_notes="$(
+    bash "${repo_root}/scripts/publish-release.sh" notes \
+        --tag "${tag}" \
+        --commit "${commit}" \
+        --version "${version}" \
+        --output "${generated_root}/notes.md"
+)"
+[[ "${generated_notes}" == "${generated_root}/notes.md" ]]
+grep -F 'Signed cbor_tags v0.22.0 install packages.' "${generated_root}/notes.md" >/dev/null
+grep -F 'Generated fixture notes' "${generated_root}/notes.md" >/dev/null
+echo 'release-notes: OK'
+
 reset_state() {
-    rm -f -- "${state_dir}/release-state" "${state_dir}/target" "${state_dir}/operations"
+    rm -f -- \
+        "${state_dir}/release-state" \
+        "${state_dir}/target" \
+        "${state_dir}/operations" \
+        "${state_dir}/immutable-check-count"
     rm -rf -- "${state_dir}/remote-assets" "${download_dir}"
     mkdir -p -- "${state_dir}/remote-assets"
     unset FAKE_DIGEST_MISMATCH
+    unset FAKE_DIRTY FAKE_HEAD
+    unset FAKE_IMMUTABLE_DISABLE_AFTER_FIRST
+    export FAKE_IMMUTABLE_RELEASES_ENABLED=true
     export FAKE_TAG_OBJECT="${tag_object}"
 }
 
@@ -206,6 +266,15 @@ expect_failure() {
     fi
     echo "${name}: OK"
 }
+
+if GITHUB_REPOSITORY=jkammerland/cbor_tags GH_REPO=someone/else \
+    bash "${repo_root}/scripts/publish-release.sh" state --tag "${tag}" --commit "${commit}" \
+    >"${test_root}/repository-mismatch.out" 2>&1; then
+    echo 'repository mismatch unexpectedly succeeded' >&2
+    exit 1
+fi
+grep -F 'GITHUB_REPOSITORY and GH_REPO identify different repositories' "${test_root}/repository-mismatch.out" >/dev/null
+echo 'repository-mismatch: OK'
 
 reset_state
 printf 'draft\n' >"${state_dir}/release-state"
@@ -237,11 +306,39 @@ expect_failure moved-tag bash "${repo_root}/scripts/publish-release.sh" "${publi
 [[ ! -f "${state_dir}/release-state" ]]
 
 reset_state
+export FAKE_HEAD=3333333333333333333333333333333333333333
+expect_failure stale-publisher-checkout bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_DIRTY=1
+expect_failure dirty-publisher-checkout bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
 export FAKE_DIGEST_MISMATCH=1
 expect_failure digest-mismatch bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
 grep -Fx 'draft' "${state_dir}/release-state" >/dev/null
 if grep -Fx edit "${state_dir}/operations" >/dev/null; then
     echo 'digest mismatch was published' >&2
+    exit 1
+fi
+
+reset_state
+export FAKE_IMMUTABLE_RELEASES_ENABLED=false
+expect_failure immutable-releases-disabled bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
+if [[ -s "${state_dir}/operations" ]] && grep -E '^(delete|create|upload|edit)$' "${state_dir}/operations" >/dev/null; then
+    echo 'disabled immutable releases allowed a release mutation' >&2
+    exit 1
+fi
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_IMMUTABLE_DISABLE_AFTER_FIRST=1
+expect_failure immutable-releases-disabled-before-publication bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
+grep -Fx 'draft' "${state_dir}/release-state" >/dev/null
+if grep -Fx edit "${state_dir}/operations" >/dev/null; then
+    echo 'immutable releases disabled before publication still made the draft public' >&2
     exit 1
 fi
 

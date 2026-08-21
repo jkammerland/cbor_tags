@@ -21,6 +21,9 @@ Commands:
           --package-dir <dir> --notes-file <path>
       Replace any matching draft, verify uploaded digests, and publish it.
 
+  notes --tag <tag> --commit <commit> --version <version> --output <path>
+      Generate release notes below build/ with the authenticated GitHub CLI.
+
   audit --tag <tag> --tag-object <object> --commit <commit> --version <version>
         --download-dir <dir> [--expected-unsigned-dir <dir>] [--wait]
       Download and verify an existing immutable release without mutating it.
@@ -31,7 +34,32 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
+initialize_repository_context() {
+    if [[ -n "${GITHUB_REPOSITORY:-}" && -n "${GH_REPO:-}" && "${GITHUB_REPOSITORY}" != "${GH_REPO}" ]]; then
+        die "GITHUB_REPOSITORY and GH_REPO identify different repositories"
+    fi
+    local repository="${GITHUB_REPOSITORY:-${GH_REPO:-}}"
+    [[ "${repository}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
+        die "GITHUB_REPOSITORY or GH_REPO must identify one owner/name repository"
+    export GITHUB_REPOSITORY="${repository}"
+    export GH_REPO="${repository}"
+}
+
 canonical_generated_dir() {
+    local requested="$1"
+    local parent name candidate
+    name="$(basename -- "${requested}")"
+    parent="$(dirname -- "${requested}")"
+    mkdir -p -- "${parent}"
+    parent="$(cd -- "${parent}" && pwd -P)"
+    candidate="${parent}/${name}"
+    case "${candidate}" in
+        "${repo_root}/build/"*) printf '%s\n' "${candidate}" ;;
+        *) die "generated release paths must be below ${repo_root}/build: ${candidate}" ;;
+    esac
+}
+
+canonical_generated_file() {
     local requested="$1"
     local parent name candidate
     name="$(basename -- "${requested}")"
@@ -90,7 +118,7 @@ verify_remote_tag() {
     local expected_object="$2"
     local expected_commit="$3"
     local refs
-    refs="$(git ls-remote origin "refs/tags/${tag}" "refs/tags/${tag}^{}")"
+    refs="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}" "refs/tags/${tag}^{}")"
 
     local actual_object actual_commit
     actual_object="$(awk -v ref="refs/tags/${tag}" '$2 == ref { print $1; exit }' <<<"${refs}")"
@@ -99,6 +127,33 @@ verify_remote_tag() {
         die "remote tag ${tag} object is ${actual_object:-missing}, expected ${expected_object}"
     [[ "${actual_commit}" == "${expected_commit}" ]] ||
         die "remote tag ${tag} commit is ${actual_commit:-missing}, expected ${expected_commit}"
+}
+
+verify_local_release_context() {
+    local tag="$1"
+    local expected_object="$2"
+    local expected_commit="$3"
+    local expected_version="$4"
+    local actual_head status verification_output
+
+    actual_head="$(git -C "${repo_root}" rev-parse HEAD)"
+    [[ "${actual_head}" == "${expected_commit}" ]] ||
+        die "publisher checkout is at ${actual_head}, expected release commit ${expected_commit}"
+    status="$(git -C "${repo_root}" status --porcelain --untracked-files=normal)"
+    [[ -z "${status}" ]] || die "publisher checkout must be clean"
+
+    verification_output="$(
+        cd -- "${repo_root}"
+        bash "${release_driver}" verify-tag --tag "${tag}" --trusted-ref HEAD
+    )"
+    grep -Fx "release_tag=${tag}" <<<"${verification_output}" >/dev/null ||
+        die "local tag verification returned an unexpected tag"
+    grep -Fx "release_tag_object=${expected_object}" <<<"${verification_output}" >/dev/null ||
+        die "local tag verification returned an unexpected tag object"
+    grep -Fx "release_commit=${expected_commit}" <<<"${verification_output}" >/dev/null ||
+        die "local tag verification returned an unexpected commit"
+    grep -Fx "release_version=${expected_version}" <<<"${verification_output}" >/dev/null ||
+        die "local tag verification returned an unexpected version"
 }
 
 local_digest_manifest() {
@@ -145,6 +200,59 @@ compare_unsigned_payloads() {
         cmp "${expected_dir}/${name}" "${actual_dir}/${name}" ||
             die "published release asset ${name} differs from the reproducible build"
     done
+}
+
+verify_immutable_releases_enabled() {
+    local enabled
+    enabled="$(gh api "repos/${GITHUB_REPOSITORY}/immutable-releases" --jq .enabled)" ||
+        die "could not verify the repository immutable-releases setting"
+    [[ "${enabled}" == "true" ]] || die "repository immutable releases are not enabled"
+}
+
+write_release_notes() {
+    local tag=""
+    local commit=""
+    local version=""
+    local output=""
+    while (($#)); do
+        case "$1" in
+            --tag) tag="${2:-}"; shift 2 ;;
+            --commit) commit="${2:-}"; shift 2 ;;
+            --version) version="${2:-}"; shift 2 ;;
+            --output) output="${2:-}"; shift 2 ;;
+            *) die "unknown notes option: $1" ;;
+        esac
+    done
+    [[ -n "${tag}" && -n "${commit}" && -n "${version}" && -n "${output}" ]] ||
+        die "notes requires --tag, --commit, --version, and --output"
+    [[ "${tag}" == "v${version}" ]] || die "release tag ${tag} does not match version ${version}"
+    [[ "${commit}" =~ ^[0-9a-fA-F]{40}$ ]] || die "release commit must be a full Git object ID"
+    output="$(canonical_generated_file "${output}")"
+
+    local generated_notes
+    generated_notes="$(
+        gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${tag}" \
+            -f target_commitish="${commit}" \
+            --jq .body
+    )"
+    {
+        echo "Signed cbor_tags ${tag} install packages."
+        echo
+        echo "Assets include TGZ and ZIP CMake install trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the default C++20 package configuration; fmt, nameof, and tl::expected remain consumer dependencies."
+        echo
+        echo "Verify an archive and the SBOM with:"
+        echo
+        echo '```sh'
+        echo "gpg --import cbor_tags-release-public-key.asc"
+        echo "gpg --verify cbor_tags-${version}-cmake.tar.gz.sig cbor_tags-${version}-cmake.tar.gz"
+        echo "gpg --verify cbor_tags-${version}-cmake.spdx.json.sig cbor_tags-${version}-cmake.spdx.json"
+        echo "sha256sum -c cbor_tags-${version}-cmake.tar.gz.sha256"
+        echo '```'
+        echo
+        printf '%s\n' "${generated_notes}"
+    } >"${output}"
+    printf '%s\n' "${output}"
 }
 
 verify_attestation() {
@@ -235,7 +343,9 @@ publish_release() {
     [[ -n "${tag}" && -n "${tag_object}" && -n "${commit}" && -n "${version}" && -n "${package_dir}" && -n "${notes_file}" ]] ||
         die "publish requires --tag, --tag-object, --commit, --version, --package-dir, and --notes-file"
     [[ -f "${notes_file}" ]] || die "release notes not found: ${notes_file}"
+    verify_local_release_context "${tag}" "${tag_object}" "${commit}" "${version}"
     bash "${release_driver}" verify-assets --package-dir "${package_dir}" --version "${version}"
+    verify_immutable_releases_enabled
 
     local metadata
     if metadata="$(release_metadata "${tag}" 2>/dev/null)"; then
@@ -263,6 +373,7 @@ publish_release() {
     metadata="$(release_metadata "${tag}")"
     validate_release_target "${metadata}" "${tag}" "${commit}"
     [[ "$(jq -r .isDraft <<<"${metadata}")" == "true" ]] || die "release ${tag} was published concurrently"
+    verify_immutable_releases_enabled
     gh release edit "${tag}" \
         --title "${tag}" \
         --notes-file "${notes_file}" \
@@ -285,10 +396,12 @@ require_command git
 require_command jq
 require_command sha256sum
 
+initialize_repository_context
 command_name="${1:-}"
 case "${command_name}" in
     state) shift; release_state "$@" ;;
     publish) shift; publish_release "$@" ;;
+    notes) shift; write_release_notes "$@" ;;
     audit) shift; audit_release "$@" ;;
     "" | -h | --help | help) usage ;;
     *) usage >&2; die "unknown command: ${command_name}" ;;

@@ -493,6 +493,7 @@ verify_signed_assets() {
     local package_dir="$1"
     local version="$2"
     local expected_fingerprint="$3"
+    local canonical_public_key="${4:-}"
     require_exact_assets "${package_dir}" "${version}" signed
 
     (
@@ -500,19 +501,44 @@ verify_signed_assets() {
         gnupg_home="$(mktemp -d)"
         chmod 700 "${gnupg_home}"
         trap 'rm -rf -- "${gnupg_home}"' EXIT
+        if [[ -n "${canonical_public_key}" ]]; then
+            [[ -f "${canonical_public_key}" ]] || die "canonical release public key not found: ${canonical_public_key}"
+            cmp "${canonical_public_key}" "${package_dir}/cbor_tags-release-public-key.asc" ||
+                die "release asset public key differs from the canonical committed key"
+        fi
         GNUPGHOME="${gnupg_home}" gpg --batch --quiet --no-autostart --import "${package_dir}/cbor_tags-release-public-key.asc"
 
-        local imported_fingerprint
-        imported_fingerprint="$(GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --with-colons --fingerprint | awk -F: '/^fpr:/ { print toupper($10); exit }')"
-        [[ "${imported_fingerprint}" == "${expected_fingerprint}" ]] ||
-            die "release asset public key fingerprint is ${imported_fingerprint:-missing}, expected ${expected_fingerprint}"
+        local imported_fingerprints=()
+        mapfile -t imported_fingerprints < <(
+            GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --with-colons --fingerprint |
+                awk -F: '
+                    /^pub:/ { want_fingerprint = 1; next }
+                    want_fingerprint && /^fpr:/ { print toupper($10); want_fingerprint = 0 }
+                '
+        )
+        [[ ${#imported_fingerprints[@]} -eq 1 ]] ||
+            die "release asset public key must contain exactly one primary key, found ${#imported_fingerprints[@]}"
+        [[ "${imported_fingerprints[0]}" == "${expected_fingerprint}" ]] ||
+            die "release asset public key fingerprint is ${imported_fingerprints[0]:-missing}, expected ${expected_fingerprint}"
 
         local stem="cbor_tags-${version}-cmake"
-        local payload
+        local payload verification_output signature_fingerprints
         for payload in "${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json"; do
             verify_checksums "${package_dir}/${payload}"
-            GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --verify \
-                "${package_dir}/${payload}.sig" "${package_dir}/${payload}" >/dev/null
+            if ! verification_output="$(
+                GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --status-fd 1 --verify \
+                    "${package_dir}/${payload}.sig" "${package_dir}/${payload}" 2>&1
+            )"; then
+                printf '%s\n' "${verification_output}" >&2
+                die "release asset ${payload} does not have a valid signature"
+            fi
+            mapfile -t signature_fingerprints < <(
+                awk '/^\[GNUPG:\] VALIDSIG / { print toupper($3) }' <<<"${verification_output}"
+            )
+            [[ ${#signature_fingerprints[@]} -eq 1 ]] ||
+                die "release asset ${payload} must have exactly one valid signature, found ${#signature_fingerprints[@]}"
+            [[ "${signature_fingerprints[0]}" == "${expected_fingerprint}" ]] ||
+                die "release asset ${payload} was signed by ${signature_fingerprints[0]:-unknown}, expected ${expected_fingerprint}"
         done
     )
 }
@@ -687,10 +713,10 @@ create_reproducible_archives() {
         -czf "${tgz_package}" \
         -C "${canonical_dir}" \
         "${package_stem}"
-    (
-        cd -- "${canonical_dir}"
-        find "${package_stem}" -print | LC_ALL=C sort | zip -X -q "${zip_package}" -@
-    )
+    bash "${repo_root}/scripts/create-reproducible-zip.sh" \
+        "${canonical_dir}" \
+        "${package_stem}" \
+        "${zip_package}"
     write_checksums "${tgz_package}"
     write_checksums "${zip_package}"
 }
@@ -921,11 +947,16 @@ verify_assets() {
         esac
     done
     require_command gpg
+    require_command cmp
     require_command sha256sum
     require_command sha512sum
     package_dir="$(canonical_build_path "${package_dir}")"
     [[ -n "${version}" ]] || version="$(metadata_version)"
-    verify_signed_assets "${package_dir}" "${version}" "${release_signing_fingerprint}"
+    verify_signed_assets \
+        "${package_dir}" \
+        "${version}" \
+        "${release_signing_fingerprint}" \
+        "${repo_root}/.github/release-signing-key.asc"
     log "Published release assets validated"
 }
 

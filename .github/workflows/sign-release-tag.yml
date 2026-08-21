@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -33,6 +34,7 @@ jobs:
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           expected_workflow_ref="refs/heads/${DEFAULT_BRANCH}"
@@ -48,6 +50,9 @@ jobs:
             echo "Release tag ${RELEASE_TAG} already exists on origin" >&2
             exit 1
           fi
+          bash scripts/verify-release-commit-checks.sh \
+            --commit "${GITHUB_SHA}" \
+            --branch "${DEFAULT_BRANCH}"
 
           metadata_versions="$(python3 - <<'PY'
           import ast

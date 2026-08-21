@@ -365,11 +365,23 @@ if(CBOR_TAGS_BUILD_TESTS)
       find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
       find_program(CBOR_TAGS_JQ_EXECUTABLE jq)
       find_program(CBOR_TAGS_SHA256SUM_EXECUTABLE sha256sum)
+      find_program(CBOR_TAGS_ZIP_EXECUTABLE zip)
+      add_test(
+        NAME release_commit_checks
+        COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_commit_checks_test.sh)
       if(CBOR_TAGS_GPG_EXECUTABLE)
         add_test(NAME release_verifier_integration COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_integration_test.sh)
+        add_test(
+          NAME release_asset_verifier_integration
+          COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_asset_verifier_integration_test.sh)
       endif()
       if(CBOR_TAGS_JQ_EXECUTABLE AND CBOR_TAGS_SHA256SUM_EXECUTABLE)
         add_test(NAME release_state_machine COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_state_test.sh)
+      endif()
+      if(CBOR_TAGS_ZIP_EXECUTABLE)
+        add_test(
+          NAME release_zip_timezone
+          COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_zip_timezone_test.sh)
       endif()
     endif()
   endif()
