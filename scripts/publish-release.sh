@@ -25,7 +25,7 @@ Commands:
       Generate release notes below build/ with the authenticated GitHub CLI.
 
   audit --tag <tag> --tag-object <object> --commit <commit> --version <version>
-        --download-dir <dir> [--expected-unsigned-dir <dir>] [--wait]
+        --download-dir <dir> [--release-id <id>] [--expected-unsigned-dir <dir>] [--wait]
       Download and verify an existing immutable release without mutating it.
 EOF
 }
@@ -86,6 +86,12 @@ release_metadata() {
                 error("multiple releases use tag " + $tag)
             end
         '
+}
+
+release_metadata_by_id() {
+    local release_id="$1"
+    [[ "${release_id}" =~ ^[0-9]+$ ]] || die "release ID must be numeric"
+    gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
 }
 
 validate_release_target() {
@@ -300,6 +306,7 @@ audit_release() {
     local version=""
     local download_dir=""
     local expected_unsigned_dir=""
+    local release_id=""
     local wait_for_attestation=false
     while (($#)); do
         case "$1" in
@@ -308,6 +315,7 @@ audit_release() {
             --commit) commit="${2:-}"; shift 2 ;;
             --version) version="${2:-}"; shift 2 ;;
             --download-dir) download_dir="${2:-}"; shift 2 ;;
+            --release-id) release_id="${2:-}"; shift 2 ;;
             --expected-unsigned-dir) expected_unsigned_dir="${2:-}"; shift 2 ;;
             --wait) wait_for_attestation=true; shift ;;
             *) die "unknown audit option: $1" ;;
@@ -319,7 +327,17 @@ audit_release() {
 
     verify_remote_tag "${tag}" "${tag_object}" "${commit}"
     local metadata
-    metadata="$(release_metadata "${tag}")"
+    if [[ -n "${release_id}" ]]; then
+        metadata="$(release_metadata_by_id "${release_id}")"
+        [[ "$(jq -r .id <<<"${metadata}")" == "${release_id}" ]] ||
+            die "GitHub returned an unexpected release ID"
+        [[ "$(jq -r .tag_name <<<"${metadata}")" == "${tag}" ]] ||
+            die "release ID ${release_id} no longer identifies tag ${tag}"
+    else
+        metadata="$(release_metadata "${tag}")"
+        [[ "${metadata}" != null ]] || die "release ${tag} does not exist"
+        release_id="$(jq -r .id <<<"${metadata}")"
+    fi
     validate_release_target "${metadata}" "${tag}" "${commit}"
     [[ "$(jq -r .draft <<<"${metadata}")" == "false" ]] || die "release ${tag} is still a draft"
 
@@ -327,7 +345,7 @@ audit_release() {
     mkdir -p -- "${download_dir}"
     gh release download "${tag}" --dir "${download_dir}"
     bash "${release_driver}" verify-assets --package-dir "${download_dir}" --version "${version}"
-    compare_remote_digests "${tag}" "${download_dir}"
+    compare_remote_digests "${tag}" "${download_dir}" "${release_id}"
     if [[ -n "${expected_unsigned_dir}" ]]; then
         compare_unsigned_payloads "${version}" "${expected_unsigned_dir}" "${download_dir}"
     fi
@@ -405,10 +423,11 @@ publish_release() {
     compare_remote_digests "${tag}" "${package_dir}" "${release_id}"
     verify_remote_tag "${tag}" "${tag_object}" "${commit}"
 
-    metadata="$(release_metadata "${tag}")"
-    [[ "${metadata}" != null ]] || die "release draft ${tag} disappeared before publication"
+    metadata="$(release_metadata_by_id "${release_id}")"
     [[ "$(jq -r .id <<<"${metadata}")" == "${release_id}" ]] ||
-        die "release tag ${tag} now identifies a different draft"
+        die "GitHub returned an unexpected release ID"
+    [[ "$(jq -r .tag_name <<<"${metadata}")" == "${tag}" ]] ||
+        die "release ID ${release_id} no longer identifies tag ${tag}"
     validate_release_target "${metadata}" "${tag}" "${commit}"
     [[ "$(jq -r .draft <<<"${metadata}")" == "true" ]] || die "release ${tag} was published concurrently"
     verify_immutable_releases_enabled
@@ -442,6 +461,7 @@ publish_release() {
         --tag-object "${tag_object}" \
         --commit "${commit}" \
         --version "${version}" \
+        --release-id "${release_id}" \
         --download-dir "${repo_root}/build/published-release-audit" \
         --expected-unsigned-dir "${package_dir}" \
         --wait
