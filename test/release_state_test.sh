@@ -93,6 +93,21 @@ if [[ "${command_name}" == api ]]; then
         [[ "${argument}" == repos/* ]] && api_path="${argument}"
     done
     case "${api_path}" in
+        */releases\?per_page=100)
+            if [[ ! -f "${state_file}" ]]; then
+                printf '[[]]\n'
+            else
+                state="$(<"${state_file}")"
+                target="$(<"${target_file}")"
+                if [[ "${state}" == draft ]]; then
+                    printf '[[{"id":42,"tag_name":"%s","draft":true,"target_commitish":"%s"}]]\n' \
+                        "${FAKE_TAG}" "${target}"
+                else
+                    printf '[[{"id":42,"tag_name":"%s","draft":false,"target_commitish":"%s"}]]\n' \
+                        "${FAKE_TAG}" "${target}"
+                fi
+            fi
+            ;;
         */releases/generate-notes)
             printf 'Generated fixture notes\n'
             ;;
@@ -108,9 +123,6 @@ if [[ "${command_name}" == api ]]; then
                 printf '%s\n' "${FAKE_IMMUTABLE_RELEASES_ENABLED:-true}"
             fi
             ;;
-        */releases/tags/*)
-            printf '42\n'
-            ;;
         */releases/42/assets)
             first=true
             while IFS= read -r asset; do
@@ -121,6 +133,20 @@ if [[ "${command_name}" == api ]]; then
                 first=false
                 printf '%s\tsha256:%s\n' "$(basename -- "${asset}")" "${digest}"
             done < <(find "${remote_dir}" -maxdepth 1 -type f | sort)
+            ;;
+        */releases/42)
+            if [[ " $* " == *" --method DELETE "* ]]; then
+                printf 'delete\n' >>"${operations}"
+                rm -f -- "${state_file}" "${target_file}"
+                rm -rf -- "${remote_dir}"
+                mkdir -p -- "${remote_dir}"
+            elif [[ " $* " == *" --method PATCH "* ]]; then
+                printf 'edit\n' >>"${operations}"
+                printf 'published\n' >"${state_file}"
+            else
+                echo "unexpected fake gh release API method: $*" >&2
+                exit 2
+            fi
             ;;
         *)
             echo "unexpected fake gh api path: ${api_path}" >&2
@@ -135,20 +161,8 @@ subcommand="$1"
 shift
 case "${subcommand}" in
     view)
-        [[ -f "${state_file}" ]] || exit 1
-        state="$(<"${state_file}")"
-        target="$(<"${target_file}")"
-        if [[ "${state}" == draft ]]; then
-            printf '{"isDraft":true,"targetCommitish":"%s"}\n' "${target}"
-        else
-            printf '{"isDraft":false,"targetCommitish":"%s"}\n' "${target}"
-        fi
-        ;;
-    delete)
-        printf 'delete\n' >>"${operations}"
-        rm -f -- "${state_file}" "${target_file}"
-        rm -rf -- "${remote_dir}"
-        mkdir -p -- "${remote_dir}"
+        echo 'release view must not be used because GitHub tag lookup excludes drafts' >&2
+        exit 2
         ;;
     create)
         printf 'create\n' >>"${operations}"
@@ -171,10 +185,6 @@ case "${subcommand}" in
             [[ "${argument}" == --clobber ]] && continue
             cp -- "${argument}" "${remote_dir}/"
         done
-        ;;
-    edit)
-        printf 'edit\n' >>"${operations}"
-        printf 'published\n' >"${state_file}"
         ;;
     download)
         destination=""

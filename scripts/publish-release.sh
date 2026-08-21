@@ -75,7 +75,17 @@ canonical_generated_file() {
 
 release_metadata() {
     local tag="$1"
-    gh release view "${tag}" --json isDraft,targetCommitish
+    gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+        jq -ce --arg tag "${tag}" '
+            [.[][] | select(.tag_name == $tag)] |
+            if length == 1 then
+                .[0] | {id, isDraft: .draft, targetCommitish: .target_commitish}
+            elif length == 0 then
+                empty
+            else
+                error("multiple releases use tag " + $tag)
+            end
+        '
 }
 
 validate_release_target() {
@@ -166,8 +176,9 @@ local_digest_manifest() {
 
 remote_digest_manifest() {
     local tag="$1"
-    local release_id
-    release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
+    local metadata release_id
+    metadata="$(release_metadata "${tag}")"
+    release_id="$(jq -r .id <<<"${metadata}")"
     gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
         --jq '.[] | [.name, .digest] | @tsv' | sort
 }
@@ -353,7 +364,8 @@ publish_release() {
         if [[ "$(jq -r .isDraft <<<"${metadata}")" == "false" ]]; then
             die "published release ${tag} already exists; use the audit command"
         fi
-        gh release delete "${tag}" --yes
+        gh api --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/releases/$(jq -r .id <<<"${metadata}")" >/dev/null
     fi
 
     verify_remote_tag "${tag}" "${tag_object}" "${commit}"
@@ -374,10 +386,9 @@ publish_release() {
     validate_release_target "${metadata}" "${tag}" "${commit}"
     [[ "$(jq -r .isDraft <<<"${metadata}")" == "true" ]] || die "release ${tag} was published concurrently"
     verify_immutable_releases_enabled
-    gh release edit "${tag}" \
-        --title "${tag}" \
-        --notes-file "${notes_file}" \
-        --draft=false
+    gh api --method PATCH \
+        "repos/${GITHUB_REPOSITORY}/releases/$(jq -r .id <<<"${metadata}")" \
+        -F draft=false >/dev/null
 
     audit_release \
         --tag "${tag}" \
