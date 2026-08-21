@@ -1,0 +1,178 @@
+name: Prepare Signed Release Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: New release tag to sign
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sign-release-tag-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign Release Tag Bundle
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate default-branch release state
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          expected_workflow_ref="refs/heads/${DEFAULT_BRANCH}"
+          if [[ "${GITHUB_REF}" != "${expected_workflow_ref}" ]]; then
+            echo "Tag signing must be dispatched from ${expected_workflow_ref}, got ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          if [[ "${RELEASE_TAG}" != v* ]] || ! git check-ref-format "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release tag ${RELEASE_TAG} already exists on origin" >&2
+            exit 1
+          fi
+
+          metadata_versions="$(python3 - <<'PY'
+          import ast
+          import json
+          import pathlib
+          import re
+
+          root = pathlib.Path(".")
+          cmake_text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+          project = re.search(r"project\s*\(\s*cbor_tags\b(?P<body>.*?)\)", cmake_text, re.DOTALL | re.IGNORECASE)
+          if not project:
+              raise SystemExit("Could not find cbor_tags project declaration")
+          cmake_match = re.search(r"\bVERSION\s+([^\s\)]+)", project.group("body"), re.IGNORECASE)
+          if not cmake_match:
+              raise SystemExit("Could not find cbor_tags project version")
+
+          with (root / "vcpkg.json").open(encoding="utf-8") as stream:
+              vcpkg_version = json.load(stream).get("version")
+
+          conan_tree = ast.parse((root / "conanfile.py").read_text(encoding="utf-8"))
+          conan_version = None
+          for node in conan_tree.body:
+              if not isinstance(node, ast.ClassDef) or node.name != "CborTagsConan":
+                  continue
+              for statement in node.body:
+                  if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                      continue
+                  target = statement.targets[0]
+                  if isinstance(target, ast.Name) and target.id == "version" and isinstance(statement.value, ast.Constant):
+                      conan_version = statement.value.value
+                      break
+
+          print(cmake_match.group(1), vcpkg_version, conan_version)
+          PY
+          )"
+          read -r cmake_version vcpkg_version conan_version <<<"${metadata_versions}"
+          tag_version="${RELEASE_TAG#v}"
+          if [[ "${cmake_version}" != "${tag_version}" ]] ||
+             [[ "${vcpkg_version}" != "${tag_version}" ]] ||
+             [[ "${conan_version}" != "${tag_version}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match project versions: CMake=${cmake_version}, vcpkg=${vcpkg_version}, Conan=${conan_version}" >&2
+            exit 1
+          fi
+
+      - name: Import release signing key
+        shell: bash
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_SIGNING_KEY_SECRET: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          expected_fingerprint="7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D"
+          if [[ -z "${GPG_PRIVATE_KEY}" ]]; then
+            echo "GPG_PRIVATE_KEY environment secret is required for releases" >&2
+            exit 1
+          fi
+
+          mkdir -p "${HOME}/.gnupg"
+          chmod 700 "${HOME}/.gnupg"
+          printf '%s\n' "allow-loopback-pinentry" >> "${HOME}/.gnupg/gpg-agent.conf"
+          gpgconf --kill gpg-agent || true
+          printf '%s\n' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+
+          signing_selector="${GPG_SIGNING_KEY_SECRET:-${expected_fingerprint}}"
+          signing_fingerprint="$(
+            gpg --batch --with-colons --list-secret-keys "${signing_selector}" \
+              | awk -F: '/^fpr:/ { print toupper($10); exit }'
+          )"
+          if [[ "${signing_fingerprint}" != "${expected_fingerprint}" ]]; then
+            echo "Imported secret key fingerprint ${signing_fingerprint:-missing} does not match ${expected_fingerprint}" >&2
+            exit 1
+          fi
+          printf 'GPG_SIGNING_KEY=%s\n' "${expected_fingerprint}" >> "${GITHUB_ENV}"
+
+          if [[ -n "${GPG_PASSPHRASE}" ]]; then
+            passphrase_file="${RUNNER_TEMP}/cbor-tags-gpg-passphrase"
+            umask 077
+            printf '%s' "${GPG_PASSPHRASE}" > "${passphrase_file}"
+            printf 'GPG_PASSPHRASE_FILE=%s\n' "${passphrase_file}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Sign and verify tag bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          gpg_wrapper="${RUNNER_TEMP}/cbor-tags-gpg"
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            'set -euo pipefail' \
+            'gpg_args=(--batch)' \
+            'if [[ -n "${GPG_PASSPHRASE_FILE:-}" ]]; then' \
+            '  gpg_args+=(--pinentry-mode loopback --passphrase-file "${GPG_PASSPHRASE_FILE}")' \
+            'fi' \
+            'exec gpg "${gpg_args[@]}" "$@"' > "${gpg_wrapper}"
+          chmod 700 "${gpg_wrapper}"
+
+          git \
+            -c gpg.program="${gpg_wrapper}" \
+            -c user.name="cbor_tags release automation" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            -c user.signingkey="${GPG_SIGNING_KEY}" \
+            tag --sign --message "cbor_tags ${RELEASE_TAG}" "${RELEASE_TAG}" "${GITHUB_SHA}"
+
+          verification_output="$(git verify-tag --raw "refs/tags/${RELEASE_TAG}" 2>&1)"
+          signing_fingerprint="$(awk '/^\[GNUPG:\] VALIDSIG / { print toupper($3); exit }' <<<"${verification_output}")"
+          if [[ "${signing_fingerprint}" != "${GPG_SIGNING_KEY}" ]]; then
+            echo "Signed tag fingerprint ${signing_fingerprint:-missing} does not match ${GPG_SIGNING_KEY}" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")" != "${GITHUB_SHA}" ]]; then
+            echo "Signed tag does not resolve to workflow commit ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+
+          mkdir -p build/release-tag
+          git bundle create "build/release-tag/${RELEASE_TAG}.bundle" "refs/tags/${RELEASE_TAG}"
+          (cd build/release-tag && sha256sum "${RELEASE_TAG}.bundle" > "${RELEASE_TAG}.bundle.sha256")
+
+      - name: Upload signed tag bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-release-tag-${{ inputs.tag }}
+          path: |
+            build/release-tag/${{ inputs.tag }}.bundle
+            build/release-tag/${{ inputs.tag }}.bundle.sha256
+          if-no-files-found: error
+          retention-days: 7

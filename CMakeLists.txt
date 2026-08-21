@@ -4,7 +4,7 @@ if(POLICY CMP0206)
 endif()
 project(
   cbor_tags
-  VERSION 0.22.0
+  VERSION 0.23.0
   DESCRIPTION "RFC 8949 CBOR implementation with automatic C++ reflection"
   HOMEPAGE_URL "https://github.com/jkammerland/cbor_tags")
 set(cbor_tags_SPDX_LICENSE "MIT")
@@ -358,6 +358,9 @@ if(CBOR_TAGS_BUILD_TESTS)
   if(UNIX)
     find_program(CBOR_TAGS_BASH_EXECUTABLE bash REQUIRED)
     add_test(NAME release_verifier COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_test.sh)
+    add_test(
+      NAME target_install_package_release_verifier
+      COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/target_install_package_release_test.sh)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
       find_program(CBOR_TAGS_JQ_EXECUTABLE jq)
@@ -382,8 +385,20 @@ if(CBOR_TAGS_BUILD_EXAMPLES)
 endif()
 
 if(CBOR_TAGS_INSTALL)
-  # GitHub locks v7.0.8 and its signed tag as an immutable release.
-  cpmaddpackage(gh:jkammerland/target_install_package.cmake@7.0.8)
+  # This exact archive is an asset of the signed immutable v7.1.0 release.
+  cpmaddpackage(
+    NAME
+    target_install_package_release
+    URL
+    https://github.com/jkammerland/target_install_package.cmake/releases/download/v7.1.0/target_install_package-7.1.0-cmake.tar.gz
+    URL_HASH
+    SHA256=e248e05d4b0c1ce8e9649fc83331a548487fa0be86aab2e331f27a2cd6609e31
+    DOWNLOAD_ONLY
+    YES)
+  find_package(
+    target_install_package 7.1.0 EXACT CONFIG REQUIRED
+    PATHS "${target_install_package_release_SOURCE_DIR}/usr/share/cmake/target_install_package"
+    NO_DEFAULT_PATH)
   set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
@@ -394,7 +409,7 @@ if(CBOR_TAGS_INSTALL)
     install(
       SBOM ${PROJECT_NAME}
       EXPORTS ${PROJECT_NAME}
-      DESTINATION share/sbom/${PROJECT_NAME}
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/sbom/${PROJECT_NAME}
       VERSION ${PROJECT_VERSION}
       LICENSE ${cbor_tags_SPDX_LICENSE}
       DESCRIPTION "${PROJECT_DESCRIPTION}"
@@ -403,7 +418,7 @@ if(CBOR_TAGS_INSTALL)
 
   install(
     FILES ${CMAKE_CURRENT_LIST_DIR}/LICENSE
-    DESTINATION share/doc/${PROJECT_NAME}
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PROJECT_NAME}
     COMPONENT Development)
 
   if(CBOR_TAGS_ENABLE_CPACK)

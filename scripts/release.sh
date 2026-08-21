@@ -718,6 +718,7 @@ build_release() {
     require_command cpack
     require_command curl
     require_command diff
+    require_command gpg
     require_command ninja
     require_command sha256sum
     require_command sha512sum
@@ -725,6 +726,9 @@ build_release() {
     require_command touch
     require_command zip
     require_release_cmake
+
+    log "Verify signed target_install_package.cmake release dependency"
+    bash "${repo_root}/scripts/verify-target-install-package-release.sh"
 
     local toolchain_file="${CMAKE_TOOLCHAIN_FILE:-}"
     if [[ -z "${toolchain_file}" && -n "${VCPKG_ROOT:-}" ]]; then

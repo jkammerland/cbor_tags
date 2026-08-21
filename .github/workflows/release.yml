@@ -100,7 +100,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y curl diffutils ninja-build python3-jsonschema tar unzip zip
+          sudo apt-get install -y curl diffutils gpg ninja-build python3-jsonschema tar unzip zip
 
       - name: Bootstrap vcpkg
         uses: ./.github/actions/bootstrap-vcpkg

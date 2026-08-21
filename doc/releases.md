@@ -40,6 +40,9 @@ The release workflow enforces all of these conditions:
 - the tag version matches `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`;
 - the annotated tag object and peeled commit are rechecked after environment
   approval and immediately before publication;
+- the exact `target_install_package.cmake` v7.1.0 release archive is pinned by
+  SHA-256 and its signature is verified against the committed release key
+  before release configuration;
 - an existing draft for the verified commit is deleted and recreated, while an
   existing published release is audited without mutation;
 - every uploaded asset name and GitHub-computed SHA-256 digest matches the
@@ -48,10 +51,14 @@ The release workflow enforces all of these conditions:
   publication.
 
 The public key is committed at `.github/release-signing-key.asc`. Private key
-material is used only by the protected `release` environment job, after all
-CMake configuration, dependency fetching, compilation, and package validation
-have completed. `target_install_package.cmake` is pinned to its verified
-immutable `v7.0.8` release.
+material is available only to jobs approved through the protected `release`
+environment. The publishing job does not receive it until all CMake
+configuration, dependency fetching, compilation, and package validation have
+completed. The protected `Prepare Signed Release Tag` workflow may also use the
+key to produce a tag bundle for administrator verification and push; it cannot
+push tags itself. `target_install_package.cmake` is consumed from the signed
+archive of its verified immutable `v7.1.0` release, with the exact archive
+SHA-256 pinned in CMake.
 
 ## One-Time Repository Setup
 
@@ -99,27 +106,37 @@ gh secret list --repo jkammerland/cbor_tags --env release
 
 1. Update the version in `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`.
 2. Merge that version bump and wait for required `master` checks.
-3. Create and locally verify a signed annotated tag on that exact commit:
+3. Dispatch the protected tag-signing workflow from `master` and approve the
+   `release` environment:
 
    ```bash
+   gh workflow run sign-release-tag.yml \
+     --repo jkammerland/cbor_tags \
+     --ref master \
+     -f tag=vX.Y.Z
+   ```
+
+4. Download the resulting `signed-release-tag-vX.Y.Z` artifact, verify its
+   checksum and tag, and push only that tag as a ruleset-bypass administrator:
+
+   ```bash
+   gh run download RUN_ID \
+     --repo jkammerland/cbor_tags \
+     --name signed-release-tag-vX.Y.Z \
+     --dir build/release-tag
+   (cd build/release-tag && sha256sum -c vX.Y.Z.bundle.sha256)
+
+   git fetch build/release-tag/vX.Y.Z.bundle \
+     refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
    git fetch origin master
-   git tag -s \
-     -u 7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D \
-     vX.Y.Z origin/master \
-     -m "Release vX.Y.Z"
-   git verify-tag vX.Y.Z
    bash scripts/release.sh verify-tag \
      --tag vX.Y.Z \
      --trusted-ref origin/master
-   ```
-
-4. Push only the verified tag:
-
-   ```bash
    git push origin refs/tags/vX.Y.Z
    ```
 
-5. Dispatch the workflow from `master` and approve the `release` environment:
+5. Dispatch the publishing workflow from `master` and approve the `release`
+   environment:
 
    ```bash
    gh workflow run release.yml \
