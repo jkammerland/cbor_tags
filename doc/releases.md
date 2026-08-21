@@ -50,8 +50,8 @@ The release workflow enforces all of these conditions:
 - the exact `target_install_package.cmake` v7.1.0 release archive is pinned by
   SHA-256 and its signature is verified against the committed release key
   before release configuration;
-- an existing draft for the verified commit is deleted and recreated, while an
-  existing published release is audited without mutation;
+- an existing draft is reported for explicit operator inspection and deletion,
+  while an existing published release is audited without mutation;
 - every uploaded asset name and GitHub-computed SHA-256 digest matches the
   signed local asset set before publication;
 - the published public-key asset is byte-identical to the committed canonical
@@ -210,7 +210,8 @@ then verifies the release attestation and every asset. If an erroneous immutable
 release is deleted, advance to a new version rather than attempting to recreate
 the same tag. A candidate-workflow rerun for an existing published release
 performs a read-only rebuild and audit. A failed local publish that left a draft
-safely deletes and recreates only that draft; it never deletes the signed tag.
+fails closed with its exact release ID so the operator can inspect and explicitly
+delete it before retrying; it never deletes the signed tag.
 
 ## Local Package Validation
 
