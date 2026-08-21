@@ -19,13 +19,13 @@ Commands:
 
   publish --tag <tag> --tag-object <object> --commit <commit> --version <version>
           --package-dir <dir> --notes-file <path>
-      Replace any matching draft, verify uploaded digests, and publish it.
+      Refuse existing releases, verify one newly created draft by ID, and publish it.
 
   notes --tag <tag> --commit <commit> --version <version> --output <path>
       Generate release notes below build/ with the authenticated GitHub CLI.
 
   audit --tag <tag> --tag-object <object> --commit <commit> --version <version>
-        --download-dir <dir> [--expected-unsigned-dir <dir>] [--wait]
+        --download-dir <dir> [--release-id <id>] [--expected-unsigned-dir <dir>] [--wait]
       Download and verify an existing immutable release without mutating it.
 EOF
 }
@@ -75,7 +75,23 @@ canonical_generated_file() {
 
 release_metadata() {
     local tag="$1"
-    gh release view "${tag}" --json isDraft,targetCommitish
+    gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+        jq -c --arg tag "${tag}" '
+            [.[][] | select(.tag_name == $tag)] |
+            if length == 1 then
+                .[0]
+            elif length == 0 then
+                null
+            else
+                error("multiple releases use tag " + $tag)
+            end
+        '
+}
+
+release_metadata_by_id() {
+    local release_id="$1"
+    [[ "${release_id}" =~ ^[0-9]+$ ]] || die "release ID must be numeric"
+    gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
 }
 
 validate_release_target() {
@@ -83,7 +99,7 @@ validate_release_target() {
     local tag="$2"
     local expected_commit="$3"
     local target_commitish
-    target_commitish="$(jq -r .targetCommitish <<<"${metadata}")"
+    target_commitish="$(jq -r .target_commitish <<<"${metadata}")"
     [[ "${target_commitish}" == "${expected_commit}" ]] ||
         die "release ${tag} targets ${target_commitish}, expected ${expected_commit}"
 }
@@ -101,12 +117,13 @@ release_state() {
     [[ -n "${tag}" && -n "${commit}" ]] || die "state requires --tag and --commit"
 
     local metadata
-    if ! metadata="$(release_metadata "${tag}" 2>/dev/null)"; then
+    metadata="$(release_metadata "${tag}")"
+    if [[ "${metadata}" == null ]]; then
         printf 'missing\n'
         return
     fi
     validate_release_target "${metadata}" "${tag}" "${commit}"
-    if [[ "$(jq -r .isDraft <<<"${metadata}")" == "true" ]]; then
+    if [[ "$(jq -r .draft <<<"${metadata}")" == "true" ]]; then
         printf 'draft\n'
     else
         printf 'published\n'
@@ -166,8 +183,13 @@ local_digest_manifest() {
 
 remote_digest_manifest() {
     local tag="$1"
-    local release_id
-    release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
+    local release_id="${2:-}"
+    if [[ -z "${release_id}" ]]; then
+        local metadata
+        metadata="$(release_metadata "${tag}")"
+        [[ "${metadata}" != null ]] || die "release ${tag} does not exist"
+        release_id="$(jq -r .id <<<"${metadata}")"
+    fi
     gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
         --jq '.[] | [.name, .digest] | @tsv' | sort
 }
@@ -175,11 +197,12 @@ remote_digest_manifest() {
 compare_remote_digests() {
     local tag="$1"
     local package_dir="$2"
+    local release_id="${3:-}"
     local local_manifest remote_manifest
     local_manifest="$(mktemp)"
     remote_manifest="$(mktemp)"
     local_digest_manifest "${package_dir}" >"${local_manifest}"
-    remote_digest_manifest "${tag}" >"${remote_manifest}"
+    remote_digest_manifest "${tag}" "${release_id}" >"${remote_manifest}"
     if ! diff -u "${local_manifest}" "${remote_manifest}"; then
         rm -f -- "${local_manifest}" "${remote_manifest}"
         die "release ${tag} does not contain the exact expected asset names and SHA-256 digests"
@@ -283,6 +306,7 @@ audit_release() {
     local version=""
     local download_dir=""
     local expected_unsigned_dir=""
+    local release_id=""
     local wait_for_attestation=false
     while (($#)); do
         case "$1" in
@@ -291,6 +315,7 @@ audit_release() {
             --commit) commit="${2:-}"; shift 2 ;;
             --version) version="${2:-}"; shift 2 ;;
             --download-dir) download_dir="${2:-}"; shift 2 ;;
+            --release-id) release_id="${2:-}"; shift 2 ;;
             --expected-unsigned-dir) expected_unsigned_dir="${2:-}"; shift 2 ;;
             --wait) wait_for_attestation=true; shift ;;
             *) die "unknown audit option: $1" ;;
@@ -302,15 +327,25 @@ audit_release() {
 
     verify_remote_tag "${tag}" "${tag_object}" "${commit}"
     local metadata
-    metadata="$(release_metadata "${tag}")"
+    if [[ -n "${release_id}" ]]; then
+        metadata="$(release_metadata_by_id "${release_id}")"
+        [[ "$(jq -r .id <<<"${metadata}")" == "${release_id}" ]] ||
+            die "GitHub returned an unexpected release ID"
+        [[ "$(jq -r .tag_name <<<"${metadata}")" == "${tag}" ]] ||
+            die "release ID ${release_id} no longer identifies tag ${tag}"
+    else
+        metadata="$(release_metadata "${tag}")"
+        [[ "${metadata}" != null ]] || die "release ${tag} does not exist"
+        release_id="$(jq -r .id <<<"${metadata}")"
+    fi
     validate_release_target "${metadata}" "${tag}" "${commit}"
-    [[ "$(jq -r .isDraft <<<"${metadata}")" == "false" ]] || die "release ${tag} is still a draft"
+    [[ "$(jq -r .draft <<<"${metadata}")" == "false" ]] || die "release ${tag} is still a draft"
 
     rm -rf -- "${download_dir}"
     mkdir -p -- "${download_dir}"
     gh release download "${tag}" --dir "${download_dir}"
     bash "${release_driver}" verify-assets --package-dir "${download_dir}" --version "${version}"
-    compare_remote_digests "${tag}" "${download_dir}"
+    compare_remote_digests "${tag}" "${download_dir}" "${release_id}"
     if [[ -n "${expected_unsigned_dir}" ]]; then
         compare_unsigned_payloads "${version}" "${expected_unsigned_dir}" "${download_dir}"
     fi
@@ -348,42 +383,85 @@ publish_release() {
     verify_immutable_releases_enabled
 
     local metadata
-    if metadata="$(release_metadata "${tag}" 2>/dev/null)"; then
+    metadata="$(release_metadata "${tag}")"
+    if [[ "${metadata}" != null ]]; then
         validate_release_target "${metadata}" "${tag}" "${commit}"
-        if [[ "$(jq -r .isDraft <<<"${metadata}")" == "false" ]]; then
+        if [[ "$(jq -r .draft <<<"${metadata}")" == "false" ]]; then
             die "published release ${tag} already exists; use the audit command"
         fi
-        gh release delete "${tag}" --yes
+        die "draft release ${tag} already exists as ID $(jq -r .id <<<"${metadata}"); inspect and delete it explicitly before retrying"
     fi
 
     verify_remote_tag "${tag}" "${tag_object}" "${commit}"
-    gh release create "${tag}" \
-        --draft \
-        --verify-tag \
-        --target "${commit}" \
-        --title "${tag}" \
-        --notes-file "${notes_file}"
+    local create_payload release_id
+    create_payload="$(
+        jq -n \
+            --arg tag "${tag}" \
+            --arg commit "${commit}" \
+            --rawfile body "${notes_file}" \
+            '{tag_name: $tag, target_commitish: $commit, name: $tag, body: $body, draft: true, prerelease: false}'
+    )"
+    metadata="$(
+        gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" --input - <<<"${create_payload}"
+    )"
+    release_id="$(jq -er '.id | select(type == "number")' <<<"${metadata}")" ||
+        die "GitHub did not return a numeric ID for the new release draft"
+    if ! jq -e \
+        --argjson id "${release_id}" \
+        --arg tag "${tag}" \
+        --arg commit "${commit}" \
+        --rawfile body "${notes_file}" \
+        '.id == $id and .tag_name == $tag and .target_commitish == $commit and
+         .name == $tag and .body == $body and .draft == true and .prerelease == false' \
+        <<<"${metadata}" >/dev/null; then
+        die "new release draft metadata does not match the verified release"
+    fi
 
     local release_assets=()
     mapfile -t release_assets < <(find "${package_dir}" -maxdepth 1 -type f | sort)
     gh release upload "${tag}" "${release_assets[@]}" --clobber
-    compare_remote_digests "${tag}" "${package_dir}"
+    compare_remote_digests "${tag}" "${package_dir}" "${release_id}"
     verify_remote_tag "${tag}" "${tag_object}" "${commit}"
 
-    metadata="$(release_metadata "${tag}")"
+    metadata="$(release_metadata_by_id "${release_id}")"
+    [[ "$(jq -r .id <<<"${metadata}")" == "${release_id}" ]] ||
+        die "GitHub returned an unexpected release ID"
+    [[ "$(jq -r .tag_name <<<"${metadata}")" == "${tag}" ]] ||
+        die "release ID ${release_id} no longer identifies tag ${tag}"
     validate_release_target "${metadata}" "${tag}" "${commit}"
-    [[ "$(jq -r .isDraft <<<"${metadata}")" == "true" ]] || die "release ${tag} was published concurrently"
+    [[ "$(jq -r .draft <<<"${metadata}")" == "true" ]] || die "release ${tag} was published concurrently"
     verify_immutable_releases_enabled
-    gh release edit "${tag}" \
-        --title "${tag}" \
-        --notes-file "${notes_file}" \
-        --draft=false
+    local publish_payload
+    publish_payload="$(
+        jq -n \
+            --arg tag "${tag}" \
+            --arg commit "${commit}" \
+            --rawfile body "${notes_file}" \
+            '{tag_name: $tag, target_commitish: $commit, name: $tag, body: $body, draft: false, prerelease: false}'
+    )"
+    metadata="$(
+        gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            --input - <<<"${publish_payload}"
+    )"
+    if ! jq -e \
+        --argjson id "${release_id}" \
+        --arg tag "${tag}" \
+        --arg commit "${commit}" \
+        --rawfile body "${notes_file}" \
+        '.id == $id and .tag_name == $tag and .target_commitish == $commit and
+         .name == $tag and .body == $body and .draft == false and
+         .prerelease == false and .immutable == true' \
+        <<<"${metadata}" >/dev/null; then
+        die "published immutable release metadata does not match the verified release"
+    fi
 
     audit_release \
         --tag "${tag}" \
         --tag-object "${tag_object}" \
         --commit "${commit}" \
         --version "${version}" \
+        --release-id "${release_id}" \
         --download-dir "${repo_root}/build/published-release-audit" \
         --expected-unsigned-dir "${package_dir}" \
         --wait

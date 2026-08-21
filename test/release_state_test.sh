@@ -82,6 +82,7 @@ set -euo pipefail
 
 state_file="${FAKE_STATE_DIR}/release-state"
 target_file="${FAKE_STATE_DIR}/target"
+release_id_file="${FAKE_STATE_DIR}/release-id"
 remote_dir="${FAKE_STATE_DIR}/remote-assets"
 operations="${FAKE_STATE_DIR}/operations"
 command_name="$1"
@@ -93,6 +94,33 @@ if [[ "${command_name}" == api ]]; then
         [[ "${argument}" == repos/* ]] && api_path="${argument}"
     done
     case "${api_path}" in
+        */releases\?per_page=100)
+            [[ " $* " == *" --paginate "* ]]
+            [[ " $* " == *" --slurp "* ]]
+            if [[ "${FAKE_RELEASE_API_FAILURE:-0}" == 1 ]]; then
+                echo 'simulated releases API failure' >&2
+                exit 1
+            fi
+            if [[ ! -f "${state_file}" || "${FAKE_STALE_RELEASE_LIST:-0}" == 1 ]]; then
+                printf '[[{"id":7,"tag_name":"v9.9.9","draft":false,"target_commitish":"9999999999999999999999999999999999999999"}],[]]\n'
+            else
+                state="$(<"${state_file}")"
+                target="$(<"${target_file}")"
+                release_id="$(<"${release_id_file}")"
+                if [[ "${state}" == draft ]]; then
+                    draft=true
+                else
+                    draft=false
+                fi
+                if [[ "${FAKE_DUPLICATE_RELEASES:-0}" == 1 ]]; then
+                    printf '[[{"id":41,"tag_name":"%s","draft":%s,"target_commitish":"%s"}],[{"id":42,"tag_name":"%s","draft":%s,"target_commitish":"%s"}]]\n' \
+                        "${FAKE_TAG}" "${draft}" "${target}" "${FAKE_TAG}" "${draft}" "${target}"
+                else
+                    printf '[[{"id":7,"tag_name":"v9.9.9","draft":false,"target_commitish":"9999999999999999999999999999999999999999"}],[{"id":%s,"tag_name":"%s","draft":%s,"target_commitish":"%s"}]]\n' \
+                        "${release_id}" "${FAKE_TAG}" "${draft}" "${target}"
+                fi
+            fi
+            ;;
         */releases/generate-notes)
             printf 'Generated fixture notes\n'
             ;;
@@ -108,9 +136,6 @@ if [[ "${command_name}" == api ]]; then
                 printf '%s\n' "${FAKE_IMMUTABLE_RELEASES_ENABLED:-true}"
             fi
             ;;
-        */releases/tags/*)
-            printf '42\n'
-            ;;
         */releases/42/assets)
             first=true
             while IFS= read -r asset; do
@@ -121,6 +146,62 @@ if [[ "${command_name}" == api ]]; then
                 first=false
                 printf '%s\tsha256:%s\n' "$(basename -- "${asset}")" "${digest}"
             done < <(find "${remote_dir}" -maxdepth 1 -type f | sort)
+            ;;
+        */releases/42)
+            if [[ " $* " == *" --method PATCH "* && " $* " == *" --input - "* ]]; then
+                payload="$(cat)"
+                jq -e \
+                    --arg tag "${FAKE_TAG}" \
+                    --arg commit "${FAKE_TAG_COMMIT}" \
+                    --rawfile body "${FAKE_NOTES_FILE}" \
+                    '.tag_name == $tag and .target_commitish == $commit and .name == $tag and
+                     .body == $body and .draft == false and .prerelease == false' \
+                    <<<"${payload}" >/dev/null
+                [[ "$(<"${release_id_file}")" == 42 ]]
+                printf 'edit:42\n' >>"${operations}"
+                printf 'published\n' >"${state_file}"
+                jq -c '. + {id: 42, immutable: true}' <<<"${payload}"
+            elif [[ " $* " != *" --method "* ]]; then
+                state="$(<"${state_file}")"
+                if [[ "${state}" == draft ]]; then
+                    draft=true
+                    immutable=false
+                else
+                    draft=false
+                    immutable=true
+                fi
+                jq -nc \
+                    --arg tag "${FAKE_TAG}" \
+                    --arg commit "$(<"${target_file}")" \
+                    --rawfile body "${FAKE_NOTES_FILE}" \
+                    --argjson draft "${draft}" \
+                    --argjson immutable "${immutable}" \
+                    '{id: 42, tag_name: $tag, target_commitish: $commit, name: $tag,
+                      body: $body, draft: $draft, prerelease: false, immutable: $immutable}'
+            else
+                echo "unexpected fake gh release API method: $*" >&2
+                exit 2
+            fi
+            ;;
+        */releases)
+            if [[ " $* " == *" --method POST "* && " $* " == *" --input - "* ]]; then
+                payload="$(cat)"
+                jq -e \
+                    --arg tag "${FAKE_TAG}" \
+                    --arg commit "${FAKE_TAG_COMMIT}" \
+                    --rawfile body "${FAKE_NOTES_FILE}" \
+                    '.tag_name == $tag and .target_commitish == $commit and .name == $tag and
+                     .body == $body and .draft == true and .prerelease == false' \
+                    <<<"${payload}" >/dev/null
+                printf 'create:42\n' >>"${operations}"
+                printf 'draft\n' >"${state_file}"
+                printf '%s\n' "${FAKE_TAG_COMMIT}" >"${target_file}"
+                printf '42\n' >"${release_id_file}"
+                jq -c '. + {id: 42, immutable: false}' <<<"${payload}"
+            else
+                echo "unexpected fake gh releases API method: $*" >&2
+                exit 2
+            fi
             ;;
         *)
             echo "unexpected fake gh api path: ${api_path}" >&2
@@ -135,34 +216,8 @@ subcommand="$1"
 shift
 case "${subcommand}" in
     view)
-        [[ -f "${state_file}" ]] || exit 1
-        state="$(<"${state_file}")"
-        target="$(<"${target_file}")"
-        if [[ "${state}" == draft ]]; then
-            printf '{"isDraft":true,"targetCommitish":"%s"}\n' "${target}"
-        else
-            printf '{"isDraft":false,"targetCommitish":"%s"}\n' "${target}"
-        fi
-        ;;
-    delete)
-        printf 'delete\n' >>"${operations}"
-        rm -f -- "${state_file}" "${target_file}"
-        rm -rf -- "${remote_dir}"
-        mkdir -p -- "${remote_dir}"
-        ;;
-    create)
-        printf 'create\n' >>"${operations}"
-        target=""
-        while (($#)); do
-            if [[ "$1" == --target ]]; then
-                target="$2"
-                shift 2
-            else
-                shift
-            fi
-        done
-        printf 'draft\n' >"${state_file}"
-        printf '%s\n' "${target}" >"${target_file}"
+        echo 'release view must not be used because GitHub tag lookup excludes drafts' >&2
+        exit 2
         ;;
     upload)
         printf 'upload\n' >>"${operations}"
@@ -171,10 +226,6 @@ case "${subcommand}" in
             [[ "${argument}" == --clobber ]] && continue
             cp -- "${argument}" "${remote_dir}/"
         done
-        ;;
-    edit)
-        printf 'edit\n' >>"${operations}"
-        printf 'published\n' >"${state_file}"
         ;;
     download)
         destination=""
@@ -207,6 +258,7 @@ export FAKE_TAG="${tag}"
 export FAKE_TAG_OBJECT="${tag_object}"
 export FAKE_TAG_COMMIT="${commit}"
 export FAKE_VERSION="${version}"
+export FAKE_NOTES_FILE="${generated_root}/notes.md"
 export FAKE_IMMUTABLE_RELEASES_ENABLED=true
 export GITHUB_REPOSITORY=jkammerland/cbor_tags
 export RELEASE_DRIVER="${fake_bin}/release-driver"
@@ -246,6 +298,7 @@ reset_state() {
     rm -f -- \
         "${state_dir}/release-state" \
         "${state_dir}/target" \
+        "${state_dir}/release-id" \
         "${state_dir}/operations" \
         "${state_dir}/immutable-check-count"
     rm -rf -- "${state_dir}/remote-assets" "${download_dir}"
@@ -253,6 +306,7 @@ reset_state() {
     unset FAKE_DIGEST_MISMATCH
     unset FAKE_DIRTY FAKE_HEAD
     unset FAKE_IMMUTABLE_DISABLE_AFTER_FIRST
+    unset FAKE_DUPLICATE_RELEASES FAKE_RELEASE_API_FAILURE FAKE_STALE_RELEASE_LIST
     export FAKE_IMMUTABLE_RELEASES_ENABLED=true
     export FAKE_TAG_OBJECT="${tag_object}"
 }
@@ -277,24 +331,53 @@ grep -F 'GITHUB_REPOSITORY and GH_REPO identify different repositories' "${test_
 echo 'repository-mismatch: OK'
 
 reset_state
+state="$(bash "${repo_root}/scripts/publish-release.sh" state --tag "${tag}" --commit "${commit}")"
+[[ "${state}" == missing ]]
+echo 'missing-release: OK'
+
+reset_state
 printf 'draft\n' >"${state_dir}/release-state"
 printf '%s\n' "${commit}" >"${state_dir}/target"
-printf 'injected\n' >"${state_dir}/remote-assets/unexpected.bin"
-bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" >/dev/null
-grep -Fx 'published' "${state_dir}/release-state" >/dev/null
-[[ ! -e "${state_dir}/remote-assets/unexpected.bin" ]]
-first_mutation="$(grep -E '^(delete|create|upload|edit)$' "${state_dir}/operations" | head -1)"
-if [[ "${first_mutation}" != delete ]]; then
-    echo "draft recovery did not delete the existing draft first" >&2
+printf '41\n' >"${state_dir}/release-id"
+export FAKE_DUPLICATE_RELEASES=1
+expect_failure duplicate-release-lookup bash "${repo_root}/scripts/publish-release.sh" state --tag "${tag}" --commit "${commit}"
+
+reset_state
+export FAKE_RELEASE_API_FAILURE=1
+expect_failure release-api-failure bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
+if [[ -s "${state_dir}/operations" ]] && grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/null; then
+    echo 'release API failure allowed a release mutation' >&2
     exit 1
 fi
-echo 'draft-recovery: OK'
+
+reset_state
+printf 'draft\n' >"${state_dir}/release-state"
+printf '%s\n' "${commit}" >"${state_dir}/target"
+printf '41\n' >"${state_dir}/release-id"
+printf 'injected\n' >"${state_dir}/remote-assets/unexpected.bin"
+expect_failure existing-draft bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
+grep -Fx 'injected' "${state_dir}/remote-assets/unexpected.bin" >/dev/null
+if [[ -s "${state_dir}/operations" ]] && grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/null; then
+    echo 'existing draft refusal performed a release mutation' >&2
+    exit 1
+fi
+echo 'existing-draft-refusal: OK'
+
+reset_state
+export FAKE_STALE_RELEASE_LIST=1
+bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" >/dev/null
+unset FAKE_STALE_RELEASE_LIST
+grep -Fx 'published' "${state_dir}/release-state" >/dev/null
+grep -Fx '42' "${state_dir}/release-id" >/dev/null
+grep -Fx 'create:42' "${state_dir}/operations" >/dev/null
+grep -Fx 'edit:42' "${state_dir}/operations" >/dev/null
+echo 'exact-release-id-publication: OK'
 
 : >"${state_dir}/operations"
 state="$(bash "${repo_root}/scripts/publish-release.sh" state --tag "${tag}" --commit "${commit}")"
 [[ "${state}" == published ]]
 bash "${repo_root}/scripts/publish-release.sh" "${audit_args[@]}" >/dev/null
-if grep -E '^(delete|create|upload|edit)$' "${state_dir}/operations" >/dev/null; then
+if grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/null; then
     echo 'published audit performed a mutation' >&2
     exit 1
 fi
@@ -319,7 +402,7 @@ reset_state
 export FAKE_DIGEST_MISMATCH=1
 expect_failure digest-mismatch bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
 grep -Fx 'draft' "${state_dir}/release-state" >/dev/null
-if grep -Fx edit "${state_dir}/operations" >/dev/null; then
+if grep -E '^edit:' "${state_dir}/operations" >/dev/null; then
     echo 'digest mismatch was published' >&2
     exit 1
 fi
@@ -327,7 +410,7 @@ fi
 reset_state
 export FAKE_IMMUTABLE_RELEASES_ENABLED=false
 expect_failure immutable-releases-disabled bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
-if [[ -s "${state_dir}/operations" ]] && grep -E '^(delete|create|upload|edit)$' "${state_dir}/operations" >/dev/null; then
+if [[ -s "${state_dir}/operations" ]] && grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/null; then
     echo 'disabled immutable releases allowed a release mutation' >&2
     exit 1
 fi
@@ -337,7 +420,7 @@ reset_state
 export FAKE_IMMUTABLE_DISABLE_AFTER_FIRST=1
 expect_failure immutable-releases-disabled-before-publication bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}"
 grep -Fx 'draft' "${state_dir}/release-state" >/dev/null
-if grep -Fx edit "${state_dir}/operations" >/dev/null; then
+if grep -E '^edit:' "${state_dir}/operations" >/dev/null; then
     echo 'immutable releases disabled before publication still made the draft public' >&2
     exit 1
 fi
@@ -345,4 +428,5 @@ fi
 reset_state
 printf 'draft\n' >"${state_dir}/release-state"
 printf '4444444444444444444444444444444444444444\n' >"${state_dir}/target"
+printf '41\n' >"${state_dir}/release-id"
 expect_failure wrong-target bash "${repo_root}/scripts/publish-release.sh" state --tag "${tag}" --commit "${commit}"
