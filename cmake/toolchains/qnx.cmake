@@ -40,7 +40,7 @@ set(CMAKE_CXX_COMPILER_TARGET
     CACHE STRING "QCC C++ target" FORCE)
 set(CMAKE_FIND_ROOT_PATH
     "${qnx_sysroot}"
-    CACHE PATH "QNX target dependency root")
+    CACHE PATH "QNX target dependency root" FORCE)
 
 # Build tools execute on the host. Libraries, headers, and CMake packages must come from the QNX sysroot or be cross-built by FetchContent/CPM.
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM

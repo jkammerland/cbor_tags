@@ -9,8 +9,13 @@ trap 'rm -rf -- "${test_root}"' EXIT
 readonly qnx_host="${test_root}/host"
 readonly qnx_target="${test_root}/target/qnx"
 mkdir -p -- "${qnx_host}/usr/bin" "${qnx_target}/x86_64" "${qnx_target}/aarch64le"
-: >"${qnx_host}/usr/bin/qcc"
-: >"${qnx_host}/usr/bin/q++"
+for qnx_compiler in qcc q++; do
+    cat >"${qnx_host}/usr/bin/${qnx_compiler}" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "${qnx_host}/usr/bin/${qnx_compiler}"
+done
 
 verify_toolchain() {
     local architecture="$1"
@@ -57,6 +62,41 @@ EOF
 
 verify_toolchain x86_64
 verify_toolchain aarch64le
+
+readonly reconfigure_source="${test_root}/reconfigure-source"
+readonly reconfigure_build="${test_root}/reconfigure-build"
+mkdir -p -- "${reconfigure_source}"
+cat >"${reconfigure_source}/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.23)
+project(qnx_toolchain_reconfigure LANGUAGES C CXX)
+
+function(assert_equal actual expected)
+  if(NOT "${${actual}}" STREQUAL "${expected}")
+    message(FATAL_ERROR "${actual} is '${${actual}}', expected '${expected}'")
+  endif()
+endfunction()
+
+assert_equal(CMAKE_C_COMPILER_TARGET "gcc_nto${EXPECTED_ARCH}")
+assert_equal(CMAKE_CXX_COMPILER_TARGET "gcc_nto${EXPECTED_ARCH}")
+assert_equal(CMAKE_FIND_ROOT_PATH "${EXPECTED_ROOT}")
+EOF
+
+configure_reused_build() {
+    local architecture="$1"
+    env QNX_HOST="${qnx_host}" QNX_TARGET="${qnx_target}" \
+        "${cmake_command}" \
+        -S "${reconfigure_source}" \
+        -B "${reconfigure_build}" \
+        -DCMAKE_TOOLCHAIN_FILE="${toolchain}" \
+        -DCMAKE_C_COMPILER_WORKS=TRUE \
+        -DCMAKE_CXX_COMPILER_WORKS=TRUE \
+        -DCBOR_TAGS_QNX_ARCH="${architecture}" \
+        -DEXPECTED_ARCH="${architecture}" \
+        -DEXPECTED_ROOT="${qnx_target}/${architecture}"
+}
+
+configure_reused_build x86_64
+configure_reused_build aarch64le
 
 if env -u QNX_HOST QNX_TARGET="${qnx_target}" \
     "${cmake_command}" -P "${toolchain}" >"${test_root}/missing-host.log" 2>&1; then
