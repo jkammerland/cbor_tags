@@ -34,15 +34,25 @@ macro(assert_equal actual expected)
   endif()
 endmacro()
 
+macro(assert_list_contains actual expected)
+  list(FIND ${actual} "${expected}" item_index)
+  if(item_index EQUAL -1)
+    message(FATAL_ERROR "${actual} does not contain '${expected}'")
+  endif()
+endmacro()
+
 assert_equal(CMAKE_SYSTEM_NAME QNX)
 assert_equal(CMAKE_SYSTEM_PROCESSOR @ARCH@)
 assert_equal(CMAKE_C_COMPILER @QNX_HOST@/usr/bin/qcc)
+assert_equal(CMAKE_C_COMPILER_TARGET gcc_nto@ARCH@)
 assert_equal(CMAKE_CXX_COMPILER @QNX_HOST@/usr/bin/q++)
+assert_equal(CMAKE_CXX_COMPILER_TARGET gcc_nto@ARCH@)
 assert_equal(CMAKE_FIND_ROOT_PATH @QNX_TARGET@/@ARCH@)
 assert_equal(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 assert_equal(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 assert_equal(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 assert_equal(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+assert_list_contains(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES CBOR_TAGS_QNX_ARCH)
 EOF
 
 verify_toolchain x86_64

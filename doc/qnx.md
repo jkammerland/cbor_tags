@@ -15,8 +15,10 @@ cmake -S . -B build-qnx -G Ninja \
 cmake --build build-qnx --parallel
 ```
 
-The default target is `x86_64`. For another QNX sysroot directory, select it
-explicitly, for example `-DCBOR_TAGS_QNX_ARCH=aarch64le`.
+The default target is `x86_64`. Select the QNX 8 ARM64 target with
+`-DCBOR_TAGS_QNX_ARCH=aarch64le`. The toolchain passes the matching
+`gcc_nto<architecture>` target to both QCC compiler drivers, so the ARM64
+setting selects `gcc_ntoaarch64le` as well as the ARM64 sysroot.
 
 The toolchain reads `QNX_HOST` and `QNX_TARGET` from `qnxsdp-env.sh`. Host
 program lookup remains enabled, while library, include, and package lookup is
