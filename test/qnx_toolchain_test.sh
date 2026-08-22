@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly cmake_command="${1:?usage: qnx_toolchain_test.sh <cmake> <toolchain>}"
-readonly toolchain="${2:?usage: qnx_toolchain_test.sh <cmake> <toolchain>}"
+readonly cmake_command="${1:?usage: qnx_toolchain_test.sh <cmake> <toolchain> <generator>}"
+readonly toolchain="${2:?usage: qnx_toolchain_test.sh <cmake> <toolchain> <generator>}"
+readonly cmake_generator="${3:?usage: qnx_toolchain_test.sh <cmake> <toolchain> <generator>}"
 readonly test_root="$(mktemp -d)"
 trap 'rm -rf -- "${test_root}"' EXIT
 
@@ -87,6 +88,7 @@ configure_reused_build() {
         "${cmake_command}" \
         -S "${reconfigure_source}" \
         -B "${reconfigure_build}" \
+        -G "${cmake_generator}" \
         -DCMAKE_TOOLCHAIN_FILE="${toolchain}" \
         -DCMAKE_C_COMPILER_WORKS=TRUE \
         -DCMAKE_CXX_COMPILER_WORKS=TRUE \
