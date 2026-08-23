@@ -95,18 +95,25 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     for (auto i : std::ranges::reverse_view(numbers_to_generate)) {
         std::vector<std::string> params;
         std::vector<std::string> anys;
+        std::vector<std::string> any_refs;
         params.reserve(i);
         anys.reserve(i);
+        any_refs.reserve(i);
         for (decltype(i) j = 1; j <= i; ++j) {
             params.push_back(fmt::format("p{}", j));
             anys.emplace_back("any");
+            any_refs.emplace_back("any_ref");
         }
 
-        fmt::format_to(std::back_inserter(out), R"( else if constexpr (IsBracesContructible<type, {0}>) {{
+        // `any` converts to a prvalue and handles move-only members; `any_ref` converts to a
+        // reference and is the only one that binds a mutable reference member. Probe both at each
+        // arity, `any` first, so aggregates that already resolved keep resolving identically.
+        fmt::format_to(std::back_inserter(out),
+                       R"( else if constexpr (IsBracesContructible<type, {0}> || IsBracesContructible<type, {2}>) {{
         auto &[{1}] = object;
         return std::tie({1});
     }})",
-                       fmt::join(anys, ", "), fmt::join(params, ", "));
+                       fmt::join(anys, ", "), fmt::join(params, ", "), fmt::join(any_refs, ", "));
     }
 
     fmt::format_to(std::back_inserter(out), R"( else {{
