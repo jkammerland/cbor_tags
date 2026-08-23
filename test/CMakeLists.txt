@@ -28,6 +28,7 @@ target_link_libraries(tests PUBLIC test_util)
 
 # add link libraries
 target_link_libraries(tests PRIVATE cbor::tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
+target_compile_definitions(tests PRIVATE $<$<PLATFORM_ID:QNX>:DOCTEST_CONFIG_USE_STD_HEADERS>)
 
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
@@ -674,6 +675,8 @@ add_executable(test_decode_stack_floor test_decode_stack_floor.cc)
 target_link_libraries(test_decode_stack_floor PRIVATE cbor::tags)
 if(MSVC)
   target_link_options(test_decode_stack_floor PRIVATE /STACK:8388608)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  target_link_options(test_decode_stack_floor PRIVATE "LINKER:-z,stack-size=8388608")
 endif()
 add_test(NAME test_decode_stack_floor COMMAND test_decode_stack_floor)
 set_tests_properties(test_decode_stack_floor PROPERTIES LABELS resource TIMEOUT 10)

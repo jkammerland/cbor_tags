@@ -367,6 +367,11 @@ if(CBOR_TAGS_BUILD_TESTS)
       find_program(CBOR_TAGS_SHA256SUM_EXECUTABLE sha256sum)
       find_program(CBOR_TAGS_ZIP_EXECUTABLE zip)
       add_test(
+        NAME qnx_toolchain_isolation
+        COMMAND
+          ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/qnx_toolchain_test.sh
+          ${CMAKE_COMMAND} ${CMAKE_CURRENT_LIST_DIR}/cmake/toolchains/qnx.cmake ${CMAKE_GENERATOR})
+      add_test(
         NAME release_commit_checks
         COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_commit_checks_test.sh)
       if(CBOR_TAGS_GPG_EXECUTABLE)
