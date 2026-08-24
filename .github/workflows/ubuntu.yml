@@ -225,11 +225,12 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DCBOR_TAGS_STL_ONLY=ON \
               -DCBOR_TAGS_INSTALL=ON \
-              -DCBOR_TAGS_BUILD_TESTS=OFF \
+              -DCBOR_TAGS_BUILD_TESTS=ON \
               -DCMAKE_INSTALL_PREFIX=/tmp/cbor-tags-stl-only \
               -DCMAKE_C_COMPILER_LAUNCHER= \
               -DCMAKE_CXX_COMPILER_LAUNCHER=
             cmake --build /tmp/stl-only-build --parallel
+            ctest --test-dir /tmp/stl-only-build --output-on-failure
             cmake --install /tmp/stl-only-build
             if grep -R -E "find_dependency\\((fmt|nameof|tl-expected)" /tmp/cbor-tags-stl-only; then
               echo "C++26 STL-only install unexpectedly exports a third-party dependency" >&2
