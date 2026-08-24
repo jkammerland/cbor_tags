@@ -334,6 +334,7 @@ jobs:
       shell: bash
       run: |
         cmake --preset=alusan \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
           -DCMAKE_C_COMPILER_LAUNCHER= \
           -DCMAKE_CXX_COMPILER_LAUNCHER=
         cmake --build --preset=alusan --parallel
