@@ -311,3 +311,30 @@ jobs:
     - name: Build benchmarks
       shell: bash
       run: cmake --build build/benchmarks --parallel
+
+  sanitizers:
+    name: ASan + LSan + UBSan
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ ninja-build
+
+    - name: Configure, build and test with sanitizers
+      shell: bash
+      run: |
+        cmake --preset=alusan \
+          -DCMAKE_C_COMPILER_LAUNCHER= \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=
+        cmake --build --preset=alusan --parallel
+        ctest --preset=alusan --output-on-failure
