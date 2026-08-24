@@ -120,6 +120,11 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     }
 
     fmt::format_to(std::back_inserter(out), R"( else {{
+        // No arity matched. A genuinely empty aggregate legitimately reflects as an empty tuple;
+        // anything else means detection failed and would otherwise encode as zero bytes silently.
+        static_assert(std::is_empty_v<type>,
+                      "Could not determine the member count for this aggregate. Members that are "
+                      "C arrays, or an aggregate with a base class, are not supported.");
         return std::make_tuple();
     }}
 }}

@@ -101,6 +101,33 @@ TEST_CASE("reflection detects arity of aggregates with reference members") {
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(mixed_refs{1, value, text}))>, 3);
 }
 
+TEST_CASE("aggregate_binding_count reports the true member count") {
+    // to_tuple(...) dispatches on this count, so a wrong count is a wrong reflection. These
+    // aggregates all reported 0 before the reference probe existed.
+    CHECK_EQ(detail::aggregate_binding_count<mutable_ref_pair>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<const_ref_pair>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<only_ref>, 1);
+    CHECK_EQ(detail::aggregate_binding_count<mixed_refs>, 3);
+
+    // Unchanged shapes must keep their counts.
+    CHECK_EQ(detail::aggregate_binding_count<value_pair>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<only_value>, 1);
+
+    // An empty aggregate is the one case the fallback branch legitimately accepts.
+    struct empty {};
+    CHECK_EQ(detail::aggregate_binding_count<empty>, 0);
+    CHECK_EQ(std::tuple_size_v<decltype(to_tuple(empty{}))>, 0);
+
+    // A tuple reports tuple_size. Brace-probing one would find its
+    // (allocator_arg_t, Alloc, Types...) constructor and overcount.
+    CHECK_EQ(detail::aggregate_binding_count<std::tuple<int, double, char, value_pair>>, 4);
+
+    int               value = 0;
+    const std::string text;
+    CHECK_EQ(detail::aggregate_binding_count<mutable_ref_pair>, std::tuple_size_v<decltype(to_tuple(mutable_ref_pair{1, value}))>);
+    CHECK_EQ(detail::aggregate_binding_count<mixed_refs>, std::tuple_size_v<decltype(to_tuple(mixed_refs{1, value, text}))>);
+}
+
 #if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_BOOST_PFR_NAMES
 TEST_CASE("counting an aggregate holding a move-only container never reaches the reference probe") {
     CHECK_EQ(detail::aggregate_binding_count<move_only_container>, 2);
