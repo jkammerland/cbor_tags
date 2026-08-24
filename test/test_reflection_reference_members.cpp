@@ -4,6 +4,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_reflection.h>
+#include <cbor_tags/cbor_reflection_config.h>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -45,6 +46,7 @@ struct only_value {
     int a;
 };
 
+#if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_BOOST_PFR_NAMES
 struct move_only_leaf {
     int a;
 };
@@ -54,10 +56,15 @@ struct move_only_leaf {
 // ill-formed when instantiated, and Clang instantiates it eagerly from inside the requires-clause.
 // Counting must therefore never reach the reference probe for an aggregate the value probe
 // already resolved.
+//
+// Only the brace-probing fallback has probes to get wrong. std::meta and Boost.PFR enumerate
+// members directly, and Boost.PFR's own field counter cannot handle this shape on the MSVC
+// standard library, so this stays scoped to the path it guards.
 struct move_only_container {
     std::vector<std::unique_ptr<move_only_leaf>> children;
     int                                          n;
 };
+#endif
 
 } // namespace
 
@@ -84,6 +91,7 @@ TEST_CASE("reflection detects arity of aggregates with reference members") {
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(mixed_refs{1, value, text}))>, 3);
 }
 
+#if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_BOOST_PFR_NAMES
 TEST_CASE("counting an aggregate holding a move-only container never reaches the reference probe") {
     CHECK_EQ(detail::aggregate_binding_count<move_only_container>, 2);
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(std::declval<move_only_container &>()))>, 2);
@@ -91,6 +99,7 @@ TEST_CASE("counting an aggregate holding a move-only container never reaches the
     // The value probe resolves this type, so the reference probe stays in a discarded branch.
     CHECK(IsBracesContructible<move_only_container, any, any>);
 }
+#endif
 
 TEST_CASE("encode aggregate with a mutable reference member") {
     // Previously encoded zero bytes while reporting success.
