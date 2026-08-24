@@ -64,6 +64,11 @@ struct move_only_container {
     std::vector<std::unique_ptr<move_only_leaf>> children;
     int                                          n;
 };
+
+struct mixed_reference_move_only_container {
+    int                                         &reference;
+    std::vector<std::unique_ptr<move_only_leaf>> children;
+};
 #endif
 
 } // namespace
@@ -98,6 +103,11 @@ TEST_CASE("counting an aggregate holding a move-only container never reaches the
 
     // The value probe resolves this type, so the reference probe stays in a discarded branch.
     CHECK(IsBracesContructible<move_only_container, any, any>);
+
+    // The C++20 fallback cannot safely choose lvalue and rvalue probes independently for each
+    // member. It must reject this mixed shape explicitly instead of instantiating vector's
+    // ill-formed copy constructor on Clang.
+    CHECK_EQ(detail::aggregate_binding_count<mixed_reference_move_only_container>, detail::UNDETECTABLE_AGGREGATE_ARITY);
 }
 #endif
 

@@ -89,6 +89,10 @@ static_assert(MAX_REFLECTION_MEMBERS == MAX_AGGREGATE_PROBE_MEMBERS,
 template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     using type = std::decay_t<T>;
     static_assert(IsAggregate<type>, "Type must be an aggregate");
+    static_assert(detail::aggregate_binding_count<type> != detail::UNDETECTABLE_AGGREGATE_ARITY,
+                  "Could not safely determine this aggregate's member count with the C++20 fallback. "
+                  "An aggregate that combines mutable reference members with non-trivially-copyable value members "
+                  "requires native C++ reflection or a custom encoder/decoder.");
     {1}
 
     if constexpr (IsTuple<type>) {{

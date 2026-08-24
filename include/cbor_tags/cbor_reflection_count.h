@@ -32,7 +32,8 @@ constexpr auto aggregate_binding_count = []() consteval {
 
 // Upper bound on the arity probed when counting an aggregate's members. The generated
 // cbor_reflection_impl.h asserts that its MAX_REFLECTION_MEMBERS matches this value.
-constexpr std::size_t MAX_AGGREGATE_PROBE_MEMBERS = 24;
+constexpr std::size_t MAX_AGGREGATE_PROBE_MEMBERS  = 24;
+constexpr std::size_t UNDETECTABLE_AGGREGATE_ARITY = MAX_AGGREGATE_PROBE_MEMBERS + 1U;
 
 template <std::size_t, typename Probe> using probe_type = Probe;
 
@@ -62,7 +63,7 @@ template <typename T> constexpr std::size_t aggregate_arity() {
         constexpr auto by_value = probe_arity<T, any, MAX_AGGREGATE_PROBE_MEMBERS>();
         if constexpr (by_value != 0) {
             return by_value;
-        } else {
+        } else if constexpr (std::is_trivially_copy_constructible_v<T>) {
             // `any` converts to a prvalue, so it can never initialize a mutable reference member
             // and such an aggregate fails at every arity. Retry with the reference-returning
             // probe. This stays in a discarded `if constexpr` branch so `any_ref` is never
@@ -70,6 +71,14 @@ template <typename T> constexpr std::size_t aggregate_arity() {
             // by-value member instantiates that member's copy constructor, which is a hard error
             // for types such as std::vector<std::unique_ptr<U>>.
             return probe_arity<T, any_ref, MAX_AGGREGATE_PROBE_MEMBERS>();
+        } else {
+            // An lvalue probe initializes ordinary value members by copying them. Some standard
+            // library types advertise a copy constructor even though instantiating it is
+            // ill-formed (for example vector<unique_ptr<U>>), so asking the compiler whether the
+            // aggregate accepts `any_ref` is itself a hard error on Clang. Conservatively use the
+            // reference probe only when copying the aggregate is trivial. Native C++ reflection
+            // does not have this C++20 probing limitation.
+            return UNDETECTABLE_AGGREGATE_ARITY;
         }
     }
 }

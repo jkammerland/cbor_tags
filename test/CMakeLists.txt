@@ -55,6 +55,24 @@ target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
 add_dependencies(tests test_smart_ptr_allocation_failure)
 
+if(NOT CBOR_TAGS_USE_STD_REFLECTION AND NOT CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  add_executable(
+    reflection_unsafe_lvalue_probe_compile_fails
+    EXCLUDE_FROM_ALL
+    reflection_unsafe_lvalue_probe_compile_fail.cc)
+  target_link_libraries(reflection_unsafe_lvalue_probe_compile_fails PRIVATE cbor::tags)
+  add_test(
+    NAME reflection_unsafe_lvalue_probe_compile_fails
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DTEST_TARGET=reflection_unsafe_lvalue_probe_compile_fails"
+      "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=Could not safely determine this aggregate"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+endif()
+
 function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
   target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
