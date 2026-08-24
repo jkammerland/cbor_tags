@@ -36,8 +36,7 @@ constexpr std::size_t MAX_AGGREGATE_PROBE_MEMBERS = 24;
 
 template <std::size_t, typename Probe> using probe_type = Probe;
 
-template <typename T, typename Probe, std::size_t... Is>
-constexpr bool braces_constructible_with(std::index_sequence<Is...>) {
+template <typename T, typename Probe, std::size_t... Is> constexpr bool braces_constructible_with(std::index_sequence<Is...>) {
     return requires { T{std::declval<probe_type<Is, Probe>>()...}; };
 }
 
