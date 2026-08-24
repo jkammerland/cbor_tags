@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -44,6 +45,20 @@ struct only_value {
     int a;
 };
 
+struct move_only_leaf {
+    int a;
+};
+
+// The reference probe returns an lvalue, so brace-initializing this member from it would select
+// std::vector's copy constructor. That constructor is declared for a move-only element type but
+// ill-formed when instantiated, and Clang instantiates it eagerly from inside the requires-clause.
+// Counting must therefore never reach the reference probe for an aggregate the value probe
+// already resolved.
+struct move_only_container {
+    std::vector<std::unique_ptr<move_only_leaf>> children;
+    int                                          n;
+};
+
 } // namespace
 
 TEST_CASE("reflection detects arity of aggregates with reference members") {
@@ -67,6 +82,14 @@ TEST_CASE("reflection detects arity of aggregates with reference members") {
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(const_ref_pair{1, value}))>, 2);
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(only_ref{value}))>, 1);
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(mixed_refs{1, value, text}))>, 3);
+}
+
+TEST_CASE("counting an aggregate holding a move-only container never reaches the reference probe") {
+    CHECK_EQ(detail::aggregate_binding_count<move_only_container>, 2);
+    CHECK_EQ(std::tuple_size_v<decltype(to_tuple(std::declval<move_only_container &>()))>, 2);
+
+    // The value probe resolves this type, so the reference probe stays in a discarded branch.
+    CHECK(IsBracesContructible<move_only_container, any, any>);
 }
 
 TEST_CASE("encode aggregate with a mutable reference member") {

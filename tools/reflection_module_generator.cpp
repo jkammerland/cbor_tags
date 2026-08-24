@@ -69,6 +69,7 @@ void generate_header(fmt::memory_buffer &out, const std::vector<std::pair<int, i
 
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_reflection_count.h"
 
 #include <tuple>
 #include <type_traits>
@@ -79,6 +80,10 @@ namespace cbor::tags {{
 
 namespace detail {{
 constexpr size_t MAX_REFLECTION_MEMBERS = {0};
+static_assert(MAX_REFLECTION_MEMBERS == MAX_AGGREGATE_PROBE_MEMBERS,
+              "to_tuple(...) dispatches on aggregate_binding_count, so the generated arities and the probed arity "
+              "must match. Rerun tools/reflection_module_generator with the same bound, or update "
+              "MAX_AGGREGATE_PROBE_MEMBERS in cbor_reflection_count.h.");
 }} // namespace detail
 
 template <class T> constexpr auto to_tuple(T &&object) noexcept {{
@@ -94,26 +99,20 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     // Generate in reverse order
     for (auto i : std::ranges::reverse_view(numbers_to_generate)) {
         std::vector<std::string> params;
-        std::vector<std::string> anys;
-        std::vector<std::string> any_refs;
         params.reserve(i);
-        anys.reserve(i);
-        any_refs.reserve(i);
         for (decltype(i) j = 1; j <= i; ++j) {
             params.push_back(fmt::format("p{}", j));
-            anys.emplace_back("any");
-            any_refs.emplace_back("any_ref");
         }
 
-        // `any` converts to a prvalue and handles move-only members; `any_ref` converts to a
-        // reference and is the only one that binds a mutable reference member. Probe both at each
-        // arity, `any` first, so aggregates that already resolved keep resolving identically.
+        // Dispatch on the member count instead of re-probing brace-constructibility here. The
+        // count is the single source of truth, so to_tuple(...) cannot disagree with it, and the
+        // reference probe it may need is instantiated at most once per type rather than per arity.
         fmt::format_to(std::back_inserter(out),
-                       R"( else if constexpr (IsBracesContructible<type, {0}> || IsBracesContructible<type, {2}>) {{
+                       R"( else if constexpr (detail::aggregate_binding_count<type> == {0}) {{
         auto &[{1}] = object;
         return std::tie({1});
     }})",
-                       fmt::join(anys, ", "), fmt::join(params, ", "), fmt::join(any_refs, ", "));
+                       i, fmt::join(params, ", "));
     }
 
     fmt::format_to(std::back_inserter(out), R"( else {{
