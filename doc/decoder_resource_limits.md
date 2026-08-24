@@ -242,6 +242,35 @@ item exceeds the bound. See
 [CDDL Size-Bounded Containers](cddl_handling.md#size-bounded-containers) for
 nesting and range-wrapper examples.
 
+That cap applies per reservation. It does not aggregate across recursion depth.
+A recursive destination type performs one independently guarded reservation at
+every nesting level, and only a few header bytes are consumed between levels, so
+each level is checked against nearly the same unconsumed tail. Every level is
+individually bounded by remaining input while the total is not, and reserved
+memory can therefore scale with nesting depth rather than with input size.
+
+For example, `D` repetitions of a definite array header declaring `N` elements,
+followed by `N` filler bytes, satisfies the one-byte-per-item guard at all `D`
+levels. On one x86-64 Linux host, `D = 200` and `N = 100000` produced a 101,000
+byte input and a 475 MB peak reservation before the decode failed. Depth alone
+was far below the stack boundary measured below, so this is a distinct effect
+from input-controlled stack growth.
+
+Bounding the recursive field bounds it at every occurrence, because the same
+field is reached at every level:
+
+```cpp
+struct bounded_recursive_array {
+    cbor::tags::bounded_size<std::vector<bounded_recursive_array>, 0, 1024> children;
+};
+```
+
+An application-level cap on admitted message size bounds this as well, since the
+amplification factor is proportional to the nesting depth the input can express.
+Per the ownership boundary in `SECURITY.md`, admission and resource policy for a
+recursive schema remain application-owned; this note documents the shape of the
+cost so that policy can be chosen deliberately.
+
 ## Recursive Decode Paths
 
 Typed decoding follows the destination C++ type. Container elements are processed in loops, so a large flat array does not create one
