@@ -222,6 +222,7 @@ jobs:
               cmake \
               git \
               ninja-build \
+              python3 \
               gcc-15 \
               g++-15 \
               libssl-dev
