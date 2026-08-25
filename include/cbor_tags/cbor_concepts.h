@@ -843,6 +843,8 @@ struct CborStream {
 template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
+// -----------------------------------------------------------------
+// Probe types used only to detect aggregate arity, never evaluated.
 struct any {
     template <class T>
         requires(is_optional_v<T> || std::default_initializable<T>)
@@ -859,20 +861,10 @@ struct any {
     operator T() const;
 };
 
-// Probe type used only to detect aggregate arity, never evaluated.
-//
-// `any` above converts to a prvalue, and [temp.deduct.conv] strips the reference from the
-// target type when deducing a conversion function template. Deducing against `int &` therefore
-// yields `T = int` and a prvalue result, which binds to `const int &` but never to `int &`.
-// Aggregates holding a mutable reference member were consequently undetectable and silently
-// reflected as having no members at all.
-//
-// A single reference-returning conversion binds to value members and to reference members of
-// either constness. It must remain the only conversion operator here: adding a by-value
-// operator alongside it makes every value target ambiguous.
 struct any_ref {
     template <class T> operator T &() const;
 };
+// -----------------------------------------------------------------
 
 template <std::uint64_t N> struct static_tag {
     static constexpr std::uint64_t cbor_tag = N;
