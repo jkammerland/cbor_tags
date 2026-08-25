@@ -725,11 +725,15 @@ TEST_CASE("custom_codec_1 propagates pmr allocators to optional aggregate range 
 
     REQUIRE(decoded.size() == source.size());
     REQUIRE(decoded[0].has_value());
-    CHECK(std::string_view(decoded[0]->label.data(), decoded[0]->label.size()) ==
-          std::string_view(source[0]->label.data(), source[0]->label.size()));
-    CHECK(std::ranges::equal(decoded[0]->bytes, source[0]->bytes));
-    CHECK(decoded[0]->label.get_allocator().resource() == &decode_resource);
-    CHECK(decoded[0]->bytes.get_allocator().resource() == &decode_resource);
+    REQUIRE(source[0].has_value());
+    // doctest's fatal REQUIRE is not modeled by bugprone-unchecked-optional-access.
+    const auto &decoded_value = decoded[0].value(); // NOLINT(bugprone-unchecked-optional-access)
+    const auto &source_value  = source[0].value();  // NOLINT(bugprone-unchecked-optional-access)
+    CHECK(std::string_view(decoded_value.label.data(), decoded_value.label.size()) ==
+          std::string_view(source_value.label.data(), source_value.label.size()));
+    CHECK(std::ranges::equal(decoded_value.bytes, source_value.bytes));
+    CHECK(decoded_value.label.get_allocator().resource() == &decode_resource);
+    CHECK(decoded_value.bytes.get_allocator().resource() == &decode_resource);
     CHECK_FALSE(decoded[1].has_value());
 }
 
@@ -858,8 +862,8 @@ TEST_CASE("compact tagged long tag and length boundaries stay compact") {
     }
     {
         std::vector<std::uint8_t> values(128);
-        for (std::uint8_t i = 0; i < values.size(); ++i) {
-            values[i] = i;
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            values[i] = static_cast<std::uint8_t>(i);
         }
 
         std::vector<std::byte> compact;

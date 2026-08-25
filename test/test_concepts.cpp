@@ -589,7 +589,7 @@ TEST_CASE("Concept sfinae") {
     AllCborMajorsExample d(std::deque<std::byte>{});
 
     CHECK(a.is_contiguous);
-    CHECK(a.is_contiguous);
+    CHECK(b.is_contiguous);
     CHECK(!c.is_contiguous);
     CHECK(!d.is_contiguous);
 }
