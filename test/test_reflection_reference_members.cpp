@@ -187,13 +187,13 @@ TEST_CASE("decode into an aggregate with a mutable reference member writes throu
     CHECK_EQ(referenced, 99);
 }
 
-TEST_CASE("roundtrip nested_ref") {
+TEST_CASE("roundtrip aggregate with nested reference members") {
     std::vector<std::byte> buf;
     auto                   enc = make_encoder(buf);
 
     int  b        = 5555;
     auto mrefpair = mutable_ref_pair{.a = 1, .b = b};
-    auto vrefpair = value_pair{value_pair{.a = 3, .b = 1337}};
+    auto vrefpair = value_pair{.a = 3, .b = 1337};
 
     REQUIRE(enc(nested_refs{mrefpair, vrefpair}));
     auto dec = make_decoder(buf);
