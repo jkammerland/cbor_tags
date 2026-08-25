@@ -38,6 +38,11 @@ struct mixed_refs {
     const std::string &c;
 };
 
+struct nested_refs {
+    mutable_ref_pair &mpair;
+    value_pair       &vpair;
+};
+
 struct only_ref {
     int &a;
 };
@@ -174,10 +179,34 @@ TEST_CASE("decode into an aggregate with a mutable reference member writes throu
     auto                   enc = make_encoder(data);
     REQUIRE(enc(value_pair{7, 99}).has_value());
 
-    mutable_ref_pair decoded{0, referenced};
+    mutable_ref_pair decoded{.a = 0, .b = referenced};
     auto             dec = make_decoder(data);
     REQUIRE(dec(decoded).has_value());
 
     CHECK_EQ(decoded.a, 7);
     CHECK_EQ(referenced, 99);
+}
+
+TEST_CASE("roundtrip nested_ref") {
+    std::vector<std::byte> buf;
+    auto                   enc = make_encoder(buf);
+
+    int  b        = 5555;
+    auto mrefpair = mutable_ref_pair{.a = 1, .b = b};
+    auto vrefpair = value_pair{value_pair{.a = 3, .b = 1337}};
+
+    REQUIRE(enc(nested_refs{mrefpair, vrefpair}));
+    auto dec = make_decoder(buf);
+
+    mrefpair.a   = 0;
+    mrefpair.b   = 0;
+    vrefpair.a   = 0;
+    vrefpair.b   = 0;
+    auto decoded = nested_refs{.mpair = mrefpair, .vpair = vrefpair};
+    REQUIRE(dec(decoded));
+
+    CHECK_EQ(mrefpair.a, 1);
+    CHECK_EQ(mrefpair.b, 5555);
+    CHECK_EQ(vrefpair.a, 3);
+    CHECK_EQ(vrefpair.b, 1337);
 }
