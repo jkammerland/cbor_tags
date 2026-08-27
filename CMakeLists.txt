@@ -4,7 +4,7 @@ if(POLICY CMP0206)
 endif()
 project(
   cbor_tags
-  VERSION 0.23.0
+  VERSION 0.24.0
   DESCRIPTION "RFC 8949 CBOR implementation with automatic C++ reflection"
   HOMEPAGE_URL "https://github.com/jkammerland/cbor_tags")
 set(cbor_tags_SPDX_LICENSE "MIT")
