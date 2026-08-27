@@ -17,10 +17,7 @@ void generate_header(fmt::memory_buffer &out, const std::vector<std::pair<int, i
         max_N = std::max(max_N, end);
     }
 
-    constexpr int max_members         = 128;
-    bool          disable_size_assert = max_N > max_members;
-
-    // Create a set of all numbers we need to generate and find holes
+    // Create a set of all numbers we need to generate
     std::set<int> numbers_to_generate;
     auto          hint = numbers_to_generate.end();
     for (const auto &[start, end] : ranges) {
@@ -29,49 +26,15 @@ void generate_header(fmt::memory_buffer &out, const std::vector<std::pair<int, i
         }
     }
 
-    // Find holes and create static assert conditions
-    std::string static_asserts;
-    if (disable_size_assert) {
-        static_asserts = "// Static asserts disabled due to large member count\n    ";
-        fmt::print("Disabling static asserts in to_tuple(...) due to large member count [greater than {}]\n", max_members);
-    } else if (ranges.size() > 1) {
-        // Check if there are numbers less than the first range
-        if (ranges[0].first > 1) {
-            static_asserts += fmt::format("static_assert(detail::aggregate_binding_count<type> >= {}, "
-                                          "\"Type must have at least {} members\");\n    ",
-                                          ranges[0].first, ranges[0].first);
-        }
-
-        // Find holes between ranges
-        int prev_end = ranges[0].second;
-        for (size_t i = 1; i < ranges.size(); ++i) {
-            if (ranges[i].first > prev_end + 1) {
-                static_asserts += fmt::format("static_assert(detail::aggregate_binding_count<type> <= {} || "
-                                              "detail::aggregate_binding_count<type> >= {}, "
-                                              "\"Type must have {} or fewer members, or {} or more members\");\n    ",
-                                              prev_end, ranges[i].first, prev_end, ranges[i].first);
-            }
-            prev_end = ranges[i].second;
-        }
-
-        // Add final range check
-        static_asserts += fmt::format("static_assert(detail::aggregate_binding_count<type> <= {}, "
-                                      "\"Type must have no more than {} members\");\n    ",
-                                      max_N, max_N);
-    } else {
-        static_asserts =
-            fmt::format("static_assert(detail::aggregate_binding_count<type> <= detail::MAX_REFLECTION_MEMBERS, "
-                        "\"Type must have at most {} members. Rerun the generator with a higher value if you need more.\");\n    ",
-                        max_N);
-    }
-
     fmt::format_to(std::back_inserter(out), R"(#pragma once
 
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_reflection_count.h"
 
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 #if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_BOOST_PFR_NAMES
 
@@ -83,36 +46,54 @@ constexpr size_t MAX_REFLECTION_MEMBERS = {0};
 
 template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     using type = std::decay_t<T>;
+    using probe = std::conditional_t<std::is_trivially_copy_constructible_v<type>, any_ref, any>;
     static_assert(IsAggregate<type>, "Type must be an aggregate");
-    {1}
 
     if constexpr (IsTuple<type>) {{
         return; // unreachable due to IsAggregate
     }})",
-                   max_N, static_asserts);
+                   max_N);
 
     // Generate in reverse order
     for (auto i : std::ranges::reverse_view(numbers_to_generate)) {
         std::vector<std::string> params;
-        std::vector<std::string> anys;
+        std::vector<std::string> probes;
         params.reserve(i);
-        anys.reserve(i);
+        probes.reserve(i);
         for (decltype(i) j = 1; j <= i; ++j) {
             params.push_back(fmt::format("p{}", j));
-            anys.emplace_back("any");
+            probes.emplace_back("probe");
         }
 
         fmt::format_to(std::back_inserter(out), R"( else if constexpr (IsBracesContructible<type, {0}>) {{
         auto &[{1}] = object;
         return std::tie({1});
     }})",
-                       fmt::join(anys, ", "), fmt::join(params, ", "));
+                       fmt::join(probes, ", "), fmt::join(params, ", "));
     }
 
     fmt::format_to(std::back_inserter(out), R"( else {{
+        static_assert(std::is_empty_v<type>,
+                      "Could not reflect this non-empty aggregate with the generated C++20 fallback. "
+                      "Its member count may be outside CBOR_TAGS_REFLECTION_RANGES, or its members may require "
+                      "incompatible value and reference probes. Use a matching generated range, native reflection, "
+                      "or a custom encoder/decoder.");
         return std::make_tuple();
     }}
 }}
+
+namespace detail {{
+template <typename T>
+    requires IsAggregate<T> || IsTuple<T>
+constexpr auto aggregate_binding_count = []() consteval {{
+    using type = std::remove_cvref_t<T>;
+    if constexpr (IsTuple<type>) {{
+        return std::tuple_size_v<type>;
+    }} else {{
+        return std::tuple_size_v<decltype(to_tuple(std::declval<type &>()))>;
+    }}
+}}();
+}} // namespace detail
 
 }} // namespace cbor::tags
 

@@ -843,6 +843,8 @@ struct CborStream {
 template <typename T, typename... Args>
 concept IsBracesContructible = requires(Args... args) { T{args...}; };
 
+// -----------------------------------------------------------------
+// Probe types used only to detect aggregate arity, never evaluated.
 struct any {
     template <class T>
         requires(is_optional_v<T> || std::default_initializable<T>)
@@ -858,6 +860,11 @@ struct any {
         requires(!is_optional_v<T> && !std::default_initializable<T>)
     operator T() const;
 };
+
+struct any_ref {
+    template <class T> operator T &() const;
+};
+// -----------------------------------------------------------------
 
 template <std::uint64_t N> struct static_tag {
     static constexpr std::uint64_t cbor_tag = N;
