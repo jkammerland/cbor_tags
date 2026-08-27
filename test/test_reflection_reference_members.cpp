@@ -32,6 +32,11 @@ struct const_ref_pair {
     const int &b;
 };
 
+struct const_ref_nontrivial_value {
+    std::string value;
+    const int  &reference;
+};
+
 struct mixed_refs {
     int                a;
     int               &b;
@@ -56,23 +61,11 @@ struct move_only_leaf {
     int a;
 };
 
-// The reference probe returns an lvalue, so brace-initializing this member from it would select
-// std::vector's copy constructor. That constructor is declared for a move-only element type but
-// ill-formed when instantiated, and Clang instantiates it eagerly from inside the requires-clause.
-// Counting must therefore never reach the reference probe for an aggregate the value probe
-// already resolved.
-//
-// Only the brace-probing fallback has probes to get wrong. std::meta and Boost.PFR enumerate
-// members directly, and Boost.PFR's own field counter cannot handle this shape on the MSVC
-// standard library, so this stays scoped to the path it guards.
+// The reference probe would select the container's ill-formed copy constructor on Clang.
+// Non-trivially-copyable aggregates must use the value probe instead.
 struct move_only_container {
     std::vector<std::unique_ptr<move_only_leaf>> children;
     int                                          n;
-};
-
-struct mixed_reference_move_only_container {
-    int                                         &reference;
-    std::vector<std::unique_ptr<move_only_leaf>> children;
 };
 #endif
 
@@ -97,8 +90,29 @@ TEST_CASE("reflection detects arity of aggregates with reference members") {
     const std::string text;
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(mutable_ref_pair{1, value}))>, 2);
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(const_ref_pair{1, value}))>, 2);
+    CHECK_EQ(std::tuple_size_v<decltype(to_tuple(const_ref_nontrivial_value{"value", value}))>, 2);
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(only_ref{value}))>, 1);
     CHECK_EQ(std::tuple_size_v<decltype(to_tuple(mixed_refs{1, value, text}))>, 3);
+}
+
+TEST_CASE("aggregate binding count agrees with tuple conversion") {
+    CHECK_EQ(detail::aggregate_binding_count<mutable_ref_pair>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<const_ref_pair>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<const_ref_nontrivial_value>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<only_ref>, 1);
+    CHECK_EQ(detail::aggregate_binding_count<mixed_refs>, 3);
+    CHECK_EQ(detail::aggregate_binding_count<value_pair>, 2);
+    CHECK_EQ(detail::aggregate_binding_count<only_value>, 1);
+
+    struct empty {};
+    CHECK_EQ(detail::aggregate_binding_count<empty>, 0);
+    CHECK_EQ(std::tuple_size_v<decltype(to_tuple(empty{}))>, 0);
+    CHECK_EQ(detail::aggregate_binding_count<std::tuple<int, double, char, value_pair>>, 4);
+
+    int               value = 0;
+    const std::string text;
+    CHECK_EQ(detail::aggregate_binding_count<mutable_ref_pair>, std::tuple_size_v<decltype(to_tuple(mutable_ref_pair{1, value}))>);
+    CHECK_EQ(detail::aggregate_binding_count<mixed_refs>, std::tuple_size_v<decltype(to_tuple(mixed_refs{1, value, text}))>);
 }
 
 #if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_BOOST_PFR_NAMES
@@ -108,11 +122,6 @@ TEST_CASE("counting an aggregate holding a move-only container never reaches the
 
     // The value probe resolves this type, so the reference probe stays in a discarded branch.
     CHECK(IsBracesContructible<move_only_container, any, any>);
-
-    // The C++20 fallback cannot safely choose lvalue and rvalue probes independently for each
-    // member. It must reject this mixed shape explicitly instead of instantiating vector's
-    // ill-formed copy constructor on Clang.
-    CHECK_EQ(detail::aggregate_binding_count<mixed_reference_move_only_container>, detail::UNDETECTABLE_AGGREGATE_ARITY);
 }
 #endif
 
