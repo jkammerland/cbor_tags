@@ -12,7 +12,18 @@ if ! mkdir -p -- "${package_dir}" 2>/dev/null; then
     exit 77
 fi
 
-readonly version=0.23.0
+version="$(
+    awk '
+        /^[[:space:]]*project[[:space:]]*\(/ { in_project = 1 }
+        in_project && /^[[:space:]]*VERSION[[:space:]]+/ { print $2; exit }
+        in_project && /\)/ { exit }
+    ' "${repo_root}/CMakeLists.txt"
+)"
+if [[ -z "${version}" ]]; then
+    echo 'could not read the cbor_tags CMake project version' >&2
+    exit 1
+fi
+readonly version
 readonly stem="cbor_tags-${version}-cmake"
 payloads=("${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json")
 
