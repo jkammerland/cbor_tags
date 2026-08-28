@@ -214,7 +214,7 @@ compare_unsigned_payloads() {
     local version="$1"
     local expected_dir="$2"
     local actual_dir="$3"
-    local stem="cbor_tags-${version}-cmake"
+    local stem="cbor_tags-${version}"
     local name
     for name in \
         "${stem}.tar.gz" "${stem}.tar.gz.sha256" "${stem}.tar.gz.sha512" \
@@ -268,9 +268,9 @@ write_release_notes() {
         echo
         echo '```sh'
         echo "gpg --import cbor_tags-release-public-key.asc"
-        echo "gpg --verify cbor_tags-${version}-cmake.tar.gz.sig cbor_tags-${version}-cmake.tar.gz"
-        echo "gpg --verify cbor_tags-${version}-cmake.spdx.json.sig cbor_tags-${version}-cmake.spdx.json"
-        echo "sha256sum -c cbor_tags-${version}-cmake.tar.gz.sha256"
+        echo "gpg --verify cbor_tags-${version}.tar.gz.sig cbor_tags-${version}.tar.gz"
+        echo "gpg --verify cbor_tags-${version}.spdx.json.sig cbor_tags-${version}.spdx.json"
+        echo "sha256sum -c cbor_tags-${version}.tar.gz.sha256"
         echo '```'
         echo
         printf '%s\n' "${generated_notes}"

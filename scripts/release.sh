@@ -412,7 +412,7 @@ metadata_version() {
 
 expected_unsigned_assets() {
     local version="$1"
-    local stem="cbor_tags-${version}-cmake"
+    local stem="cbor_tags-${version}"
     printf '%s\n' \
         "${stem}.spdx.json" \
         "${stem}.spdx.json.sha256" \
@@ -427,7 +427,7 @@ expected_unsigned_assets() {
 
 expected_signed_assets() {
     local version="$1"
-    local stem="cbor_tags-${version}-cmake"
+    local stem="cbor_tags-${version}"
     expected_unsigned_assets "${version}"
     printf '%s\n' \
         "${stem}.spdx.json.sig" \
@@ -521,7 +521,7 @@ verify_signed_assets() {
         [[ "${imported_fingerprints[0]}" == "${expected_fingerprint}" ]] ||
             die "release asset public key fingerprint is ${imported_fingerprints[0]:-missing}, expected ${expected_fingerprint}"
 
-        local stem="cbor_tags-${version}-cmake"
+        local stem="cbor_tags-${version}"
         local payload verification_output signature_fingerprints
         for payload in "${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json"; do
             verify_checksums "${package_dir}/${payload}"
@@ -799,7 +799,7 @@ build_release() {
     cmake --build "${build_dir}" --parallel
     cpack --config "${build_dir}/CPackConfig.cmake" --verbose
 
-    local package_stem="cbor_tags-${cmake_version}-cmake"
+    local package_stem="cbor_tags-${cmake_version}"
     local tgz_package="${package_dir}/${package_stem}.tar.gz"
     local zip_package="${package_dir}/${package_stem}.zip"
     mkdir -p -- "${canonical_dir}"
@@ -912,7 +912,7 @@ sign_release() {
         die "release signing key is ${signing_fingerprint}, expected ${release_signing_fingerprint}"
     fi
 
-    local stem="cbor_tags-${version}-cmake"
+    local stem="cbor_tags-${version}"
     local payload
     for payload in "${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json"; do
         verify_checksums "${package_dir}/${payload}"

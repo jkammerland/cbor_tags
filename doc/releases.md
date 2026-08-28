@@ -10,14 +10,16 @@ public.
 
 Existing releases through `v0.22.0` predate this workflow. They use lightweight
 tags and GitHub-generated source archives; they are not retroactively converted.
+Release `v0.24.0` and earlier install-package assets retain their historical
+`-cmake` filename suffix; new releases use the names documented below.
 
 ## Release Assets
 
 For version `X.Y.Z`, the workflow publishes exactly 13 assets:
 
-- `cbor_tags-X.Y.Z-cmake.tar.gz` and `.zip` CMake install trees;
+- `cbor_tags-X.Y.Z.tar.gz` and `.zip` CMake install trees;
 - detached `.sig`, `.sha256`, and `.sha512` files for both archives;
-- `cbor_tags-X.Y.Z-cmake.spdx.json`, with its detached signature and checksums;
+- `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
 - `cbor_tags-release-public-key.asc` for offline signature verification.
 
 The archives contain the default C++20 package configuration. Consumers still

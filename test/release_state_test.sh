@@ -16,7 +16,7 @@ readonly tag=v0.22.0
 readonly tag_object=1111111111111111111111111111111111111111
 readonly commit=2222222222222222222222222222222222222222
 readonly version=0.22.0
-readonly stem=cbor_tags-0.22.0-cmake
+readonly stem=cbor_tags-0.22.0
 
 asset_names=(
     "${stem}.spdx.json"
