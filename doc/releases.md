@@ -17,16 +17,17 @@ Release `v0.24.0` and earlier install-package assets retain their historical
 
 For version `X.Y.Z`, the workflow publishes exactly 13 assets:
 
-- `cbor_tags-X.Y.Z.tar.gz` and `.zip` CMake install trees;
+- `cbor_tags-X.Y.Z.tar.gz` and `.zip` reproducible source trees;
 - detached `.sig`, `.sha256`, and `.sha512` files for both archives;
 - `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
 - `cbor_tags-release-public-key.asc` for offline signature verification.
 
-The archives contain the default C++20 package configuration. Consumers still
-provide fmt, nameof, and tl::expected; these dependencies are declared by the
-installed CMake package. The workflow extracts both archives, compares every
-file digest and symlink target, and builds `test_package` against each one
-before publication.
+The archives contain the exact tracked source snapshot for the signed release
+commit. They do not contain a pre-installed CMake tree. The workflow extracts
+both archives, compares every file digest and executable bit against the
+canonical Git snapshot, and builds an example from each one before publication.
+It separately stages one internal install and builds `test_package` against it
+to keep the CMake package metadata covered without publishing that install tree.
 
 The release driver normalizes ZIP metadata to UTC so the unsigned packages are
 byte-reproducible regardless of the operator's local timezone.
@@ -49,6 +50,8 @@ The release workflow enforces all of these conditions:
 - the tag version matches `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`;
 - the annotated tag object and peeled commit are rechecked after environment
   approval and immediately before publication;
+- the TGZ and ZIP source archives are generated from the exact release commit
+  and compared file-for-file with its canonical Git snapshot;
 - the exact `target_install_package.cmake` v7.1.0 release archive is pinned by
   SHA-256 and its signature is verified against the committed release key
   before release configuration;

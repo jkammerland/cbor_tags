@@ -260,9 +260,9 @@ write_release_notes() {
             --jq .body
     )"
     {
-        echo "Signed cbor_tags ${tag} install packages."
+        echo "Signed cbor_tags ${tag} source archives."
         echo
-        echo "Assets include TGZ and ZIP CMake install trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the default C++20 package configuration; fmt, nameof, and tl::expected remain consumer dependencies."
+        echo "Assets include reproducible TGZ and ZIP source trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the exact tracked source snapshot for the signed release commit."
         echo
         echo "Verify an archive and the SBOM with:"
         echo

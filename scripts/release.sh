@@ -41,7 +41,7 @@ Commands:
       Verify the annotated tag signature, master ancestry, and all project versions.
 
   build [--package-dir <dir>]
-      Build and validate unsigned TGZ/ZIP install packages and an SPDX SBOM.
+      Build and validate unsigned reproducible source archives and an SPDX SBOM.
 
   sign [--package-dir <dir>] [--require-release-key]
       Sign validated release payloads and export the public verification key.
@@ -543,17 +543,14 @@ verify_signed_assets() {
     )
 }
 
-locate_package_prefix() {
-    local extract_dir="$1"
-    local package_stem="$2"
-    local archive_root="${extract_dir}/${package_stem}"
-    [[ -d "${archive_root}" ]] || archive_root="${extract_dir}"
-    if [[ -f "${archive_root}/share/cmake/cbor_tags/cbor_tagsConfig.cmake" ]]; then
-        printf '%s\n' "${archive_root}"
-    elif [[ -f "${archive_root}/usr/share/cmake/cbor_tags/cbor_tagsConfig.cmake" ]]; then
-        printf '%s\n' "${archive_root}/usr"
+locate_install_prefix() {
+    local install_root="$1"
+    if [[ -f "${install_root}/share/cmake/cbor_tags/cbor_tagsConfig.cmake" ]]; then
+        printf '%s\n' "${install_root}"
+    elif [[ -f "${install_root}/usr/share/cmake/cbor_tags/cbor_tagsConfig.cmake" ]]; then
+        printf '%s\n' "${install_root}/usr"
     else
-        die "release archive is missing cbor_tagsConfig.cmake"
+        die "staged install is missing cbor_tagsConfig.cmake"
     fi
 }
 
@@ -604,6 +601,25 @@ run_installed_consumer() {
         -DCMAKE_PREFIX_PATH="${prefix};${dependency_prefix}"
     cmake --build "${consumer_build_dir}" --parallel
     "${consumer_build_dir}/test_package"
+}
+
+run_source_consumer() {
+    local source_root="$1"
+    local toolchain_file="$2"
+    local consumer_build_dir="$3"
+    cmake -S "${source_root}" -B "${consumer_build_dir}" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_STANDARD=20 \
+        -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+        -DCMAKE_CXX_EXTENSIONS=OFF \
+        -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}" \
+        -DCPM_SOURCE_CACHE="${repo_root}/build/cpm_cache" \
+        -DCBOR_TAGS_BUILD_EXAMPLES=ON \
+        -DCBOR_TAGS_BUILD_TESTS=OFF \
+        -DCBOR_TAGS_INSTALL=OFF \
+        -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
+    cmake --build "${consumer_build_dir}" --parallel
+    "${consumer_build_dir}/examples/cbor_tags_basic_roundtrip"
 }
 
 require_release_cmake() {
@@ -691,11 +707,6 @@ create_reproducible_archives() {
 
     local canonical_root="${canonical_dir}/${package_stem}"
     [[ -d "${canonical_root}" ]] || die "canonical package root not found: ${canonical_root}"
-    local canonical_prefix canonical_sbom
-    canonical_prefix="$(locate_package_prefix "${canonical_dir}" "${package_stem}")"
-    canonical_sbom="$(packaged_sbom "${canonical_prefix}")"
-    normalize_sbom_timestamps "${canonical_sbom}" "${source_epoch}"
-    validate_sbom_schema "${canonical_sbom}" "${canonical_dir}/spdx-3.0.1.schema.json"
 
     find "${canonical_root}" -exec touch -h -d "@${source_epoch}" {} +
     rm -f -- \
@@ -741,10 +752,10 @@ build_release() {
 
     require_command cmake
     require_command cmp
-    require_command cpack
     require_command curl
     require_command diff
     require_command gpg
+    require_command git
     require_command ninja
     require_command sha256sum
     require_command sha512sum
@@ -765,6 +776,7 @@ build_release() {
     package_dir="$(canonical_build_path "${package_dir}")"
     local work_dir="${repo_root}/build/release"
     local build_dir="${work_dir}/package-build"
+    local install_dir="${work_dir}/install"
     local canonical_dir="${work_dir}/canonical"
     local tgz_extract_dir="${work_dir}/extract-tgz"
     local zip_extract_dir="${work_dir}/extract-zip"
@@ -778,7 +790,7 @@ build_release() {
         export SOURCE_DATE_EPOCH
     fi
 
-    log "Configure release package"
+    log "Configure release validation build"
     cmake -S "${repo_root}" -B "${build_dir}" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_STANDARD=20 \
@@ -786,27 +798,39 @@ build_release() {
         -DCMAKE_CXX_EXTENSIONS=OFF \
         -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}" \
         -DCMAKE_INSTALL_PREFIX=/ \
-        -DCPACK_PACKAGE_DIRECTORY="${package_dir}" \
         -DCPM_SOURCE_CACHE="${repo_root}/build/cpm_cache" \
         -DCBOR_TAGS_BUILD_TESTS=OFF \
         -DCBOR_TAGS_INSTALL=ON \
         -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON \
-        -DCBOR_TAGS_ENABLE_CPACK=ON \
+        -DCBOR_TAGS_ENABLE_CPACK=OFF \
         -DCBOR_TAGS_ENABLE_SBOM=ON \
         -DCMAKE_EXPERIMENTAL_GENERATE_SBOM="${sbom_experimental_value}"
 
-    log "Build and package release install tree"
+    log "Build and validate staged install metadata"
     cmake --build "${build_dir}" --parallel
-    cpack --config "${build_dir}/CPackConfig.cmake" --verbose
+    cmake --install "${build_dir}" --prefix "${install_dir}"
+
+    local install_prefix install_sbom
+    install_prefix="$(locate_install_prefix "${install_dir}")"
+    install_sbom="$(packaged_sbom "${install_prefix}")"
+    normalize_sbom_timestamps "${install_sbom}" "${SOURCE_DATE_EPOCH}"
+    validate_sbom_schema "${install_sbom}" "${work_dir}/spdx-3.0.1.schema.json"
 
     local package_stem="cbor_tags-${cmake_version}"
     local tgz_package="${package_dir}/${package_stem}.tar.gz"
     local zip_package="${package_dir}/${package_stem}.zip"
+
+    log "Create reproducible source archives"
     mkdir -p -- "${canonical_dir}"
-    (
-        cd -- "${canonical_dir}"
-        cmake -E tar xzf "${tgz_package}"
-    )
+    git -C "${repo_root}" archive \
+        --format=tar \
+        --prefix="${package_stem}/" \
+        HEAD | tar -xf - -C "${canonical_dir}"
+    [[ -f "${canonical_dir}/${package_stem}/CMakeLists.txt" ]] || die "source archive is missing CMakeLists.txt"
+    [[ -f "${canonical_dir}/${package_stem}/LICENSE" ]] || die "source archive is missing LICENSE"
+    [[ -f "${canonical_dir}/${package_stem}/include/cbor_tags/cbor.h" ]] || die "source archive is missing public headers"
+    [[ ! -e "${canonical_dir}/${package_stem}/.git" ]] || die "source archive contains Git metadata"
+    [[ ! -e "${canonical_dir}/${package_stem}/build" ]] || die "source archive contains generated build output"
     create_reproducible_archives \
         "${package_stem}" \
         "${canonical_dir}" \
@@ -823,7 +847,7 @@ build_release() {
         verify_checksums "${package_file}"
     done
 
-    log "Extract and compare TGZ and ZIP contents"
+    log "Extract and compare source archive contents"
     mkdir -p -- "${tgz_extract_dir}" "${zip_extract_dir}"
     (
         cd -- "${tgz_extract_dir}"
@@ -833,22 +857,19 @@ build_release() {
         cd -- "${zip_extract_dir}"
         cmake -E tar xf "${zip_package}"
     )
-    local tgz_prefix zip_prefix
-    tgz_prefix="$(locate_package_prefix "${tgz_extract_dir}" "${package_stem}")"
-    zip_prefix="$(locate_package_prefix "${zip_extract_dir}" "${package_stem}")"
-    [[ -f "${tgz_prefix}/share/doc/cbor_tags/LICENSE" ]] || die "TGZ release archive is missing LICENSE"
-    [[ -f "${zip_prefix}/share/doc/cbor_tags/LICENSE" ]] || die "ZIP release archive is missing LICENSE"
-    write_tree_manifest "${tgz_prefix}" "${work_dir}/tgz-manifest.txt"
-    write_tree_manifest "${zip_prefix}" "${work_dir}/zip-manifest.txt"
-    diff -u "${work_dir}/tgz-manifest.txt" "${work_dir}/zip-manifest.txt"
-
-    local tgz_sbom zip_sbom
-    tgz_sbom="$(packaged_sbom "${tgz_prefix}")"
-    zip_sbom="$(packaged_sbom "${zip_prefix}")"
-    cmp "${tgz_sbom}" "${zip_sbom}"
+    local canonical_root="${canonical_dir}/${package_stem}"
+    local tgz_source_root="${tgz_extract_dir}/${package_stem}"
+    local zip_source_root="${zip_extract_dir}/${package_stem}"
+    [[ -f "${tgz_source_root}/CMakeLists.txt" ]] || die "TGZ source archive is missing CMakeLists.txt"
+    [[ -f "${zip_source_root}/CMakeLists.txt" ]] || die "ZIP source archive is missing CMakeLists.txt"
+    write_tree_manifest "${canonical_root}" "${work_dir}/canonical-manifest.txt"
+    write_tree_manifest "${tgz_source_root}" "${work_dir}/tgz-manifest.txt"
+    write_tree_manifest "${zip_source_root}" "${work_dir}/zip-manifest.txt"
+    diff -u "${work_dir}/canonical-manifest.txt" "${work_dir}/tgz-manifest.txt"
+    diff -u "${work_dir}/canonical-manifest.txt" "${work_dir}/zip-manifest.txt"
 
     local sbom_sidecar="${package_dir}/${package_stem}.spdx.json"
-    cmake -E copy "${tgz_sbom}" "${sbom_sidecar}"
+    cmake -E copy "${install_sbom}" "${sbom_sidecar}"
     validate_sbom "${sbom_sidecar}" "${cmake_version}"
     write_checksums "${sbom_sidecar}"
     verify_checksums "${sbom_sidecar}"
@@ -857,9 +878,12 @@ build_release() {
     local dependency_prefix="${build_dir}/vcpkg_installed/${VCPKG_DEFAULT_TRIPLET:-x64-linux}"
     [[ -d "${dependency_prefix}" ]] || die "release dependency prefix not found: ${dependency_prefix}"
 
-    log "Build installed-package consumers from both archives"
-    run_installed_consumer "${tgz_prefix}" "${dependency_prefix}" "${work_dir}/consumer-tgz"
-    run_installed_consumer "${zip_prefix}" "${dependency_prefix}" "${work_dir}/consumer-zip"
+    log "Build one staged-install consumer"
+    run_installed_consumer "${install_prefix}" "${dependency_prefix}" "${work_dir}/consumer-install"
+
+    log "Build source consumers from both archives"
+    run_source_consumer "${tgz_source_root}" "${toolchain_file}" "${work_dir}/consumer-tgz"
+    run_source_consumer "${zip_source_root}" "${toolchain_file}" "${work_dir}/consumer-zip"
 
     log "Unsigned release artifacts validated"
     find "${package_dir}" -maxdepth 1 -type f -printf '%f\n' | sort

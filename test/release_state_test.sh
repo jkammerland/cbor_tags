@@ -290,7 +290,7 @@ generated_notes="$(
         --output "${generated_root}/notes.md"
 )"
 [[ "${generated_notes}" == "${generated_root}/notes.md" ]]
-grep -F 'Signed cbor_tags v0.22.0 install packages.' "${generated_root}/notes.md" >/dev/null
+grep -F 'Signed cbor_tags v0.22.0 source archives.' "${generated_root}/notes.md" >/dev/null
 grep -F 'Generated fixture notes' "${generated_root}/notes.md" >/dev/null
 echo 'release-notes: OK'
 
