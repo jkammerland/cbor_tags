@@ -16,7 +16,7 @@ readonly tag=v0.22.0
 readonly tag_object=1111111111111111111111111111111111111111
 readonly commit=2222222222222222222222222222222222222222
 readonly version=0.22.0
-readonly stem=cbor_tags-0.22.0-cmake
+readonly stem=cbor_tags-0.22.0
 
 asset_names=(
     "${stem}.spdx.json"
@@ -290,7 +290,7 @@ generated_notes="$(
         --output "${generated_root}/notes.md"
 )"
 [[ "${generated_notes}" == "${generated_root}/notes.md" ]]
-grep -F 'Signed cbor_tags v0.22.0 install packages.' "${generated_root}/notes.md" >/dev/null
+grep -F 'Signed cbor_tags v0.22.0 source archives.' "${generated_root}/notes.md" >/dev/null
 grep -F 'Generated fixture notes' "${generated_root}/notes.md" >/dev/null
 echo 'release-notes: OK'
 

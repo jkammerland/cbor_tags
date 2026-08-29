@@ -214,7 +214,7 @@ compare_unsigned_payloads() {
     local version="$1"
     local expected_dir="$2"
     local actual_dir="$3"
-    local stem="cbor_tags-${version}-cmake"
+    local stem="cbor_tags-${version}"
     local name
     for name in \
         "${stem}.tar.gz" "${stem}.tar.gz.sha256" "${stem}.tar.gz.sha512" \
@@ -260,17 +260,17 @@ write_release_notes() {
             --jq .body
     )"
     {
-        echo "Signed cbor_tags ${tag} install packages."
+        echo "Signed cbor_tags ${tag} source archives."
         echo
-        echo "Assets include TGZ and ZIP CMake install trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the default C++20 package configuration; fmt, nameof, and tl::expected remain consumer dependencies."
+        echo "Assets include reproducible TGZ and ZIP source trees, an SPDX SBOM, detached GPG signatures, SHA-256/SHA-512 checksums, and the public verification key. The archives contain the exact tracked source snapshot for the signed release commit."
         echo
         echo "Verify an archive and the SBOM with:"
         echo
         echo '```sh'
         echo "gpg --import cbor_tags-release-public-key.asc"
-        echo "gpg --verify cbor_tags-${version}-cmake.tar.gz.sig cbor_tags-${version}-cmake.tar.gz"
-        echo "gpg --verify cbor_tags-${version}-cmake.spdx.json.sig cbor_tags-${version}-cmake.spdx.json"
-        echo "sha256sum -c cbor_tags-${version}-cmake.tar.gz.sha256"
+        echo "gpg --verify cbor_tags-${version}.tar.gz.sig cbor_tags-${version}.tar.gz"
+        echo "gpg --verify cbor_tags-${version}.spdx.json.sig cbor_tags-${version}.spdx.json"
+        echo "sha256sum -c cbor_tags-${version}.tar.gz.sha256"
         echo '```'
         echo
         printf '%s\n' "${generated_notes}"

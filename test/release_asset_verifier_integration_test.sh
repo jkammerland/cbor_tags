@@ -24,7 +24,7 @@ if [[ -z "${version}" ]]; then
     exit 1
 fi
 readonly version
-readonly stem="cbor_tags-${version}-cmake"
+readonly stem="cbor_tags-${version}"
 payloads=("${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json")
 
 for payload in "${payloads[@]}"; do
