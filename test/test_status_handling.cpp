@@ -61,6 +61,21 @@ struct throwing_memory_resource : std::pmr::memory_resource {
     bool  do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
 };
 
+struct counting_memory_resource : std::pmr::memory_resource {
+    std::size_t                allocations{};
+    std::pmr::memory_resource *upstream{std::pmr::new_delete_resource()};
+
+  private:
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocations;
+        return upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *ptr, std::size_t bytes, std::size_t alignment) override { upstream->deallocate(ptr, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
+
 struct fail_after_construction_memory_resource : std::pmr::memory_resource {
     std::pmr::memory_resource *upstream;
     bool                       fail_allocations{};
@@ -264,15 +279,17 @@ TEST_SUITE("Decoding the wrong thing") {
     }
 
     TEST_CASE("Decode truncated max-length array returns incomplete without allocating") {
-        throwing_memory_resource resource;
+        counting_memory_resource resource;
         std::pmr::vector<int>    decoded{&resource};
-        const auto               data = uint64_max_array_header();
+        const auto               allocations_before_decode = resource.allocations;
+        const auto               data                      = uint64_max_array_header();
 
         auto dec    = make_decoder(data);
         auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::incomplete);
+        CHECK_EQ(resource.allocations, allocations_before_decode);
         CHECK(decoded.empty());
     }
 
