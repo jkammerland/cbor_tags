@@ -57,6 +57,10 @@ add_dependencies(tests test_smart_ptr_allocation_failure)
 
 if(NOT CBOR_TAGS_USE_STD_REFLECTION AND NOT CBOR_TAGS_USE_BOOST_PFR_NAMES)
   function(add_reflection_compile_fail_test TEST_NAME SOURCE_FILE)
+    set(PASS_REGEX "Could not reflect this non-empty aggregate")
+    if(ARGC GREATER 2)
+      set(PASS_REGEX "${ARGV2}")
+    endif()
     add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
     target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
     add_test(
@@ -66,7 +70,7 @@ if(NOT CBOR_TAGS_USE_STD_REFLECTION AND NOT CBOR_TAGS_USE_BOOST_PFR_NAMES)
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DTEST_TARGET=${TEST_NAME}"
         "-DCONFIG=$<CONFIG>"
-        "-DPASS_REGEX=Could not reflect this non-empty aggregate"
+        "-DPASS_REGEX=${PASS_REGEX}"
         -P
         "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   endfunction()
@@ -77,6 +81,10 @@ if(NOT CBOR_TAGS_USE_STD_REFLECTION AND NOT CBOR_TAGS_USE_BOOST_PFR_NAMES)
   add_reflection_compile_fail_test(
     reflection_generated_range_overflow_compile_fails
     reflection_generated_range_overflow_compile_fail.cc)
+  add_reflection_compile_fail_test(
+    reflection_member_limit_exceeded_compile_fails
+    reflection_member_limit_exceeded_compile_fail.cc
+    "Type has more than 24 members")
 endif()
 
 function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)

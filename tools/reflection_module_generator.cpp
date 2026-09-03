@@ -7,6 +7,7 @@
 #include <ranges>
 #include <set>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -49,10 +50,19 @@ template <class T> constexpr auto to_tuple(T &&object) noexcept {{
     using probe = std::conditional_t<std::is_trivially_copy_constructible_v<type>, any_ref, any>;
     static_assert(IsAggregate<type>, "Type must be an aggregate");
 
+    // An aggregate accepting one more initializer than the largest generated
+    // arity has more members than any generated branch can bind. Detecting it
+    // here keeps the diagnostic actionable: the descending scan below would
+    // otherwise match at {0} (aggregate initialization allows a value-initialized
+    // tail) and fail inside the structured binding instead.
+    static_assert(!IsBracesContructible<type, {1}>,
+                  "Type has more than {0} members. Rerun the reflection generator with a larger "
+                  "CBOR_TAGS_REFLECTION_RANGES if you need more.");
+
     if constexpr (IsTuple<type>) {{
         return; // unreachable due to IsAggregate
     }})",
-                   max_N);
+                   max_N, fmt::join(std::vector<std::string>(static_cast<std::size_t>(max_N) + 1U, "probe"), ", "));
 
     // Generate in reverse order
     for (auto i : std::ranges::reverse_view(numbers_to_generate)) {
