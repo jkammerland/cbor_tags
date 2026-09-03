@@ -33,12 +33,14 @@ target_compile_definitions(tests PRIVATE $<$<PLATFORM_ID:QNX>:DOCTEST_CONFIG_USE
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
 if(CBOR_TAGS_ENABLE_ASAN)
-  message(STATUS "ASAN enabled in tests")
-  if((UNIX OR APPLE) AND NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+  if(UNIX OR APPLE)
+    message(STATUS "ASAN enabled in tests")
     target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(tests PRIVATE -fsanitize=address)
-  elseif(WIN32)
-    # target_compile_options(tests PRIVATE /fsanitize=address) target_link_options(tests PRIVATE /fsanitize=address)
+  else()
+    # Decline audibly rather than reporting a sanitizer that was never applied.
+    message(WARNING "CBOR_TAGS_ENABLE_ASAN=ON is not supported for ${CMAKE_CXX_COMPILER_ID} on this platform; "
+                    "tests will be built WITHOUT AddressSanitizer")
   endif()
 endif()
 
