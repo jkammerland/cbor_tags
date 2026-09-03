@@ -49,6 +49,10 @@ Commands:
   verify-assets [--package-dir <dir>] [--version <version>]
       Verify the exact signed release asset set, checksums, key, and signatures.
 
+  check-versions
+      Verify CMakeLists.txt, vcpkg.json, and conanfile.py declare the same
+      version, and print it. Intended for fast pull-request validation.
+
 Environment:
   VCPKG_ROOT           vcpkg checkout used for manifest dependencies
   CMAKE_TOOLCHAIN_FILE explicit dependency toolchain (overrides VCPKG_ROOT)
@@ -408,6 +412,21 @@ metadata_version() {
     [[ "${cmake_version}" == "${vcpkg_version}" && "${cmake_version}" == "${conan_version}" ]] ||
         die "project versions disagree: CMake=${cmake_version}, vcpkg=${vcpkg_version}, Conan=${conan_version}"
     printf '%s\n' "${cmake_version}"
+}
+
+check_versions() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h | --help)
+                usage
+                return 0
+                ;;
+            *) die "unknown check-versions option: $1" ;;
+        esac
+    done
+    local version
+    version="$(metadata_version)"
+    log "Project versions agree: ${version}"
 }
 
 expected_unsigned_assets() {
@@ -1001,6 +1020,10 @@ case "${command_name}" in
     verify-assets)
         shift
         verify_assets "$@"
+        ;;
+    check-versions)
+        shift
+        check_versions "$@"
         ;;
     "" | -h | --help | help)
         usage
