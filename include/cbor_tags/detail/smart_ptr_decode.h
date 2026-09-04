@@ -1,0 +1,323 @@
+#pragma once
+
+// Included by extensions/smart_ptr.h after its public scope types. These
+// implementation helpers are not an independently supported entry point.
+#include "cbor_tags/cbor_concepts_checking.h"
+#include "cbor_tags/detail/cbor_extension_decode.h"
+#include "cbor_tags/detail/cbor_variant_dispatch.h"
+#include "cbor_tags/detail/smart_ptr_traits.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+namespace cbor::tags::ext::smart_ptr::detail {
+
+class encode_scope_ref {
+  public:
+    template <SharedPtrEncodeScope Scope>
+    explicit encode_scope_ref(Scope &scope)
+        : scope_(std::addressof(scope)),
+          observe_([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Scope *>(raw)->observe(key); }),
+          observe_untracked_([](void *raw) { return static_cast<Scope *>(raw)->observe_untracked(); }),
+          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+
+    [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
+        return observe_(scope_, key);
+    }
+    [[nodiscard]] expected<void, status_code> observe_untracked() const { return observe_untracked_(scope_); }
+    void                                      mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
+    void                                      reset() const { reset_(scope_); }
+
+  private:
+    void *scope_{};
+    expected<shared_ptr_observation, status_code> (*observe_)(void *, const shared_ptr_encode_key &){};
+    expected<void, status_code> (*observe_untracked_)(void *){};
+    void (*mark_complete_)(void *, std::size_t){};
+    void (*reset_)(void *){};
+};
+
+class decode_scope_ref {
+  public:
+    template <SharedPtrDecodeScope Scope>
+    explicit decode_scope_ref(Scope &scope)
+        : scope_(std::addressof(scope)),
+          insert_([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Scope *>(raw)->insert(entry); }),
+          insert_untracked_([](void *raw) { return static_cast<Scope *>(raw)->insert_untracked(); }),
+          resolve_([](void *raw, std::size_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
+          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
+          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+
+    [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
+    [[nodiscard]] expected<void, status_code>        insert_untracked() const { return insert_untracked_(scope_); }
+    [[nodiscard]] expected<shared_ptr_decode_entry, status_code> resolve(std::size_t index) const { return resolve_(scope_, index); }
+    void                                                         mark_complete(std::size_t index) const { mark_complete_(scope_, index); }
+    void                                                         reset() const { reset_(scope_); }
+
+  private:
+    void *scope_{};
+    expected<std::size_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
+    expected<void, status_code> (*insert_untracked_)(void *){};
+    expected<shared_ptr_decode_entry, status_code> (*resolve_)(void *, std::size_t){};
+    void (*mark_complete_)(void *, std::size_t){};
+    void (*reset_)(void *){};
+};
+
+template <typename Self>
+concept EncoderSelf = requires(Self &self, std::uint64_t value, typename Self::byte_type byte) { self.encode_major_and_size(value, byte); };
+
+template <typename Self>
+concept DecoderSelf = !EncoderSelf<Self>;
+
+template <typename Codec, typename T>
+concept CodecDecodesWithMajor = requires(Codec &codec, T &value, major_type major, std::byte additional_info) {
+    { codec.decode(value, major, additional_info) } -> std::same_as<status_code>;
+};
+
+template <typename T, typename Decoder> struct extension_decodes_with_major : std::false_type {};
+
+template <typename T, typename InputBuffer, typename Options, template <typename> typename... Decoders>
+struct extension_decodes_with_major<T, cbor::tags::decoder<InputBuffer, Options, Decoders...>> {
+    using decoder_type = cbor::tags::decoder<InputBuffer, Options, Decoders...>;
+
+    static constexpr bool value = (CodecDecodesWithMajor<Decoders<decoder_type>, T> || ...);
+};
+
+template <typename T, typename Decoder>
+inline constexpr bool extension_decodes_with_major_v =
+    extension_decodes_with_major<std::remove_cvref_t<T>, std::remove_cvref_t<Decoder>>::value;
+
+template <typename Decoder, typename T>
+[[nodiscard]] status_code decode_transparent_value(Decoder &dec, T &value, major_type major, std::byte additional_info) {
+    static_assert(encodes_one_cbor_item<typename Decoder::options, T>(), "smart pointer pointee must encode exactly one CBOR item");
+
+    if constexpr (IsClassWithDecodingOverload<Decoder, T> || extension_decodes_with_major_v<T, Decoder>) {
+        return dec.decode(value, major, additional_info);
+    } else if constexpr (IsTag<T>) {
+        if (major != major_type::Tag) {
+            return status_code::no_match_for_tag_on_buffer;
+        }
+
+        std::uint64_t tag{};
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, tag);
+        return status == status_code::success ? dec.decode(value, tag) : status;
+    } else if constexpr (IsAggregate<T> || IsUntaggedTuple<T>) {
+        auto &&tuple = [&]() -> decltype(auto) {
+            if constexpr (IsAggregate<T>) {
+                return to_tuple(value);
+            } else {
+                return (value);
+            }
+        }();
+        using tuple_type             = std::remove_cvref_t<decltype(tuple)>;
+        constexpr auto element_count = std::tuple_size_v<tuple_type>;
+        constexpr bool wrapped_group = element_count > 1U && Decoder::options::wrap_groups;
+
+        auto result = status_code::success;
+        if constexpr (wrapped_group) {
+            std::uint64_t encoded_count{};
+            result = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, encoded_count);
+            if (result != status_code::success) {
+                return result;
+            }
+            if (encoded_count != element_count) {
+                return status_code::unexpected_group_size;
+            }
+            std::apply([&](auto &...members) { ((result == status_code::success ? result = dec.decode(members) : result), ...); }, tuple);
+        } else {
+            result = dec.decode(std::get<0>(tuple), major, additional_info);
+        }
+        return result;
+    } else {
+        return dec.decode(value, major, additional_info);
+    }
+}
+
+template <typename Pointer> void reset_pointer_to_new(Pointer &value) {
+    using element_type = pointer_element_t<Pointer>;
+    if constexpr (SharedPointer<Pointer> && std::constructible_from<std::remove_cvref_t<Pointer>, std::shared_ptr<element_type>>) {
+        // Establish ownership before converting to the structural pointer.
+        // shared_ptr(raw) deletes raw if its control-block allocation fails.
+        auto allocation = std::shared_ptr<element_type>{new element_type{}};
+        value           = std::remove_cvref_t<Pointer>{std::move(allocation)};
+    } else {
+        auto  allocation = std::make_unique<element_type>();
+        auto *raw        = allocation.release();
+        value.reset(raw);
+    }
+}
+
+template <typename Decoder, UniquePointer Pointer>
+[[nodiscard]] status_code decode_unique_pointer(Decoder &dec, Pointer &value, major_type major, std::byte additional_info) {
+    using element_type = pointer_element_t<Pointer>;
+    static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
+
+    if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
+        value.reset();
+        return status_code::success;
+    }
+
+    reset_pointer_to_new(value);
+    return decode_transparent_value(dec, *value, major, additional_info);
+}
+
+template <typename Decoder, UniquePointer Pointer>
+[[nodiscard]] status_code decode_unique_pointer_tag(Decoder &dec, Pointer &value, std::uint64_t tag) {
+    using element_type = pointer_element_t<Pointer>;
+    static_assert(!known_null_wire_v<element_type>, "unique pointer cannot decode a pointee that also has a CBOR null state");
+
+    if constexpr (IsTag<element_type>) {
+        reset_pointer_to_new(value);
+        return dec.decode(*value, tag);
+    } else {
+        (void)dec;
+        (void)value;
+        (void)tag;
+        return status_code::no_match_for_tag;
+    }
+}
+
+template <typename Decoder, typename T> consteval bool unique_variant_alternative_supported() {
+    using type = std::remove_cvref_t<T>;
+
+    if constexpr (UniquePointer<type>) {
+        return std::default_initializable<type> && std::default_initializable<pointer_element_t<type>> &&
+               !known_null_wire_v<pointer_element_t<type>> && unique_variant_alternative_supported<Decoder, pointer_element_t<type>>();
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); });
+    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder>) {
+        return false;
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count == 0U) {
+            return false;
+        } else if constexpr (item_count > 1U) {
+            return Decoder::options::wrap_groups;
+        } else {
+            return unique_variant_alternative_supported<Decoder, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>();
+        }
+    } else {
+        return IsCborMajor<type> || IsArray<type> || IsMap<type>;
+    }
+}
+
+template <typename Decoder, bool CatchAllPass, typename T>
+[[nodiscard]] constexpr bool unique_variant_matches(major_type major, std::byte additional_info, const std::optional<std::uint64_t> &tag) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        if (major == major_type::Simple && additional_info == static_cast<std::byte>(SimpleType::Null)) {
+            return true;
+        }
+        return unique_variant_matches<Decoder, CatchAllPass, pointer_element_t<type>>(major, additional_info, tag);
+    } else if constexpr (IsVariant<type>) {
+        return cbor::tags::detail::with_variant_alternatives<type>(
+            [&]<typename... Ts>() { return (unique_variant_matches<Decoder, CatchAllPass, Ts>(major, additional_info, tag) || ...); });
+    } else if (major == major_type::Tag) {
+        if (!tag.has_value()) {
+            return false;
+        }
+        if constexpr (IsTagHeader<type>) {
+            return true;
+        } else if constexpr (IsTag<type>) {
+            return static_cast<std::uint64_t>(cbor::tags::detail::get_tag_from_any<type>()) == *tag;
+        } else {
+            return false;
+        }
+    } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
+        using tuple_type          = pointer_tuple_t<type>;
+        constexpr auto item_count = std::tuple_size_v<std::remove_cvref_t<tuple_type>>;
+        if constexpr (item_count > 1U && Decoder::options::wrap_groups) {
+            return major == major_type::Array;
+        } else if constexpr (item_count == 1U) {
+            return unique_variant_matches<Decoder, CatchAllPass, std::tuple_element_t<0U, std::remove_cvref_t<tuple_type>>>(
+                major, additional_info, tag);
+        } else {
+            return false;
+        }
+    } else {
+        if (!cbor::tags::detail::matches_major_dispatch<type>(major)) {
+            return false;
+        }
+        if (major == major_type::Simple) {
+            return cbor::tags::detail::matches_simple_dispatch<CatchAllPass, type>(additional_info);
+        }
+        return true;
+    }
+}
+
+template <typename Decoder, typename T>
+[[nodiscard]] status_code decode_unique_variant_alternative(Decoder &dec, T &value, major_type major, std::byte additional_info,
+                                                            std::optional<std::uint64_t> &tag) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (UniquePointer<type>) {
+        if (major == major_type::Tag) {
+            return decode_unique_pointer_tag(dec, value, *tag);
+        }
+        return decode_unique_pointer(dec, value, major, additional_info);
+    } else if constexpr (IsVariant<type>) {
+        return dec.decode_unique_pointer_variant_impl(value, major, additional_info, tag);
+    } else if constexpr (IsTag<type>) {
+        return dec.decode(value, *tag);
+    } else {
+        return dec.decode(value, major, additional_info);
+    }
+}
+
+template <typename Decoder, IsVariant Variant>
+[[nodiscard]] status_code decode_unique_pointer_variant(Decoder &dec, Variant &value, major_type major, std::byte additional_info,
+                                                        std::optional<std::uint64_t> &tag) {
+    using variant_type = std::remove_cvref_t<Variant>;
+
+    static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
+                      []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); }),
+                  "unique pointer variant alternatives must have codec-independent CBOR wire shapes; add an explicit codec for the "
+                  "whole variant");
+    static_assert(pointer_variant_is_unambiguous<variant_type, typename Decoder::options>(),
+                  "Pointer variant alternatives overlap on the CBOR wire; add an application tag or choose a different decode type");
+    static_assert(cbor::tags::detail::with_variant_alternatives<variant_type>(
+                      []<typename... Ts>() { return (std::default_initializable<Ts> && ...); }),
+                  "unique pointer variant alternatives must be default-initializable");
+
+    if (major == major_type::Tag && !tag.has_value()) {
+        std::uint64_t decoded_tag{};
+        const auto    status = cbor::tags::detail::decode_tag_argument(dec, additional_info, decoded_tag);
+        if (status != status_code::success) {
+            return status;
+        }
+        tag = decoded_tag;
+    }
+
+    status_code result   = status_code::no_match_in_variant_on_buffer;
+    bool        selected = false;
+
+    auto select_pass = [&]<bool CatchAllPass>() {
+        cbor::tags::detail::with_variant_alternative_indices<variant_type>([&]<std::size_t... Is>() {
+            auto select = [&]<std::size_t I>() {
+                using alternative_type = cbor::tags::detail::variant_alternative_t<I, variant_type>;
+                if (selected || !unique_variant_matches<Decoder, CatchAllPass, alternative_type>(major, additional_info, tag)) {
+                    return;
+                }
+                selected = true;
+                cbor::tags::detail::variant_assign<I>(value, alternative_type{});
+                auto &alternative = cbor::tags::detail::variant_get<I>(value);
+                result            = decode_unique_variant_alternative(dec, alternative, major, additional_info, tag);
+            };
+            (select.template operator()<Is>(), ...);
+        });
+    };
+
+    select_pass.template operator()<false>();
+    if (!selected && major == major_type::Simple) {
+        select_pass.template operator()<true>();
+    }
+
+    return result;
+}
+
+} // namespace cbor::tags::ext::smart_ptr::detail
