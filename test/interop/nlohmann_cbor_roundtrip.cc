@@ -202,25 +202,30 @@ TEST_CASE("cbor_tags reads non-text map keys that nlohmann rejects") {
     CHECK_EQ(value, "uint");
 
     auto negative_key = negative{};
+    value.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(negative_key, value));
     CHECK_EQ(negative_key, negative{1});
     CHECK_EQ(value, "negative");
 
     auto bool_key = false;
+    value.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(bool_key, value));
     CHECK(bool_key);
     CHECK_EQ(value, "bool");
 
     auto null_key = nullptr;
+    value.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(null_key, value));
     CHECK_EQ(value, "null");
 
     auto decoded_binary_key = std::vector<std::byte>{};
+    value.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(decoded_binary_key, value));
     CHECK(decoded_binary_key == std::vector<std::byte>{std::byte{0xca}, std::byte{0xfe}});
     CHECK_EQ(value, "bytes");
 
     auto array_key = std::vector<std::uint64_t>{};
+    value.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(array_key, value));
     CHECK(array_key == std::vector<std::uint64_t>{1U, 2U});
     CHECK_EQ(value, "array");
