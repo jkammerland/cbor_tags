@@ -15,6 +15,21 @@ permissions:
   contents: read
 
 jobs:
+  version-consistency:
+    name: Project Version Consistency
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Verify CMake, vcpkg, and Conan versions agree
+      shell: bash
+      run: bash scripts/release.sh check-versions
+
+    - name: Run version consistency regression test
+      shell: bash
+      run: bash test/release_version_consistency_test.sh
+
   cmake-compatibility:
     name: CMake 3.23 Raw + 3.25 Features
     runs-on: ubuntu-latest

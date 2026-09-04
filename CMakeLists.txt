@@ -361,6 +361,9 @@ if(CBOR_TAGS_BUILD_TESTS)
     add_test(
       NAME target_install_package_release_verifier
       COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/target_install_package_release_test.sh)
+    add_test(
+      NAME release_version_consistency
+      COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_version_consistency_test.sh)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
       find_program(CBOR_TAGS_JQ_EXECUTABLE jq)
