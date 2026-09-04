@@ -595,7 +595,7 @@ struct DynamicTagged {
 ## 🔄 Automatic Reflection
 
 Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24), with no upper limit.
-Any level of nesting will work, it's only the individual struct sizes that are limited pre-C++26.
+Supported aggregate members can be nested. The generated C++20 fallback has the member-type limitations described below, in addition to its configured member-count range.
 
 The API is the same in both modes:
 
@@ -616,6 +616,47 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 ```
 > [!IMPORTANT]
 > This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. For generated C++20 reflection, `CBOR_TAGS_REFLECTION_RANGES` controls the generated aggregate sizes and defaults to `"1:24"`. Use `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` if you need larger or custom ranges.
+
+The generated C++20 fallback does **not support fixed-size C array members**.
+For example, `struct Record { int values[3]; int id; };` has two members,
+but brace elision lets the arity probe count four initializer slots. The selected
+structured binding then fails to compile. Increasing `CBOR_TAGS_REFLECTION_RANGES`
+does not fix this mismatch. The same limitation applies to trailing arrays,
+array-only records, and multidimensional C arrays.
+
+Prefer `std::array` when you control the type:
+
+```cpp
+struct Record {
+    std::array<int, 3> values;
+    int id;
+};
+// to_tuple(record) has two elements; values remains a nested CBOR array.
+```
+
+If the C array layout must stay unchanged, provide explicit encode/decode methods
+and expose its elements through a span:
+
+```cpp
+struct Record {
+    int values[3];
+    int id;
+
+    template <typename Encoder> auto encode(Encoder &enc) const {
+        return enc(cbor::tags::wrap_as_array{std::span{values}, id});
+    }
+    template <typename Decoder> auto decode(Decoder &dec) {
+        auto elements = std::span{values};
+        return dec(cbor::tags::wrap_as_array{elements, id});
+    }
+};
+```
+
+Include `<array>` or `<span>` for the chosen workaround, alongside the encoder
+and decoder headers. The explicit codec preserves the nested array wire shape
+and bypasses `to_tuple`; it does not make automatic reflection of the raw array
+supported. Decode failures remain terminal and may leave a decoded prefix.
+The regression examples are in [`test/test_reflection_array_members.cpp`](test/test_reflection_array_members.cpp).
 
 Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
