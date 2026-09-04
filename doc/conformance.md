@@ -103,3 +103,20 @@ UTF-8 policy, and the permitted simple values.
 Support for a CBOR feature does not imply that every target C++ type accepts it.
 The encoder/decoder overload selected by the application's type, options, and
 extension codecs defines the effective profile.
+
+## Specification Vectors And Interoperability Tests
+
+`test/test_rfc8949_vectors.cpp` exercises all 81 literal examples from
+[RFC 8949 Appendix A](https://www.rfc-editor.org/rfc/rfc8949.html#appendix-A)
+in the normal unit suite. Expected values and wire bytes are specified
+independently. Bignums are checked as tagged magnitude byte strings, floating
+point uses the example's explicit width (including signed zero, infinities and
+NaNs), and indefinite containers decode into owning destinations and re-encode
+to explicit definite forms. Ordered maps may also change key order. These
+checks do not claim arbitrary-precision arithmetic or preservation of an
+input's indefinite framing by an ordinary owning C++ destination.
+
+The Ubuntu interoperability job additionally requires nlohmann/json, Glaze, and
+Rust cbor-diag. All three backend modes are explicitly `ON`, so a missing
+backend is a configuration failure rather than an automatic skip. The existing
+STL-only job also runs the full unit suite and its installed-package consumer.
