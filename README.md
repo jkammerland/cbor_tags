@@ -595,7 +595,7 @@ struct DynamicTagged {
 ## 🔄 Automatic Reflection
 
 Reflection is fully automatic, and pre-C++26 a codegen tool (see below) can be used to extend the max number of members (default is 24), with no upper limit.
-Any level of nesting will work, it's only the individual struct sizes that are limited pre-C++26.
+Supported aggregate members can be nested. 
 
 The API is the same in both modes:
 
@@ -617,9 +617,43 @@ std::apply([&enc](const auto &...args) { (enc.encode(args), ...); }, tuple);
 > [!IMPORTANT]
 > This manual `std::apply(...)` step is only illustrative; the encoder and decoder call operators do it for you and stop at the first error. For generated C++20 reflection, `CBOR_TAGS_REFLECTION_RANGES` controls the generated aggregate sizes and defaults to `"1:24"`. Use `-DCBOR_TAGS_BUILD_TOOLS=ON -DCBOR_TAGS_REFLECTION_RANGES="..."` if you need larger or custom ranges.
 
+The generated dependency free (c++20) implementation does **not support fixed-size C array members**. But this is also intended, since you would handle raw pointers in a similar way below.
+
+Prefer `std::array` when you control the type:
+
+```cpp
+struct Record {
+    std::array<int, 3> values;
+    int id;
+};
+```
+
+If the C array layout must stay unchanged, or you have raw pointers, provide explicit encode/decode methods
+and expose its elements through a span:
+
+```cpp
+struct Record {
+    int values[3];
+    int id;
+
+    template <typename Encoder> auto encode(Encoder &enc) const {
+        return enc(cbor::tags::wrap_as_array{std::span{values}, id});
+    }
+    template <typename Decoder> auto decode(Decoder &dec) {
+        auto elements = std::span{values};
+        return dec(cbor::tags::wrap_as_array{elements, id});
+    }
+};
+```
+
+The regression examples are in [`test/test_reflection_array_members.cpp`](test/test_reflection_array_members.cpp).
+
 Native C++26 reflection is explicit and opt-in for now. When consuming code is compiled with `__cpp_impl_reflection >= 202506L`, `to_tuple(...)` uses `std::meta` to enumerate aggregate members directly. GCC currently requires `-std=gnu++26 -freflection`. Configure this project with `-DCBOR_TAGS_USE_STD_REFLECTION=ON` to build and run the tests with native reflection enabled.
 
-Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer). CMake builds with this option require a Boost package config that exports `Boost::headers`; installed packages export the compile definition and Boost dependency only when they were built with the Boost.PFR names option enabled.
+Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Configure with `-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON`, or define `CBOR_TAGS_USE_BOOST_PFR_NAMES=1` before including cbor_tags headers. This requires Boost.PFR with `<boost/pfr/core_name.hpp>` and `BOOST_PFR_CORE_NAME_ENABLED` (Boost 1.84 or newer). 
+
+> [!NOTE]
+> Installed **cbor_tags** export the compile definition and Boost dependency only when they were built with the Boost.PFR names option enabled.
 
 CDDL enum value names use native C++26 reflection when `CBOR_TAGS_USE_STD_REFLECTION=ON`, or magic_enum in C++20 builds. For C++20, configure with `-DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, or define `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1` before including `cbor_tags/extensions/cbor_visualization.h`. This requires a `magic_enum` package config that exports `magic_enum::magic_enum`; installed packages export the compile definition and dependency only when they were built with the magic_enum names option enabled. Existing schemas keep rendering enums as `uint` or `int` unless `CDDLOptions::enum_mode` is set to `CDDLEnumMode::named_values`.
 
