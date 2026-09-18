@@ -119,6 +119,40 @@ jobs:
       shell: bash
       run: ctest -C Release --output-on-failure
 
+  interop:
+    name: Ubuntu CBOR interoperability
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@v4.3.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Install build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++-14 ninja-build
+        cargo --version
+
+    - name: Configure required interoperability backends
+      run: |
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_COMPILER=g++-14 \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCBOR_TAGS_BUILD_INTEROP_TESTS=ON \
+          -DCBOR_TAGS_INTEROP_NLOHMANN=ON \
+          -DCBOR_TAGS_INTEROP_GLAZE=ON \
+          -DCBOR_TAGS_INTEROP_CBOR_DIAG=ON
+
+    - name: Build
+      run: cmake --build build --parallel 2
+
+    - name: Test
+      run: ctest --test-dir build --output-on-failure --no-tests=error
+
   gcc-current:
     name: Ubuntu GCC ${{ matrix.gcc }}
     runs-on: ubuntu-latest
