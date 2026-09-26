@@ -66,6 +66,16 @@ if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
     set_tests_properties(std_expected_wire PROPERTIES LABELS "cbor-wire")
     add_test(NAME std_expected_roundtrip COMMAND tests "--test-suite=roundtrip/std_expected")
     set_tests_properties(std_expected_roundtrip PROPERTIES LABELS "roundtrip")
+    foreach(ROUTE HEADER_ROOT HEADER_GROUP HEADER_ARRAY DIRECT_ARRAY DIRECT_OPTIONAL TAG_VARIANT BOUNDED_CONTAINER INDEFINITE_CONTAINER)
+      string(TOLOWER "std_expected_${ROUTE}_compile_fails" TEST_NAME)
+      add_executable(${TEST_NAME} EXCLUDE_FROM_ALL std_expected_dispatch_compile_fail.cc)
+      target_compile_definitions(${TEST_NAME} PRIVATE CBOR_EXPECTED_${ROUTE})
+      target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+        "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+        "-DPASS_REGEX=std::expected value payload must encode exactly one CBOR item"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    endforeach()
     foreach(SHAPE EMPTY_VALUE EMPTY_ERROR OPTIONAL_EMPTY CONTAINER_EMPTY BOUNDED_EMPTY UNWRAPPED_GROUP TAG_HEADER CONVERTING_MIXIN GENERIC_MIXIN GENERIC_ARRAY_MIXIN MUTABLE_MIXIN CONST_MIXIN)
       foreach(OPERATION ENCODE DECODE)
         if((SHAPE STREQUAL "MUTABLE_MIXIN" AND OPERATION STREQUAL "DECODE") OR

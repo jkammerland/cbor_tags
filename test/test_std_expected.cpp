@@ -18,6 +18,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -235,6 +236,50 @@ TEST_SUITE("roundtrip/std_expected") {
         REQUIRE(dec(decoded));
         REQUIRE(decoded.has_value());
         CHECK_EQ(*decoded, *original);
+        int following{};
+        REQUIRE(dec(following));
+        CHECK_EQ(following, 7);
+    }
+
+    TEST_CASE("std::expected codec follows optional and single-field header dispatch") {
+        using optional_payload = std::expected<std::optional<header_only_empty>, int>;
+        using group_payload    = std::expected<std::optional<header_only_group>, int>;
+        const optional_payload original{std::optional<header_only_empty>{std::in_place}};
+        const group_payload    original_group{std::optional<header_only_group>{std::in_place}};
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder<directional_item_codec, std_expected_codec>(bytes)(original, original_group, 7));
+        auto dec                   = make_decoder<directional_item_codec, std_expected_codec>(bytes);
+        header_only_empty::decoded = 0;
+        optional_payload decoded;
+        group_payload    decoded_group;
+        REQUIRE(dec(decoded, decoded_group));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->has_value());
+        REQUIRE(decoded_group.has_value());
+        CHECK(decoded_group->has_value());
+        CHECK_EQ(header_only_empty::decoded, 2U);
+        int following{};
+        REQUIRE(dec(following));
+        CHECK_EQ(following, 7);
+    }
+
+    TEST_CASE("std::expected codec follows fixed-array and tagged variant dispatch") {
+        using fixed_payload  = std::expected<std::array<direct_only_empty, 1>, int>;
+        using tagged_payload = std::expected<std::variant<tag_only_empty, int>, int>;
+        const fixed_payload    original;
+        const tagged_payload   original_tagged;
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder<directional_item_codec, std_expected_codec>(bytes)(original, original_tagged, 7));
+        auto dec                = make_decoder<directional_item_codec, std_expected_codec>(bytes);
+        tag_only_empty::decoded = 0;
+        fixed_payload  decoded;
+        tagged_payload decoded_tagged;
+        REQUIRE(dec(decoded, decoded_tagged));
+        REQUIRE(decoded.has_value());
+        CHECK_EQ(decoded->size(), original->size());
+        REQUIRE(decoded_tagged.has_value());
+        CHECK(std::holds_alternative<tag_only_empty>(*decoded_tagged));
+        CHECK_EQ(tag_only_empty::decoded, 1U);
         int following{};
         REQUIRE(dec(following));
         CHECK_EQ(following, 7);

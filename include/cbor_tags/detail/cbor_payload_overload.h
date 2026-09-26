@@ -5,6 +5,7 @@
 namespace cbor::tags::detail {
 
 struct core_payload_overload {};
+struct forwarding_payload_overload {};
 
 // Mirror the core overload signatures that can contain reflected groups, using
 // a distinct return type only for unevaluated overload resolution. An exact
@@ -38,11 +39,13 @@ template <typename Self, typename Codec> struct payload_encoder_overload_probe :
 template <typename Self, typename Codec> struct payload_decoder_overload_probe : Codec {
     using Codec::decode;
 
-    template <typename T> core_payload_overload            decode(T &);
+    template <typename T> forwarding_payload_overload      decode(T &);
     template <typename T> core_payload_overload            decode(T &, major_type, std::byte);
     template <IsUntaggedTuple T> core_payload_overload     decode(T &);
     template <IsUntaggedTuple T> core_payload_overload     decode(T &, major_type, std::byte);
     template <IsTaggedTuple T> core_payload_overload       decode(T &, major_type, std::byte);
+    template <typename T> core_payload_overload            decode(T &, std::uint64_t);
+    template <IsTaggedTuple T> core_payload_overload       decode(T &, std::uint64_t);
     template <IsRangeOfCborValues T> core_payload_overload decode(T &, major_type, std::byte);
     template <IsVariant T> core_payload_overload           decode(T &, major_type, std::byte);
     template <typename T>
@@ -51,6 +54,9 @@ template <typename Self, typename Codec> struct payload_decoder_overload_probe :
     template <typename T>
         requires(IsAggregate<T> && !IsClassWithDecodingOverload<Self, T> && !HasIncompatibleDecodingCustomization<Self, T>)
     core_payload_overload decode(T &, major_type, std::byte);
+    template <typename T>
+        requires(IsAggregate<T> && !IsClassWithDecodingOverload<Self, T> && !HasIncompatibleDecodingCustomization<Self, T>)
+    core_payload_overload decode(T &, std::uint64_t);
 
     template <typename T> core_payload_overload decode(std::optional<T> &, major_type, std::byte);
     template <typename T> core_payload_overload decode(as_indefinite<T>);

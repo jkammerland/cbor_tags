@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <expected>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -119,6 +120,65 @@ template <typename Self> struct constrained_array_item_codec : cbor_codec_mixin_
             value.resize(size);
         }
         return status;
+    }
+};
+
+struct header_only_empty {
+    static inline unsigned decoded{};
+};
+struct header_only_group {
+    header_only_empty value;
+};
+struct direct_only_empty {};
+struct tag_only_empty {
+    static constexpr std::uint64_t cbor_tag = 321;
+    static inline unsigned         decoded{};
+};
+
+template <typename Self> struct directional_item_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::encode;
+    using cbor_codec_mixin_base<Self>::decode;
+    void encode(const header_only_empty &) { static_cast<Self &>(*this).encode(1U); }
+    void encode(const direct_only_empty &) { static_cast<Self &>(*this).encode(1U); }
+    void encode(const tag_only_empty &) {
+        auto &enc = static_cast<Self &>(*this);
+        enc.encode(static_tag<321>{});
+        enc.encode(1U);
+    }
+    status_code decode(header_only_empty &, major_type major, std::byte info) {
+        unsigned   value{};
+        const auto status = static_cast<Self &>(*this).decode(value, major, info);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (value != 1U) {
+            return status_code::error;
+        }
+        ++header_only_empty::decoded;
+        return status_code::success;
+    }
+    status_code decode(direct_only_empty &) {
+        unsigned   value{};
+        const auto status = static_cast<Self &>(*this).decode(value);
+        if (status != status_code::success) {
+            return status;
+        }
+        return value == 1U ? status_code::success : status_code::error;
+    }
+    status_code decode(tag_only_empty &, std::uint64_t tag) {
+        if (tag != tag_only_empty::cbor_tag) {
+            return status_code::no_match_for_tag;
+        }
+        unsigned   value{};
+        const auto status = static_cast<Self &>(*this).decode(value);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (value != 1U) {
+            return status_code::error;
+        }
+        ++tag_only_empty::decoded;
+        return status_code::success;
     }
 };
 
