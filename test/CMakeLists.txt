@@ -50,7 +50,11 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests)
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected")
+add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
+set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
+set_tests_properties(aggregate_decode_roundtrip PROPERTIES LABELS "roundtrip")
 
 if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
   include(CheckCXXSourceCompiles)
@@ -58,6 +62,10 @@ if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
     "#include <expected>\nint main() { std::expected<int, int> value; return *value; }"
     CBOR_TAGS_TEST_HAS_STD_EXPECTED)
   if(CBOR_TAGS_TEST_HAS_STD_EXPECTED)
+    add_test(NAME std_expected_wire COMMAND tests "--test-suite=cbor_wire/std_expected")
+    set_tests_properties(std_expected_wire PROPERTIES LABELS "cbor-wire")
+    add_test(NAME std_expected_roundtrip COMMAND tests "--test-suite=roundtrip/std_expected")
+    set_tests_properties(std_expected_roundtrip PROPERTIES LABELS "roundtrip")
     foreach(SHAPE EMPTY_VALUE EMPTY_ERROR OPTIONAL_EMPTY CONTAINER_EMPTY BOUNDED_EMPTY UNWRAPPED_GROUP TAG_HEADER)
       foreach(OPERATION ENCODE DECODE)
         string(TOLOWER "std_expected_${SHAPE}_${OPERATION}_compile_fails" TEST_NAME)
