@@ -14,7 +14,6 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -162,13 +161,17 @@ template <typename Decoder, typename DecodeEntry>
 }
 
 template <typename Decoder, typename... Fields> [[nodiscard]] constexpr status_code decode_array_fields(Decoder &dec, Fields &...fields) {
-    const auto  values = std::tie(fields...);
     std::size_t index{};
     const auto  decode_entry = [&](major_type major, std::byte additional_info) {
-        auto status = status_code::unexpected_group_size;
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            static_cast<void>(((index == I ? (status = dec.decode(std::get<I>(values), major, additional_info), true) : false) || ...));
-        }(std::index_sequence_for<Fields...>{});
+        auto        status = status_code::unexpected_group_size;
+        std::size_t field_index{};
+        const auto  decode_field = [&](auto &field) {
+            if (field_index == index) {
+                status = dec.decode(field, major, additional_info);
+            }
+            ++field_index;
+        };
+        (decode_field(fields), ...);
         if (status == status_code::success) {
             ++index;
         }

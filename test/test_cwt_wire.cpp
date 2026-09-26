@@ -555,6 +555,8 @@ TEST_SUITE("cbor_wire/cwt") {
                         fixture{"9fff", status_code::unexpected_group_size}, fixture{"9f40ff", status_code::unexpected_group_size},
                         fixture{"9f40a0ff", status_code::unexpected_group_size}, fixture{"9f40a040", status_code::incomplete},
                         fixture{"9f40a04000ff", status_code::unexpected_group_size}, fixture{"9f40a041", status_code::incomplete},
+                        fixture{"8301a04162", status_code::no_match_for_bstr_on_buffer},
+                        fixture{"9f01a04162ff", status_code::no_match_for_bstr_on_buffer},
                         fixture{"a0", status_code::no_match_for_array_on_buffer}}) {
             check.template operator()<cose_signature>(test);
         }
