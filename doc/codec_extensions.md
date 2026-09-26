@@ -163,22 +163,11 @@ Current public extension headers:
 - `cbor_tags/extensions/smart_ptr.h`: unique ownership as `T / null` and shared
   ownership through tags 28/29 with codec-owned or user-owned reference tables.
 - `cbor_tags/extensions/std_expected.h`: opt-in serialization of C++23
-  `std::expected<T, E>` as `[has_value, payload]`. Both non-void `T` and `E`
-  must represent one complete CBOR item. Known empty reflected groups, bare
-  headers, and multi-item groups with wrapping disabled are rejected at compile
-  time, including inside owning containers and optionals. Use
-  `std::expected<void, E>` for a payload-free success; its payload is CBOR null.
-  Application customizations and other codec mixins own their representation
-  and must produce/consume one complete item. An empty C++ type with explicit
-  encode/decode methods or a matching installed codec-mixin overload can provide
-  such a representation. Only an overload selected for the payload argument
-  changes validation; a conversion-only overload or a generic overload shadowed
-  by core dispatch does not. A decoder customization must cover the calls used
-  by its enclosing type: ordinary decoding, or decoding after a header or tag
-  was read. A header-only aggregate handler does not override ordinary aggregate
-  decoding. Unrelated mixins do not change payload validation.
-  Statically empty arrays and spans are complete items even when their element
-  type is an empty reflected group.
+  `std::expected<T, E>` as `[has_value, payload]`. Non-void `T` and `E` must each
+  encode and decode one complete CBOR item. Use `std::expected<void, E>` for a
+  payload-free success, encoded with a null payload. To give a custom type a
+  one-item representation, provide encode/decode customizations or an explicit
+  codec mixin.
 - `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.
   See [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
 - `cbor_tags/extensions/cbor_visualization.h`: CDDL, annotation, and diagnostic

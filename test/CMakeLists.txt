@@ -50,11 +50,15 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/fixed_text_spans")
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
 set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
 set_tests_properties(aggregate_decode_roundtrip PROPERTIES LABELS "roundtrip")
+add_test(NAME fixed_text_spans_wire COMMAND tests "--test-suite=cbor_wire/fixed_text_spans")
+set_tests_properties(fixed_text_spans_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME fixed_text_spans_roundtrip COMMAND tests "--test-suite=roundtrip/fixed_text_spans")
+set_tests_properties(fixed_text_spans_roundtrip PROPERTIES LABELS "roundtrip")
 
 if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
   include(CheckCXXSourceCompiles)
