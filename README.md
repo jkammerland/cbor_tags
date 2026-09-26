@@ -1017,6 +1017,7 @@ Additional docs:
 - [Standard and Boost container interoperability](doc/container_interoperability.md)
 - [RFC 8746 Typed Arrays](doc/rfc8746_typed_arrays.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)
+- [C++26 indirect and polymorphic value codecs](doc/cxx26_value_wrappers.md)
 - [Decoder contract](doc/decoder_resource_limits.md#decoder-contract)
 - [Resource-limited decoding: PMR, `bounded_size`, and CDDL](doc/decoder_resource_limits.md#bounded-objects-pmr-and-cddl)
 - [Experimental Range And Segment APIs](doc/experimental_ranges.md)

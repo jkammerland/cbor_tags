@@ -1278,9 +1278,28 @@ std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, st
     }
 }
 
+template <typename T> consteval bool cddl_has_wire_type_alternative() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (requires { typename cddl::cddl_wire_type<type>::type; }) {
+        return true;
+    } else if constexpr (IsOptional<type>) {
+        return cddl_has_wire_type_alternative<typename type::value_type>();
+    } else if constexpr (IsVariant<type>) {
+        return with_variant_alternatives<type>([]<typename... Ts>() { return (cddl_has_wire_type_alternative<Ts>() || ...); });
+    } else {
+        return false;
+    }
+}
+
 template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsDynamicBoundedSizeWrapper<value_type>) {
+    if constexpr (requires { typename cddl::cddl_wire_type<value_type>::type; }) {
+        using wire_type = typename cddl::cddl_wire_type<value_type>::type;
+        static_assert(!std::same_as<std::remove_cvref_t<wire_type>, value_type>, "CDDL wire type must differ from its wrapper");
+        static_assert(!IsAnyHeader<wire_type> && !is_static_tag_t<wire_type>::value && !is_dynamic_tag_t<wire_type>,
+                      "CDDL wire type must describe a complete CBOR item, not a header");
+        return cddl_type_expr<wire_type, PointerMode>(context, options);
+    } else if constexpr (IsDynamicBoundedSizeWrapper<value_type>) {
         static_assert(always_false<value_type>::value,
                       "dynamic_bounded_size cannot be represented by type-based CDDL; use bounded_size<T, Min, Max>");
         return {};
@@ -1339,6 +1358,8 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
         return cddl_multi_dimensional_array_expr<value_type, PointerMode>(context, options);
     } else if constexpr (IsVariant<value_type>) {
+        static_assert(!cddl_has_wire_type_alternative<value_type>(),
+                      "CDDL variants containing wire-type customizations require an explicit wire variant");
         return detail::with_variant_alternatives<value_type>([&context, &options]<typename... Ts>() {
             constexpr auto matching_major_types = valid_concept_mapping_array_v<value_type>;
             static_assert(matching_major_types[MajorIndex::Tag] <= 1,
@@ -1471,7 +1492,8 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
     auto &cddl_context = cddl_context_ref(context);
     debug::println("cddl_schema_to: {}", detail::short_type_name<T>());
 
-    if constexpr (IsNamedMapWrapper<value_type>) {
+    constexpr bool has_wire_type = requires { typename cddl::cddl_wire_type<value_type>::type; };
+    if constexpr (!has_wire_type && IsNamedMapWrapper<value_type>) {
         using named_value_type = named_map_value_t<value_type>;
         const auto requested_root_name =
             options.root_name.empty() ? cddl_type_name<named_value_type>() : sanitize_cddl_id(options.root_name);
@@ -1483,7 +1505,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         }
-    } else if constexpr (IsNamedGroupWrapper<value_type>) {
+    } else if constexpr (!has_wire_type && IsNamedGroupWrapper<value_type>) {
         using named_value_type = named_group_value_t<value_type>;
         const auto requested_root_name =
             options.root_name.empty() ? cddl_type_name<named_value_type>() : sanitize_cddl_id(options.root_name);
@@ -1495,7 +1517,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         }
-    } else if constexpr (IsEnum<value_type>) {
+    } else if constexpr (!has_wire_type && IsEnum<value_type>) {
         if constexpr (cddl_enum_entry_count<value_type>() != 0) {
             if (cddl_use_named_enum<value_type>(options) && !options.always_inline) {
                 const auto requested_root_name =
@@ -1514,7 +1536,8 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         } else {
             cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
         }
-    } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
+    } else if constexpr (!has_wire_type && IsAggregate<value_type> && !is_static_tag_t<value_type>::value &&
+                         !is_dynamic_tag_t<value_type>) {
         static_assert(!is_empty_cddl_aggregate_v<value_type>, "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
         const auto requested_root_name = root_rule_name<value_type>(options);
         const auto root_key            = cddl_type_key<value_type, PointerMode>();
@@ -1529,7 +1552,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
             const auto definition = text::format("{} = {}", root_name, cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
             emit_cddl_root_definition(output_buffer, definition);
         }
-    } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
+    } else if constexpr (!has_wire_type && (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>)) {
         const auto definition =
             text::format("{} = {}", root_rule_name<value_type>(options), tag_marker_root_expr<value_type>(cddl_context, options));
         emit_cddl_root_definition(output_buffer, definition);

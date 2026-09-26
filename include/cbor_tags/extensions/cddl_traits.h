@@ -11,6 +11,8 @@ namespace cbor::tags::cddl {
 template <typename T> struct cddl_tagged_bstr_array_traits {};
 template <typename T> struct cddl_homogeneous_array_traits {};
 template <typename T> struct cddl_multi_dimensional_array_traits {};
+// The selected application codec serializes T exactly as this complete wire type.
+template <typename T> struct cddl_wire_type {};
 
 } // namespace cbor::tags::cddl
 

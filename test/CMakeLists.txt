@@ -75,6 +75,49 @@ set_tests_properties(fixed_text_spans_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME fixed_text_spans_roundtrip COMMAND tests "--test-suite=roundtrip/fixed_text_spans")
 set_tests_properties(fixed_text_spans_roundtrip PROPERTIES LABELS "roundtrip")
 
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#include <memory>
+#include <version>
+#if !defined(__cpp_lib_indirect) || __cpp_lib_indirect < 202502L || !defined(__cpp_lib_polymorphic) || __cpp_lib_polymorphic < 202502L
+#error C++26 value wrappers unavailable
+#endif
+struct value { int number{}; };
+int main() { std::indirect<int> a(1); std::polymorphic<value> b; }" CBOR_TAGS_TEST_HAS_STD_VALUE_WRAPPERS)
+option(CBOR_TAGS_TEST_REQUIRE_STD_VALUE_WRAPPERS "Require C++26 value-wrapper integration coverage" OFF)
+if(CBOR_TAGS_TEST_REQUIRE_STD_VALUE_WRAPPERS AND NOT CBOR_TAGS_TEST_HAS_STD_VALUE_WRAPPERS)
+  message(FATAL_ERROR "This integration job requires C++26 std::indirect and std::polymorphic")
+endif()
+message(STATUS "C++26 value-wrapper tests=${CBOR_TAGS_TEST_HAS_STD_VALUE_WRAPPERS} (empty means unavailable)")
+
+if(CBOR_TAGS_TEST_HAS_STD_VALUE_WRAPPERS)
+  function(add_value_wrapper_compile_fail TEST_NAME SHAPE OPERATION DIAGNOSTIC)
+    add_executable(${TEST_NAME} EXCLUDE_FROM_ALL std_value_wrapper_compile_fail.cc)
+    target_compile_definitions(${TEST_NAME} PRIVATE CBOR_VALUE_${SHAPE} CBOR_VALUE_${OPERATION})
+    target_link_libraries(${TEST_NAME} PRIVATE cbor::tags fmt::fmt nameof::nameof)
+    add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  endfunction()
+  foreach(SHAPE EMPTY TAG_HEADER UNWRAPPED_GROUP)
+    foreach(OPERATION ENCODE DECODE)
+      string(TOLOWER "std_indirect_${SHAPE}_${OPERATION}_compile_fails" TEST_NAME)
+      add_value_wrapper_compile_fail(${TEST_NAME} ${SHAPE} ${OPERATION} "std::indirect payload must encode exactly one CBOR item")
+    endforeach()
+  endforeach()
+  foreach(OPERATION ENCODE DECODE)
+    string(TOLOWER "std_indirect_variant_${OPERATION}_compile_fails" TEST_NAME)
+    add_value_wrapper_compile_fail(${TEST_NAME} VARIANT ${OPERATION} "std::indirect variant alternatives require an explicit application wire variant")
+  endforeach()
+  add_value_wrapper_compile_fail(cddl_std_indirect_variant_compile_fails VARIANT CDDL "CDDL variants containing wire-type customizations require an explicit wire variant")
+  add_value_wrapper_compile_fail(cddl_std_indirect_header_compile_fails TAG_HEADER CDDL "CDDL wire type must describe a complete CBOR item")
+  add_value_wrapper_compile_fail(polymorphic_duplicate_wire_tags_compile_fails DUPLICATE_TAGS DECODE "Multiple types match against major type 6")
+  foreach(OPERATION ENCODE DECODE)
+    string(TOLOWER "polymorphic_variant_${OPERATION}_compile_fails" TEST_NAME)
+    add_value_wrapper_compile_fail(${TEST_NAME} POLYMORPHIC_VARIANT ${OPERATION} "polymorphic variant alternatives require the explicit animal_wire variant")
+  endforeach()
+  add_value_wrapper_compile_fail(cddl_polymorphic_variant_compile_fails POLYMORPHIC_VARIANT CDDL "CDDL variants containing wire-type customizations require an explicit wire variant")
+endif()
+
 if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
   include(CheckCXXSourceCompiles)
   check_cxx_source_compiles(

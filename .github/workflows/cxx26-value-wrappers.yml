@@ -1,0 +1,32 @@
+name: C++26 value wrappers
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  value-wrappers:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Install compiler and build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates cmake git ninja-build g++-16
+      - uses: actions/checkout@v6.0.2
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DCMAKE_CXX_STANDARD=26 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCBOR_TAGS_BUILD_TESTS=ON \
+            -DCBOR_TAGS_TEST_REQUIRE_STD_VALUE_WRAPPERS=ON
+      - name: Build and test
+        run: |
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure --parallel 2
