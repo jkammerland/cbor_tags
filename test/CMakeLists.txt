@@ -61,7 +61,7 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal")
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
 set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
@@ -178,10 +178,27 @@ set_tests_properties(byte_views_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME container_capacity_wire COMMAND tests "--test-suite=cbor_wire/container_capacity")
 set_tests_properties(container_capacity_wire PROPERTIES LABELS "cbor-wire")
 
-add_test(NAME any_headers_wire COMMAND tests "--test-suite=cbor_wire/*")
+add_test(NAME any_headers_wire COMMAND tests "--test-suite=cbor_wire/any_headers,cbor_wire/headers_visualization")
 set_tests_properties(any_headers_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME any_headers_roundtrip COMMAND tests "--test-suite=roundtrip/any_headers,roundtrip/headers_visualization")
 set_tests_properties(any_headers_roundtrip PROPERTIES LABELS "roundtrip")
+add_test(NAME traversal_wire COMMAND tests "--test-suite=cbor_wire/traversal")
+set_tests_properties(traversal_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME traversal_roundtrip COMMAND tests "--test-suite=roundtrip/traversal")
+set_tests_properties(traversal_roundtrip PROPERTIES LABELS "roundtrip")
+
+add_executable(traversal_callback_result_compile_fails EXCLUDE_FROM_ALL traversal_callback_result_compile_fail.cc)
+target_link_libraries(traversal_callback_result_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME traversal_callback_result_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=traversal_callback_result_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=walk_item visitor must return exactly void or status_code"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)

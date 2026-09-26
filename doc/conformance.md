@@ -21,6 +21,13 @@ boundaries:
   validators.
 - The visualization extension is a diagnostic parser. It performs checks needed
   to render an item and can be stricter than the core decoder.
+- `walk_item` visits one complete item and checks its structure. Its default
+  profile retains the core decoder's permissive simple-value and text handling.
+  `validate_item`, or `walk_item` with `strict_validation = true`, additionally
+  rejects malformed extended-simple encodings and invalid UTF-8. These are
+  syntax and text checks; they do not enforce unique map keys, canonical
+  encoding, schemas, or tag-specific semantic validity. See
+  [Item traversal and validation](traversal.md).
 - Extension codecs may implement additional RFCs or application profiles. Their
   conformance and opt-in requirements are documented separately.
 
@@ -49,9 +56,11 @@ that exchange data with strict RFC 8949 implementations must not send
 `simple{24}` through `simple{31}` and must not use the core decoder or structural
 scanner as a strict well-formedness gate.
 
-The visualization extension currently rejects `f8 18` through `f8 1f`. That
-diagnostic boundary is stricter than core encoding, decoding, and structural
-scanning.
+Use `validate_item` or strict `walk_item` to reject all `f8 00` through `f8 1f`
+forms while retaining the ordinary decoder's existing behavior.
+
+Smart annotation rejects `f8 18` through `f8 1f`. Ordinary annotation and
+diagnostic traversal retain the decoder's permissive simple-value behavior.
 
 ### Text strings and UTF-8
 
@@ -60,8 +69,10 @@ validate that they form UTF-8. This keeps byte handling separate from applicatio
 text policy. The visualization extension can validate text with
 `DiagnosticOptions::check_tstr_utf8`.
 
-Applications that require RFC-valid text strings must validate UTF-8 at their
-admission boundary or use a codec that enforces that policy.
+Applications that require RFC-valid text strings can use `validate_item` or
+strict `walk_item` at their admission boundary, or a codec that enforces that
+policy. Validation checks each indefinite string chunk independently; a code
+point cannot span chunks.
 
 ### Integer conversion
 

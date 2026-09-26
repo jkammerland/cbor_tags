@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_tags_config.h"
+#include "cbor_tags/cbor_traversal.h"
 #include "cbor_tags/detail/cbor_cddl_tag_traits.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_item.h"
@@ -223,9 +224,6 @@ struct CDDLContext {
         (void)ensure_cddl_definition<std::remove_cvref_t<T>>(*this, options);
     }
 };
-
-using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
-                                       double, bool, std::nullptr_t, simple, indefinite_break>;
 
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
     std::string indent(options.current_indent * 2, ' ');
@@ -1601,94 +1599,70 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
 
     auto dec = make_decoder(cbor_buffer);
 
-    // Headers leave the cursor at the payload. Walk complete items so that a
-    // string's raw bytes and an indefinite item's break are consumed only here.
-    auto annotate_item = [&](auto &&self, std::size_t depth, bool allow_break = false,
-                             std::optional<std::size_t> chunk_index = std::nullopt) -> bool {
+    auto check_depth = [&](std::size_t depth) {
         if (depth >= options.max_structure_depth) {
             throw std::runtime_error("CBOR annotation nesting depth exceeded");
         }
-        const auto                begin = dec.tell();
-        detail::catch_all_variant value;
-        if (!dec(value)) {
-            throw std::runtime_error("Malformed CBOR input: incomplete or invalid item");
-        }
-        const auto header_end = dec.tell();
-        const auto is_break   = std::holds_alternative<indefinite_break>(value);
-        if (is_break && !allow_break) {
-            throw std::runtime_error("Malformed CBOR input: break outside indefinite item");
-        }
-        if (chunk_index && !is_break) {
-            const bool definite_chunk = std::visit(
-                [](const auto &arg) {
-                    using T = std::remove_cvref_t<decltype(arg)>;
-                    if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
-                        return !arg.indefinite;
-                    } else {
-                        return false;
-                    }
-                },
-                value);
-            if (value.index() != *chunk_index || !definite_chunk) {
-                throw std::runtime_error("Malformed CBOR input: invalid indefinite string chunk");
+    };
+    auto annotate = [&](const auto &value, const auto &context) {
+        using T    = std::remove_cvref_t<decltype(value)>;
+        auto depth = context.depth;
+        if (context.phase == walk_phase::end) {
+            if (context.source.empty()) {
+                return;
             }
+            // A break occupies a child row even though it closes its owning item.
+            ++depth;
         }
-
+        if (context.phase != walk_phase::payload) {
+            check_depth(depth);
+        }
         auto item_options = options;
         item_options.current_indent += depth;
         item_options.offset += depth;
-        const auto after_initial = std::next(begin);
-        detail::format_bytes(output_buffer, begin, after_initial, item_options);
-        detail::format_bytes(output_buffer, after_initial, header_end, {.current_indent = 0, .offset = 1});
-        text::format_to(std::back_inserter(output_buffer), "\n");
-        if (is_break) {
-            return true;
+        if (context.phase == walk_phase::payload) {
+            ++item_options.current_indent;
+            ++item_options.offset;
+            detail::format_bytes(output_buffer, context.source.begin(), context.source.end(), item_options);
+        } else {
+            const auto after_initial = std::next(context.source.begin());
+            detail::format_bytes(output_buffer, context.source.begin(), after_initial, item_options);
+            detail::format_bytes(output_buffer, after_initial, context.source.end(), {.current_indent = 0, .offset = 1});
         }
-
-        std::visit(
-            [&](const auto &arg) {
-                using T = std::remove_cvref_t<decltype(arg)>;
-                if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
-                    if (arg.indefinite) {
-                        while (!self(self, depth + 1U, true, value.index())) {}
-                    } else {
-                        if (arg.size != 0U && depth + 1U >= options.max_structure_depth) {
-                            throw std::runtime_error("CBOR annotation nesting depth exceeded");
-                        }
-                        try {
-                            if constexpr (IsTextHeader<T>) {
-                                (void)dec.decode_text_payload(arg.size);
-                            } else {
-                                (void)dec.decode_bstring_payload(arg.size);
-                            }
-                        } catch (const std::runtime_error &error) {
-                            throw std::runtime_error(text::format("Malformed CBOR input: {}", error.what()));
-                        }
-                        ++item_options.current_indent;
-                        ++item_options.offset;
-                        detail::format_bytes(output_buffer, header_end, dec.tell(), item_options);
-                        text::format_to(std::back_inserter(output_buffer), "\n");
-                    }
-                } else if constexpr (IsArrayHeader<T> || IsMapHeader<T>) {
-                    for (std::uint64_t index = 0; arg.indefinite || index < arg.size; ++index) {
-                        if (self(self, depth + 1U, arg.indefinite)) {
-                            break;
-                        }
-                        if constexpr (IsMapHeader<T>) {
-                            // A map may end only between complete key/value pairs.
-                            self(self, depth + 1U);
-                        }
-                    }
-                } else if constexpr (IsTagHeader<T>) {
-                    self(self, depth + 1U);
-                }
-            },
-            value);
-        return false;
+        text::format_to(std::back_inserter(output_buffer), "\n");
+        if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
+            if (context.phase == walk_phase::begin && !value.indefinite && value.size != 0U) {
+                check_depth(depth + 1U);
+            }
+        }
     };
-
+    auto fail = [&](const detail::walk_failure &failure) {
+        check_depth(failure.depth);
+        if (failure.reason == detail::walk_failure_reason::unexpected_break) {
+            throw std::runtime_error("Malformed CBOR input: break outside indefinite item");
+        }
+        if (failure.reason == detail::walk_failure_reason::invalid_chunk) {
+            throw std::runtime_error("Malformed CBOR input: invalid indefinite string chunk");
+        }
+        throw std::runtime_error("Malformed CBOR input: incomplete or invalid item");
+    };
     while (!detail::decoder_at_end(dec)) {
-        annotate_item(annotate_item, 0U);
+        detail::walk_failure failure;
+        status_code          status;
+        try {
+            status = detail::walk_item_status(dec, annotate, {.max_depth = std::numeric_limits<std::size_t>::max()}, &failure);
+        } catch (const std::runtime_error &error) {
+            if (failure.reason == detail::walk_failure_reason::payload) {
+                throw std::runtime_error(text::format("Malformed CBOR input: {}", error.what()));
+            }
+            if (failure.reason != detail::walk_failure_reason::none) {
+                fail(failure);
+            }
+            throw;
+        }
+        if (status != status_code::success) {
+            fail(failure);
+        }
     }
 }
 
@@ -1768,75 +1742,6 @@ void append_escaped_diagnostic_text(OutputBuffer &output_buffer, Iterator begin,
 }
 
 namespace detail {
-
-struct utf8_prefix {
-    std::uint8_t first{};
-    std::uint8_t second{};
-};
-
-template <typename T> [[nodiscard]] constexpr std::uint8_t utf8_byte(T value) noexcept {
-    if constexpr (std::same_as<std::remove_cvref_t<T>, std::byte>) {
-        return std::to_integer<std::uint8_t>(value);
-    } else {
-        return static_cast<std::uint8_t>(static_cast<unsigned char>(value));
-    }
-}
-
-[[nodiscard]] constexpr bool is_utf8_continuation_byte(std::uint8_t value) noexcept { return (value & 0xC0U) == 0x80U; }
-
-[[nodiscard]] constexpr std::size_t utf8_sequence_length(std::uint8_t value) noexcept {
-    if (value <= 0x7FU) {
-        return 1U;
-    }
-    if (value >= 0xC2U && value <= 0xDFU) {
-        return 2U;
-    }
-    if (value >= 0xE0U && value <= 0xEFU) {
-        return 3U;
-    }
-    if (value >= 0xF0U && value <= 0xF4U) {
-        return 4U;
-    }
-    return 0U;
-}
-
-[[nodiscard]] constexpr bool is_valid_utf8_second_byte(utf8_prefix prefix) noexcept {
-    return !((prefix.first == 0xE0U && prefix.second < 0xA0U) || (prefix.first == 0xEDU && prefix.second > 0x9FU) ||
-             (prefix.first == 0xF0U && prefix.second < 0x90U) || (prefix.first == 0xF4U && prefix.second > 0x8FU));
-}
-
-template <typename Iterator, typename Sentinel> [[nodiscard]] bool is_valid_utf8(Iterator begin, Sentinel end) noexcept {
-    while (begin != end) {
-        std::array<std::uint8_t, 4> sequence{};
-        sequence[0] = utf8_byte(*begin);
-        ++begin;
-
-        const auto sequence_length = utf8_sequence_length(sequence[0]);
-        if (sequence_length == 0U) {
-            return false;
-        }
-
-        for (std::size_t offset = 1U; offset < sequence_length; ++offset) {
-            if (begin == end) {
-                return false;
-            }
-            sequence[offset] = utf8_byte(*begin);
-            ++begin;
-            if (!is_utf8_continuation_byte(sequence[offset])) {
-                return false;
-            }
-        }
-
-        if (sequence_length > 1U && !is_valid_utf8_second_byte({.first = sequence[0], .second = sequence[1]})) {
-            return false;
-        }
-    }
-    return true;
-}
-
-template <std::ranges::input_range Range> [[nodiscard]] bool is_valid_utf8(Range &&range) noexcept {
-    return is_valid_utf8(std::ranges::begin(range), std::ranges::end(range));
-}
 
 template <typename OutputBuffer> struct smart_annotator {
     const std::vector<std::byte> &bytes;
@@ -2305,9 +2210,218 @@ void buffer_annotate_smart(const CborBuffer &cbor_buffer, OutputBuffer &output_b
     text::format_to(std::back_inserter(output_buffer), "{}", staged_output);
 }
 
-} // namespace detail
+// This stack records presentation state only. The shared walker owns all input
+// consumption, child counts, and validation of container boundaries.
+template <typename OutputBuffer> struct diagnostic_renderer {
+    enum class item_kind { array, map, tag, text, binary };
+    struct frame {
+        item_kind     kind;
+        bool          indefinite{};
+        bool          rows{};
+        std::size_t   indent{};
+        std::size_t   children{};
+        std::uint64_t payload_size{};
+    };
 
-template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor;
+    OutputBuffer      &output_buffer;
+    DiagnosticOptions  options;
+    bool               sequence{};
+    bool               emitted{};
+    std::size_t        row_depth{};
+    std::vector<frame> frames;
+
+    void check_depth(std::size_t depth) const {
+        if (options.current_depth >= options.max_depth || depth >= options.max_depth - options.current_depth) {
+            throw std::runtime_error("CBOR diagnostic nesting depth exceeded");
+        }
+    }
+
+    void before_item() {
+        if (frames.empty()) {
+            if (sequence && emitted) {
+                append_diagnostic_separator(output_buffer, options.row_options.format_by_rows);
+            }
+            return;
+        }
+        const auto &parent = frames.back();
+        if (parent.kind == item_kind::array || parent.kind == item_kind::map) {
+            if (parent.kind == item_kind::map && parent.children % 2U != 0U) {
+                return;
+            }
+            if (parent.children != 0U) {
+                append_diagnostic_separator(output_buffer, parent.rows);
+            }
+            if (parent.rows) {
+                text::format_to(std::back_inserter(output_buffer), "{}",
+                                std::string(options.row_options.offset * (parent.indent + 1U), ' '));
+            }
+        } else if (parent.kind == item_kind::text || parent.kind == item_kind::binary) {
+            if (parent.children != 0U) {
+                append_diagnostic_separator(output_buffer, false);
+            } else {
+                text::format_to(std::back_inserter(output_buffer), "(_ ");
+            }
+        }
+    }
+
+    void complete_item() {
+        if (frames.empty()) {
+            emitted = true;
+            return;
+        }
+        auto &parent = frames.back();
+        ++parent.children;
+        if (parent.kind == item_kind::map && parent.children % 2U != 0U) {
+            text::format_to(std::back_inserter(output_buffer), ": ");
+        }
+    }
+
+    template <typename T> void scalar(const T &arg) {
+        if constexpr (std::same_as<T, indefinite_break>) {
+            throw std::runtime_error("CBOR break outside indefinite item");
+        } else if constexpr (IsUnsigned<T>) {
+            text::format_to(std::back_inserter(output_buffer), "{}", arg);
+        } else if constexpr (IsNegative<T>) {
+            text::format_to(std::back_inserter(output_buffer), "{}", negative_diagnostic_text(arg));
+        } else if constexpr (IsSimple<T>) {
+            if constexpr (IsBool<T>) {
+                text::format_to(std::back_inserter(output_buffer), "{}", arg ? "true" : "false");
+            } else if constexpr (IsNull<T>) {
+                text::format_to(std::back_inserter(output_buffer), "null");
+            } else if constexpr (std::same_as<T, float16_t> || std::same_as<T, float>) {
+                text::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
+            } else if constexpr (std::same_as<T, double>) {
+                text::format_to(std::back_inserter(output_buffer), "{}", arg);
+            } else if constexpr (std::same_as<T, simple>) {
+                if (arg.value == static_cast<simple::value_type>(SimpleType::Undefined)) {
+                    text::format_to(std::back_inserter(output_buffer), "undefined");
+                } else {
+                    text::format_to(std::back_inserter(output_buffer), "simple({})", arg.value);
+                }
+            } else {
+                text::format_to(std::back_inserter(output_buffer), "simple");
+            }
+        } else {
+            text::format_to(std::back_inserter(output_buffer), "unknown");
+        }
+    }
+
+    template <typename T> void begin(const T &arg, std::size_t depth) {
+        before_item();
+        check_depth(depth);
+        frame item{.kind = item_kind::tag, .indent = options.row_options.current_indent + row_depth};
+        if constexpr (IsArrayHeader<T> || IsMapHeader<T>) {
+            item.kind       = IsArrayHeader<T> ? item_kind::array : item_kind::map;
+            item.indefinite = arg.indefinite;
+            item.rows       = options.row_options.format_by_rows && (IsMapHeader<T> || !options.row_options.override_array_by_columns);
+            text::format_to(std::back_inserter(output_buffer), "{}{}{}", IsArrayHeader<T> ? "[" : "{", arg.indefinite ? "_ " : "",
+                            item.rows ? "\n" : "");
+            ++row_depth;
+        } else if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
+            item.kind         = IsTextHeader<T> ? item_kind::text : item_kind::binary;
+            item.indefinite   = arg.indefinite;
+            item.payload_size = arg.size;
+        } else if constexpr (IsTagHeader<T>) {
+            text::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
+        }
+        frames.push_back(item);
+    }
+
+    template <typename Range> void payload(const Range &range) {
+        if (frames.back().kind == item_kind::text) {
+            if (options.check_tstr_utf8 && !is_valid_utf8(range)) {
+                text::format_to(std::back_inserter(output_buffer), "non-utf8({})", frames.back().payload_size);
+            } else {
+                append_escaped_diagnostic_text(output_buffer, std::ranges::begin(range), std::ranges::end(range));
+            }
+        } else {
+            text::format_to(std::back_inserter(output_buffer), "h'");
+            for (const auto value : range) {
+                text::format_to(std::back_inserter(output_buffer), "{:02x}", utf8_byte(value));
+            }
+            text::format_to(std::back_inserter(output_buffer), "'");
+        }
+    }
+
+    void end() {
+        const auto item = frames.back();
+        frames.pop_back();
+        if (item.kind == item_kind::array || item.kind == item_kind::map) {
+            --row_depth;
+            if (item.rows && item.children != 0U) {
+                text::format_to(std::back_inserter(output_buffer), "\n{}", std::string(options.row_options.offset * item.indent, ' '));
+            }
+            text::format_to(std::back_inserter(output_buffer), "{}", item.kind == item_kind::array ? "]" : "}");
+        } else if (item.kind == item_kind::tag) {
+            text::format_to(std::back_inserter(output_buffer), ")");
+        } else if (item.indefinite) {
+            // RFC 8949 section 8.1 distinguishes zero chunks from an empty chunk.
+            text::format_to(std::back_inserter(output_buffer), "{}",
+                            item.children != 0U            ? ")"
+                            : item.kind == item_kind::text ? "\"\"_"
+                                                           : "''_");
+        }
+        complete_item();
+    }
+
+    template <typename T, typename Iterator> void operator()(const T &arg, const walk_context<Iterator> &context) {
+        if constexpr (IsAnyHeader<T>) {
+            if (context.phase == walk_phase::begin) {
+                begin(arg, context.depth);
+            } else if (context.phase == walk_phase::end) {
+                end();
+            }
+        } else if constexpr (std::ranges::input_range<T>) {
+            payload(arg);
+        } else {
+            before_item();
+            scalar(arg);
+            complete_item();
+        }
+    }
+
+    [[noreturn]] void fail(const walk_failure &failure) {
+        if (failure.reason == walk_failure_reason::unexpected_break) {
+            before_item();
+            throw std::runtime_error("CBOR break outside indefinite item");
+        }
+        if (failure.reason == walk_failure_reason::invalid_chunk) {
+            throw std::runtime_error("Invalid indefinite CBOR diagnostic string chunk");
+        }
+        if (frames.empty()) {
+            throw std::runtime_error("Malformed CBOR diagnostic top-level item");
+        }
+        const auto &parent = frames.back();
+        switch (parent.kind) {
+        case item_kind::map:
+            throw std::runtime_error(parent.children % 2U == 0U ? "Malformed CBOR diagnostic map key"
+                                                                : "Malformed CBOR diagnostic map value");
+        case item_kind::array: throw std::runtime_error(text::format("Malformed CBOR diagnostic array item {}", parent.children));
+        case item_kind::tag: throw std::runtime_error("Malformed CBOR diagnostic tag payload");
+        case item_kind::text:
+        case item_kind::binary: throw std::runtime_error("Unterminated indefinite CBOR diagnostic string");
+        }
+        throw std::runtime_error("Malformed CBOR diagnostic item");
+    }
+
+    template <typename Walk> void render(Walk &&walk) {
+        walk_failure failure;
+        status_code  status;
+        try {
+            status = std::forward<Walk>(walk)(*this, &failure);
+        } catch (const std::runtime_error &) {
+            if (failure.reason != walk_failure_reason::none && failure.reason != walk_failure_reason::payload) {
+                fail(failure);
+            }
+            throw;
+        }
+        if (status != status_code::success) {
+            fail(failure);
+        }
+    }
+};
+
+} // namespace detail
 
 template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
     OutputBuffer     &output_buffer;
@@ -2326,177 +2440,17 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         return child;
     }
 
-    template <IsMapHeader T> constexpr void operator()(const T &arg) {
-        check_depth();
-        const auto format_by_rows = options.row_options.format_by_rows;
-        auto       base_offset    = std::string(options.row_options.offset * options.row_options.current_indent * format_by_rows, ' ');
-        text::format_to(std::back_inserter(output_buffer), "{{{}{}", arg.indefinite ? "_ " : "", format_by_rows ? "\n" : "");
-        options.row_options.current_indent++;
-        auto child   = child_options();
-        bool emitted = false;
-        for (std::uint64_t i = 0; arg.indefinite || i < arg.size; ++i) {
-            detail::catch_all_variant key;
-            detail::catch_all_variant value;
-            if (!dec(key)) {
-                throw std::runtime_error("Malformed CBOR diagnostic map key");
-            }
-            if (arg.indefinite && std::holds_alternative<indefinite_break>(key)) {
-                break;
-            }
-            if (emitted) {
-                append_diagnostic_separator(output_buffer, format_by_rows);
-            }
-            if (format_by_rows) {
-                text::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
-            }
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, key);
-            text::format_to(std::back_inserter(output_buffer), ": ");
-            if (!dec(value)) {
-                throw std::runtime_error("Malformed CBOR diagnostic map value");
-            }
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, value);
-            emitted = true;
-        }
-        options.row_options.current_indent--;
-        if (format_by_rows && emitted) {
-            text::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
-        }
-        text::format_to(std::back_inserter(output_buffer), "}}");
-    }
-
-    template <IsArrayHeader T> constexpr void operator()(const T &arg) {
-        check_depth();
-        const bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
-        auto       base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
-        text::format_to(std::back_inserter(output_buffer), "[{}{}", arg.indefinite ? "_ " : "", format_by_rows ? "\n" : "");
-        options.row_options.current_indent++;
-        auto child   = child_options();
-        bool emitted = false;
-        for (std::uint64_t i = 0; arg.indefinite || i < arg.size; ++i) {
-            detail::catch_all_variant values;
-            if (!dec(values)) {
-                throw std::runtime_error(text::format("Malformed CBOR diagnostic array item {}", i));
-            }
-            if (arg.indefinite && std::holds_alternative<indefinite_break>(values)) {
-                break;
-            }
-            if (emitted) {
-                append_diagnostic_separator(output_buffer, format_by_rows);
-            }
-            if (format_by_rows) {
-                text::format_to(std::back_inserter(output_buffer), "{}{}", base_offset, std::string(options.row_options.offset, ' '));
-            }
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, child}, values);
-            emitted = true;
-        }
-        options.row_options.current_indent--;
-        if (format_by_rows && emitted) {
-            text::format_to(std::back_inserter(output_buffer), "\n{}", base_offset);
-        }
-        text::format_to(std::back_inserter(output_buffer), "]");
-    }
-
-    template <typename Header> constexpr void render_indefinite_string() {
-        check_depth();
-        bool emitted = false;
-        while (true) {
-            detail::catch_all_variant value;
-            if (!dec(value)) {
-                throw std::runtime_error("Unterminated indefinite CBOR diagnostic string");
-            }
-            if (std::holds_alternative<indefinite_break>(value)) {
-                if (!emitted) {
-                    // RFC 8949 section 8.1 distinguishes zero chunks from an empty chunk.
-                    text::format_to(std::back_inserter(output_buffer), "{}", IsTextHeader<Header> ? "\"\"_" : "''_");
-                    return;
-                }
-                break;
-            }
-            const auto *chunk = std::get_if<Header>(&value);
-            if (chunk == nullptr || chunk->indefinite) {
-                throw std::runtime_error("Invalid indefinite CBOR diagnostic string chunk");
-            }
-            if (emitted) {
-                append_diagnostic_separator(output_buffer, false);
-            } else {
-                text::format_to(std::back_inserter(output_buffer), "(_ ");
-            }
-            diagnostic_visitor{output_buffer, dec, child_options()}(*chunk);
-            emitted = true;
-        }
-        text::format_to(std::back_inserter(output_buffer), ")");
-    }
-
-    template <IsTextHeader T> constexpr void operator()(const T &arg) {
-        check_depth();
-        if (arg.indefinite) {
-            render_indefinite_string<T>();
-            return;
-        }
-        const auto range = dec.decode_text_payload(arg.size);
-        if (options.check_tstr_utf8 && !detail::is_valid_utf8(range)) {
-            text::format_to(std::back_inserter(output_buffer), "non-utf8({})", arg.size);
-            return;
-        }
-        append_escaped_diagnostic_text(output_buffer, std::ranges::begin(range), std::ranges::end(range));
-    }
-
-    template <IsBinaryHeader T> constexpr void operator()(const T &arg) {
-        check_depth();
-        if (arg.indefinite) {
-            render_indefinite_string<T>();
-            return;
-        }
-        const auto range = dec.decode_bstring_payload(arg.size);
-        text::format_to(std::back_inserter(output_buffer), "h'");
-        for (const auto value : range) {
-            if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, std::byte>) {
-                text::format_to(std::back_inserter(output_buffer), "{:02x}", std::to_integer<std::uint8_t>(value));
-            } else {
-                text::format_to(std::back_inserter(output_buffer), "{:02x}", static_cast<std::uint8_t>(value));
-            }
-        }
-        text::format_to(std::back_inserter(output_buffer), "'");
-    }
+    template <typename Header> constexpr void render_indefinite_string() { (*this)(Header{.indefinite = true}); }
 
     template <typename T> constexpr void operator()(const T &arg) {
-
-        if constexpr (std::same_as<T, indefinite_break>) {
-            throw std::runtime_error("CBOR break outside indefinite item");
-        } else if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
-            text::format_to(std::back_inserter(output_buffer), "{}", arg);
-        } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
-            text::format_to(std::back_inserter(output_buffer), "{}", detail::negative_diagnostic_text(arg));
-        } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(arg)>>) {
-            check_depth();
-            detail::catch_all_variant value;
-            text::format_to(std::back_inserter(output_buffer), "{}(", arg.tag);
-            if (!dec(value)) {
-                throw std::runtime_error("Malformed CBOR diagnostic tag payload");
-            }
-            std::visit<void>(diagnostic_visitor{output_buffer, dec, child_options()}, value);
-            text::format_to(std::back_inserter(output_buffer), ")");
-        } else if constexpr (IsSimple<std::remove_cvref_t<decltype(arg)>>) {
-            if constexpr (IsBool<std::remove_cvref_t<decltype(arg)>>) {
-                text::format_to(std::back_inserter(output_buffer), "{}", arg ? "true" : "false");
-            } else if constexpr (IsNull<std::remove_cvref_t<decltype(arg)>>) {
-                text::format_to(std::back_inserter(output_buffer), "null");
-            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, float16_t> ||
-                                 std::is_same_v<std::remove_cvref_t<decltype(arg)>, float>) {
-                text::format_to(std::back_inserter(output_buffer), "{}", static_cast<double>(arg));
-            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, double>) {
-                text::format_to(std::back_inserter(output_buffer), "{}", arg);
-            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(arg)>, simple>) {
-                if (arg.value == static_cast<simple::value_type>(SimpleType::Undefined)) {
-                    text::format_to(std::back_inserter(output_buffer), "undefined");
-                } else {
-                    text::format_to(std::back_inserter(output_buffer), "simple({})", arg.value);
-                }
-            } else {
-                text::format_to(std::back_inserter(output_buffer), "simple");
-            }
+        detail::diagnostic_renderer<OutputBuffer> renderer{.output_buffer = output_buffer, .options = options};
+        if constexpr (IsAnyHeader<T>) {
+            renderer.render([&](auto &visitor, auto *failure) {
+                return detail::walk_decoded_item(dec, arg, visitor, {.max_depth = std::numeric_limits<std::size_t>::max()}, failure);
+            });
         } else {
-            text::format_to(std::back_inserter(output_buffer), "unknown");
+            // Scalar visitors historically also support a decoder-free facade.
+            renderer.scalar(arg);
         }
     }
 };
@@ -2508,25 +2462,15 @@ auto make_diagnostic_visitor(OutputBuffer &output_buffer, Decoder &dec, Diagnost
 
 template <ValidCborBuffer CborBuffer, typename OutputBuffer>
 constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_buffer, DiagnosticOptions options = {}) {
-    detail::catch_all_variant values;
-    auto                      dec = make_decoder(buffer);
-
+    auto                                      dec = make_decoder(buffer);
+    detail::diagnostic_renderer<OutputBuffer> renderer{.output_buffer = output_buffer, .options = options, .sequence = true};
     text::format_to(std::back_inserter(output_buffer), "{}", options.row_options.format_by_rows ? "[\n" : "[");
-
-    bool emitted = false;
     while (!detail::decoder_at_end(dec)) {
-        auto result = dec(values);
-        if (!result) {
-            throw std::runtime_error("Malformed CBOR diagnostic top-level item");
-        }
-        if (emitted) {
-            append_diagnostic_separator(output_buffer, options.row_options.format_by_rows);
-        }
-        std::visit(make_diagnostic_visitor(output_buffer, dec, options), values);
-        emitted = true;
+        renderer.render([&](auto &visitor, auto *failure) {
+            return detail::walk_item_status(dec, visitor, {.max_depth = std::numeric_limits<std::size_t>::max()}, failure);
+        });
     }
-
-    if (options.row_options.format_by_rows && emitted) {
+    if (options.row_options.format_by_rows && renderer.emitted) {
         text::format_to(std::back_inserter(output_buffer), "\n");
     }
     text::format_to(std::back_inserter(output_buffer), "]");

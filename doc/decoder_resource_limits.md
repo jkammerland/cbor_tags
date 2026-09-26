@@ -150,6 +150,11 @@ called by a custom decoder. Diagnostic and annotation visitors perform this
 explicit read. Owning string destinations and borrowed string views continue
 to decode a complete string.
 
+For a shared traversal that consumes the header and all of its contents, use
+[`walk_item` or `validate_item`](traversal.md). These helpers enforce their own
+depth limit and retain the decoder's terminal failure and borrowed-input
+contract. They do not prevalidate or rewind an ordinary typed decode.
+
 ## Bounded Objects, PMR, And CDDL
 
 Plain owning containers do not impose protocol limits. A transport-level byte

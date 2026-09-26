@@ -30,14 +30,14 @@ input with the encoder and compare decoded values, without asserting particular
 encoded bytes or byte counts. This lets another encoding reuse the semantic
 cases while retaining CBOR-specific conformance and malformed-input coverage.
 
-The header tests follow this split and can be selected independently:
+The header and traversal tests follow this split and can be selected independently:
 
 ```sh
 ctest --test-dir build -L cbor-wire --output-on-failure
 ctest --test-dir build -L roundtrip --output-on-failure
 ```
 
-The labels select the isolated header suites; older test files keep their
+The labels select the isolated header and traversal suites; older test files keep their
 existing CTest registration. Apply the same separation when adding or revising
 other suites.
 
