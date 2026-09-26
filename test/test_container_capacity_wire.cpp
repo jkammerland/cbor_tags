@@ -92,26 +92,30 @@ template <typename Container> void check_zero_capacity() {
 
 } // namespace
 
+TEST_SUITE("cbor_wire/container_capacity") {
+
 #ifdef CBOR_TAGS_TEST_BOOST_CAPACITY
-TEST_CASE("capacity bounds preserve circular buffer contents") {
-    check_capacity_bounds([] { return boost::circular_buffer<int>(4); });
-    check_zero_capacity<boost::circular_buffer<int>>();
-}
+    TEST_CASE("capacity bounds preserve circular buffer contents") {
+        check_capacity_bounds([] { return boost::circular_buffer<int>(4); });
+        check_zero_capacity<boost::circular_buffer<int>>();
+    }
 
-TEST_CASE("capacity bounds preserve space optimized circular buffer contents") {
-    check_capacity_bounds([] { return boost::circular_buffer_space_optimized<int>(4); });
-    check_zero_capacity<boost::circular_buffer_space_optimized<int>>();
-}
+    TEST_CASE("capacity bounds preserve space optimized circular buffer contents") {
+        check_capacity_bounds([] { return boost::circular_buffer_space_optimized<int>(4); });
+        check_zero_capacity<boost::circular_buffer_space_optimized<int>>();
+    }
 
-TEST_CASE("capacity bounds reject static vector overflow with a protocol status") {
-    check_capacity_bounds([] { return boost::container::static_vector<int, 4>{}; });
-    check_zero_capacity<boost::container::static_vector<int, 0>>();
-}
+    TEST_CASE("capacity bounds reject static vector overflow with a protocol status") {
+        check_capacity_bounds([] { return boost::container::static_vector<int, 4>{}; });
+        check_zero_capacity<boost::container::static_vector<int, 0>>();
+    }
 #endif
 
 #if defined(__cpp_lib_inplace_vector) && __cpp_lib_inplace_vector >= 202406L
-TEST_CASE("capacity bounds reject inplace vector overflow with a protocol status") {
-    check_capacity_bounds([] { return std::inplace_vector<int, 4>{}; });
-    check_zero_capacity<std::inplace_vector<int, 0>>();
-}
+    TEST_CASE("capacity bounds reject inplace vector overflow with a protocol status") {
+        check_capacity_bounds([] { return std::inplace_vector<int, 4>{}; });
+        check_zero_capacity<std::inplace_vector<int, 0>>();
+    }
 #endif
+
+} // TEST_SUITE("cbor_wire/container_capacity")
