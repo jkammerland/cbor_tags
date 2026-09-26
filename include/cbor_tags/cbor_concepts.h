@@ -475,9 +475,9 @@ concept IsMultiMap = IsMap<T> && requires(T t) {
 
 template <typename T>
 concept IsTuple = requires {
+    requires(!IsFixedArray<std::remove_cvref_t<T>>);
     typename std::tuple_size<std::remove_cvref_t<T>>::type;
     typename std::tuple_element_t<0, std::remove_cvref_t<T>>;
-    requires(!IsFixedArray<std::remove_cvref_t<T>>);
 };
 
 namespace detail {

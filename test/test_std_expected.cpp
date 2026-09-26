@@ -5,6 +5,7 @@
 #if __has_include(<expected>) && defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
 #include "test_util.h"
 
+#include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/extensions/std_expected.h>
@@ -36,6 +37,30 @@ struct expected_holder {
     std::uint64_t                             id{};
     std::expected<std::string, std::uint64_t> result{};
 };
+
+struct expected_point {
+    int x{};
+    int y{};
+
+    bool operator==(const expected_point &) const = default;
+};
+
+struct customized_empty {
+    template <typename Encoder> auto encode(Encoder &enc) const { return enc(nullptr); }
+    template <typename Decoder> auto decode(Decoder &dec) {
+        std::nullptr_t payload{};
+        return dec(payload);
+    }
+};
+
+struct recursive_expected_payload {
+    int                                     id{};
+    std::vector<recursive_expected_payload> children;
+
+    bool operator==(const recursive_expected_payload &) const = default;
+};
+
+struct empty_expected_element {};
 
 template <typename T, typename E> std::vector<std::byte> encode_expected(const std::expected<T, E> &value) {
     std::vector<std::byte> buffer;
@@ -169,6 +194,60 @@ TEST_CASE("std::expected codec composes inside aggregate fields") {
     CHECK_EQ(decoded.result.error(), 99U);
 }
 
+TEST_CASE("std::expected codec keeps aggregate payloads as complete items") {
+    const std::expected<expected_point, int> original{expected_point{1, 2}};
+    const auto                               encoded = encode_expected(original);
+    CHECK_EQ(to_hex(encoded), "82f5820102");
+    const auto decoded = decode_expected<expected_point, int>(encoded);
+    REQUIRE(decoded.has_value());
+    CHECK_EQ(*decoded, (expected_point{1, 2}));
+
+    encoded_item_view item;
+    REQUIRE(make_decoder(encoded)(item));
+}
+
+TEST_CASE("std::expected codec preserves explicit empty-type customizations") {
+    for (bool success : {false, true}) {
+        const std::expected<customized_empty, customized_empty> original =
+            success ? std::expected<customized_empty, customized_empty>{} : std::unexpected{customized_empty{}};
+        const auto encoded = encode_expected(original);
+        CHECK_EQ(to_hex(encoded), success ? "82f5f6" : "82f4f6");
+        const auto decoded = decode_expected<customized_empty, customized_empty>(encoded);
+        CHECK_EQ(decoded.has_value(), success);
+
+        encoded_item_view item;
+        REQUIRE(make_decoder(encoded)(item));
+    }
+}
+
+TEST_CASE("std::expected codec accepts recursive aggregate payload schemas") {
+    const std::expected<recursive_expected_payload, int> original{recursive_expected_payload{1, {{2, {}}}}};
+    const auto                                           encoded = encode_expected(original);
+    CHECK_EQ(to_hex(encoded), "82f5820181820280");
+    const auto decoded = decode_expected<recursive_expected_payload, int>(encoded);
+    REQUIRE(decoded.has_value());
+    CHECK_EQ(*decoded, *original);
+}
+
+TEST_CASE("std::expected codec accepts statically empty array payloads") {
+    SUBCASE("zero-extent array") {
+        using array_type   = std::array<empty_expected_element, 0>;
+        const auto encoded = encode_expected(std::expected<array_type, int>{});
+        CHECK_EQ(to_hex(encoded), "82f580");
+        const auto decoded = decode_expected<array_type, int>(encoded);
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->empty());
+    }
+    SUBCASE("zero maximum size") {
+        using array_type   = bounded_size<std::vector<empty_expected_element>, 0, 0>;
+        const auto encoded = encode_expected(std::expected<array_type, int>{});
+        CHECK_EQ(to_hex(encoded), "82f580");
+        const auto decoded = decode_expected<array_type, int>(encoded);
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->value().empty());
+    }
+}
+
 TEST_CASE("std::expected codec decodes from non-contiguous buffers") {
     const std::expected<std::string, std::uint64_t> value{std::string{"ok"}};
     const auto                                      encoded = encode_expected(value);
@@ -193,6 +272,7 @@ TEST_CASE("std::expected codec accepts indefinite two-item arrays") {
 }
 
 TEST_CASE("std::expected codec reports malformed wrappers and payloads") {
+    check_decode_error<std::uint64_t, std::string>("82f5", status_code::incomplete);
     check_decode_error<std::uint64_t, std::string>("a0", status_code::no_match_for_array_on_buffer);
     check_decode_error<std::uint64_t, std::string>("98", status_code::incomplete);
     check_decode_error<std::uint64_t, std::string>("81f5", status_code::unexpected_group_size);

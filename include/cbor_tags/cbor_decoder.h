@@ -425,6 +425,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsTextString T> constexpr status_code decode_definite_tstr(T &t, std::uint64_t text_size) {
+        if constexpr (IsConstTextView<T> && detail::is_static_extent_span_v<T>) {
+            if (text_size != static_cast<std::uint64_t>(t.size())) {
+                return status_code::unexpected_group_size;
+            }
+        }
+
         // Match definite bstr handling: only a range-provided availability
         // check can justify a reservation. Unsized input consumes once below
         // and retains a prefix if it reaches the end.
@@ -459,7 +465,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         auto text = take_text_payload(payload_size);
         if constexpr (IsConstView<T>) {
             using text_char = typename std::remove_cvref_t<T>::value_type;
-            if constexpr (std::same_as<text_char, char>) {
+            if constexpr (IsContiguous<T> && !IsContiguous<decltype(text)>) {
+                return status_code::contiguous_view_on_non_contiguous_data;
+            } else if constexpr (std::same_as<text_char, char> && !detail::is_static_extent_span_v<T>) {
                 t = std::move(text);
             } else {
                 t = T{reinterpret_cast<const text_char *>(text.data()), text.size()};
@@ -694,17 +702,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <typename T>
         requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
-        if (major != major_type::Tag) {
-            return status_code::no_match_for_tag_on_buffer;
-        }
+        if constexpr (IsTag<T>) {
+            if (major != major_type::Tag) {
+                return status_code::no_match_for_tag_on_buffer;
+            }
 
-        auto        &&tuple = to_tuple(value);
-        std::uint64_t tag{};
-        const auto    status = decode_tag_argument(additionalInfo, tag);
-        if (status != status_code::success) {
-            return status;
+            auto        &&tuple = to_tuple(value);
+            std::uint64_t tag{};
+            const auto    status = decode_tag_argument(additionalInfo, tag);
+            if (status != status_code::success) {
+                return status;
+            }
+            return this->decode_tagged_aggregate(value, tag, tuple);
+        } else {
+            return decode_group_from_header(to_tuple(value), major, additionalInfo);
         }
-        return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
     template <typename T>
@@ -764,6 +776,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return group_status;
         }
         return std::apply([this](auto &&...args) { return this->applier(std::forward<decltype(args)>(args)...); }, value);
+    }
+
+    template <IsUntaggedTuple T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+        return decode_group_from_header(value, major, additionalInfo);
     }
 
     constexpr status_code decode(bool &value, major_type major, byte additionalInfo) {
@@ -1686,6 +1702,30 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             status = this->decode(as_array{size_});
         }
         return status;
+    }
+
+    template <typename Tuple> constexpr status_code decode_group_from_header(Tuple &&tuple, major_type major, byte additional_info) {
+        constexpr auto size = std::tuple_size_v<std::remove_cvref_t<Tuple>>;
+        if constexpr (size == 0U) {
+            // An empty group cannot account for an already-consumed item header.
+            return status_code::unexpected_group_size;
+        } else if constexpr (size > 1U && Options::wrap_groups) {
+            if (major != major_type::Array) {
+                return status_code::no_match_for_array_on_buffer;
+            }
+            if (decode_unsigned(additional_info) != size) {
+                return status_code::unexpected_group_size;
+            }
+            return std::apply([this](auto &&...args) { return applier(args...); }, tuple);
+        } else {
+            // Single-field and unwrapped groups pass the header to their first
+            // field; the reader must not rewind or read that header a second time.
+            const auto status = decode(std::get<0>(tuple), major, additional_info);
+            if (status != status_code::success) {
+                return status;
+            }
+            return std::apply([this](auto &&...args) { return applier(args...); }, detail::tuple_tail(tuple));
+        }
     }
 
     template <typename... Args> constexpr auto applier(Args &&...args) {

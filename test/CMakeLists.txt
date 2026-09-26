@@ -52,6 +52,33 @@ endif()
 # add tests for ctest
 add_test(NAME tests COMMAND tests)
 
+if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles(
+    "#include <expected>\nint main() { std::expected<int, int> value; return *value; }"
+    CBOR_TAGS_TEST_HAS_STD_EXPECTED)
+  if(CBOR_TAGS_TEST_HAS_STD_EXPECTED)
+    foreach(SHAPE EMPTY_VALUE EMPTY_ERROR OPTIONAL_EMPTY CONTAINER_EMPTY BOUNDED_EMPTY UNWRAPPED_GROUP TAG_HEADER)
+      foreach(OPERATION ENCODE DECODE)
+        string(TOLOWER "std_expected_${SHAPE}_${OPERATION}_compile_fails" TEST_NAME)
+        add_executable(${TEST_NAME} EXCLUDE_FROM_ALL std_expected_payload_compile_fail.cc)
+        target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_EXPECTED_${SHAPE} CBOR_TAGS_EXPECTED_${OPERATION})
+        target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+        add_test(
+          NAME ${TEST_NAME}
+          COMMAND
+            ${CMAKE_COMMAND}
+            "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+            "-DTEST_TARGET=${TEST_NAME}"
+            "-DCONFIG=$<CONFIG>"
+            "-DPASS_REGEX=std::expected (value|error) payload must encode exactly one CBOR item"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+      endforeach()
+    endforeach()
+  endif()
+endif()
+
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
