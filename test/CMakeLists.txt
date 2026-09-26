@@ -27,36 +27,9 @@ check_cxx_source_compiles("#include <version>
 int main() { std::inplace_vector<int, 4> v; v.push_back(1); }" CBOR_TAGS_TEST_HAS_INPLACE_VECTOR)
 message(STATUS "Capacity tests: Boost containers=${CBOR_TAGS_TEST_HAS_BOOST_CAPACITY}, std::inplace_vector=${CBOR_TAGS_TEST_HAS_INPLACE_VECTOR} (empty means unavailable)")
 
-set(CBOR_TAGS_TEST_BOOST_ROOT "" CACHE PATH "Optional Boost header root for container integration tests")
-option(CBOR_TAGS_TEST_REQUIRE_RECENT_BOOST "Require Boost 1.92 container integration coverage" OFF)
-set(CMAKE_REQUIRED_INCLUDES "${CBOR_TAGS_TEST_BOOST_ROOT}")
-check_cxx_source_compiles("#include <boost/container/slist.hpp>
-int main() {}" CBOR_TAGS_TEST_HAS_BOOST_CONTAINERS)
-check_cxx_source_compiles("#include <boost/version.hpp>
-#include <boost/container/hub.hpp>
-#include <boost/container/segtor.hpp>
-static_assert(BOOST_VERSION >= 109200);
-int main() {}" CBOR_TAGS_TEST_HAS_RECENT_BOOST)
-unset(CMAKE_REQUIRED_INCLUDES)
-if(CBOR_TAGS_TEST_REQUIRE_RECENT_BOOST AND NOT CBOR_TAGS_TEST_HAS_RECENT_BOOST)
-  message(FATAL_ERROR "This integration job requires Boost 1.92 with hub and segtor")
-endif()
-message(STATUS "Container tests: Boost=${CBOR_TAGS_TEST_HAS_BOOST_CONTAINERS}, Boost 1.92=${CBOR_TAGS_TEST_HAS_RECENT_BOOST} (empty means unavailable)")
-foreach(FEATURE flat_set flat_map inplace_vector hive)
-  check_cxx_source_compiles("#include <version>
-#ifndef __cpp_lib_${FEATURE}
-#error ${FEATURE} unavailable
-#endif
-#include <${FEATURE}>
-int main() {}" CBOR_TAGS_TEST_HAS_STD_${FEATURE})
-  message(STATUS "Container tests: std::${FEATURE}=${CBOR_TAGS_TEST_HAS_STD_${FEATURE}} (empty means unavailable)")
-endforeach()
 
 # add executables more if needed
 add_executable(tests)
-if(CBOR_TAGS_TEST_BOOST_ROOT)
-  target_include_directories(tests SYSTEM PRIVATE "${CBOR_TAGS_TEST_BOOST_ROOT}")
-endif()
 
 # add target_sources, all .cpp files in this directory
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
@@ -842,4 +815,33 @@ endif()
 
 if(CBOR_TAGS_BUILD_INTEROP_TESTS)
   add_subdirectory(interop)
+endif()
+
+include(CheckCXXSourceCompiles)
+set(CBOR_TAGS_TEST_BOOST_ROOT "" CACHE PATH "Optional Boost header root for container integration tests")
+option(CBOR_TAGS_TEST_REQUIRE_RECENT_BOOST "Require Boost 1.92 container integration coverage" OFF)
+set(CMAKE_REQUIRED_INCLUDES "${CBOR_TAGS_TEST_BOOST_ROOT}")
+check_cxx_source_compiles("#include <boost/container/slist.hpp>
+int main() {}" CBOR_TAGS_TEST_HAS_BOOST_CONTAINERS)
+check_cxx_source_compiles("#include <boost/version.hpp>
+#include <boost/container/hub.hpp>
+#include <boost/container/segtor.hpp>
+static_assert(BOOST_VERSION >= 109200);
+int main() {}" CBOR_TAGS_TEST_HAS_RECENT_BOOST)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(CBOR_TAGS_TEST_REQUIRE_RECENT_BOOST AND NOT CBOR_TAGS_TEST_HAS_RECENT_BOOST)
+  message(FATAL_ERROR "This integration job requires Boost 1.92 with hub and segtor")
+endif()
+message(STATUS "Container tests: Boost=${CBOR_TAGS_TEST_HAS_BOOST_CONTAINERS}, Boost 1.92=${CBOR_TAGS_TEST_HAS_RECENT_BOOST} (empty means unavailable)")
+foreach(FEATURE flat_set flat_map inplace_vector hive)
+  check_cxx_source_compiles("#include <version>
+#ifndef __cpp_lib_${FEATURE}
+#error ${FEATURE} unavailable
+#endif
+#include <${FEATURE}>
+int main() {}" CBOR_TAGS_TEST_HAS_STD_${FEATURE})
+  message(STATUS "Container tests: std::${FEATURE}=${CBOR_TAGS_TEST_HAS_STD_${FEATURE}} (empty means unavailable)")
+endforeach()
+if(CBOR_TAGS_TEST_BOOST_ROOT)
+  target_include_directories(tests SYSTEM PRIVATE "${CBOR_TAGS_TEST_BOOST_ROOT}")
 endif()
