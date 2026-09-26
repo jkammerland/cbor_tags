@@ -103,6 +103,10 @@ jobs:
           "${{ matrix.config.version }}" \
           "clang-${{ matrix.config.version }}"
 
+    - name: Install capacity test dependencies
+      if: matrix.config.cxx == 'g++-12'
+      run: sudo apt-get install -y libboost-dev
+
     - name: Configure CMake
       shell: bash
       run: |

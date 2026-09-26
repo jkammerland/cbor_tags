@@ -15,6 +15,17 @@ endif()
 cpmaddpackage("gh:jkammerland/doctest@1.0.4")
 
 include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#include <boost/circular_buffer.hpp>
+#include <boost/container/static_vector.hpp>
+int main() {}" CBOR_TAGS_TEST_HAS_BOOST_CAPACITY)
+check_cxx_source_compiles("#include <version>
+#if !defined(__cpp_lib_inplace_vector) || __cpp_lib_inplace_vector < 202406L
+#error inplace_vector unavailable
+#endif
+#include <inplace_vector>
+int main() { std::inplace_vector<int, 4> v; v.push_back(1); }" CBOR_TAGS_TEST_HAS_INPLACE_VECTOR)
+message(STATUS "Capacity tests: Boost containers=${CBOR_TAGS_TEST_HAS_BOOST_CAPACITY}, std::inplace_vector=${CBOR_TAGS_TEST_HAS_INPLACE_VECTOR} (empty means unavailable)")
 
 # add executables more if needed
 add_executable(tests)

@@ -130,6 +130,52 @@ These controls are complementary:
 - A size wrapper validates one CBOR item against protocol limits.
 - A bounded PMR resource contains allocations made while materializing values.
 
+### Remaining Capacity In Circular Buffers And Fixed-Capacity Vectors
+
+Decoding appends to an existing container. For a fixed-capacity destination,
+bound the **incoming element count** by its remaining capacity:
+
+```cpp
+#include <cbor_tags/cbor_decoder.h>
+#include <boost/circular_buffer.hpp>
+#include <array>
+#include <cstddef>
+
+std::array<unsigned char, 5> input{0x83, 1, 2, 3, 7}; // [1,2,3], then 7
+boost::circular_buffer<int> output(4);
+output.push_back(9);
+
+const auto remaining = static_cast<std::size_t>(output.capacity()) - output.size();
+auto dec = cbor::tags::make_decoder(input);
+auto result = dec(cbor::tags::as_bounded_size(output, 0, remaining));
+// On success: output == [9,1,2,3]. The next item is still available to dec.
+```
+
+The same recipe applies to `boost::circular_buffer_space_optimized`,
+`boost::container::static_vector`, and C++26 `std::inplace_vector`. Configure
+the destination first and keep its capacity and storage stable during the
+call. Recompute the remaining capacity before each subsequent decode. The
+wrapper supplies a protocol limit; it does not create storage or change the
+container's growth/overwrite policy. A default circular buffer has zero
+capacity and therefore needs a bound of zero until capacity is configured.
+
+Circular buffers normally discard elements when insertion exceeds capacity.
+Direct decoding uses that normal insertion behavior and can report success
+after values have been discarded. Passing the remaining-capacity bound avoids
+that loss: excessive incoming elements return `status_code::size_limit_exceeded`.
+A definite array exceeding the bound is rejected before appending elements;
+an indefinite array may leave an accepted prefix appended before the limit
+is reached. Existing elements are retained, but the failed decoder is still
+terminal and cannot be retried. Truncated elements within the bound return
+`status_code::incomplete`.
+
+Protocol-bound failures are distinct from container exceptions. Without a
+bound, default-policy `std::inplace_vector` overflow throws `std::bad_alloc`,
+which the decoder maps to `out_of_memory`. Boost.Container can use its own
+exception types or application-defined throw policies; its default custom
+exception maps to generic `error` in the audited Boost 1.90 configuration.
+Use the explicit bound when the protocol needs a predictable size-limit status.
+
 ### Bounded PMR Example
 
 ```cpp
