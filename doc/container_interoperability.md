@@ -20,6 +20,8 @@ elements; multisets retain them. Every declared wire element is consumed even
 if insertion does not increase the destination size. Ordered sets use comparator
 order, hash sets their iteration order, and hive/hub their own iteration rules.
 Encoding does not sort them or promise a canonical CBOR representation.
+Collections of `std::byte`, including byte-valued sets, retain the library's
+byte-string representation. Their normal insertion semantics still apply.
 Singly linked lists append in wire order, after any existing elements. The
 decoder finds the destination tail once per decoded array; it does not prewalk
 the input.

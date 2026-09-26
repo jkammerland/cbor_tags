@@ -191,6 +191,30 @@ TEST_CASE("insert containers consume duplicates independently of destination siz
     check_insert_container<std::unordered_multiset<int>>({1, 1, 2, 3, 9});
 }
 
+TEST_CASE("byte sets retain binary string classification across input layouts") {
+    const auto check = [](const auto &input) {
+        std::set<std::byte> output{std::byte{9}};
+        auto                dec = make_decoder(input);
+        REQUIRE(dec(output));
+        CHECK(output == std::set<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{9}});
+        int following{};
+        REQUIRE(dec(following));
+        CHECK(following == 7);
+        std::vector<std::byte> encoded;
+        REQUIRE(make_encoder(encoded)(output));
+        CHECK(encoded == to_bytes("4401020309"));
+    };
+    for (const auto *wire : {"440302020107", "5f420302420201ff07"}) {
+        const auto bytes = to_bytes(wire);
+        check(bytes);
+        const std::list<std::byte> linked(bytes.begin(), bytes.end());
+        check(linked);
+        const auto unsized = std::ranges::subrange<std::list<std::byte>::const_iterator, std::list<std::byte>::const_iterator,
+                                                   std::ranges::subrange_kind::unsized>(linked.begin(), linked.end());
+        check(unsized);
+    }
+}
+
 TEST_CASE("set decoding handles noncontiguous and unsized input and consumed headers") {
     for (const auto *wire : {"840301010207", "9f03010102ff07"}) {
         const auto                 bytes = to_bytes(wire);
@@ -323,6 +347,28 @@ TEST_CASE("boost arrays use fixed array dispatch and CDDL extents") {
     schema.clear();
     cddl_schema_to<bounded_size<boost::array<int, 3>, 0, 4>>(schema, {.row_options = {.format_by_rows = false}});
     CHECK(fmt::to_string(schema) == "root = [3*3 int]");
+}
+
+TEST_CASE("empty byte ranges encode to a fixed Boost output buffer") {
+    boost::array<std::byte, 1>   output{};
+    const std::vector<std::byte> empty;
+    REQUIRE(make_encoder(output)(empty));
+    CHECK(output[0] == std::byte{0x40});
+}
+
+TEST_CASE("zero extent byte arrays decode empty strings without accessing storage") {
+    const auto input = to_bytes("4007");
+    const auto check = [&input](auto &output) {
+        auto dec = make_decoder(input);
+        REQUIRE(dec(output));
+        int following{};
+        REQUIRE(dec(following));
+        CHECK(following == 7);
+    };
+    boost::array<std::byte, 0> boost_output{};
+    std::array<std::byte, 0>   standard_output{};
+    check(boost_output);
+    check(standard_output);
 }
 
 TEST_CASE("boost text and opt in pointer codecs keep their wire representation") {

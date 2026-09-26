@@ -163,8 +163,15 @@ template <typename T> struct appender<T, false> : append_cursor<T> {
         if (values.empty()) {
             return;
         }
-        container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
-                         reinterpret_cast<const value_type *>(values.data() + values.size()));
+        const auto *first = reinterpret_cast<const value_type *>(values.data());
+        const auto *last  = reinterpret_cast<const value_type *>(values.data() + values.size());
+        if constexpr (requires { container.insert(container.end(), first, last); }) {
+            container.insert(container.end(), first, last);
+        } else {
+            for (const auto value : values) {
+                append_value(container, static_cast<value_type>(value));
+            }
+        }
     }
     constexpr void operator()(T &container, std::string_view value) {
         if (value.empty()) {
@@ -221,11 +228,17 @@ template <typename T> struct appender<T, true> {
         container[head_++] = value;
     }
     constexpr void operator()(T &container, std::span<const std::byte> values) {
+        if (values.empty()) {
+            return;
+        }
         ensure_capacity(container, static_cast<size_type>(values.size()));
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());
         head_ += values.size();
     }
     constexpr void operator()(T &container, std::string_view value) {
+        if (value.empty()) {
+            return;
+        }
         ensure_capacity(container, static_cast<size_type>(value.size()));
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(value.data()), value.size());
         head_ += value.size();
