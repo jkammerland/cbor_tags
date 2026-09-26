@@ -12,6 +12,11 @@ signing objects:
 
 The base `cbor::tags` target does not link a crypto library.
 
+COSE message and signature arrays accept definite and indefinite lengths, with
+exact field counts and a required closing break for indefinite arrays. Decoding
+commits the destination only after the complete envelope succeeds. Internal
+`Sig_structure` encodings retain their definite-length representation.
+
 ## Claims Validation
 
 `claims_set` accepts both definite-length and break-terminated indefinite-length
