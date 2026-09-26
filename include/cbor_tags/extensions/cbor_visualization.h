@@ -6,6 +6,7 @@
 #include "cbor_tags/detail/cbor_cddl_tag_traits.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_optional_variant_traits.h"
 #include "cbor_tags/detail/cbor_pointer_traits.h"
 #include "cbor_tags/detail/smart_ptr_traits.h"
 #include "cbor_tags/detail/text_format.h"
@@ -1279,16 +1280,7 @@ std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, st
 }
 
 template <typename T> consteval bool cddl_has_wire_type_alternative() {
-    using type = std::remove_cvref_t<T>;
-    if constexpr (requires { typename cddl::cddl_wire_type<type>::type; }) {
-        return true;
-    } else if constexpr (IsOptional<type>) {
-        return cddl_has_wire_type_alternative<typename type::value_type>();
-    } else if constexpr (IsVariant<type>) {
-        return with_variant_alternatives<type>([]<typename... Ts>() { return (cddl_has_wire_type_alternative<Ts>() || ...); });
-    } else {
-        return false;
-    }
+    return has_matching_alternative<T, []<typename U>() { return requires { typename cddl::cddl_wire_type<U>::type; }; }>();
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
@@ -1492,8 +1484,15 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
     auto &cddl_context = cddl_context_ref(context);
     debug::println("cddl_schema_to: {}", detail::short_type_name<T>());
 
+    const auto emit_root_expression = [&] {
+        cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
+    };
     constexpr bool has_wire_type = requires { typename cddl::cddl_wire_type<value_type>::type; };
-    if constexpr (!has_wire_type && IsNamedMapWrapper<value_type>) {
+    // Wire types must override the reflected root categories before the common fallback.
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    if constexpr (has_wire_type) {
+        emit_root_expression();
+    } else if constexpr (IsNamedMapWrapper<value_type>) {
         using named_value_type = named_map_value_t<value_type>;
         const auto requested_root_name =
             options.root_name.empty() ? cddl_type_name<named_value_type>() : sanitize_cddl_id(options.root_name);
@@ -1505,7 +1504,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         }
-    } else if constexpr (!has_wire_type && IsNamedGroupWrapper<value_type>) {
+    } else if constexpr (IsNamedGroupWrapper<value_type>) {
         using named_value_type = named_group_value_t<value_type>;
         const auto requested_root_name =
             options.root_name.empty() ? cddl_type_name<named_value_type>() : sanitize_cddl_id(options.root_name);
@@ -1517,27 +1516,21 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
         if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
             emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
         }
-    } else if constexpr (!has_wire_type && IsEnum<value_type>) {
-        if constexpr (cddl_enum_entry_count<value_type>() != 0) {
-            if (cddl_use_named_enum<value_type>(options) && !options.always_inline) {
-                const auto requested_root_name =
-                    options.root_name.empty() ? cddl_type_name<value_type>() : sanitize_cddl_id(options.root_name);
-                const auto root_key = cddl_enum_key<value_type>();
-                if (!options.root_name.empty()) {
-                    reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
-                }
-                (void)ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
-                if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
-                    emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
-                }
-            } else {
-                cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
+    } else if constexpr (IsEnum<value_type>) {
+        if (cddl_use_named_enum<value_type>(options) && !options.always_inline) {
+            const auto requested_root_name = options.root_name.empty() ? cddl_type_name<value_type>() : sanitize_cddl_id(options.root_name);
+            const auto root_key            = cddl_enum_key<value_type>();
+            if (!options.root_name.empty()) {
+                reject_explicit_root_name_collision(cddl_context, {.key = root_key, .name = requested_root_name});
+            }
+            (void)ensure_cddl_enum_definition<value_type>(cddl_context, options, requested_root_name);
+            if (const auto *root_def = cddl_context.find_by_key(root_key); root_def != nullptr) {
+                emit_cddl_root_definition(output_buffer, std::string_view{root_def->cddl.data(), root_def->cddl.size()});
             }
         } else {
-            cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
+            emit_root_expression();
         }
-    } else if constexpr (!has_wire_type && IsAggregate<value_type> && !is_static_tag_t<value_type>::value &&
-                         !is_dynamic_tag_t<value_type>) {
+    } else if constexpr (IsAggregate<value_type> && !is_static_tag_t<value_type>::value && !is_dynamic_tag_t<value_type>) {
         static_assert(!is_empty_cddl_aggregate_v<value_type>, "empty aggregate has no CBOR data item shape; CDDL schema unsupported");
         const auto requested_root_name = root_rule_name<value_type>(options);
         const auto root_key            = cddl_type_key<value_type, PointerMode>();
@@ -1552,12 +1545,12 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
             const auto definition = text::format("{} = {}", root_name, cddl_aggregate_expr<value_type, PointerMode>(cddl_context, options));
             emit_cddl_root_definition(output_buffer, definition);
         }
-    } else if constexpr (!has_wire_type && (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>)) {
+    } else if constexpr (is_static_tag_t<value_type>::value || is_dynamic_tag_t<value_type>) {
         const auto definition =
             text::format("{} = {}", root_rule_name<value_type>(options), tag_marker_root_expr<value_type>(cddl_context, options));
         emit_cddl_root_definition(output_buffer, definition);
     } else {
-        cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
+        emit_root_expression();
     }
 
     if constexpr (!IsReferenceWrapper<Context>) {

@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cbor_item_shape.h"
+#include "cbor_tags/detail/cbor_optional_variant_traits.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #include <memory>
@@ -22,17 +23,7 @@ template <typename T> struct is_indirect : std::false_type {};
 template <typename T, typename Alloc> struct is_indirect<std::indirect<T, Alloc>> : std::true_type {};
 
 template <typename T> consteval bool has_indirect_alternative() {
-    using type = std::remove_cvref_t<T>;
-    if constexpr (is_indirect<type>::value) {
-        return true;
-    } else if constexpr (IsOptional<type>) {
-        return has_indirect_alternative<typename type::value_type>();
-    } else if constexpr (IsVariant<type>) {
-        return cbor::tags::detail::with_variant_alternatives<type>(
-            []<typename... Ts>() { return (has_indirect_alternative<Ts>() || ...); });
-    } else {
-        return false;
-    }
+    return cbor::tags::detail::has_matching_alternative<T, []<typename U>() { return is_indirect<U>::value; }>();
 }
 
 } // namespace detail

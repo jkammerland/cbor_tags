@@ -2,6 +2,7 @@
 
 #include <cbor_tags/extensions/cbor_visualization.h>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <variant>
 #include <vector>
@@ -24,6 +25,10 @@ using payload = std::indirect<static_tag<42>>;
 using payload = std::indirect<group>;
 #elif defined(CBOR_VALUE_VARIANT)
 using payload = std::variant<std::indirect<int>, int>;
+#elif defined(CBOR_VALUE_OPTIONAL_VARIANT)
+using payload = std::variant<int, std::optional<std::indirect<std::string>>>;
+#elif defined(CBOR_VALUE_NESTED_VARIANT)
+using payload = std::variant<int, std::variant<bool, std::indirect<std::string>>>;
 #elif defined(CBOR_VALUE_DUPLICATE_TAGS)
 using payload = std::variant<cbor_value_example::dog_wire, std::tuple<static_tag<60010>, std::string>>;
 #elif defined(CBOR_VALUE_POLYMORPHIC_VARIANT)
