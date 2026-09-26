@@ -225,7 +225,7 @@ struct CDDLContext {
 };
 
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
-                                       double, bool, std::nullptr_t, simple, as_break>;
+                                       double, bool, std::nullptr_t, simple, indefinite_break>;
 
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
     std::string indent(options.current_indent * 2, ' ');
@@ -1614,7 +1614,7 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
             throw std::runtime_error("Malformed CBOR input: incomplete or invalid item");
         }
         const auto header_end = dec.tell();
-        const auto is_break   = std::holds_alternative<as_break>(value);
+        const auto is_break   = std::holds_alternative<indefinite_break>(value);
         if (is_break && !allow_break) {
             throw std::runtime_error("Malformed CBOR input: break outside indefinite item");
         }
@@ -2340,7 +2340,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             if (!dec(key)) {
                 throw std::runtime_error("Malformed CBOR diagnostic map key");
             }
-            if (arg.indefinite && std::holds_alternative<as_break>(key)) {
+            if (arg.indefinite && std::holds_alternative<indefinite_break>(key)) {
                 break;
             }
             if (emitted) {
@@ -2377,7 +2377,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             if (!dec(values)) {
                 throw std::runtime_error(text::format("Malformed CBOR diagnostic array item {}", i));
             }
-            if (arg.indefinite && std::holds_alternative<as_break>(values)) {
+            if (arg.indefinite && std::holds_alternative<indefinite_break>(values)) {
                 break;
             }
             if (emitted) {
@@ -2404,7 +2404,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
             if (!dec(value)) {
                 throw std::runtime_error("Unterminated indefinite CBOR diagnostic string");
             }
-            if (std::holds_alternative<as_break>(value)) {
+            if (std::holds_alternative<indefinite_break>(value)) {
                 if (!emitted) {
                     // RFC 8949 section 8.1 distinguishes zero chunks from an empty chunk.
                     text::format_to(std::back_inserter(output_buffer), "{}", IsTextHeader<Header> ? "\"\"_" : "''_");
@@ -2461,7 +2461,7 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
 
     template <typename T> constexpr void operator()(const T &arg) {
 
-        if constexpr (std::same_as<T, as_break>) {
+        if constexpr (std::same_as<T, indefinite_break>) {
             throw std::runtime_error("CBOR break outside indefinite item");
         } else if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
             text::format_to(std::back_inserter(output_buffer), "{}", arg);

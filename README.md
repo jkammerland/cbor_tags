@@ -375,7 +375,7 @@ read a header and leave its contents for the caller. Each has a `size` and an
 `indefinite` flag. When definite, `size` counts array elements, map pairs, or
 string bytes. When indefinite, no length was declared and `size` is zero.
 `as_tag_any` leaves the tagged value unread. A visitor can use the decode-only
-`as_break` token to recognize an indefinite container's closing delimiter.
+`indefinite_break` token to recognize an indefinite container's closing delimiter.
 
 ```cpp
 #include <cbor_tags/cbor_decoder.h>
@@ -399,9 +399,9 @@ int main() {
 
     std::vector<int> values;
     for (;;) {
-        std::variant<int, ct::as_break> next;
+        std::variant<int, ct::indefinite_break> next;
         if (!dec(next)) return 1;
-        if (std::holds_alternative<ct::as_break>(next)) break;
+        if (std::holds_alternative<ct::indefinite_break>(next)) break;
         values.push_back(std::get<int>(next));
     }
     assert(values == source);

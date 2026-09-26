@@ -85,9 +85,9 @@ struct SignedSizeDequeByteRange {
 
 static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
-static_assert(IsBreak<as_break>);
-static_assert(!IsSimple<as_break>);
-static_assert(get_major_3_bit_tag<as_break>() == std::byte{0xE0});
+static_assert(IsIndefiniteBreak<indefinite_break>);
+static_assert(!IsSimple<indefinite_break>);
+static_assert(get_major_3_bit_tag<indefinite_break>() == std::byte{0xE0});
 
 } // namespace
 
@@ -125,8 +125,8 @@ TEST_SUITE("cbor_wire/any_headers") {
             CHECK_EQ(following, 7);
             CHECK(dec.tell() == input.cend());
 
-            auto                                          variant_dec = make_decoder(input);
-            std::variant<std::uint64_t, Header, as_break> token;
+            auto                                                  variant_dec = make_decoder(input);
+            std::variant<std::uint64_t, Header, indefinite_break> token;
             REQUIRE(variant_dec(token));
             REQUIRE(std::holds_alternative<Header>(token));
             CHECK_EQ(std::get<Header>(token).size, test.size);
@@ -146,8 +146,8 @@ TEST_SUITE("cbor_wire/any_headers") {
             CHECK_EQ(header.indefinite, ai == 0x1F);
             CHECK(dec.tell() == input.cend());
 
-            auto                                          variant_dec = make_decoder(input);
-            std::variant<std::uint64_t, Header, as_break> token;
+            auto                                                  variant_dec = make_decoder(input);
+            std::variant<std::uint64_t, Header, indefinite_break> token;
             REQUIRE(variant_dec(token));
             REQUIRE(std::holds_alternative<Header>(token));
             CHECK_EQ(std::get<Header>(token).size, ai == 0x1F ? 0 : 3);
@@ -171,16 +171,16 @@ TEST_SUITE("cbor_wire/any_headers") {
             } else {
                 CHECK(dec.tell() == std::next(input.cbegin()));
             }
-            std::uint64_t value{};
-            as_break      end;
+            std::uint64_t    value{};
+            indefinite_break end;
             REQUIRE(dec(value, end));
             CHECK_EQ(value, 7);
             CHECK(dec.tell() == std::ranges::end(input));
             if constexpr (std::same_as<Input, CountingUnsizedHeaderRange>) {
                 CHECK_EQ(input.increments, 3);
             }
-            auto                                          variant_dec = make_decoder(input);
-            std::variant<std::uint64_t, Header, as_break> token;
+            auto                                                  variant_dec = make_decoder(input);
+            std::variant<std::uint64_t, Header, indefinite_break> token;
             REQUIRE(variant_dec(token));
             REQUIRE(std::holds_alternative<Header>(token));
             CHECK_EQ(std::get<Header>(token).size, 0);
@@ -212,8 +212,8 @@ TEST_SUITE("cbor_wire/any_headers") {
             } else {
                 CHECK(dec.tell() == std::next(input.cbegin(), 3));
             }
-            auto                                          variant_dec = make_decoder(input);
-            std::variant<std::uint64_t, Header, as_break> token;
+            auto                                                  variant_dec = make_decoder(input);
+            std::variant<std::uint64_t, Header, indefinite_break> token;
             REQUIRE(variant_dec(token));
             REQUIRE(std::holds_alternative<Header>(token));
             CHECK_EQ(std::get<Header>(token).size, 256);
@@ -232,13 +232,13 @@ TEST_SUITE("cbor_wire/any_headers") {
 
     TEST_CASE_TEMPLATE("reused direct and variant headers reset size and indefinite state", Header, as_array_any, as_map_any, as_text_any,
                        as_bstr_any) {
-        const std::vector<std::uint8_t>               input{static_cast<std::uint8_t>(wire_major<Header>() | 0x1F),
-                                                            static_cast<std::uint8_t>(wire_major<Header>() | 0x03),
-                                                            static_cast<std::uint8_t>(wire_major<Header>() | 0x1F), wire_major<Header>()};
-        auto                                          dec         = make_decoder(input);
-        auto                                          variant_dec = make_decoder(input);
-        Header                                        header{42, false};
-        std::variant<std::uint64_t, Header, as_break> token{Header{42, false}};
+        const std::vector<std::uint8_t> input{static_cast<std::uint8_t>(wire_major<Header>() | 0x1F),
+                                              static_cast<std::uint8_t>(wire_major<Header>() | 0x03),
+                                              static_cast<std::uint8_t>(wire_major<Header>() | 0x1F), wire_major<Header>()};
+        auto                            dec         = make_decoder(input);
+        auto                            variant_dec = make_decoder(input);
+        Header                          header{42, false};
+        std::variant<std::uint64_t, Header, indefinite_break> token{Header{42, false}};
         for (const auto expected : {Header{0, true}, Header{3, false}, Header{0, true}, Header{0, false}}) {
             REQUIRE(dec(header));
             CHECK_EQ(header.size, expected.size);
@@ -266,9 +266,9 @@ TEST_SUITE("cbor_wire/any_headers") {
                 REQUIRE_FALSE(result);
                 CHECK_EQ(result.error(), status_code::incomplete);
 
-                auto                                          variant_dec = make_decoder(input);
-                std::variant<std::uint64_t, Header, as_break> token;
-                auto                                          variant_result = variant_dec(token);
+                auto                                                  variant_dec = make_decoder(input);
+                std::variant<std::uint64_t, Header, indefinite_break> token;
+                auto                                                  variant_result = variant_dec(token);
                 REQUIRE_FALSE(variant_result);
                 CHECK_EQ(variant_result.error(), status_code::incomplete);
 
@@ -389,16 +389,16 @@ TEST_SUITE("cbor_wire/any_headers") {
     TEST_CASE("break tokens work directly and in variants alongside other simple values") {
         const std::vector<std::uint8_t> input{0xFF, 0x07};
         auto                            dec = make_decoder(input);
-        as_break                        end;
+        indefinite_break                end;
         REQUIRE(dec(end));
         CHECK(dec.tell() == input.cbegin() + 1);
         std::uint64_t next{};
         REQUIRE(dec(next));
         CHECK_EQ(next, 7);
 
-        const std::vector<std::uint8_t>                      simple_input{0xF0, 0xF5, 0xF6, 0xFF};
-        auto                                                 variant_dec = make_decoder(simple_input);
-        std::variant<simple, bool, std::nullptr_t, as_break> token;
+        const std::vector<std::uint8_t>                              simple_input{0xF0, 0xF5, 0xF6, 0xFF};
+        auto                                                         variant_dec = make_decoder(simple_input);
+        std::variant<simple, bool, std::nullptr_t, indefinite_break> token;
         REQUIRE(variant_dec(token));
         REQUIRE(std::holds_alternative<simple>(token));
         CHECK_EQ(std::get<simple>(token).value, 16);
@@ -408,13 +408,13 @@ TEST_SUITE("cbor_wire/any_headers") {
         REQUIRE(variant_dec(token));
         CHECK(std::holds_alternative<std::nullptr_t>(token));
         REQUIRE(variant_dec(token));
-        CHECK(std::holds_alternative<as_break>(token));
+        CHECK(std::holds_alternative<indefinite_break>(token));
         CHECK(variant_dec.tell() == simple_input.cend());
     }
 
     TEST_CASE("break tokens reject non-break values and report absent input") {
         const std::vector<std::uint8_t> wrong{0xF6};
-        as_break                        end;
+        indefinite_break                end;
         CHECK_FALSE(make_decoder(wrong)(end));
         const std::vector<std::uint8_t> empty;
         const auto                      result = make_decoder(empty)(end);

@@ -79,8 +79,8 @@ TEST_SUITE("roundtrip/any_headers") {
         REQUIRE(dec(header));
         CHECK(header.indefinite);
 
-        std::vector<int>            decoded;
-        std::variant<int, as_break> token;
+        std::vector<int>                    decoded;
+        std::variant<int, indefinite_break> token;
         for (std::size_t index = 0; index < source.size(); ++index) {
             REQUIRE(dec(token));
             REQUIRE(std::holds_alternative<int>(token));
@@ -88,7 +88,7 @@ TEST_SUITE("roundtrip/any_headers") {
         }
         CHECK_EQ(decoded, source);
         REQUIRE(dec(token));
-        CHECK(std::holds_alternative<as_break>(token));
+        CHECK(std::holds_alternative<indefinite_break>(token));
         REQUIRE(dec(token));
         REQUIRE(std::holds_alternative<int>(token));
         CHECK_EQ(std::get<int>(token), 42);
@@ -111,7 +111,7 @@ TEST_SUITE("roundtrip/any_headers") {
             REQUIRE(decoded.emplace(key, value).second);
         }
         CHECK_EQ(decoded, source);
-        as_break end;
+        indefinite_break end;
         REQUIRE(dec(end));
     }
 
@@ -124,11 +124,11 @@ TEST_SUITE("roundtrip/any_headers") {
         as_text_any text_header{};
         REQUIRE(dec(text_header));
         CHECK(text_header.indefinite);
-        std::string                         decoded_text;
-        std::variant<std::string, as_break> text_chunk;
+        std::string                                 decoded_text;
+        std::variant<std::string, indefinite_break> text_chunk;
         while (true) {
             REQUIRE(dec(text_chunk));
-            if (std::holds_alternative<as_break>(text_chunk)) {
+            if (std::holds_alternative<indefinite_break>(text_chunk)) {
                 break;
             }
             decoded_text += std::get<std::string>(text_chunk);
@@ -138,11 +138,11 @@ TEST_SUITE("roundtrip/any_headers") {
         as_bstr_any byte_header{};
         REQUIRE(dec(byte_header));
         CHECK(byte_header.indefinite);
-        std::vector<std::byte>                         decoded_bytes;
-        std::variant<std::vector<std::byte>, as_break> byte_chunk;
+        std::vector<std::byte>                                 decoded_bytes;
+        std::variant<std::vector<std::byte>, indefinite_break> byte_chunk;
         while (true) {
             REQUIRE(dec(byte_chunk));
-            if (std::holds_alternative<as_break>(byte_chunk)) {
+            if (std::holds_alternative<indefinite_break>(byte_chunk)) {
                 break;
             }
             const auto &chunk = std::get<std::vector<std::byte>>(byte_chunk);

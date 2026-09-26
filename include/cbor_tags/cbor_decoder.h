@@ -1045,7 +1045,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    constexpr status_code decode(as_break &, major_type major, byte additionalInfo) {
+    constexpr status_code decode(indefinite_break &, major_type major, byte additionalInfo) {
         if (major != major_type::Simple) {
             return status_code::no_match_for_simple_on_buffer;
         }

@@ -128,7 +128,7 @@ content decoding is responsible for checking payload availability, consuming
 children or chunks, and enforcing application limits. Header decoding does not
 scan to a closing break or allocate from the declared length.
 
-`as_break` is a decode-only delimiter token that consumes a single CBOR break.
+`indefinite_break` is a decode-only delimiter token that consumes a single CBOR break.
 It can be an alternative in a visitor's variant. The visitor must allow it only
 in a valid indefinite context: a map cannot end between a key and its value,
 and indefinite string chunks must be definite strings of the same major type.

@@ -39,7 +39,7 @@ struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUn
                                                                             : IsMap<unwrap_type_t<T>>               ? 5
                                                                             : IsTag<unwrap_type_t<T>>               ? 6
                                                                             : IsSimple<unwrap_type_t<T>>            ? 7
-                                                                            : IsBreak<unwrap_type_t<T>>             ? 7
+                                                                            : IsIndefiniteBreak<unwrap_type_t<T>>   ? 7
                                                                             : IsRangeOfCborValues<unwrap_type_t<T>> ? 5
                                                                                                                     : 8)> {};
 
@@ -334,7 +334,7 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
 
         simples.push_back(current_tag);
     }
-    if constexpr (IsBreak<T>) {
+    if constexpr (IsIndefiniteBreak<T>) {
         unmatched = false;
         result[MajorIndex::Break]++;
     }

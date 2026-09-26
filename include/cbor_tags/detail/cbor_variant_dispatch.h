@@ -31,7 +31,7 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
     } else if constexpr (std::is_same_v<type, simple>) {
         const auto value = std::to_integer<std::uint8_t>(additional_info);
         return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
-    } else if constexpr (IsBreak<type>) {
+    } else if constexpr (IsIndefiniteBreak<type>) {
         return !CatchAllPass && additional_info == static_cast<std::byte>(31);
     } else if constexpr (IsSimple<type>) {
         return !CatchAllPass && compare_simple_value<type>(additional_info);

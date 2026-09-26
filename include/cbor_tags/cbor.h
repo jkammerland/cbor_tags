@@ -521,7 +521,7 @@ template <IsCborMajor T> constexpr std::byte get_major_3_bit_tag() {
         return static_cast<std::byte>(0xA0);
     } else if constexpr (IsTag<T>) {
         return static_cast<std::byte>(0xC0);
-    } else if constexpr (IsSimple<T> || IsBreak<T>) {
+    } else if constexpr (IsSimple<T> || IsIndefiniteBreak<T>) {
         return static_cast<std::byte>(0xE0);
     } else {
         return static_cast<std::byte>(0xFF);
