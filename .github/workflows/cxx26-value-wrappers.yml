@@ -29,4 +29,4 @@ jobs:
       - name: Build and test
         run: |
           cmake --build build --parallel 2
-          ctest --test-dir build --output-on-failure --parallel 2
+          ctest --test-dir build --output-on-failure --parallel 1
