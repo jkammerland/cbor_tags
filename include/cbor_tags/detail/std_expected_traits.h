@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_concepts.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_reflection.h"
+#include "cbor_tags/detail/cbor_payload_overload.h"
 #include "cbor_tags/detail/cbor_variant_traits.h"
 
 #include <cstddef>
@@ -12,33 +13,52 @@
 
 namespace cbor::tags::ext::std_expected::detail {
 
-// Inspect only opt-in codec mixins. The core optional/container dispatch must
-// still recursively validate its child item shapes.
 template <typename Self> struct expected_payload_mixin_customization;
 
 template <typename Buffer, IsOptions Options, template <typename> typename... Codecs>
 struct expected_payload_mixin_customization<encoder<Buffer, Options, Codecs...>> {
     using self_type = encoder<Buffer, Options, Codecs...>;
 
-    template <typename T> static consteval bool accepts() {
-        return ((std::is_base_of_v<cbor_encoder_mixin_base<self_type>, Codecs<self_type>> &&
-                 requires(Codecs<self_type> &codec, const T &value) { codec.encode(value); }) ||
-                ...);
+    template <typename T, typename Codec> static consteval bool accepts_codec() {
+        if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor_encoder_mixin_base<self_type>, Codec>) {
+            return false;
+        } else {
+            using probe = cbor::tags::detail::payload_encoder_overload_probe<self_type, Codec>;
+            if constexpr (requires(self_type &self, probe &codec, const T &value) {
+                              self.encode(value);
+                              codec.encode(value);
+                          }) {
+                return !std::same_as<decltype(std::declval<probe &>().encode(std::declval<const T &>())),
+                                     cbor::tags::detail::core_payload_overload>;
+            } else {
+                return false;
+            }
+        }
     }
+
+    template <typename T> static consteval bool accepts() { return (accepts_codec<T, Codecs<self_type>>() || ...); }
 };
 
 template <typename Buffer, IsOptions Options, template <typename> typename... Codecs>
 struct expected_payload_mixin_customization<decoder<Buffer, Options, Codecs...>> {
     using self_type = decoder<Buffer, Options, Codecs...>;
 
-    template <typename T> static consteval bool accepts() {
-        return ((std::is_base_of_v<cbor_decoder_mixin_base<self_type>, Codecs<self_type>> &&
-                 (requires(Codecs<self_type> &codec, T &value) {
-                     { codec.decode(value) } -> std::same_as<status_code>;
-                 } || requires(Codecs<self_type> &codec, T &value, major_type major, std::byte info) {
-                     { codec.decode(value, major, info) } -> std::same_as<status_code>;
-                 })) || ...);
+    template <typename T, typename Codec> static consteval bool accepts_codec() {
+        if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor_decoder_mixin_base<self_type>, Codec>) {
+            return false;
+        } else {
+            using probe = cbor::tags::detail::payload_decoder_overload_probe<self_type, Codec>;
+            return requires(self_type &self, probe &codec, T &value) {
+                { self.decode(value) } -> std::same_as<status_code>;
+                { codec.decode(value) } -> std::same_as<status_code>;
+            } || requires(self_type &self, probe &codec, T &value, major_type major, std::byte info) {
+                { self.decode(value, major, info) } -> std::same_as<status_code>;
+                { codec.decode(value, major, info) } -> std::same_as<status_code>;
+            };
+        }
     }
+
+    template <typename T> static consteval bool accepts() { return (accepts_codec<T, Codecs<self_type>>() || ...); }
 };
 
 template <typename Self, typename T, typename... Parents> consteval bool expected_payload_encodes_one_item();

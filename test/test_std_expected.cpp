@@ -208,6 +208,38 @@ TEST_SUITE("roundtrip/std_expected") {
         CHECK_EQ(*decoded, *original);
     }
 
+    TEST_CASE("std::expected codec preserves template and by-value mixin overloads") {
+        for (bool success : {false, true}) {
+            using payload                   = std::expected<templated_mixin_empty<int>, by_value_mixin_empty>;
+            const payload          original = success ? payload{} : payload{std::unexpected{by_value_mixin_empty{}}};
+            std::vector<std::byte> bytes;
+            auto                   enc = make_encoder<templated_empty_item_codec, by_value_empty_item_codec, std_expected_codec>(bytes);
+            REQUIRE(enc(original, 7));
+            auto    dec = make_decoder<templated_empty_item_codec, by_value_empty_item_codec, std_expected_codec>(bytes);
+            payload decoded;
+            REQUIRE(dec(decoded));
+            CHECK_EQ(decoded.has_value(), original.has_value());
+            int following{};
+            REQUIRE(dec(following));
+            CHECK_EQ(following, 7);
+        }
+    }
+
+    TEST_CASE("std::expected codec preserves more constrained container mixins") {
+        const std::expected<std::vector<mixin_empty>, int> original{std::vector<mixin_empty>(2)};
+        std::vector<std::byte>                             bytes;
+        auto                                               enc = make_encoder<constrained_array_item_codec, std_expected_codec>(bytes);
+        REQUIRE(enc(original, 7));
+        auto                                         dec = make_decoder<constrained_array_item_codec, std_expected_codec>(bytes);
+        std::expected<std::vector<mixin_empty>, int> decoded;
+        REQUIRE(dec(decoded));
+        REQUIRE(decoded.has_value());
+        CHECK_EQ(*decoded, *original);
+        int following{};
+        REQUIRE(dec(following));
+        CHECK_EQ(following, 7);
+    }
+
 } // TEST_SUITE
 
 #endif

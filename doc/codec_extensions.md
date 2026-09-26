@@ -171,7 +171,9 @@ Current public extension headers:
   Application customizations and other codec mixins own their representation
   and must produce/consume one complete item. An empty C++ type with explicit
   encode/decode methods or a matching installed codec-mixin overload can provide
-  such a representation. Unrelated mixins do not change payload validation.
+  such a representation. Only an overload selected for the payload argument
+  changes validation; a conversion-only overload or a generic overload shadowed
+  by core dispatch does not. Unrelated mixins do not change payload validation.
   Statically empty arrays and spans are complete items even when their element
   type is an empty reflected group.
 - `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.

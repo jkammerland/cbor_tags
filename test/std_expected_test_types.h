@@ -70,6 +70,58 @@ template <typename Self> struct empty_item_codec : cbor_codec_mixin_base<Self> {
     }
 };
 
+template <typename T> struct templated_mixin_empty {};
+
+template <typename Self> struct templated_empty_item_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::encode;
+    using cbor_codec_mixin_base<Self>::decode;
+    template <typename T> void        encode(const templated_mixin_empty<T> &) { static_cast<Self &>(*this).encode(nullptr); }
+    template <typename T> status_code decode(templated_mixin_empty<T> &) {
+        std::nullptr_t value{};
+        return static_cast<Self &>(*this).decode(value);
+    }
+    template <typename T> status_code decode(templated_mixin_empty<T> &, major_type major, std::byte info) {
+        std::nullptr_t value{};
+        return static_cast<Self &>(*this).decode(value, major, info);
+    }
+};
+
+struct by_value_mixin_empty {};
+
+template <typename Self> struct by_value_empty_item_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::encode;
+    using cbor_codec_mixin_base<Self>::decode;
+    void        encode(by_value_mixin_empty) { static_cast<Self &>(*this).encode(nullptr); }
+    status_code decode(by_value_mixin_empty &) {
+        std::nullptr_t value{};
+        return static_cast<Self &>(*this).decode(value);
+    }
+    status_code decode(by_value_mixin_empty &, major_type major, std::byte info) {
+        std::nullptr_t value{};
+        return static_cast<Self &>(*this).decode(value, major, info);
+    }
+};
+
+template <typename Self> struct constrained_array_item_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::encode;
+    using cbor_codec_mixin_base<Self>::decode;
+    template <IsArray T>
+        requires std::same_as<T, std::vector<mixin_empty>>
+    void encode(const T &value) {
+        static_cast<Self &>(*this).encode(value.size());
+    }
+    template <IsRangeOfCborValues T>
+        requires std::same_as<T, std::vector<mixin_empty>>
+    status_code decode(T &value, major_type major, std::byte info) {
+        std::size_t size{};
+        const auto  status = static_cast<Self &>(*this).decode(size, major, info);
+        if (status == status_code::success) {
+            value.resize(size);
+        }
+        return status;
+    }
+};
+
 template <typename T, typename E> std::vector<std::byte> encode_expected(const std::expected<T, E> &value) {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder<std_expected_codec>(buffer);
