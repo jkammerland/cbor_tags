@@ -54,7 +54,9 @@ template <typename Self> struct std_indirect_codec : cbor_codec_mixin_base<Self>
     [[nodiscard]] constexpr status_code decode(std::indirect<T, Alloc> &value, major_type major, std::byte additional_info) {
         require_single_item<T>();
         if (value.valueless_after_move()) {
-            value = std::indirect<T, Alloc>(std::allocator_arg, value.get_allocator());
+            std::indirect<T, Alloc> replacement(std::allocator_arg, value.get_allocator());
+            // Equal allocators let swap transfer ownership without moving T.
+            value.swap(replacement);
         }
         return static_cast<Self &>(*this).decode(*value, major, additional_info);
     }
