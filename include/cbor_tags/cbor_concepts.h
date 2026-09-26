@@ -16,6 +16,11 @@
 #include <utility>
 #include <variant>
 
+// Recognize Boost's fixed array without making Boost a dependency.
+namespace boost {
+template <typename T, std::size_t N> class array;
+}
+
 namespace cbor::tags {
 
 enum class status_code : std::uint8_t;
@@ -371,6 +376,14 @@ template <class T> constexpr bool is_optional_v = detail::is_optional_v<T>;
 
 namespace detail {
 
+template <typename T> struct is_static_array : std::false_type {};
+template <typename T, std::size_t N> struct is_static_array<std::array<T, N>> : std::true_type {
+    static constexpr std::size_t extent = N;
+};
+template <typename T, std::size_t N> struct is_static_array<boost::array<T, N>> : std::true_type {
+    static constexpr std::size_t extent = N;
+};
+
 template <typename T> struct is_fixed_array_span : std::false_type {};
 template <typename T, std::size_t Extent> struct is_fixed_array_span<std::span<T, Extent>> : std::bool_constant<!std::is_const_v<T>> {};
 template <typename T> constexpr bool is_fixed_array_span_v = is_fixed_array_span<std::remove_cvref_t<T>>::value;
@@ -387,12 +400,10 @@ concept IsRangeOfCborValuesBase =
     detail::RangeOfCborValuesBase<T, IsStringBase<std::remove_cvref_t<T>>, is_optional_v<std::remove_cvref_t<T>>>;
 
 template <typename T>
-concept IsFixedArray =
-    requires {
-        typename T::value_type;
-        typename T::size_type;
-    } && (detail::is_fixed_array_span_v<T> ||
-          (requires { typename std::tuple_size<T>::type; } && std::is_same_v<T, std::array<typename T::value_type, std::tuple_size_v<T>>>));
+concept IsFixedArray = requires {
+    typename T::value_type;
+    typename T::size_type;
+} && (detail::is_fixed_array_span_v<T> || detail::is_static_array<T>::value);
 
 template <typename T>
 concept CborFixedOutputBuffer = IsFixedArray<std::remove_cvref_t<T>> && requires(std::remove_cvref_t<T> buffer) {
