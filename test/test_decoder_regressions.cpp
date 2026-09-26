@@ -122,19 +122,6 @@ struct AdlSizedByteRange {
     friend std::uint16_t    size(const AdlSizedByteRange &range) noexcept { return static_cast<std::uint16_t>(range.bytes.size()); }
 };
 
-struct SignedSizeDequeByteRange {
-    using value_type = std::byte;
-    using size_type  = int;
-
-    std::deque<std::byte> bytes;
-
-    [[nodiscard]] auto begin() noexcept { return bytes.begin(); }
-    [[nodiscard]] auto begin() const noexcept { return bytes.begin(); }
-    [[nodiscard]] auto end() noexcept { return bytes.end(); }
-    [[nodiscard]] auto end() const noexcept { return bytes.end(); }
-    [[nodiscard]] auto size() const noexcept { return static_cast<size_type>(bytes.size()); }
-};
-
 struct CountingUnsizedByteRange {
     using value_type = std::byte;
 
@@ -342,8 +329,6 @@ static_assert(IsRangeOfCborValues<ReserveTrackingIntVector>);
 static_assert(IsMap<ReserveTrackingIntMap>);
 static_assert(CborInputBuffer<AdlSizedByteRange>);
 static_assert(std::same_as<typename decltype(make_decoder(std::declval<AdlSizedByteRange &>()))::size_type, std::uint16_t>);
-static_assert(CborInputBuffer<SignedSizeDequeByteRange>);
-static_assert(std::same_as<typename decltype(make_decoder(std::declval<SignedSizeDequeByteRange &>()))::size_type, int>);
 static_assert(IsBinaryString<ReserveWithoutSizeByteBuffer>);
 static_assert(HasReserve<ReserveWithoutSizeByteBuffer>);
 static_assert(!detail::AppendReservable<ReserveWithoutSizeByteBuffer>);
@@ -657,17 +642,6 @@ TEST_CASE("decoder should propagate incomplete from nested indefinite arrays") {
     CHECK_EQ(result.error(), status_code::incomplete);
 }
 
-TEST_CASE("decoder should propagate incomplete from variant alternatives") {
-    std::vector<std::byte> buffer{std::byte{0x62}, std::byte{'a'}};
-
-    auto                                     dec = make_decoder(buffer);
-    std::variant<std::uint64_t, as_text_any> decoded;
-    auto                                     result = dec(decoded);
-
-    REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::incomplete);
-}
-
 TEST_CASE("decoder should decode extended simple values") {
     std::vector<std::byte> buffer{std::byte{0xF8}, std::byte{0x10}};
 
@@ -779,30 +753,6 @@ TEST_CASE("decoder validates definite string payloads once") {
         CHECK_EQ(decoded, "ok");
         // Initial-byte, payload, and alias checks may each query the input size.
         CHECK(input.size_calls <= 3);
-    }
-}
-
-TEST_CASE("decoder consumes unsized string headers in one destructive traversal") {
-    SUBCASE("byte string header") {
-        CountingUnsizedByteRange input{{std::byte{0x43}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}};
-        as_bstr_any              decoded{};
-        auto                     dec = make_decoder(input);
-
-        REQUIRE(dec(decoded));
-        CHECK_EQ(decoded.size, 3);
-        CHECK_EQ(input.increments, input.bytes.size());
-        CHECK(dec.tell() == input.end());
-    }
-
-    SUBCASE("text string header") {
-        CountingUnsizedByteRange input{{std::byte{0x62}, std::byte{'o'}, std::byte{'k'}}};
-        as_text_any              decoded{};
-        auto                     dec = make_decoder(input);
-
-        REQUIRE(dec(decoded));
-        CHECK_EQ(decoded.size, 2);
-        CHECK_EQ(input.increments, input.bytes.size());
-        CHECK(dec.tell() == input.end());
     }
 }
 
@@ -926,36 +876,6 @@ TEST_CASE("decoder reserves definite containers only after a size confirmation")
         CHECK_EQ(decoded.size(), 1U);
         CHECK_EQ(decoded.at(1), 2);
         CHECK_EQ(input.increments, input.bytes.size());
-    }
-}
-
-TEST_CASE("decoder retains unsized string prefixes after incomplete input") {
-    SUBCASE("header skip is destructive") {
-        CountingUnsizedByteRange input{{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}}};
-        as_bstr_any              decoded{};
-        auto                     dec = make_decoder(input);
-
-        auto result = dec(decoded);
-
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::incomplete);
-        CHECK_EQ(decoded.size, 5);
-        CHECK_EQ(input.increments, input.bytes.size());
-        CHECK(dec.tell() == input.end());
-    }
-
-    SUBCASE("owning text string retains the consumed payload prefix") {
-        CountingUnsizedByteRange input{{std::byte{0x65}, std::byte{'o'}, std::byte{'k'}}};
-        std::string              decoded{"prefix:"};
-        auto                     dec = make_decoder(input);
-
-        auto result = dec(decoded);
-
-        REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::incomplete);
-        CHECK_EQ(decoded, "prefix:ok");
-        CHECK_EQ(input.increments, input.bytes.size());
-        CHECK(dec.tell() == input.end());
     }
 }
 
@@ -1326,32 +1246,6 @@ TEST_CASE("decoder readers reject negative seeks before begin") {
     CHECK_THROWS_AS(non_contiguous_reader.seek(std::numeric_limits<std::ptrdiff_t>::min()), std::runtime_error);
 }
 
-TEST_CASE("decoder skips any byte strings on signed-size non-contiguous ranges") {
-    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x41}, std::byte{0x01}, std::byte{0x02}}};
-
-    auto         dec = make_decoder(buffer);
-    as_bstr_any  decoded{};
-    std::uint8_t following{};
-    auto         result = dec(decoded, following);
-
-    REQUIRE(result);
-    CHECK_EQ(decoded.size, 1);
-    CHECK_EQ(following, 2);
-}
-
-TEST_CASE("decoder skips any text strings on signed-size non-contiguous ranges") {
-    SignedSizeDequeByteRange buffer{.bytes = {std::byte{0x61}, std::byte{0x41}, std::byte{0x02}}};
-
-    auto         dec = make_decoder(buffer);
-    as_text_any  decoded{};
-    std::uint8_t following{};
-    auto         result = dec(decoded, following);
-
-    REQUIRE(result);
-    CHECK_EQ(decoded.size, 1);
-    CHECK_EQ(following, 2);
-}
-
 TEST_CASE("decoder should report incomplete byte-string view without retry contract") {
     // bstr(2): 0x42, but only 1 byte payload initially
     std::vector<std::byte> buffer{std::byte{0x42}, std::byte{0x01}};
@@ -1570,68 +1464,6 @@ TEST_CASE("decoder should decode indefinite containers without staging through a
     CHECK_EQ(decoded_vector[0], 5);
     CHECK_EQ(decoded_vector[1], 6);
     CHECK_EQ(decoded_vector.get_allocator().tag, 5);
-}
-
-TEST_CASE("decoder should validate as_text_any length against available bytes") {
-    // tstr(5): 0x65, but only 3 bytes payload -> truncated
-    std::vector<std::byte> buffer{std::byte{0x65}, std::byte{0x61}, std::byte{0x62}, std::byte{0x63}};
-
-    auto dec = make_decoder(buffer);
-
-    as_text_any header{};
-    auto        result = dec(header);
-
-    CHECK_FALSE_MESSAGE(result, "Decoding as_text_any on truncated input should fail.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-}
-
-TEST_CASE("decoder should not walk past end for as_text_any on non-contiguous truncated input") {
-    // tstr(5): 0x65, but only 1 byte payload; decoding another item after skipping would be UB.
-    std::deque<std::byte> buffer{std::byte{0x65}, std::byte{'a'}};
-
-    auto dec = make_decoder(buffer);
-
-    as_text_any  header{};
-    std::uint8_t next_value{};
-    auto         result = dec(header, next_value);
-
-    CHECK_FALSE_MESSAGE(result, "Truncated as_text_any must fail before attempting to advance non-contiguous iterators.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(header.size, 5);
-}
-
-TEST_CASE("decoder should not advance non-contiguous iterators past end for as_bstr_any") {
-    // bstr(1): 0x41 0xAA, then bstr(1): 0x41 but missing payload
-    std::deque<std::uint8_t> buffer{0x41, 0xAA, 0x41};
-
-    auto dec = make_decoder(buffer);
-
-    as_bstr_any first{};
-    as_bstr_any second{};
-    auto        result = dec(first, second);
-
-    CHECK_FALSE_MESSAGE(result, "Second as_bstr_any should detect incomplete payload without advancing past end.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(first.size, 1);
-    CHECK_EQ(second.size, 1);
-}
-
-TEST_CASE("decoder non-contiguous bstr_view should update offset for subsequent bounds checks") {
-    // bstr(5): 0x45 01 02 03 04 05, then bstr(3): 0x43 AA (truncated payload)
-    // Regression: if non-contiguous bstr decode doesn't keep current_offset_ in sync, the next header can skip past end (ASAN/crash).
-    std::deque<std::byte> buffer{std::byte{0x45}, std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
-                                 std::byte{0x04}, std::byte{0x05}, std::byte{0x43}, std::byte{0xAA}};
-
-    auto dec = make_decoder(buffer);
-
-    decltype(dec)::bstr_view_t first_view{};
-    as_bstr_any                second_header{};
-    std::uint8_t               next_value{};
-    auto                       result = dec(first_view, second_header, next_value);
-
-    CHECK_FALSE_MESSAGE(result, "Second header should fail as incomplete without advancing beyond end.");
-    CHECK_EQ(result.error(), status_code::incomplete);
-    CHECK_EQ(second_header.size, 3);
 }
 
 TEST_CASE("decoder should reject array length mismatch for fixed-size containers") {

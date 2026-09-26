@@ -23,6 +23,24 @@ Use exact bytes or hex when the bytes are the behavior under test, including:
 
 Keep exact-wire assertions separate from semantic roundtrip assertions. A serializer and decoder can agree on the same wrong representation, while an exact-byte test cannot prove that decoded values survive a refactor.
 
+Put literal CBOR hex, encoded-byte fixtures, exact cursor offsets, and representation
+assertions in dedicated `*_wire.cpp` files and named `cbor_wire/...` suites. Keep
+semantic round-trip cases in separate files and `roundtrip/...` suites: generate
+input with the encoder and compare decoded values, without asserting particular
+encoded bytes or byte counts. This lets another encoding reuse the semantic
+cases while retaining CBOR-specific conformance and malformed-input coverage.
+
+The header tests follow this split and can be selected independently:
+
+```sh
+ctest --test-dir build -L cbor-wire --output-on-failure
+ctest --test-dir build -L roundtrip --output-on-failure
+```
+
+The labels select the isolated header suites; older test files keep their
+existing CTest registration. Apply the same separation when adding or revising
+other suites.
+
 ## Negative tests
 
 Negative coverage should identify the failed contract and expected destination state. Cover wrong major types, invalid tags, truncation at structural boundaries, invalid lengths or indexes, configured limits, and trailing bytes where relevant. Prefer deterministic tables for related malformed cases; fuzzing may supplement but does not replace named regression cases.

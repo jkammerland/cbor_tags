@@ -35,6 +35,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -42,7 +43,6 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
-#include <stack>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -225,7 +225,7 @@ struct CDDLContext {
 };
 
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
-                                       double, bool, std::nullptr_t, simple>;
+                                       double, bool, std::nullptr_t, simple, as_break>;
 
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
     std::string indent(options.current_indent * 2, ' ');
@@ -1601,80 +1601,94 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
 
     auto dec = make_decoder(cbor_buffer);
 
-    detail::catch_all_variant value;
-    std::stack<size_t>        indent_stack;
-
-    auto indentation_visitor = [&indent_stack](auto &&value) {
-        if constexpr (IsArrayHeader<std::remove_cvref_t<decltype(value)>>) {
-            indent_stack.push(value.size + 1);
-            return true;
-        } else if constexpr (IsMapHeader<std::remove_cvref_t<decltype(value)>>) {
-            indent_stack.push(value.size * 2 + 1);
-            return true;
-        } else if constexpr (IsTagHeader<std::remove_cvref_t<decltype(value)>>) {
-            indent_stack.push(1 + 1);
-            return true;
-        } else {
-            return false;
+    // Headers leave the cursor at the payload. Walk complete items so that a
+    // string's raw bytes and an indefinite item's break are consumed only here.
+    auto annotate_item = [&](auto &&self, std::size_t depth, bool allow_break = false,
+                             std::optional<std::size_t> chunk_index = std::nullopt) -> bool {
+        if (depth >= options.max_structure_depth) {
+            throw std::runtime_error("CBOR annotation nesting depth exceeded");
         }
-    };
-    constexpr auto string_size_visitor = [](auto &&value) {
-        using value_type = std::remove_cvref_t<decltype(value)>;
-        if constexpr (IsTextHeader<value_type> || IsBinaryHeader<value_type>) {
-            return value.size;
-        } else {
-            return std::uint64_t{0};
+        const auto                begin = dec.tell();
+        detail::catch_all_variant value;
+        if (!dec(value)) {
+            throw std::runtime_error("Malformed CBOR input: incomplete or invalid item");
         }
-    };
-
-    constexpr auto string_length_to_header_size = [](std::uint64_t length) {
-        if (length < 24) {
-            return 1;
-        } else if (length <= std::numeric_limits<std::uint8_t>::max()) {
-            return 2;
-        } else if (length <= std::numeric_limits<std::uint16_t>::max()) {
-            return 3;
-        } else if (length <= std::numeric_limits<std::uint32_t>::max()) {
-            return 5;
-        } else {
-            return 9;
+        const auto header_end = dec.tell();
+        const auto is_break   = std::holds_alternative<as_break>(value);
+        if (is_break && !allow_break) {
+            throw std::runtime_error("Malformed CBOR input: break outside indefinite item");
         }
-    };
-
-    auto it = dec.tell();
-
-    while (dec(value)) {
-        auto next_it       = dec.tell();
-        auto should_indent = std::visit(indentation_visitor, value);
-
-        if (std::holds_alternative<as_text_any>(value) || std::holds_alternative<as_bstr_any>(value)) {
-            auto size        = std::visit(string_size_visitor, value);
-            auto header_size = string_length_to_header_size(size);
-            detail::format_bytes(output_buffer, it, it + 1, options);                                          // Major type
-            detail::format_bytes(output_buffer, it + 1, it + header_size, {.current_indent = 0, .offset = 1}); // extra header
-            text::format_to(std::back_inserter(output_buffer), "\n");
-            options.current_indent++;
-            options.offset++;
-            detail::format_bytes(output_buffer, it + header_size, next_it, options);
-            options.current_indent--;
-            options.offset--;
-        } else {
-            detail::format_bytes(output_buffer, it, it + 1, options);
-            detail::format_bytes(output_buffer, it + 1, next_it, {.current_indent = 0, .offset = 1});
-        }
-
-        if (!indent_stack.empty()) {
-            indent_stack.top()--;
-
-            if (indent_stack.top() == 0) {
-                indent_stack.pop();
-                options.current_indent--;
+        if (chunk_index && !is_break) {
+            const bool definite_chunk = std::visit(
+                [](const auto &arg) {
+                    using T = std::remove_cvref_t<decltype(arg)>;
+                    if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
+                        return !arg.indefinite;
+                    } else {
+                        return false;
+                    }
+                },
+                value);
+            if (value.index() != *chunk_index || !definite_chunk) {
+                throw std::runtime_error("Malformed CBOR input: invalid indefinite string chunk");
             }
         }
-        options.current_indent += should_indent;
-        options.offset = indent_stack.size();
+
+        auto item_options = options;
+        item_options.current_indent += depth;
+        item_options.offset += depth;
+        const auto after_initial = std::next(begin);
+        detail::format_bytes(output_buffer, begin, after_initial, item_options);
+        detail::format_bytes(output_buffer, after_initial, header_end, {.current_indent = 0, .offset = 1});
         text::format_to(std::back_inserter(output_buffer), "\n");
-        it = next_it;
+        if (is_break) {
+            return true;
+        }
+
+        std::visit(
+            [&](const auto &arg) {
+                using T = std::remove_cvref_t<decltype(arg)>;
+                if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
+                    if (arg.indefinite) {
+                        while (!self(self, depth + 1U, true, value.index())) {}
+                    } else {
+                        if (arg.size != 0U && depth + 1U >= options.max_structure_depth) {
+                            throw std::runtime_error("CBOR annotation nesting depth exceeded");
+                        }
+                        try {
+                            if constexpr (IsTextHeader<T>) {
+                                (void)dec.decode_text_payload(arg.size);
+                            } else {
+                                (void)dec.decode_bstring_payload(arg.size);
+                            }
+                        } catch (const std::runtime_error &error) {
+                            throw std::runtime_error(text::format("Malformed CBOR input: {}", error.what()));
+                        }
+                        ++item_options.current_indent;
+                        ++item_options.offset;
+                        detail::format_bytes(output_buffer, header_end, dec.tell(), item_options);
+                        text::format_to(std::back_inserter(output_buffer), "\n");
+                    }
+                } else if constexpr (IsArrayHeader<T> || IsMapHeader<T>) {
+                    for (std::uint64_t index = 0; arg.indefinite || index < arg.size; ++index) {
+                        if (self(self, depth + 1U, arg.indefinite)) {
+                            break;
+                        }
+                        if constexpr (IsMapHeader<T>) {
+                            // A map may end only between complete key/value pairs.
+                            self(self, depth + 1U);
+                        }
+                    }
+                } else if constexpr (IsTagHeader<T>) {
+                    self(self, depth + 1U);
+                }
+            },
+            value);
+        return false;
+    };
+
+    while (!detail::decoder_at_end(dec)) {
+        annotate_item(annotate_item, 0U);
     }
 }
 
@@ -2316,15 +2330,18 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         check_depth();
         const auto format_by_rows = options.row_options.format_by_rows;
         auto       base_offset    = std::string(options.row_options.offset * options.row_options.current_indent * format_by_rows, ' ');
-        text::format_to(std::back_inserter(output_buffer), "{{{}", options.row_options.format_by_rows ? "\n" : "");
+        text::format_to(std::back_inserter(output_buffer), "{{{}{}", arg.indefinite ? "_ " : "", format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
         auto child   = child_options();
         bool emitted = false;
-        for (size_t i = 0; i < arg.size; i++) {
+        for (std::uint64_t i = 0; arg.indefinite || i < arg.size; ++i) {
             detail::catch_all_variant key;
             detail::catch_all_variant value;
             if (!dec(key)) {
                 throw std::runtime_error("Malformed CBOR diagnostic map key");
+            }
+            if (arg.indefinite && std::holds_alternative<as_break>(key)) {
+                break;
             }
             if (emitted) {
                 append_diagnostic_separator(output_buffer, format_by_rows);
@@ -2351,14 +2368,17 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         check_depth();
         const bool format_by_rows = options.row_options.format_by_rows && !options.row_options.override_array_by_columns;
         auto       base_offset    = std::string(format_by_rows * options.row_options.offset * options.row_options.current_indent, ' ');
-        text::format_to(std::back_inserter(output_buffer), "[{}", format_by_rows ? "\n" : "");
+        text::format_to(std::back_inserter(output_buffer), "[{}{}", arg.indefinite ? "_ " : "", format_by_rows ? "\n" : "");
         options.row_options.current_indent++;
         auto child   = child_options();
         bool emitted = false;
-        for (size_t i = 0; i < arg.size; i++) {
+        for (std::uint64_t i = 0; arg.indefinite || i < arg.size; ++i) {
             detail::catch_all_variant values;
             if (!dec(values)) {
                 throw std::runtime_error(text::format("Malformed CBOR diagnostic array item {}", i));
+            }
+            if (arg.indefinite && std::holds_alternative<as_break>(values)) {
+                break;
             }
             if (emitted) {
                 append_diagnostic_separator(output_buffer, format_by_rows);
@@ -2376,23 +2396,58 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
         text::format_to(std::back_inserter(output_buffer), "]");
     }
 
+    template <typename Header> constexpr void render_indefinite_string() {
+        check_depth();
+        bool emitted = false;
+        while (true) {
+            detail::catch_all_variant value;
+            if (!dec(value)) {
+                throw std::runtime_error("Unterminated indefinite CBOR diagnostic string");
+            }
+            if (std::holds_alternative<as_break>(value)) {
+                if (!emitted) {
+                    // RFC 8949 section 8.1 distinguishes zero chunks from an empty chunk.
+                    text::format_to(std::back_inserter(output_buffer), "{}", IsTextHeader<Header> ? "\"\"_" : "''_");
+                    return;
+                }
+                break;
+            }
+            const auto *chunk = std::get_if<Header>(&value);
+            if (chunk == nullptr || chunk->indefinite) {
+                throw std::runtime_error("Invalid indefinite CBOR diagnostic string chunk");
+            }
+            if (emitted) {
+                append_diagnostic_separator(output_buffer, false);
+            } else {
+                text::format_to(std::back_inserter(output_buffer), "(_ ");
+            }
+            diagnostic_visitor{output_buffer, dec, child_options()}(*chunk);
+            emitted = true;
+        }
+        text::format_to(std::back_inserter(output_buffer), ")");
+    }
+
     template <IsTextHeader T> constexpr void operator()(const T &arg) {
-        auto current_pos  = dec.tell();
-        auto after_header = current_pos - arg.size;
-        auto range        = std::ranges::subrange(after_header, current_pos);
-        auto char_view    = range | std::views::transform([](auto b) { return static_cast<char>(b); });
+        check_depth();
+        if (arg.indefinite) {
+            render_indefinite_string<T>();
+            return;
+        }
+        const auto range = dec.decode_text_payload(arg.size);
         if (options.check_tstr_utf8 && !detail::is_valid_utf8(range)) {
             text::format_to(std::back_inserter(output_buffer), "non-utf8({})", arg.size);
             return;
         }
-        append_escaped_diagnostic_text(output_buffer, std::ranges::begin(char_view), std::ranges::end(char_view));
+        append_escaped_diagnostic_text(output_buffer, std::ranges::begin(range), std::ranges::end(range));
     }
 
     template <IsBinaryHeader T> constexpr void operator()(const T &arg) {
-
-        auto current_pos  = dec.tell();
-        auto after_header = current_pos - arg.size;
-        auto range        = std::ranges::subrange(after_header, current_pos);
+        check_depth();
+        if (arg.indefinite) {
+            render_indefinite_string<T>();
+            return;
+        }
+        const auto range = dec.decode_bstring_payload(arg.size);
         text::format_to(std::back_inserter(output_buffer), "h'");
         for (const auto value : range) {
             if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, std::byte>) {
@@ -2406,7 +2461,9 @@ template <typename OutputBuffer, typename Decoder> struct diagnostic_visitor {
 
     template <typename T> constexpr void operator()(const T &arg) {
 
-        if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
+        if constexpr (std::same_as<T, as_break>) {
+            throw std::runtime_error("CBOR break outside indefinite item");
+        } else if constexpr (IsUnsigned<std::remove_cvref_t<decltype(arg)>>) {
             text::format_to(std::back_inserter(output_buffer), "{}", arg);
         } else if constexpr (IsNegative<std::remove_cvref_t<decltype(arg)>>) {
             text::format_to(std::back_inserter(output_buffer), "{}", detail::negative_diagnostic_text(arg));

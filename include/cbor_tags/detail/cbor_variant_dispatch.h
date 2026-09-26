@@ -31,6 +31,8 @@ template <bool CatchAllPass, typename U> constexpr bool matches_simple_dispatch(
     } else if constexpr (std::is_same_v<type, simple>) {
         const auto value = std::to_integer<std::uint8_t>(additional_info);
         return CatchAllPass && value <= static_cast<std::uint8_t>(SimpleType::Simple);
+    } else if constexpr (IsBreak<type>) {
+        return !CatchAllPass && additional_info == static_cast<std::byte>(31);
     } else if constexpr (IsSimple<type>) {
         return !CatchAllPass && compare_simple_value<type>(additional_info);
     } else {
@@ -66,6 +68,7 @@ template <typename Variant> consteval void require_unambiguous_variant_dispatch_
     static_assert(mapping[MajorIndex::float16] <= 1, "Multiple types match against major type 7 (float16)");
     static_assert(mapping[MajorIndex::float32] <= 1, "Multiple types match against major type 7 (float32)");
     static_assert(mapping[MajorIndex::float64] <= 1, "Multiple types match against major type 7 (float64)");
+    static_assert(mapping[MajorIndex::Break] <= 1, "Multiple types match against the CBOR break delimiter");
     static_assert(mapping[MajorIndex::DynamicTag] == 0,
                   "Variant cannot contain dynamic tags, must be known at compile time, use as_tag_any to catch any tag");
 }

@@ -61,7 +61,7 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization")
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
 set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
@@ -177,6 +177,11 @@ set_tests_properties(byte_views_wire PROPERTIES LABELS "cbor-wire")
 
 add_test(NAME container_capacity_wire COMMAND tests "--test-suite=cbor_wire/container_capacity")
 set_tests_properties(container_capacity_wire PROPERTIES LABELS "cbor-wire")
+
+add_test(NAME any_headers_wire COMMAND tests "--test-suite=cbor_wire/*")
+set_tests_properties(any_headers_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME any_headers_roundtrip COMMAND tests "--test-suite=roundtrip/any_headers,roundtrip/headers_visualization")
+set_tests_properties(any_headers_roundtrip PROPERTIES LABELS "roundtrip")
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)

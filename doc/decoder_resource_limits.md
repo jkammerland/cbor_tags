@@ -113,6 +113,43 @@ lazy-tag discovery), not a generic extension escape hatch. Such a feature
 needs its own documentation and tests, returns an explicit terminal status,
 and does not make prewalking or rollback valid in the core decoder.
 
+### Header descriptors
+
+`as_array_any`, `as_map_any`, `as_text_any`, and `as_bstr_any` consume only
+the header. Their `indefinite` flag distinguishes an indefinite header from a
+declared `size`. The size is an element count for arrays, a pair count for maps,
+and a byte count for strings. It is meaningful only when `indefinite` is false;
+an indefinite header resets it to zero. `as_tag_any` likewise consumes only the
+tag header and leaves the tagged value unread.
+
+A complete header succeeds even if its contents are absent. Reading an
+incomplete length argument fails with `status_code::incomplete`. Subsequent
+content decoding is responsible for checking payload availability, consuming
+children or chunks, and enforcing application limits. Header decoding does not
+scan to a closing break or allocate from the declared length.
+
+`as_break` is a decode-only delimiter token that consumes a single CBOR break.
+It can be an alternative in a visitor's variant. The visitor must allow it only
+in a valid indefinite context: a map cannot end between a key and its value,
+and indefinite string chunks must be definite strings of the same major type.
+An ordinary value decode continues to reject a break.
+
+A bounded header cannot prove a nontrivial size bound for an indefinite item.
+Such a request returns `status_code::size_limit_exceeded`. Only the unrestricted
+range from zero through `UINT64_MAX` permits an indefinite header; on platforms
+where `std::size_t` is narrower, a `SIZE_MAX` bound still restricts the declared
+length space. A visitor can instead read an unbounded header and enforce a
+running element, pair, or byte count while consuming its contents.
+
+**Migration:** text and byte-string header descriptors previously skipped their
+payloads. Consumers must now read them explicitly, using the existing payload
+helpers (`decode_text_payload` and `decode_bstring_payload`) inside their
+exception/status boundary. These low-level helpers can throw on incomplete
+input; `decoder::operator()` supplies the normal status boundary when they are
+called by a custom decoder. Diagnostic and annotation visitors perform this
+explicit read. Owning string destinations and borrowed string views continue
+to decode a complete string.
+
 ## Bounded Objects, PMR, And CDDL
 
 Plain owning containers do not impose protocol limits. A transport-level byte

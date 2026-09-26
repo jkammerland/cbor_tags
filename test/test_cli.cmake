@@ -75,6 +75,18 @@ run_cli(
   "__skip__"
   annotate --input hex --mode no_annotation 626869)
 run_cli(
+  annotate_no_annotation_payload_bytes
+  0
+  "41\n   1c\n61\n   1c\n"
+  "__skip__"
+  annotate --input hex --mode no_annotation 411c611c)
+run_cli(
+  annotate_no_annotation_indefinite
+  0
+  "9f\n   41\n      1c\n   ff\n"
+  "__skip__"
+  annotate --input hex --mode no_annotation 9f411cff)
+run_cli(
   annotate_numeric_options
   0
   "01"
@@ -187,6 +199,8 @@ run_cli(malformed_cbor 1 "__skip__" "error: Malformed CBOR diagnostic top-level 
 run_cli(no_annotation_rejects_truncated_uint 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation 18)
 run_cli(no_annotation_rejects_break 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation ff)
 run_cli(no_annotation_rejects_trailing_break 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation 01ff)
+run_cli(no_annotation_rejects_truncated_array 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation 81)
+run_cli(no_annotation_rejects_odd_map 1 "__skip__" "error: Malformed CBOR input" annotate --input hex --mode no_annotation bf01ff)
 run_cli(invalid_base64_char 1 "__skip__" "error: base64 input contains invalid character" diagnostic --input base64 "Ym?p")
 run_cli(invalid_base64_middle_padding 1 "__skip__" "error: base64 padding must be at the end" diagnostic --input base64 "Ym=hp")
 run_cli(invalid_base64_data_after_padding 1 "__skip__" "error: base64 padding must be at the end" diagnostic --input base64 "Yg==AA")
