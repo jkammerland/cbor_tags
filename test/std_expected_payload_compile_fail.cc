@@ -9,6 +9,21 @@
 using namespace cbor::tags;
 using namespace cbor::tags::ext::std_expected;
 
+struct unrelated {};
+template <typename Self> struct unrelated_codec : cbor_codec_mixin_base<Self> {
+    using cbor_codec_mixin_base<Self>::encode;
+    using cbor_codec_mixin_base<Self>::decode;
+    void        encode(const unrelated &) { static_cast<Self &>(*this).encode(nullptr); }
+    status_code decode(unrelated &) {
+        std::nullptr_t payload{};
+        return static_cast<Self &>(*this).decode(payload);
+    }
+    status_code decode(unrelated &, major_type major, std::byte info) {
+        std::nullptr_t payload{};
+        return static_cast<Self &>(*this).decode(payload, major, info);
+    }
+};
+
 struct empty {};
 struct group {
     int first{};
@@ -38,14 +53,14 @@ using payload_options = default_options;
 #endif
 
 int main() {
-    std::vector<std::byte> bytes{std::byte{0x82}, std::byte{0xF5}};
+    std::vector<std::byte> bytes;
     payload                value{};
 #if defined(CBOR_TAGS_EXPECTED_ENCODE)
     encoder<std::vector<std::byte>, payload_options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder,
-            cbor_variant_encoder, std_expected_codec>
+            cbor_variant_encoder, unrelated_codec, std_expected_codec>
         enc{bytes};
     return enc(value).has_value() ? 0 : 1;
 #else
-    return make_decoder_with_options<payload_options, std_expected_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_decoder_with_options<payload_options, unrelated_codec, std_expected_codec>(bytes)(value).has_value() ? 0 : 1;
 #endif
 }

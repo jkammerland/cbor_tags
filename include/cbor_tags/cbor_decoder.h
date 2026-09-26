@@ -1728,7 +1728,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    template <typename... Args> constexpr auto applier(Args &&...args) {
+    template <typename... Args> constexpr status_code applier(Args &&...args) {
         status_collector<self_t> collect_status{*this};
         [[maybe_unused]] auto    success = (collect_status(std::forward<Args>(args)) && ...);
         return collect_status.result;

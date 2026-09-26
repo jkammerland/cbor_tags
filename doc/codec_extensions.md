@@ -170,7 +170,10 @@ Current public extension headers:
   `std::expected<void, E>` for a payload-free success; its payload is CBOR null.
   Application customizations and other codec mixins own their representation
   and must produce/consume one complete item. An empty C++ type with explicit
-  encode/decode methods can provide such a representation.
+  encode/decode methods or a matching installed codec-mixin overload can provide
+  such a representation. Unrelated mixins do not change payload validation.
+  Statically empty arrays and spans are complete items even when their element
+  type is an empty reflected group.
 - `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.
   See [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
 - `cbor_tags/extensions/cbor_visualization.h`: CDDL, annotation, and diagnostic

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/detail/cbor_variant_traits.h"
 
@@ -11,13 +12,42 @@
 
 namespace cbor::tags::ext::std_expected::detail {
 
+// Inspect only opt-in codec mixins. The core optional/container dispatch must
+// still recursively validate its child item shapes.
+template <typename Self> struct expected_payload_mixin_customization;
+
+template <typename Buffer, IsOptions Options, template <typename> typename... Codecs>
+struct expected_payload_mixin_customization<encoder<Buffer, Options, Codecs...>> {
+    using self_type = encoder<Buffer, Options, Codecs...>;
+
+    template <typename T> static consteval bool accepts() {
+        return ((std::is_base_of_v<cbor_encoder_mixin_base<self_type>, Codecs<self_type>> &&
+                 requires(Codecs<self_type> &codec, const T &value) { codec.encode(value); }) ||
+                ...);
+    }
+};
+
+template <typename Buffer, IsOptions Options, template <typename> typename... Codecs>
+struct expected_payload_mixin_customization<decoder<Buffer, Options, Codecs...>> {
+    using self_type = decoder<Buffer, Options, Codecs...>;
+
+    template <typename T> static consteval bool accepts() {
+        return ((std::is_base_of_v<cbor_decoder_mixin_base<self_type>, Codecs<self_type>> &&
+                 (requires(Codecs<self_type> &codec, T &value) {
+                     { codec.decode(value) } -> std::same_as<status_code>;
+                 } || requires(Codecs<self_type> &codec, T &value, major_type major, std::byte info) {
+                     { codec.decode(value, major, info) } -> std::same_as<status_code>;
+                 })) || ...);
+    }
+};
+
 template <typename Self, typename T, typename... Parents> consteval bool expected_payload_encodes_one_item();
 
 template <typename Self, typename T> consteval bool expected_payload_has_customization() {
     if constexpr (requires { typename Self::input_buffer_type; }) {
-        return IsClassWithDecodingOverload<Self, T>;
+        return IsClassWithDecodingOverload<Self, T> || expected_payload_mixin_customization<Self>::template accepts<T>();
     } else {
-        return IsClassWithEncodingOverload<Self, T>;
+        return IsClassWithEncodingOverload<Self, T> || expected_payload_mixin_customization<Self>::template accepts<T>();
     }
 }
 
@@ -73,10 +103,11 @@ template <typename Self, typename T, typename... Parents> consteval bool expecte
                 if constexpr (std::tuple_size_v<type> == 0U) {
                     return true;
                 }
-            } else if constexpr (cbor::tags::detail::is_static_extent_span_v<type>) {
-                if constexpr (type::extent == 0U) {
-                    return true;
-                }
+            }
+        }
+        if constexpr (cbor::tags::detail::is_static_extent_span_v<type>) {
+            if constexpr (type::extent == 0U) {
+                return true;
             }
         }
         return expected_payload_encodes_one_item<Self, typename type::value_type, Parents..., type>();
