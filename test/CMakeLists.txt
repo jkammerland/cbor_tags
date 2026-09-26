@@ -52,7 +52,11 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests)
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/cwt,roundtrip/cwt")
+add_test(NAME cwt_wire COMMAND tests "--test-suite=cbor_wire/cwt")
+set_tests_properties(cwt_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME cwt_roundtrip COMMAND tests "--test-suite=roundtrip/cwt")
+set_tests_properties(cwt_roundtrip PROPERTIES LABELS "roundtrip")
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)

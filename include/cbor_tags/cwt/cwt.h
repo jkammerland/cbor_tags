@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -83,7 +84,8 @@ template <typename Codec> [[nodiscard]] constexpr auto codec_error(status_code c
 
 template <typename Decoder, typename DecodeEntry>
 [[nodiscard]] constexpr status_code decode_group_entries(Decoder &dec, major_type expected_major, status_code major_mismatch,
-                                                         DecodeEntry &&decode_entry) {
+                                                         DecodeEntry                &&decode_entry,
+                                                         std::optional<std::uint64_t> expected_size = std::nullopt) {
     major_type major{};
     std::byte  additional_info{};
     auto       status = cbor::tags::detail::read_extension_initial_byte(dec, major, additional_info);
@@ -109,6 +111,9 @@ template <typename Decoder, typename DecodeEntry>
         status = cbor::tags::detail::decode_unsigned_argument(dec, additional_info, size);
         if (status != status_code::success) {
             return status;
+        }
+        if (expected_size && size != *expected_size) {
+            return status_code::unexpected_group_size;
         }
         for (std::uint64_t index = 0; index < size; ++index) {
             status = decode_next();
@@ -139,6 +144,27 @@ template <typename Decoder, typename DecodeEntry>
 template <typename Decoder, typename DecodeEntry>
 [[nodiscard]] constexpr status_code decode_map_entries(Decoder &dec, DecodeEntry &&decode_entry) {
     return decode_group_entries(dec, major_type::Map, status_code::no_match_for_map_on_buffer, std::forward<DecodeEntry>(decode_entry));
+}
+
+template <typename Decoder, typename... Fields> [[nodiscard]] constexpr status_code decode_array_fields(Decoder &dec, Fields &...fields) {
+    const auto  values = std::tie(fields...);
+    std::size_t index{};
+    const auto  decode_entry = [&](major_type major, std::byte additional_info) {
+        auto status = status_code::unexpected_group_size;
+        [&]<std::size_t... I>(std::index_sequence<I...>) {
+            static_cast<void>(((index == I ? (status = dec.decode(std::get<I>(values), major, additional_info), true) : false) || ...));
+        }(std::index_sequence_for<Fields...>{});
+        if (status == status_code::success) {
+            ++index;
+        }
+        return status;
+    };
+    const auto status =
+        decode_group_entries(dec, major_type::Array, status_code::no_match_for_array_on_buffer, decode_entry, sizeof...(Fields));
+    if (status != status_code::success) {
+        return status;
+    }
+    return index == sizeof...(Fields) ? status_code::success : status_code::unexpected_group_size;
 }
 
 template <typename Decoder> [[nodiscard]] constexpr expected<algorithm, status_code> decode_algorithm(Decoder &dec) {
@@ -531,11 +557,12 @@ struct cose_signature {
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
         cose_signature decoded{};
-        auto           result = dec(as_array{3}, decoded.protected_header, decoded.unprotected, decoded.signature);
-        if (result) {
-            *this = std::move(decoded);
+        const auto     status = detail::decode_array_fields(dec, decoded.protected_header, decoded.unprotected, decoded.signature);
+        if (status != status_code::success) {
+            return detail::codec_error<Decoder>(status);
         }
-        return result;
+        *this = std::move(decoded);
+        return typename Decoder::expected_type{};
     }
 };
 
@@ -553,16 +580,17 @@ struct cose_sign {
     }
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
-        cose_sign decoded{};
-        auto      result = dec(as_array{4}, decoded.protected_header, decoded.unprotected, decoded.payload, decoded.signatures);
-        if (!result) {
-            return result;
+        cose_sign  decoded{};
+        const auto status =
+            detail::decode_array_fields(dec, decoded.protected_header, decoded.unprotected, decoded.payload, decoded.signatures);
+        if (status != status_code::success) {
+            return detail::codec_error<Decoder>(status);
         }
         if (decoded.signatures.empty()) {
             return detail::codec_error<Decoder>(status_code::unexpected_group_size);
         }
         *this = std::move(decoded);
-        return result;
+        return typename Decoder::expected_type{};
     }
 };
 
@@ -578,11 +606,13 @@ struct cose_sign1 {
 
     template <typename Decoder> constexpr auto decode(Decoder &dec) {
         cose_sign1 decoded{};
-        auto       result = dec(as_array{4}, decoded.protected_header, decoded.unprotected, decoded.payload, decoded.signature);
-        if (result) {
-            *this = std::move(decoded);
+        const auto status =
+            detail::decode_array_fields(dec, decoded.protected_header, decoded.unprotected, decoded.payload, decoded.signature);
+        if (status != status_code::success) {
+            return detail::codec_error<Decoder>(status);
         }
-        return result;
+        *this = std::move(decoded);
+        return typename Decoder::expected_type{};
     }
 };
 
