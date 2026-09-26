@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <map>
+#include <ostream>
 #include <string>
 #include <variant>
 #include <vector>
