@@ -16,11 +16,11 @@ jobs:
       matrix:
         standard: [20, 26]
     steps:
-      - uses: actions/checkout@v6.0.2
       - name: Install compiler and test dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates cmake git ninja-build g++-16 curl bzip2
+      - uses: actions/checkout@v6.0.2
       - name: Fetch pinned Boost headers
         run: |
           curl -fL --retry 2 https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.bz2 -o /tmp/boost.tar.bz2

@@ -42,7 +42,8 @@
 #define CBOR_TAGS_TEST_BOOST_DEVECTOR 1
 #endif
 
-#if __has_include(<boost/unordered/unordered_flat_map.hpp>)
+#if __has_include(<boost/unordered/unordered_flat_map.hpp>) && __has_include(<boost/unordered/unordered_flat_set.hpp>) && \
+    __has_include(<boost/unordered/unordered_node_map.hpp>) && __has_include(<boost/unordered/unordered_node_set.hpp>)
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
 #include <boost/unordered/unordered_node_map.hpp>
