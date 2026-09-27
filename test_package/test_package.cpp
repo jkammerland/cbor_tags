@@ -2,6 +2,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_reflection_config.h>
+#include <cbor_tags/cwt/cwt.h>
 #include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,10 @@
 #include <cbor_tags/extensions/cbor_visualization.h>
 #include <cbor_tags/extensions/custom_codec_1.h>
 #include <fmt/format.h>
+#endif
+
+#if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
+#include <cbor_tags/cwt/openssl_crypto.h>
 #endif
 
 #if CBOR_TAGS_USE_STD_EXPECTED
@@ -37,6 +42,10 @@ int main() {
     static_assert(std::is_same_v<cbor::tags::expected<void, cbor::tags::status_code>, tl::expected<void, cbor::tags::status_code>>);
 #endif
 
+#if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
+    static_assert(cbor::tags::cwt::openssl_es256_backend::algorithm_id == cbor::tags::cwt::algorithm::es256);
+#endif
+
     {
         std::vector<std::byte> bytes;
         auto                   enc = cbor::tags::make_encoder(bytes);
@@ -51,6 +60,24 @@ int main() {
         }
         if (decoded != 42U) {
             return 3;
+        }
+    }
+
+    {
+        namespace cwt = cbor::tags::cwt;
+
+        auto claims_bytes = cwt::encode_to_bytes(cwt::claims_set{.issuer = "issuer", .subject = "subject"});
+        if (!claims_bytes) {
+            return 11;
+        }
+
+        cwt::claims_set decoded;
+        auto            dec = cbor::tags::make_decoder(*claims_bytes);
+        if (!dec(decoded)) {
+            return 12;
+        }
+        if (!decoded.issuer || *decoded.issuer != "issuer" || !decoded.subject || *decoded.subject != "subject") {
+            return 13;
         }
     }
 

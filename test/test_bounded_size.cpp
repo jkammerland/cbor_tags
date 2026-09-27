@@ -1,4 +1,5 @@
 #include "cbor_roundtrip.h"
+#include "character_traits.h"
 #include "test_util.h"
 
 #include <algorithm>
@@ -57,7 +58,7 @@ static_assert(IsStringRangeWrapper<sized_bstr_range>);
 static_assert(IsStringRangeWrapper<sized_tstr_range>);
 static_assert(!IsStringRangeWrapper<sized_array_range>);
 static_assert(IsConstView<std::string_view>);
-static_assert(IsConstView<std::basic_string_view<std::byte>>);
+static_assert(IsConstView<test_util::basic_string_view<std::byte>>);
 static_assert(!IsConstView<std::span<std::byte>>);
 
 static_assert(CanEncodeBounded<bounded_size<sized_array_range, 0, 3>>);
@@ -468,12 +469,13 @@ TEST_CASE("dynamic bounds reject definite sizes before output allocation or muta
 
         counting_memory_resource resource;
         std::pmr::vector<int>    values{&resource};
-        auto                     dec    = make_decoder(buffer);
-        auto                     result = dec(as_bounded_size(values, 0, 2));
+        const auto               allocations_before_decode = resource.allocations;
+        auto                     dec                       = make_decoder(buffer);
+        auto                     result                    = dec(as_bounded_size(values, 0, 2));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-        CHECK_EQ(resource.allocations, 0);
+        CHECK_EQ(resource.allocations, allocations_before_decode);
         CHECK(values.empty());
     }
 }
@@ -932,12 +934,13 @@ TEST_CASE("definite bounded_size rejects length before reserving") {
 
     counting_memory_resource resource;
     std::pmr::vector<int>    values{&resource};
-    auto                     dec    = make_decoder(buffer);
-    auto                     result = dec(as_bounded_size<0, 2>(values));
+    const auto               allocations_before_decode = resource.allocations;
+    auto                     dec                       = make_decoder(buffer);
+    auto                     result                    = dec(as_bounded_size<0, 2>(values));
 
     REQUIRE_FALSE(result);
     CHECK_EQ(result.error(), status_code::size_limit_exceeded);
-    CHECK_EQ(resource.allocations, 0);
+    CHECK_EQ(resource.allocations, allocations_before_decode);
     CHECK(values.empty());
 }
 
@@ -1092,9 +1095,9 @@ TEST_CASE("bounded borrowed string views decode definite payloads without owners
         auto                         enc = make_encoder(buffer);
         REQUIRE(enc(payload));
 
-        const std::array<std::byte, 1>    sentinel{std::byte{0xcc}};
-        std::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
-        auto                              dec = make_decoder(buffer);
+        const std::array<std::byte, 1>          sentinel{std::byte{0xcc}};
+        test_util::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
+        auto                                    dec = make_decoder(buffer);
         REQUIRE(dec(as_bounded_size<0, 2>(value)));
 
         CHECK_EQ(value.size(), payload.size());
@@ -1144,11 +1147,11 @@ TEST_CASE("bounded borrowed string views reject invalid wire shapes without rebi
     }
 
     SUBCASE("indefinite binary") {
-        auto                              buffer = to_bytes("5f41aaff");
-        const std::array<std::byte, 1>    sentinel{std::byte{0xcc}};
-        std::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
-        auto                              dec    = make_decoder(buffer);
-        auto                              result = dec(as_bounded_size<0, 4>(value));
+        auto                                    buffer = to_bytes("5f41aaff");
+        const std::array<std::byte, 1>          sentinel{std::byte{0xcc}};
+        test_util::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
+        auto                                    dec    = make_decoder(buffer);
+        auto                                    result = dec(as_bounded_size<0, 4>(value));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);

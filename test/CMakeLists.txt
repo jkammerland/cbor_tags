@@ -12,7 +12,7 @@ endif()
 if(NOT TARGET nameof::nameof)
   cpmaddpackage("gh:Neargye/nameof@0.10.4")
 endif()
-cpmaddpackage("gh:jkammerland/doctest@1.0.1")
+cpmaddpackage("gh:jkammerland/doctest@1.0.4")
 
 include(CheckCXXCompilerFlag)
 
@@ -29,6 +29,10 @@ target_link_libraries(tests PUBLIC test_util)
 # add link libraries
 target_link_libraries(tests PRIVATE cbor::tags doctest::doctest fmt::fmt nameof::nameof magic_enum::magic_enum)
 target_compile_definitions(tests PRIVATE $<$<PLATFORM_ID:QNX>:DOCTEST_CONFIG_USE_STD_HEADERS>)
+if(TARGET cbor_tags_cwt_openssl)
+  target_link_libraries(tests PRIVATE cbor::cwt_openssl)
+  target_compile_definitions(tests PRIVATE CBOR_TAGS_TEST_HAS_CWT_OPENSSL=1)
+endif()
 
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
@@ -50,7 +54,15 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests)
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/cwt,roundtrip/cwt")
+add_test(NAME cwt_wire COMMAND tests "--test-suite=cbor_wire/cwt")
+set_tests_properties(cwt_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME cwt_roundtrip COMMAND tests "--test-suite=roundtrip/cwt")
+set_tests_properties(cwt_roundtrip PROPERTIES LABELS "roundtrip")
+
+# Keep this suite reachable when a branch excludes wire tests from the unit run.
+add_test(NAME byte_views_wire COMMAND tests --test-suite=cbor_wire/byte_views)
+set_tests_properties(byte_views_wire PROPERTIES LABELS "cbor-wire")
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
@@ -711,7 +723,7 @@ check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   add_executable(test_unsigned_char test_unsigned_char.cc)
   target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
-  target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
+  target_link_libraries(test_unsigned_char PRIVATE cbor::tags test_util)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
 
