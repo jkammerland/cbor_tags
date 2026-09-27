@@ -380,6 +380,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsConstView<T>) {
             t = T(std::ranges::data(bstring), std::ranges::size(bstring));
         } else if constexpr (IsFixedArray<T>) {
+            if (bstring_size == 0U) {
+                return status_code::success;
+            }
             if constexpr (IsContiguous<T> && IsContiguous<decltype(bstring)>) {
                 if (std::is_constant_evaluated()) {
                     std::ranges::copy(bstring, t.begin());

@@ -94,7 +94,18 @@ concept AssignableInsertOrAssignMap = IsMap<Container> && IsPairLike<Pair> && re
     container.insert_or_assign(pair_first(std::forward<Pair>(value)), pair_second(std::forward<Pair>(value)));
 };
 
-template <typename T> struct appender<T, false> {
+template <typename T> struct append_cursor {};
+
+template <typename T>
+    requires requires(T &container, typename T::value_type value) {
+        container.before_begin();
+        container.insert_after(container.before_begin(), std::move(value));
+    }
+struct append_cursor<T> {
+    std::optional<decltype(std::declval<T &>().before_begin())> tail;
+};
+
+template <typename T> struct appender<T, false> : append_cursor<T> {
     using value_type = T::value_type;
 
     constexpr void reserve_for_append(T &container, std::uint64_t additional_size) const {
@@ -121,13 +132,13 @@ template <typename T> struct appender<T, false> {
     constexpr void operator()(T &container, const value_type &value)
         requires(!IsMap<T>)
     {
-        container.push_back(value);
+        append_value(container, value);
     }
 
     constexpr void operator()(T &container, value_type &&value)
         requires(!IsMap<T>)
     {
-        container.push_back(std::move(value));
+        append_value(container, std::move(value));
     }
 
     template <typename Pair>
@@ -152,8 +163,15 @@ template <typename T> struct appender<T, false> {
         if (values.empty()) {
             return;
         }
-        container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
-                         reinterpret_cast<const value_type *>(values.data() + values.size()));
+        const auto *first = reinterpret_cast<const value_type *>(values.data());
+        const auto *last  = reinterpret_cast<const value_type *>(values.data() + values.size());
+        if constexpr (requires { container.insert(container.end(), first, last); }) {
+            container.insert(container.end(), first, last);
+        } else {
+            for (const auto value : values) {
+                append_value(container, static_cast<value_type>(value));
+            }
+        }
     }
     constexpr void operator()(T &container, std::string_view value) {
         if (value.empty()) {
@@ -161,6 +179,25 @@ template <typename T> struct appender<T, false> {
         }
         container.insert(container.end(), reinterpret_cast<const value_type *>(value.data()),
                          reinterpret_cast<const value_type *>(value.data() + value.size()));
+    }
+
+  private:
+    template <typename Value> constexpr void append_value(T &container, Value &&value) {
+        if constexpr (requires { container.push_back(std::forward<Value>(value)); }) {
+            container.push_back(std::forward<Value>(value));
+        } else if constexpr (requires { container.insert(std::forward<Value>(value)); }) {
+            container.insert(std::forward<Value>(value));
+        } else {
+            // Find the end of a prepopulated singly linked destination once.
+            // Only the destination is traversed; the CBOR input is never prewalked.
+            if (!this->tail) {
+                this->tail = container.before_begin();
+                for (auto it = container.begin(); it != container.end(); ++it) {
+                    this->tail = it;
+                }
+            }
+            this->tail = container.insert_after(*this->tail, std::forward<Value>(value));
+        }
     }
 };
 
@@ -191,11 +228,17 @@ template <typename T> struct appender<T, true> {
         container[head_++] = value;
     }
     constexpr void operator()(T &container, std::span<const std::byte> values) {
+        if (values.empty()) {
+            return;
+        }
         ensure_capacity(container, static_cast<size_type>(values.size()));
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());
         head_ += values.size();
     }
     constexpr void operator()(T &container, std::string_view value) {
+        if (value.empty()) {
+            return;
+        }
         ensure_capacity(container, static_cast<size_type>(value.size()));
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(value.data()), value.size());
         head_ += value.size();

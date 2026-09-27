@@ -355,12 +355,6 @@ concept IsReferenceWrapper = std::is_same_v<T, std::reference_wrapper<typename T
 
 namespace detail {
 
-template <typename T> struct is_std_array : std::false_type {};
-template <typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std::true_type {
-    using value_type                  = T;
-    static constexpr std::size_t size = N;
-};
-
 template <typename T> struct is_std_span : std::false_type {
     static constexpr std::size_t extent = std::dynamic_extent;
 };
@@ -977,8 +971,8 @@ std::string cddl_sequence_expr(CDDLContext &context, CDDLOptions options) {
     using item_type  = std::remove_cvref_t<typename value_type::value_type>;
 
     auto item = parenthesize_choice(cddl_type_expr<item_type, PointerMode>(context, options));
-    if constexpr (is_std_array<value_type>::value) {
-        return text::format("[{}*{} {}]", is_std_array<value_type>::size, is_std_array<value_type>::size, item);
+    if constexpr (is_static_array<value_type>::value) {
+        return text::format("[{}*{} {}]", is_static_array<value_type>::extent, is_static_array<value_type>::extent, item);
     } else if constexpr (is_std_span<value_type>::value) {
         if constexpr (is_std_span<value_type>::extent != std::dynamic_extent) {
             return text::format("[{}*{} {}]", is_std_span<value_type>::extent, is_std_span<value_type>::extent, item);
@@ -1012,8 +1006,8 @@ template <std::size_t Min, std::size_t Max> std::string cddl_size_control(std::s
 
 template <std::size_t Min, std::size_t Max, typename T> consteval void validate_bounded_fixed_sequence() {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (is_std_array<value_type>::value) {
-        static_assert(Min <= is_std_array<value_type>::size && is_std_array<value_type>::size <= Max,
+    if constexpr (is_static_array<value_type>::value) {
+        static_assert(Min <= is_static_array<value_type>::extent && is_static_array<value_type>::extent <= Max,
                       "bounded_size fixed array extent must be inside the configured CDDL size bounds");
     } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
         static_assert(Min <= is_std_span<value_type>::extent && is_std_span<value_type>::extent <= Max,
@@ -1023,8 +1017,8 @@ template <std::size_t Min, std::size_t Max, typename T> consteval void validate_
 
 template <std::size_t Min, std::size_t Max, typename T> consteval void validate_bounded_fixed_string() {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (is_std_array<value_type>::value) {
-        static_assert(Min <= is_std_array<value_type>::size && is_std_array<value_type>::size <= Max,
+    if constexpr (is_static_array<value_type>::value) {
+        static_assert(Min <= is_static_array<value_type>::extent && is_static_array<value_type>::extent <= Max,
                       "bounded_size fixed string extent must be inside the configured CDDL size bounds");
     } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
         static_assert(Min <= is_std_span<value_type>::extent && is_std_span<value_type>::extent <= Max,
@@ -1035,8 +1029,8 @@ template <std::size_t Min, std::size_t Max, typename T> consteval void validate_
 template <std::size_t Min, std::size_t Max, typename T> std::string cddl_bounded_string_expr(std::string_view base) {
     using value_type = std::remove_cvref_t<T>;
     validate_bounded_fixed_string<Min, Max, value_type>();
-    if constexpr (is_std_array<value_type>::value) {
-        return cddl_size_control<is_std_array<value_type>::size, is_std_array<value_type>::size>(base);
+    if constexpr (is_static_array<value_type>::value) {
+        return cddl_size_control<is_static_array<value_type>::extent, is_static_array<value_type>::extent>(base);
     } else if constexpr (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent) {
         return cddl_size_control<is_std_span<value_type>::extent, is_std_span<value_type>::extent>(base);
     } else {
@@ -1048,7 +1042,7 @@ template <typename T, std::size_t Min, std::size_t Max, cddl_shared_pointer_mode
 std::string cddl_bounded_sequence_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
     validate_bounded_fixed_sequence<Min, Max, value_type>();
-    if constexpr (is_std_array<value_type>::value ||
+    if constexpr (is_static_array<value_type>::value ||
                   (is_std_span<value_type>::value && is_std_span<value_type>::extent != std::dynamic_extent)) {
         return cddl_sequence_expr<value_type, PointerMode>(context, options);
     } else {

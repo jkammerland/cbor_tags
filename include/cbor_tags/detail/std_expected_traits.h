@@ -178,8 +178,8 @@ consteval bool expected_payload_encodes_one_item(payload_context<Context>, std::
     } else if constexpr (IsArray<type> && requires { typename type::value_type; }) {
         // Fixed empty arrays/spans have no child items to validate.
         if constexpr (IsFixedArray<type>) {
-            if constexpr (requires { typename std::tuple_size<type>::type; }) {
-                if constexpr (std::tuple_size_v<type> == 0U) {
+            if constexpr (cbor::tags::detail::is_static_array<type>::value) {
+                if constexpr (cbor::tags::detail::is_static_array<type>::extent == 0U) {
                     return true;
                 }
             }

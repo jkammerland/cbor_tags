@@ -61,11 +61,15 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/fixed_text_spans")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/fixed_text_spans")
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
 set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
 set_tests_properties(aggregate_decode_roundtrip PROPERTIES LABELS "roundtrip")
+add_test(NAME container_interoperability_wire COMMAND tests "--test-suite=cbor_wire/container_interoperability")
+set_tests_properties(container_interoperability_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME container_interoperability_roundtrip COMMAND tests "--test-suite=roundtrip/container_interoperability")
+set_tests_properties(container_interoperability_roundtrip PROPERTIES LABELS "roundtrip")
 add_test(NAME fixed_text_spans_wire COMMAND tests "--test-suite=cbor_wire/fixed_text_spans")
 set_tests_properties(fixed_text_spans_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME fixed_text_spans_roundtrip COMMAND tests "--test-suite=roundtrip/fixed_text_spans")
@@ -814,4 +818,33 @@ endif()
 
 if(CBOR_TAGS_BUILD_INTEROP_TESTS)
   add_subdirectory(interop)
+endif()
+
+include(CheckCXXSourceCompiles)
+set(CBOR_TAGS_TEST_BOOST_ROOT "" CACHE PATH "Optional Boost header root for container integration tests")
+option(CBOR_TAGS_TEST_REQUIRE_RECENT_BOOST "Require Boost 1.92 container integration coverage" OFF)
+set(CMAKE_REQUIRED_INCLUDES "${CBOR_TAGS_TEST_BOOST_ROOT}")
+check_cxx_source_compiles("#include <boost/container/slist.hpp>
+int main() {}" CBOR_TAGS_TEST_HAS_BOOST_CONTAINERS)
+check_cxx_source_compiles("#include <boost/version.hpp>
+#include <boost/container/hub.hpp>
+#include <boost/container/segtor.hpp>
+static_assert(BOOST_VERSION >= 109200);
+int main() {}" CBOR_TAGS_TEST_HAS_RECENT_BOOST)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(CBOR_TAGS_TEST_REQUIRE_RECENT_BOOST AND NOT CBOR_TAGS_TEST_HAS_RECENT_BOOST)
+  message(FATAL_ERROR "This integration job requires Boost 1.92 with hub and segtor")
+endif()
+message(STATUS "Container tests: Boost=${CBOR_TAGS_TEST_HAS_BOOST_CONTAINERS}, Boost 1.92=${CBOR_TAGS_TEST_HAS_RECENT_BOOST} (empty means unavailable)")
+foreach(FEATURE flat_set flat_map inplace_vector hive)
+  check_cxx_source_compiles("#include <version>
+#ifndef __cpp_lib_${FEATURE}
+#error ${FEATURE} unavailable
+#endif
+#include <${FEATURE}>
+int main() {}" CBOR_TAGS_TEST_HAS_STD_${FEATURE})
+  message(STATUS "Container tests: std::${FEATURE}=${CBOR_TAGS_TEST_HAS_STD_${FEATURE}} (empty means unavailable)")
+endforeach()
+if(CBOR_TAGS_TEST_BOOST_ROOT)
+  target_include_directories(tests SYSTEM PRIVATE "${CBOR_TAGS_TEST_BOOST_ROOT}")
 endif()
