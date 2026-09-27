@@ -882,7 +882,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    constexpr status_code decode(std::basic_string_view<std::byte> &value, major_type major, byte additionalInfo) {
+    template <typename Traits>
+    constexpr status_code decode(std::basic_string_view<std::byte, Traits> &value, major_type major, byte additionalInfo) {
         if constexpr (!IsContiguous<InputBuffer>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
@@ -896,7 +897,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
-    constexpr status_code decode_definite_bstr(std::basic_string_view<std::byte> &value, std::uint64_t length_u64) {
+    template <typename Traits>
+    constexpr status_code decode_definite_bstr(std::basic_string_view<std::byte, Traits> &value, std::uint64_t length_u64) {
         if constexpr (!IsContiguous<InputBuffer>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
@@ -917,7 +919,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
 
             const auto *begin = std::ranges::data(data_) + reader_.position_;
-            value             = std::basic_string_view<std::byte>(reinterpret_cast<const std::byte *>(begin), length);
+            value             = std::basic_string_view<std::byte, Traits>(reinterpret_cast<const std::byte *>(begin), length);
             reader_.position_ += length;
             return status_code::success;
         }

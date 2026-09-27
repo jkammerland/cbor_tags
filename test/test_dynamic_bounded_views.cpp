@@ -1,3 +1,4 @@
+#include "character_traits.h"
 #include "test_util.h"
 
 #include <array>
@@ -45,9 +46,9 @@ TEST_CASE("dynamic bounded borrowed string views decode definite payloads withou
         auto                         enc = make_encoder(buffer);
         REQUIRE(enc(payload));
 
-        const std::array<std::byte, 1>    sentinel{std::byte{0xcc}};
-        std::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
-        auto                              dec = make_decoder(buffer);
+        const std::array<std::byte, 1>          sentinel{std::byte{0xcc}};
+        test_util::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
+        auto                                    dec = make_decoder(buffer);
         REQUIRE(dec(as_bounded_size(value, 0, 2)));
 
         CHECK_EQ(value.size(), payload.size());
@@ -97,11 +98,11 @@ TEST_CASE("dynamic bounded borrowed string views reject invalid wire shapes with
     }
 
     SUBCASE("indefinite binary") {
-        auto                              buffer = to_bytes("5f41aaff");
-        const std::array<std::byte, 1>    sentinel{std::byte{0xcc}};
-        std::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
-        auto                              dec    = make_decoder(buffer);
-        auto                              result = dec(as_bounded_size(value, 0, 4));
+        auto                                    buffer = to_bytes("5f41aaff");
+        const std::array<std::byte, 1>          sentinel{std::byte{0xcc}};
+        test_util::basic_string_view<std::byte> value{sentinel.data(), sentinel.size()};
+        auto                                    dec    = make_decoder(buffer);
+        auto                                    result = dec(as_bounded_size(value, 0, 4));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);

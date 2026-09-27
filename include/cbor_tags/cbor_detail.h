@@ -149,10 +149,16 @@ template <typename T> struct appender<T, false> {
     }
 
     constexpr void operator()(T &container, std::span<const std::byte> values) {
+        if (values.empty()) {
+            return;
+        }
         container.insert(container.end(), reinterpret_cast<const value_type *>(values.data()),
                          reinterpret_cast<const value_type *>(values.data() + values.size()));
     }
     constexpr void operator()(T &container, std::string_view value) {
+        if (value.empty()) {
+            return;
+        }
         container.insert(container.end(), reinterpret_cast<const value_type *>(value.data()),
                          reinterpret_cast<const value_type *>(value.data() + value.size()));
     }

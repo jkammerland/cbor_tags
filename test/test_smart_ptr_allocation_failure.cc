@@ -21,17 +21,22 @@ struct tracked_value {
     ~tracked_value() { ++destructor_calls; }
 
     static void *operator new(std::size_t size) {
-        auto *storage = std::malloc(size);
-        if (storage == nullptr) {
+        // The storage must stay valid after operator delete so that a duplicate destruction is
+        // observable without relying on allocator-specific double-free behavior. Serve it from a
+        // fixed slot rather than malloc, so keeping it alive is not an actual leak; the test
+        // decodes a single value, so one slot is enough.
+        alignas(tracked_value) static std::byte storage[sizeof(tracked_value)];
+        static bool                             slot_taken = false;
+        if (size > sizeof(storage) || slot_taken) {
             throw std::bad_alloc{};
         }
+        slot_taken                  = true;
         fail_next_global_allocation = true;
-        return storage;
+        return static_cast<void *>(storage);
     }
 
     static void operator delete(void *) noexcept {
-        // Keep the storage valid so a duplicate destruction is observable
-        // without relying on allocator-specific double-free behavior.
+        // Deliberately does not release the slot; see operator new.
         ++delete_calls;
     }
 };

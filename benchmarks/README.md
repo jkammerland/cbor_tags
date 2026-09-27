@@ -4,6 +4,25 @@ These benchmarks are intended to track codec behavior over time. Keep existing
 benchmark bodies stable unless a benchmark is clearly measuring setup work
 instead of the path named in its row.
 
+## Reflection compile stress
+
+The reflection compile benchmark instantiates 512 unique eight-member aggregates
+through the generated C++20 fallback. It measures value and mutable-reference
+aggregates separately with ccache disabled:
+
+```bash
+scripts/benchmark-reflection-compile.sh g++ clang++
+```
+
+Set `CBOR_TAGS_REFLECTION_BENCH_INCLUDE_DIR` to compare another checkout, or set
+`CBOR_TAGS_REFLECTION_BENCH_INSTANCES` and `CBOR_TAGS_REFLECTION_BENCH_RUNS` to
+change the workload and repetition count. The script reports every wall-time and
+peak-RSS sample without enforcing a pass/fail threshold.
+
+The harness normally verifies an arity of eight. When measuring an older broken
+baseline that reflected mutable-reference aggregates as empty, set
+`CBOR_TAGS_REFLECTION_BENCH_REFERENCE_EXPECTED_ARITY=0`.
+
 ## Decoder `CHECK(...)` Rows
 
 Rows such as `Decoding a uint with check` use doctest assertions:

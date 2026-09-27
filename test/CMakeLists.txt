@@ -12,7 +12,7 @@ endif()
 if(NOT TARGET nameof::nameof)
   cpmaddpackage("gh:Neargye/nameof@0.10.4")
 endif()
-cpmaddpackage("gh:jkammerland/doctest@1.0.1")
+cpmaddpackage("gh:jkammerland/doctest@1.0.4")
 
 include(CheckCXXCompilerFlag)
 
@@ -37,12 +37,14 @@ endif()
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
 if(CBOR_TAGS_ENABLE_ASAN)
-  message(STATUS "ASAN enabled in tests")
-  if((UNIX OR APPLE) AND NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+  if(UNIX OR APPLE)
+    message(STATUS "ASAN enabled in tests")
     target_compile_options(tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(tests PRIVATE -fsanitize=address)
-  elseif(WIN32)
-    # target_compile_options(tests PRIVATE /fsanitize=address) target_link_options(tests PRIVATE /fsanitize=address)
+  else()
+    # Decline audibly rather than reporting a sanitizer that was never applied.
+    message(WARNING "CBOR_TAGS_ENABLE_ASAN=ON is not supported for ${CMAKE_CXX_COMPILER_ID} on this platform; "
+                    "tests will be built WITHOUT AddressSanitizer")
   endif()
 endif()
 
@@ -62,6 +64,30 @@ add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failu
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
 add_dependencies(tests test_smart_ptr_allocation_failure)
+
+if(NOT CBOR_TAGS_USE_STD_REFLECTION AND NOT CBOR_TAGS_USE_BOOST_PFR_NAMES)
+  function(add_reflection_compile_fail_test TEST_NAME SOURCE_FILE)
+    add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${SOURCE_FILE})
+    target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+    add_test(
+      NAME ${TEST_NAME}
+      COMMAND
+        ${CMAKE_COMMAND}
+        "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DTEST_TARGET=${TEST_NAME}"
+        "-DCONFIG=$<CONFIG>"
+        "-DPASS_REGEX=Could not reflect this non-empty aggregate"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  endfunction()
+
+  add_reflection_compile_fail_test(
+    reflection_unsafe_lvalue_probe_compile_fails
+    reflection_unsafe_lvalue_probe_compile_fail.cc)
+  add_reflection_compile_fail_test(
+    reflection_generated_range_overflow_compile_fails
+    reflection_generated_range_overflow_compile_fail.cc)
+endif()
 
 function(add_incompatible_codec_result_compile_fail_test TEST_NAME COMPILE_DEFINITION PASS_REGEX)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL incompatible_codec_result_compile_fail.cc)
@@ -693,7 +719,7 @@ check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   add_executable(test_unsigned_char test_unsigned_char.cc)
   target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
-  target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
+  target_link_libraries(test_unsigned_char PRIVATE cbor::tags test_util)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
 
