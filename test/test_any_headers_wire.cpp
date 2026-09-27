@@ -254,7 +254,7 @@ TEST_SUITE("cbor_wire/any_headers") {
 
     TEST_CASE_TEMPLATE("incomplete length arguments fail without reading past the input", Header, as_array_any, as_map_any, as_text_any,
                        as_bstr_any) {
-        for (const auto [ai, width] : {std::pair{0x18, 1}, {0x19, 2}, {0x1A, 4}, {0x1B, 8}}) {
+        for (const auto &[ai, width] : {std::pair{0x18, 1}, {0x19, 2}, {0x1A, 4}, {0x1B, 8}}) {
             for (int available = 0; available < width; ++available) {
                 CAPTURE(ai);
                 CAPTURE(available);
@@ -344,7 +344,7 @@ TEST_SUITE("cbor_wire/any_headers") {
         REQUIRE_FALSE(lower_result);
         CHECK_EQ(lower_result.error(), status_code::size_limit_exceeded);
 
-        for (const auto [min, max] : {std::pair<std::size_t, std::size_t>{0, 4}, {1, unlimited}}) {
+        for (const auto &[min, max] : {std::pair<std::size_t, std::size_t>{0, 4}, {1, unlimited}}) {
             dynamic_bounded_size<Header> bounded{Header{}, min, max};
             auto                         result = make_decoder(input)(bounded);
             REQUIRE_FALSE(result);

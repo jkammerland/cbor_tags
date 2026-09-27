@@ -2228,7 +2228,7 @@ template <typename OutputBuffer> struct diagnostic_renderer {
     bool               sequence{};
     bool               emitted{};
     std::size_t        row_depth{};
-    std::vector<frame> frames;
+    std::vector<frame> frames{};
 
     void check_depth(std::size_t depth) const {
         if (options.current_depth >= options.max_depth || depth >= options.max_depth - options.current_depth) {

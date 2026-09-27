@@ -138,7 +138,7 @@ TEST_SUITE("cbor_wire/headers_visualization") {
 
     TEST_CASE("presentation depth limits preserve scalar break and empty payload boundaries") {
         std::string scalar;
-        CHECK_NOTHROW(buffer_diagnostic(to_bytes("01"), scalar, {.max_depth = 0}));
+        CHECK_NOTHROW(buffer_diagnostic(to_bytes("01"), scalar, {.row_options = {}, .max_depth = 0}));
         CHECK_EQ(scalar, "[\n1\n]");
         std::string scalar_child;
         CHECK_NOTHROW(buffer_diagnostic(to_bytes("8101"), scalar_child, {.row_options = {.format_by_rows = false}, .max_depth = 1}));
