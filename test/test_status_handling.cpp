@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_integer.h"
+#include "character_traits.h"
 #include "magic_enum/magic_enum.hpp"
 #include "test_util.h"
 
@@ -660,10 +661,10 @@ TEST_SUITE("Open objects - wrap as etc") {
 
 TEST_SUITE("Views errors") {
     TEST_CASE_TEMPLATE("decode contiguous view on non-contiguous data [bstr]", T, std::span<const std::byte>,
-                       std::basic_string_view<std::byte>) {
+                       test_util::basic_string_view<std::byte>) {
         auto data = std::deque<std::byte>{};
         auto enc  = make_encoder(data);
-        auto bstr = std::basic_string<std::byte>{static_cast<std::byte>('a'), static_cast<std::byte>('b')};
+        auto bstr = test_util::basic_string<std::byte>{static_cast<std::byte>('a'), static_cast<std::byte>('b')};
         REQUIRE(enc(bstr));
 
         auto dec    = make_decoder(data);

@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "character_traits.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -36,12 +37,12 @@ int main() {
     static_assert(!IsTextChar<unsigned char>);
     static_assert(IsTextString<std::string>);
     static_assert(IsTextString<std::string_view>);
-    static_assert(IsTextString<std::basic_string<signed char>>);
+    static_assert(IsTextString<test_util::basic_string<signed char>>);
     static_assert(IsTextString<std::basic_string_view<char>>);
-    static_assert(IsTextString<std::basic_string_view<signed char>>);
+    static_assert(IsTextString<test_util::basic_string_view<signed char>>);
     static_assert(!IsTextString<std::vector<char>>);
-    static_assert(!IsTextString<std::basic_string<unsigned char>>);
-    static_assert(!IsTextString<std::basic_string_view<unsigned char>>);
+    static_assert(!IsTextString<test_util::basic_string<unsigned char>>);
+    static_assert(!IsTextString<test_util::basic_string_view<unsigned char>>);
     static_assert(!IsArray<std::string>);
     static_assert(IsCborMajor<std::variant<std::string, std::vector<int>>>);
     static_assert(valid_concept_mapping_v<std::variant<std::string, std::vector<int>>>);
@@ -62,19 +63,19 @@ int main() {
     require(dec(decoded).has_value());
     require(decoded == "hi");
 
-    auto                                 signed_data = std::vector<std::byte>{};
-    auto                                 signed_enc  = make_encoder(signed_data);
-    const std::basic_string<signed char> signed_text{static_cast<signed char>('o'), static_cast<signed char>('k')};
+    auto                                       signed_data = std::vector<std::byte>{};
+    auto                                       signed_enc  = make_encoder(signed_data);
+    const test_util::basic_string<signed char> signed_text{static_cast<signed char>('o'), static_cast<signed char>('k')};
     require(signed_enc(signed_text).has_value());
     require(to_hex(signed_data) == "626f6b");
 
-    auto signed_decoded = std::basic_string<signed char>{};
+    auto signed_decoded = test_util::basic_string<signed char>{};
     auto signed_dec     = make_decoder(signed_data);
     require(signed_dec(signed_decoded).has_value());
     require(signed_decoded == signed_text);
 
-    std::basic_string_view<signed char> signed_view;
-    auto                                signed_view_dec = make_decoder(signed_data);
+    test_util::basic_string_view<signed char> signed_view;
+    auto                                      signed_view_dec = make_decoder(signed_data);
     require(signed_view_dec(signed_view).has_value());
     require(signed_view.size() == signed_text.size());
     require(signed_view[0] == static_cast<signed char>('o'));

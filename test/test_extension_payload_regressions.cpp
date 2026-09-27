@@ -129,7 +129,7 @@ TEST_CASE("extension payloads consume unsized non-contiguous input once") {
 TEST_CASE("extension payloads retain terminal incomplete behavior for unsized input") {
     SUBCASE("owned typed arrays") {
         CountingUnsizedByteRange  input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02}}};
-        typed_array<std::uint8_t> decoded{{0xAA}};
+        typed_array<std::uint8_t> decoded{0xAA};
         auto                      dec = make_decoder<typed_array_codec>(input);
 
         const auto result = dec(decoded);

@@ -711,7 +711,7 @@ check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   add_executable(test_unsigned_char test_unsigned_char.cc)
   target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
-  target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
+  target_link_libraries(test_unsigned_char PRIVATE cbor::tags test_util)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
 
