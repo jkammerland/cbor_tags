@@ -530,4 +530,35 @@ TEST_SUITE("roundtrip/cwt") {
     }
 #endif
 
+    TEST_CASE("CWT claims roundtrip array-valued audience") {
+        claims_set claims;
+        claims.audience = std::vector<std::string>{"coap://light.example.com", "coap://sensor.example.com"};
+
+        std::vector<std::byte> encoded;
+        auto                   enc = make_encoder(encoded);
+        REQUIRE(enc(claims));
+
+        claims_set decoded;
+        auto       dec = make_decoder(encoded);
+        REQUIRE(dec(decoded));
+        REQUIRE(decoded.audience);
+        REQUIRE(std::holds_alternative<std::vector<std::string>>(*decoded.audience));
+        CHECK_EQ(std::get<std::vector<std::string>>(*decoded.audience), std::get<std::vector<std::string>>(*claims.audience));
+    }
+
+    TEST_CASE("CWT claims roundtrip an empty audience array") {
+        claims_set claims;
+        claims.audience = std::vector<std::string>{};
+
+        std::vector<std::byte> encoded;
+        auto                   enc = make_encoder(encoded);
+        REQUIRE(enc(claims));
+
+        claims_set decoded;
+        REQUIRE(make_decoder(encoded)(decoded));
+        REQUIRE(decoded.audience);
+        REQUIRE(std::holds_alternative<std::vector<std::string>>(*decoded.audience));
+        CHECK(std::get<std::vector<std::string>>(*decoded.audience).empty());
+    }
+
 } // TEST_SUITE("roundtrip/cwt")
