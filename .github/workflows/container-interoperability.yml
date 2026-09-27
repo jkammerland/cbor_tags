@@ -19,7 +19,7 @@ jobs:
       - name: Install compiler and test dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates cmake git ninja-build g++-16 curl bzip2
+          apt-get install -y --no-install-recommends ca-certificates cmake git ninja-build g++-16 curl bzip2 python3
       - uses: actions/checkout@v6.0.2
       - name: Fetch pinned Boost headers
         run: |
