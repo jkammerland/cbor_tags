@@ -1,6 +1,8 @@
 #include "std_value_wrapper_fixtures.h"
 
 #if defined(__cpp_lib_indirect) && __cpp_lib_indirect >= 202502L && defined(__cpp_lib_polymorphic) && __cpp_lib_polymorphic >= 202502L
+#include "std_expected_test_types.h"
+
 using namespace cbor_value_test;
 
 TEST_SUITE("roundtrip/std_value_wrappers") {
@@ -43,6 +45,26 @@ TEST_SUITE("roundtrip/std_value_wrappers") {
         CHECK(*choice_copy == *choice);
         REQUIRE(*pointer_copy);
         CHECK(**pointer_copy == **pointer);
+    }
+
+    TEST_CASE("std indirect dispatches its payload after reading the header") {
+        using ext::std_expected::std_expected_codec;
+        using std_expected_test::directional_item_codec;
+        using std_expected_test::header_only_empty;
+        const std::indirect<header_only_empty>                     original;
+        const std::expected<std::indirect<header_only_empty>, int> wrapped{std::in_place};
+        std::vector<std::byte>                                     encoded;
+        REQUIRE(make_encoder<directional_item_codec, std_indirect_codec, std_expected_codec>(encoded)(original, wrapped, 7));
+        std::indirect<header_only_empty>                     copy;
+        std::expected<std::indirect<header_only_empty>, int> wrapped_copy;
+        int                                                  following{};
+        header_only_empty::decoded = 0;
+        REQUIRE(make_decoder<directional_item_codec, std_indirect_codec, std_expected_codec>(encoded)(copy, wrapped_copy, following));
+        CHECK_FALSE(copy.valueless_after_move());
+        REQUIRE(wrapped_copy.has_value());
+        CHECK_FALSE(wrapped_copy->valueless_after_move());
+        CHECK(header_only_empty::decoded == 2);
+        CHECK(following == 7);
     }
 
     TEST_CASE("pmr indirect decodes engaged immovable payloads in place") {

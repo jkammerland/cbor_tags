@@ -69,7 +69,8 @@ template <typename Self> struct std_indirect_codec : cbor_codec_mixin_base<Self>
 
   private:
     template <typename T> static consteval void require_single_item() {
-        static_assert(cbor::tags::detail::codec_payload_encodes_one_item<Self, T>(),
+        static_assert(cbor::tags::detail::codec_payload_encodes_one_item<Self, T>(
+                          cbor::tags::detail::payload_context<cbor::tags::detail::payload_decode_context::header>{}),
                       "std::indirect payload must encode exactly one CBOR item");
     }
 };
