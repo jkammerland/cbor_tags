@@ -9,6 +9,7 @@
 #include <doctest/doctest.h>
 #include <list>
 #include <map>
+#include <ostream>
 #include <ranges>
 #include <set>
 #include <unordered_set>

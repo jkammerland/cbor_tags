@@ -27,7 +27,6 @@ check_cxx_source_compiles("#include <version>
 int main() { std::inplace_vector<int, 4> v; v.push_back(1); }" CBOR_TAGS_TEST_HAS_INPLACE_VECTOR)
 message(STATUS "Capacity tests: Boost containers=${CBOR_TAGS_TEST_HAS_BOOST_CAPACITY}, std::inplace_vector=${CBOR_TAGS_TEST_HAS_INPLACE_VECTOR} (empty means unavailable)")
 
-
 # add executables more if needed
 add_executable(tests)
 
@@ -62,11 +61,15 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/fixed_text_spans")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/fixed_text_spans")
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
 set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
 set_tests_properties(aggregate_decode_roundtrip PROPERTIES LABELS "roundtrip")
+add_test(NAME container_interoperability_wire COMMAND tests "--test-suite=cbor_wire/container_interoperability")
+set_tests_properties(container_interoperability_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME container_interoperability_roundtrip COMMAND tests "--test-suite=roundtrip/container_interoperability")
+set_tests_properties(container_interoperability_roundtrip PROPERTIES LABELS "roundtrip")
 add_test(NAME fixed_text_spans_wire COMMAND tests "--test-suite=cbor_wire/fixed_text_spans")
 set_tests_properties(fixed_text_spans_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME fixed_text_spans_roundtrip COMMAND tests "--test-suite=roundtrip/fixed_text_spans")
