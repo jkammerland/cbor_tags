@@ -105,6 +105,10 @@ if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
   endif()
 endif()
 
+# Keep this suite reachable when a branch excludes wire tests from the unit run.
+add_test(NAME byte_views_wire COMMAND tests --test-suite=cbor_wire/byte_views)
+set_tests_properties(byte_views_wire PROPERTIES LABELS "cbor-wire")
+
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
