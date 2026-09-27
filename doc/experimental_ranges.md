@@ -294,6 +294,24 @@ dec(text);
 `text` points into `data`. Keep `data` alive and do not invalidate it while
 using `text`.
 
+Use `std::span<const std::byte>` for a contiguous borrowed byte-string payload:
+
+```cpp
+std::vector<std::byte> data;
+auto enc = make_encoder(data);
+enc(std::vector<std::byte>{std::byte{1}, std::byte{2}});
+
+auto dec = make_decoder(data);
+std::span<const std::byte> bytes;
+dec(bytes);
+```
+
+`bytes` borrows from `data` with the same lifetime requirements as `text`.
+Decoding into `std::basic_string_view<std::byte, Traits>` is also supported when
+`Traits` implements the character-traits requirements. The standard library is
+not required to provide `std::char_traits<std::byte>`; use explicit traits for
+nonstandard string character types, or prefer the span API above.
+
 Borrowed text and byte-string views decode definite strings only. If the input
 may contain indefinite/chunked text or byte strings, decode into an owning
 `std::string` or byte container instead.

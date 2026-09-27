@@ -1,3 +1,4 @@
+#include "character_traits.h"
 #include "test_util.h"
 
 #include <array>
@@ -1243,9 +1244,9 @@ TEST_CASE("decoder should decode byte strings into basic_string_view and advance
 
     auto dec = make_decoder(buffer);
 
-    std::basic_string_view<std::byte> decoded;
-    std::uint8_t                      next_value{};
-    auto                              result = dec(decoded, next_value);
+    test_util::basic_string_view<std::byte> decoded;
+    std::uint8_t                            next_value{};
+    auto                                    result = dec(decoded, next_value);
 
     CHECK_MESSAGE(result, "Decoding into a byte-string view should advance the reader.");
     CHECK_EQ(decoded.size(), 2);
@@ -1260,9 +1261,9 @@ TEST_CASE("decoder should accept empty byte strings for basic_string_view and ad
 
     auto dec = make_decoder(buffer);
 
-    std::basic_string_view<std::byte> decoded;
-    std::uint8_t                      next_value{};
-    auto                              result = dec(decoded, next_value);
+    test_util::basic_string_view<std::byte> decoded;
+    std::uint8_t                            next_value{};
+    auto                                    result = dec(decoded, next_value);
 
     CHECK_MESSAGE(result, "Decoding an empty byte-string view should succeed and advance the reader.");
     CHECK(decoded.empty());
@@ -1276,8 +1277,8 @@ TEST_CASE("decoder should accept empty byte strings for basic_string_view at end
 
     auto dec = make_decoder(buffer);
 
-    std::basic_string_view<std::byte> decoded;
-    auto                              result = dec(decoded);
+    test_util::basic_string_view<std::byte> decoded;
+    auto                                    result = dec(decoded);
 
     CHECK_MESSAGE(result, "Decoding an empty byte-string view should succeed without touching payload bytes.");
     CHECK(decoded.empty());
@@ -1288,9 +1289,9 @@ TEST_CASE("decoder should preserve custom input buffer size_type") {
 
     auto dec = make_decoder(buffer);
 
-    std::basic_string_view<std::byte> decoded;
-    std::uint8_t                      next_value{};
-    auto                              result = dec(decoded, next_value);
+    test_util::basic_string_view<std::byte> decoded;
+    std::uint8_t                            next_value{};
+    auto                                    result = dec(decoded, next_value);
 
     REQUIRE(result);
     CHECK_EQ(decoded.size(), 2);
@@ -1357,8 +1358,8 @@ TEST_CASE("decoder should report incomplete byte-string view without retry contr
 
     auto dec = make_decoder(buffer);
 
-    std::basic_string_view<std::byte> decoded;
-    auto                              result = dec(decoded);
+    test_util::basic_string_view<std::byte> decoded;
+    auto                                    result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Truncated byte-string view should return incomplete.");
     CHECK_EQ(result.error(), status_code::incomplete);

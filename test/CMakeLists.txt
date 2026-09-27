@@ -12,7 +12,7 @@ endif()
 if(NOT TARGET nameof::nameof)
   cpmaddpackage("gh:Neargye/nameof@0.10.4")
 endif()
-cpmaddpackage("gh:jkammerland/doctest@1.0.1")
+cpmaddpackage("gh:jkammerland/doctest@1.0.4")
 
 include(CheckCXXCompilerFlag)
 
@@ -50,7 +50,64 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests)
+add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/fixed_text_spans")
+add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
+set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
+set_tests_properties(aggregate_decode_roundtrip PROPERTIES LABELS "roundtrip")
+add_test(NAME fixed_text_spans_wire COMMAND tests "--test-suite=cbor_wire/fixed_text_spans")
+set_tests_properties(fixed_text_spans_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME fixed_text_spans_roundtrip COMMAND tests "--test-suite=roundtrip/fixed_text_spans")
+set_tests_properties(fixed_text_spans_roundtrip PROPERTIES LABELS "roundtrip")
+
+if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles(
+    "#include <expected>\nint main() { std::expected<int, int> value; return *value; }"
+    CBOR_TAGS_TEST_HAS_STD_EXPECTED)
+  if(CBOR_TAGS_TEST_HAS_STD_EXPECTED)
+    add_test(NAME std_expected_wire COMMAND tests "--test-suite=cbor_wire/std_expected")
+    set_tests_properties(std_expected_wire PROPERTIES LABELS "cbor-wire")
+    add_test(NAME std_expected_roundtrip COMMAND tests "--test-suite=roundtrip/std_expected")
+    set_tests_properties(std_expected_roundtrip PROPERTIES LABELS "roundtrip")
+    foreach(ROUTE HEADER_ROOT HEADER_GROUP HEADER_ARRAY DIRECT_ARRAY DIRECT_OPTIONAL TAG_VARIANT BOUNDED_CONTAINER INDEFINITE_CONTAINER)
+      string(TOLOWER "std_expected_${ROUTE}_compile_fails" TEST_NAME)
+      add_executable(${TEST_NAME} EXCLUDE_FROM_ALL std_expected_dispatch_compile_fail.cc)
+      target_compile_definitions(${TEST_NAME} PRIVATE CBOR_EXPECTED_${ROUTE})
+      target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+        "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+        "-DPASS_REGEX=std::expected value payload must encode exactly one CBOR item"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    endforeach()
+    foreach(SHAPE EMPTY_VALUE EMPTY_ERROR OPTIONAL_EMPTY CONTAINER_EMPTY BOUNDED_EMPTY UNWRAPPED_GROUP TAG_HEADER CONVERTING_MIXIN GENERIC_MIXIN GENERIC_ARRAY_MIXIN MUTABLE_MIXIN CONST_MIXIN)
+      foreach(OPERATION ENCODE DECODE)
+        if((SHAPE STREQUAL "MUTABLE_MIXIN" AND OPERATION STREQUAL "DECODE") OR
+           (SHAPE STREQUAL "CONST_MIXIN" AND OPERATION STREQUAL "ENCODE"))
+          continue()
+        endif()
+        string(TOLOWER "std_expected_${SHAPE}_${OPERATION}_compile_fails" TEST_NAME)
+        add_executable(${TEST_NAME} EXCLUDE_FROM_ALL std_expected_payload_compile_fail.cc)
+        target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_EXPECTED_${SHAPE} CBOR_TAGS_EXPECTED_${OPERATION})
+        target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+        add_test(
+          NAME ${TEST_NAME}
+          COMMAND
+            ${CMAKE_COMMAND}
+            "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+            "-DTEST_TARGET=${TEST_NAME}"
+            "-DCONFIG=$<CONFIG>"
+            "-DPASS_REGEX=std::expected (value|error) payload must encode exactly one CBOR item"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+      endforeach()
+    endforeach()
+  endif()
+endif()
+
+# Keep this suite reachable when a branch excludes wire tests from the unit run.
+add_test(NAME byte_views_wire COMMAND tests --test-suite=cbor_wire/byte_views)
+set_tests_properties(byte_views_wire PROPERTIES LABELS "cbor-wire")
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
@@ -711,7 +768,7 @@ check_cxx_compiler_flag("-funsigned-char" CBOR_TAGS_HAS_FUNSIGNED_CHAR)
 if(CBOR_TAGS_HAS_FUNSIGNED_CHAR)
   add_executable(test_unsigned_char test_unsigned_char.cc)
   target_compile_options(test_unsigned_char PRIVATE -funsigned-char)
-  target_link_libraries(test_unsigned_char PRIVATE cbor::tags)
+  target_link_libraries(test_unsigned_char PRIVATE cbor::tags test_util)
   add_test(NAME test_unsigned_char COMMAND test_unsigned_char)
 endif()
 

@@ -1,3 +1,4 @@
+#include "character_traits.h"
 #include "test_util.h"
 
 #include <algorithm>
@@ -337,8 +338,12 @@ TEST_CASE("compact tagged pins exact nested tuple map optional variant wire") {
 
     const payload in{
         left_type{{1, std::nullopt}, {2, std::variant<std::uint16_t, std::string>{std::string{"xy"}}}},
-        std::vector<std::variant<std::uint8_t, std::string>>{std::variant<std::uint8_t, std::string>{std::uint8_t{7}},
-                                                             std::variant<std::uint8_t, std::string>{std::string{"z"}}},
+        [] {
+            std::vector<std::variant<std::uint8_t, std::string>> right;
+            right.emplace_back(std::in_place_type<std::uint8_t>, 7);
+            right.emplace_back(std::in_place_type<std::string>, "z");
+            return right;
+        }(),
     };
 
     check_compact_wire(in, payload{}, "c1500201000201010278790102000701017a");
@@ -1340,8 +1345,8 @@ TEST_CASE("compact tagged variants decode non-default alternatives when the dest
 
 TEST_CASE("compact tagged byte-like strings use binary compact dispatch") {
 
-    const std::basic_string<std::byte> in{std::byte{0xAA}, std::byte{0xBB}};
-    std::basic_string<std::byte>       out;
+    const test_util::basic_string<std::byte> in{std::byte{0xAA}, std::byte{0xBB}};
+    test_util::basic_string<std::byte>       out;
 
     std::vector<std::byte> compact;
     auto                   enc = make_encoder<custom_codec_1>(compact);

@@ -162,8 +162,12 @@ Current public extension headers:
   codec. See [Custom Codec 1](custom_codec_1.md).
 - `cbor_tags/extensions/smart_ptr.h`: unique ownership as `T / null` and shared
   ownership through tags 28/29 with codec-owned or user-owned reference tables.
-- `cbor_tags/extensions/std_expected.h`: opt-in `std::expected` return type
-  support in C++23 and newer builds.
+- `cbor_tags/extensions/std_expected.h`: opt-in serialization of C++23
+  `std::expected<T, E>` as `[has_value, payload]`. Non-void `T` and `E` must each
+  encode and decode one complete CBOR item. Use `std::expected<void, E>` for a
+  payload-free success, encoded with a null payload. To give a custom type a
+  one-item representation, provide encode/decode customizations or an explicit
+  codec mixin.
 - `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.
   See [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
 - `cbor_tags/extensions/cbor_visualization.h`: CDDL, annotation, and diagnostic

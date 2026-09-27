@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
+#include "cbor_tags/detail/std_expected_traits.h"
 
 #include <concepts>
 #include <cstddef>
@@ -41,6 +42,7 @@ template <typename Self> struct std_expected_codec : cbor_codec_mixin_base<Self>
     using cbor_codec_mixin_base<Self>::encode;
 
     template <typename T, typename E> constexpr void encode(const std::expected<T, E> &value) {
+        require_single_item_payloads<T, E>();
         auto &enc = static_cast<Self &>(*this);
 
         enc.encode(as_array{2});
@@ -59,6 +61,7 @@ template <typename Self> struct std_expected_codec : cbor_codec_mixin_base<Self>
     template <typename T, typename E>
         requires detail::DecodableStdExpected<T, E>
     [[nodiscard]] constexpr status_code decode(std::expected<T, E> &value, major_type major, std::byte additional_info) {
+        require_single_item_payloads<T, E>();
         auto &dec = static_cast<Self &>(*this);
 
         if (major != major_type::Array) {
@@ -96,6 +99,13 @@ template <typename Self> struct std_expected_codec : cbor_codec_mixin_base<Self>
     }
 
   private:
+    template <typename T, typename E> static consteval void require_single_item_payloads() {
+        static_assert(std::is_void_v<T> || detail::expected_payload_encodes_one_item<Self, T>(),
+                      "std::expected value payload must encode exactly one CBOR item; use void for a payload-free success");
+        static_assert(detail::expected_payload_encodes_one_item<Self, E>(),
+                      "std::expected error payload must encode exactly one CBOR item");
+    }
+
     template <typename T, typename E>
         requires detail::DecodableStdExpected<T, E>
     [[nodiscard]] constexpr status_code decode_payload(std::expected<T, E> &value) {
