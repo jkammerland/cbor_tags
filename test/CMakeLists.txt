@@ -12,7 +12,7 @@ endif()
 if(NOT TARGET nameof::nameof)
   cpmaddpackage("gh:Neargye/nameof@0.10.4")
 endif()
-cpmaddpackage("gh:jkammerland/doctest@1.0.1")
+cpmaddpackage("gh:jkammerland/doctest@1.0.4")
 
 include(CheckCXXCompilerFlag)
 
