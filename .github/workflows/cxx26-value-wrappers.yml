@@ -11,18 +11,18 @@ permissions:
 jobs:
   value-wrappers:
     runs-on: ubuntu-latest
-    container: ubuntu:26.04
+    # Released GCC 16 fixes indirect comparison constraints used by container tests.
+    container: registry.fedoraproject.org/fedora:44
     steps:
       - name: Install compiler and build dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates cmake git ninja-build g++-16
+          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build python3
       - uses: actions/checkout@v6.0.2
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja \
-            -DCMAKE_C_COMPILER=gcc-16 \
-            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_CXX_STANDARD=26 \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCBOR_TAGS_BUILD_TESTS=ON \

@@ -2,6 +2,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
 #include <doctest/doctest.h>
+#include <fmt/format.h>
 #include <tuple>
 #include <vector>
 

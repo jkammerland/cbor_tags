@@ -1,5 +1,6 @@
 #include <cbor_tags/extensions/cbor_visualization.h>
 #include <doctest/doctest.h>
+#include <fmt/format.h>
 
 namespace wire_schema_test {
 

@@ -1,6 +1,7 @@
 #include "../examples/cxx26_value_wrappers.h"
 
 #include <cbor_tags/extensions/cbor_visualization.h>
+#include <fmt/format.h>
 #include <memory>
 #include <optional>
 #include <tuple>
