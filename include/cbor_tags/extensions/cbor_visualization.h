@@ -1607,20 +1607,21 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
     auto annotate = [&](const auto &value, const auto &context) {
         using T    = std::remove_cvref_t<decltype(value)>;
         auto depth = context.depth;
-        if (context.phase == walk_phase::end) {
+        if (context.kind == walk_event_kind::leave) {
             if (context.source.empty()) {
                 return;
             }
             // A break occupies a child row even though it closes its owning item.
             ++depth;
         }
-        if (context.phase != walk_phase::payload) {
+        // Borrowed string payloads and scalars share the value event kind.
+        if constexpr (!std::ranges::input_range<T>) {
             check_depth(depth);
         }
         auto item_options = options;
         item_options.current_indent += depth;
         item_options.offset += depth;
-        if (context.phase == walk_phase::payload) {
+        if constexpr (std::ranges::input_range<T>) {
             ++item_options.current_indent;
             ++item_options.offset;
             detail::format_bytes(output_buffer, context.source.begin(), context.source.end(), item_options);
@@ -1631,7 +1632,7 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         }
         text::format_to(std::back_inserter(output_buffer), "\n");
         if constexpr (IsTextHeader<T> || IsBinaryHeader<T>) {
-            if (context.phase == walk_phase::begin && !value.indefinite && value.size != 0U) {
+            if (context.kind == walk_event_kind::enter && !value.indefinite && value.size != 0U) {
                 check_depth(depth + 1U);
             }
         }
@@ -2366,9 +2367,9 @@ template <typename OutputBuffer> struct diagnostic_renderer {
 
     template <typename T, typename Iterator> void operator()(const T &arg, const walk_context<Iterator> &context) {
         if constexpr (IsAnyHeader<T>) {
-            if (context.phase == walk_phase::begin) {
+            if (context.kind == walk_event_kind::enter) {
                 begin(arg, context.depth);
-            } else if (context.phase == walk_phase::end) {
+            } else if (context.kind == walk_event_kind::leave) {
                 end();
             }
         } else if constexpr (std::ranges::input_range<T>) {

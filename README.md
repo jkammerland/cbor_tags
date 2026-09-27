@@ -427,7 +427,7 @@ auto result = ct::walk_item(dec,
     [&](const auto& value, const auto& context) {
         using T = std::remove_cvref_t<decltype(value)>;
         if constexpr (std::same_as<T, ct::as_array_any>) {
-            if (context.phase == ct::walk_phase::begin) ++arrays;
+            if (context.kind == ct::walk_event_kind::enter) ++arrays;
         }
     });
 ```

@@ -47,12 +47,11 @@ template <typename T> std::string event_name(const T &value) {
     }
 }
 
-std::string phase_name(walk_phase phase) {
-    switch (phase) {
-    case walk_phase::begin: return "begin";
-    case walk_phase::value: return "value";
-    case walk_phase::payload: return "payload";
-    case walk_phase::end: return "end";
+std::string event_kind_name(walk_event_kind kind) {
+    switch (kind) {
+    case walk_event_kind::enter: return "enter";
+    case walk_event_kind::value: return "value";
+    case walk_event_kind::leave: return "leave";
     }
     return "unknown";
 }
@@ -171,19 +170,19 @@ TEST_SUITE("cbor_wire/traversal") {
             REQUIRE(walk_item(dec, [&](const auto &value, const auto &context) {
                 static_assert(!std::same_as<std::remove_cvref_t<decltype(value)>, indefinite_break>);
                 CHECK(context.source.end() == dec.tell());
-                events.push_back(phase_name(context.phase) + "/" + std::to_string(context.depth) + "/" + event_name(value) + "/" +
+                events.push_back(event_kind_name(context.kind) + "/" + std::to_string(context.depth) + "/" + event_name(value) + "/" +
                                  to_hex(context.source));
             }));
             const std::vector<std::string> expected{
-                "begin/0/array(0,indef)/9f", "begin/1/map(1,def)/a1",     "value/2/uint(1)/01",      "begin/2/tag(100)/d864",
-                "begin/3/array(2,def)/82",   "begin/4/text(2,def)/62",    "payload/4/payload/6869",  "end/4/text(2,def)/",
-                "begin/4/bytes(2,def)/42",   "payload/4/payload/00ff",    "end/4/bytes(2,def)/",     "end/3/array(2,def)/",
-                "end/2/tag(100)/",           "end/1/map(1,def)/",         "begin/1/map(0,indef)/bf", "value/2/uint(2)/02",
-                "begin/2/text(0,indef)/7f",  "begin/3/text(0,def)/60",    "payload/3/payload/",      "end/3/text(0,def)/",
-                "begin/3/text(1,def)/61",    "payload/3/payload/61",      "end/3/text(1,def)/",      "end/2/text(0,indef)/ff",
-                "end/1/map(0,indef)/ff",     "begin/1/bytes(0,indef)/5f", "begin/2/bytes(0,def)/40", "payload/2/payload/",
-                "end/2/bytes(0,def)/",       "begin/2/bytes(1,def)/41",   "payload/2/payload/01",    "end/2/bytes(1,def)/",
-                "end/1/bytes(0,indef)/ff",   "end/0/array(0,indef)/ff",
+                "enter/0/array(0,indef)/9f", "enter/1/map(1,def)/a1",     "value/2/uint(1)/01",      "enter/2/tag(100)/d864",
+                "enter/3/array(2,def)/82",   "enter/4/text(2,def)/62",    "value/4/payload/6869",    "leave/4/text(2,def)/",
+                "enter/4/bytes(2,def)/42",   "value/4/payload/00ff",      "leave/4/bytes(2,def)/",   "leave/3/array(2,def)/",
+                "leave/2/tag(100)/",         "leave/1/map(1,def)/",       "enter/1/map(0,indef)/bf", "value/2/uint(2)/02",
+                "enter/2/text(0,indef)/7f",  "enter/3/text(0,def)/60",    "value/3/payload/",        "leave/3/text(0,def)/",
+                "enter/3/text(1,def)/61",    "value/3/payload/61",        "leave/3/text(1,def)/",    "leave/2/text(0,indef)/ff",
+                "leave/1/map(0,indef)/ff",   "enter/1/bytes(0,indef)/5f", "enter/2/bytes(0,def)/40", "value/2/payload/",
+                "leave/2/bytes(0,def)/",     "enter/2/bytes(1,def)/41",   "value/2/payload/01",      "leave/2/bytes(1,def)/",
+                "leave/1/bytes(0,indef)/ff", "leave/0/array(0,indef)/ff",
             };
             REQUIRE_EQ(events.size(), expected.size());
             for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -203,11 +202,11 @@ TEST_SUITE("cbor_wire/traversal") {
 
     TEST_CASE("empty indefinite strings have no payload and nonminimal headers keep their original bytes") {
         for (const auto hex : {"5fff", "7fff"}) {
-            const auto              input = to_bytes(hex);
-            auto                    dec   = make_decoder(input);
-            std::vector<walk_phase> phases;
-            REQUIRE(walk_item(dec, [&](const auto &, const auto &context) { phases.push_back(context.phase); }));
-            CHECK(phases == std::vector<walk_phase>{walk_phase::begin, walk_phase::end});
+            const auto                   input = to_bytes(hex);
+            auto                         dec   = make_decoder(input);
+            std::vector<walk_event_kind> kinds;
+            REQUIRE(walk_item(dec, [&](const auto &, const auto &context) { kinds.push_back(context.kind); }));
+            CHECK(kinds == std::vector<walk_event_kind>{walk_event_kind::enter, walk_event_kind::leave});
         }
         for (const auto hex : {"780168", "59000168"}) {
             const auto               input = to_bytes(hex);
@@ -231,7 +230,7 @@ TEST_SUITE("cbor_wire/traversal") {
             REQUIRE(walk_item(dec, [&](const auto &value, const auto &context) {
                 using T = std::remove_cvref_t<decltype(value)>;
                 if constexpr (std::same_as<T, text_type>) {
-                    CHECK(context.phase == walk_phase::payload);
+                    CHECK(context.kind == walk_event_kind::value);
                     text = value;
                     if constexpr (std::same_as<T, std::string_view>) {
                         CHECK(reinterpret_cast<const std::byte *>(value.data()) == std::addressof(*context.source.begin()));
@@ -240,7 +239,7 @@ TEST_SUITE("cbor_wire/traversal") {
                         CHECK(value.range.end() == context.source.end());
                     }
                 } else if constexpr (std::same_as<T, bytes_type>) {
-                    CHECK(context.phase == walk_phase::payload);
+                    CHECK(context.kind == walk_event_kind::value);
                     bytes = value;
                     if constexpr (std::same_as<T, std::span<const std::byte>>) {
                         CHECK(value.data() == std::addressof(*context.source.begin()));
@@ -340,7 +339,7 @@ TEST_SUITE("cbor_wire/traversal") {
                 auto       dec    = make_decoder(buffer);
                 bool       began  = false;
                 const auto result = walk_item(dec, [&](const auto &, const auto &context) {
-                    CHECK(context.phase == walk_phase::begin);
+                    CHECK(context.kind == walk_event_kind::enter);
                     began = true;
                 });
                 REQUIRE_FALSE(result);
@@ -402,7 +401,7 @@ TEST_SUITE("cbor_wire/traversal") {
                 bool       began      = false;
                 const auto strict     = walk_item(strict_dec,
                                                   [&](const auto &, const auto &context) {
-                                                  CHECK(context.phase == walk_phase::begin);
+                                                  CHECK(context.kind == walk_event_kind::enter);
                                                   began = true;
                                                   },
                                                   {.strict_validation = true});
@@ -428,7 +427,7 @@ TEST_SUITE("cbor_wire/traversal") {
             auto permissive_dec = make_decoder(input);
             bool payload_seen   = false;
             REQUIRE(walk_item(permissive_dec,
-                              [&](const auto &, const auto &context) { payload_seen |= context.phase == walk_phase::payload; }));
+                              [&](const auto &, const auto &context) { payload_seen |= context.kind == walk_event_kind::value; }));
             CHECK(payload_seen);
             CHECK_FALSE(input.payload_dereferenced);
             CHECK(permissive_dec.tell() == input.end());
@@ -437,7 +436,7 @@ TEST_SUITE("cbor_wire/traversal") {
             bool       began      = false;
             const auto strict     = walk_item(strict_dec,
                                               [&](const auto &, const auto &context) {
-                                              CHECK(context.phase == walk_phase::begin);
+                                              CHECK(context.kind == walk_event_kind::enter);
                                               began = true;
                                               },
                                               {.strict_validation = true});
@@ -497,10 +496,10 @@ TEST_SUITE("cbor_wire/traversal") {
         REQUIRE(walk_item(dec, [&](const auto &value, const auto &context) {
             using T = std::remove_cvref_t<decltype(value)>;
             if constexpr (std::same_as<T, positive>) {
-                CHECK(context.phase == walk_phase::value);
+                CHECK(context.kind == walk_event_kind::value);
                 positives.push_back(value);
             } else if constexpr (std::same_as<T, negative>) {
-                CHECK(context.phase == walk_phase::value);
+                CHECK(context.kind == walk_event_kind::value);
                 negatives.push_back(value);
             }
         }));
@@ -521,16 +520,16 @@ TEST_SUITE("cbor_wire/traversal") {
     }
 
     TEST_CASE("callback rejection is terminal without consuming the remaining array elements") {
-        const auto              input = to_bytes("82010207");
-        auto                    dec   = make_decoder(input);
-        std::vector<walk_phase> phases;
-        const auto              result = walk_item(dec, [&](const auto &, const auto &context) {
-            phases.push_back(context.phase);
-            return context.phase == walk_phase::value ? status_code::no_match_for_tag : status_code::success;
+        const auto                   input = to_bytes("82010207");
+        auto                         dec   = make_decoder(input);
+        std::vector<walk_event_kind> kinds;
+        const auto                   result = walk_item(dec, [&](const auto &, const auto &context) {
+            kinds.push_back(context.kind);
+            return context.kind == walk_event_kind::value ? status_code::no_match_for_tag : status_code::success;
         });
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::no_match_for_tag);
-        CHECK(phases == std::vector<walk_phase>{walk_phase::begin, walk_phase::value});
+        CHECK(kinds == std::vector<walk_event_kind>{walk_event_kind::enter, walk_event_kind::value});
         CHECK(dec.tell() == input.cbegin() + 2);
         positive remaining{};
         REQUIRE(dec(remaining));

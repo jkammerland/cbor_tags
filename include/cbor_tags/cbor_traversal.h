@@ -16,7 +16,40 @@
 
 namespace cbor::tags {
 
-enum class walk_phase { begin, value, payload, end };
+/*
+ * Visitor event kinds. Headers for arrays, maps, tags, and strings produce
+ * enter/leave events around their contents. Scalars and borrowed string
+ * contents produce value events; their C++ types distinguish them.
+ *
+ * For [42, "hi"], the callbacks are:
+ *
+ *   enter    array(size=2)
+ *     value    42
+ *     enter    text(size=2)
+ *     value    "hi"
+ *     leave    text(size=2)
+ *   leave    array(size=2)
+ *
+ * The integer gets one callback. The string gets three because its header
+ * and borrowed contents are delivered separately. Its leave event carries
+ * the original header again.
+ *
+ * An indefinite string adds an outer boundary around its definite chunks:
+ *
+ *   enter    indefinite text
+ *     enter    text chunk
+ *     value    chunk contents
+ *     leave    text chunk
+ *     ...more chunks...
+ *   leave    indefinite text
+ *
+ * Byte strings follow the same pattern. An empty definite string or chunk
+ * still produces a value event; an indefinite string with no chunks does not.
+ * A leave event's source is the closing break for an indefinite item, or an
+ * empty range otherwise. Successful walks pair every enter with a leave;
+ * a failed walk may stop before leave.
+ */
+enum class walk_event_kind { enter, value, leave };
 
 struct walk_options {
     std::size_t max_depth{64};
@@ -28,7 +61,7 @@ struct validation_options {
 };
 
 template <typename Iterator> struct walk_context {
-    walk_phase                      phase;
+    walk_event_kind                 kind;
     std::size_t                     depth;
     std::ranges::subrange<Iterator> source;
 };
@@ -68,7 +101,7 @@ template <typename Decoder, typename Visitor> class item_walker {
         return status;
     }
 
-    template <typename T> status_code emit(const T &value, walk_phase phase, std::size_t depth, source_range source) {
+    template <typename T> status_code emit(const T &value, walk_event_kind kind, std::size_t depth, source_range source) {
         mark_failure(walk_failure_reason::none, depth);
         static_assert(std::is_invocable_v<Visitor &, const T &, const context &>,
                       "walk_item visitor must accept each value and const walk_context&");
@@ -76,7 +109,7 @@ template <typename Decoder, typename Visitor> class item_walker {
             using result_type = std::invoke_result_t<Visitor &, const T &, const context &>;
             static_assert(std::same_as<result_type, void> || std::same_as<result_type, status_code>,
                           "walk_item visitor must return exactly void or status_code");
-            const context event{.phase = phase, .depth = depth, .source = std::move(source)};
+            const context event{.kind = kind, .depth = depth, .source = std::move(source)};
             if constexpr (std::same_as<result_type, status_code>) {
                 return std::invoke(visitor_, value, event);
             } else if constexpr (std::same_as<result_type, void>) {
@@ -117,16 +150,16 @@ template <typename Decoder, typename Visitor> class item_walker {
             if (options_.strict_validation && !is_valid_utf8(payload)) {
                 return fail(walk_failure_reason::invalid_utf8, depth, status_code::invalid_utf8_sequence);
             }
-            return emit(payload, walk_phase::payload, depth, {begin, decoder_.tell()});
+            return emit(payload, walk_event_kind::value, depth, {begin, decoder_.tell()});
         } else {
             const auto payload = decoder_.decode_bstring_payload(header.size);
-            return emit(payload, walk_phase::payload, depth, {begin, decoder_.tell()});
+            return emit(payload, walk_event_kind::value, depth, {begin, decoder_.tell()});
         }
     }
 
     template <typename Header> status_code end_item(const Header &header, std::size_t depth) {
         const auto cursor = decoder_.tell();
-        return emit(header, walk_phase::end, depth, {cursor, cursor});
+        return emit(header, walk_event_kind::leave, depth, {cursor, cursor});
     }
 
     status_code read_item(std::size_t depth) {
@@ -150,7 +183,7 @@ template <typename Decoder, typename Visitor> class item_walker {
                 if (!header.indefinite) {
                     return fail(walk_failure_reason::unexpected_break, depth + 1U);
                 }
-                return emit(header, walk_phase::end, depth, source);
+                return emit(header, walk_event_kind::leave, depth, source);
             }
             if constexpr (IsTextHeader<Header> || IsBinaryHeader<Header>) {
                 const auto *chunk = std::get_if<Header>(&value);
@@ -187,7 +220,7 @@ template <typename Decoder, typename Visitor> class item_walker {
                     if (depth >= options_.max_depth) {
                         return fail(walk_failure_reason::depth, depth, status_code::size_limit_exceeded);
                     }
-                    auto status = emit(item, walk_phase::begin, depth, source);
+                    auto status = emit(item, walk_event_kind::enter, depth, source);
                     if (status != status_code::success) {
                         return status;
                     }
@@ -204,7 +237,7 @@ template <typename Decoder, typename Visitor> class item_walker {
                         return sequence_items(item, depth);
                     }
                 } else {
-                    return emit(item, walk_phase::value, depth, source);
+                    return emit(item, walk_event_kind::value, depth, source);
                 }
             },
             value);

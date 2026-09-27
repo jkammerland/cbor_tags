@@ -56,7 +56,7 @@ template <typename T> semantic_frame make_frame(const T &value, std::size_t dept
 
 TEST_SUITE("roundtrip/traversal") {
 
-    TEST_CASE("generated nested values retain semantic contents and balanced header events") {
+    TEST_CASE("generated scalar and borrowed text values share value events within balanced headers") {
         const std::map<std::uint64_t, std::vector<std::string>> source{{1, {"one", "", "three"}}, {2, {"four", "five"}}};
         const std::vector<std::uint64_t>                        expected_keys{1, 2};
         const std::vector<std::string>                          expected_text{"one", "", "three", "four", "five"};
@@ -80,7 +80,7 @@ TEST_SUITE("roundtrip/traversal") {
                 using T = std::remove_cvref_t<decltype(value)>;
                 if constexpr (IsAnyHeader<T>) {
                     const auto frame = make_frame(value, context.depth);
-                    if (context.phase == walk_phase::begin) {
+                    if (context.kind == walk_event_kind::enter) {
                         CHECK_EQ(context.depth, frames.size());
                         if (frames.empty()) {
                             CHECK_FALSE(root_began);
@@ -90,7 +90,7 @@ TEST_SUITE("roundtrip/traversal") {
                         }
                         frames.push_back(frame);
                     } else {
-                        REQUIRE(context.phase == walk_phase::end);
+                        REQUIRE(context.kind == walk_event_kind::leave);
                         REQUIRE_FALSE(frames.empty());
                         CHECK(frames.back() == frame);
                         frames.pop_back();
@@ -99,13 +99,17 @@ TEST_SUITE("roundtrip/traversal") {
                         }
                     }
                 } else if constexpr (std::same_as<T, positive>) {
-                    CHECK(context.phase == walk_phase::value);
+                    CHECK(context.kind == walk_event_kind::value);
                     CHECK_EQ(context.depth, frames.size());
                     keys.push_back(value);
                 } else if constexpr (std::same_as<T, text_type>) {
-                    REQUIRE(context.phase == walk_phase::payload);
+                    REQUIRE(context.kind == walk_event_kind::value);
                     REQUIRE_FALSE(frames.empty());
                     CHECK_EQ(context.depth, frames.back().depth);
+                    if (!value.empty()) {
+                        REQUIRE_FALSE(context.source.empty());
+                        CHECK(reinterpret_cast<const std::byte *>(value.data()) == &*context.source.begin());
+                    }
                     text.emplace_back(value.begin(), value.end());
                 } else {
                     FAIL("unexpected event for the generated map of arrays of text");
@@ -135,7 +139,7 @@ TEST_SUITE("roundtrip/traversal") {
             REQUIRE(walk_item(dec,
                               [&](const auto &value, const auto &context) {
                                   using Value = std::remove_cvref_t<decltype(value)>;
-                                  CHECK(context.phase == walk_phase::value);
+                                  CHECK(context.kind == walk_event_kind::value);
                                   CHECK_EQ(context.depth, 0);
                                   if constexpr (std::same_as<T, Value>) {
                                       CHECK(value == source);
@@ -163,10 +167,11 @@ TEST_SUITE("roundtrip/traversal") {
         check(simple{255});
     }
 
-    TEST_CASE("generated tag and indefinite strings preserve semantic payloads") {
+    TEST_CASE("generated tag and string chunks retain balanced headers and semantic values") {
         const std::string            source_text{"hello world"};
         const std::vector<std::byte> source_bytes{std::byte{'a'}, std::byte{'b'}, std::byte{'c'}};
         for (const bool indefinite : {false, true}) {
+            CAPTURE(indefinite);
             std::vector<std::byte> encoded;
             auto                   enc = make_encoder(encoded);
             REQUIRE(enc(static_tag<123>{}));
@@ -183,34 +188,55 @@ TEST_SUITE("roundtrip/traversal") {
             auto dec         = make_decoder(encoded);
             using text_type  = decltype(dec.decode_text_payload(0));
             using bytes_type = decltype(dec.decode_bstring_payload(0));
-            std::string            text;
-            std::vector<std::byte> bytes;
-            bool                   tag_began = false;
-            bool                   tag_ended = false;
-            const auto             visitor   = [&](const auto &value, const auto &context) {
+            std::string                 text;
+            std::vector<std::byte>      bytes;
+            std::vector<semantic_frame> frames;
+            bool                        tag_began = false;
+            bool                        tag_ended = false;
+            const auto                  visitor   = [&](const auto &value, const auto &context) {
                 using T = std::remove_cvref_t<decltype(value)>;
+                if constexpr (IsAnyHeader<T>) {
+                    const auto frame = make_frame(value, context.depth);
+                    if (context.kind == walk_event_kind::enter) {
+                        CHECK_EQ(context.depth, frames.size());
+                        frames.push_back(frame);
+                    } else {
+                        REQUIRE(context.kind == walk_event_kind::leave);
+                        REQUIRE_FALSE(frames.empty());
+                        CHECK(frames.back() == frame);
+                        frames.pop_back();
+                    }
+                }
                 if constexpr (std::same_as<T, as_tag_any>) {
                     CHECK_EQ(value.tag, 123);
                     CHECK_EQ(context.depth, 0);
-                    if (context.phase == walk_phase::begin) {
+                    if (context.kind == walk_event_kind::enter) {
                         tag_began = true;
                     } else {
-                        CHECK(context.phase == walk_phase::end);
+                        CHECK(context.kind == walk_event_kind::leave);
                         tag_ended = true;
                     }
                 } else if constexpr (std::same_as<T, text_type>) {
+                    CHECK(context.kind == walk_event_kind::value);
+                    REQUIRE_FALSE(frames.empty());
+                    CHECK_EQ(context.depth, frames.back().depth);
                     text.append(value.begin(), value.end());
                 } else if constexpr (std::same_as<T, bytes_type>) {
+                    CHECK(context.kind == walk_event_kind::value);
+                    REQUIRE_FALSE(frames.empty());
+                    CHECK_EQ(context.depth, frames.back().depth);
                     bytes.insert(bytes.end(), value.begin(), value.end());
                 }
                 return status_code::success;
             };
             REQUIRE(walk_item(dec, visitor));
+            CHECK(frames.empty());
             CHECK(tag_began);
             CHECK(tag_ended);
             CHECK_EQ(text, source_text);
             CHECK(bytes.empty());
             REQUIRE(walk_item(dec, visitor));
+            CHECK(frames.empty());
             CHECK(bytes == source_bytes);
         }
     }
@@ -226,7 +252,7 @@ TEST_SUITE("roundtrip/traversal") {
         REQUIRE(walk_item(dec, [&](const auto &value, const auto &context) {
             using T = std::remove_cvref_t<decltype(value)>;
             if constexpr (std::same_as<T, as_tag_any>) {
-                if (context.phase == walk_phase::begin) {
+                if (context.kind == walk_event_kind::enter) {
                     REQUIRE_FALSE(dec.observed_tags.empty());
                     CHECK_EQ(dec.observed_tags.back(), value.tag);
                     callback_tags.push_back(value.tag);
@@ -264,18 +290,35 @@ TEST_SUITE("roundtrip/traversal") {
         }
     }
 
-    TEST_CASE("visitor status is preserved at begin value payload and end") {
-        const std::array phases{walk_phase::begin, walk_phase::value, walk_phase::payload, walk_phase::end};
-        for (const auto rejected_phase : phases) {
-            CAPTURE(static_cast<int>(rejected_phase));
+    TEST_CASE("visitor status is preserved at enter scalar value payload value and leave") {
+        enum class rejection_point { enter, scalar_value, payload_value, leave };
+        const std::array rejection_points{rejection_point::enter, rejection_point::scalar_value, rejection_point::payload_value,
+                                          rejection_point::leave};
+        for (const auto rejected_point : rejection_points) {
+            CAPTURE(static_cast<int>(rejected_point));
             const auto             source = std::pair{std::uint64_t{7}, std::string{"text"}};
             std::vector<std::byte> encoded;
             REQUIRE(make_encoder(encoded)(source));
-            auto       dec      = make_decoder(encoded);
+            auto dec            = make_decoder(encoded);
+            using text_type     = decltype(dec.decode_text_payload(0));
             bool       rejected = false;
-            const auto result   = walk_item(dec, [&](const auto &, const auto &context) {
+            const auto result   = walk_item(dec, [&](const auto &value, const auto &context) {
+                using T = std::remove_cvref_t<decltype(value)>;
                 CHECK_FALSE(rejected);
-                if (context.phase == rejected_phase) {
+                bool reject = false;
+                if constexpr (IsAnyHeader<T>) {
+                    reject = (context.kind == walk_event_kind::enter && rejected_point == rejection_point::enter) ||
+                             (context.kind == walk_event_kind::leave && rejected_point == rejection_point::leave);
+                } else if constexpr (std::same_as<T, positive>) {
+                    CHECK(context.kind == walk_event_kind::value);
+                    CHECK_EQ(value, source.first);
+                    reject = rejected_point == rejection_point::scalar_value;
+                } else if constexpr (std::same_as<T, text_type>) {
+                    CHECK(context.kind == walk_event_kind::value);
+                    CHECK_EQ(value, source.second);
+                    reject = rejected_point == rejection_point::payload_value;
+                }
+                if (reject) {
                     rejected = true;
                     return status_code::unexpected_group_size;
                 }
