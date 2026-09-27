@@ -368,6 +368,82 @@ int main() {
 }
 ```
 
+### Header-only traversal
+
+The `as_array_any`, `as_map_any`, `as_text_any`, and `as_bstr_any` descriptors
+read a header and leave its contents for the caller. Each has a `size` and an
+`indefinite` flag. When definite, `size` counts array elements, map pairs, or
+string bytes. When indefinite, no length was declared and `size` is zero.
+`as_tag_any` leaves the tagged value unread. A visitor can use the decode-only
+`indefinite_break` token to recognize an indefinite container's closing delimiter.
+
+```cpp
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
+#include <cassert>
+#include <cstddef>
+#include <variant>
+#include <vector>
+
+int main() {
+    namespace ct = cbor::tags;
+    std::vector<int> source{1, 2, 3};
+    std::vector<std::byte> buffer;
+    auto enc = ct::make_encoder(buffer);
+    if (!enc(ct::as_indefinite{source})) return 1;
+
+    auto dec = ct::make_decoder(buffer);
+    ct::as_array_any header;
+    if (!dec(header)) return 1;
+    assert(header.indefinite);
+
+    std::vector<int> values;
+    for (;;) {
+        std::variant<int, ct::indefinite_break> next;
+        if (!dec(next)) return 1;
+        if (std::holds_alternative<ct::indefinite_break>(next)) break;
+        values.push_back(std::get<int>(next));
+    }
+    assert(values == source);
+    assert(dec.tell() == buffer.end());
+}
+```
+
+The enclosing visitor checks legal break placement, map key/value pairing,
+string chunk types, and nesting limits. A header decode succeeds when the
+header is complete even if its children or payload are missing; later content
+decoding reports truncation. Text and byte-string headers now leave payloads
+unread, so consumers that relied on the former payload skip must explicitly
+read them. See the [header descriptor contract](doc/decoder_resource_limits.md#header-descriptors).
+
+### Item traversal and validation
+
+Include `<cbor_tags/cbor_traversal.h>` to process one complete item with a
+callable, without constructing a variant or manually consuming its children:
+
+```cpp
+std::size_t arrays = 0;
+auto result = ct::walk_item(dec,
+    [&](const auto& value, const auto& context) {
+        using T = std::remove_cvref_t<decltype(value)>;
+        if constexpr (std::same_as<T, ct::as_array_any>) {
+            if (context.kind == ct::walk_event_kind::enter) ++arrays;
+        }
+    });
+```
+
+Callbacks receive begin, scalar-value, payload, and end notifications. Both
+definite and indefinite containers produce matching begin/end notifications;
+payloads are borrowed from the input. A successful call leaves the decoder at
+the next item.
+
+`ct::validate_item(dec)` checks one item's structure, simple-value encodings,
+and text UTF-8 without producing events for the caller. Ordinary walking keeps
+the library's permissive profile; pass `{.strict_validation = true}` to combine
+strict checks with callbacks in the same walk. See [Item traversal and
+validation](doc/traversal.md) for callback types, depth limits, and failure
+semantics.
+
 ### Private Class Members or explicit overloading
 Should the need arise for overloading, or encoding private members, you have two options. The first is to use the `Access` friend class as shown in the example above. This will allow you to access private members of your class for encoding/decoding purposes.
 
@@ -1038,8 +1114,8 @@ There are many types of cbor objects defined, the major types are:
 | 6          | tag of number N         | 1 data item           |
 | 7          | simple/float            | -                     |
 
-The core decoder preserves text-string bytes and does not validate UTF-8 unless
-you explicitly request diagnostic UTF-8 checking in tooling.
+The core decoder preserves text-string bytes. Use `validate_item`, strict
+`walk_item`, or diagnostic UTF-8 checking when text validity is required.
 
 The library name cbor_tags refers to the focus on handling tagged types(6) in a user friendly way. 
 

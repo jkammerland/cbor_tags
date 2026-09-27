@@ -151,20 +151,27 @@ template <typename T, std::size_t Min, std::size_t Max> struct bounded_size;
 template <typename T> struct dynamic_bounded_size;
 
 struct as_text_any {
-    std::uint64_t size;
+    std::uint64_t size{};
+    bool          indefinite{};
 };
 
 struct as_bstr_any {
-    std::uint64_t size;
+    std::uint64_t size{};
+    bool          indefinite{};
 };
 
 struct as_array_any {
-    std::uint64_t size;
+    std::uint64_t size{};
+    bool          indefinite{};
 };
 
 struct as_map_any {
-    std::uint64_t size;
+    std::uint64_t size{};
+    bool          indefinite{};
 };
+
+// A delimiter token for callers that consume indefinite items incrementally.
+struct indefinite_break {};
 
 struct as_tag_any {
     std::uint64_t tag;
@@ -191,6 +198,9 @@ concept IsTagHeader = std::is_same_v<T, as_tag_any>;
 
 template <typename T>
 concept IsAnyHeader = IsArrayHeader<T> || IsMapHeader<T> || IsTagHeader<T> || IsTextHeader<T> || IsBinaryHeader<T>;
+
+template <typename T>
+concept IsIndefiniteBreak = std::is_same_v<T, indefinite_break>;
 
 template <typename T>
 concept IsFloat16 = std::is_same_v<T, float16_t>; // Do not require sizeof(T) == 2, let the memory layout be implementation defined
@@ -758,8 +768,8 @@ concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
 template <typename T>
-concept IsAggregate = std::is_aggregate_v<T> && !IsVariant<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsString<T> &&
-                      !IsNamedWrapper<T> && !IsAnyBoundedSizeWrapper<T>;
+concept IsAggregate = std::is_aggregate_v<T> && !IsVariant<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsIndefiniteBreak<T> &&
+                      !IsString<T> && !IsNamedWrapper<T> && !IsAnyBoundedSizeWrapper<T>;
 
 // Helper to check if all types in a variant satisfy IsCborMajor
 template <typename T> struct AllTypesAreCborMajor;
@@ -774,7 +784,7 @@ concept AllTypesAreCborMajorConcept = AllTypesAreCborMajor<T>::value;
 // TODO: cleanup or simplify
 template <typename T>
 concept IsCborMajor =
-    IsAnyHeader<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
+    IsAnyHeader<T> || IsIndefiniteBreak<T> || IsUnsigned<T> || IsNegative<T> || IsSigned<T> || IsTextString<T> || IsBinaryString<T> ||
     (IsArray<T> && ContainsCborMajorConcept<T>) || (IsMap<T> && ContainsCborMajorConcept<T>) || IsTag<T> || IsSimple<T> ||
     (IsVariant<T> && AllTypesAreCborMajorConcept<T>) || (IsOptional<T> && ContainsCborMajorConcept<T>) || IsNamedMapWrapper<T> ||
     (IsAnyBoundedSizeWrapper<T> && ContainsCborMajorConcept<T>) || IsEnum<T> || (IsClassWithTagOverload<T>);

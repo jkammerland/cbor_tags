@@ -113,6 +113,24 @@ lazy-tag discovery), not a generic extension escape hatch. Such a feature
 needs its own documentation and tests, returns an explicit terminal status,
 and does not make prewalking or rollback valid in the core decoder.
 
+### Header descriptors
+
+`as_array_any`, `as_map_any`, `as_text_any`, and `as_bstr_any` consume only the
+header, leaving children, payloads, and closing breaks unread. For definite
+items, `size` counts array elements, map pairs, or string bytes. Indefinite
+headers set `indefinite = true` and `size = 0`. `as_tag_any` likewise leaves its
+tagged value unread. A successful header decode does not prove its contents
+are present.
+
+Use [`walk_item` or `validate_item`](traversal.md) to consume a complete item.
+Low-level visitors can decode `indefinite_break` explicitly; they must enforce
+legal break positions and matching, definite string chunks.
+
+For an indefinite header, a bounded wrapper accepts only the unrestricted
+`[0, UINT64_MAX]` range; other bounds return `size_limit_exceeded`. To limit an
+indefinite item's contents, read its header unbounded and count as you consume
+them.
+
 ## Bounded Objects, PMR, And CDDL
 
 Plain owning containers do not impose protocol limits. A transport-level byte

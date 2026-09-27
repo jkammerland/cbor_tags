@@ -39,6 +39,7 @@ struct ConceptType : std::integral_constant<ByteType, static_cast<ByteType>(IsUn
                                                                             : IsMap<unwrap_type_t<T>>               ? 5
                                                                             : IsTag<unwrap_type_t<T>>               ? 6
                                                                             : IsSimple<unwrap_type_t<T>>            ? 7
+                                                                            : IsIndefiniteBreak<unwrap_type_t<T>>   ? 7
                                                                             : IsRangeOfCborValues<unwrap_type_t<T>> ? 5
                                                                                                                     : 8)> {};
 
@@ -107,7 +108,7 @@ struct MajorIndex {
     static constexpr std::uint64_t Null         = 16;
     static constexpr std::uint64_t SimpleValued = 17;
     static constexpr std::uint64_t endSimples   = 18;
-    // static constexpr std::uint64_t ClassWithTag = 19;
+    static constexpr std::uint64_t Break        = 19;
 };
 
 constexpr std::uint64_t MaxBucketsForVariantChecking = 20;
@@ -332,6 +333,10 @@ constexpr void getMatchCount(std::array<uint64_t, detail::MaxBucketsForVariantCh
         }
 
         simples.push_back(current_tag);
+    }
+    if constexpr (IsIndefiniteBreak<T>) {
+        unmatched = false;
+        result[MajorIndex::Break]++;
     }
 
     if (unmatched) {
