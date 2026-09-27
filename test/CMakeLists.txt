@@ -15,6 +15,17 @@ endif()
 cpmaddpackage("gh:jkammerland/doctest@1.0.4")
 
 include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#include <boost/circular_buffer.hpp>
+#include <boost/container/static_vector.hpp>
+int main() {}" CBOR_TAGS_TEST_HAS_BOOST_CAPACITY)
+check_cxx_source_compiles("#include <version>
+#if !defined(__cpp_lib_inplace_vector) || __cpp_lib_inplace_vector < 202406L
+#error inplace_vector unavailable
+#endif
+#include <inplace_vector>
+int main() { std::inplace_vector<int, 4> v; v.push_back(1); }" CBOR_TAGS_TEST_HAS_INPLACE_VECTOR)
+message(STATUS "Capacity tests: Boost containers=${CBOR_TAGS_TEST_HAS_BOOST_CAPACITY}, std::inplace_vector=${CBOR_TAGS_TEST_HAS_INPLACE_VECTOR} (empty means unavailable)")
 
 # add executables more if needed
 add_executable(tests)
@@ -108,6 +119,9 @@ endif()
 # Keep this suite reachable when a branch excludes wire tests from the unit run.
 add_test(NAME byte_views_wire COMMAND tests --test-suite=cbor_wire/byte_views)
 set_tests_properties(byte_views_wire PROPERTIES LABELS "cbor-wire")
+
+add_test(NAME container_capacity_wire COMMAND tests "--test-suite=cbor_wire/container_capacity")
+set_tests_properties(container_capacity_wire PROPERTIES LABELS "cbor-wire")
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)

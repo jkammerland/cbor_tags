@@ -130,6 +130,38 @@ These controls are complementary:
 - A size wrapper validates one CBOR item against protocol limits.
 - A bounded PMR resource contains allocations made while materializing values.
 
+### Remaining container capacity
+
+Decoding appends to an existing container. For a fixed-capacity destination,
+bound the **incoming element count** by its remaining capacity:
+
+```cpp
+#include <cbor_tags/cbor_decoder.h>
+#include <boost/circular_buffer.hpp>
+#include <array>
+#include <cstddef>
+
+std::array<unsigned char, 5> input{0x83, 1, 2, 3, 7}; // [1,2,3], then 7
+boost::circular_buffer<int> output(4);
+output.push_back(9);
+
+const auto remaining = static_cast<std::size_t>(output.capacity()) - output.size();
+auto dec = cbor::tags::make_decoder(input);
+auto result = dec(cbor::tags::as_bounded_size(output, 0, remaining));
+// On success: output == [9,1,2,3]. The next item is still available to dec.
+```
+
+This also works with `boost::circular_buffer_space_optimized`,
+`boost::container::static_vector`, and C++26 `std::inplace_vector`. Configure
+capacity first, keep storage stable during decoding, and recompute the bound
+before each call. An empty default circular buffer has zero capacity.
+
+Excess input returns `status_code::size_limit_exceeded`, preventing circular
+buffer overwrite or fixed-capacity overflow. Definite arrays exceeding the
+bound fail before any append; indefinite arrays may leave an accepted prefix.
+Truncated elements return `status_code::incomplete`. Any failed decode is
+terminal.
+
 ### Bounded PMR Example
 
 ```cpp
