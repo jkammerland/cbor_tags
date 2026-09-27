@@ -30,7 +30,6 @@ TEST_SUITE("cbor_roundtrip/byte_views") {
         CHECK(std::ranges::equal(value, payload));
         REQUIRE(dec(following));
         CHECK_EQ(following, 42);
-        CHECK(dec.tell() == encoded.end());
     }
 
     TEST_CASE_TEMPLATE("empty byte views decode at the end of input", View, std::span<const std::byte>,
@@ -44,6 +43,5 @@ TEST_SUITE("cbor_roundtrip/byte_views") {
         auto             dec = make_decoder(encoded);
         REQUIRE(dec(value));
         CHECK(value.empty());
-        CHECK(dec.tell() == encoded.end());
     }
 }

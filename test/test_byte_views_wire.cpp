@@ -26,6 +26,29 @@ TEST_SUITE("cbor_wire/byte_views") {
         CHECK(dec.tell() == input.end());
     }
 
+    TEST_CASE_TEMPLATE("empty byte views advance to the following item or end", View, std::span<const std::byte>,
+                       test_util::basic_string_view<std::byte>) {
+        auto input         = to_bytes("40");
+        bool has_following = false;
+        SUBCASE("at end of input") {}
+        SUBCASE("with following item") {
+            input         = to_bytes("4001");
+            has_following = true;
+        }
+
+        const std::array sentinel{std::byte{7}};
+        View             value{sentinel.data(), sentinel.size()};
+        auto             dec = make_decoder(input);
+        REQUIRE(dec(value));
+        CHECK(value.empty());
+        if (has_following) {
+            std::uint8_t following{};
+            REQUIRE(dec(following));
+            CHECK_EQ(following, 1);
+        }
+        CHECK(dec.tell() == input.end());
+    }
+
     TEST_CASE_TEMPLATE("byte views reject unsupported headers without rebinding", View, std::span<const std::byte>,
                        test_util::basic_string_view<std::byte>) {
         std::vector<std::byte> input;
