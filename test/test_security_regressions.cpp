@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
+#include "character_traits.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -73,9 +74,9 @@ TEST_CASE("security regression: oversized definite text view length is rejected"
 }
 
 TEST_CASE("security regression: oversized definite byte view length is rejected") {
-    auto                              buffer = uint64_max_length_bstr_with_one_payload_byte();
-    auto                              dec    = make_decoder(buffer);
-    std::basic_string_view<std::byte> decoded;
+    auto                                    buffer = uint64_max_length_bstr_with_one_payload_byte();
+    auto                                    dec    = make_decoder(buffer);
+    test_util::basic_string_view<std::byte> decoded;
 
     auto result = dec(decoded);
 

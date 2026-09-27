@@ -85,7 +85,7 @@ TEST_SUITE("cbor_wire/cwt") {
         SUBCASE("truncated cose_sign1 preserves the destination") {
             const cose_sign1 source{
                 .protected_header = byte_string{std::byte{0x41}},
-                .unprotected      = header_map{.kid = byte_string{std::byte{0x42}}},
+                .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x42}}, .crit = {}},
                 .payload          = byte_string{std::byte{0x43}},
                 .signature        = byte_string{std::byte{0x44}},
             };
@@ -95,7 +95,7 @@ TEST_SUITE("cbor_wire/cwt") {
 
             cose_sign1 decoded{
                 .protected_header = byte_string{std::byte{0x51}},
-                .unprotected      = header_map{.kid = byte_string{std::byte{0x52}}},
+                .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x52}}, .crit = {}},
                 .payload          = byte_string{std::byte{0x53}},
                 .signature        = byte_string{std::byte{0x54}},
             };
@@ -140,9 +140,9 @@ TEST_SUITE("cbor_wire/cwt") {
         auto      input = to_bytes("8440a0410180");
         cose_sign decoded{
             .protected_header = byte_string{std::byte{0x11}},
-            .unprotected      = header_map{.kid = byte_string{std::byte{0x12}}},
+            .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x12}}, .crit = {}},
             .payload          = byte_string{std::byte{0x13}},
-            .signatures       = {cose_signature{.signature = byte_string{std::byte{0x14}}}},
+            .signatures       = {cose_signature{.protected_header = {}, .unprotected = {}, .signature = byte_string{std::byte{0x14}}}},
         };
         auto decode_result = make_decoder(input)(decoded);
         REQUIRE_FALSE(decode_result);
@@ -310,7 +310,7 @@ TEST_SUITE("cbor_wire/cwt") {
     }
 
     TEST_CASE("COSE protected header and Sign1 Sig_structure encode in RFC shape") {
-        const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256});
+        const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}});
         REQUIRE(protected_header);
         CHECK_EQ(to_hex(*protected_header), "a10126");
 
@@ -418,7 +418,7 @@ TEST_SUITE("cbor_wire/cwt") {
         }
 
         SUBCASE("trailing protected header item") {
-            auto encoded = encode_protected_header(header_map{.alg = algorithm::es256});
+            auto encoded = encode_protected_header(header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}});
             REQUIRE(encoded);
             encoded->push_back(std::byte{0x00});
             check_rejected(std::move(encoded));
@@ -426,9 +426,10 @@ TEST_SUITE("cbor_wire/cwt") {
     }
 
     TEST_CASE("COSE Sign Sig_structure uses body and signature protected headers") {
-        const auto body_protected = encode_protected_header(header_map{.alg = algorithm::es256});
+        const auto body_protected = encode_protected_header(header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}});
         REQUIRE(body_protected);
-        const auto signature_protected = encode_protected_header(header_map{.kid = byte_string{std::byte{0x01}}});
+        const auto signature_protected =
+            encode_protected_header(header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}}, .crit = {}});
         REQUIRE(signature_protected);
 
         cose_sign message{
@@ -527,7 +528,7 @@ TEST_SUITE("cbor_wire/cwt") {
             value.protected_header = byte_string{std::byte{'p'}};
             value.unprotected.kid  = byte_string{std::byte{'k'}};
             if constexpr (std::same_as<Envelope, cose_sign>) {
-                value.signatures = {cose_signature{.signature = byte_string{std::byte{'s'}}}};
+                value.signatures = {cose_signature{.protected_header = {}, .unprotected = {}, .signature = byte_string{std::byte{'s'}}}};
             } else {
                 value.signature = byte_string{std::byte{'s'}};
             }

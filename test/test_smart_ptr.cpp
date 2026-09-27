@@ -990,7 +990,7 @@ TEST_CASE("sharedref indices count ordinary tag 28 items") {
 
     std::vector<std::byte> bytes;
     auto                   enc = make_encoder<shared_ptr_codec>(bytes);
-    REQUIRE(enc(wrap_as_array{smart_ptr_test::ordinary_shareable{.value = 1U}, pointer, pointer}));
+    REQUIRE(enc(wrap_as_array{smart_ptr_test::ordinary_shareable{.cbor_tag = {}, .value = 1U}, pointer, pointer}));
     REQUIRE_EQ(to_hex(bytes), "83d81c01d81c02d81d01");
 
     smart_ptr_test::ordinary_shareable first;
@@ -1004,7 +1004,8 @@ TEST_CASE("sharedref indices count ordinary tag 28 items") {
 }
 
 TEST_CASE("sharedref indices count tag 28 pointees decoded through unique_ptr codec") {
-    const auto first   = std::make_unique<smart_ptr_test::ordinary_shareable>(smart_ptr_test::ordinary_shareable{.value = 1U});
+    const auto first =
+        std::make_unique<smart_ptr_test::ordinary_shareable>(smart_ptr_test::ordinary_shareable{.cbor_tag = {}, .value = 1U});
     const auto pointer = std::make_shared<std::uint64_t>(2U);
 
     std::vector<std::byte> bytes;

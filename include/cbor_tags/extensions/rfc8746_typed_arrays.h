@@ -266,9 +266,8 @@ template <typename BitType> [[nodiscard]] BitType byteswap_bits(BitType value) n
 }
 
 template <typed_array_byte_order ByteOrder, typename BitType> [[nodiscard]] BitType native_to_wire_bits(BitType bits) noexcept {
-    if constexpr (sizeof(BitType) == 1U || native_matches_byte_order<ByteOrder>) {
-        return bits;
-    } else if constexpr (std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>) {
+    if constexpr (sizeof(BitType) != 1U && !native_matches_byte_order<ByteOrder> &&
+                  (std::is_unsigned_v<BitType> || std::same_as<BitType, std::array<std::byte, 16>>)) {
         return byteswap_bits(bits);
     } else {
         return bits;

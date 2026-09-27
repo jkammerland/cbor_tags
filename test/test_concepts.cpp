@@ -10,6 +10,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/cbor_tags_config.h"
 #include "cbor_tags/float16_ieee754.h"
+#include "character_traits.h"
 #include "test_util.h"
 
 #include <array>
@@ -113,7 +114,7 @@ TEST_CASE("Test IsTextString concept") {
     static_assert(std::ranges::input_range<non_common_char_range>);
     static_assert(!std::ranges::common_range<non_common_char_range>);
     static_assert(!CanInstantiateTextView<non_common_char_range>);
-    static_assert(!IsTextString<std::basic_string_view<std::byte>>);
+    static_assert(!IsTextString<test_util::basic_string_view<std::byte>>);
     static_assert(!IsTextString<std::vector<char>>);
     static_assert(!IsTextString<std::span<char>>);
     static_assert(!IsTextString<std::span<const std::byte>>);
@@ -122,8 +123,8 @@ TEST_CASE("Test IsTextString concept") {
 TEST_CASE("Test IsBinaryString concept") {
     using non_common_char_range = std::ranges::istream_view<char>;
 
-    static_assert(IsBinaryString<std::basic_string<std::byte>>);
-    static_assert(IsBinaryString<std::basic_string_view<std::byte>>);
+    static_assert(IsBinaryString<test_util::basic_string<std::byte>>);
+    static_assert(IsBinaryString<test_util::basic_string_view<std::byte>>);
     static_assert(IsBinaryString<std::vector<std::byte>>);
     static_assert(IsBinaryString<std::array<std::byte, 5>>);
     static_assert(IsBinaryString<std::span<const std::byte>>);
@@ -133,7 +134,7 @@ TEST_CASE("Test IsBinaryString concept") {
     static_assert(!CanInstantiateBinaryView<non_common_char_range>);
     static_assert(!IsBinaryString<std::vector<uint8_t>>);
     static_assert(!IsBinaryString<std::span<const uint8_t>>);
-    static_assert(!IsBinaryString<std::basic_string_view<uint8_t>>);
+    static_assert(!IsBinaryString<test_util::basic_string_view<uint8_t>>);
     static_assert(!IsBinaryString<std::string>);
     static_assert(!IsBinaryString<std::string_view>);
     static_assert(!IsRangeOfCborValues<std::array<std::byte, 5>>);
@@ -293,7 +294,7 @@ TEST_CASE("Test IsTextString concept with string views") {
     using string_2 = std::basic_string_view<char>;
     static_assert(IsTextString<string_2>);
 
-    using string_3 = std::basic_string_view<std::byte>;
+    using string_3 = test_util::basic_string_view<std::byte>;
     static_assert(!IsTextString<string_3>);
 
     using string_4 = std::vector<char>;
@@ -301,9 +302,9 @@ TEST_CASE("Test IsTextString concept with string views") {
 }
 
 TEST_CASE("Test IsBinaryString concept with various binary string types") {
-    using bstring_1 = std::basic_string<std::byte>;
+    using bstring_1 = test_util::basic_string<std::byte>;
     using bstring_2 = std::vector<std::byte>;
-    using bstring_3 = std::basic_string_view<std::byte>;
+    using bstring_3 = test_util::basic_string_view<std::byte>;
     using bstring_4 = std::array<std::byte, 5>;
     static_assert(IsBinaryString<bstring_1>);
     static_assert(IsBinaryString<bstring_2>);
@@ -589,7 +590,7 @@ TEST_CASE("Concept sfinae") {
     AllCborMajorsExample d(std::deque<std::byte>{});
 
     CHECK(a.is_contiguous);
-    CHECK(a.is_contiguous);
+    CHECK(b.is_contiguous);
     CHECK(!c.is_contiguous);
     CHECK(!d.is_contiguous);
 }

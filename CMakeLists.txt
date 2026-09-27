@@ -4,7 +4,7 @@ if(POLICY CMP0206)
 endif()
 project(
   cbor_tags
-  VERSION 0.23.0
+  VERSION 0.24.1
   DESCRIPTION "RFC 8949 CBOR implementation with automatic C++ reflection"
   HOMEPAGE_URL "https://github.com/jkammerland/cbor_tags")
 set(cbor_tags_SPDX_LICENSE "MIT")
@@ -381,6 +381,9 @@ if(CBOR_TAGS_BUILD_TESTS)
     add_test(
       NAME target_install_package_release_verifier
       COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/target_install_package_release_test.sh)
+    add_test(
+      NAME release_version_consistency
+      COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_version_consistency_test.sh)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
       find_program(CBOR_TAGS_JQ_EXECUTABLE jq)
@@ -495,7 +498,7 @@ if(CBOR_TAGS_INSTALL)
       ON
       ADDITIONAL_CPACK_VARS
       CPACK_PACKAGE_FILE_NAME
-      "${PROJECT_NAME}-${PROJECT_VERSION}-cmake"
+      "${PROJECT_NAME}-${PROJECT_VERSION}"
       CPACK_SYSTEM_NAME
       "cmake"
       CPACK_ARCHIVE_UID

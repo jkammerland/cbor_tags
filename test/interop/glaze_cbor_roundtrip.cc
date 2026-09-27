@@ -103,16 +103,19 @@ TEST_CASE("cbor_tags reads Glaze text-key maps and typed-array fields") {
     CHECK_EQ(name, "Ada");
 
     auto age = std::uint64_t{};
+    key.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(key, age));
     CHECK_EQ(key, "age");
     CHECK_EQ(age, 42U);
 
     auto active = false;
+    key.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(key, active));
     CHECK_EQ(key, "active");
     CHECK(active);
 
     auto samples = typed_array<std::int32_t>{};
+    key.clear(); // Text decoding appends to an existing destination.
     REQUIRE(dec(key, samples));
     CHECK_EQ(key, "samples");
     CHECK_EQ(samples.values(), std::vector<std::int32_t>{1, -2, 3});

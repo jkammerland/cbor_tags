@@ -356,9 +356,7 @@ template <typename Compare = std::less<>> struct VariantCompare {
 
                 if constexpr (std::is_same_v<L, std::nullptr_t> && std::is_same_v<R, std::nullptr_t>) {
                     return false; // nullptr == nullptr
-                } else if constexpr (std::is_floating_point_v<L> && std::is_floating_point_v<R>) {
-                    return Compare{}(l, r);
-                } else if constexpr (std::is_same_v<L, R>) {
+                } else if constexpr ((std::is_floating_point_v<L> && std::is_floating_point_v<R>) || std::is_same_v<L, R>) {
                     return Compare{}(l, r);
                 } else {
                     return Compare{}(typeid(L).before(typeid(R)), false);
