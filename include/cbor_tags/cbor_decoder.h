@@ -1716,7 +1716,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (decode_unsigned(additional_info) != size) {
                 return status_code::unexpected_group_size;
             }
-            return std::apply([this](auto &&...args) { return applier(args...); }, tuple);
+            return std::apply([this](auto &&...args) { return this->applier(args...); }, tuple);
         } else {
             // Single-field and unwrapped groups pass the header to their first
             // field; the reader must not rewind or read that header a second time.
@@ -1724,7 +1724,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if (status != status_code::success) {
                 return status;
             }
-            return std::apply([this](auto &&...args) { return applier(args...); }, detail::tuple_tail(tuple));
+            return std::apply([this](auto &&...args) { return this->applier(args...); }, detail::tuple_tail(tuple));
         }
     }
 
