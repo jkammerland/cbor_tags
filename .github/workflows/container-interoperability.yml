@@ -11,15 +11,15 @@ permissions:
 jobs:
   boost:
     runs-on: ubuntu-latest
-    container: ubuntu:26.04
+    # Released GCC 16 fixes indirect comparison constraints in the stacked tests.
+    container: registry.fedoraproject.org/fedora:44
     strategy:
       matrix:
         standard: [20, 26]
     steps:
       - name: Install compiler and test dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates cmake git ninja-build g++-16 curl bzip2 python3
+          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build curl-minimal bzip2 python3 tar
       - uses: actions/checkout@v6.0.2
       - name: Fetch pinned Boost headers
         run: |
@@ -29,8 +29,8 @@ jobs:
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja \
-            -DCMAKE_C_COMPILER=gcc-16 \
-            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_CXX_STANDARD=${{ matrix.standard }} \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCBOR_TAGS_BUILD_TESTS=ON \

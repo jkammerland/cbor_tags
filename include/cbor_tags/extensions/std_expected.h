@@ -3,7 +3,7 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_extensions.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
-#include "cbor_tags/detail/std_expected_traits.h"
+#include "cbor_tags/detail/cbor_item_shape.h"
 
 #include <concepts>
 #include <cstddef>
@@ -100,9 +100,9 @@ template <typename Self> struct std_expected_codec : cbor_codec_mixin_base<Self>
 
   private:
     template <typename T, typename E> static consteval void require_single_item_payloads() {
-        static_assert(std::is_void_v<T> || detail::expected_payload_encodes_one_item<Self, T>(),
+        static_assert(std::is_void_v<T> || cbor::tags::detail::codec_payload_encodes_one_item<Self, T>(),
                       "std::expected value payload must encode exactly one CBOR item; use void for a payload-free success");
-        static_assert(detail::expected_payload_encodes_one_item<Self, E>(),
+        static_assert(cbor::tags::detail::codec_payload_encodes_one_item<Self, E>(),
                       "std::expected error payload must encode exactly one CBOR item");
     }
 

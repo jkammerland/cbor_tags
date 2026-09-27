@@ -1,0 +1,33 @@
+name: C++26 value wrappers
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  value-wrappers:
+    runs-on: ubuntu-latest
+    # Released GCC 16 fixes indirect comparison constraints used by container tests.
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - name: Install compiler and build dependencies
+        run: |
+          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build python3
+      - uses: actions/checkout@v6.0.2
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_CXX_STANDARD=26 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCBOR_TAGS_BUILD_TESTS=ON \
+            -DCBOR_TAGS_TEST_REQUIRE_STD_VALUE_WRAPPERS=ON
+      - name: Build and test
+        run: |
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure --parallel 1

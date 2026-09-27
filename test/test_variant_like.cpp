@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_operators.h"
+#include "cbor_tags/detail/cbor_optional_variant_traits.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
 #include "cbor_tags/extensions/custom_codec_1.h"
 #include "cbor_tags/extensions/smart_ptr.h"
@@ -13,7 +14,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -134,6 +137,33 @@ TEST_CASE("non-std variants require explicit variant_traits opt-in") {
     static_assert(!tags::IsAggregate<manual_variant>);
 
     CHECK(tags::detail::variant_size_v<manual_variant> == 2U);
+}
+
+TEST_CASE("optional and variant queries normalize types and follow declared alternatives") {
+    constexpr auto matches_text = []<typename T>() { return std::same_as<T, std::string>; };
+    using manual_variant        = variant_traits_test::manual_variant<int, bool, std::optional<std::string>>;
+    using nested_variant        = std::optional<std::variant<int, std::optional<manual_variant>>>;
+    using no_match              = std::optional<variant_traits_test::manual_variant<int, std::variant<bool, double>>>;
+
+    CHECK(tags::detail::has_matching_alternative<const std::string &, matches_text>());
+    CHECK(tags::detail::has_matching_alternative<volatile std::string &&, matches_text>());
+    CHECK(tags::detail::has_matching_alternative<const manual_variant &, matches_text>());
+    CHECK(tags::detail::has_matching_alternative<const nested_variant &, matches_text>());
+    CHECK_FALSE(tags::detail::has_matching_alternative<no_match, matches_text>());
+    CHECK_FALSE(tags::detail::has_matching_alternative<std::vector<std::string>, matches_text>());
+    CHECK_FALSE(tags::detail::has_matching_alternative<std::map<int, std::string>, matches_text>());
+    CHECK_FALSE(tags::detail::has_matching_alternative<std::variant<int, std::vector<std::string>>, matches_text>());
+    CHECK_FALSE(tags::detail::has_matching_alternative<std::optional<std::map<int, std::string>>, matches_text>());
+}
+
+TEST_CASE("optional and variant queries match the current wrapper before recursing") {
+    constexpr auto matches_wrapper = []<typename T>() {
+        static_assert(!std::same_as<T, int>, "a matching wrapper must stop recursion into its payload");
+        return tags::IsOptional<T> || tags::IsVariant<T>;
+    };
+    CHECK(tags::detail::has_matching_alternative<const std::optional<int> &, matches_wrapper>());
+    CHECK(tags::detail::has_matching_alternative<const std::variant<int> &, matches_wrapper>());
+    CHECK(tags::detail::has_matching_alternative<const variant_traits_test::manual_variant<int> &, matches_wrapper>());
 }
 
 TEST_CASE("custom variant traits roundtrip through normal CBOR") {
