@@ -8,7 +8,7 @@ trap 'rm -rf -- "${test_root}"' EXIT
 readonly epoch=1700000000
 for timezone in UTC Europe/Stockholm; do
     source_dir="${test_root}/source-${timezone//\//-}"
-    package_root="${source_dir}/cbor_tags-fixture/usr/share/cbor_tags"
+    package_root="${source_dir}/cbor_tags-fixture/include/cbor_tags"
     mkdir -p -- "${package_root}"
     printf 'timezone-independent payload\n' >"${package_root}/payload.txt"
     TZ="${timezone}" find "${source_dir}/cbor_tags-fixture" -exec touch -h -d "@${epoch}" {} +

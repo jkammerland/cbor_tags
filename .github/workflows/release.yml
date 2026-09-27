@@ -135,7 +135,7 @@ jobs:
           grep -Fx "release_commit=${RELEASE_COMMIT}" <<< "${verification_output}"
           printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct "${RELEASE_COMMIT}")" >> "${GITHUB_ENV}"
 
-      - name: Build and validate unsigned release artifacts
+      - name: Build and validate unsigned source artifacts
         shell: bash
         run: |
           set -euxo pipefail
