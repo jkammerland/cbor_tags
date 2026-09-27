@@ -7,6 +7,7 @@
 #include <limits>
 #include <map>
 #include <new>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
