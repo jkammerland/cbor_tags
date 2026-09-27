@@ -92,6 +92,7 @@ template <typename Container> void check_zero_capacity() {
 
 } // namespace
 
+#if defined(CBOR_TAGS_TEST_BOOST_CAPACITY) || (defined(__cpp_lib_inplace_vector) && __cpp_lib_inplace_vector >= 202406L)
 TEST_SUITE("cbor_wire/container_capacity") {
 
 #ifdef CBOR_TAGS_TEST_BOOST_CAPACITY
@@ -119,3 +120,4 @@ TEST_SUITE("cbor_wire/container_capacity") {
 #endif
 
 } // TEST_SUITE("cbor_wire/container_capacity")
+#endif
