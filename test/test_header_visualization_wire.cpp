@@ -11,6 +11,21 @@ using namespace cbor::tags;
 
 TEST_SUITE("cbor_wire/headers_visualization") {
 
+    TEST_CASE("reserved arguments retain the runtime error presentation boundary") {
+        for (const auto *hex : {"1c", "5c", "dc", "1f", "3f", "df"}) {
+            CAPTURE(std::string_view{hex});
+            const auto input = to_bytes(hex);
+            const auto check = [](const auto &buffer) {
+                std::string diagnostic;
+                CHECK_THROWS_AS(buffer_diagnostic(buffer, diagnostic), std::runtime_error);
+                std::string annotation;
+                CHECK_THROWS_AS(buffer_annotate(buffer, annotation), std::runtime_error);
+            };
+            check(input);
+            check(std::deque<std::byte>{input.begin(), input.end()});
+        }
+    }
+
     TEST_CASE("string payloads are consumed once before the next item") {
         const auto input = to_bytes("62686943ff81ff07");
         const auto check = [](const auto &buffer) {

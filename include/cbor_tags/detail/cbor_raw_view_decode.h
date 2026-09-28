@@ -39,8 +39,12 @@ constexpr status_code read_raw_encoded_item_bounds(const InputBuffer &data, std:
     }
 
     const auto distance = std::ranges::distance(start, cursor);
-    if (distance < 0 || std::cmp_greater(distance, std::numeric_limits<SizeType>::max())) {
+    if (distance < 0) {
+        // A truthful range cannot move backwards while scanning an item.
         return status_code::error;
+    }
+    if (std::cmp_greater(distance, std::numeric_limits<SizeType>::max())) {
+        return status_code::size_limit_exceeded;
     }
 
     bounds = raw_encoded_item_bounds<std::ranges::iterator_t<const InputBuffer>, SizeType>{

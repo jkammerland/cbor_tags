@@ -1161,7 +1161,7 @@ TEST_CASE("rfc8746 typed array decode rejects payload ranges that discard bytes"
         const auto                                            result = dec(decoded);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
         CHECK_EQ(decoded.size(), 0U);
         CHECK(dec.tell() == input.end());
     }
@@ -1172,7 +1172,7 @@ TEST_CASE("rfc8746 typed array decode rejects payload ranges that discard bytes"
         const auto                                                                result = dec(decoded);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::unexpected_group_size);
         CHECK_EQ(decoded.value().size(), 0U);
         CHECK(dec.tell() == input.end());
     }
@@ -1654,11 +1654,11 @@ TEST_CASE("rfc8746 typed array decode rejects malformed inputs") {
 
 TEST_CASE("rfc8746 typed array decode rejects invalid additional-info values") {
     for (const auto *hex : {"dc", "dd", "de", "df"}) {
-        check_decode_error<std::int32_t>(hex, status_code::error);
+        check_decode_error<std::int32_t>(hex, status_code::invalid_additional_info);
     }
 
     for (const auto *hex : {"d84e5c", "d84e5d", "d84e5e"}) {
-        check_decode_error<std::int32_t>(hex, status_code::error);
+        check_decode_error<std::int32_t>(hex, status_code::invalid_additional_info);
     }
 
     check_decode_error<std::int32_t>("d84e5f", status_code::no_match_for_bstr_on_buffer);
@@ -1681,7 +1681,7 @@ TEST_CASE("rfc8746 typed array decode rejects truncated extended headers and lar
 
     check_decode_error<std::int32_t>("d84e5affffffff", status_code::incomplete);
     if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
-        check_decode_error<std::int32_t>("d84e5b0000000100000000", status_code::error);
+        check_decode_error<std::int32_t>("d84e5b0000000100000000", status_code::size_limit_exceeded);
     } else {
         check_decode_error<std::int32_t>("d84e5b0000000100000000", status_code::incomplete);
     }

@@ -591,14 +591,14 @@ TEST_CASE("decoder should reject truncated float payloads") {
     }
 }
 
-TEST_CASE("decoder should map invalid additional information to error") {
+TEST_CASE("decoder should identify invalid additional information") {
     {
         std::vector<std::byte> buffer{std::byte{0x1C}};
         auto                   dec = make_decoder(buffer);
         std::uint64_t          decoded{};
         auto                   result = dec(decoded);
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::invalid_additional_info);
     }
 
     {
@@ -607,7 +607,7 @@ TEST_CASE("decoder should map invalid additional information to error") {
         std::vector<std::byte> decoded;
         auto                   result = dec(decoded);
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::invalid_additional_info);
     }
 }
 
@@ -618,7 +618,7 @@ TEST_CASE("decoder should reject wrong chunk types inside indefinite strings") {
         std::vector<std::byte> decoded;
         auto                   result = dec(as_indefinite{decoded});
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
     }
 
     {
@@ -627,7 +627,7 @@ TEST_CASE("decoder should reject wrong chunk types inside indefinite strings") {
         std::string            decoded;
         auto                   result = dec(as_indefinite{decoded});
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
     }
 }
 
@@ -901,7 +901,7 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         auto                   result   = dec(input);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(input, original);
     }
 
@@ -914,7 +914,7 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         auto        result   = dec(input);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(input, original);
     }
 
@@ -926,7 +926,7 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         auto                   result   = dec(storage);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(storage, original);
     }
 
@@ -938,7 +938,7 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         auto                   result   = dec(storage);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(storage, original);
     }
 
@@ -950,7 +950,7 @@ TEST_CASE("decoder rejects definite string targets that alias input storage") {
         auto                   result = dec(target);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(input, original);
     }
 
@@ -977,7 +977,7 @@ TEST_CASE("decoder rejects indefinite string targets that alias input storage") 
         auto       result   = dec(storage);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(storage, original);
     }
 
@@ -991,7 +991,7 @@ TEST_CASE("decoder rejects indefinite string targets that alias input storage") 
         auto       result   = dec(storage);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::input_output_aliasing);
         CHECK_EQ(storage, original);
     }
 }
@@ -1063,7 +1063,7 @@ TEST_CASE("decoder rejects fixed byte string targets that alias input") {
     auto       result   = dec(storage.decoded);
 
     REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(result.error(), status_code::input_output_aliasing);
     CHECK_EQ(storage.prefix, original.prefix);
     CHECK_EQ(storage.decoded, original.decoded);
 }

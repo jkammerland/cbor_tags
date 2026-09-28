@@ -289,7 +289,7 @@ TEST_CASE("raw encoded views reject malformed and truncated input") {
         auto              result = dec(item);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
     }
 
     {
@@ -311,7 +311,7 @@ TEST_CASE("raw encoded views reject malformed and truncated input") {
         auto              result = dec(item);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
     }
 
     {
@@ -333,13 +333,13 @@ TEST_CASE("raw encoded views reject malformed and truncated input") {
         auto             result = dec(map);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
     }
 }
 
 TEST_CASE("raw encoded views reject invalid additional-info values and truncated arguments") {
     for (const auto *hex : {"1c", "1d", "1e", "1f", "5c", "9c", "bc", "dc", "fc", "fd", "fe"}) {
-        check_raw_item_decode_error(hex, status_code::error);
+        check_raw_item_decode_error(hex, status_code::invalid_additional_info);
     }
 
     for (const auto *hex : {"18", "19ff", "1a0000", "1b00000000000000"}) {

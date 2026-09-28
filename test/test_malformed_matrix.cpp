@@ -224,7 +224,7 @@ TEST_CASE("malformed structural matrix has contiguous and non-contiguous status 
         constexpr std::array cases{
             malformed_case{"truncated definite map value", "a101", status_code::incomplete},
             malformed_case{"indefinite map without break", "bf0102", status_code::incomplete},
-            malformed_case{"break used as map value", "bf01ff", status_code::no_match_for_map_on_buffer},
+            malformed_case{"break used as map value", "bf01ff", status_code::malformed_structure},
         };
         check_malformed_backends<std::map<int, int>>(cases);
     }
@@ -233,8 +233,8 @@ TEST_CASE("malformed structural matrix has contiguous and non-contiguous status 
         constexpr std::array cases{
             malformed_case{"truncated definite byte string", "45010203", status_code::incomplete},
             malformed_case{"indefinite byte string without break", "5f4101", status_code::incomplete},
-            malformed_case{"text chunk in byte string", "5f6161ff", status_code::no_match_for_bstr_on_buffer},
-            malformed_case{"nested indefinite byte string", "5f5fff", status_code::no_match_for_bstr_on_buffer},
+            malformed_case{"text chunk in byte string", "5f6161ff", status_code::malformed_structure},
+            malformed_case{"nested indefinite byte string", "5f5fff", status_code::malformed_structure},
         };
         check_malformed_backends<std::vector<std::byte>>(cases);
     }
@@ -243,8 +243,8 @@ TEST_CASE("malformed structural matrix has contiguous and non-contiguous status 
         constexpr std::array cases{
             malformed_case{"truncated definite text string", "65616263", status_code::incomplete},
             malformed_case{"indefinite text string without break", "7f6161", status_code::incomplete},
-            malformed_case{"byte chunk in text string", "7f4101ff", status_code::no_match_for_tstr_on_buffer},
-            malformed_case{"nested indefinite text string", "7f7fff", status_code::no_match_for_tstr_on_buffer},
+            malformed_case{"byte chunk in text string", "7f4101ff", status_code::malformed_structure},
+            malformed_case{"nested indefinite text string", "7f7fff", status_code::malformed_structure},
         };
         check_malformed_backends<std::string>(cases);
     }

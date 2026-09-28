@@ -96,7 +96,7 @@ template <typename Decoder, typename Visitor> class item_walker {
         }
     }
 
-    status_code fail(walk_failure_reason reason, std::size_t depth, status_code status = status_code::error) {
+    status_code fail(walk_failure_reason reason, std::size_t depth, status_code status = status_code::malformed_structure) {
         mark_failure(reason, depth);
         return status;
     }
@@ -122,21 +122,18 @@ template <typename Decoder, typename Visitor> class item_walker {
     status_code read_token(catch_all_variant &value, std::size_t depth) {
         mark_failure(walk_failure_reason::malformed, depth);
         const auto [major, additional_info] = decoder_.read_initial_byte();
-        const auto status                   = decoder_.decode(value, major, additional_info);
+        if (additional_info >= std::byte{28} && additional_info <= std::byte{30}) {
+            return status_code::invalid_additional_info;
+        }
+        const auto status = decoder_.decode(value, major, additional_info);
         if (status != status_code::success) {
-            switch (status) {
-            case status_code::incomplete:
-            case status_code::out_of_memory:
-            case status_code::size_limit_exceeded:
-            case status_code::invalid_utf8_sequence: return status;
-            default: return status_code::error;
-            }
+            return detail::is_retriable_variant_mismatch(status) ? status_code::malformed_structure : status;
         }
         // Keep the initial additional-info value: simple{n} alone cannot tell
         // whether a small simple value used the forbidden two-byte form.
         if (options_.strict_validation && major == major_type::Simple && additional_info == std::byte{24}) {
             if (const auto *value_ptr = std::get_if<simple>(&value); value_ptr && value_ptr->value < 32U) {
-                return status_code::error;
+                return status_code::malformed_structure;
             }
         }
         return status_code::success;
@@ -282,7 +279,10 @@ expected<void, status_code> walk_item(Decoder &decoder, Visitor &&visitor, walk_
         return {};
     } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
         return unexpected<status_code>(status_code::out_of_memory);
+    } catch (const detail::decode_status_exception &error) {
+        return unexpected<status_code>(error.status);
     } catch (const parse_incomplete_exception &) { return unexpected<status_code>(status_code::incomplete); } catch (...) {
+        // Preserve the existing fallback for exceptions from visitor/customization code.
         return unexpected<status_code>(status_code::error);
     }
 }

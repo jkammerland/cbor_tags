@@ -70,7 +70,7 @@ TEST_CASE("security regression: oversized definite text view length is rejected"
     auto result = dec(decoded);
 
     REQUIRE_FALSE(result);
-    CHECK((result.error() == status_code::incomplete || result.error() == status_code::error));
+    CHECK_EQ(result.error(), sizeof(std::size_t) < sizeof(std::uint64_t) ? status_code::size_limit_exceeded : status_code::incomplete);
 }
 
 TEST_CASE("security regression: oversized definite byte view length is rejected") {
@@ -81,7 +81,7 @@ TEST_CASE("security regression: oversized definite byte view length is rejected"
     auto result = dec(decoded);
 
     REQUIRE_FALSE(result);
-    CHECK((result.error() == status_code::incomplete || result.error() == status_code::error));
+    CHECK_EQ(result.error(), sizeof(std::size_t) < sizeof(std::uint64_t) ? status_code::size_limit_exceeded : status_code::incomplete);
 }
 
 TEST_CASE("security regression: direct tagged class decode rejects wrong tag before payload") {

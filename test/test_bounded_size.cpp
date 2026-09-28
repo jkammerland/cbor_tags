@@ -1022,7 +1022,7 @@ TEST_CASE("bounded indefinite decoding preserves structural errors") {
         auto                       result = dec(as_bounded_size<0, 2>(value));
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
         CHECK(value.empty());
     }
 
@@ -1033,7 +1033,7 @@ TEST_CASE("bounded indefinite decoding preserves structural errors") {
         auto                   result = dec(as_bounded_size<0, 2>(value));
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
         CHECK(value.empty());
     }
 

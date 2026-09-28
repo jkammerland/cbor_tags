@@ -297,19 +297,32 @@ TEST_SUITE("cbor_wire/traversal") {
             status_code status;
         };
         const std::array cases{
-            malformed_case{"", status_code::incomplete},       malformed_case{"18", status_code::incomplete},
-            malformed_case{"1a0000", status_code::incomplete}, malformed_case{"6268", status_code::incomplete},
-            malformed_case{"4201", status_code::incomplete},   malformed_case{"81", status_code::incomplete},
-            malformed_case{"a101", status_code::incomplete},   malformed_case{"9f", status_code::incomplete},
-            malformed_case{"9f01", status_code::incomplete},   malformed_case{"bf01", status_code::incomplete},
-            malformed_case{"7f6161", status_code::incomplete}, malformed_case{"5f4101", status_code::incomplete},
-            malformed_case{"c0", status_code::incomplete},     malformed_case{"ff", status_code::error},
-            malformed_case{"81ff", status_code::error},        malformed_case{"a101ff", status_code::error},
-            malformed_case{"bf01ff", status_code::error},      malformed_case{"c0ff", status_code::error},
-            malformed_case{"7f4101ff", status_code::error},    malformed_case{"5f6161ff", status_code::error},
-            malformed_case{"5f5fffff", status_code::error},    malformed_case{"7f7fffff", status_code::error},
-            malformed_case{"7f01ff", status_code::error},      malformed_case{"1c", status_code::error},
-            malformed_case{"7c", status_code::error},          malformed_case{"fc", status_code::error},
+            malformed_case{"", status_code::incomplete},
+            malformed_case{"18", status_code::incomplete},
+            malformed_case{"1a0000", status_code::incomplete},
+            malformed_case{"6268", status_code::incomplete},
+            malformed_case{"4201", status_code::incomplete},
+            malformed_case{"81", status_code::incomplete},
+            malformed_case{"a101", status_code::incomplete},
+            malformed_case{"9f", status_code::incomplete},
+            malformed_case{"9f01", status_code::incomplete},
+            malformed_case{"bf01", status_code::incomplete},
+            malformed_case{"7f6161", status_code::incomplete},
+            malformed_case{"5f4101", status_code::incomplete},
+            malformed_case{"c0", status_code::incomplete},
+            malformed_case{"ff", status_code::malformed_structure},
+            malformed_case{"81ff", status_code::malformed_structure},
+            malformed_case{"a101ff", status_code::malformed_structure},
+            malformed_case{"bf01ff", status_code::malformed_structure},
+            malformed_case{"c0ff", status_code::malformed_structure},
+            malformed_case{"7f4101ff", status_code::malformed_structure},
+            malformed_case{"5f6161ff", status_code::malformed_structure},
+            malformed_case{"5f5fffff", status_code::malformed_structure},
+            malformed_case{"7f7fffff", status_code::malformed_structure},
+            malformed_case{"7f01ff", status_code::malformed_structure},
+            malformed_case{"1c", status_code::invalid_additional_info},
+            malformed_case{"7c", status_code::invalid_additional_info},
+            malformed_case{"fc", status_code::invalid_additional_info},
         };
         for (const auto &test : cases) {
             CAPTURE(test.hex);
@@ -372,10 +385,10 @@ TEST_SUITE("cbor_wire/traversal") {
             const auto validation     = validate_item(validation_dec);
             if (payload < 32) {
                 REQUIRE_FALSE(strict);
-                CHECK(strict.error() == status_code::error);
+                CHECK(strict.error() == status_code::malformed_structure);
                 CHECK_EQ(strict_callbacks, 0);
                 REQUIRE_FALSE(validation);
-                CHECK(validation.error() == status_code::error);
+                CHECK(validation.error() == status_code::malformed_structure);
             } else {
                 CHECK(strict.has_value());
                 CHECK_EQ(strict_callbacks, 1);
@@ -515,7 +528,7 @@ TEST_SUITE("cbor_wire/traversal") {
         CHECK(dec.tell() == input.cbegin() + 2);
         const auto trailing = validate_item(dec);
         REQUIRE_FALSE(trailing);
-        CHECK(trailing.error() == status_code::error);
+        CHECK(trailing.error() == status_code::malformed_structure);
         CHECK(dec.tell() == input.cend());
     }
 

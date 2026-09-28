@@ -104,37 +104,31 @@ struct default_memory_resource_guard {
 } // namespace
 
 TEST_CASE("status messages cover every declared status code") {
-    constexpr status_code statuses[] = {
-        status_code::success,
-        status_code::incomplete,
-        status_code::unexpected_group_size,
-        status_code::out_of_memory,
-        status_code::error,
-        status_code::contiguous_view_on_non_contiguous_data,
-        status_code::invalid_utf8_sequence,
-        status_code::begin_no_match_decoding,
-        status_code::no_match_for_tag,
-        status_code::no_match_for_tag_simple_on_buffer,
-        status_code::no_match_for_uint_on_buffer,
-        status_code::no_match_for_nint_on_buffer,
-        status_code::no_match_for_int_on_buffer,
-        status_code::no_match_for_enum_on_buffer,
-        status_code::no_match_for_bstr_on_buffer,
-        status_code::no_match_for_tstr_on_buffer,
-        status_code::no_match_for_array_on_buffer,
-        status_code::no_match_for_map_on_buffer,
-        status_code::no_match_for_tag_on_buffer,
-        status_code::no_match_for_simple_on_buffer,
-        status_code::no_match_for_optional_on_buffer,
-        status_code::no_match_in_variant_on_buffer,
-        status_code::end_no_match_decoding,
-        status_code::size_limit_exceeded,
-    };
+    constexpr auto statuses = magic_enum::enum_values<status_code>();
+    static_assert(!statuses.empty());
 
     for (auto status : statuses) {
         CHECK_NE(status_message(status), "Unknown CBOR status code"sv);
     }
     CHECK_EQ(status_message(static_cast<status_code>(255)), "Unknown CBOR status code"sv);
+}
+
+TEST_CASE("precise statuses preserve enum ABI and remain terminal") {
+    static_assert(std::is_same_v<std::underlying_type_t<status_code>, std::uint8_t>);
+    static_assert(static_cast<unsigned>(status_code::success) == 0);
+    static_assert(static_cast<unsigned>(status_code::error) == 4);
+    static_assert(static_cast<unsigned>(status_code::begin_no_match_decoding) == 7);
+    static_assert(static_cast<unsigned>(status_code::end_no_match_decoding) == 22);
+    static_assert(static_cast<unsigned>(status_code::size_limit_exceeded) == 23);
+
+    CHECK_EQ(status_message(status_code::invalid_additional_info), "Invalid CBOR additional information"sv);
+    CHECK_EQ(status_message(status_code::malformed_structure), "Malformed CBOR item structure"sv);
+    CHECK_EQ(status_message(status_code::input_output_aliasing), "CBOR input and output storage overlap"sv);
+    CHECK_EQ(status_message(status_code::unsupported_operation), "Unsupported CBOR operation for the selected type"sv);
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::invalid_additional_info));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::malformed_structure));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::input_output_aliasing));
+    CHECK_FALSE(detail::is_retriable_variant_mismatch(status_code::unsupported_operation));
 }
 
 TEST_CASE("variant mismatch classification uses the no-match status range") {
@@ -655,7 +649,7 @@ TEST_SUITE("Open objects - wrap as etc") {
         auto result = dec(wrap_as_array{a, b});
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::error);
+        CHECK_EQ(result.error(), status_code::no_match_for_array_on_buffer);
     }
 }
 

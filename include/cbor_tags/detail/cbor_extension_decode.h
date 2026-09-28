@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/cbor_decode_error.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -33,12 +34,14 @@ template <typename Decoder>
 [[nodiscard]] constexpr status_code decode_unsigned_argument(Decoder &dec, std::byte additional_info, std::uint64_t &value) {
     const auto info = std::to_integer<std::uint8_t>(additional_info);
     if (!is_valid_cbor_argument_info(info)) {
-        return status_code::error;
+        return status_code::invalid_additional_info;
     }
 
     try {
         value = dec.decode_unsigned(additional_info);
-    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
+    } catch (const decode_status_exception &error) { return error.status; } catch (const parse_incomplete_exception &) {
+        return status_code::incomplete;
+    }
     return status_code::success;
 }
 
@@ -46,12 +49,14 @@ template <typename Decoder>
 [[nodiscard]] constexpr status_code decode_tag_argument(Decoder &dec, std::byte additional_info, std::uint64_t &value) {
     const auto info = std::to_integer<std::uint8_t>(additional_info);
     if (!is_valid_cbor_argument_info(info)) {
-        return status_code::error;
+        return status_code::invalid_additional_info;
     }
 
     try {
         return dec.decode_tag_argument(additional_info, value);
-    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
+    } catch (const decode_status_exception &error) { return error.status; } catch (const parse_incomplete_exception &) {
+        return status_code::incomplete;
+    }
 }
 
 template <typename Decoder>
@@ -69,7 +74,7 @@ template <typename Decoder>
 template <typename Decoder> [[nodiscard]] constexpr status_code require_extension_payload_bytes(Decoder &dec, std::uint64_t byte_count) {
     if constexpr (std::numeric_limits<typename Decoder::size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
         if (byte_count > static_cast<std::uint64_t>(std::numeric_limits<typename Decoder::size_type>::max())) {
-            return status_code::error;
+            return status_code::size_limit_exceeded;
         }
     }
     if constexpr (IsContiguous<typename Decoder::input_buffer_type> ||
@@ -93,7 +98,9 @@ template <typename Decoder, typename Fn>
 
     try {
         return std::forward<Fn>(consume)(dec.decode_bstring_payload(byte_count));
-    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
+    } catch (const decode_status_exception &error) { return error.status; } catch (const parse_incomplete_exception &) {
+        return status_code::incomplete;
+    }
 }
 
 template <typename Decoder, typename Output>
@@ -105,7 +112,9 @@ template <typename Decoder, typename Output>
 
     try {
         return dec.decode_definite_bstr(output, byte_count);
-    } catch (const parse_incomplete_exception &) { return status_code::incomplete; }
+    } catch (const decode_status_exception &error) { return error.status; } catch (const parse_incomplete_exception &) {
+        return status_code::incomplete;
+    }
 }
 
 [[nodiscard]] constexpr status_code match_expected_tag(std::uint64_t expected_tag, std::uint64_t actual_tag) {

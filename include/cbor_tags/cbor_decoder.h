@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
@@ -65,7 +66,7 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
 
     if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
         if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-            return status_code::error;
+            return status_code::size_limit_exceeded;
         }
     }
 
@@ -86,7 +87,7 @@ constexpr status_code skip_sized_string_payload(Reader &reader, const InputBuffe
         reader.position_ += needed;
     } else if constexpr (std::ranges::sized_range<const InputBuffer>) {
         if (std::cmp_greater(needed, std::numeric_limits<std::ptrdiff_t>::max())) {
-            return status_code::error;
+            return status_code::size_limit_exceeded;
         }
         reader.position_ = std::next(reader.position_, static_cast<std::ptrdiff_t>(needed));
         reader.current_offset_ += needed;
@@ -169,11 +170,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return expected_type{};
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
+        } catch (const detail::decode_status_exception &error) {
+            return unexpected<status_code>(error.status);
         } catch (const parse_incomplete_exception &) {
             return unexpected<status_code>(status_code::incomplete);
         } catch ([[maybe_unused]] const std::exception &e) {
             debug::println("Caught exception: {}", e.what());
-            return unexpected<status_code>(status_code::error); // TODO: placeholder
+            // Exceptions from application customizations have no library parse classification.
+            return unexpected<status_code>(status_code::error);
         }
     }
 
@@ -336,7 +340,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto payload_size = require_bytes(bstring_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
-                return status_code::error;
+                return status_code::input_output_aliasing;
             }
         }
 
@@ -440,7 +444,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         const auto payload_size = require_bytes(text_size);
         if constexpr (!IsConstView<T>) {
             if (string_target_aliases_input(t)) {
-                return status_code::error;
+                return status_code::input_output_aliasing;
             }
         }
         if constexpr (!IsConstView<T> && !IsContiguous<InputBuffer>) {
@@ -855,7 +859,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // to validate this header or justify reservation.
         const auto payload_size = require_bytes(text_size);
         if (string_target_aliases_input(value)) {
-            return status_code::error;
+            return status_code::input_output_aliasing;
         }
 
         if constexpr (!IsContiguous<InputBuffer>) {
@@ -924,7 +928,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
             if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
                 if (length_u64 > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                    return status_code::error;
+                    return status_code::size_limit_exceeded;
                 }
             }
 
@@ -1086,6 +1090,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else if constexpr (IsEncodedMapView<RawView>) {
             return decode_encoded_view(value, major_type::Map, status_code::no_match_for_map_on_buffer);
         } else {
+            // No expected major: the mismatch status is never used.
             return decode_encoded_view(value, std::nullopt, status_code::error);
         }
     }
@@ -1155,14 +1160,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             /* This requires an indirect call in order for some compilers to find the overload. */
             auto result = detail::adl_indirect_decode(*this, std::forward<C>(value));
             return result.has_value() ? status_code::success : result.error();
-        } else if (has_free_transcode) {
+        } else {
+            static_assert(has_free_transcode);
             /* Transcode does not require an indirect call, because no other methods exist with the same name (decode) */
             auto result = transcode(*this, std::forward<C>(value));
             return result.has_value() ? status_code::success : result.error();
         }
-
-        // throw std::runtime_error("This should never happen");
-        return status_code::error;
     }
 
     template <typename C>
@@ -1418,7 +1421,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_bstr(T &out, decode_size_bounds bounds = {}) {
         if (string_target_aliases_input(out)) {
-            return status_code::error;
+            return status_code::input_output_aliasing;
         }
 
         detail::appender<T>            appender_;
@@ -1433,7 +1436,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 }
             }
             if (major != major_type::ByteString || additionalInfo == static_cast<byte>(31)) {
-                return status_code::no_match_for_bstr_on_buffer;
+                return status_code::malformed_structure;
             }
 
             const auto chunk_size = decode_unsigned(additionalInfo);
@@ -1464,7 +1467,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_tstr(T &out, decode_size_bounds bounds = {}) {
         if (string_target_aliases_input(out)) {
-            return status_code::error;
+            return status_code::input_output_aliasing;
         }
 
         detail::appender<T>            appender_;
@@ -1479,7 +1482,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 }
             }
             if (major != major_type::TextString || additionalInfo == static_cast<byte>(31)) {
-                return status_code::no_match_for_tstr_on_buffer;
+                return status_code::malformed_structure;
             }
 
             const auto chunk_size = decode_unsigned(additionalInfo);
@@ -1569,7 +1572,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (status == status_code::success) {
                     auto [mapped_major, mapped_additional_info] = read_initial_byte();
                     if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                        return status_code::no_match_for_map_on_buffer;
+                        return status_code::malformed_structure;
                     }
                     status = decode(mapped_value, mapped_major, mapped_additional_info);
                 }
@@ -1587,7 +1590,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (status == status_code::success) {
                     auto [mapped_major, mapped_additional_info] = read_initial_byte();
                     if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                        return status_code::no_match_for_map_on_buffer;
+                        return status_code::malformed_structure;
                     }
                     status = decode(result.second, mapped_major, mapped_additional_info);
                 }
@@ -1605,7 +1608,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr size_type require_bytes(std::uint64_t length) {
         if constexpr (std::numeric_limits<size_type>::max() < std::numeric_limits<std::uint64_t>::max()) {
             if (length > static_cast<std::uint64_t>(std::numeric_limits<size_type>::max())) {
-                throw std::runtime_error("CBOR item exceeds buffer limits");
+                throw detail::decode_status_exception{status_code::size_limit_exceeded};
             }
         }
         const auto needed = static_cast<size_type>(length);
@@ -1623,7 +1626,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr uint64_t read_unsigned(byte additionalInfo) {
         const auto info = std::to_integer<std::uint8_t>(additionalInfo);
         if (!detail::is_valid_cbor_argument_info(info)) {
-            throw std::runtime_error("Invalid additional info for integer");
+            throw detail::decode_status_exception{status_code::invalid_additional_info};
         }
 
         const auto payload_size = detail::cbor_argument_payload_size(info);
@@ -1645,7 +1648,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return true;
         });
         if (!ok) {
-            throw std::runtime_error("Invalid additional info for integer");
+            throw detail::decode_status_exception{status};
         }
         return value;
     }
@@ -2125,7 +2128,7 @@ template <typename T> struct cbor_indefinite_decoder {
                 return dec.decode_indef_array(value.value_);
             }
         } else {
-            return status_code::error;
+            return status_code::unsupported_operation;
         }
     }
 
@@ -2148,14 +2151,17 @@ template <typename T> struct cbor_header_decoder {
     constexpr auto get_and_validate_header(major_type expectedMajorType) {
         auto [initialByte, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
         if (initialByte != expectedMajorType) {
-            throw std::runtime_error("Invalid major type");
+            throw detail::decode_status_exception{detail::major_type_mismatch_status(expectedMajorType)};
         }
         return additionalInfo;
     }
 
     constexpr auto validate_size(major_type expectedMajor, std::uint64_t expectedSize) {
         auto additionalInfo = get_and_validate_header(expectedMajor);
-        auto size           = detail::underlying<T>(this).decode_unsigned(additionalInfo);
+        if (additionalInfo == std::byte{31}) {
+            return status_code::unexpected_group_size;
+        }
+        auto size = detail::underlying<T>(this).decode_unsigned(additionalInfo);
         return (size == expectedSize) ? status_code::success : status_code::unexpected_group_size;
     }
 

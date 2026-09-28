@@ -120,7 +120,7 @@ constexpr bool read_cbor_argument(std::uint8_t additional_info, std::uint64_t &v
         return true;
     }
     if (!is_valid_cbor_argument_info(additional_info)) {
-        status = status_code::error;
+        status = status_code::invalid_additional_info;
         return false;
     }
 
@@ -139,7 +139,7 @@ constexpr bool read_cbor_argument(std::uint8_t additional_info, std::uint64_t &v
 [[nodiscard]] inline status_code read_cbor_argument_from_span(std::span<const std::byte> input, std::size_t &offset,
                                                               std::uint8_t additional_info, std::uint64_t &value) noexcept {
     if (!is_valid_cbor_argument_info(additional_info)) {
-        return status_code::error;
+        return status_code::invalid_additional_info;
     }
 
     const auto byte_count = cbor_argument_payload_size(additional_info);
