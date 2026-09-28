@@ -59,9 +59,9 @@ struct failing_value {
         case codec_failure::standard: throw std::runtime_error{"Invalid CBOR additional information"};
         case codec_failure::allocation: throw std::bad_alloc{};
         case codec_failure::length: throw std::length_error{"application length limit"};
-        case codec_failure::returned_status: return unexpected<status_code>{status_code::unsupported_operation};
+        case codec_failure::returned_status: return cbor::tags::unexpected<status_code>{status_code::unsupported_operation};
         }
-        return unexpected<status_code>{status_code::error};
+        return cbor::tags::unexpected<status_code>{status_code::error};
     }
 };
 
