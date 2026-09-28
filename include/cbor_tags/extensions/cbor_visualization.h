@@ -411,10 +411,10 @@ template <typename T, typename Seen> consteval bool cddl_contains_smart_pointer(
     } else {
         using next_seen = cddl_seen_append_t<Seen, value_type>;
         if constexpr (CDDLHomogeneousArray<value_type>) {
-            using traits = cddl_homogeneous_array_traits<value_type>;
+            using traits = homogeneous_array_traits<value_type>;
             return cddl_contains_smart_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
-            using traits = cddl_multi_dimensional_array_traits<value_type>;
+            using traits = multi_dimensional_array_traits<value_type>;
             return cddl_contains_smart_pointer<typename traits::dimensions_type, next_seen>() ||
                    cddl_contains_smart_pointer<typename traits::array_type, next_seen>();
         } else if constexpr (IsAnyBoundedSizeWrapper<value_type> || IsArrayRangeWrapper<value_type> || IsOptional<value_type> ||
@@ -561,19 +561,19 @@ inline std::string parenthesize_choice(std::string value) {
 
 template <typename T> std::string cddl_tagged_bstr_array_expr() {
     using value_type = std::remove_cvref_t<T>;
-    return text::format("#6.{}(bstr)", cddl_tagged_bstr_array_traits<value_type>::tag);
+    return text::format("#6.{}(bstr)", tagged_bstr_array_traits<value_type>::tag);
 }
 
 template <std::size_t Min, std::size_t Max> std::string cddl_size_control(std::string_view base);
 
 template <typename T>
 concept CDDLBoundedTaggedByteStringArray = CDDLTaggedByteStringArray<T> && requires {
-    { cddl_tagged_bstr_array_traits<std::remove_cvref_t<T>>::element_byte_size } -> std::convertible_to<std::uint64_t>;
+    { tagged_bstr_array_traits<std::remove_cvref_t<T>>::element_byte_size } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T, std::size_t Min, std::size_t Max> std::string cddl_bounded_tagged_bstr_array_expr() {
     using value_type       = std::remove_cvref_t<T>;
-    using traits           = cddl_tagged_bstr_array_traits<value_type>;
+    using traits           = tagged_bstr_array_traits<value_type>;
     constexpr auto element = traits::element_byte_size;
     static_assert(element > 0U, "bounded tagged byte-string array CDDL requires a non-zero element byte size");
     static_assert(element <= static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()),
@@ -589,14 +589,14 @@ template <typename T, std::size_t Min, std::size_t Max> std::string cddl_bounded
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_homogeneous_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    using traits     = cddl_homogeneous_array_traits<value_type>;
+    using traits     = homogeneous_array_traits<value_type>;
     return text::format("#6.{}({})", traits::tag, cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode = cddl_shared_pointer_mode::nullable>
 std::string cddl_multi_dimensional_array_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    using traits     = cddl_multi_dimensional_array_traits<value_type>;
+    using traits     = multi_dimensional_array_traits<value_type>;
     auto dimensions  = parenthesize_choice(cddl_type_expr<typename traits::dimensions_type, PointerMode>(context, options));
     auto array       = parenthesize_choice(cddl_type_expr<typename traits::array_type, PointerMode>(context, options));
     return text::format("#6.{}([{}, {}])", traits::tag, dimensions, array);
@@ -1278,13 +1278,13 @@ std::string ensure_cddl_definition(CDDLContext &context, CDDLOptions options, st
 }
 
 template <typename T> consteval bool cddl_has_wire_type_alternative() {
-    return has_matching_alternative<T, []<typename U>() { return requires { typename cddl::cddl_wire_type<U>::type; }; }>();
+    return has_matching_alternative<T, []<typename U>() { return requires { typename cddl::wire_type_t<U>; }; }>();
 }
 
 template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_type_expr(CDDLContext &context, CDDLOptions options) {
     using value_type = std::remove_cvref_t<T>;
-    if constexpr (requires { typename cddl::cddl_wire_type<value_type>::type; }) {
-        using wire_type = typename cddl::cddl_wire_type<value_type>::type;
+    if constexpr (requires { typename cddl::wire_type_t<value_type>; }) {
+        using wire_type = cddl::wire_type_t<value_type>;
         static_assert(!std::same_as<std::remove_cvref_t<wire_type>, value_type>, "CDDL wire type must differ from its wrapper");
         static_assert(!IsAnyHeader<wire_type> && !is_static_tag_t<wire_type>::value && !is_dynamic_tag_t<wire_type>,
                       "CDDL wire type must describe a complete CBOR item, not a header");
@@ -1485,7 +1485,7 @@ auto cddl_schema_to_impl(OutputBuffer &output_buffer, CDDLOptions options, Conte
     const auto emit_root_expression = [&] {
         cddl_schema_root_expr_to<value_type, OutputBuffer, PointerMode>(output_buffer, cddl_context, options);
     };
-    constexpr bool has_wire_type = requires { typename cddl::cddl_wire_type<value_type>::type; };
+    constexpr bool has_wire_type = requires { typename cddl::wire_type_t<value_type>; };
     // Wire types must override the reflected root categories before the common fallback.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if constexpr (has_wire_type) {
@@ -1583,6 +1583,19 @@ auto cddl_schema_to(OutputBuffer &output_buffer, CDDLOptions options, Context co
     using value_type = std::remove_cvref_t<T>;
     return detail::cddl_schema_to_impl<value_type, detail::cddl_shared_pointer_mode::nullable>(output_buffer, options, context);
 }
+
+namespace cddl {
+
+using options   = CDDLOptions;
+using enum_mode = CDDLEnumMode;
+
+template <typename T, typename OutputBuffer, typename Context = detail::CDDLContext>
+auto schema_to(OutputBuffer &output_buffer, options opts = {}, Context context = {}) {
+    // Reuse this context: its PMR storage must not be implicitly copied or moved.
+    return cddl_schema_to<T, OutputBuffer, Context &>(output_buffer, opts, context);
+}
+
+} // namespace cddl
 
 template <typename CborBuffer, typename OutputBuffer>
 auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer, AnnotationOptions options = {}) {

@@ -89,6 +89,11 @@ template <typename Self> struct cbor_codec_mixin_base : cbor_encoder_mixin_base<
     using cbor_encoder_mixin_base<Self>::encode;
 };
 
+// Short names preserve the identity of the existing mixin base types.
+template <typename Self> using encoder_mixin_base = cbor_encoder_mixin_base<Self>;
+template <typename Self> using decoder_mixin_base = cbor_decoder_mixin_base<Self>;
+template <typename Self> using codec_mixin_base   = cbor_codec_mixin_base<Self>;
+
 constexpr std::string_view status_message(status_code s) {
     switch (s) {
     case status_code::success: return "Success";

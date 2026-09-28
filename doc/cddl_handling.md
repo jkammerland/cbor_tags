@@ -21,6 +21,8 @@ A C++ header-only library for generating CDDL schemas from C++ types and annotat
 #include <variant>
 #include <vector>
 
+namespace cddl = cbor::tags::cddl;
+
 struct MyStruct {
     int32_t id;
     std::string name;
@@ -29,7 +31,7 @@ struct MyStruct {
 
 // Generate CDDL schema
 fmt::memory_buffer buffer;
-cbor::tags::cddl_schema_to<MyStruct>(buffer);
+cddl::schema_to<MyStruct>(buffer);
 // Output:
 // MyStruct = [
 //   int,
@@ -38,11 +40,45 @@ cbor::tags::cddl_schema_to<MyStruct>(buffer);
 // ]
 ```
 
+## Names and customization points
+
+Examples use `namespace ct = cbor::tags;` for core APIs and
+`namespace cddl = cbor::tags::cddl;` for schema APIs. Prefer `cddl::schema_to<T>`,
+`cddl::options`, and `cddl::enum_mode` in new code. The existing
+`ct::cddl_schema_to`, `ct::CDDLOptions`, and `ct::CDDLEnumMode` remain supported.
+
+To describe an application's complete wire representation, specialize the
+class template `wire_type` and read the result with `wire_type_t`:
+
+```cpp
+namespace cbor::tags::cddl {
+template <> struct wire_type<app::record> {
+    using type = app::record_wire;
+};
+}
+
+namespace cddl = cbor::tags::cddl;
+using record_wire = cddl::wire_type_t<app::record>;
+```
+
+This mapping describes the schema; the application codec must serialize that
+same representation. Types without a mapping have no `wire_type_t` result.
+
+The concise traits (`wire_type`, `tagged_bstr_array_traits`,
+`homogeneous_array_traits`, and `multi_dimensional_array_traits`) inherit
+existing `cddl_` trait specializations as a compatibility fallback. Specialize
+the concise names in new code. If both spellings are specialized for one type,
+the concise specialization controls schema generation. Existing direct reads
+of a legacy trait still read that legacy trait; they do not resolve new
+specializations. Built-in legacy mappings remain available through both names.
+
 ## Basic Usage
 
 ### Schema Generation
 
 ```cpp
+namespace cddl = cbor::tags::cddl;
+
 struct Person {
     uint32_t age;
     std::map<std::string, int> attributes;
@@ -50,7 +86,7 @@ struct Person {
 };
 
 fmt::memory_buffer schema;
-cbor::tags::cddl_schema_to<Person>(schema, {.row_options = {.format_by_rows = false}});
+cddl::schema_to<Person>(schema, {.row_options = {.format_by_rows = false}});
 // Person = [uint, {* tstr => int}, bstr / null]
 ```
 
@@ -58,8 +94,10 @@ When named reflection is available, aggregate array fields can be labeled
 without changing the encoded CBOR shape:
 
 ```cpp
+namespace cddl = cbor::tags::cddl;
+
 fmt::memory_buffer schema;
-cbor::tags::cddl_schema_to<Person>(
+cddl::schema_to<Person>(
     schema,
     {.row_options = {.format_by_rows = false}, .label_array_fields = true});
 // Person = [age: uint, attributes: {* tstr => int}, data: bstr / null]
@@ -68,9 +106,11 @@ cbor::tags::cddl_schema_to<Person>(
 ### CBOR Annotation
 
 ```cpp
+namespace ct = cbor::tags;
+
 std::vector<std::byte> cbor_data = /* ... */;
 fmt::memory_buffer annotation;
-cbor::tags::buffer_annotate(cbor_data, annotation, {
+ct::buffer_annotate(cbor_data, annotation, {
     .current_indent = 2,
     .max_depth = 16
 });
@@ -80,8 +120,10 @@ cbor::tags::buffer_annotate(cbor_data, annotation, {
 diagnostic-notation-like value stream:
 
 ```cpp
+namespace ct = cbor::tags;
+
 fmt::memory_buffer diagnostic;
-cbor::tags::buffer_diagnostic(cbor_data, diagnostic);
+ct::buffer_diagnostic(cbor_data, diagnostic);
 ```
 
 ### Custom Tags
@@ -98,14 +140,14 @@ struct CustomTagged {
 
 ## API Highlights
 
-### `cddl_schema_to<Type>(buffer, options)`
+### `cddl::schema_to<Type>(buffer, options)`
 Generates CDDL schema for the given type into output buffer
 
 **Options**:
 - `row_options.format_by_rows`: Format multi-field aggregate payload arrays across multiple lines
 - `always_inline`: Inline nested aggregate definitions when possible; recursive references stay named
 - `root_name`: Override the generated root rule name; non-aggregate roots default to `root`
-- `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `CDDLEnumMode::named_values` when C++26 static reflection or `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON` is available
+- `enum_mode`: Keep enums as underlying `uint`/`int` shapes by default, or emit named CDDL enumeration choices with `cddl::enum_mode::named_values` when C++26 static reflection or `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON` is available
 - `label_array_fields`: Label aggregate array fields when named reflection is available; single-field aggregates use the field name as a rule alias and reject alias collisions, including CDDL prelude names
 
 Generated schemas mirror the default encoder shape plus explicitly documented
@@ -126,6 +168,7 @@ and decoding:
 
 ```cpp
 namespace ct = cbor::tags;
+namespace cddl = ct::cddl;
 
 struct Person {
     ct::bounded_size<std::string, 1, 64> name;
@@ -134,7 +177,7 @@ struct Person {
 };
 
 fmt::memory_buffer schema;
-ct::cddl_schema_to<Person>(
+cddl::schema_to<Person>(
     schema,
     {.row_options = {.format_by_rows = false}});
 // Person = [tstr .size (1..64), [1*3 int], {0*2 tstr => uint}]
@@ -169,6 +212,8 @@ Runtime wrappers have no default constructor because a decoder must never
 receive an unconfigured bound. Construct aggregate fields before decoding:
 
 ```cpp
+namespace ct = cbor::tags;
+
 struct RuntimePerson {
     ct::dynamic_bounded_size<std::string> name;
     ct::dynamic_bounded_size<std::vector<int>> scores;
@@ -188,13 +233,15 @@ Wrapping an already bounded value replaces its old bounds and keeps only one
 wrapper:
 
 ```cpp
+namespace ct = cbor::tags;
+
 auto configured = ct::as_bounded_size(scores, 0, max_scores);
 auto request_bound = ct::as_bounded_size(configured, 1, request_max);
 // request_bound refers to scores and uses [1, request_max].
 ```
 
 Type-based CDDL cannot read per-instance limits, so
-`cddl_schema_to<dynamic_bounded_size<T>>` is intentionally rejected. Use
+`cddl::schema_to<ct::dynamic_bounded_size<T>>` is intentionally rejected. Use
 `bounded_size<T, Min, Max>` for schema-visible protocol limits. Runtime-bounded
 values may be encoded through a selected `std::variant` alternative, but they
 cannot be decoded as variant alternatives or as values that generic optional or
@@ -268,6 +315,8 @@ Decoding into an existing mutable destination validates only the incoming item,
 then follows the core decoder's append/insert contract:
 
 ```cpp
+namespace ct = cbor::tags;
+
 std::vector<int> incoming{1, 2};
 std::vector<std::byte> input;
 ct::make_encoder(input)(incoming);
@@ -284,6 +333,8 @@ slice, make that slice the wrapped value instead of expecting the bound to selec
 elements:
 
 ```cpp
+namespace ct = cbor::tags;
+
 std::vector<int> values{1, 2, 3, 4};
 
 auto rejected = enc(ct::as_bounded_size<2, 2>(values)); // size 4: rejected
@@ -305,34 +356,37 @@ container, its overload can delegate the bound without rereading the CBOR
 header:
 
 ```cpp
+namespace ct = cbor::tags;
+
 struct samples {
     std::vector<int> values;
 };
 
 template <typename Self>
-struct samples_codec : cbor::tags::cbor_codec_mixin_base<Self> {
-    using cbor::tags::cbor_codec_mixin_base<Self>::decode;
-    using cbor::tags::cbor_codec_mixin_base<Self>::encode;
+struct samples_codec : ct::codec_mixin_base<Self> {
+    using base = ct::codec_mixin_base<Self>;
+    using base::decode;
+    using base::encode;
 
     template <std::size_t Min, std::size_t Max>
-    void encode(const cbor::tags::bounded_size<samples, Min, Max>& bounded) {
+    void encode(const ct::bounded_size<samples, Min, Max>& bounded) {
         static_cast<Self&>(*this).encode(
-            cbor::tags::as_bounded_size<Min, Max>(bounded.value().values));
+            ct::as_bounded_size<Min, Max>(bounded.value().values));
     }
 
     template <std::size_t Min, std::size_t Max>
-    cbor::tags::status_code decode(
-        cbor::tags::bounded_size<samples, Min, Max>& bounded,
-        cbor::tags::major_type major,
+    ct::status_code decode(
+        ct::bounded_size<samples, Min, Max>& bounded,
+        ct::major_type major,
         std::byte additional_info) {
-        auto values = cbor::tags::as_bounded_size<Min, Max>(bounded.value().values);
+        auto values = ct::as_bounded_size<Min, Max>(bounded.value().values);
         return static_cast<Self&>(*this).decode(values, major, additional_info);
     }
 
     template <typename Value>
         requires std::same_as<std::remove_cvref_t<Value>, samples>
-    void encode(const cbor::tags::dynamic_bounded_size<Value>& bounded) {
-        static_cast<Self&>(*this).encode(cbor::tags::as_bounded_size(
+    void encode(const ct::dynamic_bounded_size<Value>& bounded) {
+        static_cast<Self&>(*this).encode(ct::as_bounded_size(
             bounded.value().values,
             bounded.min_size(),
             bounded.max_size()));
@@ -340,11 +394,11 @@ struct samples_codec : cbor::tags::cbor_codec_mixin_base<Self> {
 
     template <typename Value>
         requires std::same_as<std::remove_cvref_t<Value>, samples>
-    cbor::tags::status_code decode(
-        cbor::tags::dynamic_bounded_size<Value>& bounded,
-        cbor::tags::major_type major,
+    ct::status_code decode(
+        ct::dynamic_bounded_size<Value>& bounded,
+        ct::major_type major,
         std::byte additional_info) {
-        auto values = cbor::tags::as_bounded_size(
+        auto values = ct::as_bounded_size(
             bounded.value().values,
             bounded.min_size(),
             bounded.max_size());
@@ -359,11 +413,12 @@ in CDDL because the wire payload is a `bstr`:
 
 ```cpp
 namespace ct = cbor::tags;
+namespace cddl = ct::cddl;
 namespace rfc8746 = cbor::tags::ext::rfc8746;
 
 using samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
 
-ct::cddl_schema_to<samples>(schema, {.row_options = {.format_by_rows = false}});
+cddl::schema_to<samples>(schema, {.row_options = {.format_by_rows = false}});
 // root = #6.78(bstr .size (4..12))
 ```
 
@@ -377,7 +432,7 @@ metadata:
 
 ```cpp
 namespace cbor::tags::cddl {
-template <> struct cddl_tagged_bstr_array_traits<MyTypedBstrView> {
+template <> struct tagged_bstr_array_traits<MyTypedBstrView> {
     static constexpr std::uint64_t tag = 1000;
 };
 }
@@ -392,10 +447,12 @@ By default, C++ enum types render as their CBOR integer shape because the
 decoder accepts any value representable by the enum's underlying type:
 
 ```cpp
+namespace cddl = cbor::tags::cddl;
+
 enum class Color : std::uint8_t { red = 1, green = 2, blue = 4 };
 
 fmt::memory_buffer schema;
-cbor::tags::cddl_schema_to<Color>(schema, {.row_options = {.format_by_rows = false}});
+cddl::schema_to<Color>(schema, {.row_options = {.format_by_rows = false}});
 // root = uint
 ```
 
@@ -404,10 +461,12 @@ When the library is built with `CBOR_TAGS_USE_STD_REFLECTION=ON` or
 enumerator values:
 
 ```cpp
+namespace cddl = cbor::tags::cddl;
+
 fmt::memory_buffer named_schema;
-cbor::tags::cddl_schema_to<Color>(
+cddl::schema_to<Color>(
     named_schema,
-    {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::CDDLEnumMode::named_values});
+    {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
 // Color = &(red: 1, green: 2, blue: 4)
 ```
 
@@ -430,6 +489,9 @@ When named reflection is enabled through C++26 static reflection
 map keys through the explicit named-map transform:
 
 ```cpp
+namespace ct = cbor::tags;
+namespace cddl = ct::cddl;
+
 struct Person {
     int age;
     std::string name;
@@ -438,11 +500,11 @@ struct Person {
 
 Person person{.age = 42, .name = "Ada", .employer = "AcmeCo"};
 std::vector<std::byte> buffer;
-auto enc = cbor::tags::make_encoder(buffer);
-enc(cbor::tags::as_named_map{person});
+auto enc = ct::make_encoder(buffer);
+enc(ct::as_named_map{person});
 
 fmt::memory_buffer schema;
-cbor::tags::cddl_schema_to<cbor::tags::as_named_map<Person>>(
+cddl::schema_to<ct::as_named_map<Person>>(
     schema, {.row_options = {.format_by_rows = false}, .root_name = "person"});
 // person = {age: int, name: tstr, employer: tstr}
 ```

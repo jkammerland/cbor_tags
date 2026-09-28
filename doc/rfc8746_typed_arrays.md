@@ -196,19 +196,22 @@ because the RFC 8746 payload is a byte string:
 
 ```cpp
 namespace ct = cbor::tags;
+namespace cddl = ct::cddl;
 namespace rfc8746 = cbor::tags::ext::rfc8746;
 
 std::vector<std::int32_t> values{1, 2, 3};
 enc(ct::as_bounded_size<1, 3>(rfc8746::as_typed_array(values)));
 
 using bounded_samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
-ct::cddl_schema_to<bounded_samples>(schema);
+cddl::schema_to<bounded_samples>(schema);
 // root = #6.78(bstr .size (4..12))
 ```
 
 Use runtime bounds when the element limit comes from application configuration:
 
 ```cpp
+namespace ct = cbor::tags;
+
 std::size_t max_samples = configured_sample_limit();
 
 enc(ct::as_bounded_size(

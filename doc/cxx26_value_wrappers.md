@@ -6,12 +6,14 @@ Include the opt-in extension and select `std_indirect_codec` in your factories:
 #include <cbor_tags/extensions/std_indirect.h>
 #include <vector>
 
+namespace ct = cbor::tags;
+
 using cbor::tags::ext::std_indirect::std_indirect_codec;
 std::indirect<int> value(42);
 std::vector<std::byte> bytes;
-auto encoded = cbor::tags::make_encoder<std_indirect_codec>(bytes)(value);
+auto encoded = ct::make_encoder<std_indirect_codec>(bytes)(value);
 std::indirect<int> decoded;
-auto result = cbor::tags::make_decoder<std_indirect_codec>(bytes)(decoded);
+auto result = ct::make_decoder<std_indirect_codec>(bytes)(decoded);
 // On success, *decoded == 42.
 ```
 
@@ -36,7 +38,7 @@ uses a tagged variant for `dog` and `cat`, reconstructs the concrete type with
 the destination allocator, and rejects unknown tags or unsupported dynamic types.
 Select `animal_codec` in the factory pack to compose it with other codecs.
 
-CDDL follows `cbor::tags::cddl::cddl_wire_type<T>::type`: the indirect extension
+CDDL follows `cbor::tags::cddl::wire_type_t<T>`: the indirect extension
 maps to `T`, and the animal example maps to its explicit `animal_wire` variant.
 This customization supplies a schema; it does not register runtime conversions.
 Aliases must end at a supported schema type without cycles, and customized
