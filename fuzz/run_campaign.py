@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -20,13 +21,13 @@ def sha256(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def tool_info(name):
+def tool_info(name, cwd):
     path = shutil.which(name)
     if not path:
         return {"available": False}
     resolved = pathlib.Path(path).resolve()
     result = subprocess.run(
-        [path, "--version"], capture_output=True, text=True, check=True
+        [path, "--version"], cwd=cwd, capture_output=True, text=True, check=True
     )
     return {
         "invoked_path": path,
@@ -34,6 +35,23 @@ def tool_info(name):
         "version": (result.stdout or result.stderr).strip(),
         "sha256": sha256(resolved),
     }
+
+
+def run_process(command, env, log, timeout):
+    # Centipede launches workers. A timeout must terminate the entire group.
+    with subprocess.Popen(
+        command,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        env=env,
+        start_new_session=True,
+    ) as process:
+        try:
+            return process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+            return 124
 
 
 def main():
@@ -73,6 +91,7 @@ def main():
     tests = [test for test in tests if args.filter in test]
     if not tests:
         raise RuntimeError(f"No properties selected; FuzzTest listing was: {listing!r}")
+    root = pathlib.Path(__file__).resolve().parent.parent
     report = {
         "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "binary": str(binary),
@@ -81,44 +100,38 @@ def main():
         "jobs": args.jobs,
         "asan_options": env["ASAN_OPTIONS"],
         "tools": {
-            name: tool_info(name)
-            for name in ("clang++", "cmake", "ninja", "llvm-cov", "llvm-profdata")
+            name: tool_info(name, root / "fuzz")
+            for name in ("/usr/bin/clang++", "bazelisk", "llvm-cov", "llvm-profdata")
         },
         "results": [],
     }
-    cache = binary.parent / "CMakeCache.txt"
-    if cache.exists():
-        shutil.copyfile(cache, output / cache.name)
-        for key in ("CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER"):
-            match = re.search(rf"^{key}:[^=]+=(.+)$", cache.read_text(), re.MULTILINE)
-            if match:
-                report["tools"][key] = tool_info(match[1])
-        dependencies = list((binary.parent / "_deps").glob("*-src"))
-        match = re.search(
-            r"^fuzztest_SOURCE_DIR:[^=]+=(.+)$", cache.read_text(), re.MULTILINE
-        )
-        if match:
-            dependencies.append(pathlib.Path(match[1]))
-        report["dependency_revisions"] = {}
-        for dependency in dependencies:
-            if (dependency / ".git").exists():
-                report["dependency_revisions"][str(dependency)] = (
-                    subprocess.check_output(
-                        ["git", "-C", str(dependency), "rev-parse", "HEAD"], text=True
-                    ).strip()
-                )
-    commands = binary.parent / "compile_commands.json"
-    if commands.exists():
-        shutil.copyfile(commands, output / commands.name)
-    root = pathlib.Path(__file__).resolve().parent.parent
+    for name in ("MODULE.bazel", "MODULE.bazel.lock", ".bazelversion", ".bazelrc"):
+        path = root / "fuzz" / name
+        if path.exists():
+            shutil.copyfile(path, output / name)
     report["source_commit"] = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
     ).strip()
+    sources = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "fuzz",
+            "include",
+            "cbor_tags_config.h.in",
+        ],
+        text=True,
+    ).split("\0")
     report["source_sha256"] = {
-        str(path.relative_to(root)): sha256(path)
-        for directory in (root / "fuzz", root / "include")
-        for path in sorted(directory.rglob("*"))
-        if path.is_file() and "__pycache__" not in path.parts
+        name: sha256(root / name)
+        for name in sources
+        if name and (root / name).is_file()
     }
 
     def run_one(test):
@@ -136,18 +149,7 @@ def main():
         started = time.monotonic()
         log_path = output / f"{test}.log"
         with log_path.open("w") as log:
-            try:
-                result = subprocess.run(
-                    command,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    env=test_env,
-                    timeout=args.seconds + 60,
-                    check=False,
-                )
-                code = result.returncode
-            except subprocess.TimeoutExpired:
-                code = 124
+            code = run_process(command, test_env, log, timeout=args.seconds + 60)
         return {
             "test": test,
             "command": command,

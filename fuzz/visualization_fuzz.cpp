@@ -41,6 +41,7 @@ void valid_record_visualization(const record &input) {
     bytes buffer;
     auto  enc = make_encoder(buffer);
     ASSERT_TRUE(enc(input));
+
     for (const bool annotate : {false, true}) {
         const auto result = render(buffer, annotate);
         EXPECT_TRUE(result.error.empty()) << result.error;
@@ -65,6 +66,7 @@ void cddl_options(const std::string &root_name, bool rows, bool inline_types, st
     cddl_schema_to<schema_record>(text, options);
     std::vector<char> chars;
     cddl_schema_to<schema_record>(chars, options);
+
     EXPECT_TRUE(std::ranges::equal(text, chars));
     EXPECT_TRUE(text.starts_with(root_name + " = "));
     EXPECT_NE(text.find("#6.100"), std::string::npos);

@@ -1,0 +1,28 @@
+build --action_env=CC=/usr/bin/clang
+build --action_env=CXX=/usr/bin/clang++
+build --cxxopt=-std=c++20
+build --host_cxxopt=-std=c++20
+build --compilation_mode=opt
+build --strip=never
+build --dynamic_mode=off
+
+# Centipede + ASan flags from FuzzTest's bazel/setup_configs.sh.
+build --@fuzztest//fuzztest:centipede_integration
+build --copt=-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+build --copt=-UNDEBUG
+build --copt=-D_LIBCPP_ENABLE_ASSERTIONS=1
+build --copt=-DHEAPCHECK_DISABLE
+build --copt=-DADDRESS_SANITIZER
+build --copt=-gline-tables-only
+build --copt=-fno-builtin
+build --copt=-fno-omit-frame-pointer
+build --copt=-fsanitize=address
+build --linkopt=-fsanitize=address
+build --copt=-fsanitize-coverage=trace-pc-guard,pc-table,trace-loads,trace-cmp
+build --per_file_copt=common/.*,fuzztest/.*,centipede/.*,-centipede/.*fuzz_target,googletest/.*,googlemock/.*@-fsanitize-coverage=0
+
+build:coverage --copt=-fprofile-instr-generate
+build:coverage --copt=-fcoverage-mapping
+build:coverage --linkopt=-fprofile-instr-generate
+test --test_output=errors
+test --test_env=ASAN_OPTIONS=detect_leaks=1:halt_on_error=1

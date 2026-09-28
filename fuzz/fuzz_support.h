@@ -1,10 +1,11 @@
 #pragma once
 
+#include "fuzztest/fuzztest.h"
+
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cstdint>
 #include <deque>
-#include <fuzztest/fuzztest.h>
 #include <gtest/gtest.h>
 #include <list>
 #include <map>
@@ -39,6 +40,7 @@ template <typename T, typename Buffer> void decode_equal(const T &expected, cons
     T    actual{};
     auto dec = make_decoder(buffer);
     ASSERT_TRUE(dec(actual));
+
     EXPECT_EQ(detail::unwrap_bounded_size(actual), detail::unwrap_bounded_size(expected));
     EXPECT_EQ(dec.tell(), std::ranges::end(buffer));
 }
@@ -48,9 +50,12 @@ template <typename T> void roundtrip(const T &value) {
     auto  enc = make_encoder(buffer);
     ASSERT_TRUE(enc(value));
     ASSERT_FALSE(buffer.empty());
+
     decode_equal(value, buffer);
+
     const std::deque<std::uint8_t> segmented(buffer.begin(), buffer.end());
     decode_equal(value, segmented);
+
     const std::list<std::uint8_t> storage(buffer.begin(), buffer.end());
     const auto                    unsized = std::ranges::subrange(storage.begin(), storage.end());
     static_assert(!std::ranges::sized_range<decltype(unsized)>);

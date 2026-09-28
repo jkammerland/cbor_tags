@@ -1,0 +1,40 @@
+module(name = "cbor_tags_fuzz")
+
+bazel_dep(name = "fuzztest", version = "20260629.0")
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
+bazel_dep(name = "rules_cc", version = "0.2.18")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "fmt", version = "11.1.2")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+new_local_repository(
+    name = "cbor_tags",
+    path = "..",
+    build_file = "//:cbor_tags.BUILD",
+)
+
+http_archive(
+    name = "tl_expected",
+    urls = ["https://codeload.github.com/TartanLlama/expected/tar.gz/refs/tags/v1.3.1"],
+    sha256 = "9a04f4f472fbb5c30bf60402f1ca626c4a76987f867978d0b8a35d7ab3fb8fe7",
+    strip_prefix = "expected-1.3.1",
+    type = "tar.gz",
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(name = "expected", hdrs = glob(["include/**/*.hpp"]), includes = ["include"], visibility = ["//visibility:public"])
+""",
+)
+
+http_archive(
+    name = "nameof",
+    urls = ["https://codeload.github.com/Neargye/nameof/tar.gz/refs/tags/v0.10.4"],
+    sha256 = "b67ed2155a32760067eee0d33c727b9badfd8c12393ebbe3b7ab219b4faa0149",
+    strip_prefix = "nameof-0.10.4",
+    type = "tar.gz",
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(name = "nameof", hdrs = glob(["include/**/*.hpp"]), includes = ["include"], visibility = ["//visibility:public"])
+""",
+)

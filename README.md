@@ -1192,10 +1192,7 @@ unit test target.
 
 ### Linux fuzz testing
 
-The [standalone FuzzTest suite](fuzz/README.md) combines structured property
-tests with a CBOR mutation dictionary, ASan campaigns, saved corpora, and LLVM
-source coverage. It has its own CMake build and Linux CI workflow; ordinary
-library builds do not depend on FuzzTest or GoogleTest.
+See the [Centipede + FuzzTest suite](fuzz/README.md) for ASan campaigns and source coverage.
 
 ### Test Logging
 

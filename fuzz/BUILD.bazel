@@ -1,0 +1,31 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+genrule(
+    name = "wire_vocabulary",
+    srcs = ["cbor.dict"],
+    tools = ["generate_vocabulary.py"],
+    outs = ["wire_vocabulary.h"],
+    cmd = "python3 $(location generate_vocabulary.py) $(location cbor.dict) $@",
+)
+
+cc_test(
+    name = "cbor_fuzz",
+    size = "medium",
+    srcs = [
+        "extensions_fuzz.cpp",
+        "roundtrip_fuzz.cpp",
+        "visualization_fuzz.cpp",
+        "wire_fuzz.cpp",
+        "fuzz_support.h",
+        "wire_domains.h",
+        ":wire_vocabulary",
+    ],
+    args = ["--corpus_database="],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "@cbor_tags//:cbor_tags",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+        "@googletest//:gtest",
+    ],
+)

@@ -1,4 +1,4 @@
-name: Linux FuzzTest (ASan)
+name: Linux Centipede (ASan)
 
 on:
   pull_request:
@@ -19,31 +19,36 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm ninja-build python3 ripgrep
-      - name: Configure standalone suite
-        run: >-
-          cmake -S fuzz -B build/fuzz -G Ninja
-          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCBOR_FUZZ_COVERAGE=ON
-      - name: Build
-        run: cmake --build build/fuzz --target cbor_fuzz --parallel 2
+          sudo apt-get install -y clang llvm python3 ripgrep
+          go install github.com/bazelbuild/bazelisk@v1.28.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Property and vocabulary smoke tests
-        run: ctest --test-dir build/fuzz --output-on-failure
+        working-directory: fuzz
+        run: |
+          bazelisk test --config=coverage --jobs=2 //:cbor_fuzz
+          python3 test_tools.py
+      - name: Record build actions
+        working-directory: fuzz
+        run: |
+          mkdir -p ../build/fuzz-build
+          bazelisk aquery --config=coverage --output=text \
+            'mnemonic("Cpp.*", deps(//:cbor_fuzz))' > ../build/fuzz-build/actions.txt
+          bazelisk mod graph > ../build/fuzz-build/modules.txt
       - name: Restore corpus
         uses: actions/cache@v4
         with:
           path: build/fuzz-corpus
-          key: fuzz-corpus-v1-${{ github.run_id }}
-          restore-keys: fuzz-corpus-v1-
+          key: fuzz-corpus-v2-${{ github.run_id }}
+          restore-keys: fuzz-corpus-v2-
       - name: Coverage-guided ASan campaign
         run: |
           seconds=10
           if [[ '${{ github.event_name }}' != pull_request ]]; then seconds=60; fi
-          python3 fuzz/run_campaign.py build/fuzz/cbor_fuzz --seconds "$seconds" --jobs 2 \
+          python3 fuzz/run_campaign.py fuzz/bazel-bin/cbor_fuzz --seconds "$seconds" --jobs 2 \
             --corpus build/fuzz-corpus --output build/fuzz-evidence
       - name: Source coverage
         if: always()
-        run: bash fuzz/coverage.sh build/fuzz/cbor_fuzz build/fuzz-evidence
+        run: bash fuzz/coverage.sh fuzz/bazel-bin/cbor_fuzz build/fuzz-evidence
       - name: Upload evidence and corpus
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,5 +57,4 @@ jobs:
           path: |
             build/fuzz-evidence
             build/fuzz-corpus
-            build/fuzz/CMakeCache.txt
-            build/fuzz/compile_commands.json
+            build/fuzz-build

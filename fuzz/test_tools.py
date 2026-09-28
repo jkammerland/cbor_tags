@@ -2,13 +2,16 @@
 """Regression tests for dictionary validation and campaign failure reporting."""
 
 import json
+import os
 import pathlib
+import select
 import subprocess
 import sys
 import tempfile
 import unittest
 
 from generate_vocabulary import generate
+from run_campaign import run_process
 
 
 class VocabularyTest(unittest.TestCase):
@@ -34,6 +37,42 @@ class VocabularyTest(unittest.TestCase):
 
 
 class CampaignTest(unittest.TestCase):
+    def test_timeout_terminates_worker_processes(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with os.fdopen(write_fd, "w") as log:
+                code = run_process(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import os, signal\n"
+                            "if os.fork() == 0:\n"
+                            " print('worker started', flush=True)\n"
+                            " signal.pause()\n"
+                            "else:\n"
+                            " os.wait()\n"
+                        ),
+                    ],
+                    os.environ.copy(),
+                    log,
+                    timeout=5,
+                )
+            self.assertEqual(code, 124)
+
+            # EOF proves the worker also closed its inherited stdout pipe.
+            output = b""
+            while True:
+                ready, _, _ = select.select([read_fd], [], [], 5)
+                self.assertTrue(ready, "a worker survived the campaign timeout")
+                chunk = os.read(read_fd, 4096)
+                if not chunk:
+                    break
+                output += chunk
+            self.assertIn(b"worker started", output)
+        finally:
+            os.close(read_fd)
+
     def test_records_every_property_and_propagates_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
