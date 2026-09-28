@@ -21,13 +21,13 @@ def sha256(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def tool_info(name, cwd):
+def tool_info(name):
     path = shutil.which(name)
     if not path:
         return {"available": False}
     resolved = pathlib.Path(path).resolve()
     result = subprocess.run(
-        [path, "--version"], cwd=cwd, capture_output=True, text=True, check=True
+        [path, "--version"], capture_output=True, text=True, check=True
     )
     return {
         "invoked_path": path,
@@ -38,7 +38,7 @@ def tool_info(name, cwd):
 
 
 def run_process(command, env, log, timeout):
-    # Centipede launches workers. A timeout must terminate the entire group.
+    # Terminate the whole process group on timeout, including any subprocesses.
     with subprocess.Popen(
         command,
         stdout=log,
@@ -100,15 +100,35 @@ def main():
         "jobs": args.jobs,
         "asan_options": env["ASAN_OPTIONS"],
         "tools": {
-            name: tool_info(name, root / "fuzz")
-            for name in ("/usr/bin/clang++", "bazelisk", "llvm-cov", "llvm-profdata")
+            name: tool_info(name)
+            for name in ("clang++", "cmake", "ninja", "llvm-cov", "llvm-profdata")
         },
         "results": [],
     }
-    for name in ("MODULE.bazel", "MODULE.bazel.lock", ".bazelversion", ".bazelrc"):
-        path = root / "fuzz" / name
-        if path.exists():
-            shutil.copyfile(path, output / name)
+    cache = binary.parent / "CMakeCache.txt"
+    if cache.exists():
+        shutil.copyfile(cache, output / cache.name)
+        for key in ("CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER"):
+            match = re.search(rf"^{key}:[^=]+=(.+)$", cache.read_text(), re.MULTILINE)
+            if match:
+                report["tools"][key] = tool_info(match[1])
+        dependencies = list((binary.parent / "_deps").glob("*-src"))
+        match = re.search(
+            r"^fuzztest_SOURCE_DIR:[^=]+=(.+)$", cache.read_text(), re.MULTILINE
+        )
+        if match:
+            dependencies.append(pathlib.Path(match[1]))
+        report["dependency_revisions"] = {}
+        for dependency in dependencies:
+            if (dependency / ".git").exists():
+                report["dependency_revisions"][str(dependency)] = (
+                    subprocess.check_output(
+                        ["git", "-C", str(dependency), "rev-parse", "HEAD"], text=True
+                    ).strip()
+                )
+    commands = binary.parent / "compile_commands.json"
+    if commands.exists():
+        shutil.copyfile(commands, output / commands.name)
     report["source_commit"] = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
     ).strip()

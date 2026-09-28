@@ -1192,7 +1192,7 @@ unit test target.
 
 ### Linux fuzz testing
 
-See the [Centipede + FuzzTest suite](fuzz/README.md) for ASan campaigns and source coverage.
+See the [FuzzTest suite](fuzz/README.md) for ASan campaigns and source coverage.
 
 ### Test Logging
 
