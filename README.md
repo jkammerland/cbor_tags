@@ -1190,6 +1190,13 @@ Use release builds for timing numbers and run benchmark executables directly
 when collecting results. The regular CI test path still builds and runs the
 unit test target.
 
+### Linux fuzz testing
+
+The [standalone FuzzTest suite](fuzz/README.md) combines structured property
+tests with a CBOR mutation dictionary, ASan campaigns, saved corpora, and LLVM
+source coverage. It has its own CMake build and Linux CI workflow; ordinary
+library builds do not depend on FuzzTest or GoogleTest.
+
 ### Test Logging
 
 Unit tests rely on doctest's `INFO` context for diagnostics, so log lines now surface only when an assertion fails. Set the environment variable `CBOR_TAGS_TEST_LOGS=1` to force the helper logs to emit immediately via `MESSAGE`, for example:
