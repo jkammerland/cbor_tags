@@ -43,7 +43,7 @@ Definite borrowed views are formed only after their complete payload is
 available, preventing out-of-bounds views without a second traversal.
 
 Mutable owning text- and byte-string destinations whose exposed contiguous
-storage overlaps the decoder input are rejected with `status_code::error`; use
+storage overlaps the decoder input are rejected with `status_code::input_output_aliasing`; use
 separate input and output storage. Other mutable output types must not alias
 the decoder input: the runtime check is not general alias analysis. Input range
 adaptors and views that hide shared storage are unsupported and must also use

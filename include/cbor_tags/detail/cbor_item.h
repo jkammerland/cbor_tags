@@ -40,6 +40,7 @@ struct cbor_item_reader {
         if constexpr (std::random_access_iterator<Iterator>) {
             const auto remaining = end - cursor;
             if (remaining < 0) {
+                // The caller supplied inconsistent range/iterator semantics.
                 status = status_code::error;
                 return false;
             }
@@ -95,7 +96,7 @@ struct cbor_item_reader {
                 return false;
             }
             if (chunk.major != expected_major || chunk.additional_info == 31U) {
-                status = status_code::error;
+                status = status_code::malformed_structure;
                 return false;
             }
             if (!read_argument(cursor, end, chunk.additional_info, chunk.argument, status)) {
@@ -150,11 +151,12 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
             }
 
             if (is_cbor_break_byte(cbor_byte_to_u8(*cursor_))) {
-                fail(status_code::error);
+                fail(status_code::malformed_structure);
                 return false;
             }
 
             if (!consume_parent_item()) {
+                // Exhausted definite frames are popped before an item is consumed.
                 fail(status_code::error);
                 return false;
             }
@@ -172,7 +174,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
                 std::uint64_t ignored{};
                 if (header.additional_info == 31U || !read_argument(header.additional_info, ignored)) {
                     if (!done_) {
-                        fail(status_code::error);
+                        fail(status_code::invalid_additional_info);
                     }
                     return false;
                 }
@@ -219,7 +221,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
                         return false;
                     }
                     if (length > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
-                        fail(status_code::error);
+                        fail(status_code::size_limit_exceeded);
                         return false;
                     }
                     const auto item_count = length * 2U;
@@ -233,7 +235,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
                 std::uint64_t tag{};
                 if (header.additional_info == 31U || !read_argument(header.additional_info, tag)) {
                     if (!done_) {
-                        fail(status_code::error);
+                        fail(status_code::invalid_additional_info);
                     }
                     return false;
                 }
@@ -246,13 +248,14 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
             }
             case major_type::Simple:
                 if (is_reserved_simple_argument(header.additional_info)) {
-                    fail(status_code::error);
+                    fail(status_code::invalid_additional_info);
                     return false;
                 }
                 if (header.additional_info >= 24U && !skip_bytes(std::uint64_t{1U << (header.additional_info - 24U)})) {
                     return false;
                 }
                 break;
+            // Header extraction produces only the eight CBOR major types.
             default: fail(status_code::error); return false;
             }
         }
@@ -293,7 +296,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
             return false;
         }
         if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
-            fail(status_code::error);
+            fail(status_code::malformed_structure);
             return true;
         }
         ++cursor_;
@@ -333,7 +336,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
     constexpr void                stack_pop_back() noexcept { --stack_size_; }
     constexpr bool                push_frame(cbor_item_frame frame) {
         if (stack_size_ == stack_.size()) {
-            fail(status_code::error);
+            fail(status_code::size_limit_exceeded);
             return false;
         }
         stack_[stack_size_++] = frame;
@@ -351,7 +354,7 @@ template <std::size_t MaxDepth, typename Iterator> class cbor_item_walker {
 template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
     template <typename Iterator> static bool skip_item(Iterator &cursor, Iterator end, status_code &status, std::size_t initial_depth = 0) {
         if (initial_depth > MaxDepth) {
-            status = status_code::error;
+            status = status_code::size_limit_exceeded;
             return false;
         }
         std::array<cbor_item_frame, MaxDepth> stack{};
@@ -363,7 +366,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
         auto pop_frame   = [&] { --stack_size; };
         auto push_frame  = [&](cbor_item_frame frame) {
             if (initial_depth + stack_size == stack.size()) {
-                status = status_code::error;
+                status = status_code::size_limit_exceeded;
                 return false;
             }
             stack[stack_size++] = frame;
@@ -385,7 +388,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                 }
                 if (is_cbor_break_byte(cbor_byte_to_u8(*cursor))) {
                     if (stack_back().major == major_type::Map && stack_back().map_expects_value) {
-                        status = status_code::error;
+                        status = status_code::malformed_structure;
                         return false;
                     }
                     ++cursor;
@@ -399,7 +402,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                 return false;
             }
             if (is_cbor_break_byte(cbor_byte_to_u8(*cursor))) {
-                status = status_code::error;
+                status = status_code::malformed_structure;
                 return false;
             }
 
@@ -411,6 +414,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                 }
             } else {
                 if (frame.remaining == 0) {
+                    // Exhausted definite frames are popped at the top of the loop.
                     status = status_code::error;
                     return false;
                 }
@@ -426,7 +430,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
             case major_type::UnsignedInteger:
             case major_type::NegativeInteger:
                 if (header.additional_info == 31U) {
-                    status = status_code::error;
+                    status = status_code::invalid_additional_info;
                     return false;
                 }
                 if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
@@ -472,7 +476,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                         return false;
                     }
                     if (header.argument > (std::numeric_limits<std::uint64_t>::max() / 2U)) {
-                        status = status_code::error;
+                        status = status_code::size_limit_exceeded;
                         return false;
                     }
                     const auto item_count = header.argument * 2U;
@@ -483,7 +487,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                 break;
             case major_type::Tag:
                 if (header.additional_info == 31U) {
-                    status = status_code::error;
+                    status = status_code::invalid_additional_info;
                     return false;
                 }
                 if (!cbor_item_reader::read_argument(cursor, end, header.additional_info, header.argument, status)) {
@@ -495,7 +499,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                 break;
             case major_type::Simple:
                 if (is_reserved_simple_argument(header.additional_info)) {
-                    status = status_code::error;
+                    status = status_code::invalid_additional_info;
                     return false;
                 }
                 if (header.additional_info >= 24U &&
@@ -503,6 +507,7 @@ template <std::size_t MaxDepth = 256> struct cbor_item_skipper {
                     return false;
                 }
                 break;
+            // Header extraction produces only the eight CBOR major types.
             default: status = status_code::error; return false;
             }
         }

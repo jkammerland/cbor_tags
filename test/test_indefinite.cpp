@@ -98,7 +98,7 @@ TEST_CASE("decode indefinite bstr with wrong chunk type") {
     auto                   result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite bstr into a normal vector.");
-    CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+    CHECK_EQ(result.error(), status_code::malformed_structure);
 }
 
 TEST_CASE("decode indefinite tstr into string") {
@@ -135,7 +135,7 @@ TEST_CASE("decode indefinite tstr with wrong chunk type") {
     auto        result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Wrong chunk major type should fail decoding indefinite tstr into a normal string.");
-    CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+    CHECK_EQ(result.error(), status_code::malformed_structure);
 }
 
 TEST_CASE("decode explicit indefinite bstr from non-contiguous input") {
@@ -210,7 +210,7 @@ TEST_CASE("decode explicit indefinite wrapper rejects unsupported scalar target"
     auto result = dec(as_indefinite{decoded});
 
     CHECK_FALSE_MESSAGE(result, "Scalar targets are not valid indefinite wrapper targets.");
-    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(result.error(), status_code::unsupported_operation);
 }
 
 TEST_CASE("decode indefinite array without break returns incomplete") {
@@ -260,7 +260,7 @@ TEST_CASE("decode indefinite map rejects break as value") {
     auto               result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "A map key followed by break is malformed.");
-    CHECK_EQ(result.error(), status_code::no_match_for_map_on_buffer);
+    CHECK_EQ(result.error(), status_code::malformed_structure);
 }
 
 TEST_CASE("decode indefinite bstr without break returns incomplete") {
@@ -276,7 +276,7 @@ TEST_CASE("decode indefinite bstr without break returns incomplete") {
     CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}}));
 }
 
-TEST_CASE("decode indefinite bstr with indefinite chunk returns no match") {
+TEST_CASE("decode indefinite bstr with indefinite chunk reports malformed structure") {
     std::vector<std::byte> buffer{std::byte{0x5F}, std::byte{0x5F}, std::byte{0xFF}};
 
     auto dec = make_decoder(buffer);
@@ -285,7 +285,7 @@ TEST_CASE("decode indefinite bstr with indefinite chunk returns no match") {
     auto                   result = dec(decoded);
 
     CHECK_FALSE_MESSAGE(result, "Nested indefinite bstr chunks are not allowed.");
-    CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+    CHECK_EQ(result.error(), status_code::malformed_structure);
 }
 
 TEST_CASE("decode indefinite bstr with truncated chunk returns incomplete") {
@@ -309,7 +309,7 @@ TEST_CASE("decode indefinite strings retain completed chunks before malformed in
         auto                         result = dec(decoded);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_bstr_on_buffer);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
         CHECK_EQ(decoded, (std::vector<std::byte>{std::byte{0x01}, std::byte{0xAA}}));
     }
 
@@ -320,7 +320,7 @@ TEST_CASE("decode indefinite strings retain completed chunks before malformed in
         auto                         result = dec(decoded);
 
         REQUIRE_FALSE(result);
-        CHECK_EQ(result.error(), status_code::no_match_for_tstr_on_buffer);
+        CHECK_EQ(result.error(), status_code::malformed_structure);
         CHECK_EQ(decoded, "prefix:a");
     }
 }

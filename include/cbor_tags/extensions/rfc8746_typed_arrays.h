@@ -1264,7 +1264,7 @@ template <typename Self> struct typed_array_codec : codec_mixin_base<Self> {
                 payload_major, payload_info, min, max, [&](auto &&raw_payload, std::size_t payload_size) {
                     auto payload = byte_range{std::forward<decltype(raw_payload)>(raw_payload)};
                     if (!detail::payload_range_size_matches(payload, payload_size)) {
-                        return status_code::error;
+                        return status_code::unexpected_group_size;
                     }
                     view = array_type::from_decoded_payload(std::move(payload), payload_size);
                     return status_code::success;
@@ -1298,7 +1298,7 @@ template <typename Self> struct typed_array_codec : codec_mixin_base<Self> {
                 }
                 auto payload = ByteRange{std::forward<decltype(raw_payload)>(raw_payload)};
                 if (!detail::payload_range_size_matches(payload, payload_size)) {
-                    return status_code::error;
+                    return status_code::unexpected_group_size;
                 }
                 view = typed_array_view<value_type, ByteRange, ByteOrder>::from_decoded_payload(std::move(payload), payload_size);
                 return status_code::success;
@@ -1315,7 +1315,7 @@ template <typename Self> struct typed_array_codec : codec_mixin_base<Self> {
         if constexpr (std::numeric_limits<std::size_t>::max() < std::numeric_limits<std::uint64_t>::max()) {
             const auto payload_size_limit = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
             if (payload_size_u64 > payload_size_limit) {
-                return status_code::error;
+                return status_code::size_limit_exceeded;
             }
         }
         return status_code::success;

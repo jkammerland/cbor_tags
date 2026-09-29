@@ -81,7 +81,8 @@ TEST_SUITE("cbor_wire/byte_views") {
         const auto       result = dec(value);
         REQUIRE_FALSE(result);
         if (oversized) {
-            CHECK((result.error() == status_code::incomplete || result.error() == status_code::error));
+            CHECK_EQ(result.error(),
+                     sizeof(std::size_t) < sizeof(std::uint64_t) ? status_code::size_limit_exceeded : status_code::incomplete);
         } else {
             CHECK_EQ(result.error(), status_code::incomplete);
         }

@@ -289,7 +289,7 @@ TEST_SUITE("cbor_wire/any_headers") {
             Header                          header{};
             auto                            result = make_decoder(input)(header);
             REQUIRE_FALSE(result);
-            CHECK_EQ(result.error(), status_code::error);
+            CHECK_EQ(result.error(), status_code::invalid_additional_info);
         }
     }
 

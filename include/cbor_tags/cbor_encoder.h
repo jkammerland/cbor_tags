@@ -318,7 +318,7 @@ template <typename T> struct cbor_indefinite_encoder {
             }
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
         } else {
-            throw std::runtime_error("Invalid type for indefinite encoding");
+            throw detail::encode_status_exception{status_code::unsupported_operation};
         }
     }
 };

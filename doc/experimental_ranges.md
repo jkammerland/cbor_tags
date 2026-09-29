@@ -382,7 +382,7 @@ work the iterator has already performed, so advance through `matches.end()`
 before treating its status as the result for the complete input segment. If a
 caller stops after the first match, malformed or deeply nested trailing data
 has not been scanned yet. The current scanner permits at most 256
-simultaneously open array, map, or tag frames. It returns `status_code::error`
+simultaneously open array, map, or tag frames. It returns `status_code::size_limit_exceeded`
 when scanning or locating a matched payload boundary would require another
 frame; that payload scan shares the same frame budget. This is a
 scanner-specific terminal limit, not a core decoder rollback or resumability

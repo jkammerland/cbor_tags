@@ -1032,7 +1032,7 @@ TEST_CASE("compact tagged malformed envelope metadata is rejected") {
         bool out{};
         auto result = decode_compact_hex("dc", as_custom_codec_1(static_tag<1>{}, out));
         REQUIRE_FALSE(result);
-        CHECK(result.error() == status_code::error);
+        CHECK(result.error() == status_code::invalid_additional_info);
     }
     {
         bool out{};
@@ -1056,7 +1056,7 @@ TEST_CASE("compact tagged malformed envelope metadata is rejected") {
         bool out{};
         auto result = decode_compact_hex("c15c", as_custom_codec_1(static_tag<1>{}, out));
         REQUIRE_FALSE(result);
-        CHECK(result.error() == status_code::error);
+        CHECK(result.error() == status_code::invalid_additional_info);
     }
     {
         bool out{};

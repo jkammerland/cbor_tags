@@ -73,7 +73,11 @@ enum class status_code : uint8_t {
     no_match_for_optional_on_buffer,
     no_match_in_variant_on_buffer,
     end_no_match_decoding,
-    size_limit_exceeded
+    size_limit_exceeded,
+    invalid_additional_info,
+    malformed_structure,
+    input_output_aliasing,
+    unsupported_operation
 };
 
 template <typename Self> struct encoder_mixin_base {
@@ -117,6 +121,10 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::no_match_in_variant_on_buffer: return "Unexpected CBOR format: no matching variant type found";
     case status_code::end_no_match_decoding: return "Unexpected error at end of CBOR decoding: invalid terminal state";
     case status_code::size_limit_exceeded: return "CBOR item size limit exceeded";
+    case status_code::invalid_additional_info: return "Invalid CBOR additional information";
+    case status_code::malformed_structure: return "Malformed CBOR item structure";
+    case status_code::input_output_aliasing: return "CBOR input and output storage overlap";
+    case status_code::unsupported_operation: return "Unsupported CBOR operation for the selected type";
     default: return "Unknown CBOR status code";
     }
 }

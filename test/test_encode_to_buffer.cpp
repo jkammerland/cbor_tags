@@ -278,7 +278,7 @@ TEST_CASE("CBOR Encoder rejects invalid indefinite wrapper type") {
     auto result = enc(as_indefinite{value});
 
     REQUIRE_FALSE(result);
-    CHECK_EQ(result.error(), status_code::error);
+    CHECK_EQ(result.error(), status_code::unsupported_operation);
 }
 
 TEST_CASE("CBOR Encoder on deque") {

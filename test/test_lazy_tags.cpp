@@ -646,7 +646,7 @@ TEST_CASE("lazy tag scanner handles no-allocation depth boundary") {
 
         CHECK(!threw);
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::size_limit_exceeded);
     }
 }
 
@@ -661,7 +661,7 @@ TEST_CASE("lazy tag scanner status reflects scanning performed so far") {
 
     ++it;
     CHECK(it == view.end());
-    CHECK_EQ(view.status(), status_code::error);
+    CHECK_EQ(view.status(), status_code::malformed_structure);
 }
 
 TEST_CASE("lazy tag scanner yields nested matches before malformed nonmatching tag tails") {
@@ -709,7 +709,7 @@ TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
         auto it     = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::invalid_additional_info);
     }
 
     {
@@ -718,7 +718,7 @@ TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
         auto it     = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::invalid_additional_info);
     }
 
     for (const auto *hex : {"d864fc", "d864fd", "d864fe"}) {
@@ -728,7 +728,7 @@ TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
         CAPTURE(hex);
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::invalid_additional_info);
     }
 
     {
@@ -738,7 +738,7 @@ TEST_CASE("lazy tag scanner reports malformed tagged payloads") {
         auto                  it   = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::invalid_additional_info);
     }
 }
 
@@ -749,7 +749,7 @@ TEST_CASE("lazy tag scanner reports malformed indefinite items") {
         auto it     = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::malformed_structure);
     }
 
     {
@@ -759,7 +759,7 @@ TEST_CASE("lazy tag scanner reports malformed indefinite items") {
         auto                  it   = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::malformed_structure);
     }
 
     {
@@ -768,6 +768,6 @@ TEST_CASE("lazy tag scanner reports malformed indefinite items") {
         auto it     = view.begin();
         CHECK(it == view.end());
         CHECK(view.failed());
-        CHECK_EQ(view.status(), status_code::error);
+        CHECK_EQ(view.status(), status_code::malformed_structure);
     }
 }
