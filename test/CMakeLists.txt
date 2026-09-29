@@ -106,7 +106,8 @@ endif()
 add_dependencies(tests test_expected_no_exceptions)
 add_test(NAME expected_no_exceptions COMMAND test_expected_no_exceptions)
 add_test(NAME expected_no_exceptions_terminate COMMAND ${CMAKE_COMMAND}
-  "-DPROGRAM=$<TARGET_FILE:test_expected_no_exceptions>" -P "${CMAKE_CURRENT_SOURCE_DIR}/expected_no_exceptions.cmake")
+  "-DPROGRAM=$<TARGET_FILE:test_expected_no_exceptions>" "-DMSVC_NO_EXCEPTIONS=${MSVC}"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/expected_no_exceptions.cmake")
 set_tests_properties(expected_no_exceptions expected_no_exceptions_terminate PROPERTIES LABELS "expected")
 
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
