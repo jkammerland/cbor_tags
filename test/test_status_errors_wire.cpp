@@ -39,8 +39,8 @@ template <std::uint64_t Tag> struct tagged_bytes {
     std::vector<std::byte>         value;
 };
 
-template <typename Self> struct observing_codec : cbor_decoder_mixin_base<Self> {
-    using cbor_decoder_mixin_base<Self>::decode;
+template <typename Self> struct observing_codec : decoder_mixin_base<Self> {
+    using decoder_mixin_base<Self>::decode;
     std::vector<std::uint64_t> attempts;
 
     template <std::uint64_t Tag> status_code decode(tagged_bytes<Tag> &value, std::uint64_t actual_tag) {
