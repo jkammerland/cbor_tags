@@ -201,13 +201,17 @@ jobs:
           '
 
   std-expected-cxx23:
-    name: Ubuntu GCC 15 C++23 std::expected return tests
+    name: Ubuntu GCC 15 C++23 expected return tests (std=${{ matrix.std_expected }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        std_expected: ["ON", "OFF"]
 
     steps:
     - uses: actions/checkout@v6.0.2
 
-    - name: Build and test std::expected return backend in C++23
+    - name: Build and test expected return backend in C++23
       shell: bash
       run: |
         docker run --rm \
@@ -228,7 +232,7 @@ jobs:
             cmake -S /work -B /tmp/build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCBOR_TAGS_BUILD_TESTS=ON \
-              -DCBOR_TAGS_USE_STD_EXPECTED=ON \
+              -DCBOR_TAGS_USE_STD_EXPECTED=${{ matrix.std_expected }} \
               -DCMAKE_CXX_STANDARD=23 \
               -DCMAKE_CXX_STANDARD_REQUIRED=ON \
               -DCMAKE_C_COMPILER=gcc-15 \
