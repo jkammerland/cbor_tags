@@ -13,13 +13,17 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
 
 namespace {
+
+struct wire_error_case {
+    std::string_view hex;
+    status_code      status;
+};
 
 template <typename Fn> void with_input_ranges(const std::vector<std::byte> &bytes, Fn check) {
     check(bytes);
@@ -146,20 +150,21 @@ TEST_SUITE("cbor_wire/status_errors") {
     }
 
     TEST_CASE("fixed headers distinguish wrong major size and invalid arguments") {
-        struct header_case {
-            const char *hex;
-            status_code status;
+        constexpr wire_error_case cases[]{
+            {"a0", status_code::no_match_for_array_on_buffer},
+            {"81", status_code::unexpected_group_size},
+            {"9f", status_code::unexpected_group_size},
+            {"9c", status_code::invalid_additional_info},
+            {"99", status_code::incomplete},
         };
-        for (const auto &test :
-             {header_case{"a0", status_code::no_match_for_array_on_buffer}, header_case{"81", status_code::unexpected_group_size},
-              header_case{"9f", status_code::unexpected_group_size}, header_case{"9c", status_code::invalid_additional_info},
-              header_case{"99", status_code::incomplete}}) {
-            CAPTURE(test.hex);
-            with_input_ranges(to_bytes(test.hex), [&](const auto &input) {
+
+        for (const auto &[hex, expected_status] : cases) {
+            CAPTURE(hex);
+            with_input_ranges(to_bytes(hex), [&](const auto &input) {
                 auto       dec    = make_decoder(input);
                 const auto result = dec(as_array{0});
                 REQUIRE_FALSE(result);
-                CHECK_EQ(result.error(), test.status);
+                CHECK_EQ(result.error(), expected_status);
             });
         }
         const auto input  = to_bytes("80");
@@ -171,15 +176,19 @@ TEST_SUITE("cbor_wire/status_errors") {
 
     TEST_CASE("variants stop after malformed tagged payloads and retry genuine tag mismatches") {
         using value_type = std::variant<tagged_bytes<42>, tagged_bytes<43>>;
-        for (const auto &test :
-             {std::pair{"d82a5c", status_code::invalid_additional_info}, std::pair{"d82a5f6100ff", status_code::malformed_structure}}) {
-            CAPTURE(test.first);
-            with_input_ranges(to_bytes(test.first), [&](const auto &input) {
+        constexpr wire_error_case cases[]{
+            {"d82a5c", status_code::invalid_additional_info},
+            {"d82a5f6100ff", status_code::malformed_structure},
+        };
+
+        for (const auto &[hex, expected_status] : cases) {
+            CAPTURE(hex);
+            with_input_ranges(to_bytes(hex), [&](const auto &input) {
                 value_type value{tagged_bytes<43>{{std::byte{7}}}};
                 auto       dec    = make_decoder<observing_codec>(input);
                 const auto result = dec(value);
                 REQUIRE_FALSE(result);
-                CHECK_EQ(result.error(), test.second);
+                CHECK_EQ(result.error(), expected_status);
                 CHECK_EQ(dec.attempts, (std::vector<std::uint64_t>{42}));
                 REQUIRE_EQ(value.index(), 1);
                 CHECK_EQ(std::get<1>(value).value, (std::vector<std::byte>{std::byte{7}}));
@@ -197,15 +206,19 @@ TEST_SUITE("cbor_wire/status_errors") {
     }
 
     TEST_CASE("raw scanners distinguish unrepresentable counts and truncated containers") {
-        for (const auto &test : {std::pair{"bbffffffffffffffff", status_code::size_limit_exceeded},
-                                 std::pair{"bb0000000000000001", status_code::incomplete}}) {
-            CAPTURE(test.first);
-            with_input_ranges(to_bytes(test.first), [&](const auto &input) {
+        constexpr wire_error_case cases[]{
+            {"bbffffffffffffffff", status_code::size_limit_exceeded},
+            {"bb0000000000000001", status_code::incomplete},
+        };
+
+        for (const auto &[hex, expected_status] : cases) {
+            CAPTURE(hex);
+            with_input_ranges(to_bytes(hex), [&](const auto &input) {
                 auto                                         dec = make_decoder(input);
                 typename decltype(dec)::raw_encoded_map_view value;
                 const auto                                   result = dec(value);
                 REQUIRE_FALSE(result);
-                CHECK_EQ(result.error(), test.second);
+                CHECK_EQ(result.error(), expected_status);
             });
         }
 
@@ -219,17 +232,25 @@ TEST_SUITE("cbor_wire/status_errors") {
     }
 
     TEST_CASE("customization failures keep allocation and unknown exception classifications") {
+        struct failure_case {
+            codec_failure failure;
+            status_code   status;
+        };
+        constexpr failure_case cases[]{
+            {codec_failure::standard, status_code::error},
+            {codec_failure::allocation, status_code::out_of_memory},
+            {codec_failure::length, status_code::out_of_memory},
+            {codec_failure::returned_status, status_code::unsupported_operation},
+        };
+
         const auto input = to_bytes("00");
-        for (const auto &test :
-             {std::pair{codec_failure::standard, status_code::error}, std::pair{codec_failure::allocation, status_code::out_of_memory},
-              std::pair{codec_failure::length, status_code::out_of_memory},
-              std::pair{codec_failure::returned_status, status_code::unsupported_operation}}) {
-            CAPTURE(test.first);
-            failing_value value{test.first};
+        for (const auto &[failure, expected_status] : cases) {
+            CAPTURE(failure);
+            failing_value value{failure};
             auto          dec    = make_decoder(input);
             const auto    result = dec(value);
             REQUIRE_FALSE(result);
-            CHECK_EQ(result.error(), test.second);
+            CHECK_EQ(result.error(), expected_status);
         }
     }
 }

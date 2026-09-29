@@ -1,83 +1,90 @@
 # Status errors
 
-Encoder and decoder call operators return an expected result. Check success
-before reading `.error()`; `status_message(code)` provides a diagnostic.
+Encoder and decoder call operators return an expected result. Check it before
+reading `.error()`. Use `status_message(code)` for a diagnostic:
 
 ```cpp
-std::vector<std::byte> input{std::byte{0x1c}};
-std::uint64_t value{};
-auto result = cbor::tags::make_decoder(input)(value);
-assert(!result);
-assert(result.error() == cbor::tags::status_code::invalid_additional_info);
+#include <cbor_tags/cbor_decoder.h>
+
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <iostream>
+#include <string>
+#include <vector>
+
+namespace ct = cbor::tags;
+
+bool read_count(const std::vector<std::byte> &input, std::uint64_t &count) {
+    const auto result = ct::make_decoder(input)(count);
+    if (!result) {
+        std::cerr << ct::status_message(result.error()) << '\n';
+        return false;
+    }
+    return true;
+}
 ```
 
-Here `0x1c` is an integer header with reserved additional information. Replacing
-it with `0x18` gives `incomplete`: that valid header needs one more byte.
-Both failures are terminal for the decoder instance; neither permits resuming
-with more input. See the [decoder contract](decoder_resource_limits.md#decoder-contract).
+Handle every failed result. `status_code::error` is the fallback when no more
+specific status describes the failure.
 
-## Classifications
+## Invalid or incomplete input
 
-| Status | Meaning and example |
+`invalid_additional_info` means a CBOR header uses an invalid argument encoding.
+`incomplete` means the input ends before the requested item is complete:
+
+```cpp
+std::uint64_t value{};
+
+// 0x1c is an integer header with reserved additional information.
+const std::vector<std::byte> invalid{std::byte{0x1c}};
+const auto invalid_result = ct::make_decoder(invalid)(value);
+assert(!invalid_result);
+assert(invalid_result.error() == ct::status_code::invalid_additional_info);
+
+// 0x18 is a valid integer header, but its argument byte is missing.
+const std::vector<std::byte> truncated{std::byte{0x18}};
+const auto truncated_result = ct::make_decoder(truncated)(value);
+assert(!truncated_result);
+assert(truncated_result.error() == ct::status_code::incomplete);
+```
+
+A failed call is terminal for that encoder or decoder instance. Even
+`incomplete` requires a fresh decoder with complete input to try again.
+
+## Partial output after failure
+
+Failure can leave a decoded prefix in the destination. Discard failed output
+unless its type documents a stronger guarantee. For example, a text string
+containing a byte-string chunk returns `malformed_structure`:
+
+```cpp
+const std::vector<std::byte> input{
+    std::byte{0x7f},                                  // Indefinite text string.
+    std::byte{0x62}, std::byte{'o'}, std::byte{'k'},     // Text chunk: "ok".
+    std::byte{0x41}, std::byte{0x00},                   // Invalid byte-string chunk.
+    std::byte{0xff},                                  // Break.
+};
+std::string text;
+const auto result = ct::make_decoder(input)(text);
+assert(!result);
+assert(result.error() == ct::status_code::malformed_structure);
+assert(text == "ok"); // Partial output remains after failure.
+```
+
+See the [decoder contract](decoder_resource_limits.md#decoder-contract) for
+input ownership and destination behavior.
+
+## Other common statuses
+
+| Status | Meaning |
 | --- | --- |
-| `invalid_additional_info` | Reserved additional information 28–30, or 31 where an argument is required, such as an integer or tag. |
-| `malformed_structure` | A structural violation detected while decoding an item: a text chunk inside a byte string, nested indefinite string chunk, misplaced break, or a map ending without a value. Strict traversal also uses this for the forbidden two-byte encoding of a simple value below 32. |
-| `input_output_aliasing` | The existing mutable string storage check detected overlap with decoder input. |
-| `unsupported_operation` | An `as_indefinite` wrapper targets an unsupported type, such as a scalar. |
-| `size_limit_exceeded` | An explicit bound, input-size representation, scanner item count, or scanner depth limit is exceeded. |
-| `unexpected_group_size` | A fixed extent or group size does not match, including an indefinite header where an exact header size was requested. |
-| `incomplete` | The admitted input ends before the requested segment is available. |
-| `out_of_memory` | `std::bad_alloc` or `std::length_error`, including existing destination capacity checks. |
-| `no_match_for_*` | The input does not match the requested type or tag. Variant dispatch may try another compatible alternative. |
-| `error` | A failure without a more specific classification; see below. |
+| `input_output_aliasing` | Detected overlap between input and a mutable text- or byte-string destination. Use separate storage. |
+| `unsupported_operation` | The requested operation is unsupported for the selected type, such as `as_indefinite` on an integer. |
+| `size_limit_exceeded` | An item exceeds a size or depth limit for the requested operation. |
+| `unexpected_group_size` | An array, map, or payload has the wrong size for a fixed-size destination. |
+| `out_of_memory` | Allocation failed or the destination cannot hold the requested size. |
+| `no_match_for_*` | The input does not match the requested type or tag. A variant may try another compatible alternative. |
 
-These statuses describe the operation actually attempted. Typed decoding does
-not validate arbitrary trailing data or become a structural scanner. A wrong
-major type can be rejected before its argument is inspected. Raw views and
-lazy tag discovery use their existing scanners; traversal has its own strict
-validation option. This change does not broaden the accepted CBOR encodings.
-
-Value-returning decoder primitives carry a typed internal exception to the
-nearest result boundary. Status-returning helpers propagate it directly.
-The implementation does not inspect exception message text. Direct low-level
-primitive calls retain their `std::runtime_error` exception category; codec users
-should normally return the result
-of the decoder call operator.
-
-## Compatibility note
-
-The four new enum members are appended after `size_limit_exceeded`. Existing
-numeric values, `uint8_t` storage, public result types, and the variant mismatch
-interval are unchanged. The new statuses are terminal during variant dispatch.
-
-Code that treated only `status_code::error` as failure must instead check the
-expected result or handle the refined statuses above. Invalid indefinite chunks
-and missing map values now return `malformed_structure` instead of a retriable
-major mismatch. Wrong fixed array/map headers return their existing major
-mismatch status. Scanner depth exhaustion now returns `size_limit_exceeded`.
-RFC 8746 payload views that discard bytes return `unexpected_group_size`.
-
-Input ownership, one-pass unsized decoding, allocation/reservation rules, and
-retention of a decoded prefix on failure are unchanged. The core decoder still
-catches standard exceptions only; traversal retains its existing catch-all.
-
-## Retained generic paths
-
-The source audit deliberately retains `error` at these boundaries:
-
-- Decoder, encoder, segment, and traversal exception fallbacks: unknown
-  application codec, allocator, range, or visitor exceptions. Encoder API
-  misuse and exhausted fixed output buffers also keep their existing fallback.
-- Decoder compile-time rejection branches: their preceding `static_assert`
-  makes the return unreachable. The raw item view passes an unused mismatch
-  argument when no expected major type was supplied.
-- `detail/cbor_item.h`: impossible major/frame states and inconsistent iterator
-  ordering. `detail/cbor_raw_view_decode.h` likewise retains its negative-distance
-  guard for an inconsistent range.
-- Smart pointer extensions: unsupported graph state, invalid reference index or
-  pointee type, and compile-time rejection branches.
-- `std_indirect`: a valueless encoding source and a compile-time rejection branch.
-- `detail/custom_codec_1_serialization.h`: its separate payload format retains
-  its current error policy. Its CBOR envelope uses the refined core statuses.
-
-These paths do not claim a CBOR parse diagnosis that the library cannot establish.
+Malformed input stops variant decoding. These results describe the requested
+item; successful typed decoding does not validate trailing input.
