@@ -7,8 +7,7 @@
   "builtin-baseline": "a7f2963aed6b381ce54c0803330bb4de36cd3241",
   "dependencies": [],
   "default-features": [
-    "format-names",
-    "tl-expected"
+    "format-names"
   ],
   "features": {
     "format-names": {
@@ -24,17 +23,8 @@
         }
       ]
     },
-    "tl-expected": {
-      "description": "Install tl::expected dependencies for the default C++20 expected backend.",
-      "dependencies": [
-        {
-          "name": "tl-expected",
-          "version>=": "1.1.0"
-        }
-      ]
-    },
     "std-expected": {
-      "description": "Use the C++23 std::expected backend without installing tl::expected.",
+      "description": "Use the optional C++23 std::expected backend instead of the built-in C++20 implementation.",
       "dependencies": [
         {
           "name": "nameof",

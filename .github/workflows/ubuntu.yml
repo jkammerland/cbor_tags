@@ -368,9 +368,9 @@ jobs:
       matrix:
         include:
           - {
-              name: "cxx20-system-expected",
+              name: "cxx20-builtin-expected",
               cxx_standard: "20",
-              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON",
+              configure_flags: "",
               vcpkg_features: "",
               vcpkg_no_default_features: "OFF",
               consumer_mode: "default"
@@ -386,7 +386,7 @@ jobs:
           - {
               name: "magic-enum-names",
               cxx_standard: "20",
-              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON -DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON",
+              configure_flags: "-DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON",
               vcpkg_features: "magic-enum-names",
               vcpkg_no_default_features: "OFF",
               consumer_mode: "magic_enum"
@@ -394,7 +394,7 @@ jobs:
           - {
               name: "boost-pfr-names",
               cxx_standard: "20",
-              configure_flags: "-DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON -DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON",
+              configure_flags: "-DCBOR_TAGS_USE_BOOST_PFR_NAMES=ON",
               vcpkg_features: "boost-pfr-names",
               vcpkg_no_default_features: "OFF",
               consumer_mode: "boost_pfr"

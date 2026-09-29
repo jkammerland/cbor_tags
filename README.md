@@ -54,7 +54,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - Buffer-backed decode views (zero-copy) for contiguous and non-contiguous inputs.
 - Flexible tag handling for structs and tuples, can be completely non-invasive on your code.
 - Support for many (almost arbitrary) containers and nesting.
-- noexcept API (encode/decode), with status return values using `tl::expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
+- noexcept API (encode/decode), with status return values using the built-in C++20 `expected<void, status_code>` by default or `std::expected<void, status_code>` with C++23 opt-in.
 - Opt-in [RFC 8746 typed-array](doc/rfc8746_typed_arrays.md) codec for homogeneous numeric payloads.
 - CDDL support for schema and custom data definitions.
 - C++26 STL-only mode provides the complete feature set with no third-party consumer dependencies.
@@ -965,9 +965,12 @@ pattern.
 
 | Mode | Configuration | Third-party consumer dependencies |
 |---|---|---|
-| C++20 (default) | No additional options | `tl::expected`, fmt 11.0.2+, nameof 0.10.4+ |
+| C++20 (default) | No additional options | fmt 11.0.2+, nameof 0.10.4+ |
 | C++23 | `CBOR_TAGS_USE_STD_EXPECTED=ON` | fmt 11.0.2+, nameof 0.10.4+ |
 | C++26 STL-only | `CBOR_TAGS_STL_ONLY=ON` | None |
+
+The built-in expected header also works independently of the codec. See
+[Expected](doc/expected.md) for its C++23 API, examples, and migration notes.
 
 The C++26 STL-only mode uses `std::expected`, `std::format`, and `std::meta`.
 It currently requires GCC 16 with `-std=gnu++26 -freflection`; the CMake option
@@ -1013,16 +1016,14 @@ System-wide install:
 ```bash
 git clone https://github.com/jkammerland/cbor_tags
 cd cbor_tags
-cmake -B build -DCBOR_TAGS_INSTALL=ON -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
+cmake -B build -DCBOR_TAGS_INSTALL=ON
 cmake --build build
 cmake --install build
 ```
 
 `CBOR_TAGS_INSTALL=ON` requires CMake 3.25 or newer because the install package
-helper is target_install_package.cmake v7. Installed CMake packages also need a
-non-FetchContent expected backend: use `CBOR_TAGS_USE_SYSTEM_EXPECTED=ON` for
-`tl::expected`, or C++23 with `CBOR_TAGS_USE_STD_EXPECTED=ON` for
-`std::expected` return values.
+helper is target_install_package.cmake v7. The default C++20 expected backend
+is included in the installed headers and needs no external expected package.
 
 C++23 `std::expected` return backend:
 
@@ -1044,7 +1045,7 @@ cmake --install build/release-cxx26-stl-only
 
 This mode requires a compiler with C++26 static reflection support. The current
 CI path uses GCC on Fedora with `-std=gnu++26 -freflection`. Installed consumers
-link only `cbor::tags`; no fmt, nameof, or tl::expected package is exported.
+link only `cbor::tags`; no third-party package is exported.
 
 Package-manager opt-in examples:
 

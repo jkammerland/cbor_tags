@@ -21,7 +21,7 @@ option(CBOR_TAGS_STL_ONLY "Use only the C++26 standard library; no external publ
 option(CBOR_TAGS_USE_STD_REFLECTION "Build cbor_tags tests with GCC C++26 std::meta reflection" OFF)
 option(CBOR_TAGS_USE_BOOST_PFR_NAMES "Enable C++20 named-map reflection via Boost.PFR field names" OFF)
 option(CBOR_TAGS_USE_MAGIC_ENUM_NAMES "Enable CDDL enum-name definitions via magic_enum" OFF)
-option(CBOR_TAGS_USE_STD_EXPECTED "Use C++23 std::expected for public return values instead of tl::expected" OFF)
+option(CBOR_TAGS_USE_STD_EXPECTED "Use C++23 std::expected for public return values instead of the built-in C++20 implementation" OFF)
 
 if(CBOR_TAGS_STL_ONLY)
   if(CMAKE_CXX_STANDARD LESS 26)
@@ -29,7 +29,7 @@ if(CBOR_TAGS_STL_ONLY)
   endif()
   set(CBOR_TAGS_USE_STD_EXPECTED
       ON
-      CACHE BOOL "Use C++23 std::expected for public return values instead of tl::expected" FORCE)
+      CACHE BOOL "Use C++23 std::expected for public return values instead of the built-in C++20 implementation" FORCE)
   set(CBOR_TAGS_USE_STD_REFLECTION
       ON
       CACHE BOOL "Build cbor_tags tests with GCC C++26 std::meta reflection" FORCE)
@@ -205,7 +205,6 @@ if(CBOR_TAGS_ENABLE_SBOM AND CMAKE_VERSION VERSION_LESS 4.4)
 endif()
 
 # Expected return backend
-option(CBOR_TAGS_USE_SYSTEM_EXPECTED "Use system installed tl::expected" OFF)
 if(CBOR_TAGS_USE_STD_EXPECTED)
   if(CMAKE_CXX_STANDARD LESS 23)
     message(FATAL_ERROR "CBOR_TAGS_USE_STD_EXPECTED requires CMAKE_CXX_STANDARD=23 or newer.")
@@ -233,27 +232,6 @@ int main() {
   endif()
   target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_USE_STD_EXPECTED=1)
   target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_23)
-elseif(CBOR_TAGS_INSTALL AND NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
-  message(FATAL_ERROR "CBOR_TAGS_INSTALL requires -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON or -DCBOR_TAGS_USE_STD_EXPECTED=ON")
-endif()
-
-if(NOT CBOR_TAGS_USE_STD_EXPECTED AND NOT CBOR_TAGS_USE_SYSTEM_EXPECTED)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/get_cpm.cmake)
-  set(CPM_SOURCE_CACHE ${CMAKE_BINARY_DIR}/cpm_cache)
-  cpmaddpackage(
-    NAME
-    expected
-    GITHUB_REPOSITORY
-    TartanLlama/expected
-    VERSION
-    1.3.1
-    GIT_TAG
-    v1.3.1
-    OPTIONS
-    "EXPECTED_BUILD_TESTS OFF"
-    "EXPECTED_BUILD_PACKAGE OFF")
-elseif(NOT CBOR_TAGS_USE_STD_EXPECTED)
-  find_package(tl-expected REQUIRED)
 endif()
 
 if(NOT CBOR_TAGS_STL_ONLY)
@@ -291,9 +269,6 @@ endif()
 # Define public dependencies (if any)
 set(CBOR_TAGS_PUBLIC_DEPENDENCIES "")
 # If you had dependencies, you would add them like this: list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "find_dependency(SomePackage)")
-if(CBOR_TAGS_USE_SYSTEM_EXPECTED AND NOT CBOR_TAGS_USE_STD_EXPECTED)
-  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "tl-expected REQUIRED")
-endif()
 if(NOT CBOR_TAGS_STL_ONLY)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "fmt REQUIRED CONFIG")
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "nameof REQUIRED CONFIG")
@@ -307,13 +282,7 @@ endif()
 
 # Link dependencies
 if(NOT CBOR_TAGS_STL_ONLY)
-  if(CBOR_TAGS_USE_STD_EXPECTED)
-    target_link_libraries(${PROJECT_NAME} INTERFACE fmt::fmt nameof::nameof)
-  elseif(CBOR_TAGS_USE_SYSTEM_EXPECTED)
-    target_link_libraries(${PROJECT_NAME} INTERFACE tl::expected fmt::fmt nameof::nameof)
-  else()
-    target_link_libraries(${PROJECT_NAME} INTERFACE expected fmt::fmt nameof::nameof)
-  endif()
+  target_link_libraries(${PROJECT_NAME} INTERFACE fmt::fmt nameof::nameof)
 endif()
 
 # Make ${PROJECT_NAME} depend on the generated header add tools - reflection module generator - makes cbor_reflection_impl.h
