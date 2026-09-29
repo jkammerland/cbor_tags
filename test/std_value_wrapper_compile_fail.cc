@@ -19,9 +19,9 @@ struct group {
 };
 
 #if defined(CBOR_VALUE_DIRECT_MIXIN)
-template <typename Self> struct direct_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct direct_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     status_code decode(empty &) {
         int value{};
         return static_cast<Self &>(*this).decode(value);
@@ -64,7 +64,7 @@ int main() {
     return enc(value).has_value() ? 0 : 1;
 #elif defined(CBOR_VALUE_CDDL)
     fmt::memory_buffer schema;
-    cddl_schema_to<payload>(schema);
+    cddl::schema_to<payload>(schema);
 #else
     return make_decoder_with_options<payload_options, std_indirect_codec, animal_codec>(bytes)(value).has_value() ? 0 : 1;
 #endif

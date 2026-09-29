@@ -47,7 +47,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         REQUIRE(make_encoder<std_indirect_codec>(encoded)(output));
         CHECK(encoded == to_bytes("f6"));
         fmt::memory_buffer schema;
-        cddl_schema_to<std::indirect<std::optional<int>>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<std::indirect<std::optional<int>>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = int / null");
     }
 
@@ -213,13 +213,13 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         CHECK(**copy == 42);
 
         fmt::memory_buffer schema;
-        cddl_schema_to<std::indirect<int>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<std::indirect<int>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = int");
         schema.clear();
-        cddl_schema_to<std::indirect<std::vector<std::polymorphic<animal>>>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<std::indirect<std::vector<std::polymorphic<animal>>>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = [* (#6.60010([uint, tstr]) / #6.60011([tstr, uint]))]");
         schema.clear();
-        cddl_schema_to<std::indirect<std::shared_ptr<int>>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<std::indirect<std::shared_ptr<int>>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = null / #6.28(int) / #6.29(uint)");
     }
 

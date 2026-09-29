@@ -274,7 +274,7 @@ TEST_CASE("security regression: diagnostic rejects excessive nesting depth") {
 TEST_CASE("security regression: cddl root name is reserved before nested definitions") {
     std::string schema;
 
-    cddl_schema_to<std::vector<SecurityRootItem>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"});
+    cddl::schema_to<std::vector<SecurityRootItem>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"});
 
     const auto first_rule = schema.find("SecurityRootItem =");
     REQUIRE(first_rule != std::string::npos);
@@ -302,7 +302,7 @@ TEST_CASE("security regression: cddl always_inline recursive aggregate below con
         alarm(3);
 
         std::string schema;
-        cddl_schema_to<std::vector<SecurityRecursiveNode>>(
+        cddl::schema_to<std::vector<SecurityRecursiveNode>>(
             schema, {.row_options = {.format_by_rows = false}, .always_inline = true, .root_name = "Root"});
 
         const bool has_recursive_rule = schema.find("SecurityRecursiveNode") != std::string::npos;
@@ -324,8 +324,8 @@ TEST_CASE("security regression: cddl root name is reserved for external contexts
     detail::CDDLContext context;
     std::string         schema;
 
-    cddl_schema_to<std::vector<SecurityRootItem>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"},
-                                                  std::ref(context));
+    cddl::schema_to<std::vector<SecurityRootItem>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"},
+                                                   std::ref(context));
 
     CHECK_NE(schema, "SecurityRootItem = [* SecurityRootItem]");
     CHECK(schema.find("[* SecurityRootItem]") == std::string::npos);
@@ -336,9 +336,9 @@ TEST_CASE("security regression: cddl explicit root name collision in external co
     std::string         existing_schema;
     std::string         schema;
 
-    cddl_schema_to<SecurityRootItem>(existing_schema, {.row_options = {.format_by_rows = false}}, std::ref(context));
+    cddl::schema_to<SecurityRootItem>(existing_schema, {.row_options = {.format_by_rows = false}}, std::ref(context));
 
-    CHECK_THROWS_AS(cddl_schema_to<std::vector<SecurityRootItem>>(
+    CHECK_THROWS_AS(cddl::schema_to<std::vector<SecurityRootItem>>(
                         schema, {.row_options = {.format_by_rows = false}, .root_name = "SecurityRootItem"}, std::ref(context)),
                     std::invalid_argument);
 }

@@ -5,6 +5,6 @@
 
 int main() {
     fmt::memory_buffer output;
-    cbor::tags::cddl_schema_to<cbor::tags::dynamic_bounded_size<std::vector<int>>>(output);
+    cbor::tags::cddl::schema_to<cbor::tags::dynamic_bounded_size<std::vector<int>>>(output);
     return 0;
 }

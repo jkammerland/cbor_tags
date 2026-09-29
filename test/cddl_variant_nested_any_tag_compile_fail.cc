@@ -13,6 +13,6 @@ int main() {
     using nested = std::variant<std::string, as_tag_any>;
 
     fmt::memory_buffer buffer;
-    cddl_schema_to<std::variant<typed_array<std::int32_t>, nested>>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<std::variant<typed_array<std::int32_t>, nested>>(buffer, {.row_options = {.format_by_rows = false}});
     return 0;
 }

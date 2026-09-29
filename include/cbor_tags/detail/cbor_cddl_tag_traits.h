@@ -14,20 +14,20 @@ namespace cbor::tags::detail {
 
 template <typename T>
 concept CDDLTaggedByteStringArray = requires {
-    { cddl_tagged_bstr_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
+    { tagged_bstr_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T>
 concept CDDLHomogeneousArray = requires {
-    typename cddl_homogeneous_array_traits<std::remove_cvref_t<T>>::array_type;
-    { cddl_homogeneous_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
+    typename homogeneous_array_traits<std::remove_cvref_t<T>>::array_type;
+    { homogeneous_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T>
 concept CDDLMultiDimensionalArray = requires {
-    typename cddl_multi_dimensional_array_traits<std::remove_cvref_t<T>>::dimensions_type;
-    typename cddl_multi_dimensional_array_traits<std::remove_cvref_t<T>>::array_type;
-    { cddl_multi_dimensional_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
+    typename multi_dimensional_array_traits<std::remove_cvref_t<T>>::dimensions_type;
+    typename multi_dimensional_array_traits<std::remove_cvref_t<T>>::array_type;
+    { multi_dimensional_array_traits<std::remove_cvref_t<T>>::tag } -> std::convertible_to<std::uint64_t>;
 };
 
 template <typename T> consteval bool cddl_direct_fixed_tag_available() {
@@ -44,11 +44,11 @@ template <typename T> consteval bool cddl_direct_fixed_tag_available() {
 template <typename T> consteval std::uint64_t cddl_direct_fixed_tag() {
     using value_type = std::remove_cvref_t<T>;
     if constexpr (CDDLTaggedByteStringArray<value_type>) {
-        return cddl_tagged_bstr_array_traits<value_type>::tag;
+        return tagged_bstr_array_traits<value_type>::tag;
     } else if constexpr (CDDLHomogeneousArray<value_type>) {
-        return cddl_homogeneous_array_traits<value_type>::tag;
+        return homogeneous_array_traits<value_type>::tag;
     } else if constexpr (CDDLMultiDimensionalArray<value_type>) {
-        return cddl_multi_dimensional_array_traits<value_type>::tag;
+        return multi_dimensional_array_traits<value_type>::tag;
     } else {
         return static_cast<std::uint64_t>(get_tag_from_any<value_type>());
     }

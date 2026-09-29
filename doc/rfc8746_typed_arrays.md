@@ -172,7 +172,7 @@ Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
 
 ## CDDL Rendering
 
-`cddl_schema_to<T>` renders the RFC 8746 wrappers as semantic tags around their
+`cddl::schema_to<T>` renders the RFC 8746 wrappers as semantic tags around their
 wire payload shape:
 
 ```cpp
@@ -182,11 +182,11 @@ wire payload shape:
 #include <fmt/format.h>
 
 fmt::memory_buffer schema;
-cddl_schema_to<typed_array<std::int32_t>>(schema);
+cddl::schema_to<typed_array<std::int32_t>>(schema);
 // root = #6.78(bstr)
 
 fmt::memory_buffer schema_be;
-cddl_schema_to<typed_array_be<double>>(schema_be);
+cddl::schema_to<typed_array_be<double>>(schema_be);
 // root = #6.82(bstr)
 ```
 
@@ -196,19 +196,22 @@ because the RFC 8746 payload is a byte string:
 
 ```cpp
 namespace ct = cbor::tags;
+namespace cddl = ct::cddl;
 namespace rfc8746 = cbor::tags::ext::rfc8746;
 
 std::vector<std::int32_t> values{1, 2, 3};
 enc(ct::as_bounded_size<1, 3>(rfc8746::as_typed_array(values)));
 
 using bounded_samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
-ct::cddl_schema_to<bounded_samples>(schema);
+cddl::schema_to<bounded_samples>(schema);
 // root = #6.78(bstr .size (4..12))
 ```
 
 Use runtime bounds when the element limit comes from application configuration:
 
 ```cpp
+namespace ct = cbor::tags;
+
 std::size_t max_samples = configured_sample_limit();
 
 enc(ct::as_bounded_size(
@@ -235,7 +238,7 @@ Structural wrappers render their actual encoded payload:
 
 ```cpp
 fmt::memory_buffer homogeneous_schema;
-cddl_schema_to<homogeneous_array<std::vector<int>>>(homogeneous_schema);
+cddl::schema_to<homogeneous_array<std::vector<int>>>(homogeneous_schema);
 // root = #6.41([* int])
 
 using matrix = multi_dimensional_array<
@@ -243,7 +246,7 @@ using matrix = multi_dimensional_array<
     typed_array<std::uint16_t>>;
 
 fmt::memory_buffer matrix_schema;
-cddl_schema_to<matrix>(matrix_schema);
+cddl::schema_to<matrix>(matrix_schema);
 // root = #6.40([[* uint], #6.69(bstr)])
 ```
 

@@ -5,5 +5,5 @@
 
 int main() {
     std::string schema;
-    cbor::tags::cddl_schema_to<std::shared_ptr<cbor::tags::as_tag_any>>(schema);
+    cbor::tags::cddl::schema_to<std::shared_ptr<cbor::tags::as_tag_any>>(schema);
 }

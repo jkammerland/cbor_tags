@@ -10,6 +10,7 @@ int main() {
     using namespace cbor::tags::ext::rfc8746;
 
     fmt::memory_buffer buffer;
-    cddl_schema_to<std::variant<typed_array<std::int32_t>, dynamic_tag<std::uint64_t>>>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<std::variant<typed_array<std::int32_t>, dynamic_tag<std::uint64_t>>>(buffer,
+                                                                                         {.row_options = {.format_by_rows = false}});
     return 0;
 }

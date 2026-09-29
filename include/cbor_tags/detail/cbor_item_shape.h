@@ -25,7 +25,7 @@ struct codec_payload_mixin_customization<encoder<Buffer, Options, Codecs...>> {
     using self_type = encoder<Buffer, Options, Codecs...>;
 
     template <typename T, typename Codec> static consteval bool accepts_codec() {
-        if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor_encoder_mixin_base<self_type>, Codec>) {
+        if constexpr (std::is_void_v<T> || !std::is_base_of_v<encoder_mixin_base<self_type>, Codec>) {
             return false;
         } else {
             using probe = cbor::tags::detail::payload_encoder_overload_probe<self_type, Codec>;
@@ -49,7 +49,7 @@ struct codec_payload_mixin_customization<decoder<Buffer, Options, Codecs...>> {
     using self_type = decoder<Buffer, Options, Codecs...>;
 
     template <typename T, payload_decode_context Context, typename Codec> static consteval bool accepts_codec() {
-        if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor_decoder_mixin_base<self_type>, Codec>) {
+        if constexpr (std::is_void_v<T> || !std::is_base_of_v<decoder_mixin_base<self_type>, Codec>) {
             return false;
         } else {
             using probe                     = cbor::tags::detail::payload_decoder_overload_probe<self_type, Codec>;

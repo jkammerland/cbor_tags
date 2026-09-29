@@ -137,9 +137,9 @@ struct extension_shareable {
     std::uint64_t value{};
 };
 
-template <typename Self> struct extension_shareable_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct extension_shareable_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     void encode(const extension_shareable &value) {
         auto &enc = static_cast<Self &>(*this);
@@ -157,9 +157,9 @@ struct custom_record {
     std::uint64_t value{};
 };
 
-template <typename Self> struct custom_record_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct custom_record_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     void encode(const custom_record &value) {
         auto &enc = static_cast<Self &>(*this);
@@ -1402,10 +1402,10 @@ TEST_CASE("unambiguous unique_ptr variants dispatch by wire shape once") {
 
 TEST_CASE("CDDL uses native null and shared-reference tags") {
     std::string unique_schema;
-    cddl_schema_to<std::unique_ptr<int>>(unique_schema);
+    cddl::schema_to<std::unique_ptr<int>>(unique_schema);
     CHECK_EQ(unique_schema, "root = int / null");
 
     std::string shared_schema;
-    cddl_schema_to<std::shared_ptr<int>>(shared_schema);
+    cddl::schema_to<std::shared_ptr<int>>(shared_schema);
     CHECK_EQ(shared_schema, "root = null / #6.28(int) / #6.29(uint)");
 }

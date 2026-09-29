@@ -219,9 +219,9 @@ struct bounded_extension_value {
     std::vector<int> values;
 };
 
-template <typename Self> struct bounded_extension_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct bounded_extension_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     void encode(const bounded_extension_value &value) { static_cast<Self &>(*this).encode(value.values); }
 

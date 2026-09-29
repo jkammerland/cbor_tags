@@ -126,9 +126,9 @@ enum class Color : std::uint8_t { red = 1, green = 2 };
 
 int main() {
     fmt::memory_buffer schema;
-    cbor::tags::cddl_schema_to<Color>(
+    cbor::tags::cddl::schema_to<Color>(
         schema,
-        {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::CDDLEnumMode::named_values});
+        {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::cddl::enum_mode::named_values});
     const auto text = fmt::to_string(schema);
     return text.find("red") == std::string::npos ? 1 : 0;
 }
@@ -156,7 +156,7 @@ int main() {
     static_assert(CBOR_TAGS_HAS_BOOST_PFR_NAMES == 1);
 
     fmt::memory_buffer schema;
-    cbor::tags::cddl_schema_to<cbor::tags::as_named_map<Person>>(
+    cbor::tags::cddl::schema_to<cbor::tags::as_named_map<Person>>(
         schema, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     const auto text = fmt::to_string(schema);
     if (text.find("age: uint") == std::string::npos || text.find("name: tstr") == std::string::npos) {

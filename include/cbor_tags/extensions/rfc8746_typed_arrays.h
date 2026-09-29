@@ -829,31 +829,31 @@ namespace cbor::tags::cddl {
 
 // Register the RFC 8746 wrappers with the public CDDL extension traits.
 template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
-struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
+struct tagged_bstr_array_traits<ext::rfc8746::typed_array<T, ByteOrder>> {
     static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
     static constexpr std::uint64_t element_byte_size = ext::rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
 template <typename T, ext::rfc8746::typed_array_byte_order ByteOrder>
-struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_ref<T, ByteOrder>> {
+struct tagged_bstr_array_traits<ext::rfc8746::typed_array_ref<T, ByteOrder>> {
     static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
     static constexpr std::uint64_t element_byte_size = ext::rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
 template <typename T, ext::rfc8746::detail::TypedArrayPayloadRange ByteRange, ext::rfc8746::typed_array_byte_order ByteOrder>
-struct cddl_tagged_bstr_array_traits<ext::rfc8746::typed_array_view<T, ByteRange, ByteOrder>> {
+struct tagged_bstr_array_traits<ext::rfc8746::typed_array_view<T, ByteRange, ByteOrder>> {
     static constexpr std::uint64_t tag               = ext::rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
     static constexpr std::uint64_t element_byte_size = ext::rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
-template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::homogeneous_array<Array>> {
+template <typename Array> struct homogeneous_array_traits<ext::rfc8746::homogeneous_array<Array>> {
     static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array CDDL requires a CBOR array payload type");
 
     using array_type                   = Array;
     static constexpr std::uint64_t tag = ext::rfc8746::homogeneous_array<Array>::cbor_array_tag;
 };
 
-template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::homogeneous_array_ref<Array>> {
+template <typename Array> struct homogeneous_array_traits<ext::rfc8746::homogeneous_array_ref<Array>> {
     static_assert(IsArray<std::remove_cvref_t<Array>>, "RFC 8746 homogeneous_array_ref CDDL requires a CBOR array payload type");
 
     using array_type                   = typename ext::rfc8746::homogeneous_array_ref<Array>::array_type;
@@ -861,7 +861,7 @@ template <typename Array> struct cddl_homogeneous_array_traits<ext::rfc8746::hom
 };
 
 template <typename Dimensions, typename Array, ext::rfc8746::multi_dimensional_layout Layout>
-struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array<Dimensions, Array, Layout>> {
+struct multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array<Dimensions, Array, Layout>> {
     static_assert(ext::rfc8746::IsRFC8746DimensionArray<Dimensions>,
                   "RFC 8746 multi_dimensional_array CDDL requires dimensions to be a CBOR array of unsigned integers");
     static_assert(ext::rfc8746::IsRFC8746ArrayPayload<Array>,
@@ -873,7 +873,7 @@ struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array
 };
 
 template <typename Dimensions, typename Array, ext::rfc8746::multi_dimensional_layout Layout>
-struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>> {
+struct multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array_ref<Dimensions, Array, Layout>> {
     static_assert(ext::rfc8746::IsRFC8746DimensionArray<Dimensions>,
                   "RFC 8746 multi_dimensional_array_ref CDDL requires dimensions to be a CBOR array of unsigned integers");
     static_assert(ext::rfc8746::IsRFC8746ArrayPayload<Array>,
@@ -888,9 +888,9 @@ struct cddl_multi_dimensional_array_traits<ext::rfc8746::multi_dimensional_array
 
 namespace cbor::tags::ext::rfc8746 {
 
-template <typename Self> struct typed_array_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct typed_array_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     template <typename Array, std::size_t Min, std::size_t Max>
         requires TypedArrayEncodeTarget<Array>

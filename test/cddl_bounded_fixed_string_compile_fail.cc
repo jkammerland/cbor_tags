@@ -16,6 +16,6 @@ using invalid_bounded_string = bounded_size<std::span<const char, 2>, 3, 4>;
 
 int main() {
     std::string schema;
-    cddl_schema_to<invalid_bounded_string>(schema);
+    cddl::schema_to<invalid_bounded_string>(schema);
     return 0;
 }

@@ -116,9 +116,9 @@ dynamic_bounded_typed_report_value semantic_value(const dynamic_bounded_typed_re
     return {report.state, report.samples.value().values(), report.note, std::move(result), report.groups};
 }
 
-template <typename Self> struct toy_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct toy_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     constexpr void encode(toy_value value) { static_cast<Self &>(*this).encode(value.value()); }
 

@@ -28,9 +28,9 @@ template <typename T> consteval bool has_indirect_alternative() {
 
 } // namespace detail
 
-template <typename Self> struct std_indirect_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct std_indirect_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     template <typename T, typename Alloc> constexpr void encode(const std::indirect<T, Alloc> &value) {
         require_single_item<T>();
@@ -79,7 +79,7 @@ template <typename Self> struct std_indirect_codec : cbor_codec_mixin_base<Self>
 
 namespace cbor::tags::cddl {
 
-template <typename T, typename Alloc> struct cddl_wire_type<std::indirect<T, Alloc>> {
+template <typename T, typename Alloc> struct wire_type<std::indirect<T, Alloc>> {
     using type = T;
 };
 

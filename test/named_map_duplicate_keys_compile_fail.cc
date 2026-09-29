@@ -38,7 +38,7 @@ int main() {
     (void)result;
 #elif defined(CBOR_TAGS_DUPLICATE_KEYS_CDDL)
     fmt::memory_buffer buffer;
-    cddl_schema_to<as_named_map<DuplicateRoot>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "DuplicateRoot"});
+    cddl::schema_to<as_named_map<DuplicateRoot>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "DuplicateRoot"});
 #else
 #error "expected a duplicate-key compile-fail mode"
 #endif

@@ -27,11 +27,15 @@ auto dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(bytes);
 ```
 
 Extension codecs are class-template mixins over the final encoder or decoder
-type. Encoder-only mixins should inherit `cbor_encoder_mixin_base<Self>`,
-decoder-only mixins should inherit `cbor_decoder_mixin_base<Self>`, and
-bidirectional codecs should inherit `cbor_codec_mixin_base<Self>`. Bring the
+type. Encoder-only mixins should inherit `encoder_mixin_base<Self>`,
+decoder-only mixins should inherit `decoder_mixin_base<Self>`, and
+bidirectional codecs should inherit `codec_mixin_base<Self>`. Bring the
 matching base overloads into scope so unsupported overloads remain deleted and
 visible to overload resolution.
+
+Use a local `base` alias when importing
+both `encode` and `decode`. In example headers, keep namespace aliases inside
+the example's namespace; in standalone examples, declare them near the includes.
 
 There are two layers to keep separate:
 
@@ -46,22 +50,25 @@ Do not add sequencing APIs such as `encode_all`; use `operator()(...)` for
 normal public composition and direct dispatch only inside codec internals.
 
 ```cpp
+namespace ct = cbor::tags;
+
 template <typename Self>
-struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
-    using cbor::tags::cbor_codec_mixin_base<Self>::decode;
-    using cbor::tags::cbor_codec_mixin_base<Self>::encode;
+struct my_codec : ct::codec_mixin_base<Self> {
+    using base = ct::codec_mixin_base<Self>;
+    using base::decode;
+    using base::encode;
 
     void encode(const my_type& value) {
         auto& enc = static_cast<Self&>(*this);
-        enc.encode(cbor::tags::static_tag<100>{});
+        enc.encode(ct::static_tag<100>{});
         enc.encode(value.payload);
     }
 
-    [[nodiscard]] cbor::tags::status_code
-    decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
+    [[nodiscard]] ct::status_code
+    decode(my_type& value, ct::major_type major, std::byte additional_info) {
         auto& dec = static_cast<Self&>(*this);
-        const auto tag_status = dec.decode(cbor::tags::static_tag<100>{}, major, additional_info);
-        if (tag_status != cbor::tags::status_code::success) {
+        const auto tag_status = dec.decode(ct::static_tag<100>{}, major, additional_info);
+        if (tag_status != ct::status_code::success) {
             return tag_status;
         }
         return dec.decode(value.payload);
@@ -72,9 +79,12 @@ struct my_codec : cbor::tags::cbor_codec_mixin_base<Self> {
 One-way extensions can use the narrower bases:
 
 ```cpp
+namespace ct = cbor::tags;
+
 template <typename Self>
-struct my_encoder_only : cbor::tags::cbor_encoder_mixin_base<Self> {
-    using cbor::tags::cbor_encoder_mixin_base<Self>::encode;
+struct my_encoder_only : ct::encoder_mixin_base<Self> {
+    using base = ct::encoder_mixin_base<Self>;
+    using base::encode;
 
     void encode(const my_type& value) {
         static_cast<Self&>(*this).encode(value.payload);
@@ -82,11 +92,12 @@ struct my_encoder_only : cbor::tags::cbor_encoder_mixin_base<Self> {
 };
 
 template <typename Self>
-struct my_decoder_only : cbor::tags::cbor_decoder_mixin_base<Self> {
-    using cbor::tags::cbor_decoder_mixin_base<Self>::decode;
+struct my_decoder_only : ct::decoder_mixin_base<Self> {
+    using base = ct::decoder_mixin_base<Self>;
+    using base::decode;
 
-    [[nodiscard]] cbor::tags::status_code
-    decode(my_type& value, cbor::tags::major_type major, std::byte additional_info) {
+    [[nodiscard]] ct::status_code
+    decode(my_type& value, ct::major_type major, std::byte additional_info) {
         return static_cast<Self&>(*this).decode(value.payload, major, additional_info);
     }
 };

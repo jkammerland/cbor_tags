@@ -422,6 +422,8 @@ Include `<cbor_tags/cbor_traversal.h>` to process one complete item with a
 callable, without constructing a variant or manually consuming its children:
 
 ```cpp
+namespace ct = cbor::tags;
+
 std::size_t arrays = 0;
 auto result = ct::walk_item(dec,
     [&](const auto& value, const auto& context) {
@@ -708,16 +710,18 @@ If the C array layout must stay unchanged, or you have raw pointers, provide exp
 and expose its elements through a span:
 
 ```cpp
+namespace ct = cbor::tags;
+
 struct Record {
     int values[3];
     int id;
 
     template <typename Encoder> auto encode(Encoder &enc) const {
-        return enc(cbor::tags::wrap_as_array{std::span{values}, id});
+        return enc(ct::wrap_as_array{std::span{values}, id});
     }
     template <typename Decoder> auto decode(Decoder &dec) {
         auto elements = std::span{values};
-        return dec(cbor::tags::wrap_as_array{elements, id});
+        return dec(ct::wrap_as_array{elements, id});
     }
 };
 ```
@@ -731,7 +735,7 @@ Named-map reflection can also be enabled in C++20 with Boost.PFR field names. Co
 > [!NOTE]
 > Installed **cbor_tags** export the compile definition and Boost dependency only when they were built with the Boost.PFR names option enabled.
 
-CDDL enum value names use native C++26 reflection when `CBOR_TAGS_USE_STD_REFLECTION=ON`, or magic_enum in C++20 builds. For C++20, configure with `-DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, or define `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1` before including `cbor_tags/extensions/cbor_visualization.h`. This requires a `magic_enum` package config that exports `magic_enum::magic_enum`; installed packages export the compile definition and dependency only when they were built with the magic_enum names option enabled. Existing schemas keep rendering enums as `uint` or `int` unless `CDDLOptions::enum_mode` is set to `CDDLEnumMode::named_values`.
+CDDL enum value names use native C++26 reflection when `CBOR_TAGS_USE_STD_REFLECTION=ON`, or magic_enum in C++20 builds. For C++20, configure with `-DCBOR_TAGS_USE_MAGIC_ENUM_NAMES=ON`, or define `CBOR_TAGS_USE_MAGIC_ENUM_NAMES=1` before including `cbor_tags/extensions/cbor_visualization.h`. This requires a `magic_enum` package config that exports `magic_enum::magic_enum`; installed packages export the compile definition and dependency only when they were built with the magic_enum names option enabled. Existing schemas keep rendering enums as `uint` or `int` unless `cbor::tags::cddl::options::enum_mode` is set to `cbor::tags::cddl::enum_mode::named_values`.
 
 ## 🏷️ Annotating CBOR Buffers
 You can use `buffer_annotate` and `buffer_diagnostic` from `cbor_tags/extensions/cbor_visualization.h` to inspect and visualize CBOR data:
@@ -857,8 +861,11 @@ cbor_tags_cli diagnostic --input hex --no-format-by-rows --check-tstr-utf8 62c32
 ```
 
 ## 🤝 CDDL Schema Generation
-For Concise Data Definitions schemas you can use the `cddl_schema_to` method, e.g by applying on a struct "A":
+Generate a CDDL schema with `cddl::schema_to<T>`, for example for struct `A`:
 ```cpp
+namespace ct = cbor::tags;
+namespace cddl = ct::cddl;
+
 struct B {
     static constexpr std::uint64_t cbor_tag = 140;
     std::vector<std::byte>         a;
@@ -866,14 +873,14 @@ struct B {
 };
 
 struct C {
-    static_tag<141>  cbor_tag;
+    ct::static_tag<141> cbor_tag;
     int              a;
     std::string      b;
     std::optional<B> c;
 };
 struct A {
         uint32_t                       a1;
-        negative                       aminus;
+        ct::negative                   aminus;
         int                            a;
         double                         b;
         float                          c;
@@ -888,7 +895,7 @@ struct A {
 };
 
 fmt::memory_buffer buffer;
-cddl_schema_to<A>(buffer, {.row_options = {.format_by_rows = false}});
+cddl::schema_to<A>(buffer, {.row_options = {.format_by_rows = false}});
 fmt::print("Concise Data Definition: \n{}\n", fmt::to_string(buffer));
 ```
 

@@ -6,5 +6,5 @@
 
 int main() {
     std::string schema;
-    cbor::tags::cddl_schema_to<std::optional<std::unique_ptr<int>>>(schema);
+    cbor::tags::cddl::schema_to<std::optional<std::unique_ptr<int>>>(schema);
 }

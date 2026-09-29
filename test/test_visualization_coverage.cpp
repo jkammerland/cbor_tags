@@ -99,23 +99,23 @@ TEST_CASE("cddl helpers generate prelude and schemas") {
     CHECK(prelude.find("float64 = #7.27") != std::string::npos);
 
     std::string row_schema;
-    cddl_schema_to<VisualizationTagged>(row_schema);
+    cddl::schema_to<VisualizationTagged>(row_schema);
     CHECK(row_schema.find("VisualizationTagged = #6.777") != std::string::npos);
     CHECK(row_schema.find("int") != std::string::npos);
     CHECK(row_schema.find("tstr") != std::string::npos);
 
     std::string inline_schema;
-    cddl_schema_to<VisualizationInner>(inline_schema, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<VisualizationInner>(inline_schema, {.row_options = {.format_by_rows = false}});
     CHECK(inline_schema.find("VisualizationInner = [int, tstr]") != std::string::npos);
 }
 
 TEST_CASE("cddl helpers cover tuple and tagged tuple schemas") {
     std::string tuple_schema;
-    cddl_schema_to<std::tuple<int, std::string>>(tuple_schema, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<std::tuple<int, std::string>>(tuple_schema, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(tuple_schema, "root = [int, tstr]");
 
     std::string tagged_tuple_schema;
-    cddl_schema_to<std::tuple<static_tag<7>, int, std::string>>(tagged_tuple_schema, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<std::tuple<static_tag<7>, int, std::string>>(tagged_tuple_schema, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(tagged_tuple_schema, "root = #6.7([int, tstr])");
 }
 

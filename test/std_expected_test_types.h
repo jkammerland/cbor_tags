@@ -56,9 +56,9 @@ struct mixin_empty {
     bool operator==(const mixin_empty &) const = default;
 };
 
-template <typename Self> struct empty_item_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct empty_item_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
 
     void        encode(const mixin_empty &) { static_cast<Self &>(*this).encode(nullptr); }
     status_code decode(mixin_empty &) {
@@ -73,9 +73,9 @@ template <typename Self> struct empty_item_codec : cbor_codec_mixin_base<Self> {
 
 template <typename T> struct templated_mixin_empty {};
 
-template <typename Self> struct templated_empty_item_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct templated_empty_item_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     template <typename T> void        encode(const templated_mixin_empty<T> &) { static_cast<Self &>(*this).encode(nullptr); }
     template <typename T> status_code decode(templated_mixin_empty<T> &) {
         std::nullptr_t value{};
@@ -89,9 +89,9 @@ template <typename Self> struct templated_empty_item_codec : cbor_codec_mixin_ba
 
 struct by_value_mixin_empty {};
 
-template <typename Self> struct by_value_empty_item_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct by_value_empty_item_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     void        encode(by_value_mixin_empty) { static_cast<Self &>(*this).encode(nullptr); }
     status_code decode(by_value_mixin_empty &) {
         std::nullptr_t value{};
@@ -103,9 +103,9 @@ template <typename Self> struct by_value_empty_item_codec : cbor_codec_mixin_bas
     }
 };
 
-template <typename Self> struct constrained_array_item_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct constrained_array_item_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     template <IsArray T>
         requires std::same_as<T, std::vector<mixin_empty>>
     void encode(const T &value) {
@@ -135,9 +135,9 @@ struct tag_only_empty {
     static inline unsigned         decoded{};
 };
 
-template <typename Self> struct directional_item_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct directional_item_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     void encode(const header_only_empty &) { static_cast<Self &>(*this).encode(1U); }
     void encode(const direct_only_empty &) { static_cast<Self &>(*this).encode(1U); }
     void encode(const tag_only_empty &) {

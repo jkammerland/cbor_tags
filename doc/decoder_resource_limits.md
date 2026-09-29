@@ -251,7 +251,7 @@ struct bounded_request {
 };
 
 fmt::memory_buffer schema;
-ct::cddl_schema_to<bounded_request>(
+ct::cddl::schema_to<bounded_request>(
     schema,
     {.row_options = {.format_by_rows = false}});
 // bounded_request = [tstr .size (1..64), [0*8 uint]]

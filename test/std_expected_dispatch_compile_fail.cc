@@ -15,9 +15,9 @@ struct tagged_empty {
     static constexpr std::uint64_t cbor_tag = 321;
 };
 
-template <typename Self> struct header_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct header_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     status_code decode(empty &, major_type major, std::byte info) {
         std::uint64_t value{};
         return static_cast<Self &>(*this).decode(value, major, info);
@@ -33,18 +33,18 @@ template <typename Self> struct header_codec : cbor_codec_mixin_base<Self> {
     }
 };
 
-template <typename Self> struct direct_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct direct_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     status_code decode(empty &) {
         std::uint64_t value{};
         return static_cast<Self &>(*this).decode(value);
     }
 };
 
-template <typename Self> struct container_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct container_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     void        encode(const std::vector<empty> &value) { static_cast<Self &>(*this).encode(value.size()); }
     status_code decode(std::vector<empty> &value, major_type major, std::byte info) {
         std::size_t size{};

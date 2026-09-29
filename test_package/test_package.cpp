@@ -72,7 +72,7 @@ int main() {
 
 #if !CBOR_TAGS_STL_ONLY
         fmt::memory_buffer schema;
-        cbor::tags::cddl_schema_to<rfc8746::typed_array<std::int32_t>>(schema, {.row_options = {.format_by_rows = false}});
+        cbor::tags::cddl::schema_to<rfc8746::typed_array<std::int32_t>>(schema, {.row_options = {.format_by_rows = false}});
         if (fmt::to_string(schema) != "root = #6.78(bstr)") {
             return 6;
         }
@@ -101,8 +101,8 @@ int main() {
 #if CBOR_TAGS_USE_MAGIC_ENUM_NAMES
     {
         fmt::memory_buffer schema;
-        cbor::tags::cddl_schema_to<PackageColor>(
-            schema, {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::CDDLEnumMode::named_values});
+        cbor::tags::cddl::schema_to<PackageColor>(
+            schema, {.row_options = {.format_by_rows = false}, .enum_mode = cbor::tags::cddl::enum_mode::named_values});
         const auto text = fmt::to_string(schema);
         if (text.find("red") == std::string::npos || text.find("blue") == std::string::npos) {
             return 9;
@@ -115,7 +115,7 @@ int main() {
         static_assert(CBOR_TAGS_HAS_BOOST_PFR_NAMES == 1);
 
         fmt::memory_buffer schema;
-        cbor::tags::cddl_schema_to<cbor::tags::as_named_map<PackagePerson>>(
+        cbor::tags::cddl::schema_to<cbor::tags::as_named_map<PackagePerson>>(
             schema, {.row_options = {.format_by_rows = false}, .root_name = "person"});
         const auto text = fmt::to_string(schema);
         if (text.find("age: uint") == std::string::npos || text.find("name: tstr") == std::string::npos) {
