@@ -424,7 +424,7 @@ null / #6.28(T) / #6.29(uint)
 ```
 
 ```cpp
-cddl_schema_to<std::shared_ptr<int>>(schema);
+cddl::schema_to<std::shared_ptr<int>>(schema);
 ```
 
 CDDL describes item shapes. It cannot express whether a tag 29 index exists,

@@ -44,8 +44,7 @@ cddl::schema_to<MyStruct>(buffer);
 
 Examples use `namespace ct = cbor::tags;` for core APIs and
 `namespace cddl = cbor::tags::cddl;` for schema APIs. Prefer `cddl::schema_to<T>`,
-`cddl::options`, and `cddl::enum_mode` in new code. The existing
-`ct::cddl_schema_to`, `ct::CDDLOptions`, and `ct::CDDLEnumMode` remain supported.
+`cddl::options`, and `cddl::enum_mode`.
 
 To describe an application's complete wire representation, specialize the
 class template `wire_type` and read the result with `wire_type_t`:
@@ -63,14 +62,6 @@ using record_wire = cddl::wire_type_t<app::record>;
 
 This mapping describes the schema; the application codec must serialize that
 same representation. Types without a mapping have no `wire_type_t` result.
-
-The concise traits (`wire_type`, `tagged_bstr_array_traits`,
-`homogeneous_array_traits`, and `multi_dimensional_array_traits`) inherit
-existing `cddl_` trait specializations as a compatibility fallback. Specialize
-the concise names in new code. If both spellings are specialized for one type,
-the concise specialization controls schema generation. Existing direct reads
-of a legacy trait still read that legacy trait; they do not resolve new
-specializations. Built-in legacy mappings remain available through both names.
 
 ## Basic Usage
 

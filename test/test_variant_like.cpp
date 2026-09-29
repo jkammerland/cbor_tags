@@ -243,7 +243,7 @@ TEST_CASE("custom variant traits render CDDL") {
     using variant = variant_traits_test::manual_variant<std::uint64_t, std::string>;
 
     std::string schema;
-    tags::cddl_schema_to<variant>(schema, {.row_options = {.format_by_rows = false}});
+    tags::cddl::schema_to<variant>(schema, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(schema, "root = uint / tstr");
 }
 

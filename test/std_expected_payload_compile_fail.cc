@@ -10,9 +10,9 @@ using namespace cbor::tags;
 using namespace cbor::tags::ext::std_expected;
 
 struct unrelated {};
-template <typename Self> struct unrelated_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct unrelated_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     void        encode(const unrelated &) { static_cast<Self &>(*this).encode(nullptr); }
     status_code decode(unrelated &) {
         std::nullptr_t payload{};
@@ -36,9 +36,9 @@ struct empty {
         return value;
     }
 };
-template <typename Self> struct payload_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct payload_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     void        encode(const converted &) { static_cast<Self &>(*this).encode(nullptr); }
     status_code decode(converted &) {
         std::nullptr_t value{};
@@ -52,9 +52,9 @@ template <typename Self> struct payload_codec : cbor_codec_mixin_base<Self> {
 #else
 struct empty {};
 #if defined(CBOR_TAGS_EXPECTED_GENERIC_MIXIN) || defined(CBOR_TAGS_EXPECTED_GENERIC_ARRAY_MIXIN)
-template <typename Self> struct payload_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct payload_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     template <typename T> void        encode(const T &) { static_cast<Self &>(*this).encode(nullptr); }
     template <typename T> status_code decode(T &) {
         std::nullptr_t value{};
@@ -71,15 +71,15 @@ template <typename Self> struct payload_codec : cbor_codec_mixin_base<Self> {
     }
 };
 #elif defined(CBOR_TAGS_EXPECTED_MUTABLE_MIXIN)
-template <typename Self> struct payload_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct payload_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     void encode(empty &) { static_cast<Self &>(*this).encode(nullptr); }
 };
 #elif defined(CBOR_TAGS_EXPECTED_CONST_MIXIN)
-template <typename Self> struct payload_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::encode;
-    using cbor_codec_mixin_base<Self>::decode;
+template <typename Self> struct payload_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::encode;
+    using codec_mixin_base<Self>::decode;
     status_code decode(const empty &) {
         std::nullptr_t value{};
         return static_cast<Self &>(*this).decode(value);

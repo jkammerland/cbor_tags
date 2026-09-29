@@ -235,10 +235,10 @@ TEST_SUITE("cbor_wire/container_interoperability") {
         REQUIRE(make_encoder(encoded)(empty));
         CHECK(encoded == to_bytes("80"));
         fmt::memory_buffer schema;
-        cddl_schema_to<boost::array<int, 3>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<boost::array<int, 3>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = [3*3 int]");
         schema.clear();
-        cddl_schema_to<boost::array<int, 0>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<boost::array<int, 0>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = [0*0 int]");
 
         boost::array<std::byte, 4> fixed_buffer{};
@@ -260,10 +260,10 @@ TEST_SUITE("cbor_wire/container_interoperability") {
         REQUIRE(make_encoder(encoded)(text));
         CHECK(encoded == char_array_wire);
         schema.clear();
-        cddl_schema_to<bounded_size<boost::array<std::byte, 3>, 0, 4>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<bounded_size<boost::array<std::byte, 3>, 0, 4>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = bstr .size 3");
         schema.clear();
-        cddl_schema_to<bounded_size<boost::array<int, 3>, 0, 4>>(schema, {.row_options = {.format_by_rows = false}});
+        cddl::schema_to<bounded_size<boost::array<int, 3>, 0, 4>>(schema, {.row_options = {.format_by_rows = false}});
         CHECK(fmt::to_string(schema) == "root = [3*3 int]");
     }
 

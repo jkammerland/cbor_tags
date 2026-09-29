@@ -16,9 +16,9 @@ struct record {
     std::uint64_t                  value{};
 };
 
-template <typename Self> struct record_codec : cbor::tags::cbor_codec_mixin_base<Self> {
-    using cbor::tags::cbor_codec_mixin_base<Self>::decode;
-    using cbor::tags::cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct record_codec : cbor::tags::codec_mixin_base<Self> {
+    using cbor::tags::codec_mixin_base<Self>::decode;
+    using cbor::tags::codec_mixin_base<Self>::encode;
 
     void encode(const record &value) {
         auto &enc = static_cast<Self &>(*this);

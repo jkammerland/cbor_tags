@@ -117,9 +117,9 @@ template <typename Tag, typename T>
     requires(!std::is_lvalue_reference_v<T>)
 void encode_borrowed_segments(Tag &&, T &&) = delete;
 
-template <typename Self> struct custom_codec_1 : cbor::tags::cbor_codec_mixin_base<Self> {
-    using cbor::tags::cbor_codec_mixin_base<Self>::decode;
-    using cbor::tags::cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct custom_codec_1 : cbor::tags::codec_mixin_base<Self> {
+    using cbor::tags::codec_mixin_base<Self>::decode;
+    using cbor::tags::codec_mixin_base<Self>::encode;
 
     template <typename T> constexpr void encode(const custom_codec_1_ref<T> &value) {
         encode_tagged(codec_detail::tag_for(value.get()), value.get());

@@ -12,6 +12,6 @@ int main() {
     using value_type  = std::variant<std::shared_ptr<int>, nested_type>;
 
     fmt::memory_buffer buffer;
-    cbor::tags::cddl_schema_to<value_type>(buffer, {.row_options = {.format_by_rows = false}});
+    cbor::tags::cddl::schema_to<value_type>(buffer, {.row_options = {.format_by_rows = false}});
     return 0;
 }

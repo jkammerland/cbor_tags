@@ -67,7 +67,7 @@ int main() {
     (void)dec(cbor::tags::as_named_map{value});
 #elif defined(CBOR_TAGS_EXTENSION_FIELDS_CDDL)
     std::string output;
-    cbor::tags::cddl_schema_to<cbor::tags::as_named_map<TestRoot>>(output, {.root_name = "bad"});
+    cbor::tags::cddl::schema_to<cbor::tags::as_named_map<TestRoot>>(output, {.root_name = "bad"});
 #else
 #error "expected an extension-field compile-fail mode"
 #endif

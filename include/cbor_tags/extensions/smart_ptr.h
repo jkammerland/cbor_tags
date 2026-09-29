@@ -203,9 +203,9 @@ template <IsSharedPointer Pointer>
 
 namespace cbor::tags::ext::smart_ptr {
 
-template <typename Self> struct unique_ptr_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct unique_ptr_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     template <IsUniquePointer Pointer> void encode(const Pointer &value) {
         using element_type = detail::pointer_element_t<Pointer>;
@@ -251,9 +251,9 @@ template <typename Self> struct unique_ptr_codec : cbor_codec_mixin_base<Self> {
     }
 };
 
-template <typename Self> struct shared_ptr_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct shared_ptr_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     template <SharedPtrEncodeScope Scope, typename S = Self>
         requires detail::EncoderSelf<S>

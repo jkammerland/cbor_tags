@@ -37,9 +37,9 @@ concept DecodableStdExpected = std::default_initializable<E> && (std::is_void_v<
 
 } // namespace detail
 
-template <typename Self> struct std_expected_codec : cbor_codec_mixin_base<Self> {
-    using cbor_codec_mixin_base<Self>::decode;
-    using cbor_codec_mixin_base<Self>::encode;
+template <typename Self> struct std_expected_codec : codec_mixin_base<Self> {
+    using codec_mixin_base<Self>::decode;
+    using codec_mixin_base<Self>::encode;
 
     template <typename T, typename E> constexpr void encode(const std::expected<T, E> &value) {
         require_single_item_payloads<T, E>();

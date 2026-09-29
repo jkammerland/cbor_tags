@@ -172,7 +172,7 @@ Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
 
 ## CDDL Rendering
 
-`cddl_schema_to<T>` renders the RFC 8746 wrappers as semantic tags around their
+`cddl::schema_to<T>` renders the RFC 8746 wrappers as semantic tags around their
 wire payload shape:
 
 ```cpp
@@ -182,11 +182,11 @@ wire payload shape:
 #include <fmt/format.h>
 
 fmt::memory_buffer schema;
-cddl_schema_to<typed_array<std::int32_t>>(schema);
+cddl::schema_to<typed_array<std::int32_t>>(schema);
 // root = #6.78(bstr)
 
 fmt::memory_buffer schema_be;
-cddl_schema_to<typed_array_be<double>>(schema_be);
+cddl::schema_to<typed_array_be<double>>(schema_be);
 // root = #6.82(bstr)
 ```
 
@@ -238,7 +238,7 @@ Structural wrappers render their actual encoded payload:
 
 ```cpp
 fmt::memory_buffer homogeneous_schema;
-cddl_schema_to<homogeneous_array<std::vector<int>>>(homogeneous_schema);
+cddl::schema_to<homogeneous_array<std::vector<int>>>(homogeneous_schema);
 // root = #6.41([* int])
 
 using matrix = multi_dimensional_array<
@@ -246,7 +246,7 @@ using matrix = multi_dimensional_array<
     typed_array<std::uint16_t>>;
 
 fmt::memory_buffer matrix_schema;
-cddl_schema_to<matrix>(matrix_schema);
+cddl::schema_to<matrix>(matrix_schema);
 // root = #6.40([[* uint], #6.69(bstr)])
 ```
 

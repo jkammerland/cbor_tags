@@ -59,7 +59,7 @@ Generate CDDL for the same shape:
 ```cpp
 fmt::memory_buffer schema;
 
-cddl_schema_to<as_named_map<Person>>(
+cddl::schema_to<as_named_map<Person>>(
     schema,
     {
         .row_options = {.format_by_rows = false},
@@ -195,7 +195,7 @@ Generate CDDL:
 ```cpp
 fmt::memory_buffer schema;
 
-cddl_schema_to<as_named_map<PersonalData>>(
+cddl::schema_to<as_named_map<PersonalData>>(
     schema,
     {
         .row_options = {.format_by_rows = false},
@@ -337,7 +337,7 @@ Generate CDDL:
 ```cpp
 fmt::memory_buffer schema;
 
-cddl_schema_to<as_named_map<AccountProfile>>(
+cddl::schema_to<as_named_map<AccountProfile>>(
     schema,
     {
         .row_options = {.format_by_rows = false},

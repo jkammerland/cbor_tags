@@ -17,19 +17,19 @@ int main() {
     using namespace cbor::tags;
 
     std::string enum_schema;
-    cddl_schema_to<consumer_color>(enum_schema, {.enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<consumer_color>(enum_schema, {.enum_mode = cddl::enum_mode::named_values});
     if (enum_schema.find("red") == std::string::npos || enum_schema.find("blue") == std::string::npos) {
         return 1;
     }
 
     std::string map_schema;
-    cddl_schema_to<as_named_map<consumer_point>>(map_schema, {.row_options = {.format_by_rows = false}, .root_name = "point"});
+    cddl::schema_to<as_named_map<consumer_point>>(map_schema, {.row_options = {.format_by_rows = false}, .root_name = "point"});
     if (map_schema.find("x: uint") == std::string::npos || map_schema.find("y: uint") == std::string::npos) {
         return 2;
     }
 
     std::string type_schema;
-    cddl_schema_to<consumer_point>(type_schema, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<consumer_point>(type_schema, {.row_options = {.format_by_rows = false}});
     if (type_schema.find("consumer_point = [uint, uint]") == std::string::npos) {
         return 6;
     }

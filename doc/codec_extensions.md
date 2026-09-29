@@ -33,8 +33,7 @@ bidirectional codecs should inherit `codec_mixin_base<Self>`. Bring the
 matching base overloads into scope so unsupported overloads remain deleted and
 visible to overload resolution.
 
-The shorter base names are aliases for the existing `cbor_` base types, so
-existing codecs remain compatible. Use a local `base` alias when importing
+Use a local `base` alias when importing
 both `encode` and `decode`. In example headers, keep namespace aliases inside
 the example's namespace; in standalone examples, declare them near the includes.
 

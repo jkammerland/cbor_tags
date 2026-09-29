@@ -9,7 +9,7 @@ int main() {
     using namespace cbor::tags::ext::rfc8746;
 
     fmt::memory_buffer buffer;
-    cbor::tags::cddl_schema_to<std::variant<typed_array_ref<std::int32_t>, typed_array<std::int32_t>>>(
+    cbor::tags::cddl::schema_to<std::variant<typed_array_ref<std::int32_t>, typed_array<std::int32_t>>>(
         buffer, {.row_options = {.format_by_rows = false}});
     return 0;
 }

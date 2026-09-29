@@ -34,13 +34,13 @@ namespace smart_ptr = cbor::tags::ext::smart_ptr;
 namespace cbor_tags_test_cddl {
 template <typename T> std::string cddl_schema_inline() {
     fmt::memory_buffer buffer;
-    cddl_schema_to<T>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<T>(buffer, {.row_options = {.format_by_rows = false}});
     return fmt::to_string(buffer);
 }
 
-template <typename T> std::string cddl_schema_with_options(CDDLOptions options) {
+template <typename T> std::string cddl_schema_with_options(cddl::options options) {
     fmt::memory_buffer buffer;
-    cddl_schema_to<T>(buffer, options);
+    cddl::schema_to<T>(buffer, options);
     return fmt::to_string(buffer);
 }
 
@@ -595,14 +595,14 @@ struct A42121 {
 
 TEST_CASE("CDDL extension") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<A42121>(buffer);
+    cddl::schema_to<A42121>(buffer);
     CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
     CHECK(substrings_in(fmt::to_string(buffer), "uint,\n", "int / tstr,\n"));
 }
 
 TEST_CASE("CDDL aggregate tagged") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<A13213>(buffer, {.row_options = {.format_by_rows = true}});
+    cddl::schema_to<A13213>(buffer, {.row_options = {.format_by_rows = true}});
     CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 }
 
@@ -652,28 +652,28 @@ TEST_CASE("CDDL labels aggregate array fields when requested") {
                         "CDDLPlainTwo = [id: int, name: tstr]", "CDDLSingleField = id", "id = uint"));
 
     fmt::memory_buffer tuple_buffer;
-    cddl_schema_to<std::tuple<int, std::string>>(tuple_buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true});
+    cddl::schema_to<std::tuple<int, std::string>>(tuple_buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true});
     CHECK_EQ(fmt::to_string(tuple_buffer), "root = [int, tstr]");
 
     fmt::memory_buffer collision_buffer;
     CHECK_THROWS_AS(
-        cddl_schema_to<CDDLArrayLabelCollision>(collision_buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+        cddl::schema_to<CDDLArrayLabelCollision>(collision_buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
         std::invalid_argument);
 
     fmt::memory_buffer alias_collision_buffer;
-    CHECK_THROWS_AS(cddl_schema_to<CDDLArrayLabelAliasCollision>(alias_collision_buffer,
-                                                                 {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+    CHECK_THROWS_AS(cddl::schema_to<CDDLArrayLabelAliasCollision>(alias_collision_buffer,
+                                                                  {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
                     std::invalid_argument);
 
     fmt::memory_buffer prelude_alias_buffer;
-    CHECK_THROWS_AS(cddl_schema_to<CDDLArrayLabelPreludeAlias>(prelude_alias_buffer,
-                                                               {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+    CHECK_THROWS_AS(cddl::schema_to<CDDLArrayLabelPreludeAlias>(prelude_alias_buffer,
+                                                                {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
                     std::invalid_argument);
 }
 #else
 TEST_CASE("CDDL array field labels require named reflection") {
     fmt::memory_buffer buffer;
-    CHECK_THROWS_AS(cddl_schema_to<CDDLPlainTwo>(buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
+    CHECK_THROWS_AS(cddl::schema_to<CDDLPlainTwo>(buffer, {.row_options = {.format_by_rows = false}, .label_array_fields = true}),
                     std::invalid_argument);
 }
 #endif
@@ -773,7 +773,7 @@ TEST_CASE("CDDL emits RFC 8746 typed-array extension shapes") {
              "root = #6.78(bstr) / #6.82(bstr)");
     CHECK_EQ(cddl_schema_inline<CDDLTypedArrays>(),
              "CDDLTypedArrays = [#6.78(bstr), #6.82(bstr), #6.41([* uint]), #6.40([[* uint], #6.69(bstr)])]");
-    CHECK_EQ(cddl_schema_with_options<rfc8746::typed_array<std::int32_t>>(CDDLOptions{.row_options = {}, .root_name = "samples"}),
+    CHECK_EQ(cddl_schema_with_options<rfc8746::typed_array<std::int32_t>>(cddl::options{.row_options = {}, .root_name = "samples"}),
              "samples = #6.78(bstr)");
 
     const auto row_schema = cddl_schema_with_options<CDDLTypedArrays>({});
@@ -809,7 +809,7 @@ TEST_CASE("CDDL emits shared pointer reference shapes directly") {
     CHECK_EQ(cddl_schema_inline<CDDLSharedGraphUniqueVariant>(), "root = int / null / tstr");
 
     std::string named_root_schema;
-    cddl_schema_to<std::shared_ptr<int>>(named_root_schema, {.row_options = {.format_by_rows = false}, .root_name = "shared"});
+    cddl::schema_to<std::shared_ptr<int>>(named_root_schema, {.row_options = {.format_by_rows = false}, .root_name = "shared"});
     CHECK_EQ(named_root_schema, "shared = null / #6.28(int) / #6.29(uint)");
 
     const auto schema = cddl_schema_inline<CDDLSharedGraphPointers>();
@@ -821,7 +821,7 @@ TEST_CASE("CDDL emits shared pointer reference shapes directly") {
     CHECK_EQ(count_occurrences(schema, "CDDLPlainTwo = [int, tstr]"), 1);
 
     fmt::memory_buffer inline_buffer;
-    cddl_schema_to<CDDLSharedGraphPointers>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
+    cddl::schema_to<CDDLSharedGraphPointers>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
     const auto inline_schema = fmt::to_string(inline_buffer);
     CHECK(substrings_in(inline_schema, "CDDLSharedGraphPointers = [null / #6.28([int, tstr]) / #6.29(uint), [* (null / #6.28(tstr) / "
                                        "#6.29(uint))]]"));
@@ -842,7 +842,7 @@ TEST_CASE("CDDL supports recursive aggregate containers") {
     CHECK_EQ(count_occurrences(recursive_variant_schema, "CDDLRecursiveNode = [* CDDLRecursiveNode]"), 1);
 
     fmt::memory_buffer inline_buffer;
-    cddl_schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
+    cddl::schema_to<CDDLRecursiveNode>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
     CHECK_EQ(fmt::to_string(inline_buffer), "CDDLRecursiveNode = [* CDDLRecursiveNode]");
 }
 
@@ -863,15 +863,15 @@ TEST_CASE("CDDL groups choices in map keys and repeated item positions") {
 
 TEST_CASE("CDDL supports root expressions for anonymous schema roots") {
     fmt::memory_buffer vector_buffer;
-    cddl_schema_to<std::vector<int>>(vector_buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<std::vector<int>>(vector_buffer, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(fmt::to_string(vector_buffer), "root = [* int]");
 
     fmt::memory_buffer tuple_buffer;
-    cddl_schema_to<std::tuple<int, std::string>>(tuple_buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<std::tuple<int, std::string>>(tuple_buffer, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(fmt::to_string(tuple_buffer), "root = [int, tstr]");
 
     fmt::memory_buffer tag_buffer;
-    cddl_schema_to<static_tag<7>>(tag_buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<static_tag<7>>(tag_buffer, {.row_options = {.format_by_rows = false}});
     CHECK_EQ(fmt::to_string(tag_buffer), "root = #6.7(any)");
 
     CHECK_EQ(cddl_schema_inline<simple>(), "root = #7.<0..23 / 32..255>");
@@ -889,7 +889,7 @@ TEST_CASE("CDDL supports catch-all header roots") {
 
 TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
     fmt::memory_buffer inline_buffer;
-    cddl_schema_to<CDDLContainers>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
+    cddl::schema_to<CDDLContainers>(inline_buffer, {.row_options = {.format_by_rows = false}, .always_inline = true});
     const auto inline_schema = fmt::to_string(inline_buffer);
     CHECK(substrings_in(inline_schema, "[int, tstr] / null", "int / [int, tstr]"));
     CHECK_EQ(inline_schema.find("CDDLPlainTwo ="), std::string::npos);
@@ -900,24 +900,24 @@ TEST_CASE("CDDL supports always_inline and enum underlying integer shapes") {
 #if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
 TEST_CASE("CDDL can emit named enum choices") {
     fmt::memory_buffer root;
-    cddl_schema_to<CDDLTrafficLight>(
-        root, {.row_options = {.format_by_rows = false}, .root_name = "traffic-light", .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLTrafficLight>(
+        root, {.row_options = {.format_by_rows = false}, .root_name = "traffic-light", .enum_mode = cddl::enum_mode::named_values});
     CHECK_EQ(fmt::to_string(root), "traffic_light = &(red: 1, yellow: 2, green: 4)");
 
     fmt::memory_buffer inline_root;
-    cddl_schema_to<CDDLTrafficLight>(
-        inline_root, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLTrafficLight>(
+        inline_root, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = cddl::enum_mode::named_values});
     CHECK_EQ(fmt::to_string(inline_root), "CDDLTrafficLight = &(red: 1, yellow: 2, green: 4)");
 
     fmt::memory_buffer unordered;
-    cddl_schema_to<CDDLUnorderedChoice>(
-        unordered, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLUnorderedChoice>(
+        unordered, {.row_options = {.format_by_rows = false}, .always_inline = true, .enum_mode = cddl::enum_mode::named_values});
     CHECK_EQ(fmt::to_string(unordered), "CDDLUnorderedChoice = &(negative: -1, low: 1, high: 5)");
 }
 
 TEST_CASE("CDDL reuses named enum definitions inside aggregate schemas") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<CDDLEnumNames>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLEnumNames>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
     const auto schema = fmt::to_string(buffer);
 
     CHECK_EQ(schema, "CDDLEnumNames = [CDDLTrafficLight, CDDLSignedChoice / null, CDDLTrafficLight / int, "
@@ -930,7 +930,7 @@ TEST_CASE("CDDL reuses named enum definitions inside aggregate schemas") {
 
 TEST_CASE("CDDL reuses named enum definitions through nested aggregate schemas") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<CDDLEnumNestedRoot>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLEnumNestedRoot>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
     const auto schema = fmt::to_string(buffer);
 
     CHECK(substrings_in(schema, "CDDLEnumNestedRoot = [CDDLEnumNestedMiddle, [* CDDLTrafficLight]]",
@@ -944,13 +944,13 @@ TEST_CASE("CDDL keeps enum underlying shapes unless named enum mode is requested
     CHECK_EQ(cddl_schema_inline<CDDLTrafficLight>(), "root = uint");
 
     fmt::memory_buffer empty_enum;
-    cddl_schema_to<CDDLUnsignedEnum>(empty_enum, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLUnsignedEnum>(empty_enum, {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
     CHECK_EQ(fmt::to_string(empty_enum), "root = uint");
 }
 
 TEST_CASE("CDDL named enum backend emits all enumerators outside the magic_enum default range") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<CDDLWideMagicEnum>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLWideMagicEnum>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
     CHECK_EQ(fmt::to_string(buffer), "CDDLWideMagicEnum = &(low: 1, high: 1000)");
 }
 #endif
@@ -958,7 +958,7 @@ TEST_CASE("CDDL named enum backend emits all enumerators outside the magic_enum 
 #if !CBOR_TAGS_HAS_STD_REFLECTION && !CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
 TEST_CASE("CDDL named enum mode falls back without enum-name backend") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<CDDLTrafficLight>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<CDDLTrafficLight>(buffer, {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
     CHECK_EQ(fmt::to_string(buffer), "root = uint");
 }
 #endif
@@ -966,51 +966,51 @@ TEST_CASE("CDDL named enum mode falls back without enum-name backend") {
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
 TEST_CASE("named-map CDDL covers RFC 8610 map and group examples") {
     fmt::memory_buffer direct_map;
-    cddl_schema_to<as_named_map<CDDLNamedPerson>>(direct_map, {.row_options = {.format_by_rows = false}, .root_name = "person"});
+    cddl::schema_to<as_named_map<CDDLNamedPerson>>(direct_map, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(direct_map), "person = {age: int, name: tstr, employer: tstr}");
 
     fmt::memory_buffer direct_dog_map;
-    cddl_schema_to<as_named_map<CDDLNamedDog>>(direct_dog_map, {.row_options = {.format_by_rows = false}, .root_name = "dog"});
+    cddl::schema_to<as_named_map<CDDLNamedDog>>(direct_dog_map, {.row_options = {.format_by_rows = false}, .root_name = "dog"});
     CHECK_EQ(fmt::to_string(direct_dog_map), "dog = {age: int, name: tstr, leash_length: float32}");
 
     fmt::memory_buffer basic_group;
-    cddl_schema_to<as_named_group<CDDLNamedPerson>>(basic_group, {.row_options = {.format_by_rows = false}, .root_name = "pii"});
+    cddl::schema_to<as_named_group<CDDLNamedPerson>>(basic_group, {.row_options = {.format_by_rows = false}, .root_name = "pii"});
     CHECK_EQ(fmt::to_string(basic_group), "pii = (age: int, name: tstr, employer: tstr)");
 
     fmt::memory_buffer group_by_name;
-    cddl_schema_to<as_named_map<CDDLNamedPersonWithPii>>(group_by_name, {.row_options = {.format_by_rows = false}, .root_name = "person"});
+    cddl::schema_to<as_named_map<CDDLNamedPersonWithPii>>(group_by_name, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(group_by_name), "person = {pii}\npii = (age: int, name: tstr, employer: tstr)");
 
     fmt::memory_buffer parenthesized_group;
-    cddl_schema_to<as_named_map<CDDLNamedPersonWithPii>>(
+    cddl::schema_to<as_named_map<CDDLNamedPersonWithPii>>(
         parenthesized_group, {.row_options = {.format_by_rows = false}, .always_inline = true, .root_name = "person"});
     CHECK_EQ(fmt::to_string(parenthesized_group), "person = {(age: int, name: tstr, employer: tstr)}");
 }
 
 TEST_CASE("named-map CDDL covers RFC 8610 group factorization and personal data examples") {
     fmt::memory_buffer person;
-    cddl_schema_to<as_named_map<CDDLNamedPersonWithIdentity>>(person, {.row_options = {.format_by_rows = false}, .root_name = "person"});
+    cddl::schema_to<as_named_map<CDDLNamedPersonWithIdentity>>(person, {.row_options = {.format_by_rows = false}, .root_name = "person"});
     CHECK_EQ(fmt::to_string(person), "person = {identity, employer: tstr}\nidentity = (age: int, name: tstr)");
 
     fmt::memory_buffer dog;
-    cddl_schema_to<as_named_map<CDDLNamedDogWithIdentity>>(dog, {.row_options = {.format_by_rows = false}, .root_name = "dog"});
+    cddl::schema_to<as_named_map<CDDLNamedDogWithIdentity>>(dog, {.row_options = {.format_by_rows = false}, .root_name = "dog"});
     CHECK_EQ(fmt::to_string(dog), "dog = {identity, leash_length: float32}\nidentity = (age: int, name: tstr)");
 
     fmt::memory_buffer personal_data;
-    cddl_schema_to<as_named_map<CDDLPersonalData>>(personal_data, {.row_options = {.format_by_rows = false}, .root_name = "PersonalData"});
+    cddl::schema_to<as_named_map<CDDLPersonalData>>(personal_data, {.row_options = {.format_by_rows = false}, .root_name = "PersonalData"});
     CHECK_EQ(fmt::to_string(personal_data), "PersonalData = {? displayName: tstr, NameComponents, ? age: uint}\n"
                                             "NameComponents = (? firstName: tstr, ? familyName: tstr)");
 
     fmt::memory_buffer extensible;
-    cddl_schema_to<as_named_map<CDDLPersonalDataExtensible>>(extensible,
-                                                             {.row_options = {.format_by_rows = false}, .root_name = "PersonalData"});
+    cddl::schema_to<as_named_map<CDDLPersonalDataExtensible>>(extensible,
+                                                              {.row_options = {.format_by_rows = false}, .root_name = "PersonalData"});
     CHECK_EQ(fmt::to_string(extensible), "PersonalData = {? displayName: tstr, NameComponents, ? age: uint, * tstr => tstr}\n"
                                          "NameComponents = (? firstName: tstr, ? familyName: tstr)");
 }
 
 TEST_CASE("named-map CDDL covers a larger grouped profile") {
     fmt::memory_buffer account;
-    cddl_schema_to<as_named_map<CDDLAccountProfile>>(account, {.row_options = {.format_by_rows = false}, .root_name = "AccountProfile"});
+    cddl::schema_to<as_named_map<CDDLAccountProfile>>(account, {.row_options = {.format_by_rows = false}, .root_name = "AccountProfile"});
     CHECK_EQ(fmt::to_string(account),
              "AccountProfile = {accountId: tstr, owner, location, roles: [* tstr], counters: {* tstr => uint}, ? active: bool, "
              "* tstr => tstr}\n"
@@ -1020,28 +1020,28 @@ TEST_CASE("named-map CDDL covers a larger grouped profile") {
 
 TEST_CASE("named-map CDDL keeps unique pointer fields required unless optional") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
+    cddl::schema_to<as_named_map<CDDLNamedNullablePointers>>(buffer, {.row_options = {.format_by_rows = false}, .root_name = "Pointers"});
     CHECK_EQ(fmt::to_string(buffer), "Pointers = {count: uint / null, name: tstr / null, ? maybe_count: int / null}");
 }
 
 TEST_CASE("named-map CDDL propagates shared pointer shapes through named maps and groups") {
     fmt::memory_buffer map_buffer;
-    cddl_schema_to<as_named_map<CDDLNamedSharedGraphRoot>>(map_buffer,
-                                                           {.row_options = {.format_by_rows = false}, .root_name = "GraphRoot"});
+    cddl::schema_to<as_named_map<CDDLNamedSharedGraphRoot>>(map_buffer,
+                                                            {.row_options = {.format_by_rows = false}, .root_name = "GraphRoot"});
     const auto map_schema = fmt::to_string(map_buffer);
     CHECK(substrings_in(map_schema, "GraphRoot = {group, reviewer: null / #6.28(tstr) / #6.29(uint)}",
                         "group = (owner: null / #6.28(CDDLPlainTwo) / #6.29(uint))", "CDDLPlainTwo = [int, tstr]"));
 
     fmt::memory_buffer group_buffer;
-    cddl_schema_to<as_named_group<CDDLNamedSharedGraphGroup>>(group_buffer,
-                                                              {.row_options = {.format_by_rows = false}, .root_name = "GraphGroup"});
+    cddl::schema_to<as_named_group<CDDLNamedSharedGraphGroup>>(group_buffer,
+                                                               {.row_options = {.format_by_rows = false}, .root_name = "GraphGroup"});
     const auto group_schema = fmt::to_string(group_buffer);
     CHECK(substrings_in(group_schema, "GraphGroup = (owner: null / #6.28(CDDLPlainTwo) / #6.29(uint))", "CDDLPlainTwo = [int, tstr]"));
 }
 
 TEST_CASE("named-map CDDL indents nested inline named groups by depth") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<as_named_map<CDDLNestedInlineRoot>>(
+    cddl::schema_to<as_named_map<CDDLNestedInlineRoot>>(
         buffer, {.row_options = {.format_by_rows = true}, .always_inline = true, .root_name = "Root"});
     CHECK_EQ(fmt::to_string(buffer), "Root = {\n"
                                      "  (\n"
@@ -1057,8 +1057,8 @@ TEST_CASE("named-map CDDL indents nested inline named groups by depth") {
 
 TEST_CASE("named-map CDDL scopes repeated local names inside nested named maps") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<as_named_map<CDDLRootWithNestedMapRepeatedLocalName>>(buffer,
-                                                                         {.row_options = {.format_by_rows = false}, .root_name = "Root"});
+    cddl::schema_to<as_named_map<CDDLRootWithNestedMapRepeatedLocalName>>(buffer,
+                                                                          {.row_options = {.format_by_rows = false}, .root_name = "Root"});
     CHECK_EQ(fmt::to_string(buffer), "Root = {value: int, child: CDDLNestedMapWithRepeatedLocalName}\n"
                                      "CDDLNestedMapWithRepeatedLocalName = {value: int}");
 }
@@ -1066,8 +1066,8 @@ TEST_CASE("named-map CDDL scopes repeated local names inside nested named maps")
 #if CBOR_TAGS_HAS_STD_REFLECTION || CBOR_TAGS_HAS_MAGIC_ENUM_NAMES
 TEST_CASE("named-map CDDL reuses named enum definitions through nested named maps and groups") {
     fmt::memory_buffer buffer;
-    cddl_schema_to<as_named_map<CDDLNamedEnumRoot>>(buffer,
-                                                    {.row_options = {.format_by_rows = false}, .enum_mode = CDDLEnumMode::named_values});
+    cddl::schema_to<as_named_map<CDDLNamedEnumRoot>>(
+        buffer, {.row_options = {.format_by_rows = false}, .enum_mode = cddl::enum_mode::named_values});
     const auto schema = fmt::to_string(buffer);
 
     CHECK(substrings_in(schema, "CDDLNamedEnumRoot = {group, child: CDDLNamedEnumChildMap, ? status: CDDLTrafficLight}",
@@ -1105,12 +1105,12 @@ TEST_CASE("nested named groups roundtrip with the C++20 named reflection backend
 
 TEST_CASE("named-map CDDL keeps table examples typed") {
     fmt::memory_buffer square_roots;
-    cddl_schema_to<std::map<int, float>>(square_roots, {.row_options = {.format_by_rows = false}, .root_name = "square_roots"});
+    cddl::schema_to<std::map<int, float>>(square_roots, {.row_options = {.format_by_rows = false}, .root_name = "square_roots"});
     CHECK_EQ(fmt::to_string(square_roots), "square_roots = {* int => float32}");
 
     fmt::memory_buffer to_string_table;
-    cddl_schema_to<std::map<std::variant<int, float>, std::string>>(to_string_table,
-                                                                    {.row_options = {.format_by_rows = false}, .root_name = "tostring"});
+    cddl::schema_to<std::map<std::variant<int, float>, std::string>>(to_string_table,
+                                                                     {.row_options = {.format_by_rows = false}, .root_name = "tostring"});
     CHECK_EQ(fmt::to_string(to_string_table), "tostring = {* (int / float32) => tstr}");
 }
 
@@ -1184,7 +1184,7 @@ TEST_CASE("named-map codec supports one root extension field") {
     CHECK_EQ(decoded.extensions.value_.at("nickname"), "ace");
 
     fmt::memory_buffer schema;
-    cddl_schema_to<as_named_map<CDDLOwningExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "root_ext"});
+    cddl::schema_to<as_named_map<CDDLOwningExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "root_ext"});
     CHECK_NE(fmt::to_string(schema).find("root_ext = {id: int, * tstr => tstr}"), std::string::npos);
 }
 
@@ -1205,7 +1205,7 @@ TEST_CASE("named-map codec supports one grouped extension field") {
     CHECK_EQ(decoded.group.value_.extensions.value_.at("nickname"), "ace");
 
     fmt::memory_buffer schema;
-    cddl_schema_to<as_named_map<CDDLGroupedExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "group_ext"});
+    cddl::schema_to<as_named_map<CDDLGroupedExtensionRoot>>(schema, {.row_options = {.format_by_rows = false}, .root_name = "group_ext"});
     const auto schema_text = fmt::to_string(schema);
     CHECK_NE(schema_text.find("group_ext = {id: int,"), std::string::npos);
     CHECK_NE(schema_text.find("* tstr => tstr"), std::string::npos);
@@ -1236,7 +1236,7 @@ TEST_CASE("named-map codec scopes nested map extensions") {
     CHECK_EQ(decoded_child.extensions.value_.at("childExtra"), "inside");
 
     fmt::memory_buffer schema;
-    cddl_schema_to<as_named_map<CDDLNestedMapScopedExtensionRoot>>(
+    cddl::schema_to<as_named_map<CDDLNestedMapScopedExtensionRoot>>(
         schema, {.row_options = {.format_by_rows = false}, .root_name = "nested_scoped"});
     const auto schema_text = fmt::to_string(schema);
     CHECK_NE(schema_text.find("nested_scoped = {rootId: int, child:"), std::string::npos);
@@ -1455,7 +1455,7 @@ struct A0001 {
 TEST_CASE("CDDL no columns") {
     fmt::memory_buffer buffer;
 
-    cddl_schema_to<A0001>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<A0001>(buffer, {.row_options = {.format_by_rows = false}});
     CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "uint,", "nint,", "int / tstr", "B129058 = #6.140([bstr, {* int => tstr}])",
@@ -1556,7 +1556,7 @@ TEST_CASE("CDDL adhoc tagging") {
     fmt::memory_buffer buffer;
     using namespace cbor::tags::literals;
     using tagA = std::pair<static_tag<140>, A>;
-    cddl_schema_to<tagA>(buffer, {.row_options = {.format_by_rows = false}});
+    cddl::schema_to<tagA>(buffer, {.row_options = {.format_by_rows = false}});
     CBOR_TAGS_TEST_LOG("CDDL: \n{}\n", fmt::to_string(buffer));
 
     CHECK(substrings_in(fmt::to_string(buffer), "#6.140(A)", "A = tstr"));

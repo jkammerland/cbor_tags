@@ -76,23 +76,18 @@ enum class status_code : uint8_t {
     size_limit_exceeded
 };
 
-template <typename Self> struct cbor_encoder_mixin_base {
+template <typename Self> struct encoder_mixin_base {
     constexpr void encode() = delete;
 };
 
-template <typename Self> struct cbor_decoder_mixin_base {
+template <typename Self> struct decoder_mixin_base {
     constexpr status_code decode() = delete;
 };
 
-template <typename Self> struct cbor_codec_mixin_base : cbor_encoder_mixin_base<Self>, cbor_decoder_mixin_base<Self> {
-    using cbor_decoder_mixin_base<Self>::decode;
-    using cbor_encoder_mixin_base<Self>::encode;
+template <typename Self> struct codec_mixin_base : encoder_mixin_base<Self>, decoder_mixin_base<Self> {
+    using decoder_mixin_base<Self>::decode;
+    using encoder_mixin_base<Self>::encode;
 };
-
-// Short names preserve the identity of the existing mixin base types.
-template <typename Self> using encoder_mixin_base = cbor_encoder_mixin_base<Self>;
-template <typename Self> using decoder_mixin_base = cbor_decoder_mixin_base<Self>;
-template <typename Self> using codec_mixin_base   = cbor_codec_mixin_base<Self>;
 
 constexpr std::string_view status_message(status_code s) {
     switch (s) {
