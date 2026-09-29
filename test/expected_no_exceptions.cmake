@@ -7,5 +7,12 @@ else()
   set(expected_result "42")
 endif()
 if(NOT result STREQUAL expected_result)
-  message(FATAL_ERROR "invalid value access must terminate with ${expected_result}; got ${result}")
+  string(LENGTH "${expected_result}" expected_length)
+  string(LENGTH "${result}" result_length)
+  string(HEX "${expected_result}" expected_hex)
+  string(HEX "${result}" result_hex)
+  message(FATAL_ERROR
+    "invalid value access must terminate with ${expected_result} "
+    "(length ${expected_length}, hex ${expected_hex}); got ${result} "
+    "(length ${result_length}, hex ${result_hex}); CMake ${CMAKE_VERSION}")
 endif()
