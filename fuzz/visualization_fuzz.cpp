@@ -59,13 +59,13 @@ struct schema_record {
 };
 
 void cddl_options(const std::string &root_name, bool rows, bool inline_types, std::uint8_t indent) {
-    const CDDLOptions options{.row_options   = {.format_by_rows = rows, .offset = indent},
-                              .always_inline = inline_types,
-                              .root_name     = root_name};
-    std::string       text;
-    cddl_schema_to<schema_record>(text, options);
+    const cddl::options options{.row_options   = {.format_by_rows = rows, .offset = indent},
+                                .always_inline = inline_types,
+                                .root_name     = root_name};
+    std::string         text;
+    cddl::schema_to<schema_record>(text, options);
     std::vector<char> chars;
-    cddl_schema_to<schema_record>(chars, options);
+    cddl::schema_to<schema_record>(chars, options);
 
     EXPECT_TRUE(std::ranges::equal(text, chars));
     EXPECT_TRUE(text.starts_with(root_name + " = "));
