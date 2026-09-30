@@ -142,22 +142,49 @@ struct constexpr_error {
     friend constexpr void swap(constexpr_error &left, constexpr_error &right) noexcept { std::swap(left.number, right.number); }
 };
 
+// A const payload can move and swap through an application-owned value. This
+// avoids reading a mutable member during constant evaluation on GCC 12.
+struct constexpr_const_movable {
+    transfer_counts *state;
+    int             *number;
+    constexpr constexpr_const_movable(transfer_counts &state, int &number) noexcept : state(&state), number(&number) {
+        ++state.live;
+        ++state.constructed;
+    }
+    constexpr_const_movable(const constexpr_const_movable &) = delete;
+    constexpr constexpr_const_movable(constexpr_const_movable &&other) noexcept : constexpr_const_movable(*other.state, *other.number) {
+        ++state->moves;
+    }
+    constexpr constexpr_const_movable(const constexpr_const_movable &&other) noexcept
+        : constexpr_const_movable(*other.state, *other.number) {
+        ++state->const_moves;
+    }
+    constexpr ~constexpr_const_movable() {
+        --state->live;
+        ++state->destroyed;
+    }
+    friend constexpr void swap(const constexpr_const_movable &left, const constexpr_const_movable &right) noexcept {
+        std::swap(*left.number, *right.number);
+    }
+};
+
 template <typename Error> constexpr bool constant_const_transfers() {
     transfer_counts state;
+    int             first = 7, second = 8;
     {
-        using result = ex::expected<const const_movable<false>, Error>;
-        result value(std::in_place, state, 7), error(ex::unexpect, 9);
+        using result = ex::expected<const constexpr_const_movable, Error>;
+        result value(std::in_place, state, first), error(ex::unexpect, 9);
         value.swap(error);
-        if (value.has_value() || !error.has_value() || error->number != 7)
+        if (value.has_value() || !error.has_value() || error->number != &first || *error->number != 7)
             return false;
         value.swap(error);
-        if (!value.has_value() || error.has_value() || value->number != 7)
+        if (!value.has_value() || error.has_value() || value->number != &first || *value->number != 7)
             return false;
         value = ex::unexpected(11);
         if (value.has_value() || state.live != 0)
             return false;
-        value.emplace(state, 8);
-        if (value->number != 8 || state.live != 1)
+        value.emplace(state, second);
+        if (value->number != &second || *value->number != 8 || state.live != 1)
             return false;
     }
     return state.live == 0 && state.constructed == state.destroyed && state.copies == 0 && state.const_moves == 0;
