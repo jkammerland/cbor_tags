@@ -1,4 +1,6 @@
 execute_process(COMMAND "${PROGRAM}" invalid-value RESULT_VARIABLE result)
+# CMake on Windows can append a line ending to the textual process status.
+string(REGEX REPLACE "\r?\n$" "" result "${result}")
 if(MSVC_NO_EXCEPTIONS)
   # Microsoft STL's _HAS_EXCEPTIONS=0 makes set_terminate a no-op; terminate
   # calls abort, which Windows reports as this fast-fail process status.
