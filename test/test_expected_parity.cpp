@@ -27,6 +27,13 @@ template <typename T, typename E> constexpr bool matching_traits() {
     constexpr bool assignment = [] {
         if constexpr (std::is_const_v<T> && !std::is_void_v<T>) {
             return !std::is_copy_assignable_v<A> && !std::is_move_assignable_v<A> && !std::is_swappable_v<A> && !member_swappable<A>;
+        } else if constexpr (std::is_void_v<T> && std::is_same_v<E, copy_only>) {
+            // LWG 4025 changed expected<cv void, E>'s move assignment from
+            // conditionally deleted to constrained. Older libc++ still deletes
+            // it, which also disables the generic swap fallback for copy_only.
+            return std::is_copy_assignable_v<A> == std::is_copy_assignable_v<B> && std::is_move_assignable_v<A> &&
+                   std::is_nothrow_move_assignable_v<A> && std::is_swappable_v<A> && std::is_nothrow_swappable_v<A> &&
+                   !member_swappable<A> && !member_swappable<B>;
         } else {
             return std::is_copy_assignable_v<A> == std::is_copy_assignable_v<B> &&
                    std::is_move_assignable_v<A> == std::is_move_assignable_v<B> &&
