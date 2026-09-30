@@ -4,6 +4,11 @@
 independent of the encoder, decoder, fmt, and nameof. The implementation stores
 the active value or error inline; payload types can still allocate internally.
 
+There is no small-object size threshold or heap fallback. Both alternatives
+share storage large enough for either payload, alongside a state flag and any
+alignment padding. Large payloads therefore increase the size of the expected
+object itself. `expected<void, E>` needs storage only for the error and state.
+
 ```cpp
 #include <cbor_tags/expected.h>
 #include <string>
@@ -55,8 +60,9 @@ payload can support that guarantee. A payload's throwing assignment or move can
 still modify that payload according to its own exception guarantee.
 
 The implementation includes the bool-conversion correction in
-[LWG 3836](https://cplusplus.github.io/LWG/issue3836) and uses unqualified internal
-storage for cv-qualified values as specified by
+[LWG 3836](https://cplusplus.github.io/LWG/issue3836), excludes `unexpect_t` from
+value construction per [LWG 4222](https://cplusplus.github.io/LWG/issue4222), and
+uses unqualified internal storage and transfers for cv-qualified values per
 [LWG 3891](https://cplusplus.github.io/LWG/issue3891). Public observers and
 assignment constraints retain the declared value type. GCC currently reports
 some defaulted moves that copy const members as nontrivial. Those combinations

@@ -47,8 +47,8 @@ struct invoke_value_t {};
 struct invoke_error_t {};
 
 // LWG 3891 permits unqualified storage, while public references retain T's cv.
-// For const T, a defaulted move must copy the value. Keeping that choice in a
-// member wrapper preserves trivial construction even when U's move is nontrivial.
+// A trivial move of const T can use its copy constructor. Keeping that choice
+// in a member wrapper preserves triviality even when U's move is nontrivial.
 template <typename T> struct value_storage {
     std::remove_cv_t<T> object;
     template <typename... Args>
@@ -67,6 +67,21 @@ struct value_storage<T> : value_storage<std::remove_const_t<T>> {
     using base::base;
     value_storage(const value_storage &) = default;
 };
+
+// State changes transfer the unqualified payload, not the wrapper's special
+// members. Public expected constructors still retain T's cv-qualified semantics.
+template <typename T> constexpr T                   &storage_object(T &object) noexcept { return object; }
+template <typename T> constexpr std::remove_cv_t<T> &storage_object(value_storage<T> &value) noexcept { return value.object; }
+template <typename T> using storage_object_t = std::remove_reference_t<decltype(impl::storage_object(std::declval<T &>()))>;
+
+template <typename T> constexpr void move_construct_storage(T *destination, T &source) noexcept(std::is_nothrow_move_constructible_v<T>) {
+    std::construct_at(destination, std::move(source));
+}
+template <typename T>
+constexpr void move_construct_storage(value_storage<T>    *destination,
+                                      std::remove_cv_t<T> &source) noexcept(std::is_nothrow_move_constructible_v<std::remove_cv_t<T>>) {
+    std::construct_at(destination, std::in_place, std::move(source));
+}
 
 template <typename T, typename E> union storage {
     value_storage<T> value;
@@ -95,11 +110,11 @@ template <typename T, typename E> union storage {
 // Restore the old union member if construction of its replacement throws.
 // Its move construction is known not to throw. This also works without exceptions.
 template <typename T> struct restore_on_failure {
-    T *destination;
-    T &saved;
+    T                   *destination;
+    storage_object_t<T> &saved;
     constexpr ~restore_on_failure() {
         if (destination)
-            std::construct_at(destination, std::move(saved));
+            impl::move_construct_storage(destination, saved);
     }
     constexpr void release() noexcept { destination = nullptr; }
 };
@@ -108,13 +123,13 @@ template <typename New, typename Old, typename... Args> constexpr void replace(N
     if constexpr (std::is_nothrow_constructible_v<New, Args...>) {
         std::destroy_at(std::addressof(previous));
         std::construct_at(std::addressof(target), std::forward<Args>(args)...);
-    } else if constexpr (std::is_nothrow_move_constructible_v<New>) {
+    } else if constexpr (std::is_nothrow_move_constructible_v<storage_object_t<New>>) {
         New next(std::forward<Args>(args)...);
         std::destroy_at(std::addressof(previous));
-        std::construct_at(std::addressof(target), std::move(next));
+        impl::move_construct_storage(std::addressof(target), impl::storage_object(next));
     } else {
-        static_assert(std::is_nothrow_move_constructible_v<Old>);
-        Old saved(std::move(previous));
+        static_assert(std::is_nothrow_move_constructible_v<storage_object_t<Old>>);
+        storage_object_t<Old> saved(std::move(impl::storage_object(previous)));
         std::destroy_at(std::addressof(previous));
         restore_on_failure<Old> restore{std::addressof(previous), saved};
         std::construct_at(std::addressof(target), std::forward<Args>(args)...);
@@ -368,7 +383,8 @@ template <typename T, typename E> class expected {
     }
     template <typename U = std::remove_cv_t<T>>
         requires(!std::is_same_v<std::remove_cvref_t<U>, expected> && !std::is_same_v<std::remove_cvref_t<U>, std::in_place_t> &&
-                 !impl::is_unexpected<std::remove_cvref_t<U>> && std::is_constructible_v<T, U> &&
+                 !std::is_same_v<std::remove_cvref_t<U>, unexpect_t> && !impl::is_unexpected<std::remove_cvref_t<U>> &&
+                 std::is_constructible_v<T, U> &&
                  (!std::is_same_v<std::remove_cv_t<T>, bool> || !impl::is_expected<std::remove_cvref_t<U>>))
     constexpr explicit(!std::is_convertible_v<U, T>) expected(U &&value) noexcept(std::is_nothrow_constructible_v<T, U>)
         : data_(std::in_place, std::forward<U>(value)), has_(true) {}
@@ -492,18 +508,18 @@ template <typename T, typename E> class expected {
                 E saved(std::move(other.data_.error));
                 std::destroy_at(std::addressof(other.data_.error));
                 impl::restore_on_failure<E> restore{std::addressof(other.data_.error), saved};
-                std::construct_at(std::addressof(other.data_.value), std::move(data_.value));
+                impl::move_construct_storage(std::addressof(other.data_.value), data_.value.object);
                 restore.release();
                 std::destroy_at(std::addressof(data_.value));
                 std::construct_at(std::addressof(data_.error), std::move(saved));
             } else {
-                impl::value_storage<T> saved(std::move(data_.value));
+                std::remove_cv_t<T> saved(std::move(data_.value.object));
                 std::destroy_at(std::addressof(data_.value));
                 impl::restore_on_failure<impl::value_storage<T>> restore{std::addressof(data_.value), saved};
                 std::construct_at(std::addressof(data_.error), std::move(other.data_.error));
                 restore.release();
                 std::destroy_at(std::addressof(other.data_.error));
-                std::construct_at(std::addressof(other.data_.value), std::move(saved));
+                impl::move_construct_storage(std::addressof(other.data_.value), saved);
             }
             has_       = false;
             other.has_ = true;
@@ -593,11 +609,15 @@ template <typename T, typename E> class expected {
     }
     template <typename G = E> constexpr E error_or(G &&fallback) const & {
         static_assert(std::is_copy_constructible_v<E> && std::is_convertible_v<G, E>);
-        return has_ ? static_cast<E>(std::forward<G>(fallback)) : data_.error;
+        if (has_)
+            return std::forward<G>(fallback);
+        return data_.error;
     }
     template <typename G = E> constexpr E error_or(G &&fallback) && {
         static_assert(std::is_move_constructible_v<E> && std::is_convertible_v<G, E>);
-        return has_ ? static_cast<E>(std::forward<G>(fallback)) : std::move(data_.error);
+        if (has_)
+            return std::forward<G>(fallback);
+        return std::move(data_.error);
     }
 
     template <typename F>
@@ -700,15 +720,19 @@ template <typename T, typename E> class expected {
     template <typename U, typename G>
         requires(!std::is_void_v<U>)
     friend constexpr bool operator==(const expected &left, const expected<U, G> &right) {
-        return left.has_ == right.has_value() && (left.has_ ? *left == *right : left.data_.error == right.error());
+        if (left.has_ != right.has_value())
+            return false;
+        if (left.has_)
+            return *left == *right;
+        return left.data_.error == right.error();
     }
     template <typename U>
         requires(!impl::is_expected<U> && !impl::is_unexpected<U>)
     friend constexpr bool operator==(const expected &left, const U &right) {
-        return left.has_ && *left == right;
+        return left.has_ && static_cast<bool>(*left == right);
     }
     template <typename G> friend constexpr bool operator==(const expected &left, const unexpected<G> &right) {
-        return !left.has_ && left.data_.error == right.error();
+        return !left.has_ && static_cast<bool>(left.data_.error == right.error());
     }
 };
 
@@ -890,11 +914,15 @@ class expected<T, E> {
     }
     template <typename G = E> constexpr E error_or(G &&fallback) const & {
         static_assert(std::is_copy_constructible_v<E> && std::is_convertible_v<G, E>);
-        return has_ ? static_cast<E>(std::forward<G>(fallback)) : data_.error;
+        if (has_)
+            return std::forward<G>(fallback);
+        return data_.error;
     }
     template <typename G = E> constexpr E error_or(G &&fallback) && {
         static_assert(std::is_move_constructible_v<E> && std::is_convertible_v<G, E>);
-        return has_ ? static_cast<E>(std::forward<G>(fallback)) : std::move(data_.error);
+        if (has_)
+            return std::forward<G>(fallback);
+        return std::move(data_.error);
     }
 
     template <typename F>
@@ -963,10 +991,10 @@ class expected<T, E> {
     template <typename U, typename G>
         requires std::is_void_v<U>
     friend constexpr bool operator==(const expected &left, const expected<U, G> &right) {
-        return left.has_ == right.has_value() && (left.has_ || left.data_.error == right.error());
+        return left.has_ == right.has_value() && (left.has_ || static_cast<bool>(left.data_.error == right.error()));
     }
     template <typename G> friend constexpr bool operator==(const expected &left, const unexpected<G> &right) {
-        return !left.has_ && left.data_.error == right.error();
+        return !left.has_ && static_cast<bool>(left.data_.error == right.error());
     }
 };
 
