@@ -61,7 +61,55 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal")
+# Expected is a standalone value/error abstraction; keep its tests separate from
+# codec roundtrips and CBOR wire fixtures.
+add_test(NAME expected_contract COMMAND tests "--test-suite=expected/contract")
+set_tests_properties(expected_contract PROPERTIES LABELS "expected")
+
+function(add_expected_compile_fail CASE DIAGNOSTIC)
+  string(TOLOWER "expected_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL expected_compile_fail.cc)
+  target_include_directories(${TEST_NAME} PRIVATE "${PROJECT_SOURCE_DIR}/../include")
+  target_compile_features(${TEST_NAME} PRIVATE cxx_std_20)
+  target_compile_definitions(${TEST_NAME} PRIVATE EXPECTED_${CASE})
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "expected;compile-fail")
+endfunction()
+foreach(CASE REFERENCE ARRAY TAG)
+  add_expected_compile_fail(INVALID_VALUE_${CASE} "expected requires a non-array object or void value type")
+endforeach()
+foreach(CASE CONST VOID UNEXPECTED)
+  add_expected_compile_fail(INVALID_ERROR_${CASE} "expected requires a valid unexpected error type")
+endforeach()
+add_expected_compile_fail(INVALID_UNEXPECTED_REFERENCE "unexpected requires an unqualified non-array object error type")
+add_expected_compile_fail(AND_THEN_NOT_EXPECTED "and_then must return an expected")
+add_expected_compile_fail(AND_THEN_ERROR_TYPE "and_then must preserve the error type")
+add_expected_compile_fail(OR_ELSE_VALUE_TYPE "or_else must preserve the value type")
+add_expected_compile_fail(TRANSFORM_REFERENCE "transform must produce a valid expected value type")
+add_expected_compile_fail(TRANSFORM_ERROR_VOID "transform_error must produce a valid error type")
+add_expected_compile_fail(VALUE_MOVE_ONLY_ERROR "value requires a copy-constructible error type")
+
+# Deliberately use only source includes: this also checks the standalone public
+# header with no generated config, linked dependencies, or C++23 library support.
+add_executable(test_expected_no_exceptions expected_no_exceptions.cc)
+target_include_directories(test_expected_no_exceptions PRIVATE "${PROJECT_SOURCE_DIR}/../include")
+set_target_properties(test_expected_no_exceptions PROPERTIES CXX_STANDARD 20 CXX_EXTENSIONS OFF)
+if(MSVC)
+  target_compile_options(test_expected_no_exceptions PRIVATE /EHs-c-)
+  target_compile_definitions(test_expected_no_exceptions PRIVATE _HAS_EXCEPTIONS=0)
+else()
+  target_compile_options(test_expected_no_exceptions PRIVATE -fno-exceptions)
+endif()
+add_dependencies(tests test_expected_no_exceptions)
+add_test(NAME expected_no_exceptions COMMAND test_expected_no_exceptions)
+add_test(NAME expected_no_exceptions_terminate COMMAND ${CMAKE_COMMAND}
+  "-DPROGRAM=$<TARGET_FILE:test_expected_no_exceptions>" "-DMSVC_NO_EXCEPTIONS=${MSVC}"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/expected_no_exceptions.cmake")
+set_tests_properties(expected_no_exceptions expected_no_exceptions_terminate PROPERTIES LABELS "expected")
+
 add_test(NAME aggregate_decode_wire COMMAND tests "--test-suite=cbor_wire/aggregate_decode")
 set_tests_properties(aggregate_decode_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME aggregate_decode_roundtrip COMMAND tests "--test-suite=roundtrip/aggregate_decode")
@@ -132,6 +180,8 @@ if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
     "#include <expected>\nint main() { std::expected<int, int> value; return *value; }"
     CBOR_TAGS_TEST_HAS_STD_EXPECTED)
   if(CBOR_TAGS_TEST_HAS_STD_EXPECTED)
+    add_test(NAME expected_std_parity COMMAND tests "--test-suite=expected/std_parity")
+    set_tests_properties(expected_std_parity PROPERTIES LABELS "expected")
     add_test(NAME std_expected_wire COMMAND tests "--test-suite=cbor_wire/std_expected")
     set_tests_properties(std_expected_wire PROPERTIES LABELS "cbor-wire")
     add_test(NAME std_expected_roundtrip COMMAND tests "--test-suite=roundtrip/std_expected")

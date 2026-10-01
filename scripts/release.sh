@@ -320,7 +320,6 @@ if len(package_license_ids) != 1:
 package_license_id = package_license_ids[0]
 
 expected_dependencies = {
-    "tl-expected:tl::expected": "urn:tl-expected:tl::expected#Package",
     "fmt:fmt": "urn:fmt:fmt#Package",
     "nameof:nameof": "urn:nameof:nameof#Package",
 }
@@ -635,8 +634,7 @@ run_source_consumer() {
         -DCPM_SOURCE_CACHE="${repo_root}/build/cpm_cache" \
         -DCBOR_TAGS_BUILD_EXAMPLES=ON \
         -DCBOR_TAGS_BUILD_TESTS=OFF \
-        -DCBOR_TAGS_INSTALL=OFF \
-        -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON
+        -DCBOR_TAGS_INSTALL=OFF
     cmake --build "${consumer_build_dir}" --parallel
     "${consumer_build_dir}/examples/cbor_tags_basic_roundtrip"
 }
@@ -820,7 +818,6 @@ build_release() {
         -DCPM_SOURCE_CACHE="${repo_root}/build/cpm_cache" \
         -DCBOR_TAGS_BUILD_TESTS=OFF \
         -DCBOR_TAGS_INSTALL=ON \
-        -DCBOR_TAGS_USE_SYSTEM_EXPECTED=ON \
         -DCBOR_TAGS_ENABLE_CPACK=OFF \
         -DCBOR_TAGS_ENABLE_SBOM=ON \
         -DCMAKE_EXPERIMENTAL_GENERATE_SBOM="${sbom_experimental_value}"

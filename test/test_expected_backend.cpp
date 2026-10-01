@@ -13,7 +13,7 @@
 #if CBOR_TAGS_USE_STD_EXPECTED
 #include <expected>
 #else
-#include <tl/expected.hpp>
+#include <cbor_tags/detail/expected.h>
 #endif
 
 using namespace cbor::tags;
@@ -94,10 +94,10 @@ template <typename T> inline constexpr bool             is_configured_unexpected
 template <typename T, typename E> inline constexpr bool is_configured_expected_v<std::expected<T, E>>  = true;
 template <typename E> inline constexpr bool             is_configured_unexpected_v<std::unexpected<E>> = true;
 #else
-template <typename T> inline constexpr bool             is_configured_expected_v                      = false;
-template <typename T> inline constexpr bool             is_configured_unexpected_v                    = false;
-template <typename T, typename E> inline constexpr bool is_configured_expected_v<tl::expected<T, E>>  = true;
-template <typename E> inline constexpr bool             is_configured_unexpected_v<tl::unexpected<E>> = true;
+template <typename T> inline constexpr bool             is_configured_expected_v                                                    = false;
+template <typename T> inline constexpr bool             is_configured_unexpected_v                                                  = false;
+template <typename T, typename E> inline constexpr bool is_configured_expected_v<cbor::tags::detail::expected_impl::expected<T, E>> = true;
+template <typename E> inline constexpr bool             is_configured_unexpected_v<cbor::tags::detail::expected_impl::unexpected<E>> = true;
 #endif
 
 } // namespace

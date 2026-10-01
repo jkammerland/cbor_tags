@@ -18,7 +18,7 @@
 #if CBOR_TAGS_USE_STD_EXPECTED
 #include <expected>
 #else
-#include <tl/expected.hpp>
+#include <cbor_tags/detail/expected.h>
 #endif
 
 enum class PackageColor : std::uint8_t { red = 1, blue = 2 };
@@ -34,7 +34,8 @@ int main() {
 #if CBOR_TAGS_USE_STD_EXPECTED
     static_assert(std::is_same_v<cbor::tags::expected<void, cbor::tags::status_code>, std::expected<void, cbor::tags::status_code>>);
 #else
-    static_assert(std::is_same_v<cbor::tags::expected<void, cbor::tags::status_code>, tl::expected<void, cbor::tags::status_code>>);
+    static_assert(std::is_same_v<cbor::tags::expected<void, cbor::tags::status_code>,
+                                 cbor::tags::detail::expected_impl::expected<void, cbor::tags::status_code>>);
 #endif
 
     {

@@ -37,8 +37,6 @@ class CborTagsConan(ConanFile):
             return
         self.requires("fmt/[>=11.0.2 <12]")
         self.requires("nameof/0.10.4")
-        if not self.options.std_expected:
-            self.requires("tl-expected/1.1.0")
         if self.options.boost_pfr_names:
             self.requires("boost/[>=1.84.0 <2]")
         if self.options.magic_enum_names:
@@ -79,7 +77,6 @@ class CborTagsConan(ConanFile):
         tc.variables["CBOR_TAGS_INSTALL"] = "ON"
         tc.variables["CBOR_TAGS_STL_ONLY"] = "ON" if self.options.stl_only else "OFF"
         tc.variables["CBOR_TAGS_USE_STD_EXPECTED"] = "ON" if (self.options.std_expected or self.options.stl_only) else "OFF"
-        tc.variables["CBOR_TAGS_USE_SYSTEM_EXPECTED"] = "OFF" if (self.options.std_expected or self.options.stl_only) else "ON"
         tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.variables["CBOR_TAGS_USE_MAGIC_ENUM_NAMES"] = "ON" if self.options.magic_enum_names else "OFF"
         tc.generate()
@@ -102,8 +99,6 @@ class CborTagsConan(ConanFile):
         self.cpp_info.requires = []
         if not self.options.stl_only:
             self.cpp_info.requires.extend(["fmt::fmt", "nameof::nameof"])
-        if not self.options.std_expected and not self.options.stl_only:
-            self.cpp_info.requires.append("tl-expected::expected")
         if self.options.boost_pfr_names and not self.options.stl_only:
             self.cpp_info.requires.append("boost::headers")
         if self.options.magic_enum_names and not self.options.stl_only:
