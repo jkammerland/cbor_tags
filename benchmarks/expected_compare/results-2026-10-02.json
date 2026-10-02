@@ -1,0 +1,1425 @@
+{
+  "date": "2026-10-02",
+  "source_commit": "445bd0a6002bb8348be86c4eb5c57d40c3a1e936",
+  "cpu": "AMD Ryzen 9 7950X",
+  "compilers": {
+    "/usr/bin/g++": "g++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+    "/usr/bin/clang++": "clang version 22.1.8 (Fedora 22.1.8-4.fc44)\nTarget: x86_64-redhat-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin\nConfiguration file: /etc/clang/x86_64-redhat-linux-gnu-clang++.cfg\n"
+  },
+  "tl_header_sha256": "0788f7d544a2fdec1dd7a794e1e9863ad4cc6a8817982b6fd93fd98724b9fa19",
+  "method": "C++20, -O3 runtime across four section placements and five alternating paired rounds; size at -O2/-O3/-Os. Shared host with powersave and boost.",
+  "size": {
+    "gcc-O2-ours": {
+      "object": {
+        "code": 6838,
+        "rodata": 2643,
+        "unwind": 1459
+      },
+      "linked": {
+        "code": 8148,
+        "rodata": 2864,
+        "unwind": 2042
+      },
+      "stripped_file_bytes": 27512,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 212,
+        "cmp_decode_integers": 99,
+        "cmp_decode_truncated": 276,
+        "cmp_encode_integers": 236,
+        "cmp_monadic_chain": 83,
+        "cmp_scalar_assignment": 171,
+        "cmp_scalar_return": 83,
+        "cmp_string_return": 176,
+        "cmp_string_transition": 1162,
+        "cmp_void_materialized": 102
+      },
+      "expected_only": {
+        "object": {
+          "code": 2322,
+          "rodata": 286,
+          "unwind": 551
+        },
+        "linked": {
+          "code": 2956,
+          "rodata": 344,
+          "unwind": 860
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_1L13scalar_resultEmb": 24,
+          "_ZN12_GLOBAL__N_1L13string_resultEmb": 140,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED0Ev": 40,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED1Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED2Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED0Ev": 40,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED1Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED2Ev": 12,
+          "_ZNK4cbor4tags6detail13expected_impl19bad_expected_accessIvE4whatEv": 6,
+          "cmp_checked_value": 212,
+          "cmp_monadic_chain": 83,
+          "cmp_scalar_assignment": 171,
+          "cmp_scalar_return": 83,
+          "cmp_string_return": 176,
+          "cmp_string_transition": 1162,
+          "cmp_void_materialized": 102
+        },
+        "object_sha256": "f9086e2e77a2d1c59122f6bd30305f61fcbbf98dde0e75cb036a9ae2b53bc0f5",
+        "executable_sha256": "994fe04c45c34d8f86d0b1e24c7a575ba451a7c5b86facfa9319a65ae8b6ef69"
+      }
+    },
+    "gcc-O2-tl": {
+      "object": {
+        "code": 6868,
+        "rodata": 2575,
+        "unwind": 1459
+      },
+      "linked": {
+        "code": 8180,
+        "rodata": 2752,
+        "unwind": 2034
+      },
+      "stripped_file_bytes": 27512,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 222,
+        "cmp_decode_integers": 99,
+        "cmp_decode_truncated": 74,
+        "cmp_encode_integers": 236,
+        "cmp_monadic_chain": 99,
+        "cmp_scalar_assignment": 139,
+        "cmp_scalar_return": 99,
+        "cmp_string_return": 176,
+        "cmp_string_transition": 1131,
+        "cmp_void_materialized": 102
+      },
+      "expected_only": {
+        "object": {
+          "code": 2312,
+          "rodata": 138,
+          "unwind": 511
+        },
+        "linked": {
+          "code": 2934,
+          "rodata": 184,
+          "unwind": 804
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_1L13scalar_resultEmb": 69,
+          "_ZN12_GLOBAL__N_1L13string_resultEmb": 156,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED0Ev": 40,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED1Ev": 12,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED2Ev": 12,
+          "_ZNK2tl19bad_expected_accessIN4cbor4tags11status_codeEE4whatEv": 6,
+          "cmp_checked_value": 222,
+          "cmp_monadic_chain": 99,
+          "cmp_scalar_assignment": 139,
+          "cmp_scalar_return": 99,
+          "cmp_string_return": 176,
+          "cmp_string_transition": 1131,
+          "cmp_void_materialized": 102
+        },
+        "object_sha256": "78d06d023e33e6482c47bc70b4dcd819e508190233484f156b352d83a32cd3d3",
+        "executable_sha256": "e4916fc52259ed1cfe7ba42a272a80e6651c6d6f306900521c2747fac553bb0a"
+      }
+    },
+    "gcc-O3-ours": {
+      "object": {
+        "code": 9341,
+        "rodata": 2571,
+        "unwind": 1226
+      },
+      "linked": {
+        "code": 10519,
+        "rodata": 2768,
+        "unwind": 1667
+      },
+      "stripped_file_bytes": 23400,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 212,
+        "cmp_decode_integers": 1886,
+        "cmp_decode_truncated": 510,
+        "cmp_encode_integers": 3277,
+        "cmp_monadic_chain": 107,
+        "cmp_scalar_assignment": 187,
+        "cmp_scalar_return": 83,
+        "cmp_string_return": 176,
+        "cmp_string_transition": 1153,
+        "cmp_void_materialized": 102
+      },
+      "expected_only": {
+        "object": {
+          "code": 2354,
+          "rodata": 286,
+          "unwind": 558
+        },
+        "linked": {
+          "code": 2908,
+          "rodata": 344,
+          "unwind": 860
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_1L13scalar_resultEmb": 24,
+          "_ZN12_GLOBAL__N_1L13string_resultEmb": 140,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED0Ev": 40,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED1Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED2Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED0Ev": 40,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED1Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED2Ev": 12,
+          "_ZNK4cbor4tags6detail13expected_impl19bad_expected_accessIvE4whatEv": 6,
+          "cmp_checked_value": 212,
+          "cmp_monadic_chain": 107,
+          "cmp_scalar_assignment": 187,
+          "cmp_scalar_return": 83,
+          "cmp_string_return": 176,
+          "cmp_string_transition": 1153,
+          "cmp_void_materialized": 102
+        },
+        "object_sha256": "599b3f5e46aff9d3914c735347c3154ccdacbc95e820fcb8145ce201c2e7aa19",
+        "executable_sha256": "7f66096689942080b5bcc2c44a587aed5a5eea57ea929101fd6b538d2a901594"
+      }
+    },
+    "gcc-O3-tl": {
+      "object": {
+        "code": 9345,
+        "rodata": 2503,
+        "unwind": 1195
+      },
+      "linked": {
+        "code": 10511,
+        "rodata": 2688,
+        "unwind": 1619
+      },
+      "stripped_file_bytes": 23400,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 222,
+        "cmp_decode_integers": 1874,
+        "cmp_decode_truncated": 502,
+        "cmp_encode_integers": 3293,
+        "cmp_monadic_chain": 123,
+        "cmp_scalar_assignment": 147,
+        "cmp_scalar_return": 115,
+        "cmp_string_return": 176,
+        "cmp_string_transition": 1140,
+        "cmp_void_materialized": 94
+      },
+      "expected_only": {
+        "object": {
+          "code": 2360,
+          "rodata": 138,
+          "unwind": 527
+        },
+        "linked": {
+          "code": 2902,
+          "rodata": 184,
+          "unwind": 812
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_1L13scalar_resultEmb": 69,
+          "_ZN12_GLOBAL__N_1L13string_resultEmb": 156,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED0Ev": 40,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED1Ev": 12,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED2Ev": 12,
+          "_ZNK2tl19bad_expected_accessIN4cbor4tags11status_codeEE4whatEv": 6,
+          "cmp_checked_value": 222,
+          "cmp_monadic_chain": 123,
+          "cmp_scalar_assignment": 147,
+          "cmp_scalar_return": 115,
+          "cmp_string_return": 176,
+          "cmp_string_transition": 1140,
+          "cmp_void_materialized": 94
+        },
+        "object_sha256": "4c823a7a2d1d7e578e45c30eaa96ef11318b1ef415bd857b212acad28df2b871",
+        "executable_sha256": "d9faca441230528cbf3f784ebc4201848233d98d0e729f3d69cdab91535d40df"
+      }
+    },
+    "gcc-Os-ours": {
+      "object": {
+        "code": 4391,
+        "rodata": 2554,
+        "unwind": 1592
+      },
+      "linked": {
+        "code": 5445,
+        "rodata": 2704,
+        "unwind": 2170
+      },
+      "stripped_file_bytes": 23432,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 138,
+        "cmp_decode_integers": 87,
+        "cmp_decode_truncated": 72,
+        "cmp_encode_integers": 79,
+        "cmp_monadic_chain": 83,
+        "cmp_scalar_assignment": 118,
+        "cmp_scalar_return": 57,
+        "cmp_string_return": 101,
+        "cmp_string_transition": 363,
+        "cmp_void_materialized": 64
+      },
+      "expected_only": {
+        "object": {
+          "code": 1187,
+          "rodata": 286,
+          "unwind": 578
+        },
+        "linked": {
+          "code": 1739,
+          "rodata": 312,
+          "unwind": 894
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_1L13scalar_resultEmb": 21,
+          "_ZN12_GLOBAL__N_1L13string_resultEmb": 94,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED0Ev": 23,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED1Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED2Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED0Ev": 23,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED1Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessIvED2Ev": 12,
+          "_ZN4cbor4tags6detail13expected_impl8expectedINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_11status_codeEE7destroyEv": 12,
+          "_ZNK4cbor4tags6detail13expected_impl19bad_expected_accessIvE4whatEv": 6,
+          "cmp_checked_value": 138,
+          "cmp_monadic_chain": 83,
+          "cmp_scalar_assignment": 118,
+          "cmp_scalar_return": 57,
+          "cmp_string_return": 101,
+          "cmp_string_transition": 363,
+          "cmp_void_materialized": 64
+        },
+        "object_sha256": "de9faa7147f4c22dffb2574f01ed174b2218c8913192ce03401fbb9236e2d38d",
+        "executable_sha256": "af606122fcd0d1d41e41d228fe532952e0fcb84d46c92a3a7a03862884f12442"
+      }
+    },
+    "gcc-Os-tl": {
+      "object": {
+        "code": 4482,
+        "rodata": 2486,
+        "unwind": 1528
+      },
+      "linked": {
+        "code": 5537,
+        "rodata": 2624,
+        "unwind": 2090
+      },
+      "stripped_file_bytes": 23432,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 154,
+        "cmp_decode_integers": 87,
+        "cmp_decode_truncated": 72,
+        "cmp_encode_integers": 79,
+        "cmp_monadic_chain": 133,
+        "cmp_scalar_assignment": 100,
+        "cmp_scalar_return": 84,
+        "cmp_string_return": 101,
+        "cmp_string_transition": 373,
+        "cmp_void_materialized": 62
+      },
+      "expected_only": {
+        "object": {
+          "code": 1290,
+          "rodata": 138,
+          "unwind": 522
+        },
+        "linked": {
+          "code": 1841,
+          "rodata": 152,
+          "unwind": 822
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_1L13scalar_resultEmb": 51,
+          "_ZN12_GLOBAL__N_1L13string_resultEmb": 99,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED0Ev": 23,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED1Ev": 12,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED2Ev": 12,
+          "_ZN2tl6detail21expected_storage_baseINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEN4cbor4tags11status_codeELb0ELb1EED1Ev": 12,
+          "_ZN2tl6detail21expected_storage_baseINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEN4cbor4tags11status_codeELb0ELb1EED2Ev": 12,
+          "_ZNK2tl19bad_expected_accessIN4cbor4tags11status_codeEE4whatEv": 6,
+          "cmp_checked_value": 154,
+          "cmp_monadic_chain": 133,
+          "cmp_scalar_assignment": 100,
+          "cmp_scalar_return": 84,
+          "cmp_string_return": 101,
+          "cmp_string_transition": 373,
+          "cmp_void_materialized": 62
+        },
+        "object_sha256": "db862db9c185787e3a2064047e6ed9de7a446a623b4505f7ce4e82cee2106fa4",
+        "executable_sha256": "01c2d2b5d6d4e91f1623bb788757defda7fdfcb6e379c906aeb5a82c3d462f3f"
+      }
+    },
+    "clang-O2-ours": {
+      "object": {
+        "code": 6718,
+        "rodata": 2440,
+        "unwind": 1768
+      },
+      "linked": {
+        "code": 8141,
+        "rodata": 2544,
+        "unwind": 2360
+      },
+      "stripped_file_bytes": 27544,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 151,
+        "cmp_decode_integers": 99,
+        "cmp_decode_truncated": 84,
+        "cmp_encode_integers": 86,
+        "cmp_monadic_chain": 153,
+        "cmp_scalar_assignment": 180,
+        "cmp_scalar_return": 81,
+        "cmp_string_return": 134,
+        "cmp_string_transition": 623,
+        "cmp_void_materialized": 87
+      },
+      "expected_only": {
+        "object": {
+          "code": 1713,
+          "rodata": 246,
+          "unwind": 640
+        },
+        "linked": {
+          "code": 2287,
+          "rodata": 255,
+          "unwind": 924
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_113scalar_resultEmb": 17,
+          "_ZN12_GLOBAL__N_113string_resultB5cxx11Emb": 134,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED0Ev": 23,
+          "_ZN4cbor4tags6detail13expected_impl4impl10bad_accessINS0_11status_codeERKS5_EEvOT0_": 45,
+          "_ZNK4cbor4tags6detail13expected_impl19bad_expected_accessIvE4whatEv": 6,
+          "cmp_checked_value": 151,
+          "cmp_monadic_chain": 153,
+          "cmp_scalar_assignment": 180,
+          "cmp_scalar_return": 81,
+          "cmp_string_return": 134,
+          "cmp_string_transition": 623,
+          "cmp_void_materialized": 87
+        },
+        "object_sha256": "95232d862f71425905392b7117fe45301174420bd430ed97aae280875726abb4",
+        "executable_sha256": "a65f67185bdba643de9fa2b1a73e917b3092c0207def063e11caaf971fd96ec3"
+      }
+    },
+    "clang-O2-tl": {
+      "object": {
+        "code": 6579,
+        "rodata": 2332,
+        "unwind": 1732
+      },
+      "linked": {
+        "code": 7997,
+        "rodata": 2432,
+        "unwind": 2316
+      },
+      "stripped_file_bytes": 23448,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 159,
+        "cmp_decode_integers": 99,
+        "cmp_decode_truncated": 84,
+        "cmp_encode_integers": 86,
+        "cmp_monadic_chain": 153,
+        "cmp_scalar_assignment": 106,
+        "cmp_scalar_return": 81,
+        "cmp_string_return": 134,
+        "cmp_string_transition": 594,
+        "cmp_void_materialized": 87
+      },
+      "expected_only": {
+        "object": {
+          "code": 1580,
+          "rodata": 138,
+          "unwind": 604
+        },
+        "linked": {
+          "code": 2151,
+          "rodata": 140,
+          "unwind": 880
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_113scalar_resultEmb": 17,
+          "_ZN12_GLOBAL__N_113string_resultB5cxx11Emb": 134,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED0Ev": 23,
+          "_ZNK2tl19bad_expected_accessIN4cbor4tags11status_codeEE4whatEv": 6,
+          "cmp_checked_value": 159,
+          "cmp_monadic_chain": 153,
+          "cmp_scalar_assignment": 106,
+          "cmp_scalar_return": 81,
+          "cmp_string_return": 134,
+          "cmp_string_transition": 594,
+          "cmp_void_materialized": 87
+        },
+        "object_sha256": "b0256133440d0f1bf2ade3b7ee8df8f3b0bef963a6cb715e2aafefd3b19e7cdc",
+        "executable_sha256": "377049175ca496b5f4544dc97ed363d3a4cc7a746206cec34a10ee42eb6e94b6"
+      }
+    },
+    "clang-O3-ours": {
+      "object": {
+        "code": 6729,
+        "rodata": 2440,
+        "unwind": 1888
+      },
+      "linked": {
+        "code": 8189,
+        "rodata": 2544,
+        "unwind": 2488
+      },
+      "stripped_file_bytes": 27544,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 151,
+        "cmp_decode_integers": 103,
+        "cmp_decode_truncated": 84,
+        "cmp_encode_integers": 90,
+        "cmp_monadic_chain": 153,
+        "cmp_scalar_assignment": 180,
+        "cmp_scalar_return": 81,
+        "cmp_string_return": 134,
+        "cmp_string_transition": 257,
+        "cmp_void_materialized": 87
+      },
+      "expected_only": {
+        "object": {
+          "code": 1713,
+          "rodata": 246,
+          "unwind": 720
+        },
+        "linked": {
+          "code": 2287,
+          "rodata": 255,
+          "unwind": 1012
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_113scalar_resultEmb": 17,
+          "_ZN12_GLOBAL__N_113string_resultB5cxx11Emb": 131,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED0Ev": 23,
+          "_ZN4cbor4tags6detail13expected_impl4impl10bad_accessINS0_11status_codeERKS5_EEvOT0_": 45,
+          "_ZN4cbor4tags6detail13expected_impl8expectedINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_11status_codeEEaSEOSB_Qaaaaaaaasr3stdE23is_move_constructible_vIT_Esr3stdE20is_move_assignable_vISD_Esr3stdE23is_move_constructible_vIT0_Esr3stdE20is_move_assignable_vISE_Eoosr3stdE31is_nothrow_move_constructible_vISD_Esr3stdE31is_nothrow_move_constructible_vISE_E": 352,
+          "_ZNK4cbor4tags6detail13expected_impl19bad_expected_accessIvE4whatEv": 6,
+          "cmp_checked_value": 151,
+          "cmp_monadic_chain": 153,
+          "cmp_scalar_assignment": 180,
+          "cmp_scalar_return": 81,
+          "cmp_string_return": 134,
+          "cmp_string_transition": 257,
+          "cmp_void_materialized": 87
+        },
+        "object_sha256": "08dedcd0873ac37b1ab735b56d59e5b3bfc90731d391eeaad5f03191e86a0242",
+        "executable_sha256": "920b5eeb6ee272491eb0b0345ea92cc1ec166ad804fe91cc1cc6f3fdb6fa16db"
+      }
+    },
+    "clang-O3-tl": {
+      "object": {
+        "code": 6590,
+        "rodata": 2332,
+        "unwind": 1772
+      },
+      "linked": {
+        "code": 8045,
+        "rodata": 2432,
+        "unwind": 2356
+      },
+      "stripped_file_bytes": 23448,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 159,
+        "cmp_decode_integers": 103,
+        "cmp_decode_truncated": 84,
+        "cmp_encode_integers": 90,
+        "cmp_monadic_chain": 153,
+        "cmp_scalar_assignment": 106,
+        "cmp_scalar_return": 81,
+        "cmp_string_return": 134,
+        "cmp_string_transition": 594,
+        "cmp_void_materialized": 87
+      },
+      "expected_only": {
+        "object": {
+          "code": 1580,
+          "rodata": 138,
+          "unwind": 604
+        },
+        "linked": {
+          "code": 2151,
+          "rodata": 140,
+          "unwind": 880
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_113scalar_resultEmb": 17,
+          "_ZN12_GLOBAL__N_113string_resultB5cxx11Emb": 131,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED0Ev": 23,
+          "_ZNK2tl19bad_expected_accessIN4cbor4tags11status_codeEE4whatEv": 6,
+          "cmp_checked_value": 159,
+          "cmp_monadic_chain": 153,
+          "cmp_scalar_assignment": 106,
+          "cmp_scalar_return": 81,
+          "cmp_string_return": 134,
+          "cmp_string_transition": 594,
+          "cmp_void_materialized": 87
+        },
+        "object_sha256": "3e5afd589736857efb8c071fd70ffba64d0b30d1e0fc6a5b6b82db3bb316355a",
+        "executable_sha256": "5758791e874e830879a1f9bf8fda64e1972cf2c54c3873ec94759237b81e9ee7"
+      }
+    },
+    "clang-Os-ours": {
+      "object": {
+        "code": 4733,
+        "rodata": 2664,
+        "unwind": 2252
+      },
+      "linked": {
+        "code": 6227,
+        "rodata": 2800,
+        "unwind": 3140
+      },
+      "stripped_file_bytes": 23488,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 137,
+        "cmp_decode_integers": 96,
+        "cmp_decode_truncated": 70,
+        "cmp_encode_integers": 82,
+        "cmp_monadic_chain": 154,
+        "cmp_scalar_assignment": 161,
+        "cmp_scalar_return": 72,
+        "cmp_string_return": 133,
+        "cmp_string_transition": 250,
+        "cmp_void_materialized": 72
+      },
+      "expected_only": {
+        "object": {
+          "code": 1526,
+          "rodata": 246,
+          "unwind": 832
+        },
+        "linked": {
+          "code": 2059,
+          "rodata": 288,
+          "unwind": 1156
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_113scalar_resultEmb": 17,
+          "_ZN12_GLOBAL__N_113string_resultB5cxx11Emb": 159,
+          "_ZN4cbor4tags6detail13expected_impl19bad_expected_accessINS0_11status_codeEED0Ev": 23,
+          "_ZN4cbor4tags6detail13expected_impl4impl10bad_accessINS0_11status_codeERKS5_EEvOT0_": 44,
+          "_ZN4cbor4tags6detail13expected_impl8expectedINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_11status_codeEE12assign_errorISA_EEvOT_": 63,
+          "_ZN4cbor4tags6detail13expected_impl8expectedINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_11status_codeEE12assign_valueIS9_EEvOT_": 113,
+          "_ZN4cbor4tags6detail13expected_impl8expectedINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_11status_codeEEaSEOSB_Qaaaaaaaasr3stdE23is_move_constructible_vIT_Esr3stdE20is_move_assignable_vISD_Esr3stdE23is_move_constructible_vIT0_Esr3stdE20is_move_assignable_vISE_Eoosr3stdE31is_nothrow_move_constructible_vISD_Esr3stdE31is_nothrow_move_constructible_vISE_E": 41,
+          "_ZNK4cbor4tags6detail13expected_impl19bad_expected_accessIvE4whatEv": 6,
+          "__clang_call_terminate": 11,
+          "cmp_checked_value": 137,
+          "cmp_monadic_chain": 154,
+          "cmp_scalar_assignment": 161,
+          "cmp_scalar_return": 72,
+          "cmp_string_return": 133,
+          "cmp_string_transition": 250,
+          "cmp_void_materialized": 72
+        },
+        "object_sha256": "4f0c8a1274fb846731ac5e31372be1891faeaf64beb2e18c471ab4b89d711857",
+        "executable_sha256": "a3c5de0943f9b14b43ae36136964a9999c008c31ec1c2ef93d62529a636a3434"
+      }
+    },
+    "clang-Os-tl": {
+      "object": {
+        "code": 4681,
+        "rodata": 2556,
+        "unwind": 2224
+      },
+      "linked": {
+        "code": 6171,
+        "rodata": 2688,
+        "unwind": 3104
+      },
+      "stripped_file_bytes": 23488,
+      "exported_kernel_bytes": {
+        "cmp_checked_value": 130,
+        "cmp_decode_integers": 96,
+        "cmp_decode_truncated": 70,
+        "cmp_encode_integers": 82,
+        "cmp_monadic_chain": 154,
+        "cmp_scalar_assignment": 106,
+        "cmp_scalar_return": 72,
+        "cmp_string_return": 133,
+        "cmp_string_transition": 250,
+        "cmp_void_materialized": 72
+      },
+      "expected_only": {
+        "object": {
+          "code": 1465,
+          "rodata": 138,
+          "unwind": 804
+        },
+        "linked": {
+          "code": 1996,
+          "rodata": 176,
+          "unwind": 1120
+        },
+        "object_symbols": {
+          "_ZN12_GLOBAL__N_113scalar_resultEmb": 17,
+          "_ZN12_GLOBAL__N_113string_resultB5cxx11Emb": 159,
+          "_ZN2tl19bad_expected_accessIN4cbor4tags11status_codeEED0Ev": 23,
+          "_ZN2tl6detail24expected_operations_baseINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEN4cbor4tags11status_codeEE13assign_commonISB_EEvOT_": 92,
+          "_ZN2tl6detail24expected_operations_baseINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEN4cbor4tags11status_codeEE6assignIS7_TnPNSt9enable_ifIXsr3std29is_nothrow_move_constructibleIT_EE5valueEvE4typeELPv0EEEvOSB_": 124,
+          "_ZNK2tl19bad_expected_accessIN4cbor4tags11status_codeEE4whatEv": 6,
+          "_ZNR2tl8expectedImN4cbor4tags11status_codeEE5valueImTnPNSt9enable_ifIXntsr3std7is_voidIT_EE5valueEvE4typeELPv0EEERS7_v": 55,
+          "__clang_call_terminate": 11,
+          "cmp_checked_value": 130,
+          "cmp_monadic_chain": 154,
+          "cmp_scalar_assignment": 106,
+          "cmp_scalar_return": 72,
+          "cmp_string_return": 133,
+          "cmp_string_transition": 250,
+          "cmp_void_materialized": 72
+        },
+        "object_sha256": "2567046e3f6689e9e38715bd2148fd3aec935e8fefb888f9b6598791aed0414d",
+        "executable_sha256": "10c8b9b36997a04212fd6f790b8382e724a42a65b5f3d37fefb5cefb8e098acc"
+      }
+    }
+  },
+  "object_layout": {
+    "gcc": {
+      "ours": [
+        {
+          "type": "void/u8",
+          "sizeof": "2",
+          "alignof": "1",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u64",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "string/u8",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "string/string",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "array64/u8",
+          "sizeof": "72",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "aligned128/u8",
+          "sizeof": "192",
+          "alignof": "64",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "unique_ptr/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        }
+      ],
+      "tl": [
+        {
+          "type": "void/u8",
+          "sizeof": "2",
+          "alignof": "1",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u64",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "string/u8",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "string/string",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "array64/u8",
+          "sizeof": "72",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "aligned128/u8",
+          "sizeof": "192",
+          "alignof": "64",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "unique_ptr/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        }
+      ]
+    },
+    "clang": {
+      "ours": [
+        {
+          "type": "void/u8",
+          "sizeof": "2",
+          "alignof": "1",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u64",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "string/u8",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "string/string",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "array64/u8",
+          "sizeof": "72",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "aligned128/u8",
+          "sizeof": "192",
+          "alignof": "64",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "unique_ptr/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        }
+      ],
+      "tl": [
+        {
+          "type": "void/u8",
+          "sizeof": "2",
+          "alignof": "1",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "u64/u64",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "string/u8",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "string/string",
+          "sizeof": "40",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        },
+        {
+          "type": "array64/u8",
+          "sizeof": "72",
+          "alignof": "8",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "aligned128/u8",
+          "sizeof": "192",
+          "alignof": "64",
+          "trivial_copy_ctor": "1",
+          "trivial_move_ctor": "1",
+          "trivial_copy_assign": "1",
+          "trivial_move_assign": "1",
+          "trivial_destructor": "1"
+        },
+        {
+          "type": "unique_ptr/u8",
+          "sizeof": "16",
+          "alignof": "8",
+          "trivial_copy_ctor": "0",
+          "trivial_move_ctor": "0",
+          "trivial_copy_assign": "0",
+          "trivial_move_assign": "0",
+          "trivial_destructor": "0"
+        }
+      ]
+    }
+  },
+  "runtime": [
+    {
+      "compiler": "gcc",
+      "case": "checked_value/half_error",
+      "ours_ns": 179.18706055,
+      "tl_ns": 186.70596485,
+      "layout_ratio_min": 0.9514371808187988,
+      "layout_ratio_max": 0.9725039977217741
+    },
+    {
+      "compiler": "gcc",
+      "case": "checked_value/one_error_in_64",
+      "ours_ns": 6.7597400180000005,
+      "tl_ns": 10.844988585,
+      "layout_ratio_min": 0.6166848422335961,
+      "layout_ratio_max": 0.6292109156120852
+    },
+    {
+      "compiler": "gcc",
+      "case": "checked_value/success",
+      "ours_ns": 0.9662826979,
+      "tl_ns": 5.192837218,
+      "layout_ratio_min": 0.1858947141518578,
+      "layout_ratio_max": 0.18663157857321805
+    },
+    {
+      "compiler": "gcc",
+      "case": "codec_decode/truncated_uint",
+      "ours_ns": 435.61046680000004,
+      "tl_ns": 435.40578215,
+      "layout_ratio_min": 0.9850418443848569,
+      "layout_ratio_max": 1.0196325281484475
+    },
+    {
+      "compiler": "gcc",
+      "case": "codec_decode/uints32",
+      "ours_ns": 68.13351492000001,
+      "tl_ns": 68.042336275,
+      "layout_ratio_min": 0.9991217985101736,
+      "layout_ratio_max": 1.0073083504500064
+    },
+    {
+      "compiler": "gcc",
+      "case": "codec_decode/uints4096",
+      "ours_ns": 8882.339569,
+      "tl_ns": 8880.535981500001,
+      "layout_ratio_min": 0.993262285110828,
+      "layout_ratio_max": 1.0041355699240824
+    },
+    {
+      "compiler": "gcc",
+      "case": "codec_encode/uints32",
+      "ours_ns": 34.372095834999996,
+      "tl_ns": 36.2980788,
+      "layout_ratio_min": 0.9083434744961486,
+      "layout_ratio_max": 1.0025824992711982
+    },
+    {
+      "compiler": "gcc",
+      "case": "codec_encode/uints4096",
+      "ours_ns": 4526.2836675,
+      "tl_ns": 4669.6289515,
+      "layout_ratio_min": 0.9145561205734418,
+      "layout_ratio_max": 1.0041528184586554
+    },
+    {
+      "compiler": "gcc",
+      "case": "monadic_chain/half_error",
+      "ours_ns": 1.144557849,
+      "tl_ns": 6.099590281,
+      "layout_ratio_min": 0.186927334083276,
+      "layout_ratio_max": 0.18846620945584908
+    },
+    {
+      "compiler": "gcc",
+      "case": "monadic_chain/one_error_in_64",
+      "ours_ns": 1.249527445,
+      "tl_ns": 5.348662784,
+      "layout_ratio_min": 0.21599877344415272,
+      "layout_ratio_max": 0.24850459502804859
+    },
+    {
+      "compiler": "gcc",
+      "case": "monadic_chain/success",
+      "ours_ns": 1.1401604035,
+      "tl_ns": 5.3226075195,
+      "layout_ratio_min": 0.18203044501559715,
+      "layout_ratio_max": 0.21459346125905632
+    },
+    {
+      "compiler": "gcc",
+      "case": "scalar_assignment/half_error",
+      "ours_ns": 1.2461286135,
+      "tl_ns": 7.2455716804999994,
+      "layout_ratio_min": 0.15756061061080187,
+      "layout_ratio_max": 0.17310635758825996
+    },
+    {
+      "compiler": "gcc",
+      "case": "scalar_assignment/one_error_in_64",
+      "ours_ns": 1.3470993005,
+      "tl_ns": 6.3749822355,
+      "layout_ratio_min": 0.21128066961258182,
+      "layout_ratio_max": 0.21365701750271718
+    },
+    {
+      "compiler": "gcc",
+      "case": "scalar_assignment/success",
+      "ours_ns": 1.1599579565,
+      "tl_ns": 6.4094874265,
+      "layout_ratio_min": 0.18087602023733837,
+      "layout_ratio_max": 0.18351192266719285
+    },
+    {
+      "compiler": "gcc",
+      "case": "scalar_return/half_error",
+      "ours_ns": 1.149368306,
+      "tl_ns": 6.1351540725,
+      "layout_ratio_min": 0.18714114569103546,
+      "layout_ratio_max": 0.18761256839543103
+    },
+    {
+      "compiler": "gcc",
+      "case": "scalar_return/one_error_in_64",
+      "ours_ns": 1.335597747,
+      "tl_ns": 5.223748093499999,
+      "layout_ratio_min": 0.2551852022178596,
+      "layout_ratio_max": 0.2566910455529912
+    },
+    {
+      "compiler": "gcc",
+      "case": "scalar_return/success",
+      "ours_ns": 0.9687103866,
+      "tl_ns": 5.1996578525,
+      "layout_ratio_min": 0.18561327299500593,
+      "layout_ratio_max": 0.18712186036858824
+    },
+    {
+      "compiler": "gcc",
+      "case": "string_return/half_error",
+      "ours_ns": 4.1716246115,
+      "tl_ns": 4.250648851999999,
+      "layout_ratio_min": 0.9609591499097145,
+      "layout_ratio_max": 0.9996773819260513
+    },
+    {
+      "compiler": "gcc",
+      "case": "string_return/one_error_in_64",
+      "ours_ns": 7.241625578500001,
+      "tl_ns": 7.248459471,
+      "layout_ratio_min": 0.9861482964653326,
+      "layout_ratio_max": 1.002326310660262
+    },
+    {
+      "compiler": "gcc",
+      "case": "string_return/success",
+      "ours_ns": 7.3536177285,
+      "tl_ns": 7.3479155155,
+      "layout_ratio_min": 0.9782345487374807,
+      "layout_ratio_max": 1.0169866040251385
+    },
+    {
+      "compiler": "gcc",
+      "case": "string_transition/half_error",
+      "ours_ns": 4.6834297905,
+      "tl_ns": 4.634667154500001,
+      "layout_ratio_min": 0.9929929275848605,
+      "layout_ratio_max": 1.0428457427678217
+    },
+    {
+      "compiler": "gcc",
+      "case": "string_transition/one_error_in_64",
+      "ours_ns": 7.865300371,
+      "tl_ns": 7.8271573305,
+      "layout_ratio_min": 0.9995313719749829,
+      "layout_ratio_max": 1.0279708568133312
+    },
+    {
+      "compiler": "gcc",
+      "case": "string_transition/success",
+      "ours_ns": 7.7817463205,
+      "tl_ns": 7.9217648675,
+      "layout_ratio_min": 0.9582377777174507,
+      "layout_ratio_max": 1.0192993883037145
+    },
+    {
+      "compiler": "gcc",
+      "case": "void_materialized/half_error",
+      "ours_ns": 0.58146779445,
+      "tl_ns": 0.5251090189000001,
+      "layout_ratio_min": 1.0960325257356587,
+      "layout_ratio_max": 1.112386587622951
+    },
+    {
+      "compiler": "gcc",
+      "case": "void_materialized/one_error_in_64",
+      "ours_ns": 0.5562615787,
+      "tl_ns": 0.46856915695,
+      "layout_ratio_min": 1.0224580563357373,
+      "layout_ratio_max": 1.220849489395933
+    },
+    {
+      "compiler": "gcc",
+      "case": "void_materialized/success",
+      "ours_ns": 0.5599657247500001,
+      "tl_ns": 0.52467451075,
+      "layout_ratio_min": 1.0125301684920536,
+      "layout_ratio_max": 1.1247663867668163
+    },
+    {
+      "compiler": "clang",
+      "case": "checked_value/half_error",
+      "ours_ns": 222.28523669999998,
+      "tl_ns": 174.2724759,
+      "layout_ratio_min": 1.269464458730352,
+      "layout_ratio_max": 1.2781792416502673
+    },
+    {
+      "compiler": "clang",
+      "case": "checked_value/one_error_in_64",
+      "ours_ns": 8.119519317,
+      "tl_ns": 6.506635742,
+      "layout_ratio_min": 1.2154043870840088,
+      "layout_ratio_max": 1.2677407701306105
+    },
+    {
+      "compiler": "clang",
+      "case": "checked_value/success",
+      "ours_ns": 1.152940857,
+      "tl_ns": 1.07127912565,
+      "layout_ratio_min": 0.8465272479990588,
+      "layout_ratio_max": 1.1922816638765414
+    },
+    {
+      "compiler": "clang",
+      "case": "codec_decode/truncated_uint",
+      "ours_ns": 666.04563505,
+      "tl_ns": 650.495545,
+      "layout_ratio_min": 1.0209561242946839,
+      "layout_ratio_max": 1.0265289300311091
+    },
+    {
+      "compiler": "clang",
+      "case": "codec_decode/uints32",
+      "ours_ns": 93.99667418499999,
+      "tl_ns": 94.54579251999999,
+      "layout_ratio_min": 0.993338292131604,
+      "layout_ratio_max": 0.9958971564100082
+    },
+    {
+      "compiler": "clang",
+      "case": "codec_decode/uints4096",
+      "ours_ns": 10836.781654999999,
+      "tl_ns": 10851.325294999999,
+      "layout_ratio_min": 0.9972083909894065,
+      "layout_ratio_max": 0.999782950377883
+    },
+    {
+      "compiler": "clang",
+      "case": "codec_encode/uints32",
+      "ours_ns": 176.35764799999998,
+      "tl_ns": 186.8870913,
+      "layout_ratio_min": 0.938637835304865,
+      "layout_ratio_max": 1.0009898011985179
+    },
+    {
+      "compiler": "clang",
+      "case": "codec_encode/uints4096",
+      "ours_ns": 22380.898999999998,
+      "tl_ns": 23433.841135000002,
+      "layout_ratio_min": 0.9373643239081827,
+      "layout_ratio_max": 1.02879872671818
+    },
+    {
+      "compiler": "clang",
+      "case": "monadic_chain/half_error",
+      "ours_ns": 1.27037333,
+      "tl_ns": 1.276238703,
+      "layout_ratio_min": 0.9915944086282237,
+      "layout_ratio_max": 1.0015319418013664
+    },
+    {
+      "compiler": "clang",
+      "case": "monadic_chain/one_error_in_64",
+      "ours_ns": 1.286545639,
+      "tl_ns": 1.2892561315,
+      "layout_ratio_min": 0.9762961641021353,
+      "layout_ratio_max": 1.0062171514226357
+    },
+    {
+      "compiler": "clang",
+      "case": "monadic_chain/success",
+      "ours_ns": 1.280517737,
+      "tl_ns": 1.2689431125000001,
+      "layout_ratio_min": 0.9972253205550232,
+      "layout_ratio_max": 1.0081890664096467
+    },
+    {
+      "compiler": "clang",
+      "case": "scalar_assignment/half_error",
+      "ours_ns": 2.423078351,
+      "tl_ns": 1.1543314755,
+      "layout_ratio_min": 1.8078445607788198,
+      "layout_ratio_max": 2.476724820012795
+    },
+    {
+      "compiler": "clang",
+      "case": "scalar_assignment/one_error_in_64",
+      "ours_ns": 1.172443399,
+      "tl_ns": 1.166160971,
+      "layout_ratio_min": 0.9967152506240594,
+      "layout_ratio_max": 1.1997360659032723
+    },
+    {
+      "compiler": "clang",
+      "case": "scalar_assignment/success",
+      "ours_ns": 1.089572894,
+      "tl_ns": 1.1578766384999999,
+      "layout_ratio_min": 0.8473010672669699,
+      "layout_ratio_max": 1.0001369271517477
+    },
+    {
+      "compiler": "clang",
+      "case": "scalar_return/half_error",
+      "ours_ns": 1.07369286655,
+      "tl_ns": 1.07372769715,
+      "layout_ratio_min": 1.0004616681401381,
+      "layout_ratio_max": 1.006581663258434
+    },
+    {
+      "compiler": "clang",
+      "case": "scalar_return/one_error_in_64",
+      "ours_ns": 1.0731440549,
+      "tl_ns": 1.0733803533,
+      "layout_ratio_min": 1.0000174991173891,
+      "layout_ratio_max": 1.0170567049039916
+    },
+    {
+      "compiler": "clang",
+      "case": "scalar_return/success",
+      "ours_ns": 1.0683452252,
+      "tl_ns": 1.07142603925,
+      "layout_ratio_min": 0.9936049199145016,
+      "layout_ratio_max": 1.006473949534408
+    },
+    {
+      "compiler": "clang",
+      "case": "string_return/half_error",
+      "ours_ns": 4.3340028969999995,
+      "tl_ns": 4.337566496,
+      "layout_ratio_min": 0.9609667797866669,
+      "layout_ratio_max": 1.0568095679749387
+    },
+    {
+      "compiler": "clang",
+      "case": "string_return/one_error_in_64",
+      "ours_ns": 7.261362312,
+      "tl_ns": 7.240764553,
+      "layout_ratio_min": 0.9556847002595235,
+      "layout_ratio_max": 1.0499739753624862
+    },
+    {
+      "compiler": "clang",
+      "case": "string_return/success",
+      "ours_ns": 7.3247483905,
+      "tl_ns": 7.3221961715,
+      "layout_ratio_min": 0.9496231943057797,
+      "layout_ratio_max": 1.0491866051480492
+    },
+    {
+      "compiler": "clang",
+      "case": "string_transition/half_error",
+      "ours_ns": 5.812043345999999,
+      "tl_ns": 4.8841848174999996,
+      "layout_ratio_min": 1.126275180281495,
+      "layout_ratio_max": 1.2754396765350446
+    },
+    {
+      "compiler": "clang",
+      "case": "string_transition/one_error_in_64",
+      "ours_ns": 8.6160479345,
+      "tl_ns": 8.097904669,
+      "layout_ratio_min": 1.0446313429343972,
+      "layout_ratio_max": 1.1190172000228915
+    },
+    {
+      "compiler": "clang",
+      "case": "string_transition/success",
+      "ours_ns": 8.6771444505,
+      "tl_ns": 8.0098507375,
+      "layout_ratio_min": 1.0285168307127708,
+      "layout_ratio_max": 1.128764710721499
+    },
+    {
+      "compiler": "clang",
+      "case": "void_materialized/half_error",
+      "ours_ns": 0.4829178765,
+      "tl_ns": 0.48168526209999996,
+      "layout_ratio_min": 0.994417962824595,
+      "layout_ratio_max": 1.0036153971800628
+    },
+    {
+      "compiler": "clang",
+      "case": "void_materialized/one_error_in_64",
+      "ours_ns": 0.42841997384999997,
+      "tl_ns": 0.42978503675,
+      "layout_ratio_min": 0.9351067638871811,
+      "layout_ratio_max": 1.0084550897357238
+    },
+    {
+      "compiler": "clang",
+      "case": "void_materialized/success",
+      "ours_ns": 0.50810145365,
+      "tl_ns": 0.5084956618500001,
+      "layout_ratio_min": 0.996216855226012,
+      "layout_ratio_max": 1.0157913402374337
+    }
+  ]
+}
