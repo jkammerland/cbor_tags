@@ -197,12 +197,3 @@ benchmark-local byte-range, contiguous bulk-copy buffer, and borrowed
 header-plus-payload segment paths so range overhead and the zero-copy ceiling
 are visible separately. The byte-range and bulk-copy rows are encode variants;
 their decode validation uses the public `cbor_tags` typed-array codec.
-
-## Expected Backend Comparison
-
-The standalone `expected_compare` project compares the built-in expected with
-`tl::expected` using the same source. It measures object layout, runtime across
-several code placements, and object/function/linked code size at three
-optimization levels. See [expected_compare/README.md](expected_compare/README.md)
-for the dependency path, run command, measurement boundaries, and initial
-findings.
