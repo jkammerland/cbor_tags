@@ -46,6 +46,11 @@ struct empty_t {};
 struct invoke_value_t {};
 struct invoke_error_t {};
 
+// Union assignment starts the matching scalar member's lifetime without a state
+// branch. Class payloads retain memberwise operations: even a trivial class can
+// contain volatile members with observable accesses.
+template <typename T> inline constexpr bool scalar_assignable = std::is_scalar_v<T> && std::is_same_v<T, std::remove_cv_t<T>>;
+
 // LWG 3891 permits unqualified storage, while public references retain T's cv.
 // A trivial move of const T can use its copy constructor. Keeping that choice
 // in a member wrapper preserves triviality even when U's move is nontrivial.
@@ -137,7 +142,13 @@ template <typename New, typename Old, typename... Args> constexpr void replace(N
     }
 }
 
-template <typename E, typename U> [[noreturn]] inline void bad_access(U &&error) {
+template <typename E, typename U>
+[[noreturn]]
+#if defined(__GNUC__) || defined(__clang__)
+// Avoid an extra frame for the exception unwinder at each failed value() call.
+[[gnu::always_inline]]
+#endif
+inline void bad_access(U &&error) {
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
     throw bad_expected_access<E>(std::forward<U>(error));
 #else
@@ -429,7 +440,10 @@ template <typename T, typename E> class expected {
         requires(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T> && std::is_copy_constructible_v<E> &&
                  std::is_copy_assignable_v<E> && (std::is_nothrow_move_constructible_v<T> || std::is_nothrow_move_constructible_v<E>))
     {
-        if (other.has_)
+        if constexpr (impl::scalar_assignable<T> && impl::scalar_assignable<E> && std::is_trivially_copy_assignable_v<decltype(data_)>) {
+            data_ = other.data_;
+            has_  = other.has_;
+        } else if (other.has_)
             assign_value(*other);
         else
             assign_error(other.data_.error);
@@ -441,7 +455,10 @@ template <typename T, typename E> class expected {
         requires(std::is_move_constructible_v<T> && std::is_move_assignable_v<T> && std::is_move_constructible_v<E> &&
                  std::is_move_assignable_v<E> && (std::is_nothrow_move_constructible_v<T> || std::is_nothrow_move_constructible_v<E>))
     {
-        if (other.has_)
+        if constexpr (impl::scalar_assignable<T> && impl::scalar_assignable<E> && std::is_trivially_move_assignable_v<decltype(data_)>) {
+            data_ = std::move(other.data_);
+            has_  = other.has_;
+        } else if (other.has_)
             assign_value(*std::move(other));
         else
             assign_error(std::move(other.data_.error));
@@ -828,7 +845,10 @@ class expected<T, E> {
                                                                   std::is_nothrow_copy_assignable_v<E>)
         requires(std::is_copy_constructible_v<E> && std::is_copy_assignable_v<E>)
     {
-        if (other.has_)
+        if constexpr (impl::scalar_assignable<E> && std::is_trivially_copy_assignable_v<decltype(data_)>) {
+            data_ = other.data_;
+            has_  = other.has_;
+        } else if (other.has_)
             emplace();
         else
             assign_error(other.data_.error);
@@ -838,7 +858,10 @@ class expected<T, E> {
                                                              std::is_nothrow_move_assignable_v<E>)
         requires(std::is_move_constructible_v<E> && std::is_move_assignable_v<E>)
     {
-        if (other.has_)
+        if constexpr (impl::scalar_assignable<E> && std::is_trivially_move_assignable_v<decltype(data_)>) {
+            data_ = std::move(other.data_);
+            has_  = other.has_;
+        } else if (other.has_)
             emplace();
         else
             assign_error(std::move(other.data_.error));

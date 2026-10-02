@@ -1,7 +1,8 @@
 # Expected comparison
 
-This standalone project compares the built-in expected implementation from
-0.26.0 with `tl::expected` 1.3.1. Both executables compile the same kernels and
+This standalone project compares the checked-out built-in expected implementation
+with `tl::expected` 1.3.1. The initial measurements used 0.26.0.
+Both executables compile the same kernels and
 codec headers. The tl executable uses a generated include override for the
 public expected aliases; each executable uses one backend consistently.
 
@@ -77,3 +78,9 @@ the measured function boundaries and workloads, not general expected rankings.
 Core codec decoding was essentially flat. Encoder ratios varied with placement.
 The detailed measurements and source/tool hashes are in the generated report,
 CSV files, `sizes.json`, and `provenance.json`.
+
+The [optimization follow-up](optimization-2026-10-02.md) measures scalar union
+assignment and an inlined bad-access helper against that baseline. Clang's
+alternating assignment improved by 52%, failed checked access by 21%, and
+expected-only object code decreased from 1713 to 1596 bytes. The follow-up also
+records GCC results and the encoder placement investigation.
