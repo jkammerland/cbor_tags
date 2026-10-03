@@ -1636,6 +1636,29 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             }
         }
 
+        if constexpr (IsContiguous<InputBuffer>) {
+            if (payload_size == 0U) {
+                return info;
+            }
+            const auto   *payload = std::ranges::data(data_) + reader_.position_;
+            std::uint64_t value{};
+            if (info < 26U) {
+                if (info == 24U) {
+                    value = detail::load_cbor_big_endian<std::uint8_t>(payload);
+                } else {
+                    value = detail::load_cbor_big_endian<std::uint16_t>(payload);
+                }
+            } else {
+                if (info == 26U) {
+                    value = detail::load_cbor_big_endian<std::uint32_t>(payload);
+                } else {
+                    value = detail::load_cbor_big_endian<std::uint64_t>(payload);
+                }
+            }
+            reader_.position_ += payload_size;
+            return value;
+        }
+
         std::uint64_t value{};
         auto          status = status_code::success;
         const auto    ok     = detail::read_cbor_argument(info, value, status, [this](std::uint8_t &byte_value) {

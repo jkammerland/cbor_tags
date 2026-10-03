@@ -234,6 +234,8 @@ add_test(NAME any_headers_roundtrip COMMAND tests "--test-suite=roundtrip/any_he
 set_tests_properties(any_headers_roundtrip PROPERTIES LABELS "roundtrip")
 add_test(NAME status_errors_wire COMMAND tests "--test-suite=cbor_wire/status_errors")
 set_tests_properties(status_errors_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME integer_arguments_wire COMMAND tests "--test-suite=cbor_wire/integer_arguments")
+set_tests_properties(integer_arguments_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME traversal_wire COMMAND tests "--test-suite=cbor_wire/traversal")
 set_tests_properties(traversal_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME traversal_roundtrip COMMAND tests "--test-suite=roundtrip/traversal")
