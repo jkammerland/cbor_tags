@@ -120,6 +120,8 @@ add_test(NAME container_interoperability_roundtrip COMMAND tests "--test-suite=r
 set_tests_properties(container_interoperability_roundtrip PROPERTIES LABELS "roundtrip")
 add_test(NAME fixed_text_spans_wire COMMAND tests "--test-suite=cbor_wire/fixed_text_spans")
 set_tests_properties(fixed_text_spans_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME float_array_encoding_wire COMMAND tests "--test-suite=cbor_wire/float_arrays")
+set_tests_properties(float_array_encoding_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME fixed_text_spans_roundtrip COMMAND tests "--test-suite=roundtrip/fixed_text_spans")
 set_tests_properties(fixed_text_spans_roundtrip PROPERTIES LABELS "roundtrip")
 

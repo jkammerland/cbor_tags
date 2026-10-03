@@ -9,11 +9,13 @@
 #include <memory>
 #include <nameof.hpp>
 #include <random>
+#include <span>
 #include <string>
 #include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest/doctest.h"
 
+#include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/extensions/smart_ptr.h>
 #include <fmt/format.h>
@@ -258,6 +260,58 @@ void run_shared_ptr_encode_benchmarks(ankerl::nanobench::Bench &bench) {
     run_shared_ptr_encode_benchmarks_for_size<256U>(bench);
 }
 
+template <typename Float, std::size_t Count> void run_float_array_encode_benchmarks(ankerl::nanobench::Bench &bench) {
+    static_assert(Count <= 65535);
+    std::vector<Float> source(Count);
+    for (std::size_t index = 0; index < Count; ++index) {
+        source[index] = (static_cast<Float>(index) - Float{2048}) / Float{17};
+    }
+    const auto             name        = fmt::format("ordinary float{} array {}", sizeof(Float) * 8, Count);
+    constexpr std::size_t  header_size = Count < 24 ? 1 : Count <= 255 ? 2 : 3;
+    constexpr std::size_t  wire_size   = header_size + Count * (sizeof(Float) + 1);
+    std::vector<std::byte> output;
+    output.reserve(wire_size);
+    REQUIRE(make_encoder(output)(source));
+    std::vector<Float> decoded;
+    REQUIRE(make_decoder(output)(decoded));
+    REQUIRE(decoded == source);
+
+    bool       succeeded = true;
+    const auto encode    = [&](const auto &values) {
+        output.clear();
+        const auto result = make_encoder(output)(values);
+        succeeded &= result.has_value();
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(output);
+    };
+    bench.run(name + " reserved", [&] { encode(source); });
+    REQUIRE(succeeded);
+    decoded.clear();
+    REQUIRE(make_decoder(output)(decoded));
+    REQUIRE(decoded == source);
+
+    const auto borrowed = std::span<const Float>{source};
+    succeeded           = true;
+    bench.run(name + " borrowed fallback", [&] { encode(borrowed); });
+    REQUIRE(succeeded);
+    decoded.clear();
+    REQUIRE(make_decoder(output)(decoded));
+    REQUIRE(decoded == source);
+
+    std::array<std::byte, wire_size> fixed{};
+    REQUIRE(make_encoder(fixed)(source));
+    REQUIRE(std::ranges::equal(output, fixed));
+    succeeded = true;
+    bench.run(name + " fixed", [&] {
+        const auto result = make_encoder(fixed)(source);
+        succeeded &= result.has_value();
+        ankerl::nanobench::doNotOptimizeAway(result);
+        ankerl::nanobench::doNotOptimizeAway(fixed);
+    });
+    REQUIRE(succeeded);
+    REQUIRE(std::ranges::equal(output, fixed));
+}
+
 template <typename ContainerType> void run_benchmark() {
     ankerl::nanobench::Bench bench;
     benchmark_options        options;
@@ -288,6 +342,19 @@ TEST_CASE("Shared graph encode lookup benchmarks") {
     bench.relative(options.relative);
 
     run_shared_ptr_encode_benchmarks(bench);
+}
+
+TEST_CASE("ordinary floating array encoding benchmarks") {
+    ankerl::nanobench::Bench bench;
+    bench.title("ordinary floating array encoding");
+    bench.minEpochIterations(100);
+    bench.unit("array");
+    bench.performanceCounters(true);
+    bench.relative(false);
+    run_float_array_encode_benchmarks<float, 32>(bench);
+    run_float_array_encode_benchmarks<float, 4096>(bench);
+    run_float_array_encode_benchmarks<double, 32>(bench);
+    run_float_array_encode_benchmarks<double, 4096>(bench);
 }
 
 // Main function to run tests and benchmarks

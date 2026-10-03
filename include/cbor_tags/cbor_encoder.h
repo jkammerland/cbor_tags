@@ -10,6 +10,7 @@
 #include "cbor_tags/detail/cbor_argument.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +26,9 @@
 namespace cbor::tags {
 
 template <typename T> struct cbor_header_encoder;
+template <typename T> struct cbor_indefinite_encoder;
+template <typename T> struct cbor_optional_encoder;
+template <typename T> struct cbor_variant_encoder;
 
 template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
     requires CborOutputBuffer<OutputBuffer>
@@ -127,6 +131,13 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <IsArray T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(0x80));
+        if constexpr (detail::is_owning_float_array<T>::value &&
+                      std::same_as<self_t, encoder<OutputBuffer, Options, cbor_header_encoder, cbor_indefinite_encoder,
+                                                   cbor_optional_encoder, cbor_variant_encoder>>) {
+            if (try_encode_float_array(value)) {
+                return;
+            }
+        }
         for (const auto &item : value) {
             encode(item);
         }
@@ -254,6 +265,66 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     OutputBuffer                  &data_;
 
   private:
+    template <typename T> constexpr bool try_encode_float_array(const T &value) {
+        if constexpr (IsFixedArray<OutputBuffer> || std::same_as<OutputBuffer, std::vector<byte_type>>) {
+            using float_type     = typename T::value_type;
+            using bits_type      = std::conditional_t<std::same_as<float_type, float>, std::uint32_t, std::uint64_t>;
+            constexpr auto width = sizeof(bits_type) + 1;
+            const auto     count = value.size();
+            if (count == 0) {
+                return true;
+            }
+            const auto position = [&]() {
+                if constexpr (IsFixedArray<OutputBuffer>) {
+                    return appender_.head_;
+                } else {
+                    return data_.size();
+                }
+            }();
+            const auto available = [&]() {
+                if constexpr (IsFixedArray<OutputBuffer>) {
+                    return position <= data_.size() ? data_.size() - position : size_type{};
+                } else {
+                    return data_.capacity() - position;
+                }
+            }();
+            if (count > available / width) {
+                return false;
+            }
+            const auto bytes = count * width;
+            if constexpr (!IsFixedArray<OutputBuffer>) {
+                // Restrict this to owning sources and the default allocator: resizing
+                // must neither overwrite borrowed input nor add allocator callbacks.
+                data_.resize(position + bytes);
+            }
+            auto *output = data_.data() + position;
+            for (const auto &item : value) {
+                const auto bits = std::bit_cast<bits_type>(item);
+                // Copy the complete payload so byte packing can become a single wide store.
+                const auto encoded = [&]() {
+                    if constexpr (std::same_as<float_type, float>) {
+                        return std::array<byte_type, sizeof(bits_type)>{static_cast<byte_type>(bits >> 24),
+                                                                        static_cast<byte_type>(bits >> 16),
+                                                                        static_cast<byte_type>(bits >> 8), static_cast<byte_type>(bits)};
+                    } else {
+                        return std::array<byte_type, sizeof(bits_type)>{
+                            static_cast<byte_type>(bits >> 56), static_cast<byte_type>(bits >> 48), static_cast<byte_type>(bits >> 40),
+                            static_cast<byte_type>(bits >> 32), static_cast<byte_type>(bits >> 24), static_cast<byte_type>(bits >> 16),
+                            static_cast<byte_type>(bits >> 8),  static_cast<byte_type>(bits)};
+                    }
+                }();
+                *output++ = static_cast<byte_type>(std::same_as<float_type, float> ? 0xFA : 0xFB);
+                output    = std::copy(encoded.begin(), encoded.end(), output);
+            }
+            if constexpr (IsFixedArray<OutputBuffer>) {
+                appender_.head_ += bytes;
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     template <std::size_t Min, std::size_t Max, typename T> constexpr void encode_bounded_size(const bounded_size<T, Min, Max> &value) {
         encode_bounded_size(value.value(), Min, Max);
     }
