@@ -2,6 +2,8 @@ if(NOT DEFINED CLI)
   message(FATAL_ERROR "CLI variable must point to cborctl")
 endif()
 
+get_filename_component(CLI_NAME "${CLI}" NAME)
+
 if(NOT DEFINED WORK)
   set(WORK "${CMAKE_CURRENT_BINARY_DIR}/cborctl")
 endif()
@@ -50,13 +52,13 @@ endfunction()
 run_cli(
   help
   0
-  "cborctl annotate --input hex|base64 [DATA|-] [options]"
+  "${CLI_NAME} annotate --input hex|base64 [DATA|-] [options]"
   "__skip__"
   --help)
 run_cli(
   subcommand_help
   0
-  "cborctl diagnostic --input hex|base64 [DATA|-] [options]"
+  "${CLI_NAME} diagnostic --input hex|base64 [DATA|-] [options]"
   "__skip__"
   diagnostic --help)
 
