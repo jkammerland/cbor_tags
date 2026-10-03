@@ -3,9 +3,11 @@
 #include "cbor_tags/cbor.h"
 
 #include <array>
+#include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <type_traits>
 
@@ -17,6 +19,40 @@ template <typename Byte> constexpr std::uint8_t cbor_byte_to_u8(Byte value) {
     } else {
         return static_cast<std::uint8_t>(value);
     }
+}
+
+// The caller has checked the complete fixed-width payload. memcpy permits
+// unaligned byte storage without imposing an integer aliasing requirement.
+template <std::unsigned_integral UInt, typename Byte> [[nodiscard]] constexpr UInt load_cbor_big_endian(const Byte *input) noexcept {
+    static_assert(sizeof(Byte) == 1);
+    static_assert(sizeof(UInt) == 1 || sizeof(UInt) == 2 || sizeof(UInt) == 4 || sizeof(UInt) == 8);
+
+    if constexpr (!std::is_volatile_v<Byte> && (std::endian::native == std::endian::big || std::endian::native == std::endian::little)) {
+        if (!std::is_constant_evaluated()) {
+            UInt value;
+            std::memcpy(&value, input, sizeof(value));
+            if constexpr (std::endian::native == std::endian::little) {
+                if constexpr (sizeof(UInt) == 2) {
+                    value = static_cast<UInt>((value << 8U) | (value >> 8U));
+                } else if constexpr (sizeof(UInt) == 4) {
+                    value = ((value & 0x000000FFU) << 24U) | ((value & 0x0000FF00U) << 8U) | ((value & 0x00FF0000U) >> 8U) |
+                            ((value & 0xFF000000U) >> 24U);
+                } else if constexpr (sizeof(UInt) == 8) {
+                    value = ((value & 0x00000000000000FFULL) << 56U) | ((value & 0x000000000000FF00ULL) << 40U) |
+                            ((value & 0x0000000000FF0000ULL) << 24U) | ((value & 0x00000000FF000000ULL) << 8U) |
+                            ((value & 0x000000FF00000000ULL) >> 8U) | ((value & 0x0000FF0000000000ULL) >> 24U) |
+                            ((value & 0x00FF000000000000ULL) >> 40U) | ((value & 0xFF00000000000000ULL) >> 56U);
+                }
+            }
+            return value;
+        }
+    }
+
+    UInt value{};
+    for (std::size_t index = 0; index < sizeof(UInt); ++index) {
+        value = static_cast<UInt>((value << 8U) | cbor_byte_to_u8(input[index]));
+    }
+    return value;
 }
 
 [[nodiscard]] constexpr bool is_cbor_break_byte(std::uint8_t value) noexcept { return value == 0xFFU; }
