@@ -1,9 +1,11 @@
 if(NOT DEFINED CLI)
-  message(FATAL_ERROR "CLI variable must point to cbor_tags_cli")
+  message(FATAL_ERROR "CLI variable must point to cborctl")
 endif()
 
+get_filename_component(CLI_NAME "${CLI}" NAME)
+
 if(NOT DEFINED WORK)
-  set(WORK "${CMAKE_CURRENT_BINARY_DIR}/cbor_tags_cli")
+  set(WORK "${CMAKE_CURRENT_BINARY_DIR}/cborctl")
 endif()
 
 file(MAKE_DIRECTORY "${WORK}")
@@ -46,6 +48,19 @@ function(run_cli_stdin NAME EXPECTED_EXIT STDOUT_CONTAINS STDERR_CONTAINS STDIN_
   check_contains("${NAME}" "${STDOUT}" "${STDOUT_CONTAINS}" "stdout")
   check_contains("${NAME}" "${STDERR}" "${STDERR_CONTAINS}" "stderr")
 endfunction()
+
+run_cli(
+  help
+  0
+  "${CLI_NAME} annotate --input hex|base64 [DATA|-] [options]"
+  "__skip__"
+  --help)
+run_cli(
+  subcommand_help
+  0
+  "${CLI_NAME} diagnostic --input hex|base64 [DATA|-] [options]"
+  "__skip__"
+  diagnostic --help)
 
 set(COMMENTED_HEX [=[
 bf
