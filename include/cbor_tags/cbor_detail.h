@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_reflection_config.h"
 #include "cbor_tags/cbor_reflection_count.h"
 
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -19,8 +20,15 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace cbor::tags::detail {
+
+template <typename T> struct is_owning_float_array : std::false_type {};
+template <typename T, std::size_t N>
+struct is_owning_float_array<std::array<T, N>> : std::bool_constant<std::same_as<T, float> || std::same_as<T, double>> {};
+template <typename T>
+struct is_owning_float_array<std::vector<T>> : std::bool_constant<std::same_as<T, float> || std::same_as<T, double>> {};
 
 template <typename T>
 concept AppendableContainer = requires {
