@@ -882,10 +882,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return status_code::success;
         }
 
-        if (value.empty()) {
-            value = std::string(take_text_payload(payload_size));
-        } else if constexpr (IsContiguous<InputBuffer>) {
+        if constexpr (IsContiguous<InputBuffer>) {
             auto text = take_text_payload(payload_size);
+            // Append also reuses retained storage when the caller has cleared the target.
             value.append(text.data(), text.size());
         } else {
             const auto old_size = value.size();
