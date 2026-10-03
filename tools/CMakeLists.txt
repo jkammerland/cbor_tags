@@ -10,14 +10,14 @@ if(NOT CBOR_TAGS_STL_ONLY AND NOT TARGET fmt::fmt)
 endif()
 
 if(CBOR_TAGS_BUILD_CLI)
-  add_executable(cbor_tags_cli cbor_tags_cli.cpp)
-  target_link_libraries(cbor_tags_cli PRIVATE cbor::tags)
+  add_executable(cborctl cborctl.cpp)
+  target_link_libraries(cborctl PRIVATE cbor::tags)
   if(NOT CBOR_TAGS_STL_ONLY)
-    target_link_libraries(cbor_tags_cli PRIVATE fmt::fmt nameof::nameof)
+    target_link_libraries(cborctl PRIVATE fmt::fmt nameof::nameof)
   endif()
 
   install(
-    TARGETS cbor_tags_cli
+    TARGETS cborctl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT tools)
 endif()

@@ -836,7 +836,7 @@ it with `-DCBOR_TAGS_BUILD_CLI=ON`:
 
 ```bash
 cmake -B build -G Ninja -DCBOR_TAGS_BUILD_CLI=ON
-cmake --build build --target cbor_tags_cli
+cmake --build build --target cborctl
 ```
 
 The CLI requires explicit input encoding, accepts data as an argument or on
@@ -844,20 +844,20 @@ stdin, and supports both standard and URL-safe base64:
 
 ```bash
 # Smart annotation from hex
-cbor_tags_cli annotate --input hex --annotation-column 13 bf6346756ef563416d7421ff
+cborctl annotate --input hex --annotation-column 13 bf6346756ef563416d7421ff
 
 # Diagnostic notation from base64 on stdin
-printf 'Ymhp\n' | cbor_tags_cli diagnostic --input base64
+printf 'Ymhp\n' | cborctl diagnostic --input base64
 
 # URL-safe base64 that starts with '-' needs -- to end option parsing
-cbor_tags_cli annotate --input base64 -- -n-AAAA
+cborctl annotate --input base64 -- -n-AAAA
 
 # Hex input may contain whitespace and # comments
-cbor_tags_cli annotate --input hex 'bf 63 46756e # "Fun"
+cborctl annotate --input hex 'bf 63 46756e # "Fun"
 f5 63 416d74 21 ff'
 
 # Validate text-string UTF-8 in diagnostic output
-cbor_tags_cli diagnostic --input hex --no-format-by-rows --check-tstr-utf8 62c328
+cborctl diagnostic --input hex --no-format-by-rows --check-tstr-utf8 62c328
 ```
 
 ## 🤝 CDDL Schema Generation
