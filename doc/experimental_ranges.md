@@ -445,6 +445,18 @@ encode_indefinite_bstr_segments_into(segments, payload_span, 4096);
 encode_tagged_bstr_segments_into(segments, std::uint64_t{24}, payload_span);
 ```
 
+Sources passed to `append_owned()` must remain valid throughout the call.
+Appending may reallocate owned storage and invalidate views into the
+destination's bytes; self-append is not guaranteed. To duplicate an owned
+segment's bytes, first copy them into independent storage:
+
+```cpp
+auto segment = byte_segment::owned(payload_span);
+const auto bytes = segment.bytes();
+std::vector<std::byte> copy(bytes.begin(), bytes.end());
+segment.append_owned(copy);
+```
+
 Flattening always copies. Borrowed segment payloads must outlive the segment
 container.
 
