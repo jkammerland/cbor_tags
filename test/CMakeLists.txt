@@ -934,13 +934,13 @@ target_link_libraries(test_smart_ptr_decode_allocations PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_decode_allocations COMMAND test_smart_ptr_decode_allocations)
 add_dependencies(tests test_smart_ptr_decode_allocations)
 
-if(TARGET cbor_tags_cli)
+if(TARGET cborctl)
   add_test(
-    NAME cbor_tags_cli
+    NAME cborctl
     COMMAND
       ${CMAKE_COMMAND}
-      "-DCLI=$<TARGET_FILE:cbor_tags_cli>"
-      "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cbor_tags_cli"
+      "-DCLI=$<TARGET_FILE:cborctl>"
+      "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cborctl"
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/test_cli.cmake")
 endif()

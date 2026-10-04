@@ -157,7 +157,7 @@ reset_generated_dir "$report_dir"
     --root "$root" \
     --object-directory "$build_dir" \
     --filter 'include/cbor_tags/' \
-    --filter 'tools/cbor_tags_cli.cpp' \
+    --filter 'tools/cborctl.cpp' \
     --exclude 'include/cbor_tags/detail/.*' \
     --txt "$report_dir/coverage.txt" \
     --txt-summary \
@@ -179,7 +179,7 @@ file_rows = []
 cli_physical_lines = {}
 for cls in root.findall(".//class"):
     filename = cls.attrib.get("filename", "")
-    if filename == "tools/cbor_tags_cli.cpp":
+    if filename == "tools/cborctl.cpp":
         for line in cls.findall("./lines/line"):
             number = int(line.attrib["number"])
             hits = int(line.attrib.get("hits", "0"))
@@ -220,7 +220,7 @@ summary = (
     "\n"
     "------------------------------------------------------------------------------\n"
     "CLI Source Line Coverage\n"
-    "File: tools/cbor_tags_cli.cpp\n"
+    "File: tools/cborctl.cpp\n"
     "------------------------------------------------------------------------------\n"
     f"Lines: {cli_covered} / {cli_total} = {cli_percentage:.1f}%\n"
     "------------------------------------------------------------------------------\n"
@@ -266,7 +266,7 @@ markdown_lines.extend(
         "",
         "| Source | Covered | Total | Coverage |",
         "| --- | ---: | ---: | ---: |",
-        f"| `tools/cbor_tags_cli.cpp` | {cli_covered} | {cli_total} | {cli_percentage:.1f}% |",
+        f"| `tools/cborctl.cpp` | {cli_covered} | {cli_total} | {cli_percentage:.1f}% |",
     ]
 )
 

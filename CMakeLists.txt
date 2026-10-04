@@ -181,7 +181,7 @@ endif()
 # Build options
 option(CBOR_TAGS_BUILD_TESTS "Build tests" OFF)
 option(CBOR_TAGS_BUILD_INTEROP_TESTS "Build opt-in third-party CBOR interoperability tests" OFF)
-option(CBOR_TAGS_BUILD_CLI "Build cbor_tags_cli" ${CBOR_TAGS_BUILD_TESTS})
+option(CBOR_TAGS_BUILD_CLI "Build cborctl" ${CBOR_TAGS_BUILD_TESTS})
 option(CBOR_TAGS_BUILD_TOOLS "Build tools (for to_tuple(...) generation, it is required for struct reflection)" OFF)
 option(CBOR_TAGS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(CBOR_TAGS_BUILD_EXAMPLES "Build examples" OFF)
