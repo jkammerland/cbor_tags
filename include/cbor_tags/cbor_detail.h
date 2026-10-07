@@ -167,7 +167,9 @@ template <typename T> struct appender<T, false> : append_cursor<T> {
         container.insert(container.end(), {std::forward<Ts>(values)...});
     }
 
-    constexpr void operator()(T &container, std::span<const std::byte> values) {
+    constexpr void operator()(T &container, std::span<const std::byte> values)
+        requires IsCborBufferByte<value_type>
+    {
         if (values.empty()) {
             return;
         }
@@ -181,7 +183,9 @@ template <typename T> struct appender<T, false> : append_cursor<T> {
             }
         }
     }
-    constexpr void operator()(T &container, std::string_view value) {
+    constexpr void operator()(T &container, std::string_view value)
+        requires IsCborBufferByte<value_type>
+    {
         if (value.empty()) {
             return;
         }
@@ -235,7 +239,9 @@ template <typename T> struct appender<T, true> {
         ensure_capacity(container, 1);
         container[head_++] = value;
     }
-    constexpr void operator()(T &container, std::span<const std::byte> values) {
+    constexpr void operator()(T &container, std::span<const std::byte> values)
+        requires IsCborBufferByte<value_type>
+    {
         if (values.empty()) {
             return;
         }
@@ -243,7 +249,9 @@ template <typename T> struct appender<T, true> {
         std::memcpy(container.data() + head_, reinterpret_cast<const value_type *>(values.data()), values.size());
         head_ += values.size();
     }
-    constexpr void operator()(T &container, std::string_view value) {
+    constexpr void operator()(T &container, std::string_view value)
+        requires IsCborBufferByte<value_type>
+    {
         if (value.empty()) {
             return;
         }
