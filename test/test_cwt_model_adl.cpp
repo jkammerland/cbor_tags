@@ -1,6 +1,7 @@
 #include "cbor_tags/cwt/types.h"
 
 #include <doctest/doctest.h>
+#include <ostream>
 
 namespace {
 
