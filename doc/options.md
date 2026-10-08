@@ -154,6 +154,20 @@ Passing the complete output span as the source, or otherwise overlapping the
 source with bytes the encoder writes, remains unsupported. Use separate storage
 when that layout is not practical.
 
+## Return Encoded Item Views
+
+```cpp
+auto dec = make_decoder_with_options<encoded_item_view_decoder_options>(buffer);
+Claims claims{};
+auto encoded = dec(claims); // expected<raw_encoded_item_view, status_code>
+```
+
+On success, the borrowed view covers exactly the bytes consumed by this call.
+Keep the input alive and unchanged. Variadic calls include all arguments;
+header-only calls return the consumed prefix; zero consumption returns an empty
+view. Typed decoding stays single-pass. Direct decoding into a raw item, array
+or map view instead structurally parses one complete item to find its end.
+
 ## Wrapping Groups
 
 `default_wrapping` controls whether reflected aggregates and tuple-like grouped
