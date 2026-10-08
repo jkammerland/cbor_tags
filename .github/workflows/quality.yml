@@ -119,6 +119,31 @@ jobs:
         cmake --build build/cmake-3.25-consumer --parallel
         ./build/cmake-3.25-consumer/test_package
 
+    - name: Build and consume installed OpenSSL package
+      shell: bash
+      run: |
+        cmake -S . -B build/cmake-3.25-openssl -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20 \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DVCPKG_MANIFEST_FEATURES=cwt-openssl \
+          -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/cbor-tags-cmake-3.25-openssl" \
+          -DCBOR_TAGS_BUILD_TESTS=OFF \
+          -DCBOR_TAGS_BUILD_CLI=OFF \
+          -DCBOR_TAGS_BUILD_EXAMPLES=OFF \
+          -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON \
+          -DCBOR_TAGS_INSTALL=ON
+        cmake --build build/cmake-3.25-openssl --parallel
+        cmake --install build/cmake-3.25-openssl
+        cmake -S test_package -B build/cmake-3.25-openssl-consumer -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20 \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/cbor-tags-cmake-3.25-openssl;${GITHUB_WORKSPACE}/build/cmake-3.25-openssl/vcpkg_installed/x64-linux" \
+          -DCBOR_TAGS_TEST_PACKAGE_REQUIRE_CWT_OPENSSL=ON
+        cmake --build build/cmake-3.25-openssl-consumer --parallel
+        ./build/cmake-3.25-openssl-consumer/test_package
+
   format-and-tidy:
     name: C++ Format + Clang-Tidy
     runs-on: ubuntu-24.04
@@ -199,6 +224,7 @@ jobs:
       matrix:
         include:
           - { name: "default", cppstd: "20", options: "" }
+          - { name: "cwt-openssl", cppstd: "20", options: "-o cbor-tags/*:cwt_openssl=True" }
           - { name: "std-expected", cppstd: "23", options: "-o cbor-tags/*:std_expected=True" }
           - { name: "boost-pfr-names", cppstd: "20", options: "-o cbor-tags/*:boost_pfr_names=True" }
           - { name: "magic-enum-names", cppstd: "20", options: "-o cbor-tags/*:magic_enum_names=True" }
