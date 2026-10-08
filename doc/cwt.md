@@ -120,3 +120,8 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
 - Header labels accept integers or text. Duplicate labels within each map,
   unsupported/empty `crit`, absent critical targets and trailing protected-header
   bytes are rejected. Supported critical targets are `alg` (1) and `kid` (4).
+
+## Signing and verification
+
+See [COSE signing and verification](cose_signing.md) for the backend contract and
+signing policy.
