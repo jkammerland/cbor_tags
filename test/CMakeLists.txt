@@ -61,7 +61,7 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/cwt")
 # Expected is a standalone value/error abstraction; keep its tests separate from
 # codec roundtrips and CBOR wire fixtures.
 add_test(NAME expected_contract COMMAND tests "--test-suite=expected/contract")
@@ -255,9 +255,25 @@ add_test(
     "-DPASS_REGEX=walk_item visitor must return exactly void or status_code"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
-
+add_test(NAME cwt_wire COMMAND tests "--test-suite=cbor_wire/cwt")
+set_tests_properties(cwt_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME cwt_roundtrip COMMAND tests "--test-suite=roundtrip/cwt")
+set_tests_properties(cwt_roundtrip PROPERTIES LABELS "roundtrip")
+foreach(STORAGE IN ITEMS OWNED VIEW)
+  foreach(OPERATION IN ITEMS ENCODE DECODE)
+    string(TOLOWER "cwt_missing_codec_${STORAGE}_${OPERATION}_compile_fails" TEST_NAME)
+    add_executable(${TEST_NAME} EXCLUDE_FROM_ALL cwt_missing_codec_compile_fail.cc)
+    target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_CWT_${STORAGE} CBOR_TAGS_CWT_${OPERATION})
+    target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+    add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+      "-DPASS_REGEX=CWT types require codec::cwt" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    set_tests_properties(${TEST_NAME} PROPERTIES LABELS "cwt;compile-fail")
+  endforeach()
+endforeach()
 add_test(NAME encoded_item_views_wire COMMAND tests "--test-suite=cbor_wire/encoded_item_views")
 set_tests_properties(encoded_item_views_wire PROPERTIES LABELS "cbor-wire")
+
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)

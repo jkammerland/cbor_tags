@@ -20,11 +20,13 @@ auto enc = make_encoder<codec::unique_ptr>(bytes);
 auto dec = make_decoder<codec::unique_ptr>(bytes);
 ```
 
-The same naming rule applies throughout the library: `codec::typed_array`, `codec::unique_ptr`, `codec::shared_ptr`,
+The same naming rule applies throughout the library: `codec::cwt`,
+`codec::typed_array`, `codec::unique_ptr`, `codec::shared_ptr`,
 `codec::std_expected`, `codec::std_indirect` and `codec::custom_1` use the matching
 `cbor_tags/codec/<name>.h` header. Feature data types live in their feature
-namespace, such as `rfc8746::typed_array`. The former
+namespace, such as `cwt::claims_view` or `rfc8746::typed_array`. The former
 `extensions/` codec headers and suffixed codec names have no compatibility aliases.
+See [CWT and COSE](cwt.md) for the owning/view model split.
 
 Multiple extensions can be installed together when their overloads are designed
 to compose:
@@ -185,6 +187,8 @@ my_root<T> as_my_root(my_session&, const T&&) = delete;
 
 Current public extension headers:
 
+- `cbor_tags/codec/cwt.h`: CWT claims and COSE owning/borrowed wire models.
+  See [CWT and COSE](cwt.md).
 - `cbor_tags/codec/custom_1.h`: schema-bound `tag(bstr)` payload
   codec. See [Custom Codec 1](custom_codec_1.md).
 - `cbor_tags/codec/unique_ptr.h`: unique ownership as `T / null`.
