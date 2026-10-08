@@ -224,8 +224,8 @@ template <typename Self> struct cwt : base<Self> {
                     }
                     decoded.subject = std::move(value);
                 } else if (key->value == 3U) {
-                    helpers::text_storage<Borrowed> value;
-                    const auto                      value_status = dec.decode(value);
+                    helpers::audience_storage<Borrowed> value;
+                    const auto                          value_status = dec.decode(value);
                     if (value_status != status_code::success) {
                         return value_status;
                     }
