@@ -135,4 +135,30 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK(result.error() == status_code::error);
         CHECK(view.issuer == "unchanged");
     }
+    TEST_CASE("cwt views skip text claim labels and reject their duplicates") {
+        const auto  bytes = to_bytes("bf7f637072696476617465ff9f0102ff0163696470ff09");
+        claims_view view;
+        auto        dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(bytes);
+        const auto  result = dec(view);
+        REQUIRE(result);
+        REQUIRE(view.issuer);
+        CHECK(*view.issuer == "idp");
+        CHECK(view.issuer->data() == reinterpret_cast<const char *>(bytes.data() + 18));
+        CHECK(to_hex(result->bytes()) == "bf7f637072696476617465ff9f0102ff0163696470ff");
+        int following{};
+        REQUIRE(dec(following));
+        CHECK(following == 9);
+        CHECK(dec.tell() == bytes.end());
+
+        const auto duplicate = to_bytes("a27f637072696476617465ff01677072697661746502");
+        const auto rejected  = make_decoder<codec::cwt>(duplicate)(view);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error() == status_code::error);
+        CHECK(view.issuer == "idp");
+        const auto truncated  = to_bytes("a17f63707269");
+        const auto incomplete = make_decoder<codec::cwt>(truncated)(view);
+        REQUIRE_FALSE(incomplete);
+        CHECK(incomplete.error() == status_code::incomplete);
+        CHECK(view.issuer == "idp");
+    }
 }
