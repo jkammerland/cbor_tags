@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/extensions/smart_ptr.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
 
 #include <concepts>
 #include <cstddef>
@@ -80,14 +81,14 @@ void operator delete(void *storage, std::size_t) noexcept { std::free(storage); 
 
 int main() {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::smart_ptr;
+    using namespace cbor::tags::smart_ptr;
 
     static_assert(IsSharedPointer<structural_shared_pointer<tracked_value>>);
     static_assert(!std::constructible_from<structural_shared_pointer<tracked_value>, std::shared_ptr<tracked_value>>);
 
     const std::vector<std::byte>             encoded{std::byte{0xD8}, std::byte{0x1C}, std::byte{0x01}};
     structural_shared_pointer<tracked_value> decoded;
-    auto                                     dec    = make_decoder<shared_ptr_codec>(encoded);
+    auto                                     dec    = make_decoder<codec::shared_ptr>(encoded);
     const auto                               result = dec(decoded);
 
     const auto allocation_failed = !result && result.error() == status_code::out_of_memory;

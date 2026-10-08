@@ -257,8 +257,7 @@ template <typename T> constexpr std::uint64_t tag_for(const T &value) {
     } else if constexpr (HasTagFreeFunction<type>) {
         return tag_to_uint64(cbor_tag(value));
     } else {
-        static_assert(dependent_false<T>::value,
-                      "as_custom_codec_1(value) requires a CBOR tag; use as_custom_codec_1(tag, value) for explicit tags");
+        static_assert(dependent_false<T>::value, "as_ref(value) requires a CBOR tag; use as_ref(tag, value) for explicit tags");
     }
 }
 

@@ -327,7 +327,7 @@ template <typename T> constexpr auto getName() {
     } else {
         if constexpr (IsOptional<T>) {
             using value_type = typename T::value_type;
-            static_assert(!ext::smart_ptr::detail::has_pointer_null_wire_v<true, true, value_type>,
+            static_assert(!smart_ptr::detail::has_pointer_null_wire_v<true, true, value_type>,
                           "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
             auto name = getName<value_type>();
             return std::string(name) + " / null";
@@ -1327,7 +1327,7 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
     } else if constexpr (IsIndefiniteWrapper<value_type>) {
         return cddl_type_expr<indefinite_value_t<value_type>, PointerMode>(context, options);
     } else if constexpr (IsOptional<value_type>) {
-        static_assert(!ext::smart_ptr::detail::has_pointer_null_wire_v<true, true, typename value_type::value_type>,
+        static_assert(!smart_ptr::detail::has_pointer_null_wire_v<true, true, typename value_type::value_type>,
                       "CDDL std::optional<T> cannot contain a smart pointer null state because both empty states use CBOR null");
         return text::format("{} / null", cddl_type_expr<typename value_type::value_type, PointerMode>(context, options));
     } else if constexpr (IsSmartPointer<value_type>) {
@@ -1337,7 +1337,7 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
                       "non-const, non-void, and non-array");
         static_assert(std::default_initializable<element_type>,
                       "CDDL smart pointer support requires default-initializable pointee types because pointer decode constructs T");
-        static_assert(ext::smart_ptr::detail::encodes_one_cbor_item<default_options, element_type>(),
+        static_assert(smart_ptr::detail::encodes_one_cbor_item<default_options, element_type>(),
                       "CDDL smart pointer pointee must encode exactly one CBOR item");
         if constexpr (IsSharedPointer<value_type>) {
             return text::format("null / #6.28({}) / #6.29(uint)",
@@ -1364,7 +1364,7 @@ template <typename T, cddl_shared_pointer_mode PointerMode> std::string cddl_typ
             static_assert(matching_major_types[MajorIndex::DynamicTag] == 0,
                           "CDDL for variant alternatives with dynamic CBOR tags is unsupported");
             if constexpr ((cddl_contains_smart_pointer<Ts>() || ...)) {
-                static_assert(ext::smart_ptr::detail::pointer_variant_is_unambiguous<value_type>(),
+                static_assert(smart_ptr::detail::pointer_variant_is_unambiguous<value_type>(),
                               "CDDL pointer variant alternatives overlap on the CBOR wire");
             }
             return join_cddl(std::array<std::string, sizeof...(Ts)>{cddl_type_expr<Ts, PointerMode>(context, options)...}, " / ");

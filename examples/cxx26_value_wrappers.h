@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cbor_tags/extensions/std_indirect.h>
+#include <cbor_tags/codec/std_indirect.h>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -37,7 +37,7 @@ using cat_wire    = std::tuple<ct::static_tag<60011>, std::string, std::uint64_t
 using animal_wire = std::variant<dog_wire, cat_wire>;
 
 template <typename T> struct is_animal_value : std::false_type {};
-template <typename Alloc> struct is_animal_value<std::polymorphic<animal, Alloc>> : std::true_type {};
+template <typename Alloc> struct is_animal_value<std::polymorphic<cbor_value_example::animal, Alloc>> : std::true_type {};
 
 template <typename T> consteval bool has_animal_alternative() {
     if constexpr (is_animal_value<T>::value) {
@@ -51,13 +51,15 @@ template <typename T> consteval bool has_animal_alternative() {
     }
 }
 
-template <typename Self> struct animal_codec : ct::codec_mixin_base<Self> {
-    using base = ct::codec_mixin_base<Self>;
+namespace codec {
+
+template <typename Self> struct animal : cbor::tags::codec::base<Self> {
+    using base = cbor::tags::codec::base<Self>;
     using base::decode;
     using base::encode;
 
-    template <typename Alloc> void encode(const std::polymorphic<animal, Alloc> &value) {
-        static_assert(Self::options::wrap_groups, "animal_codec requires wrapped tagged payload groups");
+    template <typename Alloc> void encode(const std::polymorphic<cbor_value_example::animal, Alloc> &value) {
+        static_assert(Self::options::wrap_groups, "codec::animal requires wrapped tagged payload groups");
         if (value.valueless_after_move()) {
             throw ct::detail::encode_status_exception{ct::status_code::error};
         }
@@ -72,8 +74,9 @@ template <typename Self> struct animal_codec : ct::codec_mixin_base<Self> {
     }
 
     template <typename Alloc>
-    [[nodiscard]] ct::status_code decode(std::polymorphic<animal, Alloc> &value, ct::major_type major, std::byte additional_info) {
-        static_assert(Self::options::wrap_groups, "animal_codec requires wrapped tagged payload groups");
+    [[nodiscard]] ct::status_code decode(std::polymorphic<cbor_value_example::animal, Alloc> &value, ct::major_type major,
+                                         std::byte additional_info) {
+        static_assert(Self::options::wrap_groups, "codec::animal requires wrapped tagged payload groups");
         animal_wire wire;
         const auto  status = static_cast<Self &>(*this).decode(wire, major, additional_info);
         if (status != ct::status_code::success) {
@@ -84,11 +87,13 @@ template <typename Self> struct animal_codec : ct::codec_mixin_base<Self> {
             [&value](auto &&concrete) {
                 using wire_type = std::remove_cvref_t<decltype(concrete)>;
                 if constexpr (std::same_as<wire_type, dog_wire>) {
-                    value = std::polymorphic<animal, Alloc>(std::allocator_arg, value.get_allocator(), std::in_place_type<dog>,
-                                                            std::get<1>(concrete), std::move(std::get<2>(concrete)));
+                    value = std::polymorphic<cbor_value_example::animal, Alloc>(std::allocator_arg, value.get_allocator(),
+                                                                                std::in_place_type<dog>, std::get<1>(concrete),
+                                                                                std::move(std::get<2>(concrete)));
                 } else {
-                    value = std::polymorphic<animal, Alloc>(std::allocator_arg, value.get_allocator(), std::in_place_type<cat>,
-                                                            std::move(std::get<1>(concrete)), std::get<2>(concrete));
+                    value = std::polymorphic<cbor_value_example::animal, Alloc>(std::allocator_arg, value.get_allocator(),
+                                                                                std::in_place_type<cat>, std::move(std::get<1>(concrete)),
+                                                                                std::get<2>(concrete));
                 }
             },
             std::move(wire));
@@ -108,6 +113,8 @@ template <typename Self> struct animal_codec : ct::codec_mixin_base<Self> {
         return ct::status_code::error;
     }
 };
+
+} // namespace codec
 
 } // namespace cbor_value_example
 

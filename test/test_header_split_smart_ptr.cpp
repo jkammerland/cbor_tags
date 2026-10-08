@@ -1,21 +1,22 @@
 // A public extension header should be enough for its codec wrappers and factories.
-#include <cbor_tags/extensions/smart_ptr.h>
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/unique_ptr.h>
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <memory>
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::smart_ptr;
+using namespace cbor::tags::smart_ptr;
 
 TEST_CASE("smart pointer split header is directly usable") {
     std::vector<std::byte> encoded;
     auto                   value = std::make_unique<int>(42);
-    auto                   enc   = make_encoder<unique_ptr_codec>(encoded);
+    auto                   enc   = make_encoder<codec::unique_ptr>(encoded);
     REQUIRE(enc(value));
 
     std::unique_ptr<int> decoded;
-    auto                 dec = make_decoder<unique_ptr_codec>(encoded);
+    auto                 dec = make_decoder<codec::unique_ptr>(encoded);
     REQUIRE(dec(decoded));
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, 42);
@@ -24,11 +25,11 @@ TEST_CASE("smart pointer split header is directly usable") {
 TEST_CASE("shared pointer split header is directly usable") {
     std::vector<std::byte> encoded;
     auto                   value = std::make_shared<int>(42);
-    auto                   enc   = make_encoder<shared_ptr_codec>(encoded);
+    auto                   enc   = make_encoder<codec::shared_ptr>(encoded);
     REQUIRE(enc(value));
 
     std::shared_ptr<int> decoded;
-    auto                 dec = make_decoder<shared_ptr_codec>(encoded);
+    auto                 dec = make_decoder<codec::shared_ptr>(encoded);
     REQUIRE(dec(decoded));
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(*decoded, 42);
@@ -44,11 +45,11 @@ TEST_CASE("shared pointer split header roundtrips aggregate payloads") {
     const std::vector<double> expected_ys{1.0, 2.0};
 
     auto value = std::make_shared<TestGraphStruct>(TestGraphStruct{.x = 1, .ys = expected_ys});
-    auto enc   = make_encoder<shared_ptr_codec>(encoded);
+    auto enc   = make_encoder<codec::shared_ptr>(encoded);
     REQUIRE(enc(value));
 
     std::shared_ptr<TestGraphStruct> decoded;
-    auto                             dec = make_decoder<shared_ptr_codec>(encoded);
+    auto                             dec = make_decoder<codec::shared_ptr>(encoded);
     REQUIRE(dec(decoded));
     REQUIRE(static_cast<bool>(decoded));
     CHECK_EQ(decoded->x, 1);

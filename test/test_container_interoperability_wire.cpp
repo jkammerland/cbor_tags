@@ -302,13 +302,13 @@ TEST_SUITE("cbor_wire/container_interoperability") {
         REQUIRE(make_encoder(encoded)(output));
         CHECK(encoded == to_bytes("63616263"));
 
-        using namespace cbor::tags::ext::smart_ptr;
+        using namespace cbor::tags::smart_ptr;
         boost::movelib::unique_ptr<int> unique(new int(42));
         boost::shared_ptr<int>          shared(new int(23));
         encoded.clear();
-        REQUIRE(make_encoder<unique_ptr_codec, shared_ptr_codec>(encoded)(unique, shared));
+        REQUIRE(make_encoder<codec::unique_ptr, codec::shared_ptr>(encoded)(unique, shared));
         CHECK(encoded == to_bytes("182ad81c17"));
-        auto                            pointer_dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(encoded);
+        auto                            pointer_dec = make_decoder<codec::unique_ptr, codec::shared_ptr>(encoded);
         boost::movelib::unique_ptr<int> unique_copy;
         boost::shared_ptr<int>          shared_copy;
         REQUIRE(pointer_dec(unique_copy, shared_copy));
@@ -319,9 +319,9 @@ TEST_SUITE("cbor_wire/container_interoperability") {
         unique.reset();
         shared.reset();
         encoded.clear();
-        REQUIRE(make_encoder<unique_ptr_codec, shared_ptr_codec>(encoded)(unique, shared));
+        REQUIRE(make_encoder<codec::unique_ptr, codec::shared_ptr>(encoded)(unique, shared));
         CHECK(encoded == to_bytes("f6f6"));
-        REQUIRE(make_decoder<unique_ptr_codec, shared_ptr_codec>(encoded)(unique_copy, shared_copy));
+        REQUIRE(make_decoder<codec::unique_ptr, codec::shared_ptr>(encoded)(unique_copy, shared_copy));
         CHECK_FALSE(unique_copy);
         CHECK_FALSE(shared_copy);
     }

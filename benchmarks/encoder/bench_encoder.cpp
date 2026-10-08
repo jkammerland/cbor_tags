@@ -17,14 +17,15 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
-#include <cbor_tags/extensions/smart_ptr.h>
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/unique_ptr.h>
 #include <fmt/format.h>
 #include <nanobench.h>
 #include <small_generator.h>
 
 using namespace std::string_view_literals;
 using namespace cbor::tags;
-using namespace cbor::tags::ext::smart_ptr;
+using namespace cbor::tags::smart_ptr;
 
 struct benchmark_options {
     std::string_view unit{"Ops"};
@@ -245,7 +246,7 @@ template <std::size_t UniqueCount> void run_shared_ptr_encode_benchmarks_for_siz
         std::vector<std::uint8_t> data;
         data.reserve(values.size() * 8U);
 
-        auto enc    = make_encoder<shared_ptr_codec>(data);
+        auto enc    = make_encoder<codec::shared_ptr>(data);
         auto result = enc(values);
 
         ankerl::nanobench::doNotOptimizeAway(result);

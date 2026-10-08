@@ -346,56 +346,54 @@ no library trait registration is required. When the extension contains a core
 container, its overload can delegate the bound without rereading the CBOR
 header:
 
+The compiled [samples codec example](../examples/bounded_samples.h) uses a
+separate application namespace, so its selector composes with library codecs.
+
 ```cpp
+namespace app {
+
 namespace ct = cbor::tags;
 
 struct samples {
     std::vector<int> values;
 };
 
-template <typename Self>
-struct samples_codec : ct::codec_mixin_base<Self> {
-    using base = ct::codec_mixin_base<Self>;
+namespace codec {
+
+template <typename Self> struct samples : ct::codec::base<Self> {
+    using base = ct::codec::base<Self>;
     using base::decode;
     using base::encode;
 
-    template <std::size_t Min, std::size_t Max>
-    void encode(const ct::bounded_size<samples, Min, Max>& bounded) {
-        static_cast<Self&>(*this).encode(
-            ct::as_bounded_size<Min, Max>(bounded.value().values));
+    template <typename Value, std::size_t Min, std::size_t Max>
+        requires std::same_as<std::remove_cvref_t<Value>, app::samples>
+    void encode(const ct::bounded_size<Value, Min, Max> &bounded) {
+        static_cast<Self &>(*this).encode(ct::as_bounded_size<Min, Max>(bounded.value().values));
     }
 
-    template <std::size_t Min, std::size_t Max>
-    ct::status_code decode(
-        ct::bounded_size<samples, Min, Max>& bounded,
-        ct::major_type major,
-        std::byte additional_info) {
+    template <typename Value, std::size_t Min, std::size_t Max>
+        requires std::same_as<std::remove_cvref_t<Value>, app::samples>
+    ct::status_code decode(ct::bounded_size<Value, Min, Max> &bounded, ct::major_type major, std::byte additional_info) {
         auto values = ct::as_bounded_size<Min, Max>(bounded.value().values);
-        return static_cast<Self&>(*this).decode(values, major, additional_info);
+        return static_cast<Self &>(*this).decode(values, major, additional_info);
     }
 
     template <typename Value>
-        requires std::same_as<std::remove_cvref_t<Value>, samples>
-    void encode(const ct::dynamic_bounded_size<Value>& bounded) {
-        static_cast<Self&>(*this).encode(ct::as_bounded_size(
-            bounded.value().values,
-            bounded.min_size(),
-            bounded.max_size()));
+        requires std::same_as<std::remove_cvref_t<Value>, app::samples>
+    void encode(const ct::dynamic_bounded_size<Value> &bounded) {
+        static_cast<Self &>(*this).encode(ct::as_bounded_size(bounded.value().values, bounded.min_size(), bounded.max_size()));
     }
 
     template <typename Value>
-        requires std::same_as<std::remove_cvref_t<Value>, samples>
-    ct::status_code decode(
-        ct::dynamic_bounded_size<Value>& bounded,
-        ct::major_type major,
-        std::byte additional_info) {
-        auto values = ct::as_bounded_size(
-            bounded.value().values,
-            bounded.min_size(),
-            bounded.max_size());
-        return static_cast<Self&>(*this).decode(values, major, additional_info);
+        requires std::same_as<std::remove_cvref_t<Value>, app::samples>
+    ct::status_code decode(ct::dynamic_bounded_size<Value> &bounded, ct::major_type major, std::byte additional_info) {
+        auto values = ct::as_bounded_size(bounded.value().values, bounded.min_size(), bounded.max_size());
+        return static_cast<Self &>(*this).decode(values, major, additional_info);
     }
 };
+
+} // namespace codec
+} // namespace app
 ```
 
 The RFC 8746 scalar typed-array extension supports static and runtime bounds as
@@ -405,7 +403,7 @@ in CDDL because the wire payload is a `bstr`:
 ```cpp
 namespace ct = cbor::tags;
 namespace cddl = ct::cddl;
-namespace rfc8746 = cbor::tags::ext::rfc8746;
+namespace rfc8746 = cbor::tags::rfc8746;
 
 using samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
 
@@ -512,7 +510,7 @@ scoped maps and may have their own extension field. Fixed field names must also
 be unique after flattening all `as_named_group` members; duplicate fixed names
 are rejected at compile time.
 
-`std::unique_ptr<T>` renders as `T / null`, matching `unique_ptr_codec`.
+`std::unique_ptr<T>` renders as `T / null`, matching `cbor::tags::codec::unique_ptr`.
 Pointer fields remain required in named maps unless the field type itself is
 `std::optional`; a null pointer is an explicit CBOR `null`, not an omitted
 member. A pointee type that also accepts `null` is rejected because the two
@@ -521,7 +519,7 @@ pointer states would be indistinguishable. Outside named maps, an
 the same reason. Named-map omission is distinct from a present key whose value
 is `null`, so optional smart-pointer fields remain representable there.
 
-Include `cbor_tags/extensions/smart_ptr.h` to render compatible shared pointer
+Include `cbor_tags/codec/shared_ptr.h` to render compatible shared pointer
 types directly as `null / #6.28(T) / #6.29(uint)`. No schema-root wrapper is
 required.
 

@@ -3,17 +3,18 @@
 Smart-pointer support is opt-in:
 
 ```cpp
-#include "cbor_tags/extensions/smart_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
+#include "cbor_tags/codec/shared_ptr.h"
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::smart_ptr;
+using namespace cbor::tags::smart_ptr;
 ```
 
 There are two codecs because the wire formats do different things:
 
-- `unique_ptr_codec` writes an owned value as `T`, or an empty pointer as
+- `cbor::tags::codec::unique_ptr` writes an owned value as `T`, or an empty pointer as
   CBOR `null`.
-- `shared_ptr_codec` writes CBOR shared-reference tags 28 and 29 so repeated
+- `cbor::tags::codec::shared_ptr` writes CBOR shared-reference tags 28 and 29 so repeated
   pointers decode to the same object.
 
 Both codecs use structural concepts rather than matching only the standard
@@ -28,11 +29,11 @@ cannot be checked by a C++ concept.
 std::vector<std::byte> bytes;
 std::unique_ptr<int> sent = std::make_unique<int>(42);
 
-auto enc = make_encoder<unique_ptr_codec>(bytes);
+auto enc = make_encoder<cbor::tags::codec::unique_ptr>(bytes);
 enc(sent); // encodes the same item as int{42}
 
 std::unique_ptr<int> received;
-auto dec = make_decoder<unique_ptr_codec>(bytes);
+auto dec = make_decoder<cbor::tags::codec::unique_ptr>(bytes);
 dec(received);
 ```
 
@@ -70,11 +71,11 @@ auto value = std::make_shared<int>(42);
 message sent{value, value};
 
 std::vector<std::byte> bytes;
-auto enc = make_encoder<shared_ptr_codec>(bytes);
+auto enc = make_encoder<cbor::tags::codec::shared_ptr>(bytes);
 enc(sent);
 
 message received;
-auto dec = make_decoder<shared_ptr_codec>(bytes);
+auto dec = make_decoder<cbor::tags::codec::shared_ptr>(bytes);
 dec(received);
 
 assert(received.first == received.second);
@@ -91,7 +92,7 @@ The first non-null pointer is written with tag 28. Later occurrences are tag
 ```
 
 Every tag 28 in the active reference scope consumes an index, including tags not
-produced by `shared_ptr_codec`.
+produced by `cbor::tags::codec::shared_ptr`.
 
 An empty pointer is ordinary CBOR `null`.
 
@@ -100,7 +101,7 @@ An empty pointer is ordinary CBOR `null`.
 The library does not choose which derived type a `std::shared_ptr<animal>`
 represents on the wire. Define that choice in the application. Put the overload
 in the same namespace as `animal` so the normal encoder and decoder find it,
-and do not install `shared_ptr_codec` for this value format.
+and do not install `cbor::tags::codec::shared_ptr` for this value format.
 
 With RTTI, encoding can select the concrete type with `dynamic_cast`:
 
@@ -235,7 +236,7 @@ auto dog_value = std::make_shared<dog>();
 dog_value->age = 7;
 std::shared_ptr<animal> sent = dog_value;
 
-auto enc = make_encoder(bytes); // no shared_ptr_codec
+auto enc = make_encoder(bytes); // no cbor::tags::codec::shared_ptr
 assert(enc(sent));
 
 std::shared_ptr<animal> received;

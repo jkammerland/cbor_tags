@@ -4,8 +4,9 @@
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/unique_ptr.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
-#include <cbor_tags/extensions/smart_ptr.h>
 #include <doctest/doctest.h>
 #include <list>
 #include <map>

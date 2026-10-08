@@ -1,12 +1,12 @@
+#include "cbor_tags/codec/typed_array.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
 
 #include <cstdint>
 #include <fmt/format.h>
 #include <variant>
 
 int main() {
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
 
     fmt::memory_buffer buffer;
     cbor::tags::cddl::schema_to<std::variant<typed_array_ref<std::int32_t>, typed_array<std::int32_t>>>(

@@ -918,33 +918,35 @@ deserialization, CDDL, and exact output examples.
 Standards coverage is tracked in [`doc/cddl_standard_coverage.md`](doc/cddl_standard_coverage.md).
 
 ### Smart Pointer Codecs
-Smart pointer support is opt-in through `cbor_tags/extensions/smart_ptr.h`.
-`unique_ptr_codec` writes a `std::unique_ptr<T>` as plain `null` or `T`.
-`shared_ptr_codec` preserves shared identity: repeated pointers decode to the
+Smart pointer support is opt-in through `cbor_tags/codec/unique_ptr.h` and
+`cbor_tags/codec/shared_ptr.h`.
+`codec::unique_ptr` writes a `std::unique_ptr<T>` as plain `null` or `T`.
+`codec::shared_ptr` preserves shared identity: repeated pointers decode to the
 same object.
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/smart_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
+#include "cbor_tags/codec/shared_ptr.h"
 
 #include <cstddef>
 #include <memory>
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::smart_ptr;
+using namespace cbor::tags::smart_ptr;
 
 std::vector<std::byte> buffer;
 
 auto value = std::make_shared<int>(42);
 std::vector<std::shared_ptr<int>> sent{value, value};
 
-auto enc = make_encoder<shared_ptr_codec>(buffer);
+auto enc = make_encoder<codec::shared_ptr>(buffer);
 enc(sent);
 
 std::vector<std::shared_ptr<int>> received;
-auto dec = make_decoder<shared_ptr_codec>(buffer);
+auto dec = make_decoder<codec::shared_ptr>(buffer);
 dec(received);
 
 // received[0].get() == received[1].get(): both point to the same int.

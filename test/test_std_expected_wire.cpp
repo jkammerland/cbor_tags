@@ -11,14 +11,13 @@
 #include <span>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::std_expected;
 using namespace std_expected_test;
 
 namespace {
 template <typename T, typename E> void check_decode_error(const char *hex, status_code expected_status) {
     const auto          bytes = to_bytes(hex);
     std::expected<T, E> decoded{};
-    auto                dec    = make_decoder<std_expected_codec>(bytes);
+    auto                dec    = make_decoder<codec::std_expected>(bytes);
     const auto          result = dec(decoded);
 
     CAPTURE(hex);
@@ -78,7 +77,7 @@ TEST_SUITE("cbor_wire/std_expected") {
 
     TEST_CASE("std::expected installed empty-item mixin emits one null payload") {
         std::vector<std::byte> bytes;
-        auto                   enc = make_encoder<empty_item_codec, std_expected_codec>(bytes);
+        auto                   enc = make_encoder<empty_item_codec, codec::std_expected>(bytes);
         REQUIRE(enc(std::expected<mixin_empty, int>{}));
         CHECK_EQ(to_hex(bytes), "82f5f6");
     }
@@ -87,7 +86,7 @@ TEST_SUITE("cbor_wire/std_expected") {
         const auto bytes = to_bytes("9ff5182aff");
 
         std::expected<int, std::string> decoded{};
-        auto                            dec = make_decoder<std_expected_codec>(bytes);
+        auto                            dec = make_decoder<codec::std_expected>(bytes);
 
         REQUIRE(dec(decoded));
         REQUIRE(decoded.has_value());

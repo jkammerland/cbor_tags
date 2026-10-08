@@ -1,5 +1,5 @@
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/custom_codec_1.h"
+#include "cbor_tags/codec/custom_1.h"
 
 #include <compare>
 #include <cstddef>
@@ -12,10 +12,10 @@ struct zero_width_key {
 
 int main() {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::custom_codec_1;
+    using namespace cbor::tags::custom_1;
 
     std::vector<std::byte>                   output;
     std::map<zero_width_key, std::nullptr_t> values;
-    auto                                     enc = make_encoder<custom_codec_1>(output);
-    return enc(as_custom_codec_1(static_tag<1>{}, values)).has_value() ? 0 : 1;
+    auto                                     enc = make_encoder<codec::custom_1>(output);
+    return enc(as_ref(static_tag<1>{}, values)).has_value() ? 0 : 1;
 }

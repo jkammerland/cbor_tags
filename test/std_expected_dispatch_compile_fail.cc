@@ -1,11 +1,11 @@
-#include <cbor_tags/extensions/std_expected.h>
+#include <cbor_tags/codec/std_expected.h>
 #include <expected>
 #include <optional>
 #include <variant>
 #include <vector>
 
 using namespace cbor::tags;
-using ext::std_expected::std_expected_codec;
+using codec::std_expected;
 
 struct empty {};
 struct group {
@@ -15,9 +15,9 @@ struct tagged_empty {
     static constexpr std::uint64_t cbor_tag = 321;
 };
 
-template <typename Self> struct header_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::encode;
-    using codec_mixin_base<Self>::decode;
+template <typename Self> struct header_codec : codec::base<Self> {
+    using codec::base<Self>::encode;
+    using codec::base<Self>::decode;
     status_code decode(empty &, major_type major, std::byte info) {
         std::uint64_t value{};
         return static_cast<Self &>(*this).decode(value, major, info);
@@ -33,18 +33,18 @@ template <typename Self> struct header_codec : codec_mixin_base<Self> {
     }
 };
 
-template <typename Self> struct direct_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::encode;
-    using codec_mixin_base<Self>::decode;
+template <typename Self> struct direct_codec : codec::base<Self> {
+    using codec::base<Self>::encode;
+    using codec::base<Self>::decode;
     status_code decode(empty &) {
         std::uint64_t value{};
         return static_cast<Self &>(*this).decode(value);
     }
 };
 
-template <typename Self> struct container_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::encode;
-    using codec_mixin_base<Self>::decode;
+template <typename Self> struct container_codec : codec::base<Self> {
+    using codec::base<Self>::encode;
+    using codec::base<Self>::decode;
     void        encode(const std::vector<empty> &value) { static_cast<Self &>(*this).encode(value.size()); }
     status_code decode(std::vector<empty> &value, major_type major, std::byte info) {
         std::size_t size{};
@@ -77,15 +77,15 @@ int main() {
 #if defined(CBOR_EXPECTED_INDEFINITE_CONTAINER)
     std::vector<empty> elements;
     payload            value{std::in_place, elements};
-    return make_encoder<container_codec, std_expected_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_encoder<container_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
 #else
     payload value{};
 #if defined(CBOR_EXPECTED_BOUNDED_CONTAINER)
-    return make_decoder<container_codec, std_expected_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_decoder<container_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
 #elif defined(CBOR_EXPECTED_DIRECT_ARRAY) || defined(CBOR_EXPECTED_DIRECT_OPTIONAL)
-    return make_decoder<direct_codec, std_expected_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_decoder<direct_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
 #else
-    return make_decoder<header_codec, std_expected_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_decoder<header_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
 #endif
 #endif
 }

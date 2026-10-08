@@ -1,29 +1,29 @@
 # RFC 8746 Typed Arrays
 
-`cbor_tags/extensions/rfc8746_typed_arrays.h` provides an opt-in codec for RFC
+`cbor_tags/codec/typed_array.h` provides an opt-in codec for RFC
 8746 typed-array tags. Include the extension and install
-`typed_array_codec` on the encoder or decoder:
+`cbor::tags::codec::typed_array` on the encoder or decoder:
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
+#include "cbor_tags/codec/typed_array.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::rfc8746;
+using namespace cbor::tags::rfc8746;
 
 std::vector<std::int32_t> values{1, -2, 3};
 std::vector<std::byte> bytes;
 
-auto enc = make_encoder<typed_array_codec>(bytes);
+auto enc = make_encoder<cbor::tags::codec::typed_array>(bytes);
 enc(as_typed_array(values));
 
 typed_array<std::int32_t> decoded;
-auto dec = make_decoder<typed_array_codec>(bytes);
+auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
 dec(decoded);
 ```
 
@@ -163,7 +163,7 @@ For non-contiguous input buffers, use `typed_array_view_for<T, Decoder>` so the
 view stores the decoder's non-contiguous byte-string view type:
 
 ```cpp
-auto dec = make_decoder<typed_array_codec>(input);
+auto dec = make_decoder<cbor::tags::codec::typed_array>(input);
 typed_array_view_for<std::int32_t, decltype(dec)> view;
 dec(view);
 ```
@@ -177,7 +177,7 @@ wire payload shape:
 
 ```cpp
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
+#include "cbor_tags/codec/typed_array.h"
 
 #include <fmt/format.h>
 
@@ -197,7 +197,7 @@ because the RFC 8746 payload is a byte string:
 ```cpp
 namespace ct = cbor::tags;
 namespace cddl = ct::cddl;
-namespace rfc8746 = cbor::tags::ext::rfc8746;
+namespace rfc8746 = cbor::tags::rfc8746;
 
 std::vector<std::int32_t> values{1, 2, 3};
 enc(ct::as_bounded_size<1, 3>(rfc8746::as_typed_array(values)));
@@ -350,7 +350,7 @@ Variant tag collisions are rejected at compile time when decode is instantiated:
 using duplicate_static_tag = std::variant<typed_array<std::int32_t>, static_tag<78>>;
 
 duplicate_static_tag value;
-auto dec = make_decoder<typed_array_codec>(bytes);
+auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
 dec(value); // Error: both alternatives match #6.78.
 
 using catch_all_collision = std::variant<typed_array<std::int32_t>, as_tag_any>;

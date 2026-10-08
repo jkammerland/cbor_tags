@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor.h"
-#include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/codec.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_item_shape.h"
 
@@ -28,7 +28,7 @@
 
 #include <expected>
 
-namespace cbor::tags::ext::std_expected {
+namespace cbor::tags::codec {
 
 namespace detail {
 
@@ -37,9 +37,9 @@ concept DecodableStdExpected = std::default_initializable<E> && (std::is_void_v<
 
 } // namespace detail
 
-template <typename Self> struct std_expected_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::decode;
-    using codec_mixin_base<Self>::encode;
+template <typename Self> struct std_expected : base<Self> {
+    using base<Self>::decode;
+    using base<Self>::encode;
 
     template <typename T, typename E> constexpr void encode(const std::expected<T, E> &value) {
         require_single_item_payloads<T, E>();
@@ -76,7 +76,7 @@ template <typename Self> struct std_expected_codec : codec_mixin_base<Self> {
 
             major_type end_major{};
             std::byte  end_info{};
-            status = cbor::tags::detail::read_extension_initial_byte(dec, end_major, end_info);
+            status = tags::detail::read_initial_byte(dec, end_major, end_info);
             if (status != status_code::success) {
                 return status;
             }
@@ -87,7 +87,7 @@ template <typename Self> struct std_expected_codec : codec_mixin_base<Self> {
         }
 
         std::uint64_t size{};
-        auto          status = cbor::tags::detail::decode_definite_array_size(dec, major, additional_info, size);
+        auto          status = tags::detail::decode_definite_array_size(dec, major, additional_info, size);
         if (status != status_code::success) {
             return status;
         }
@@ -100,9 +100,9 @@ template <typename Self> struct std_expected_codec : codec_mixin_base<Self> {
 
   private:
     template <typename T, typename E> static consteval void require_single_item_payloads() {
-        static_assert(std::is_void_v<T> || cbor::tags::detail::codec_payload_encodes_one_item<Self, T>(),
+        static_assert(std::is_void_v<T> || tags::detail::codec_payload_encodes_one_item<Self, T>(),
                       "std::expected value payload must encode exactly one CBOR item; use void for a payload-free success");
-        static_assert(cbor::tags::detail::codec_payload_encodes_one_item<Self, E>(),
+        static_assert(tags::detail::codec_payload_encodes_one_item<Self, E>(),
                       "std::expected error payload must encode exactly one CBOR item");
     }
 
@@ -143,4 +143,4 @@ template <typename Self> struct std_expected_codec : codec_mixin_base<Self> {
     }
 };
 
-} // namespace cbor::tags::ext::std_expected
+} // namespace cbor::tags::codec

@@ -13,7 +13,7 @@
 #include <utility>
 #include <variant>
 
-namespace cbor::tags::ext::smart_ptr::detail {
+namespace cbor::tags::smart_ptr::detail {
 
 inline constexpr std::uint64_t shareable_tag = 28U;
 inline constexpr std::uint64_t sharedref_tag = 29U;
@@ -299,4 +299,4 @@ consteval bool pointer_variant_is_unambiguous() {
     }
 }
 
-} // namespace cbor::tags::ext::smart_ptr::detail
+} // namespace cbor::tags::smart_ptr::detail

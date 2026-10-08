@@ -3,21 +3,22 @@
 
 #include <cbor_tags/cbor_lazy_tags.h>
 #include <cbor_tags/cbor_segments.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
-#include <cbor_tags/extensions/smart_ptr.h>
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/typed_array.h>
+#include <cbor_tags/codec/unique_ptr.h>
 
 namespace cbor_fuzz {
-using namespace cbor::tags::ext::rfc8746;
+using namespace cbor::tags::rfc8746;
 
 template <typename T, typed_array_byte_order Order> void typed_roundtrip(const std::vector<T> &input) {
     typed_array<T, Order> value(input);
     bytes                 buffer;
-    auto                  enc = make_encoder<typed_array_codec>(buffer);
+    auto                  enc = make_encoder<cbor::tags::codec::typed_array>(buffer);
     ASSERT_TRUE(enc(value));
 
     auto verify = [&](const auto &data) {
         typed_array<T, Order> decoded;
-        auto                  dec = make_decoder<typed_array_codec>(data);
+        auto                  dec = make_decoder<cbor::tags::codec::typed_array>(data);
         ASSERT_TRUE(dec(decoded));
 
         EXPECT_EQ(decoded.values(), input);
@@ -54,12 +55,12 @@ FUZZ_TEST(CborExtensions, typed_float_arrays).WithDomains(fuzztest::VectorOf(fuz
 
 void typed_array_wire(const bytes &input) {
     typed_array<std::int32_t> contiguous;
-    auto                      dec    = make_decoder<typed_array_codec>(input);
+    auto                      dec    = make_decoder<cbor::tags::codec::typed_array>(input);
     const auto                result = dec(contiguous);
 
     const std::deque<std::uint8_t> segmented(input.begin(), input.end());
     typed_array<std::int32_t>      other;
-    auto                           other_dec    = make_decoder<typed_array_codec>(segmented);
+    auto                           other_dec    = make_decoder<cbor::tags::codec::typed_array>(segmented);
     const auto                     other_result = other_dec(other);
 
     ASSERT_EQ(result.has_value(), other_result.has_value());
@@ -94,7 +95,7 @@ void lazy_tag_payload(const record &input) {
 FUZZ_TEST(CborExtensions, lazy_tag_payload).WithDomains(record_domain());
 
 void smart_pointer_roundtrip(const std::optional<std::int64_t> &input) {
-    using namespace cbor::tags::ext::smart_ptr;
+    using namespace cbor::tags::smart_ptr;
 
     std::unique_ptr<std::int64_t> source;
     if (input) {
@@ -102,11 +103,11 @@ void smart_pointer_roundtrip(const std::optional<std::int64_t> &input) {
     }
 
     bytes buffer;
-    auto  enc = make_encoder<unique_ptr_codec>(buffer);
+    auto  enc = make_encoder<cbor::tags::codec::unique_ptr>(buffer);
     ASSERT_TRUE(enc(source));
 
     std::unique_ptr<std::int64_t> decoded;
-    auto                          dec = make_decoder<unique_ptr_codec>(buffer);
+    auto                          dec = make_decoder<cbor::tags::codec::unique_ptr>(buffer);
     ASSERT_TRUE(dec(decoded));
 
     ASSERT_EQ(static_cast<bool>(decoded), input.has_value());

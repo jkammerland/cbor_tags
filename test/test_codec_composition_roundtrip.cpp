@@ -2,16 +2,17 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
-#include <cbor_tags/extensions/custom_codec_1.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
-#include <cbor_tags/extensions/smart_ptr.h>
+#include <cbor_tags/codec/custom_1.h>
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/typed_array.h>
+#include <cbor_tags/codec/unique_ptr.h>
 
 #if __has_include(<version>)
 #include <version>
 #endif
 
 #if __has_include(<expected>) && defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
-#include <cbor_tags/extensions/std_expected.h>
+#include <cbor_tags/codec/std_expected.h>
 #include <expected>
 #define CBOR_TAGS_TEST_HAS_STD_EXPECTED 1
 #endif
@@ -28,13 +29,12 @@
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::custom_codec_1;
-using namespace cbor::tags::ext::rfc8746;
-using namespace cbor::tags::ext::smart_ptr;
+using namespace cbor::tags::custom_1;
+using namespace cbor::tags::rfc8746;
+using namespace cbor::tags::smart_ptr;
 namespace test_support = cbor::tags::test;
 
 #ifdef CBOR_TAGS_TEST_HAS_STD_EXPECTED
-using namespace cbor::tags::ext::std_expected;
 #endif
 
 namespace {
@@ -175,10 +175,10 @@ expected_typed_report_value semantic_value(const expected_typed_report &report) 
 TEST_CASE("custom codec roundtrips realistic aggregate composition") {
     auto check_roundtrip = [](const compact_codec_report &input) {
         compact_codec_report output;
-        auto                 encoded = as_custom_codec_1(static_tag<61000>{}, input);
-        auto                 decoded = as_custom_codec_1(static_tag<61000>{}, output);
+        auto                 encoded = as_ref(static_tag<61000>{}, input);
+        auto                 decoded = as_ref(static_tag<61000>{}, output);
 
-        test_support::roundtrip_into<custom_codec_1>(encoded, decoded);
+        test_support::roundtrip_into<codec::custom_1>(encoded, decoded);
         CHECK(output == input);
     };
 
@@ -200,7 +200,7 @@ TEST_CASE("custom codec roundtrips realistic aggregate composition") {
 
 TEST_CASE("typed array and unique pointer codecs roundtrip aggregate composition") {
     auto check_roundtrip = [](const nullable_typed_report &input) {
-        const auto output = test_support::roundtrip<typed_array_codec, unique_ptr_codec>(input);
+        const auto output = test_support::roundtrip<codec::typed_array, codec::unique_ptr>(input);
         CHECK(semantic_value(output) == semantic_value(input));
     };
 
@@ -230,11 +230,11 @@ TEST_CASE("typed array and unique pointer codecs roundtrip aggregate composition
 TEST_CASE("typed array unique and shared pointer codecs preserve aggregate identity") {
     auto check_roundtrip = [](graph_codec_report &input) {
         std::vector<std::byte> buffer;
-        auto                   enc = make_encoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
+        auto                   enc = make_encoder<codec::typed_array, codec::unique_ptr, codec::shared_ptr>(buffer);
         REQUIRE(enc(input));
 
         graph_codec_report output;
-        auto               dec = make_decoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
+        auto               dec = make_decoder<codec::typed_array, codec::unique_ptr, codec::shared_ptr>(buffer);
         REQUIRE(dec(output));
         REQUIRE(dec.tell() == buffer.end());
 
@@ -294,7 +294,7 @@ TEST_CASE("composed shared pointer stack rejects cycles") {
         cycle->next    = cycle;
 
         std::vector<std::byte> buffer;
-        auto                   enc    = make_encoder<typed_array_codec, unique_ptr_codec, shared_ptr_codec>(buffer);
+        auto                   enc    = make_encoder<codec::typed_array, codec::unique_ptr, codec::shared_ptr>(buffer);
         const auto             result = enc(cycle);
         cycle->next.reset();
 
@@ -307,7 +307,7 @@ TEST_CASE("composed shared pointer stack rejects cycles") {
 
 TEST_CASE("typed array and std expected codecs roundtrip success and error aggregate states") {
     auto check_roundtrip = [](const expected_typed_report &input) {
-        const auto output = test_support::roundtrip<typed_array_codec, std_expected_codec>(input);
+        const auto output = test_support::roundtrip<codec::typed_array, codec::std_expected>(input);
         CHECK(semantic_value(output) == semantic_value(input));
     };
 

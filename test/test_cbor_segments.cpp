@@ -4,7 +4,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_segments.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -701,16 +701,16 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
 }
 
 TEST_CASE("typed array codec borrows payload when the encoder output is segmented") {
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
 
     std::vector<std::int32_t> values{1, -2, 3};
 
     cbor_segments segmented;
-    auto          segment_encoder = make_encoder<typed_array_codec>(segmented);
+    auto          segment_encoder = make_encoder<codec::typed_array>(segmented);
     REQUIRE(segment_encoder(as_typed_array(values)));
 
     std::vector<std::byte> contiguous;
-    auto                   contiguous_encoder = make_encoder<typed_array_codec>(contiguous);
+    auto                   contiguous_encoder = make_encoder<codec::typed_array>(contiguous);
     REQUIRE(contiguous_encoder(as_typed_array(values)));
 
     const auto payload = std::as_bytes(std::span<const std::int32_t>{values});
@@ -719,16 +719,16 @@ TEST_CASE("typed array codec borrows payload when the encoder output is segmente
 }
 
 TEST_CASE("owning typed array codec copies payload when the encoder output is segmented") {
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
 
     auto array = typed_array<std::int32_t>{{1, -2, 3}};
 
     cbor_segments segmented;
-    auto          segment_encoder = make_encoder<typed_array_codec>(segmented);
+    auto          segment_encoder = make_encoder<codec::typed_array>(segmented);
     REQUIRE(segment_encoder(array));
 
     std::vector<std::byte> contiguous;
-    auto                   contiguous_encoder = make_encoder<typed_array_codec>(contiguous);
+    auto                   contiguous_encoder = make_encoder<codec::typed_array>(contiguous);
     REQUIRE(contiguous_encoder(array));
 
     const auto payload = std::as_bytes(array.span());

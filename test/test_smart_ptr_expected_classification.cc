@@ -4,8 +4,8 @@
 
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/codec/std_expected.h"
 #include "cbor_tags/detail/cbor_pointer_traits.h"
-#include "cbor_tags/extensions/std_expected.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +15,7 @@
 
 int main() {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::std_expected;
+    using namespace cbor::tags::codec;
 
     using result_type = std::expected<std::uint64_t, std::string>;
     static_assert(!IsOptional<result_type>);
@@ -24,13 +24,13 @@ int main() {
     const result_type sent{std::unexpected<std::string>{"bad"}};
 
     std::vector<std::byte> bytes;
-    auto                   enc = make_encoder<std_expected_codec>(bytes);
+    auto                   enc = make_encoder<codec::std_expected>(bytes);
     if (!enc(sent)) {
         return 1;
     }
 
     result_type decoded;
-    auto        dec = make_decoder<std_expected_codec>(bytes);
+    auto        dec = make_decoder<codec::std_expected>(bytes);
     if (!dec(decoded) || decoded.has_value() || decoded.error() != "bad") {
         return 2;
     }

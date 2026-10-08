@@ -18,8 +18,8 @@ using namespace cbor::tags;
 
 namespace {
 
-template <typename Self> struct traversal_tag_observer : decoder_mixin_base<Self> {
-    using decoder_mixin_base<Self>::decode;
+template <typename Self> struct traversal_tag_observer : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
 
     std::vector<std::uint64_t> observed_tags;
     status_code                tag_status{status_code::success};

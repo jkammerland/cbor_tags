@@ -1,6 +1,7 @@
 #include "cbor_tags/cbor.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/smart_ptr.h"
 
 #include <fmt/format.h>
 #include <memory>

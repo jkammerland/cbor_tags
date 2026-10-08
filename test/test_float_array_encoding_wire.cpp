@@ -46,14 +46,14 @@ template <typename T> struct throwing_construct_allocator {
     friend bool operator==(const throwing_construct_allocator &, const throwing_construct_allocator &) = default;
 };
 
-template <typename Self> struct float_array_codec : encoder_mixin_base<Self> {
-    using encoder_mixin_base<Self>::encode;
+template <typename Self> struct float_array_codec : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
 
     void encode(const std::vector<float> &) { static_cast<Self &>(*this).encode(42U); }
 };
 
-template <typename Self> struct passthrough_codec : encoder_mixin_base<Self> {
-    using encoder_mixin_base<Self>::encode;
+template <typename Self> struct passthrough_codec : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
 };
 
 template <typename Float> constexpr bool float_array_is_constexpr() {

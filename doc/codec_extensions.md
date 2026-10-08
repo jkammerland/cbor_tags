@@ -1,35 +1,43 @@
 # Codec Extensions
 
 `cbor_tags` keeps non-default wire policies behind explicit codec extensions.
-Include the extension header and pass the codec mixin to `make_encoder` or
+Public codec selectors live in `cbor::tags::codec`, with matching headers under
+`cbor_tags/codec/`. Include the header and pass the codec mixin to `make_encoder` or
 `make_decoder`:
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/smart_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
+#include "cbor_tags/codec/shared_ptr.h"
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::smart_ptr;
+using namespace cbor::tags::smart_ptr;
 
 std::vector<std::byte> bytes;
 
-auto enc = make_encoder<unique_ptr_codec>(bytes);
-auto dec = make_decoder<unique_ptr_codec>(bytes);
+auto enc = make_encoder<codec::unique_ptr>(bytes);
+auto dec = make_decoder<codec::unique_ptr>(bytes);
 ```
+
+The same naming rule applies throughout the library: `codec::typed_array`, `codec::unique_ptr`, `codec::shared_ptr`,
+`codec::std_expected`, `codec::std_indirect` and `codec::custom_1` use the matching
+`cbor_tags/codec/<name>.h` header. Feature data types live in their feature
+namespace, such as `rfc8746::typed_array`. The former
+`extensions/` codec headers and suffixed codec names have no compatibility aliases.
 
 Multiple extensions can be installed together when their overloads are designed
 to compose:
 
 ```cpp
-auto enc = make_encoder<unique_ptr_codec, shared_ptr_codec>(bytes);
-auto dec = make_decoder<unique_ptr_codec, shared_ptr_codec>(bytes);
+auto enc = make_encoder<codec::unique_ptr, codec::shared_ptr>(bytes);
+auto dec = make_decoder<codec::unique_ptr, codec::shared_ptr>(bytes);
 ```
 
 Extension codecs are class-template mixins over the final encoder or decoder
-type. Encoder-only mixins should inherit `encoder_mixin_base<Self>`,
-decoder-only mixins should inherit `decoder_mixin_base<Self>`, and
-bidirectional codecs should inherit `codec_mixin_base<Self>`. Bring the
+type. Encoder-only mixins should inherit `cbor::tags::codec::encoder_base<Self>`,
+decoder-only mixins should inherit `cbor::tags::codec::decoder_base<Self>`, and
+bidirectional codecs should inherit `cbor::tags::codec::base<Self>`. Bring the
 matching base overloads into scope so unsupported overloads remain deleted and
 visible to overload resolution.
 
@@ -52,20 +60,22 @@ normal public composition and direct dispatch only inside codec internals.
 ```cpp
 namespace ct = cbor::tags;
 
+namespace app::codec {
+
 template <typename Self>
-struct my_codec : ct::codec_mixin_base<Self> {
-    using base = ct::codec_mixin_base<Self>;
+struct my_type : ct::codec::base<Self> {
+    using base = ct::codec::base<Self>;
     using base::decode;
     using base::encode;
 
-    void encode(const my_type& value) {
+    void encode(const ::my_type& value) {
         auto& enc = static_cast<Self&>(*this);
         enc.encode(ct::static_tag<100>{});
         enc.encode(value.payload);
     }
 
     [[nodiscard]] ct::status_code
-    decode(my_type& value, ct::major_type major, std::byte additional_info) {
+    decode(::my_type& value, ct::major_type major, std::byte additional_info) {
         auto& dec = static_cast<Self&>(*this);
         const auto tag_status = dec.decode(ct::static_tag<100>{}, major, additional_info);
         if (tag_status != ct::status_code::success) {
@@ -74,6 +84,8 @@ struct my_codec : ct::codec_mixin_base<Self> {
         return dec.decode(value.payload);
     }
 };
+
+} // namespace app::codec
 ```
 
 One-way extensions can use the narrower bases:
@@ -81,26 +93,30 @@ One-way extensions can use the narrower bases:
 ```cpp
 namespace ct = cbor::tags;
 
+namespace app::codec {
+
 template <typename Self>
-struct my_encoder_only : ct::encoder_mixin_base<Self> {
-    using base = ct::encoder_mixin_base<Self>;
+struct my_type_encoder : ct::codec::encoder_base<Self> {
+    using base = ct::codec::encoder_base<Self>;
     using base::encode;
 
-    void encode(const my_type& value) {
+    void encode(const ::my_type& value) {
         static_cast<Self&>(*this).encode(value.payload);
     }
 };
 
 template <typename Self>
-struct my_decoder_only : ct::decoder_mixin_base<Self> {
-    using base = ct::decoder_mixin_base<Self>;
+struct my_type_decoder : ct::codec::decoder_base<Self> {
+    using base = ct::codec::decoder_base<Self>;
     using base::decode;
 
     [[nodiscard]] ct::status_code
-    decode(my_type& value, ct::major_type major, std::byte additional_info) {
+    decode(::my_type& value, ct::major_type major, std::byte additional_info) {
         return static_cast<Self&>(*this).decode(value.payload, major, additional_info);
     }
 };
+
+} // namespace app::codec
 ```
 
 ## Custom Decoder Success Contract
@@ -169,17 +185,20 @@ my_root<T> as_my_root(my_session&, const T&&) = delete;
 
 Current public extension headers:
 
-- `cbor_tags/extensions/custom_codec_1.h`: schema-bound `tag(bstr)` payload
+- `cbor_tags/codec/custom_1.h`: schema-bound `tag(bstr)` payload
   codec. See [Custom Codec 1](custom_codec_1.md).
-- `cbor_tags/extensions/smart_ptr.h`: unique ownership as `T / null` and shared
-  ownership through tags 28/29 with codec-owned or user-owned reference tables.
-- `cbor_tags/extensions/std_expected.h`: opt-in serialization of C++23
+- `cbor_tags/codec/unique_ptr.h`: unique ownership as `T / null`.
+- `cbor_tags/codec/shared_ptr.h`: shared ownership through tags 28/29 with
+  codec-owned or user-owned reference tables.
+- `cbor_tags/codec/std_expected.h`: opt-in serialization of C++23
   `std::expected<T, E>` as `[has_value, payload]`. Non-void `T` and `E` must each
   encode and decode one complete CBOR item. Use `std::expected<void, E>` for a
   payload-free success, encoded with a null payload. To give a custom type a
   one-item representation, provide encode/decode customizations or an explicit
   codec mixin.
-- `cbor_tags/extensions/rfc8746_typed_arrays.h`: RFC 8746 typed-array helpers.
+- `cbor_tags/codec/std_indirect.h`: opt-in serialization of C++26 `std::indirect<T>`
+  as its held value. See [C++26 Value Wrappers](cxx26_value_wrappers.md).
+- `cbor_tags/codec/typed_array.h`: RFC 8746 typed-array helpers.
   See [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
 - `cbor_tags/extensions/cbor_visualization.h`: CDDL, annotation, and diagnostic
   rendering helpers.

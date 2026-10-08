@@ -2,7 +2,7 @@
 
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
+#include "cbor_tags/codec/typed_array.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <cstddef>
@@ -56,7 +56,7 @@ namespace cbor_tags_interop_glaze {
 
 template <typename... Args> [[nodiscard]] std::vector<std::byte> encode_with_cbor_tags(Args &&...args) {
     auto output = std::vector<std::byte>{};
-    auto enc    = cbor::tags::make_encoder<cbor::tags::ext::rfc8746::typed_array_codec>(output);
+    auto enc    = cbor::tags::make_encoder<codec::typed_array>(output);
     auto result = enc(std::forward<Args>(args)...);
     REQUIRE(result);
     return output;
@@ -88,12 +88,12 @@ TEST_CASE("glaze reads text-key maps emitted by cbor_tags") {
 
 TEST_CASE("cbor_tags reads Glaze text-key maps and typed-array fields") {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
     using namespace cbor_tags_interop_glaze;
 
     const auto input = encode_with_glaze(record{"Ada", 42U, true, {1, -2, 3}});
 
-    auto dec = make_decoder<typed_array_codec>(input);
+    auto dec = make_decoder<codec::typed_array>(input);
     REQUIRE(dec(as_map{4}));
 
     auto key  = std::string{};
@@ -123,7 +123,7 @@ TEST_CASE("cbor_tags reads Glaze text-key maps and typed-array fields") {
 
 TEST_CASE("Glaze numeric vectors use RFC 8746 typed arrays") {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
     using namespace cbor_tags_interop_glaze;
 
     const auto values      = std::vector<std::int32_t>{1, -2, 3};
@@ -134,7 +134,7 @@ TEST_CASE("Glaze numeric vectors use RFC 8746 typed arrays") {
     CHECK_FALSE(generic_dec(generic_values));
 
     auto typed_values = typed_array<std::int32_t>{};
-    auto typed_dec    = make_decoder<typed_array_codec>(glaze_bytes);
+    auto typed_dec    = make_decoder<codec::typed_array>(glaze_bytes);
     REQUIRE(typed_dec(typed_values));
     CHECK_EQ(typed_values.values(), values);
 

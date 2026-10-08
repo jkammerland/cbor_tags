@@ -79,8 +79,8 @@ struct counting_unsized_argument_range {
 static_assert(CborInputBuffer<counting_unsized_argument_range>);
 static_assert(!std::ranges::sized_range<const counting_unsized_argument_range>);
 
-template <typename Self> struct argument_tag_observer : decoder_mixin_base<Self> {
-    using decoder_mixin_base<Self>::decode;
+template <typename Self> struct argument_tag_observer : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
 
     std::vector<std::uint64_t> tags;
     status_code                result = status_code::success;

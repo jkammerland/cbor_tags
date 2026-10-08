@@ -4,10 +4,11 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_operators.h"
+#include "cbor_tags/codec/custom_1.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
 #include "cbor_tags/detail/cbor_optional_variant_traits.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/custom_codec_1.h"
-#include "cbor_tags/extensions/smart_ptr.h"
 #include "test_util.h"
 
 #include <array>
@@ -248,25 +249,25 @@ TEST_CASE("custom variant traits render CDDL") {
 }
 
 TEST_CASE("custom codec variant serialization uses custom variant traits") {
-    namespace compact = tags::ext::custom_codec_1;
+    namespace compact = cbor::tags::custom_1;
 
     using variant = variant_traits_test::manual_variant<std::uint8_t, std::string>;
 
     std::vector<std::byte> compact_buffer;
-    auto                   enc = tags::make_encoder<compact::custom_codec_1>(compact_buffer);
+    auto                   enc = tags::make_encoder<tags::codec::custom_1>(compact_buffer);
     variant                input{std::variant<std::uint8_t, std::string>{std::string{"hi"}}};
-    REQUIRE(enc(compact::as_custom_codec_1(tags::static_tag<77>{}, input)));
+    REQUIRE(enc(compact::as_ref(tags::static_tag<77>{}, input)));
 
-    auto    dec = tags::make_decoder<compact::custom_codec_1>(compact_buffer);
+    auto    dec = tags::make_decoder<tags::codec::custom_1>(compact_buffer);
     variant output;
-    REQUIRE(dec(compact::as_custom_codec_1(tags::static_tag<77>{}, output)));
+    REQUIRE(dec(compact::as_ref(tags::static_tag<77>{}, output)));
 
     REQUIRE(tags::detail::variant_index(output) == 1U);
     CHECK(std::get<1>(output.storage) == "hi");
 }
 
 TEST_CASE("custom variant traits work with unique pointer codec") {
-    namespace smart = tags::ext::smart_ptr;
+    namespace smart = tags::smart_ptr;
 
     using variant = variant_traits_test::manual_variant<std::unique_ptr<std::uint64_t>, std::string>;
 
@@ -274,12 +275,12 @@ TEST_CASE("custom variant traits work with unique pointer codec") {
         variant input{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::make_unique<std::uint64_t>(42U)}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = tags::make_encoder<smart::unique_ptr_codec>(buffer);
+        auto                   enc = tags::make_encoder<tags::codec::unique_ptr>(buffer);
         REQUIRE(enc(input));
         CHECK_EQ(to_hex(buffer), "182a");
 
         variant output{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
-        auto    dec = tags::make_decoder<smart::unique_ptr_codec>(buffer);
+        auto    dec = tags::make_decoder<tags::codec::unique_ptr>(buffer);
         REQUIRE(dec(output));
 
         REQUIRE(tags::detail::variant_index(output) == 0U);
@@ -292,12 +293,12 @@ TEST_CASE("custom variant traits work with unique pointer codec") {
         variant input{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::unique_ptr<std::uint64_t>{}}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = tags::make_encoder<smart::unique_ptr_codec>(buffer);
+        auto                   enc = tags::make_encoder<tags::codec::unique_ptr>(buffer);
         REQUIRE(enc(input));
         CHECK_EQ(to_hex(buffer), "f6");
 
         variant output{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::string{"before"}}};
-        auto    dec = tags::make_decoder<smart::unique_ptr_codec>(buffer);
+        auto    dec = tags::make_decoder<tags::codec::unique_ptr>(buffer);
         REQUIRE(dec(output));
 
         REQUIRE(tags::detail::variant_index(output) == 0U);
@@ -308,12 +309,12 @@ TEST_CASE("custom variant traits work with unique pointer codec") {
         variant input{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::string{"ok"}}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = tags::make_encoder<smart::unique_ptr_codec>(buffer);
+        auto                   enc = tags::make_encoder<tags::codec::unique_ptr>(buffer);
         REQUIRE(enc(input));
         CHECK_EQ(to_hex(buffer), "626f6b");
 
         variant output{std::variant<std::unique_ptr<std::uint64_t>, std::string>{std::unique_ptr<std::uint64_t>{}}};
-        auto    dec = tags::make_decoder<smart::unique_ptr_codec>(buffer);
+        auto    dec = tags::make_decoder<tags::codec::unique_ptr>(buffer);
         REQUIRE(dec(output));
 
         REQUIRE(tags::detail::variant_index(output) == 1U);
@@ -326,7 +327,7 @@ TEST_CASE("custom variant traits work with unique pointer codec") {
         const std::vector<std::byte> wrong_sized_bstr{std::byte{0x41}, std::byte{0xaa}};
         fixed_bstr_variant           output{
             std::variant<std::unique_ptr<std::uint64_t>, std::array<std::byte, 2>>{std::make_unique<std::uint64_t>(9U)}};
-        auto dec    = tags::make_decoder<smart::unique_ptr_codec>(wrong_sized_bstr);
+        auto dec    = tags::make_decoder<tags::codec::unique_ptr>(wrong_sized_bstr);
         auto result = dec(output);
 
         REQUIRE_FALSE(result);

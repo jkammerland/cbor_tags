@@ -1,11 +1,10 @@
 #pragma once
 
-// Included by extensions/smart_ptr.h after its public scope types. These
-// implementation helpers are not an independently supported entry point.
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/detail/smart_ptr_traits.h"
+#include "cbor_tags/smart_ptr/types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +13,7 @@
 #include <utility>
 #include <variant>
 
-namespace cbor::tags::ext::smart_ptr::detail {
+namespace cbor::tags::smart_ptr::detail {
 
 class encode_scope_ref {
   public:
@@ -320,4 +319,4 @@ template <typename Decoder, IsVariant Variant>
     return result;
 }
 
-} // namespace cbor::tags::ext::smart_ptr::detail
+} // namespace cbor::tags::smart_ptr::detail

@@ -1,5 +1,5 @@
+#include "cbor_tags/codec/typed_array.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
 
 #include <cstdint>
 #include <fmt/format.h>
@@ -8,7 +8,7 @@
 
 int main() {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
 
     using nested = std::variant<std::string, as_tag_any>;
 

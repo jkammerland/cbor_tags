@@ -97,7 +97,7 @@ public-preflight rows.
 The encoder suite includes `shared_ptr encode N unique x2` rows. Each row
 encodes a `std::vector<std::shared_ptr<std::uint64_t>>` containing `N`
 first-seen pointers followed by the same `N` pointers again. The benchmark uses
-one fresh `shared_ptr_codec` encoder per iteration, including its internal
+one fresh `cbor::tags::codec::shared_ptr` encoder per iteration, including its internal
 address-and-pointer-type lookup.
 
 Lookup strategy and reservation are deliberately not public options. An
@@ -148,7 +148,7 @@ represented wire bytes and does not include payload flattening or a final write
 to a contiguous destination.
 
 Rows named `rfc8746 typed array ... encode` use the public
-`rfc8746::typed_array_codec` with an owned byte-vector destination. On
+`cbor::tags::codec::typed_array` with an owned byte-vector destination. On
 little-endian hosts the typed-array payload is appended from the native
 contiguous vector bytes, so the hot path is header work plus one payload append.
 Rows named `rfc8746 typed array zc ... encode segment assembly (represented bytes)` use

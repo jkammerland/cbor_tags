@@ -1,6 +1,6 @@
 # Custom Codec 1
 
-`custom_codec_1` is an opt-in codec for cases where both sides already
+`codec::custom_1` is an opt-in codec for cases where both sides already
 share the C++ schema and do not need normal self-describing CBOR fields inside
 the tagged payload.
 
@@ -27,7 +27,7 @@ required.
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
-#include <cbor_tags/extensions/custom_codec_1.h>
+#include <cbor_tags/codec/custom_1.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -44,30 +44,30 @@ struct Message {
 std::vector<std::byte> out;
 
 using namespace cbor::tags;
-namespace cc1 = cbor::tags::ext::custom_codec_1;
+namespace cc1 = cbor::tags::custom_1;
 
 Message message{.id = 7, .label = "ready"};
-auto    enc     = make_encoder<cc1::custom_codec_1>(out);
-auto    encoded = enc(cc1::as_custom_codec_1(message));
+auto    enc     = make_encoder<codec::custom_1>(out);
+auto    encoded = enc(cc1::as_ref(message));
 
 Message decoded{};
-auto    dec        = make_decoder<cc1::custom_codec_1>(out);
-auto    decoded_ok = dec(cc1::as_custom_codec_1(decoded));
+auto    dec        = make_decoder<codec::custom_1>(out);
+auto    decoded_ok = dec(cc1::as_ref(decoded));
 ```
 
-`as_custom_codec_1(value)` requires the type to provide a CBOR tag, using the same tag
+`as_ref(value)` requires the type to provide a CBOR tag, using the same tag
 mechanisms as normal tagged values. If the tag should be supplied at the call
 site, pass it explicitly:
 
 ```cpp
-auto result = enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
+auto result = enc(cc1::as_ref(static_tag<1001>{}, message));
 ```
 
 ## Lazy Tag Payloads
 
 `find_tags` matches the outer CBOR tag and exposes only the tag payload. For
-`custom_codec_1` values, that payload is the definite-length byte string, not the
-whole `#6.<tag>(bstr)` envelope. Decode it with `as_custom_codec_1_payload`.
+`codec::custom_1` values, that payload is the definite-length byte string, not the
+whole `#6.<tag>(bstr)` envelope. Decode it with `as_payload`.
 The payload decoder object also accepts the wrapper directly, so either form can
 decode the current match:
 
@@ -77,14 +77,14 @@ auto it      = matches.begin();
 
 if (it != matches.end()) {
     Message decoded_from_match{};
-    auto    payload_ref = cc1::as_custom_codec_1_payload(decoded_from_match);
-    auto    ok          = it->decode<cc1::custom_codec_1>(payload_ref);
+    auto    payload_ref = cc1::as_payload(decoded_from_match);
+    auto    ok          = it->decode<codec::custom_1>(payload_ref);
 }
 
 if (it != matches.end()) {
     Message decoded_from_payload{};
-    auto    payload_decoder = it->make_decoder<cc1::custom_codec_1>();
-    auto    ok = payload_decoder(cc1::as_custom_codec_1_payload(decoded_from_payload));
+    auto    payload_decoder = it->make_decoder<codec::custom_1>();
+    auto    ok = payload_decoder(cc1::as_payload(decoded_from_payload));
 }
 
 // Exhaust the scanner before using failed() for the complete input segment.
@@ -101,8 +101,8 @@ first match leaves later malformed or deeply nested data unscanned. Its current
 fixed nesting boundary and terminal scanner contract are documented under
 [Lazy Tag Scanning](experimental_ranges.md#lazy-tag-scanning).
 
-Use `as_custom_codec_1(...)` for full buffers that still contain the outer tag. Use
-`as_custom_codec_1_payload(...)` only when the decoder starts at the tag payload bstr,
+Use `as_ref(...)` for full buffers that still contain the outer tag. Use
+`as_payload(...)` only when the decoder starts at the tag payload bstr,
 as lazy tag matches do.
 
 ## Payload Rules
@@ -149,7 +149,7 @@ that buffer invalidates the decoded views.
 
 ## Segmented Encoding
 
-`custom_codec_1` has to know the byte-string payload length before it can write
+`codec::custom_1` has to know the byte-string payload length before it can write
 the payload header. The encoder now writes the payload once into scratch storage,
 computes that size, then writes the outer tag and byte-string headers before
 replaying the payload.
@@ -158,9 +158,9 @@ The normal user-facing API stays the same:
 
 ```cpp
 std::vector<std::byte> out;
-auto enc = make_encoder<cc1::custom_codec_1>(out);
+auto enc = make_encoder<codec::custom_1>(out);
 
-enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
+enc(cc1::as_ref(static_tag<1001>{}, message));
 ```
 
 Using `cbor_segments` as the output buffer lets callers replay the encoded bytes
@@ -172,9 +172,9 @@ to vectored I/O without first flattening them into one contiguous buffer:
 #include <sys/uio.h> // POSIX iovec
 
 cbor_segments segments;
-auto enc = make_encoder<cc1::custom_codec_1>(segments);
+auto enc = make_encoder<codec::custom_1>(segments);
 
-enc(cc1::as_custom_codec_1(static_tag<1001>{}, message));
+enc(cc1::as_ref(static_tag<1001>{}, message));
 
 std::vector<iovec> iovecs;
 iovecs.reserve(segments.size());
@@ -212,7 +212,7 @@ auto segments = cc1::encode_borrowed_segments(static_tag<1001>{}, samples);
   `std::vector<std::nullptr_t>`, are unsupported. Use a fixed-extent
   `std::span` or `std::array` when the schema must carry such elements; a fixed
   extent bounds decoding even though each element has no payload bytes.
-- `as_custom_codec_1(...)` stores a reference and encoding observes the value
+- `as_ref(...)` stores a reference and encoding observes the value
   through a `const` view. Input ranges that can only be iterated through a
   non-`const` `begin()` still need to be materialized or wrapped before
   encoding.
@@ -237,6 +237,6 @@ auto segments = cc1::encode_borrowed_segments(static_tag<1001>{}, samples);
   the destination variant is already seeded with the same selected index, giving
   the codec an existing value to copy and update. Duplicate alternative types
   are supported because decode emplaces by stored index.
-- Additional opt-in codecs passed beside `custom_codec_1` compose at the outer
+- Additional opt-in codecs passed beside `codec::custom_1` compose at the outer
   CBOR level. Payload fields use this codec's schema-bound payload
   rules, not the normal extension dispatch path.

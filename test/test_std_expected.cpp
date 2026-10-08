@@ -8,7 +8,7 @@
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
-#include <cbor_tags/extensions/std_expected.h>
+#include <cbor_tags/codec/std_expected.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -22,7 +22,6 @@
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::std_expected;
 
 using namespace std_expected_test;
 
@@ -31,9 +30,9 @@ TEST_SUITE("roundtrip/std_expected") {
     TEST_CASE("std::expected codec is explicit opt in") {
         using expected_type     = std::expected<std::uint64_t, std::string>;
         using default_encoder   = decltype(make_encoder(std::declval<std::vector<std::byte> &>()));
-        using extension_encoder = decltype(make_encoder<std_expected_codec>(std::declval<std::vector<std::byte> &>()));
+        using extension_encoder = decltype(make_encoder<codec::std_expected>(std::declval<std::vector<std::byte> &>()));
         using default_decoder   = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
-        using extension_decoder = decltype(make_decoder<std_expected_codec>(std::declval<std::vector<std::byte> &>()));
+        using extension_decoder = decltype(make_decoder<codec::std_expected>(std::declval<std::vector<std::byte> &>()));
 
         static_assert(!CanEncode<default_encoder, expected_type>);
         static_assert(CanEncode<extension_encoder, expected_type>);
@@ -67,7 +66,7 @@ TEST_SUITE("roundtrip/std_expected") {
             const auto                             encoded = encode_expected(value);
 
             std::expected<void, std::string> decoded{std::unexpected<std::string>{"before"}};
-            auto                             dec = make_decoder<std_expected_codec>(encoded);
+            auto                             dec = make_decoder<codec::std_expected>(encoded);
             REQUIRE(dec(decoded));
             CHECK(decoded.has_value());
         }
@@ -77,7 +76,7 @@ TEST_SUITE("roundtrip/std_expected") {
             const auto                             encoded = encode_expected(value);
 
             std::expected<void, std::string> decoded{};
-            auto                             dec = make_decoder<std_expected_codec>(encoded);
+            auto                             dec = make_decoder<codec::std_expected>(encoded);
             REQUIRE(dec(decoded));
             REQUIRE_FALSE(decoded.has_value());
             CHECK_EQ(decoded.error(), "failed");
@@ -114,11 +113,11 @@ TEST_SUITE("roundtrip/std_expected") {
         const expected_holder value{7U, std::unexpected<std::uint64_t>{99U}};
 
         std::vector<std::byte> buffer;
-        auto                   enc = make_encoder<std_expected_codec>(buffer);
+        auto                   enc = make_encoder<codec::std_expected>(buffer);
         REQUIRE(enc(value));
 
         expected_holder decoded{};
-        auto            dec = make_decoder<std_expected_codec>(buffer);
+        auto            dec = make_decoder<codec::std_expected>(buffer);
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.id, 7U);
         REQUIRE_FALSE(decoded.result.has_value());
@@ -174,7 +173,7 @@ TEST_SUITE("roundtrip/std_expected") {
         const std::deque<std::byte>                     input(encoded.begin(), encoded.end());
 
         std::expected<std::string, std::uint64_t> decoded;
-        auto                                      dec = make_decoder<std_expected_codec>(input);
+        auto                                      dec = make_decoder<codec::std_expected>(input);
         REQUIRE(dec(decoded));
         REQUIRE(decoded.has_value());
         CHECK_EQ(*decoded, "ok");
@@ -185,9 +184,9 @@ TEST_SUITE("roundtrip/std_expected") {
             const std::expected<mixin_empty, mixin_empty> original =
                 success ? std::expected<mixin_empty, mixin_empty>{} : std::unexpected{mixin_empty{}};
             std::vector<std::byte> bytes;
-            auto                   enc = make_encoder<empty_item_codec, std_expected_codec>(bytes);
+            auto                   enc = make_encoder<empty_item_codec, codec::std_expected>(bytes);
             REQUIRE(enc(original, 7));
-            auto                                    dec = make_decoder<empty_item_codec, std_expected_codec>(bytes);
+            auto                                    dec = make_decoder<empty_item_codec, codec::std_expected>(bytes);
             std::expected<mixin_empty, mixin_empty> decoded;
             REQUIRE(dec(decoded));
             CHECK_EQ(decoded.has_value(), original.has_value());
@@ -200,9 +199,9 @@ TEST_SUITE("roundtrip/std_expected") {
     TEST_CASE("std::expected codec finds mixins inside containers") {
         const std::expected<std::vector<mixin_empty>, int> original{std::vector<mixin_empty>(2)};
         std::vector<std::byte>                             bytes;
-        auto                                               enc = make_encoder<empty_item_codec, std_expected_codec>(bytes);
+        auto                                               enc = make_encoder<empty_item_codec, codec::std_expected>(bytes);
         REQUIRE(enc(original));
-        auto                                         dec = make_decoder<empty_item_codec, std_expected_codec>(bytes);
+        auto                                         dec = make_decoder<empty_item_codec, codec::std_expected>(bytes);
         std::expected<std::vector<mixin_empty>, int> decoded;
         REQUIRE(dec(decoded));
         REQUIRE(decoded.has_value());
@@ -214,9 +213,9 @@ TEST_SUITE("roundtrip/std_expected") {
             using payload                   = std::expected<templated_mixin_empty<int>, by_value_mixin_empty>;
             const payload          original = success ? payload{} : payload{std::unexpected{by_value_mixin_empty{}}};
             std::vector<std::byte> bytes;
-            auto                   enc = make_encoder<templated_empty_item_codec, by_value_empty_item_codec, std_expected_codec>(bytes);
+            auto                   enc = make_encoder<templated_empty_item_codec, by_value_empty_item_codec, codec::std_expected>(bytes);
             REQUIRE(enc(original, 7));
-            auto    dec = make_decoder<templated_empty_item_codec, by_value_empty_item_codec, std_expected_codec>(bytes);
+            auto    dec = make_decoder<templated_empty_item_codec, by_value_empty_item_codec, codec::std_expected>(bytes);
             payload decoded;
             REQUIRE(dec(decoded));
             CHECK_EQ(decoded.has_value(), original.has_value());
@@ -229,9 +228,9 @@ TEST_SUITE("roundtrip/std_expected") {
     TEST_CASE("std::expected codec preserves more constrained container mixins") {
         const std::expected<std::vector<mixin_empty>, int> original{std::vector<mixin_empty>(2)};
         std::vector<std::byte>                             bytes;
-        auto                                               enc = make_encoder<constrained_array_item_codec, std_expected_codec>(bytes);
+        auto                                               enc = make_encoder<constrained_array_item_codec, codec::std_expected>(bytes);
         REQUIRE(enc(original, 7));
-        auto                                         dec = make_decoder<constrained_array_item_codec, std_expected_codec>(bytes);
+        auto                                         dec = make_decoder<constrained_array_item_codec, codec::std_expected>(bytes);
         std::expected<std::vector<mixin_empty>, int> decoded;
         REQUIRE(dec(decoded));
         REQUIRE(decoded.has_value());
@@ -247,8 +246,8 @@ TEST_SUITE("roundtrip/std_expected") {
         const optional_payload original{std::optional<header_only_empty>{std::in_place}};
         const group_payload    original_group{std::optional<header_only_group>{std::in_place}};
         std::vector<std::byte> bytes;
-        REQUIRE(make_encoder<directional_item_codec, std_expected_codec>(bytes)(original, original_group, 7));
-        auto dec                   = make_decoder<directional_item_codec, std_expected_codec>(bytes);
+        REQUIRE(make_encoder<directional_item_codec, codec::std_expected>(bytes)(original, original_group, 7));
+        auto dec                   = make_decoder<directional_item_codec, codec::std_expected>(bytes);
         header_only_empty::decoded = 0;
         optional_payload decoded;
         group_payload    decoded_group;
@@ -269,8 +268,8 @@ TEST_SUITE("roundtrip/std_expected") {
         const fixed_payload    original;
         const tagged_payload   original_tagged;
         std::vector<std::byte> bytes;
-        REQUIRE(make_encoder<directional_item_codec, std_expected_codec>(bytes)(original, original_tagged, 7));
-        auto dec                = make_decoder<directional_item_codec, std_expected_codec>(bytes);
+        REQUIRE(make_encoder<directional_item_codec, codec::std_expected>(bytes)(original, original_tagged, 7));
+        auto dec                = make_decoder<directional_item_codec, codec::std_expected>(bytes);
         tag_only_empty::decoded = 0;
         fixed_payload  decoded;
         tagged_payload decoded_tagged;

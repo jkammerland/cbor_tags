@@ -1,5 +1,5 @@
 // A custom codec user should not need an order-sensitive encoder/decoder include recipe.
-#include <cbor_tags/cbor_extensions.h>
+#include <cbor_tags/codec.h>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -15,9 +15,9 @@ struct split_codec_value {
     friend constexpr bool operator==(split_codec_value, split_codec_value) = default;
 };
 
-template <typename Self> struct split_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::decode;
-    using codec_mixin_base<Self>::encode;
+template <typename Self> struct split_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
 
     constexpr void encode(split_codec_value value) { static_cast<Self &>(*this).encode(value.value); }
 
@@ -32,14 +32,14 @@ template <typename Self> struct split_codec : codec_mixin_base<Self> {
     }
 };
 
-template <typename Self> struct split_encoder_only : encoder_mixin_base<Self> {
-    using encoder_mixin_base<Self>::encode;
+template <typename Self> struct split_encoder_only : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
 
     constexpr void encode(split_codec_value value) { static_cast<Self &>(*this).encode(value.value); }
 };
 
-template <typename Self> struct split_decoder_only : decoder_mixin_base<Self> {
-    using decoder_mixin_base<Self>::decode;
+template <typename Self> struct split_decoder_only : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
 
     constexpr status_code decode(split_codec_value &value, major_type major, std::byte additional_info) {
         std::uint64_t decoded{};

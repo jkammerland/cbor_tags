@@ -1,8 +1,9 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/cbor_extensions.h"
+#include "cbor_tags/codec.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
-#include "cbor_tags/extensions/smart_ptr.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,9 +17,9 @@ struct record {
     std::uint64_t                  value{};
 };
 
-template <typename Self> struct record_codec : cbor::tags::codec_mixin_base<Self> {
-    using cbor::tags::codec_mixin_base<Self>::decode;
-    using cbor::tags::codec_mixin_base<Self>::encode;
+template <typename Self> struct record_codec : cbor::tags::codec::base<Self> {
+    using cbor::tags::codec::base<Self>::decode;
+    using cbor::tags::codec::base<Self>::encode;
 
     void encode(const record &value) {
         auto &enc = static_cast<Self &>(*this);
@@ -43,7 +44,7 @@ template <typename Self> struct record_codec : cbor::tags::codec_mixin_base<Self
 int main() {
     using choice = std::variant<std::unique_ptr<std::string>, record>;
     const std::vector<std::byte> bytes{std::byte{0xD8}, std::byte{0x64}, std::byte{0x01}};
-    auto                         dec = cbor::tags::make_decoder<cbor::tags::ext::smart_ptr::unique_ptr_codec, record_codec>(bytes);
+    auto                         dec = cbor::tags::make_decoder<cbor::tags::codec::unique_ptr, record_codec>(bytes);
     choice                       value;
     return dec(value).has_value() ? 0 : 1;
 }
