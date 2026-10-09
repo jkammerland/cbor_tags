@@ -56,7 +56,7 @@ namespace cbor_tags_interop_glaze {
 
 template <typename... Args> [[nodiscard]] std::vector<std::byte> encode_with_cbor_tags(Args &&...args) {
     auto output = std::vector<std::byte>{};
-    auto enc    = cbor::tags::make_encoder<codec::typed_array>(output);
+    auto enc    = cbor::tags::make_encoder<cbor::tags::codec::typed_array>(output);
     auto result = enc(std::forward<Args>(args)...);
     REQUIRE(result);
     return output;
