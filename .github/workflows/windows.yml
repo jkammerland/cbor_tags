@@ -262,6 +262,7 @@ jobs:
           "-G", "Visual Studio 17 2022", "-A", "x64",
           "-DCBOR_TAGS_BUILD_TESTS=ON",
           "-DCBOR_TAGS_INSTALL=ON",
+          "-DCBOR_TAGS_BUILD_EXAMPLES=ON",
           "-DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON",
           "-DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}",
           "-DCMAKE_CXX_STANDARD_REQUIRED=ON",

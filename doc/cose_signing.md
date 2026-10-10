@@ -7,6 +7,18 @@ See [CWT and COSE models](cwt.md) for codec selection and payload lifetimes.
 
 ## Backend contract
 
+The runnable [custom backend example](../examples/24_experimental_cwt_backend.cpp)
+uses an application-owned key and OpenSSL as a replaceable provider. Its two
+provider calls are the integration points for your crypto library or HSM SDK;
+map provider failures to `unexpected<status_code>` and return success only after
+signing or verification succeeds. Only this example requires the optional
+`CBOR_TAGS_ENABLE_CWT_OPENSSL` build flag.
+
+Keys can be application-defined types; the helpers forward them to your backend.
+The backend receives the encoded COSE `Sig_structure`, not just the payload or a
+precomputed digest. For ES256, the provider applies SHA-256 and returns a 64-byte
+`r || s` signature, converting its native signature format if necessary.
+
 Provide an algorithm identifier and operations with these signatures:
 
 ```cpp

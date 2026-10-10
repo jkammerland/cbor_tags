@@ -4,7 +4,8 @@ Read the numbered programs in order. Each is a standalone C++20 program, with
 its CDDL immediately above `main()` and short comments separating the steps.
 Examples 01 and 03 group related basics; later files introduce one feature each.
 Examples 19–22 form an experimental range, view and segment sequence.
-Example 23 introduces experimental CWT claim encoding and decoding.
+Example 23 introduces experimental CWT claim encoding and decoding; example 24
+connects an application crypto backend using optional OpenSSL.
 
 ## Learning order
 
@@ -33,6 +34,7 @@ Example 23 introduces experimental CWT claim encoding and decoding.
 | [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
 | [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
 | [23_experimental_cwt_claims.cpp](23_experimental_cwt_claims.cpp) | Encode and decode CWT claims | Opt into registered integer claim labels; signing and application validation are separate steps. |
+| [24_experimental_cwt_backend.cpp](24_experimental_cwt_backend.cpp) | Connect a custom crypto backend | Forward an application key through signing and verification, using OpenSSL as the replaceable provider. |
 
 ## CDDL
 
@@ -69,3 +71,11 @@ Run one example directly:
 
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
+
+Example 24 additionally requires OpenSSL development files and the explicit opt-in:
+
+```bash
+cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON
+cmake --build build/examples --target cbor_tags_example_24_experimental_cwt_backend
+ctest --test-dir build/examples -R '^example_24_' --output-on-failure --no-tests=error
+```

@@ -242,6 +242,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release \
           -DCBOR_TAGS_BUILD_TESTS=ON \
           -DCBOR_TAGS_INSTALL=ON \
+          -DCBOR_TAGS_BUILD_EXAMPLES=ON \
           -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON \
           -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
           -DVCPKG_TARGET_TRIPLET="${CBOR_TAGS_OPENSSL_TRIPLET}" \
