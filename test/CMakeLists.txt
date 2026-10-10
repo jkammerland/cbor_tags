@@ -256,6 +256,9 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+add_test(NAME encoded_item_views_wire COMMAND tests "--test-suite=cbor_wire/encoded_item_views")
+set_tests_properties(encoded_item_views_wire PROPERTIES LABELS "cbor-wire")
+
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
 target_link_libraries(test_smart_ptr_allocation_failure PRIVATE cbor::tags)
 add_test(NAME test_smart_ptr_allocation_failure COMMAND test_smart_ptr_allocation_failure)
