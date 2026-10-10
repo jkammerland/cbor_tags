@@ -110,6 +110,22 @@ current time and trusted key configuration; `kid` identifies a key but does not
 establish trust. Signature verification and application claim validation are
 separate steps: the example also rejects expiry at the exact deadline.
 
+## Multiple signers
+
+[Example 26](../examples/26_experimental_cwt_multi_signer.cpp) creates a
+CWT-tagged COSE_Sign token with two independent ES256 keys. `sign` creates the
+first signature; `add_signature` appends the second over the same payload and
+external AAD. Each signature has its own protected algorithm and key ID.
+
+The example's application policy requires exactly two signatures in an agreed
+order and verifies each index with its corresponding pretrusted key. It rejects
+a wrong key, a damaged signature and a missing signer. The no-index
+`verify_sign(key, message, aad)` overload checks every signature using that one
+key; use the indexed overload or `verify_signature` when signers have different
+keys. Key selection and whether one, all or a threshold of signers is required
+remain application policy. Apply the claim policy from example 25 after that
+signature policy succeeds.
+
 ## Header policy
 
 - Signing helpers reject unprotected `alg`/`crit` and conflicting algorithms.
