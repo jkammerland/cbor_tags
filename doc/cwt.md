@@ -124,4 +124,5 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
 ## Signing and verification
 
 See [COSE signing and verification](cose_signing.md) for the backend contract and
-signing policy.
+signing policy. The optional [OpenSSL ES256 backend](cwt_openssl.md) provides
+a first-party implementation.

@@ -6,6 +6,7 @@
 #include <cbor_tags/cwt/cwt.h>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -14,6 +15,13 @@
 #include <cbor_tags/codec/custom_1.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
 #include <fmt/format.h>
+#endif
+
+#if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
+#include <cbor_tags/cwt/openssl_crypto.h>
+#include <openssl/ec.h>
+#include <openssl/evp.h>
+#include <openssl/obj_mac.h>
 #endif
 
 #if CBOR_TAGS_USE_STD_EXPECTED
@@ -37,6 +45,33 @@ int main() {
 #else
     static_assert(std::is_same_v<cbor::tags::expected<void, cbor::tags::status_code>,
                                  cbor::tags::detail::expected_impl::expected<void, cbor::tags::status_code>>);
+#endif
+
+#if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
+    {
+        namespace cwt = cbor::tags::cwt;
+        static_assert(cwt::openssl_es256_backend::algorithm_id == cwt::algorithm::es256);
+
+        std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> context{EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free};
+        if (!context || EVP_PKEY_keygen_init(context.get()) != 1 ||
+            EVP_PKEY_CTX_set_ec_paramgen_curve_nid(context.get(), NID_X9_62_prime256v1) != 1) {
+            return 15;
+        }
+        EVP_PKEY *generated{};
+        if (EVP_PKEY_keygen(context.get(), &generated) != 1) {
+            return 16;
+        }
+        std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{generated, EVP_PKEY_free};
+        const cwt::byte_string                              payload{std::byte{1}, std::byte{2}, std::byte{3}};
+        auto                                                message = cwt::sign1<cwt::openssl_es256_backend>(key.get(), {}, {}, payload);
+        if (!message || !cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), *message)) {
+            return 17;
+        }
+        message->payload->front() ^= std::byte{1};
+        if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), *message)) {
+            return 18;
+        }
+    }
 #endif
 
     {

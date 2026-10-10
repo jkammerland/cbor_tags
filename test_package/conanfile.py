@@ -20,6 +20,7 @@ class CborTagsTestPackage(ConanFile):
         deps.generate()
         tc = CMakeToolchain(self)
         tc.user_presets_path = None
+        tc.variables["CBOR_TAGS_TEST_PACKAGE_REQUIRE_CWT_OPENSSL"] = bool(self.dependencies["cbor-tags"].options.cwt_openssl)
         tc.generate()
 
     def build(self):

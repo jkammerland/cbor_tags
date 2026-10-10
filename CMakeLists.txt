@@ -78,6 +78,17 @@ target_compile_features(cbor_tags_cwt INTERFACE cxx_std_20)
 set_target_properties(cbor_tags_cwt PROPERTIES EXPORT_NAME cwt)
 add_library(cbor::cwt ALIAS cbor_tags_cwt)
 
+option(CBOR_TAGS_ENABLE_CWT_OPENSSL "Enable the optional OpenSSL CWT crypto backend target" OFF)
+
+if(CBOR_TAGS_ENABLE_CWT_OPENSSL)
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  add_library(cbor_tags_cwt_openssl INTERFACE)
+  target_link_libraries(cbor_tags_cwt_openssl INTERFACE cbor::cwt OpenSSL::Crypto)
+  target_compile_features(cbor_tags_cwt_openssl INTERFACE cxx_std_20)
+  set_target_properties(cbor_tags_cwt_openssl PROPERTIES EXPORT_NAME cwt_openssl)
+  add_library(cbor::cwt_openssl ALIAS cbor_tags_cwt_openssl)
+endif()
+
 if(CBOR_TAGS_STL_ONLY)
   target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_STL_ONLY=1)
 endif()
@@ -285,6 +296,9 @@ endif()
 if(CBOR_TAGS_USE_MAGIC_ENUM_NAMES)
   list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "magic_enum 0.9.7 REQUIRED CONFIG")
 endif()
+if(TARGET cbor_tags_cwt_openssl)
+  list(APPEND CBOR_TAGS_PUBLIC_DEPENDENCIES "OpenSSL REQUIRED COMPONENTS Crypto")
+endif()
 
 # Link dependencies
 if(NOT CBOR_TAGS_STL_ONLY)
@@ -396,6 +410,9 @@ if(CBOR_TAGS_INSTALL)
     PATHS "${target_install_package_release_SOURCE_DIR}/usr/share/cmake/target_install_package"
     NO_DEFAULT_PATH)
   set(CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS cbor_tags_cwt)
+  if(TARGET cbor_tags_cwt_openssl)
+    list(APPEND CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS cbor_tags_cwt_openssl)
+  endif()
   set(CBOR_TAGS_INSTALL_PACKAGE_ARGS
       ${PROJECT_NAME}
       NAMESPACE

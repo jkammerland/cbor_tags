@@ -17,12 +17,14 @@ class CborTagsConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = {
         "boost_pfr_names": [True, False],
+        "cwt_openssl": [True, False],
         "magic_enum_names": [True, False],
         "std_expected": [True, False],
         "stl_only": [True, False],
     }
     default_options = {
         "boost_pfr_names": False,
+        "cwt_openssl": False,
         "magic_enum_names": False,
         "std_expected": False,
         "stl_only": False,
@@ -38,6 +40,8 @@ class CborTagsConan(ConanFile):
     )
 
     def requirements(self):
+        if self.options.cwt_openssl:
+            self.requires("openssl/[>=3 <4]")
         if self.options.stl_only:
             return
         self.requires("fmt/[>=11.0.2 <12]")
@@ -84,6 +88,7 @@ class CborTagsConan(ConanFile):
         tc.variables["CBOR_TAGS_USE_STD_EXPECTED"] = "ON" if (self.options.std_expected or self.options.stl_only) else "OFF"
         tc.variables["CBOR_TAGS_USE_BOOST_PFR_NAMES"] = "ON" if self.options.boost_pfr_names else "OFF"
         tc.variables["CBOR_TAGS_USE_MAGIC_ENUM_NAMES"] = "ON" if self.options.magic_enum_names else "OFF"
+        tc.variables["CBOR_TAGS_ENABLE_CWT_OPENSSL"] = "ON" if self.options.cwt_openssl else "OFF"
         tc.generate()
         deps = CMakeDeps(self)
         deps.generate()
@@ -132,6 +137,14 @@ class CborTagsConan(ConanFile):
         cwt.libdirs = []
         cwt.bindirs = []
         cwt.requires = ["tags"]
+
+        if self.options.cwt_openssl:
+            cwt_openssl = self.cpp_info.components["cwt_openssl"]
+            cwt_openssl.set_property("cmake_target_name", "cbor::cwt_openssl")
+            cwt_openssl.includedirs = ["include"]
+            cwt_openssl.libdirs = []
+            cwt_openssl.bindirs = []
+            cwt_openssl.requires = ["cwt", "openssl::crypto"]
 
         # Header-only library
         self.cpp_info.header_only = True

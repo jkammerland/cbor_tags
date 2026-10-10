@@ -209,3 +209,66 @@ jobs:
     - name: Test
       shell: bash
       run: ctest --test-dir build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
+
+  cwt-openssl:
+    name: macOS OpenSSL ${{ matrix.runner }} C++${{ matrix.cxx_standard }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+        cxx_standard: [20, 23]
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+      with:
+        cmakeVersion: '3.31.5'
+
+    - name: Bootstrap vcpkg
+      uses: ./.github/actions/bootstrap-vcpkg
+
+    - name: Select native OpenSSL triplet
+      shell: bash
+      run: |
+        case "$(uname -m)" in
+          arm64) triplet=arm64-osx ;;
+          x86_64) triplet=x64-osx ;;
+          *) echo "Unsupported macOS architecture" >&2; exit 1 ;;
+        esac
+        echo "CBOR_TAGS_OPENSSL_TRIPLET=${triplet}" >> "${GITHUB_ENV}"
+
+    - name: Configure OpenSSL backend
+      shell: bash
+      run: |
+        cmake -S . -B build-openssl \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCBOR_TAGS_INSTALL=ON \
+          -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON \
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+          -DVCPKG_TARGET_TRIPLET="${CBOR_TAGS_OPENSSL_TRIPLET}" \
+          -DVCPKG_MANIFEST_FEATURES=cwt-openssl \
+          -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+          -DCMAKE_CXX_EXTENSIONS=OFF \
+          -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/cbor-tags-openssl"
+
+    - name: Build and test OpenSSL backend
+      shell: bash
+      run: |
+        cmake --build build-openssl --config Release --parallel 2
+        ctest --test-dir build-openssl -C Release --output-on-failure --no-tests=error
+
+    - name: Test installed OpenSSL consumer
+      shell: bash
+      run: |
+        cmake --install build-openssl --config Release
+        cmake -S test_package -B build-openssl-consumer \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \
+          -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/cbor-tags-openssl;${GITHUB_WORKSPACE}/build-openssl/vcpkg_installed/${CBOR_TAGS_OPENSSL_TRIPLET}" \
+          -DCBOR_TAGS_TEST_PACKAGE_REQUIRE_CWT_OPENSSL=ON
+        cmake --build build-openssl-consumer --config Release --parallel 2
+        ./build-openssl-consumer/test_package
