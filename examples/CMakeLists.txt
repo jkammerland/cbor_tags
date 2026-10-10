@@ -1,2 +1,11 @@
-add_executable(cbor_tags_basic_roundtrip basic_roundtrip.cpp)
-target_link_libraries(cbor_tags_basic_roundtrip PRIVATE cbor::tags)
+file(GLOB EXAMPLE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/[0-9][0-9]_*.cpp")
+list(SORT EXAMPLE_SOURCES)
+
+foreach(EXAMPLE_SOURCE IN LISTS EXAMPLE_SOURCES)
+  get_filename_component(EXAMPLE_NAME "${EXAMPLE_SOURCE}" NAME_WE)
+  set(EXAMPLE_TARGET "cbor_tags_example_${EXAMPLE_NAME}")
+  add_executable(${EXAMPLE_TARGET} "${EXAMPLE_SOURCE}")
+  target_link_libraries(${EXAMPLE_TARGET} PRIVATE cbor::tags)
+  add_test(NAME "example_${EXAMPLE_NAME}" COMMAND $<TARGET_FILE:${EXAMPLE_TARGET}>)
+  set_tests_properties("example_${EXAMPLE_NAME}" PROPERTIES LABELS "examples")
+endforeach()

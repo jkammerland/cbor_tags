@@ -72,6 +72,7 @@ jobs:
         cmake -B build-cxx${{ matrix.cxx_standard }} \
           -DCMAKE_BUILD_TYPE=Release \
           -DCBOR_TAGS_BUILD_TESTS=ON \
+          -DCBOR_TAGS_BUILD_EXAMPLES=${{ matrix.cxx_standard == 20 && 'ON' || 'OFF' }} \
           "${cxx_standard_args[@]}" \
           -DCMAKE_C_COMPILER=${{ matrix.config.cc }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.config.cxx }}

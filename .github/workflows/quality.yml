@@ -68,7 +68,7 @@ jobs:
     - name: Test raw CMake 3.23 roundtrips
       shell: bash
       run: |
-        ./build/minimum-cmake/examples/cbor_tags_basic_roundtrip
+        ctest --test-dir build/minimum-cmake -L examples --output-on-failure --no-tests=error
         ./build/minimum-cmake/tools/cborctl diagnostic --input hex 01
 
     - name: Setup CMake 3.25.3

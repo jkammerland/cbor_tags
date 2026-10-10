@@ -321,7 +321,7 @@ else()
 endif()
 
 # Extra options
-if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS)
+if(CBOR_TAGS_BUILD_TESTS OR CBOR_TAGS_BUILD_BENCHMARKS OR CBOR_TAGS_BUILD_EXAMPLES)
   include(CTest)
   enable_testing()
   add_library(test_util INTERFACE)

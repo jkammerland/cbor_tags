@@ -1,0 +1,11 @@
+BasedOnStyle: InheritParentConfig
+ColumnLimit: 100
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+ReflowComments: false
+FixNamespaceComments: false
+AlignAfterOpenBracket: DontAlign
