@@ -46,7 +46,8 @@ jobs:
           "-B", $buildDir,
           "-G", "Visual Studio 18 2026",
           "-A", "x64",
-          "-DCBOR_TAGS_BUILD_TESTS=ON"
+          "-DCBOR_TAGS_BUILD_TESTS=ON",
+          "-DCBOR_TAGS_BUILD_EXAMPLES=${{ matrix.cxx_standard == 20 && 'ON' || 'OFF' }}"
         )
         if ("${{ matrix.cxx_standard }}" -eq "26") {
           # CMake 4.3 supports the VS 2026 generator but does not model its C++26 preview mode.

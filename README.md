@@ -60,6 +60,8 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 - C++26 STL-only mode provides the complete feature set with no third-party consumer dependencies.
 
 ## 🔧 Quick Start
+Work through the [numbered examples](examples/README.md) for a gradual introduction to values, receiver layouts, containers and codecs.
+
 ### Basic Encoding/Decoding Example
 Basic example of encoding and decoding a single cbor items:
 ```cpp
