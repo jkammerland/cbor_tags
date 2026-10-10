@@ -1100,6 +1100,7 @@ Additional docs:
 - [Custom Codec 1](doc/custom_codec_1.md)
 - [Encoder And Decoder Options](doc/options.md)
 - [Codec Extensions](doc/codec_extensions.md)
+- [CWT and COSE owning and borrowed models](doc/cwt.md)
 - [Standard and Boost container interoperability](doc/container_interoperability.md)
 - [RFC 8746 Typed Arrays](doc/rfc8746_typed_arrays.md)
 - [Smart Pointer Codecs](doc/smart_pointers.md)

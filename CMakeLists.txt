@@ -72,6 +72,12 @@ target_sources(
             "${PROJECT_BINARY_DIR}/include/cbor_tags/cbor_tags_config.h")
 add_library(cbor::tags ALIAS ${PROJECT_NAME})
 
+add_library(cbor_tags_cwt INTERFACE)
+target_link_libraries(cbor_tags_cwt INTERFACE cbor::tags)
+target_compile_features(cbor_tags_cwt INTERFACE cxx_std_20)
+set_target_properties(cbor_tags_cwt PROPERTIES EXPORT_NAME cwt)
+add_library(cbor::cwt ALIAS cbor_tags_cwt)
+
 if(CBOR_TAGS_STL_ONLY)
   target_compile_definitions(${PROJECT_NAME} INTERFACE CBOR_TAGS_STL_ONLY=1)
 endif()
@@ -389,7 +395,15 @@ if(CBOR_TAGS_INSTALL)
     target_install_package 7.1.0 EXACT CONFIG REQUIRED
     PATHS "${target_install_package_release_SOURCE_DIR}/usr/share/cmake/target_install_package"
     NO_DEFAULT_PATH)
-  set(CBOR_TAGS_INSTALL_PACKAGE_ARGS ${PROJECT_NAME} NAMESPACE cbor:: ALIAS_NAME tags)
+  set(CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS cbor_tags_cwt)
+  set(CBOR_TAGS_INSTALL_PACKAGE_ARGS
+      ${PROJECT_NAME}
+      NAMESPACE
+      cbor::
+      ALIAS_NAME
+      tags
+      ADDITIONAL_TARGETS
+      ${CBOR_TAGS_INSTALL_ADDITIONAL_TARGETS})
   if(CBOR_TAGS_PUBLIC_DEPENDENCIES)
     list(APPEND CBOR_TAGS_INSTALL_PACKAGE_ARGS PUBLIC_DEPENDENCIES ${CBOR_TAGS_PUBLIC_DEPENDENCIES})
   endif()

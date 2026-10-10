@@ -3,6 +3,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_reflection_config.h>
 #include <cbor_tags/codec/typed_array.h>
+#include <cbor_tags/cwt/cwt.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -52,6 +53,29 @@ int main() {
         }
         if (decoded != 42U) {
             return 3;
+        }
+    }
+
+    {
+        namespace cwt = cbor::tags::cwt;
+
+        auto claims_bytes = cwt::encode_to_bytes(cwt::claims_set{.issuer = "issuer", .subject = "subject"});
+        if (!claims_bytes) {
+            return 11;
+        }
+
+        cwt::claims_set decoded;
+        auto            dec = cbor::tags::make_decoder<cbor::tags::codec::cwt>(*claims_bytes);
+        if (!dec(decoded)) {
+            return 12;
+        }
+        if (!decoded.issuer || *decoded.issuer != "issuer" || !decoded.subject || *decoded.subject != "subject") {
+            return 13;
+        }
+        cwt::claims_view view;
+        if (!cbor::tags::make_decoder<cbor::tags::codec::cwt>(*claims_bytes)(view) || view.issuer != decoded.issuer ||
+            view.subject != decoded.subject) {
+            return 14;
         }
     }
 
