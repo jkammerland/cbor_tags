@@ -6,6 +6,7 @@ Examples 01 and 03 group related basics; later files introduce one feature each.
 Examples 19–22 form an experimental range, view and segment sequence.
 Example 23 introduces experimental CWT claim encoding and decoding; example 24
 connects an application crypto backend using optional OpenSSL.
+Example 25 builds a complete signed token with external AAD and receiver validation.
 
 ## Learning order
 
@@ -35,6 +36,7 @@ connects an application crypto backend using optional OpenSSL.
 | [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
 | [23_experimental_cwt_claims.cpp](23_experimental_cwt_claims.cpp) | Encode and decode CWT claims | Opt into registered integer claim labels; signing and application validation are separate steps. |
 | [24_experimental_cwt_backend.cpp](24_experimental_cwt_backend.cpp) | Connect a custom crypto backend | Forward an application key through signing and verification, using OpenSSL as the replaceable provider. |
+| [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged envelope, then validate the verified claims. |
 
 ## CDDL
 
@@ -72,10 +74,12 @@ Run one example directly:
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
 
-Example 24 additionally requires OpenSSL development files and the explicit opt-in:
+Examples 24 and 25 additionally require OpenSSL development files and the explicit opt-in:
 
 ```bash
 cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON
-cmake --build build/examples --target cbor_tags_example_24_experimental_cwt_backend
-ctest --test-dir build/examples -R '^example_24_' --output-on-failure --no-tests=error
+cmake --build build/examples --target \
+  cbor_tags_example_24_experimental_cwt_backend \
+  cbor_tags_example_25_experimental_cwt_token
+ctest --test-dir build/examples -R '^example_(24|25)_' --output-on-failure --no-tests=error
 ```

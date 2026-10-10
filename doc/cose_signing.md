@@ -11,7 +11,7 @@ The runnable [custom backend example](../examples/24_experimental_cwt_backend.cp
 uses an application-owned key and OpenSSL as a replaceable provider. Its two
 provider calls are the integration points for your crypto library or HSM SDK;
 map provider failures to `unexpected<status_code>` and return success only after
-signing or verification succeeds. Only this example requires the optional
+signing or verification succeeds. The crypto examples require the optional
 `CBOR_TAGS_ENABLE_CWT_OPENSSL` build flag.
 
 Keys can be application-defined types; the helpers forward them to your backend.
@@ -89,6 +89,26 @@ auto result = cwt::verify_sign1<custom_backend>(
 ```
 
 An embedded payload takes precedence over the detached argument.
+
+## Complete token with external AAD
+
+[Example 25](../examples/25_experimental_cwt_token.cpp) builds a complete
+CWT-tagged COSE_Sign1 token: encode claims, protect `alg` and `kid`, sign with
+external AAD, serialize, decode, verify, then apply issuer, audience and expiry
+policy. It uses the built-in OpenSSL backend; substitute the backend and key
+from [example 24](../examples/24_experimental_cwt_backend.cpp) at the signing and
+verification calls to use your own provider.
+
+External AAD is authenticated but absent from the token. Both parties must
+supply identical bytes from their application context; this example binds the
+token to one request purpose. Missing or different AAD causes verification to
+fail, as required by [COSE external data processing](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3).
+
+The example uses a pretrusted key, checks its protected key ID, and injects a
+fixed Unix time to keep the demonstration reproducible. A service supplies its
+current time and trusted key configuration; `kid` identifies a key but does not
+establish trust. Signature verification and application claim validation are
+separate steps: the example also rejects expiry at the exact deadline.
 
 ## Header policy
 
