@@ -4,6 +4,7 @@
 #include "cbor_tags/cwt/types.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -15,29 +16,43 @@ template <typename Label> [[nodiscard]] constexpr bool is_header_label(const Lab
     return numeric != nullptr && !numeric->is_negative && numeric->value == expected;
 }
 
-template <typename Label> [[nodiscard]] constexpr bool contains_label(const std::vector<Label> &labels, const Label &target) {
-    for (const auto &label : labels) {
-        if (label == target) {
-            return true;
+template <typename Label = header_label> class seen_header_labels {
+  public:
+    constexpr void add(const Label &label) { labels_.push_back(label); }
+
+    [[nodiscard]] constexpr bool has_duplicates() {
+        sorted_indices_.resize(labels_.size());
+        for (std::size_t index = 0; index < labels_.size(); ++index) {
+            sorted_indices_[index] = index;
         }
+        std::sort(sorted_indices_.begin(), sorted_indices_.end(),
+                  [this](std::size_t lhs, std::size_t rhs) { return labels_[lhs] < labels_[rhs]; });
+        for (std::size_t index = 1; index < sorted_indices_.size(); ++index) {
+            if (labels_[sorted_indices_[index - 1U]] == labels_[sorted_indices_[index]]) {
+                return true;
+            }
+        }
+        return false;
     }
-    return false;
-}
+
+  private:
+    // Keep labels in arrival order and sort only their indices once decoding
+    // finishes. Duplicate validation is O(N log N) without moving strings.
+    std::vector<Label>       labels_;
+    std::vector<std::size_t> sorted_indices_;
+};
 
 template <typename Label>
 [[nodiscard]] constexpr status_code validate_critical_labels(const std::vector<Label> &labels, bool has_algorithm, bool has_key_id) {
-    for (std::size_t index = 0; index < labels.size(); ++index) {
-        for (std::size_t previous = 0; previous < index; ++previous) {
-            if (labels[index] == labels[previous]) {
-                return status_code::error;
-            }
-        }
+    seen_header_labels<Label> seen_labels;
+    for (const auto &label : labels) {
+        seen_labels.add(label);
 
-        if (is_header_label(labels[index], 1U)) {
+        if (is_header_label(label, 1U)) {
             if (!has_algorithm) {
                 return status_code::error;
             }
-        } else if (is_header_label(labels[index], 4U)) {
+        } else if (is_header_label(label, 4U)) {
             if (!has_key_id) {
                 return status_code::error;
             }
@@ -45,7 +60,7 @@ template <typename Label>
             return status_code::error;
         }
     }
-    return status_code::success;
+    return seen_labels.has_duplicates() ? status_code::error : status_code::success;
 }
 
 // Core wrap_as_array requires a definite length. COSE also accepts indefinite

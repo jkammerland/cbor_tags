@@ -103,8 +103,8 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
   one signature. `Sig_structure` encoding uses definite arrays.
 - Complete CWT/COSE decodes replace the destination only on success. Failure
   preserves it; the decoder cursor remains terminal, without rollback.
-- Duplicate integer claim labels are rejected, including unknown and
-  noncanonical spellings. Unknown integer claims are consumed and discarded.
+- Duplicate integer or text claim labels are rejected, including unknown and
+  noncanonical spellings. Unknown integer and text claims are consumed and discarded.
 - Integer dates must fit `int64_t`; floating dates must be finite.
 - Header labels accept integers or text. Duplicate labels within each map,
   unsupported/empty `crit`, absent critical targets and trailing protected-header
