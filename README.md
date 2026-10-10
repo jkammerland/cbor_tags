@@ -378,38 +378,54 @@ string bytes. When indefinite, no length was declared and `size` is zero.
 `indefinite_break` token to recognize an indefinite container's closing delimiter.
 
 ```cpp
-#include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/cbor_encoder.h>
+#include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/cbor_encoder.h"
+
 #include <cassert>
 #include <cstddef>
 #include <variant>
 #include <vector>
 
+using namespace cbor::tags;
+
 int main() {
-    namespace ct = cbor::tags;
+    // Encode an array whose length is not included in its header.
     std::vector<int> source{1, 2, 3};
     std::vector<std::byte> buffer;
-    auto enc = ct::make_encoder(buffer);
-    if (!enc(ct::as_indefinite{source})) return 1;
+    auto encoder = make_encoder(buffer);
+    if (!encoder(as_indefinite{source})) {
+        return 1;
+    }
 
-    auto dec = ct::make_decoder(buffer);
-    ct::as_array_any header;
-    if (!dec(header)) return 1;
+    // Read only the array header. Its elements are still unread.
+    auto decoder = make_decoder(buffer);
+    as_array_any header;
+    if (!decoder(header)) {
+        return 1;
+    }
     assert(header.indefinite);
 
-    std::vector<int> values;
-    for (;;) {
-        std::variant<int, ct::indefinite_break> next;
-        if (!dec(next)) return 1;
-        if (std::holds_alternative<ct::indefinite_break>(next)) break;
-        values.push_back(std::get<int>(next));
+    // Read integers until the closing break token ends the array.
+    std::vector<int> decoded_values;
+    while (true) {
+        std::variant<int, indefinite_break> item;
+        if (!decoder(item)) {
+            return 1;
+        }
+
+        if (std::holds_alternative<indefinite_break>(item)) {
+            break;
+        }
+        decoded_values.push_back(std::get<int>(item));
     }
-    assert(values == source);
-    assert(dec.tell() == buffer.end());
+
+    assert(decoded_values == source);
+    assert(decoder.tell() == buffer.end());
+    return 0;
 }
 ```
 
-The enclosing visitor checks legal break placement, map key/value pairing,
+Use `walk_item` (below) to check legal break placement, map key/value pairing,
 string chunk types, and nesting limits. A header decode succeeds when the
 header is complete even if its children or payload are missing; later content
 decoding reports truncation. Text and byte-string headers now leave payloads
@@ -422,16 +438,47 @@ Include `<cbor_tags/cbor_traversal.h>` to process one complete item with a
 callable, without constructing a variant or manually consuming its children:
 
 ```cpp
-namespace ct = cbor::tags;
+#include "cbor_tags/cbor_encoder.h"
+#include "cbor_tags/cbor_traversal.h"
 
-std::size_t arrays = 0;
-auto result = ct::walk_item(dec,
-    [&](const auto& value, const auto& context) {
-        using T = std::remove_cvref_t<decltype(value)>;
-        if constexpr (std::same_as<T, ct::as_array_any>) {
-            if (context.kind == ct::walk_event_kind::enter) ++arrays;
+#include <cassert>
+#include <concepts>
+#include <cstddef>
+#include <type_traits>
+#include <vector>
+
+using namespace cbor::tags;
+
+int main() {
+    // Encode one outer array containing two inner arrays.
+    std::vector<std::vector<int>> source{{1, 2}, {3}};
+    std::vector<std::byte> buffer;
+    auto encoder = make_encoder(buffer);
+    if (!encoder(source)) {
+        return 1;
+    }
+
+    std::size_t array_count = 0;
+    auto count_arrays = [&array_count](const auto &value, const auto &context) {
+        using value_type = std::remove_cvref_t<decltype(value)>;
+        if constexpr (std::same_as<value_type, as_array_any>) {
+            // An array has enter and leave events. Count it only on entry.
+            if (context.kind == walk_event_kind::enter) {
+                ++array_count;
+            }
         }
-    });
+    };
+
+    auto decoder = make_decoder(buffer);
+    auto result = walk_item(decoder, count_arrays);
+    if (!result) {
+        return 1;
+    }
+
+    assert(array_count == 3);
+    assert(decoder.tell() == buffer.end());
+    return 0;
+}
 ```
 
 Callbacks receive begin, scalar-value, payload, and end notifications. Both
@@ -439,7 +486,7 @@ definite and indefinite containers produce matching begin/end notifications;
 payloads are borrowed from the input. A successful call leaves the decoder at
 the next item.
 
-`ct::validate_item(dec)` checks one item's structure, simple-value encodings,
+`validate_item(decoder)` checks one item's structure, simple-value encodings,
 and text UTF-8 without producing events for the caller. Ordinary walking keeps
 the library's permissive profile; pass `{.strict_validation = true}` to combine
 strict checks with callbacks in the same walk. See [Item traversal and
