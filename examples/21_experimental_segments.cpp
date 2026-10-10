@@ -15,12 +15,14 @@ using namespace cbor::tags;
 items = (tstr, bstr)
 */
 int main() {
+    // Hold ordered headers and original-data views for scatter/gather output.
+    cbor_segments segments;
+
     // Keep both original payloads alive and unchanged until the segments are consumed.
     std::string text = "ready";
     std::vector<std::byte> payload{std::byte{1}, std::byte{2}, std::byte{3}};
 
     // Layout: owned text header, original text view, owned byte header, original byte view.
-    cbor_segments segments;
     auto encoder = make_encoder(segments);
     if (!encoder(as_tstr_range(text), as_bstr_range(payload))) {
         return 1;
@@ -41,16 +43,22 @@ int main() {
         return 2;
     }
 
-    // Decode the owned headers separately to verify their types and declared lengths.
-    as_text_any text_header;
-    as_bstr_any byte_header;
+    // Borrow the two owned headers as separate decoder inputs.
     auto text_header_bytes = segments[0].bytes();
     auto byte_header_bytes = segments[2].bytes();
+
+    // Declare receivers for the text and byte-string headers.
+    as_text_any text_header;
+    as_bstr_any byte_header;
+
+    // Decode each header independently of its borrowed payload.
     auto text_decoder = make_decoder(text_header_bytes);
     auto byte_decoder = make_decoder(byte_header_bytes);
     if (!text_decoder(text_header) || !byte_decoder(byte_header)) {
         return 1;
     }
+
+    // Check both header types and their declared lengths.
     if (text_header.indefinite || text_header.size != text.size() || byte_header.indefinite ||
         byte_header.size != payload.size()) {
         return 2;

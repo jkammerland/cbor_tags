@@ -10,16 +10,22 @@ using namespace cbor::tags;
 numbers = [* int]
 */
 int main() {
-    // Encode the array without a length in its header.
-    std::vector<int> source{1, 2, 3};
+    // Hold the encoded data that would normally be transferred to the receiver.
     std::vector<std::byte> buffer;
+
+    // Define the array elements.
+    std::vector<int> source{1, 2, 3};
+
+    // Encode the array without a length in its header.
     auto encoder = make_encoder(buffer);
     if (!encoder(as_indefinite{source})) {
         return 1;
     }
 
-    // The ordinary container decoder consumes elements through the closing break.
+    // Declare an owning receiver for the array.
     std::vector<int> received;
+
+    // Decode through the closing break with the ordinary container decoder.
     auto decoder = make_decoder(buffer);
     if (!decoder(received)) {
         return 1;

@@ -16,16 +16,22 @@ struct Record {
 record = [int, tstr]
 */
 int main() {
-    // Public aggregate members are encoded as an array in declaration order.
-    Record source{42, "ready"};
+    // Hold the encoded data that would normally be transferred to the receiver.
     std::vector<std::byte> buffer;
+
+    // Define a record with public aggregate members.
+    Record source{42, "ready"};
+
+    // Encode the members as an array in declaration order.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;
     }
 
-    // Decode the array into a new record.
+    // Declare a record to receive the array members.
     Record received;
+
+    // Decode the array into the receiver.
     auto decoder = make_decoder(buffer);
     if (!decoder(received)) {
         return 1;

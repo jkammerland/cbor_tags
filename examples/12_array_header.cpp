@@ -10,26 +10,34 @@ using namespace cbor::tags;
 numbers = [* int]
 */
 int main() {
-    // Encode a definite array whose header declares its element count.
-    std::vector<int> source{1, 2, 3};
+    // Hold the encoded data that would normally be transferred to the receiver.
     std::vector<std::byte> buffer;
+
+    // Define the elements of a definite array.
+    std::vector<int> source{1, 2, 3};
+
+    // Encode the array with its element count in the header.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;
     }
 
-    // Read only the header, leaving the elements unread.
+    // Declare separate receivers for the header and elements.
     as_array_any header;
+    std::vector<int> received;
+
+    // Read only the header, leaving the elements unread.
     auto decoder = make_decoder(buffer);
     if (!decoder(header)) {
         return 1;
     }
+
+    // Check the declared count before reading the elements.
     if (header.indefinite || header.size != source.size()) {
         return 2;
     }
 
     // Read each declared element individually.
-    std::vector<int> received;
     for (std::size_t index = 0; index < header.size; ++index) {
         int value{};
         if (!decoder(value)) {

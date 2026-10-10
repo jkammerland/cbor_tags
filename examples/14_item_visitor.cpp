@@ -13,9 +13,13 @@ using namespace cbor::tags;
 nested_arrays = [* [* int]]
 */
 int main() {
-    // Encode an outer array containing two inner arrays.
-    std::vector<std::vector<int>> source{{1, 2}, {3}};
+    // Hold the encoded data that would normally be transferred to the receiver.
     std::vector<std::byte> buffer;
+
+    // Define an outer array containing two inner arrays.
+    std::vector<std::vector<int>> source{{1, 2}, {3}};
+
+    // Encode the nested arrays into the buffer.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;

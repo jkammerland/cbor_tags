@@ -16,7 +16,7 @@ They are related because they all help avoid unnecessary temporary containers or
 copies. They are not one feature.
 
 For small, compiled programs with CDDL and executable checks, start with the
-[numbered experimental examples](../examples/README.md#experimental-ranges-views-and-segments).
+[numbered experimental examples](../examples/README.md#learning-order).
 They introduce range encoding, borrowed decode views, segmented output and raw-view
 forwarding separately.
 

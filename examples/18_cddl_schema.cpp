@@ -14,8 +14,10 @@ struct Record {
 record = [int, tstr]
 */
 int main() {
-    // Generate a schema for the same struct shape introduced earlier.
+    // Hold the generated schema text.
     std::string schema;
+
+    // Generate a schema for the same struct shape introduced earlier.
     cddl::schema_to<Record>(schema,
         {.row_options = {.format_by_rows = false}, .root_name = "record"});
 

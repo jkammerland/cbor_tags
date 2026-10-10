@@ -19,16 +19,22 @@ struct Record {
 record = #6.1001([int, tstr])
 */
 int main() {
-    // The static tag identifies the record without becoming an array member.
-    Record source{42, "ready"};
+    // Hold the encoded data that would normally be transferred to the receiver.
     std::vector<std::byte> buffer;
+
+    // Define a record with a static identifying tag.
+    Record source{42, "ready"};
+
+    // Encode the tag followed by the record array.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;
     }
 
-    // Decode the tagged array into a new record.
+    // Declare a record to receive the tagged array.
     Record received;
+
+    // Decode the tagged array into the receiver.
     auto decoder = make_decoder(buffer);
     if (!decoder(received)) {
         return 1;

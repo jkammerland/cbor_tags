@@ -13,17 +13,23 @@ using namespace cbor::tags;
 payload = bstr
 */
 int main() {
-    // An ordinary output buffer receives a copy of the source byte view.
+    // Hold the encoded data that would normally be transferred to the receiver.
+    std::vector<std::byte> buffer;
+
+    // Define a byte view over existing source data.
     std::vector<std::byte> source{std::byte{1}, std::byte{2}, std::byte{3}};
     std::span<const std::byte> outgoing = source;
-    std::vector<std::byte> buffer;
+
+    // Encode the byte view, copying its bytes into the ordinary output buffer.
     auto encoder = make_encoder(buffer);
     if (!encoder(outgoing)) {
         return 1;
     }
 
-    // Decode a payload view while keeping its encoded buffer alive and unchanged.
+    // Borrow the payload to avoid copying while keeping the encoded buffer stable.
     std::span<const std::byte> received;
+
+    // Decode directly into the byte view.
     auto decoder = make_decoder(buffer);
     if (!decoder(received)) {
         return 1;

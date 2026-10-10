@@ -12,18 +12,24 @@ using namespace cbor::tags;
 variant_values = (int / tstr, int / tstr)
 */
 int main() {
-    // Encode two alternatives with distinct CBOR major types.
+    // Hold the encoded data that would normally be transferred to the receiver.
+    std::vector<std::byte> buffer;
+
+    // Define two alternatives with distinct CBOR major types.
     std::variant<int, std::string> number = 42;
     std::variant<int, std::string> text = std::string{"ready"};
-    std::vector<std::byte> buffer;
+
+    // Encode both selected alternatives.
     auto encoder = make_encoder(buffer);
     if (!encoder(number, text)) {
         return 1;
     }
 
-    // The decoder selects each alternative from its CBOR type.
+    // Declare receivers that allow either alternative.
     std::variant<int, std::string> received_number;
     std::variant<int, std::string> received_text;
+
+    // Select each alternative from its CBOR type.
     auto decoder = make_decoder(buffer);
     if (!decoder(received_number, received_text)) {
         return 1;

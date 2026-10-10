@@ -12,16 +12,22 @@ using namespace cbor::tags;
 receiver_layout = tstr
 */
 int main() {
+    // Hold the encoded data that would normally be transferred to the receiver.
+    std::vector<std::byte> buffer;
+
     // The sender owns its text in a std::string.
     std::string source = "Hello, World!";
-    std::vector<std::byte> buffer;
+
+    // Encode the owning string as CBOR text.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;
     }
 
-    // The receiver chooses a view while keeping the encoded buffer alive and unchanged.
+    // Choose a text view that borrows from the stable encoded buffer.
     std::string_view received_text;
+
+    // Decode the text directly into the receiver's chosen layout.
     auto decoder = make_decoder(buffer);
     if (!decoder(received_text)) {
         return 1;

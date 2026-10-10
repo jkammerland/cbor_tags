@@ -13,20 +13,24 @@ using namespace cbor::tags;
 numbers = [* int]
 */
 int main() {
-    // Filter existing values without first collecting them into another vector.
+    // Hold the encoded data that would normally be transferred to the receiver.
+    std::vector<std::byte> buffer;
+
+    // Filter existing values without collecting them into another vector.
     std::vector<int> source{1, 2, 3, 4, 5, 6};
     auto is_even = [](int value) { return value % 2 == 0; };
     auto evens = source | std::views::filter(is_even);
 
-    // Encode the view as an array, writing CBOR bytes into the output buffer.
-    std::vector<std::byte> buffer;
+    // Encode the view as an array, writing CBOR bytes into the buffer.
     auto encoder = make_encoder(buffer);
     if (!encoder(as_array_range(evens))) {
         return 1;
     }
 
-    // Decode into an ordinary owning container.
+    // Declare an ordinary owning container for the filtered values.
     std::vector<int> received;
+
+    // Decode the array into the receiver.
     auto decoder = make_decoder(buffer);
     if (!decoder(received)) {
         return 1;

@@ -11,18 +11,24 @@ using namespace cbor::tags;
 optional_values = (int / null, int / null)
 */
 int main() {
-    // Encode a present value followed by an absent value.
+    // Hold the encoded data that would normally be transferred to the receiver.
+    std::vector<std::byte> buffer;
+
+    // Define a present value and an absent value.
     std::optional<int> present = 42;
     std::optional<int> absent;
-    std::vector<std::byte> buffer;
+
+    // Encode the present value followed by CBOR null.
     auto encoder = make_encoder(buffer);
     if (!encoder(present, absent)) {
         return 1;
     }
 
-    // Decode CBOR null as an empty optional.
+    // Declare receivers for both optional states.
     std::optional<int> received_present;
     std::optional<int> received_absent = 99;
+
+    // Decode CBOR null as an empty optional.
     auto decoder = make_decoder(buffer);
     if (!decoder(received_present, received_absent)) {
         return 1;

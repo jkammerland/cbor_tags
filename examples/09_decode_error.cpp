@@ -11,16 +11,22 @@ using namespace cbor::tags;
 input = tstr
 */
 int main() {
-    // Encode text that cannot be decoded as an integer.
-    std::string source = "not an integer";
+    // Hold the encoded data that would normally be transferred to the receiver.
     std::vector<std::byte> buffer;
+
+    // Define text that cannot be decoded as an integer.
+    std::string source = "not an integer";
+
+    // Encode the text value.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;
     }
 
-    // Decode once and inspect the returned error instead of retrying.
+    // Choose an integer destination for the text input.
     int received{};
+
+    // Decode once and inspect the returned error instead of retrying.
     auto decoder = make_decoder(buffer);
     auto result = decoder(received);
     if (result) {

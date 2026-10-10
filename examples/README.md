@@ -32,72 +32,20 @@ Examples 19–22 form an experimental range, view and segment sequence.
 | [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
 | [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
 
-## What to expect
+## CDDL
 
-Successful programs return zero. An encode/decode failure returns 1; a wrong
-result or an unexpected status returns 2. Example 18 also prints:
+CDDL describes the structure of CBOR data, such as a record containing an integer
+and a text string:
 
 ```text
 record = [int, tstr]
 ```
 
-Example 02 shows why the sender and receiver do not need identical C++ types:
-CBOR describes the value on the wire. A `std::string` and a `std::string_view`
-both represent a text string. The receiving view borrows the encoded buffer,
-which must stay alive and unchanged while the view is used. Other destination
-constraints still apply: example 10 shows that a matching integer major type
-alone does not guarantee representability.
-
-The CDDL describes the encoded data, including error-example inputs. Parentheses
-describe a sequence of items; brackets describe one array. CDDL describes array
-contents without choosing definite or indefinite encoding. Example 11 selects
-the indefinite encoding in C++.
-
-## Experimental ranges, views and segments
-
-> [!WARNING]
-> Examples 19–22 are experimental. Range, raw-view and segment APIs and borrowing
-> behavior may change. See [the detailed API guide](../doc/experimental_ranges.md).
-
-Use a **range wrapper** when a filter, transform or generated range would otherwise
-need an intermediate container. Example 19 encodes its filtered values directly;
-it still writes their CBOR representation into the output buffer. An unsized
-filtered range emits an indefinite array, consumed normally by the receiver.
-
-Use a **borrowed decode view** when a contiguous encoded input buffer already
-exists and copying a large definite text or byte-string payload would be wasteful.
-Example 20 checks that its decoded span points into that buffer. Encoding a span
-into an ordinary vector still copies its bytes. Borrowed payload views cannot
-combine indefinite string chunks into one contiguous view.
-
-Use **segments** when a consumer can accept several byte spans in order, such as
-a scatter/gather writer, and a large payload already exists elsewhere. Example 21
-has this layout:
-
-```text
-owned text header -> view into original text -> owned byte header -> view into original bytes
-```
-
-The list describes one ordered CBOR stream, not a new wire format. Small headers
-are stored in the segment container; contiguous lvalue payloads are borrowed.
-Keep those originals alive and unchanged until writing finishes. A consumer can
-write each `segment.bytes()` in order. `flatten_segments` creates a contiguous
-copy and removes the payload-copy benefit; use an ordinary buffer when contiguous
-output is what the consumer needs.
-
-Use a **raw encoded view** when an existing CBOR item should pass through a
-relay without converting its elements into application objects. Example 22
-locates the array as a borrowed view and passes its existing header and payload
-to `borrow_segments`; both refer to the original encoded input. Its final owning
-decode is a correctness check, not part of the copy-free forwarding operation.
+See the [CDDL standard, RFC 8610](https://www.rfc-editor.org/rfc/rfc8610.html).
 
 ## Build and run
 
-Use a compatible C++20 compiler, CMake 3.23 or newer, and Ninja. The existing
-CMake dependency setup supplies fmt and nameof. No OpenSSL dependency is needed.
-The first fourteen examples use core APIs; examples 15–17 explicitly install
-codec mixins, and example 18 includes the CDDL extension. Examples 19–22 reuse
-those basics to demonstrate the experimental APIs without extra dependencies.
+From the repository root, use a C++20 compiler, CMake 3.23 or newer, and Ninja:
 
 ```bash
 cmake -S . -B build/examples -G Ninja \
@@ -111,20 +59,11 @@ cmake --build build/examples --parallel
 ctest --test-dir build/examples -L examples --output-on-failure --no-tests=error
 ```
 
-Run one program directly:
+Run one example directly:
 
 ```bash
 ./build/examples/examples/cbor_tags_example_01_basic_values
 ```
 
-For a multi-configuration generator, build with `--config Debug`, test with
-`-C Debug`, and use the executable in the `examples/Debug` directory. Windows
-executables have the `.exe` suffix. Set `CMAKE_BUILD_TYPE=Release` for a Release
-build; the examples' explicit checks remain active.
-
-## Advanced reference helpers
-
-[bounded_samples.h](bounded_samples.h) and
-[cxx26_value_wrappers.h](cxx26_value_wrappers.h) remain separately tested helpers
-for the detailed codec documentation. They are not part of this introductory
-sequence.
+For multi-configuration generators, build with `--config Debug`, test with
+`-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
