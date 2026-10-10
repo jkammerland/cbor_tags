@@ -232,3 +232,78 @@ jobs:
     - name: Test
       shell: pwsh
       run: ctest --test-dir build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} -C Release --output-on-failure
+
+  cwt-openssl:
+    name: Windows OpenSSL ${{ matrix.compiler }} C++${{ matrix.cxx_standard }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [MSVC, ClangCL]
+        cxx_standard: [20, 23]
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+      with:
+        cmakeVersion: '3.31.5'
+        useCloudCache: false
+
+    - name: Bootstrap vcpkg
+      uses: ./.github/actions/bootstrap-vcpkg
+
+    - name: Configure OpenSSL backend
+      shell: pwsh
+      run: |
+        $arguments = @(
+          "-S", ".", "-B", "build-openssl",
+          "-G", "Visual Studio 17 2022", "-A", "x64",
+          "-DCBOR_TAGS_BUILD_TESTS=ON",
+          "-DCBOR_TAGS_INSTALL=ON",
+          "-DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON",
+          "-DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}",
+          "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+          "-DCMAKE_CXX_EXTENSIONS=OFF",
+          "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake",
+          "-DVCPKG_TARGET_TRIPLET=x64-windows",
+          "-DVCPKG_MANIFEST_FEATURES=cwt-openssl",
+          "-DCMAKE_INSTALL_PREFIX=$env:RUNNER_TEMP/cbor-tags-openssl"
+        )
+        if ("${{ matrix.compiler }}" -eq "ClangCL") {
+          $arguments += @("-T", "ClangCL")
+        }
+        cmake @arguments
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Build and test OpenSSL backend
+      shell: pwsh
+      run: |
+        $env:PATH = "$env:GITHUB_WORKSPACE/build-openssl/vcpkg_installed/x64-windows/bin;$env:PATH"
+        cmake --build build-openssl --config Release --parallel 2
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        ctest --test-dir build-openssl -C Release --output-on-failure --no-tests=error
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Test installed OpenSSL consumer
+      shell: pwsh
+      run: |
+        $env:PATH = "$env:GITHUB_WORKSPACE/build-openssl/vcpkg_installed/x64-windows/bin;$env:PATH"
+        cmake --install build-openssl --config Release
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $arguments = @(
+          "-S", "test_package", "-B", "build-openssl-consumer",
+          "-G", "Visual Studio 17 2022", "-A", "x64",
+          "-DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }}",
+          "-DCMAKE_PREFIX_PATH=$env:RUNNER_TEMP/cbor-tags-openssl;$env:GITHUB_WORKSPACE/build-openssl/vcpkg_installed/x64-windows",
+          "-DCBOR_TAGS_TEST_PACKAGE_REQUIRE_CWT_OPENSSL=ON"
+        )
+        if ("${{ matrix.compiler }}" -eq "ClangCL") {
+          $arguments += @("-T", "ClangCL")
+        }
+        cmake @arguments
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build build-openssl-consumer --config Release --parallel 2
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & ./build-openssl-consumer/Release/test_package.exe
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
