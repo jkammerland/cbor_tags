@@ -6,9 +6,10 @@
 #if defined(__cpp_lib_indirect) && __cpp_lib_indirect >= 202502L && defined(__cpp_lib_polymorphic) && __cpp_lib_polymorphic >= 202502L
 #include "../examples/cxx26_value_wrappers.h"
 
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/std_expected.h>
+#include <cbor_tags/codec/unique_ptr.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
-#include <cbor_tags/extensions/smart_ptr.h>
-#include <cbor_tags/extensions/std_expected.h>
 #include <cstddef>
 #include <expected>
 #include <list>
@@ -23,10 +24,14 @@
 #include <vector>
 
 using namespace cbor::tags;
-using cbor::tags::ext::std_indirect::std_indirect_codec;
-using namespace cbor_value_example;
 
 namespace cbor_value_test {
+
+using cbor_value_example::animal;
+using cbor_value_example::cat;
+using cbor_value_example::dog;
+
+namespace ct = cbor::tags;
 
 struct record {
     int         id{};

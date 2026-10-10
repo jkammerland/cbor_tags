@@ -9,11 +9,11 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
     TEST_CASE("std indirect uses exactly the payload wire item") {
         std::indirect<int>     value(42);
         std::vector<std::byte> encoded;
-        REQUIRE(make_encoder<std_indirect_codec>(encoded)(value));
+        REQUIRE(make_encoder<ct::codec::std_indirect>(encoded)(value));
         CHECK(encoded == to_bytes("182a"));
         const auto         input = to_bytes("182a07");
         std::indirect<int> output(9);
-        auto               dec = make_decoder<std_indirect_codec>(input);
+        auto               dec = make_decoder<ct::codec::std_indirect>(input);
         REQUIRE(dec(output));
         CHECK(*output == 42);
         int following{};
@@ -22,21 +22,21 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
 
         const auto            structured = to_bytes("82016361626307");
         std::indirect<record> object;
-        auto                  record_dec = make_decoder<std_indirect_codec>(structured);
+        auto                  record_dec = make_decoder<ct::codec::std_indirect>(structured);
         REQUIRE(record_dec(object));
         CHECK(object->id == 1);
         CHECK(object->name == "abc");
         REQUIRE(record_dec(following));
         CHECK(following == 7);
         encoded.clear();
-        REQUIRE(make_encoder<std_indirect_codec>(encoded)(object));
+        REQUIRE(make_encoder<ct::codec::std_indirect>(encoded)(object));
         CHECK(encoded == to_bytes("820163616263"));
     }
 
     TEST_CASE("std indirect can own a null payload without becoming valueless") {
         std::indirect<std::optional<int>> output(std::optional<int>{42});
         const auto                        input = to_bytes("f607");
-        auto                              dec   = make_decoder<std_indirect_codec>(input);
+        auto                              dec   = make_decoder<ct::codec::std_indirect>(input);
         REQUIRE(dec(output));
         CHECK_FALSE(output.valueless_after_move());
         CHECK_FALSE(output->has_value());
@@ -44,7 +44,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         REQUIRE(dec(following));
         CHECK(following == 7);
         std::vector<std::byte> encoded;
-        REQUIRE(make_encoder<std_indirect_codec>(encoded)(output));
+        REQUIRE(make_encoder<ct::codec::std_indirect>(encoded)(output));
         CHECK(encoded == to_bytes("f6"));
         fmt::memory_buffer schema;
         cddl::schema_to<std::indirect<std::optional<int>>>(schema, {.row_options = {.format_by_rows = false}});
@@ -55,7 +55,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         const auto                      input = to_bytes("8301020307");
         const std::list<std::byte>      linked(input.begin(), input.end());
         std::vector<std::indirect<int>> output;
-        auto                            dec = make_decoder<std_indirect_codec>(linked);
+        auto                            dec = make_decoder<ct::codec::std_indirect>(linked);
         REQUIRE(dec(output));
         REQUIRE(output.size() == 3);
         CHECK(*output[0] == 1);
@@ -65,22 +65,22 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         REQUIRE(dec(following));
         CHECK(following == 7);
 
-        using ext::std_expected::std_expected_codec;
+        using ct::codec::std_expected;
         std::indirect<std::expected<int, std::string>> wrapped;
         const auto                                     expected_wire = to_bytes("82f5182a07");
-        auto                                           expected_dec  = make_decoder<std_indirect_codec, std_expected_codec>(expected_wire);
+        auto expected_dec = make_decoder<ct::codec::std_indirect, ct::codec::std_expected>(expected_wire);
         REQUIRE(expected_dec(wrapped));
         REQUIRE(wrapped->has_value());
         CHECK(**wrapped == 42);
         REQUIRE(expected_dec(following));
         CHECK(following == 7);
         std::vector<std::byte> encoded;
-        REQUIRE(make_encoder<std_indirect_codec, std_expected_codec>(encoded)(wrapped));
+        REQUIRE(make_encoder<ct::codec::std_indirect, ct::codec::std_expected>(encoded)(wrapped));
         CHECK(encoded == to_bytes("82f5182a"));
 
         std::indirect<std::variant<int, std::string>> choice;
         const auto                                    choice_wire = to_bytes("6161");
-        REQUIRE(make_decoder<std_indirect_codec>(choice_wire)(choice));
+        REQUIRE(make_decoder<ct::codec::std_indirect>(choice_wire)(choice));
         CHECK(std::get<std::string>(*choice) == "a");
     }
 
@@ -90,12 +90,12 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         auto                    owner = std::move(value);
         REQUIRE(value.valueless_after_move());
         std::vector<std::byte> encoded;
-        const auto             encoded_result = make_encoder<std_indirect_codec>(encoded)(value);
+        const auto             encoded_result = make_encoder<ct::codec::std_indirect>(encoded)(value);
         REQUIRE_FALSE(encoded_result);
         CHECK(encoded_result.error() == status_code::error);
         CHECK(encoded.empty());
         const auto input = to_bytes("0107");
-        auto       dec   = make_decoder<std_indirect_codec>(input);
+        auto       dec   = make_decoder<ct::codec::std_indirect>(input);
         REQUIRE(dec(value));
         CHECK(*value == 1);
         CHECK(value.get_allocator().resource() == &resource);
@@ -110,14 +110,14 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         std::pmr::indirect<std::pmr::vector<int>> output(std::allocator_arg, &resource);
         output->push_back(9);
         const auto input  = to_bytes("9f011901");
-        const auto result = make_decoder<std_indirect_codec>(input)(output);
+        const auto result = make_decoder<ct::codec::std_indirect>(input)(output);
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::incomplete);
         CHECK(*output == std::pmr::vector<int>{9, 1});
         CHECK(output->get_allocator().resource() == &resource);
         const auto         malformed = to_bytes("6161");
         std::indirect<int> number(8);
-        const auto         bad_type = make_decoder<std_indirect_codec>(malformed)(number);
+        const auto         bad_type = make_decoder<ct::codec::std_indirect>(malformed)(number);
         REQUIRE_FALSE(bad_type);
         CHECK(bad_type.error() == status_code::no_match_for_int_on_buffer);
         CHECK(*number == 8);
@@ -126,7 +126,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         auto                          owner = std::move(source);
         REQUIRE(source.valueless_after_move());
         throwing_value::fail = true;
-        const auto failure   = make_decoder<std_indirect_codec>(input)(source);
+        const auto failure   = make_decoder<ct::codec::std_indirect>(input)(source);
         throwing_value::fail = false;
         REQUIRE_FALSE(failure);
         CHECK(failure.error() == status_code::error);
@@ -136,7 +136,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
 
     TEST_CASE("polymorphic application codec preserves two concrete types and fields") {
         const auto               input = to_bytes("d9ea6a820463526578d9ea6b82634d69610907");
-        auto                     dec   = make_decoder<animal_codec>(input);
+        auto                     dec   = make_decoder<cbor_value_example::codec::animal>(input);
         std::polymorphic<animal> first;
         std::polymorphic<animal> second;
         REQUIRE(dec(first, second));
@@ -152,7 +152,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         REQUIRE(dec(following));
         CHECK(following == 7);
         std::vector<std::byte> encoded;
-        REQUIRE(make_encoder<animal_codec>(encoded)(first, second));
+        REQUIRE(make_encoder<cbor_value_example::codec::animal>(encoded)(first, second));
         CHECK(encoded == to_bytes("d9ea6a820463526578d9ea6b82634d696109"));
     }
 
@@ -165,7 +165,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
             CAPTURE(wire);
             std::polymorphic<animal> output(std::in_place_type<dog>, 8, "old");
             const auto               input  = to_bytes(wire);
-            const auto               result = make_decoder<animal_codec>(input)(output);
+            const auto               result = make_decoder<cbor_value_example::codec::animal>(input)(output);
             REQUIRE_FALSE(result);
             CHECK(result.error() == status);
             const auto *old = dynamic_cast<const dog *>(&*output);
@@ -175,13 +175,13 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         }
         std::polymorphic<animal> unsupported;
         std::vector<std::byte>   bytes;
-        const auto               result = make_encoder<animal_codec>(bytes)(unsupported);
+        const auto               result = make_encoder<cbor_value_example::codec::animal>(bytes)(unsupported);
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::error);
         CHECK(bytes.empty());
         auto owner = std::move(unsupported);
         REQUIRE(unsupported.valueless_after_move());
-        const auto moved_result = make_encoder<animal_codec>(bytes)(unsupported);
+        const auto moved_result = make_encoder<cbor_value_example::codec::animal>(bytes)(unsupported);
         REQUIRE_FALSE(moved_result);
         CHECK(moved_result.error() == status_code::error);
         CHECK(bytes.empty());
@@ -190,7 +190,7 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
     TEST_CASE("value wrappers compose without changing smart pointer formats and CDDL") {
         const auto                                           input = to_bytes("82d9ea6a820463526578d9ea6b82634d69610907");
         std::indirect<std::vector<std::polymorphic<animal>>> values;
-        auto                                                 dec = make_decoder<std_indirect_codec, animal_codec>(input);
+        auto dec = make_decoder<ct::codec::std_indirect, cbor_value_example::codec::animal>(input);
         REQUIRE(dec(values));
         REQUIRE(values->size() == 2);
         REQUIRE(dynamic_cast<const dog *>(&*(*values)[0]));
@@ -199,16 +199,16 @@ TEST_SUITE("cbor_wire/std_value_wrappers") {
         REQUIRE(dec(following));
         CHECK(following == 7);
         std::vector<std::byte> encoded;
-        REQUIRE(make_encoder<std_indirect_codec, animal_codec>(encoded)(values));
+        REQUIRE(make_encoder<ct::codec::std_indirect, cbor_value_example::codec::animal>(encoded)(values));
         CHECK(encoded == to_bytes("82d9ea6a820463526578d9ea6b82634d696109"));
 
-        using ext::smart_ptr::shared_ptr_codec;
+        using ct::codec::shared_ptr;
         std::indirect<std::shared_ptr<int>> pointer(std::make_shared<int>(42));
         encoded.clear();
-        REQUIRE(make_encoder<std_indirect_codec, shared_ptr_codec>(encoded)(pointer));
+        REQUIRE(make_encoder<ct::codec::std_indirect, ct::codec::shared_ptr>(encoded)(pointer));
         CHECK(encoded == to_bytes("d81c182a"));
         std::indirect<std::shared_ptr<int>> copy;
-        REQUIRE(make_decoder<std_indirect_codec, shared_ptr_codec>(encoded)(copy));
+        REQUIRE(make_decoder<ct::codec::std_indirect, ct::codec::shared_ptr>(encoded)(copy));
         REQUIRE(*copy);
         CHECK(**copy == 42);
 

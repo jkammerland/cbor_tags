@@ -2,7 +2,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_reflection_config.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -10,8 +10,8 @@
 #include <vector>
 
 #if !CBOR_TAGS_STL_ONLY
+#include <cbor_tags/codec/custom_1.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
-#include <cbor_tags/extensions/custom_codec_1.h>
 #include <fmt/format.h>
 #endif
 
@@ -56,17 +56,17 @@ int main() {
     }
 
     {
-        namespace rfc8746 = cbor::tags::ext::rfc8746;
+        namespace rfc8746 = cbor::tags::rfc8746;
 
         std::vector<std::byte>    bytes;
         std::vector<std::int32_t> values{1, -2, 3};
-        auto                      enc = cbor::tags::make_encoder<rfc8746::typed_array_codec>(bytes);
+        auto                      enc = cbor::tags::make_encoder<cbor::tags::codec::typed_array>(bytes);
         if (!enc(rfc8746::as_typed_array(values))) {
             return 4;
         }
 
         rfc8746::typed_array<std::int32_t> decoded;
-        auto                               dec = cbor::tags::make_decoder<rfc8746::typed_array_codec>(bytes);
+        auto                               dec = cbor::tags::make_decoder<cbor::tags::codec::typed_array>(bytes);
         if (!dec(decoded) || decoded.values() != values) {
             return 5;
         }
@@ -82,18 +82,18 @@ int main() {
 
 #if !CBOR_TAGS_STL_ONLY
     {
-        namespace compact = cbor::tags::ext::custom_codec_1;
+        namespace compact = cbor::tags::custom_1;
 
         std::vector<std::byte>    compact_bytes;
         std::vector<std::int16_t> values{1, -2, 3};
-        auto                      enc = cbor::tags::make_encoder<compact::custom_codec_1>(compact_bytes);
-        if (!enc(compact::as_custom_codec_1(cbor::tags::static_tag<17>{}, values))) {
+        auto                      enc = cbor::tags::make_encoder<cbor::tags::codec::custom_1>(compact_bytes);
+        if (!enc(compact::as_ref(cbor::tags::static_tag<17>{}, values))) {
             return 7;
         }
 
         std::vector<std::int16_t> decoded;
-        auto                      dec = cbor::tags::make_decoder<compact::custom_codec_1>(compact_bytes);
-        if (!dec(compact::as_custom_codec_1(cbor::tags::static_tag<17>{}, decoded)) || decoded != values) {
+        auto                      dec = cbor::tags::make_decoder<cbor::tags::codec::custom_1>(compact_bytes);
+        if (!dec(compact::as_ref(cbor::tags::static_tag<17>{}, decoded)) || decoded != values) {
             return 8;
         }
     }

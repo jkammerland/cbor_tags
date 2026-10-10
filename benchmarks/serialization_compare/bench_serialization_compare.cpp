@@ -17,7 +17,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_ranges.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <cereal/archives/binary.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/string.hpp>
@@ -76,7 +76,7 @@
 namespace bench_compare {
 
 using byte_buffer = std::vector<std::uint8_t>;
-namespace rfc8746 = cbor::tags::ext::rfc8746;
+namespace rfc8746 = cbor::tags::rfc8746;
 
 namespace allocation_probe {
 inline thread_local bool        enabled = false;
@@ -794,7 +794,7 @@ struct cbor_tags_typed_array_codec {
 
     template <typename T> static void encode_into(const std::vector<T> &value, byte_buffer &buffer) {
         buffer.clear();
-        auto enc    = cbor::tags::make_encoder<rfc8746::typed_array_codec>(buffer);
+        auto enc    = cbor::tags::make_encoder<cbor::tags::codec::typed_array>(buffer);
         auto result = enc(rfc8746::as_typed_array(value));
         if (!result) {
             throw std::runtime_error(std::string{"cbor_tags typed-array codec encode failed: "} +
@@ -810,7 +810,7 @@ struct cbor_tags_typed_array_codec {
 
     template <typename T> static std::uint64_t decode_checksum(const byte_buffer &buffer) {
         rfc8746::typed_array<typename T::value_type> decoded;
-        auto                                         dec    = cbor::tags::make_decoder<rfc8746::typed_array_codec>(buffer);
+        auto                                         dec    = cbor::tags::make_decoder<cbor::tags::codec::typed_array>(buffer);
         auto                                         result = dec(decoded);
         if (!result) {
             throw std::runtime_error(std::string{"cbor_tags typed-array codec decode failed: "} +

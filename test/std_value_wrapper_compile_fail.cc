@@ -9,8 +9,7 @@
 #include <vector>
 
 using namespace cbor::tags;
-using cbor_value_example::animal_codec;
-using ext::std_indirect::std_indirect_codec;
+using codec::std_indirect;
 
 struct empty {};
 struct group {
@@ -19,9 +18,9 @@ struct group {
 };
 
 #if defined(CBOR_VALUE_DIRECT_MIXIN)
-template <typename Self> struct direct_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::encode;
-    using codec_mixin_base<Self>::decode;
+template <typename Self> struct direct_codec : codec::base<Self> {
+    using codec::base<Self>::encode;
+    using codec::base<Self>::decode;
     status_code decode(empty &) {
         int value{};
         return static_cast<Self &>(*this).decode(value);
@@ -56,16 +55,17 @@ int main() {
     std::vector<std::byte> bytes{std::byte{0x01}};
     payload                value{};
 #if defined(CBOR_VALUE_DIRECT_MIXIN)
-    return make_decoder<direct_codec, std_indirect_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_decoder<direct_codec, codec::std_indirect>(bytes)(value).has_value() ? 0 : 1;
 #elif defined(CBOR_VALUE_ENCODE)
     encoder<std::vector<std::byte>, payload_options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder,
-            cbor_variant_encoder, std_indirect_codec, animal_codec>
+            cbor_variant_encoder, codec::std_indirect, cbor_value_example::codec::animal>
         enc{bytes};
     return enc(value).has_value() ? 0 : 1;
 #elif defined(CBOR_VALUE_CDDL)
     fmt::memory_buffer schema;
     cddl::schema_to<payload>(schema);
 #else
-    return make_decoder_with_options<payload_options, std_indirect_codec, animal_codec>(bytes)(value).has_value() ? 0 : 1;
+    return make_decoder_with_options<payload_options, codec::std_indirect, cbor_value_example::codec::animal>(bytes)(value).has_value() ? 0
+                                                                                                                                        : 1;
 #endif
 }

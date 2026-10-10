@@ -4,7 +4,7 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <cstddef>
 #include <nanobench.h>
 #include <span>
@@ -14,7 +14,9 @@
 
 namespace {
 
-namespace rfc8746 = cbor::tags::ext::rfc8746;
+namespace ct = cbor::tags;
+
+namespace rfc8746 = ct::rfc8746;
 
 using byte_buffer = std::vector<std::byte>;
 
@@ -37,7 +39,7 @@ void configure_throughput_bench(ankerl::nanobench::Bench &bench, std::string_vie
 
 template <typename T> auto encode_le(std::vector<T> const &values) -> byte_buffer {
     byte_buffer encoded;
-    auto        encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
+    auto        encoder = ct::make_encoder<ct::codec::typed_array>(encoded);
     auto        result  = encoder(rfc8746::as_typed_array(values));
     CHECK(result);
     return encoded;
@@ -45,7 +47,7 @@ template <typename T> auto encode_le(std::vector<T> const &values) -> byte_buffe
 
 template <typename T> auto encode_be(std::vector<T> const &values) -> byte_buffer {
     byte_buffer encoded;
-    auto        encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
+    auto        encoder = ct::make_encoder<ct::codec::typed_array>(encoded);
     auto        result  = encoder(rfc8746::as_typed_array_be(values));
     CHECK(result);
     return encoded;
@@ -53,7 +55,7 @@ template <typename T> auto encode_be(std::vector<T> const &values) -> byte_buffe
 
 template <typename T> auto decode_le(byte_buffer const &encoded) -> std::vector<T> {
     rfc8746::typed_array<T> decoded;
-    auto                    decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded);
+    auto                    decoder = ct::make_decoder<ct::codec::typed_array>(encoded);
     auto                    result  = decoder(decoded);
     CHECK(result);
     return decoded.values();
@@ -61,7 +63,7 @@ template <typename T> auto decode_le(byte_buffer const &encoded) -> std::vector<
 
 template <typename T> auto decode_be(byte_buffer const &encoded) -> std::vector<T> {
     rfc8746::typed_array_be<T> decoded;
-    auto                       decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded);
+    auto                       decoder = ct::make_decoder<ct::codec::typed_array>(encoded);
     auto                       result  = decoder(decoded);
     CHECK(result);
     return decoded.values();
@@ -69,7 +71,7 @@ template <typename T> auto decode_be(byte_buffer const &encoded) -> std::vector<
 
 template <typename T> auto decode_le_view_copy(byte_buffer const &encoded) -> std::vector<T> {
     rfc8746::typed_array_view<T> decoded;
-    auto                         decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded);
+    auto                         decoder = ct::make_decoder<ct::codec::typed_array>(encoded);
     auto                         result  = decoder(decoded);
     CHECK(result);
     return decoded.copy_values();
@@ -77,7 +79,7 @@ template <typename T> auto decode_le_view_copy(byte_buffer const &encoded) -> st
 
 template <typename T> auto decode_be_view_copy(byte_buffer const &encoded) -> std::vector<T> {
     rfc8746::typed_array_view_be<T> decoded;
-    auto                            decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded);
+    auto                            decoder = ct::make_decoder<ct::codec::typed_array>(encoded);
     auto                            result  = decoder(decoded);
     CHECK(result);
     return decoded.copy_values();
@@ -108,18 +110,18 @@ template <typename T> void run_type_benchmarks(ankerl::nanobench::Bench &bench, 
     auto const prefix = std::string{"rfc8746 "} + std::string{type_name} + "[" + std::to_string(count) + "] ";
 
     run_encode(bench, prefix + "LE encode", encoded_le.size(), [&](byte_buffer &encoded) {
-        auto encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
+        auto encoder = ct::make_encoder<ct::codec::typed_array>(encoded);
         return encoder(rfc8746::as_typed_array(values));
     });
 
     run_encode(bench, prefix + "BE encode", encoded_be.size(), [&](byte_buffer &encoded) {
-        auto encoder = cbor::tags::make_encoder<rfc8746::typed_array_codec>(encoded);
+        auto encoder = ct::make_encoder<ct::codec::typed_array>(encoded);
         return encoder(rfc8746::as_typed_array_be(values));
     });
 
     bench.batch(encoded_le.size()).run(prefix + "LE decode owning", [&] {
         rfc8746::typed_array<T> decoded;
-        auto                    decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded_le);
+        auto                    decoder = ct::make_decoder<ct::codec::typed_array>(encoded_le);
         auto                    result  = decoder(decoded);
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(decoded);
@@ -127,7 +129,7 @@ template <typename T> void run_type_benchmarks(ankerl::nanobench::Bench &bench, 
 
     bench.batch(encoded_be.size()).run(prefix + "BE decode owning", [&] {
         rfc8746::typed_array_be<T> decoded;
-        auto                       decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded_be);
+        auto                       decoder = ct::make_decoder<ct::codec::typed_array>(encoded_be);
         auto                       result  = decoder(decoded);
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(decoded);
@@ -135,7 +137,7 @@ template <typename T> void run_type_benchmarks(ankerl::nanobench::Bench &bench, 
 
     bench.batch(encoded_le.size()).run(prefix + "LE decode view copy", [&] {
         rfc8746::typed_array_view<T> decoded;
-        auto                         decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded_le);
+        auto                         decoder = ct::make_decoder<ct::codec::typed_array>(encoded_le);
         auto                         result  = decoder(decoded);
         auto                         copied  = decoded.copy_values();
         ankerl::nanobench::doNotOptimizeAway(result);
@@ -144,7 +146,7 @@ template <typename T> void run_type_benchmarks(ankerl::nanobench::Bench &bench, 
 
     bench.batch(encoded_be.size()).run(prefix + "BE decode view copy", [&] {
         rfc8746::typed_array_view_be<T> decoded;
-        auto                            decoder = cbor::tags::make_decoder<rfc8746::typed_array_codec>(encoded_be);
+        auto                            decoder = ct::make_decoder<ct::codec::typed_array>(encoded_be);
         auto                            result  = decoder(decoded);
         auto                            copied  = decoded.copy_values();
         ankerl::nanobench::doNotOptimizeAway(result);

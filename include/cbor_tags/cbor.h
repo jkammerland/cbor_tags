@@ -58,18 +58,22 @@ enum class status_code : uint8_t {
     unsupported_operation
 };
 
-template <typename Self> struct encoder_mixin_base {
+namespace codec {
+
+template <typename Self> struct encoder_base {
     constexpr void encode() = delete;
 };
 
-template <typename Self> struct decoder_mixin_base {
+template <typename Self> struct decoder_base {
     constexpr status_code decode() = delete;
 };
 
-template <typename Self> struct codec_mixin_base : encoder_mixin_base<Self>, decoder_mixin_base<Self> {
-    using decoder_mixin_base<Self>::decode;
-    using encoder_mixin_base<Self>::encode;
+template <typename Self> struct base : encoder_base<Self>, decoder_base<Self> {
+    using decoder_base<Self>::decode;
+    using encoder_base<Self>::encode;
 };
+
+} // namespace codec
 
 constexpr std::string_view status_message(status_code s) {
     switch (s) {

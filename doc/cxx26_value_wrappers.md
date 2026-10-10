@@ -1,19 +1,18 @@
 # C++26 value-wrapper codecs
 
-Include the opt-in extension and select `std_indirect_codec` in your factories:
+Include the opt-in extension and select `codec::std_indirect` in your factories:
 
 ```cpp
-#include <cbor_tags/extensions/std_indirect.h>
+#include <cbor_tags/codec/std_indirect.h>
 #include <vector>
 
 namespace ct = cbor::tags;
 
-using cbor::tags::ext::std_indirect::std_indirect_codec;
 std::indirect<int> value(42);
 std::vector<std::byte> bytes;
-auto encoded = ct::make_encoder<std_indirect_codec>(bytes)(value);
+auto encoded = ct::make_encoder<ct::codec::std_indirect>(bytes)(value);
 std::indirect<int> decoded;
-auto result = ct::make_decoder<std_indirect_codec>(bytes)(decoded);
+auto result = ct::make_decoder<ct::codec::std_indirect>(bytes)(decoded);
 // On success, *decoded == 42.
 ```
 
@@ -36,7 +35,7 @@ For `std::polymorphic<Base>`, define the concrete types and their wire mapping
 in an application codec. The compiled [animal codec example](../examples/cxx26_value_wrappers.h)
 uses a tagged variant for `dog` and `cat`, reconstructs the concrete type with
 the destination allocator, and rejects unknown tags or unsupported dynamic types.
-Select `animal_codec` in the factory pack to compose it with other codecs.
+Select `cbor_value_example::codec::animal` in the factory pack to compose it with other codecs.
 
 CDDL follows `cbor::tags::cddl::wire_type_t<T>`: the indirect extension
 maps to `T`, and the animal example maps to its explicit `animal_wire` variant.

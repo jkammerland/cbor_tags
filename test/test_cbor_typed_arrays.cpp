@@ -6,7 +6,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_lazy_tags.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -25,8 +25,8 @@
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::rfc8746;
-namespace rfc8746_detail = cbor::tags::ext::rfc8746::detail;
+using namespace cbor::tags::rfc8746;
+namespace rfc8746_detail = cbor::tags::rfc8746::detail;
 namespace test_support   = cbor::tags::test;
 using cbor::tags::test::detail::allocation_failure_guard;
 
@@ -116,9 +116,9 @@ dynamic_bounded_typed_report_value semantic_value(const dynamic_bounded_typed_re
     return {report.state, report.samples.value().values(), report.note, std::move(result), report.groups};
 }
 
-template <typename Self> struct toy_codec : codec_mixin_base<Self> {
-    using codec_mixin_base<Self>::decode;
-    using codec_mixin_base<Self>::encode;
+template <typename Self> struct toy_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
 
     constexpr void encode(toy_value value) { static_cast<Self &>(*this).encode(value.value()); }
 
@@ -202,8 +202,8 @@ static_assert(!IsTag<typed_array_ref<std::int32_t>>);
 static_assert(!IsTag<homogeneous_array_ref<std::vector<int>>>);
 static_assert(!IsTag<multi_dimensional_array_ref<std::vector<std::uint64_t>, typed_array<std::uint16_t>>>);
 
-using extension_decoder = decltype(make_decoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
-using extension_encoder = decltype(make_encoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
+using extension_decoder = decltype(make_decoder<codec::typed_array>(std::declval<std::vector<std::byte> &>()));
+using extension_encoder = decltype(make_encoder<codec::typed_array>(std::declval<std::vector<std::byte> &>()));
 
 class truncating_byte_view : public std::ranges::view_base {
   public:
@@ -251,14 +251,14 @@ static_assert(!rfc8746_detail::TypedArrayPayloadRange<owning_payload_range>);
 
 template <typename T> std::vector<std::byte> encode_normal(std::span<const T> values) {
     std::vector<std::byte> output;
-    auto                   enc = make_encoder<typed_array_codec>(output);
+    auto                   enc = make_encoder<codec::typed_array>(output);
     REQUIRE(enc(as_typed_array(values)));
     return output;
 }
 
 template <typename T> std::vector<std::byte> encode_big_endian(std::span<const T> values) {
     std::vector<std::byte> output;
-    auto                   enc = make_encoder<typed_array_codec>(output);
+    auto                   enc = make_encoder<codec::typed_array>(output);
     REQUIRE(enc(as_typed_array_be(values)));
     return output;
 }
@@ -279,7 +279,7 @@ template <typename T> void check_roundtrip(const std::vector<T> &values) {
 
     {
         typed_array<T> decoded;
-        auto           dec    = make_decoder<typed_array_codec>(encoded);
+        auto           dec    = make_decoder<codec::typed_array>(encoded);
         const auto     result = dec(decoded);
 
         REQUIRE(result);
@@ -288,7 +288,7 @@ template <typename T> void check_roundtrip(const std::vector<T> &values) {
 
     {
         typed_array_view<T> decoded;
-        auto                dec    = make_decoder<typed_array_codec>(encoded);
+        auto                dec    = make_decoder<codec::typed_array>(encoded);
         const auto          result = dec(decoded);
 
         REQUIRE(result);
@@ -303,7 +303,7 @@ template <typename T> void check_big_endian_roundtrip(const std::vector<T> &valu
 
     {
         typed_array_be<T> decoded;
-        auto              dec    = make_decoder<typed_array_codec>(encoded);
+        auto              dec    = make_decoder<codec::typed_array>(encoded);
         const auto        result = dec(decoded);
 
         REQUIRE(result);
@@ -312,7 +312,7 @@ template <typename T> void check_big_endian_roundtrip(const std::vector<T> &valu
 
     {
         typed_array_view_be<T> decoded;
-        auto                   dec    = make_decoder<typed_array_codec>(encoded);
+        auto                   dec    = make_decoder<codec::typed_array>(encoded);
         const auto             result = dec(decoded);
 
         REQUIRE(result);
@@ -325,7 +325,7 @@ template <typename T> void check_big_endian_roundtrip(const std::vector<T> &valu
 template <typename T> void check_decode_error(const char *hex, status_code expected) {
     const auto          bytes = to_bytes(hex);
     typed_array_view<T> decoded;
-    auto                dec    = make_decoder<typed_array_codec>(bytes);
+    auto                dec    = make_decoder<codec::typed_array>(bytes);
     const auto          result = dec(decoded);
 
     CAPTURE(hex);
@@ -336,7 +336,7 @@ template <typename T> void check_decode_error(const char *hex, status_code expec
 template <typename T> void check_big_endian_decode_error(const char *hex, status_code expected) {
     const auto             bytes = to_bytes(hex);
     typed_array_view_be<T> decoded;
-    auto                   dec    = make_decoder<typed_array_codec>(bytes);
+    auto                   dec    = make_decoder<codec::typed_array>(bytes);
     const auto             result = dec(decoded);
 
     CAPTURE(hex);
@@ -347,7 +347,7 @@ template <typename T> void check_big_endian_decode_error(const char *hex, status
 template <typename T> void check_big_endian_owned_decode_error(const char *hex, status_code expected) {
     const auto        bytes = to_bytes(hex);
     typed_array_be<T> decoded;
-    auto              dec    = make_decoder<typed_array_codec>(bytes);
+    auto              dec    = make_decoder<codec::typed_array>(bytes);
     const auto        result = dec(decoded);
 
     CAPTURE(hex);
@@ -359,7 +359,7 @@ template <typename T> void check_big_endian_non_contiguous_decode_error(const ch
     const auto        bytes = to_bytes(hex);
     const auto        input = std::deque<std::byte>{bytes.begin(), bytes.end()};
     typed_array_be<T> decoded;
-    auto              dec    = make_decoder<typed_array_codec>(input);
+    auto              dec    = make_decoder<codec::typed_array>(input);
     const auto        result = dec(decoded);
 
     CAPTURE(hex);
@@ -381,7 +381,7 @@ template <typename Segments> bool has_borrowed_segment(const Segments &segments,
 TEST_CASE("codec extensions append user mixins to default encoder and decoder") {
     using default_encoder   = decltype(make_encoder(std::declval<std::vector<std::byte> &>()));
     using default_decoder   = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
-    using extension_encoder = decltype(make_encoder<typed_array_codec>(std::declval<std::vector<std::byte> &>()));
+    using extension_encoder = decltype(make_encoder<codec::typed_array>(std::declval<std::vector<std::byte> &>()));
 
     static_assert(!CanEncode<default_encoder, typed_array<std::int32_t>>);
     static_assert(!CanDecode<default_decoder, typed_array<std::int32_t>>);
@@ -437,14 +437,14 @@ TEST_CASE("rfc8746 typed arrays handle empty payloads across decode paths") {
 
     {
         typed_array<std::int32_t> decoded;
-        auto                      dec = make_decoder<typed_array_codec>(encoded);
+        auto                      dec = make_decoder<codec::typed_array>(encoded);
         REQUIRE(dec(decoded));
         CHECK(decoded.values().empty());
     }
 
     {
         typed_array_view<std::int32_t> decoded;
-        auto                           dec = make_decoder<typed_array_codec>(encoded);
+        auto                           dec = make_decoder<codec::typed_array>(encoded);
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.size(), 0U);
         CHECK(decoded.copy_values().empty());
@@ -458,7 +458,7 @@ TEST_CASE("rfc8746 typed arrays handle empty payloads across decode paths") {
 
     {
         auto tagged = std::vector<std::byte>{};
-        auto enc    = make_encoder<typed_array_codec>(tagged);
+        auto enc    = make_encoder<codec::typed_array>(tagged);
         REQUIRE(enc(make_tag_pair(static_tag<100>{}, as_typed_array(values))));
 
         auto view = find_tags<100>(tagged);
@@ -466,7 +466,7 @@ TEST_CASE("rfc8746 typed arrays handle empty payloads across decode paths") {
         REQUIRE(it != view.end());
 
         typed_array<std::int32_t> decoded;
-        REQUIRE(it->decode<typed_array_codec>(decoded));
+        REQUIRE(it->decode<codec::typed_array>(decoded));
         CHECK(decoded.values().empty());
     }
 }
@@ -535,13 +535,13 @@ TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") 
     {
         const std::vector<int> values{1, 2, 3};
         std::vector<std::byte> bytes;
-        auto                   enc = make_encoder<typed_array_codec>(bytes);
+        auto                   enc = make_encoder<codec::typed_array>(bytes);
 
         REQUIRE(enc(as_homogeneous_array(values)));
         CHECK_EQ(to_hex(bytes), "d82983010203");
 
         homogeneous_array<std::vector<int>> decoded;
-        auto                                dec = make_decoder<typed_array_codec>(bytes);
+        auto                                dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.values(), values);
     }
@@ -550,13 +550,13 @@ TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") 
         const std::vector<std::uint64_t> dimensions{2, 2};
         const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
         std::vector<std::byte>           bytes;
-        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        auto                             enc = make_encoder<codec::typed_array>(bytes);
 
         REQUIRE(enc(as_multi_dimensional_array(dimensions, values)));
         CHECK_EQ(to_hex(bytes), "d82882820202d845480100020003000400");
 
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
-        auto                                                                            dec = make_decoder<typed_array_codec>(bytes);
+        auto                                                                            dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.dimensions(), dimensions);
         CHECK_EQ(decoded.values().values(), values.values());
@@ -568,7 +568,7 @@ TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") 
         auto                             input = to_bytes("d82882820202d845480100020003000400");
 
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array_view<std::uint16_t>> decoded;
-        auto                                                                                 dec = make_decoder<typed_array_codec>(input);
+        auto                                                                                 dec = make_decoder<codec::typed_array>(input);
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.dimensions(), dimensions);
         CHECK_EQ(decoded.values().copy_values(), values);
@@ -578,14 +578,14 @@ TEST_CASE("rfc8746 structural array tags encode and decode fixed-tag wrappers") 
         const std::vector<std::uint64_t> dimensions{2, 2};
         const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
         std::vector<std::byte>           bytes;
-        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        auto                             enc = make_encoder<codec::typed_array>(bytes);
 
         REQUIRE(enc(as_multi_dimensional_column_major_array(dimensions, values)));
         CHECK_EQ(to_hex(bytes), "d9041082820202d845480100020003000400");
 
         using column_major_type = multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>>;
         std::variant<homogeneous_array<std::vector<int>>, column_major_type> decoded;
-        auto                                                                 dec = make_decoder<typed_array_codec>(bytes);
+        auto                                                                 dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         REQUIRE(std::holds_alternative<column_major_type>(decoded));
         CHECK_EQ(std::get<column_major_type>(decoded).dimensions(), dimensions);
@@ -598,13 +598,13 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
         const std::vector<std::uint64_t> dimensions{};
         const typed_array<std::uint16_t> scalar{7};
         std::vector<std::byte>           bytes;
-        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        auto                             enc = make_encoder<codec::typed_array>(bytes);
 
         REQUIRE(enc(as_multi_dimensional_array(dimensions, scalar)));
         CHECK_EQ(to_hex(bytes), "d8288280d845420700");
 
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
-        auto                                                                            dec = make_decoder<typed_array_codec>(bytes);
+        auto                                                                            dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         CHECK(decoded.dimensions().empty());
         CHECK_EQ(decoded.values().values(), scalar.values());
@@ -614,7 +614,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
         const std::vector<std::uint64_t> dimensions{2, 0};
         const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
         std::vector<std::byte>           bytes;
-        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        auto                             enc = make_encoder<codec::typed_array>(bytes);
 
         const auto result = enc(as_multi_dimensional_array(dimensions, values));
         REQUIRE_FALSE(result);
@@ -626,7 +626,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
         const std::vector<std::uint64_t> dimensions{2, 3};
         const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
         std::vector<std::byte>           bytes;
-        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        auto                             enc = make_encoder<codec::typed_array>(bytes);
 
         const auto result = enc(as_multi_dimensional_array(dimensions, values));
         REQUIRE_FALSE(result);
@@ -640,7 +640,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
 
         {
             std::vector<std::byte> bytes;
-            auto                   enc    = make_encoder<typed_array_codec>(bytes);
+            auto                   enc    = make_encoder<codec::typed_array>(bytes);
             const auto             result = enc(as_multi_dimensional_array(dimensions, values));
             REQUIRE_FALSE(result);
             CHECK_EQ(result.error(), status_code::error);
@@ -649,7 +649,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
 
         {
             std::vector<std::byte> bytes;
-            auto                   enc    = make_encoder<typed_array_codec>(bytes);
+            auto                   enc    = make_encoder<codec::typed_array>(bytes);
             const auto             result = enc(as_multi_dimensional_column_major_array(dimensions, values));
             REQUIRE_FALSE(result);
             CHECK_EQ(result.error(), status_code::error);
@@ -660,7 +660,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto       input  = to_bytes("d82882820200d845480100020003000400");
-        auto       dec    = make_decoder<typed_array_codec>(input);
+        auto       dec    = make_decoder<codec::typed_array>(input);
         const auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -670,7 +670,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto       input  = to_bytes("d82882820203d845480100020003000400");
-        auto       dec    = make_decoder<typed_array_codec>(input);
+        auto       dec    = make_decoder<codec::typed_array>(input);
         const auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -680,7 +680,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto       input  = to_bytes("d82882821bffffffffffffffff02d845420100");
-        auto       dec    = make_decoder<typed_array_codec>(input);
+        auto       dec    = make_decoder<codec::typed_array>(input);
         const auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -690,7 +690,7 @@ TEST_CASE("rfc8746 structural array tags reject invalid multidimensional shapes"
     {
         multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto       input  = to_bytes("d9041082821bffffffffffffffff02d845420100");
-        auto       dec    = make_decoder<typed_array_codec>(input);
+        auto       dec    = make_decoder<codec::typed_array>(input);
         const auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -702,7 +702,7 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
     {
         homogeneous_array<std::vector<int>> decoded;
         auto                                input  = to_bytes("d82901");
-        auto                                dec    = make_decoder<typed_array_codec>(input);
+        auto                                dec    = make_decoder<codec::typed_array>(input);
         const auto                          result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -712,7 +712,7 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto                                                                            input  = to_bytes("d82881820202");
-        auto                                                                            dec    = make_decoder<typed_array_codec>(input);
+        auto                                                                            dec    = make_decoder<codec::typed_array>(input);
         const auto                                                                      result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -722,7 +722,7 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto       input  = to_bytes("d82883820202d84548010002000300040080");
-        auto       dec    = make_decoder<typed_array_codec>(input);
+        auto       dec    = make_decoder<codec::typed_array>(input);
         const auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -732,7 +732,7 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto                                                                            input  = to_bytes("d8288201d845480100020003000400");
-        auto                                                                            dec    = make_decoder<typed_array_codec>(input);
+        auto                                                                            dec    = make_decoder<codec::typed_array>(input);
         const auto                                                                      result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -742,7 +742,7 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto                                                                            input  = to_bytes("d8288282020201");
-        auto                                                                            dec    = make_decoder<typed_array_codec>(input);
+        auto                                                                            dec    = make_decoder<codec::typed_array>(input);
         const auto                                                                      result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -752,7 +752,7 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
     {
         multi_dimensional_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
         auto                                                                            input  = to_bytes("d82882820202d84543010203");
-        auto                                                                            dec    = make_decoder<typed_array_codec>(input);
+        auto                                                                            dec    = make_decoder<codec::typed_array>(input);
         const auto                                                                      result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -763,11 +763,11 @@ TEST_CASE("rfc8746 structural array tags reject malformed payload wrappers") {
         const std::vector<std::uint64_t> dimensions{2, 2};
         const typed_array<std::uint16_t> values{{1, 2, 3, 4}};
         std::vector<std::byte>           bytes;
-        auto                             enc = make_encoder<typed_array_codec>(bytes);
+        auto                             enc = make_encoder<codec::typed_array>(bytes);
         REQUIRE(enc(as_multi_dimensional_array(dimensions, values)));
 
         multi_dimensional_column_major_array<std::vector<std::uint64_t>, typed_array<std::uint16_t>> decoded;
-        auto       dec    = make_decoder<typed_array_codec>(bytes);
+        auto       dec    = make_decoder<codec::typed_array>(bytes);
         const auto result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -781,13 +781,13 @@ TEST_CASE("rfc8746 typed arrays decode unambiguous variants by tag") {
     {
         value_type             encoded{typed_array<std::int32_t>{{1, -2, 3}}};
         std::vector<std::byte> bytes;
-        auto                   enc = make_encoder<typed_array_codec>(bytes);
+        auto                   enc = make_encoder<codec::typed_array>(bytes);
 
         REQUIRE(enc(encoded));
         CHECK_EQ(to_hex(bytes), "d84e4c01000000feffffff03000000");
 
         value_type decoded{static_tag<42>{}};
-        auto       dec = make_decoder<typed_array_codec>(bytes);
+        auto       dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         REQUIRE(std::holds_alternative<typed_array<std::int32_t>>(decoded));
         CHECK_EQ(std::get<typed_array<std::int32_t>>(decoded).values(), std::vector<std::int32_t>{1, -2, 3});
@@ -798,7 +798,7 @@ TEST_CASE("rfc8746 typed arrays decode unambiguous variants by tag") {
         const auto                bytes = encode_normal(std::span<const double>{values});
 
         value_type decoded{static_tag<42>{}};
-        auto       dec = make_decoder<typed_array_codec>(bytes);
+        auto       dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         REQUIRE(std::holds_alternative<typed_array<double>>(decoded));
         CHECK_EQ(std::get<typed_array<double>>(decoded).values(), values);
@@ -812,7 +812,7 @@ TEST_CASE("rfc8746 typed array views decode unambiguous variants by tag") {
     const auto                      bytes = encode_normal(std::span<const std::int32_t>{values});
 
     value_type decoded{static_tag<42>{}};
-    auto       dec = make_decoder<typed_array_codec>(bytes);
+    auto       dec = make_decoder<codec::typed_array>(bytes);
     REQUIRE(dec(decoded));
     REQUIRE(std::holds_alternative<typed_array_view<std::int32_t>>(decoded));
     CHECK_EQ(std::get<typed_array_view<std::int32_t>>(decoded).copy_values(), values);
@@ -826,7 +826,7 @@ TEST_CASE("rfc8746 big-endian typed arrays decode unambiguous variants by tag") 
         const auto               bytes = encode_big_endian(std::span<const float>{values});
 
         value_type decoded{typed_array<float>{}};
-        auto       dec = make_decoder<typed_array_codec>(bytes);
+        auto       dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         REQUIRE(std::holds_alternative<typed_array_be<float>>(decoded));
         CHECK_EQ(std::get<typed_array_be<float>>(decoded).values(), values);
@@ -837,7 +837,7 @@ TEST_CASE("rfc8746 big-endian typed arrays decode unambiguous variants by tag") 
         const auto                bytes = encode_big_endian(std::span<const double>{values});
 
         value_type decoded{typed_array<float>{}};
-        auto       dec = make_decoder<typed_array_codec>(bytes);
+        auto       dec = make_decoder<codec::typed_array>(bytes);
         REQUIRE(dec(decoded));
         REQUIRE(std::holds_alternative<typed_array_view_be<double>>(decoded));
         CHECK_EQ(std::get<typed_array_view_be<double>>(decoded).copy_values(), values);
@@ -857,7 +857,7 @@ TEST_CASE("rfc8746 typed arrays decode nested variants by tag") {
     const auto                bytes = encode_normal(std::span<const double>{values});
 
     value_type decoded{typed_array<std::int32_t>{}};
-    auto       dec = make_decoder<typed_array_codec>(bytes);
+    auto       dec = make_decoder<codec::typed_array>(bytes);
     REQUIRE(dec(decoded));
     REQUIRE(std::holds_alternative<nested_type>(decoded));
     const auto &nested = std::get<nested_type>(decoded);
@@ -869,7 +869,7 @@ TEST_CASE("rfc8746 typed array variant tag mismatches do not consume payload") {
     using value_type = std::variant<typed_array<std::int32_t>, static_tag<42>>;
 
     const auto bytes = to_bytes("d82a4401020304");
-    auto       dec   = make_decoder<typed_array_codec>(bytes);
+    auto       dec   = make_decoder<codec::typed_array>(bytes);
 
     value_type decoded{typed_array<std::int32_t>{}};
     REQUIRE(dec(decoded));
@@ -884,7 +884,7 @@ TEST_CASE("rfc8746 typed array variants preserve malformed matching-tag errors")
     using value_type = std::variant<typed_array<std::int32_t>, static_tag<42>>;
 
     const auto bytes = to_bytes("d84e43010203");
-    auto       dec   = make_decoder<typed_array_codec>(bytes);
+    auto       dec   = make_decoder<codec::typed_array>(bytes);
 
     value_type decoded{static_tag<42>{}};
     auto       result = dec(decoded);
@@ -1157,7 +1157,7 @@ TEST_CASE("rfc8746 typed array decode rejects payload ranges that discard bytes"
 
     {
         typed_array_view<std::uint32_t, truncating_byte_view> decoded;
-        auto                                                  dec    = make_decoder<typed_array_codec>(input);
+        auto                                                  dec    = make_decoder<codec::typed_array>(input);
         const auto                                            result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1168,7 +1168,7 @@ TEST_CASE("rfc8746 typed array decode rejects payload ranges that discard bytes"
 
     {
         bounded_size<typed_array_view<std::uint32_t, truncating_byte_view>, 1, 1> decoded;
-        auto                                                                      dec    = make_decoder<typed_array_codec>(input);
+        auto                                                                      dec    = make_decoder<codec::typed_array>(input);
         const auto                                                                result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1214,7 +1214,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
 
     {
         typed_array_view<std::int32_t> decoded;
-        auto                           dec    = make_decoder<typed_array_codec>(input);
+        auto                           dec    = make_decoder<codec::typed_array>(input);
         const auto                     result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1223,7 +1223,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
     }
 
     {
-        auto dec                  = make_decoder<typed_array_codec>(input);
+        auto dec                  = make_decoder<codec::typed_array>(input);
         using non_contiguous_view = typed_array_view_for<std::int32_t, decltype(dec)>;
         static_assert(std::same_as<typename non_contiguous_view::payload_range_type, typename decltype(dec)::bstr_view_t>);
         static_assert(!HasTypedArrayPayloadBytes<non_contiguous_view>);
@@ -1238,7 +1238,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
     }
 
     {
-        auto dec              = make_decoder<typed_array_codec>(encoded);
+        auto dec              = make_decoder<codec::typed_array>(encoded);
         using contiguous_view = typed_array_view_for<std::int32_t, decltype(dec)>;
         static_assert(std::same_as<typename contiguous_view::payload_range_type, std::span<const std::byte>>);
         static_assert(HasTypedArrayPayloadBytes<contiguous_view>);
@@ -1246,7 +1246,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
 
     {
         const auto unsized_input = std::list<std::byte>{encoded.begin(), encoded.end()};
-        auto       dec           = make_decoder<typed_array_codec>(unsized_input);
+        auto       dec           = make_decoder<codec::typed_array>(unsized_input);
         using unsized_view       = typed_array_view_for<std::int32_t, decltype(dec)>;
         static_assert(!std::ranges::sized_range<const typename unsized_view::payload_range_type>);
 
@@ -1257,7 +1257,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
 
     {
         typed_array<std::int32_t> decoded;
-        auto                      dec    = make_decoder<typed_array_codec>(input);
+        auto                      dec    = make_decoder<codec::typed_array>(input);
         const auto                result = dec(decoded);
 
         REQUIRE(result);
@@ -1267,7 +1267,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
     {
         const std::array<std::int32_t, 3> lazy_values{1, -2, 3};
         std::vector<std::byte>            tagged;
-        auto                              enc = make_encoder<typed_array_codec>(tagged);
+        auto                              enc = make_encoder<codec::typed_array>(tagged);
         REQUIRE(enc(make_tag_pair(static_tag<100>{}, as_typed_array(std::span<const std::int32_t>{lazy_values}))));
 
         std::deque<std::byte> tagged_input(tagged.begin(), tagged.end());
@@ -1275,7 +1275,7 @@ TEST_CASE("rfc8746 typed array view decodes non-contiguous definite byte strings
         auto                  it   = tags.begin();
         REQUIRE(it != tags.end());
 
-        auto payload_dec      = it->make_decoder<typed_array_codec>();
+        auto payload_dec      = it->make_decoder<codec::typed_array>();
         using lazy_typed_view = typed_array_view_for<std::int32_t, decltype(payload_dec)>;
         static_assert(std::same_as<typename lazy_typed_view::payload_range_type, typename decltype(payload_dec)::bstr_view_t>);
 
@@ -1292,7 +1292,7 @@ TEST_CASE("rfc8746 big-endian typed array view decodes non-contiguous byte strin
 
     {
         typed_array_view_be<double> decoded;
-        auto                        dec    = make_decoder<typed_array_codec>(input);
+        auto                        dec    = make_decoder<codec::typed_array>(input);
         const auto                  result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1300,7 +1300,7 @@ TEST_CASE("rfc8746 big-endian typed array view decodes non-contiguous byte strin
         CHECK_EQ(to_hex(std::ranges::subrange(dec.tell(), input.end())), "3ff0000000000000c004000000000000");
     }
 
-    auto dec                  = make_decoder<typed_array_codec>(input);
+    auto dec                  = make_decoder<codec::typed_array>(input);
     using non_contiguous_view = typed_array_view_be_for<double, decltype(dec)>;
     static_assert(std::same_as<typename non_contiguous_view::payload_range_type, typename decltype(dec)::bstr_view_t>);
     static_assert(!HasTypedArrayPayloadBytes<non_contiguous_view>);
@@ -1345,7 +1345,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
     {
         auto                   values = bounded_size<typed_array<std::int32_t>, 1, 3>{typed_array<std::int32_t>{{1, 2, 3}}};
         std::vector<std::byte> buffer;
-        auto                   enc = make_encoder<typed_array_codec>(buffer);
+        auto                   enc = make_encoder<codec::typed_array>(buffer);
 
         REQUIRE(enc(values));
         CHECK_EQ(to_hex(buffer), "d84e4c010000000200000003000000");
@@ -1354,7 +1354,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
     {
         auto                   values = bounded_size<typed_array<std::int32_t>, 1, 3>{typed_array<std::int32_t>{{1, 2, 3, 4}}};
         std::vector<std::byte> buffer;
-        auto                   enc    = make_encoder<typed_array_codec>(buffer);
+        auto                   enc    = make_encoder<codec::typed_array>(buffer);
         const auto             result = enc(values);
 
         REQUIRE_FALSE(result);
@@ -1365,7 +1365,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
     {
         std::vector<std::int32_t> values{1, 2, 3};
         std::vector<std::byte>    buffer;
-        auto                      enc = make_encoder<typed_array_codec>(buffer);
+        auto                      enc = make_encoder<codec::typed_array>(buffer);
 
         REQUIRE(enc(as_bounded_size<1, 3>(as_typed_array(values))));
         CHECK_EQ(to_hex(buffer), "d84e4c010000000200000003000000");
@@ -1374,7 +1374,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
     {
         std::vector<std::int32_t> values{1, 2, 3, 4};
         std::vector<std::byte>    buffer;
-        auto                      enc    = make_encoder<typed_array_codec>(buffer);
+        auto                      enc    = make_encoder<codec::typed_array>(buffer);
         const auto                result = enc(as_bounded_size<1, 3>(as_typed_array(values)));
 
         REQUIRE_FALSE(result);
@@ -1384,7 +1384,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
 
     {
         bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
-        auto                                          dec = make_decoder<typed_array_codec>(encoded_three);
+        auto                                          dec = make_decoder<codec::typed_array>(encoded_three);
 
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.value().values(), (std::vector<std::int32_t>{1, 2, 3}));
@@ -1394,7 +1394,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
         const std::array<std::int32_t, 4>             input_values{1, 2, 3, 4};
         auto                                          input  = encode_normal<std::int32_t>(std::span<const std::int32_t>{input_values});
-        auto                                          dec    = make_decoder<typed_array_codec>(input);
+        auto                                          dec    = make_decoder<codec::typed_array>(input);
         const auto                                    result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1406,7 +1406,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         bounded_size<typed_array<std::int32_t>, 2, 3> decoded;
         const std::array<std::int32_t, 1>             input_values{1};
         auto                                          input  = encode_normal<std::int32_t>(std::span<const std::int32_t>{input_values});
-        auto                                          dec    = make_decoder<typed_array_codec>(input);
+        auto                                          dec    = make_decoder<codec::typed_array>(input);
         const auto                                    result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1417,7 +1417,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
     {
         bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
         auto                                          input  = to_bytes("d84e450100000000");
-        auto                                          dec    = make_decoder<typed_array_codec>(input);
+        auto                                          dec    = make_decoder<codec::typed_array>(input);
         const auto                                    result = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -1430,7 +1430,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         for (const auto *hex : shape_invalid_inputs) {
             bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
             auto                                          input  = to_bytes(hex);
-            auto                                          dec    = make_decoder<typed_array_codec>(input);
+            auto                                          dec    = make_decoder<codec::typed_array>(input);
             const auto                                    result = dec(decoded);
 
             REQUIRE_FALSE(result);
@@ -1441,7 +1441,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         {
             bounded_size<typed_array<std::int32_t>, 1, 3> decoded;
             auto                                          input  = to_bytes("d84e44010203");
-            auto                                          dec    = make_decoder<typed_array_codec>(input);
+            auto                                          dec    = make_decoder<codec::typed_array>(input);
             const auto                                    result = dec(decoded);
 
             REQUIRE_FALSE(result);
@@ -1452,7 +1452,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         for (const auto *hex : shape_invalid_inputs) {
             bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
             auto                                               input  = to_bytes(hex);
-            auto                                               dec    = make_decoder<typed_array_codec>(input);
+            auto                                               dec    = make_decoder<codec::typed_array>(input);
             const auto                                         result = dec(decoded);
 
             REQUIRE_FALSE(result);
@@ -1463,7 +1463,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
         {
             bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
             auto                                               input  = to_bytes("d84e44010203");
-            auto                                               dec    = make_decoder<typed_array_codec>(input);
+            auto                                               dec    = make_decoder<codec::typed_array>(input);
             const auto                                         result = dec(decoded);
 
             REQUIRE_FALSE(result);
@@ -1474,7 +1474,7 @@ TEST_CASE("rfc8746 bounded typed arrays enforce element counts") {
 
     {
         bounded_size<typed_array_view<std::int32_t>, 1, 3> decoded;
-        auto                                               dec = make_decoder<typed_array_codec>(encoded_three);
+        auto                                               dec = make_decoder<codec::typed_array>(encoded_three);
 
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.value().size(), 3U);
@@ -1491,7 +1491,7 @@ TEST_CASE("rfc8746 bounded typed arrays roundtrip aggregate composition") {
             {{"primary", {{1, 2}, {3}}}, {"secondary", {{4, 5, 6}}}},
         };
 
-        const auto output = test_support::roundtrip<typed_array_codec>(input);
+        const auto output = test_support::roundtrip<codec::typed_array>(input);
         CHECK(semantic_value(output) == semantic_value(input));
     }
 
@@ -1503,7 +1503,7 @@ TEST_CASE("rfc8746 bounded typed arrays roundtrip aggregate composition") {
             {{"empty", {}}},
         };
 
-        const auto output = test_support::roundtrip<typed_array_codec>(input);
+        const auto output = test_support::roundtrip<codec::typed_array>(input);
         CHECK(semantic_value(output) == semantic_value(input));
     }
 }
@@ -1515,7 +1515,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
     SUBCASE("borrowed encode") {
         std::vector<std::int32_t> values{1, 2, 3};
         std::vector<std::byte>    buffer;
-        auto                      enc = make_encoder<typed_array_codec>(buffer);
+        auto                      enc = make_encoder<codec::typed_array>(buffer);
 
         REQUIRE(enc(as_bounded_size(as_typed_array(values), 1, 3)));
         CHECK_EQ(buffer, encoded_three);
@@ -1524,7 +1524,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
     SUBCASE("encode rejects before output") {
         typed_array<std::int32_t> values{{1, 2, 3, 4}};
         std::vector<std::byte>    buffer;
-        auto                      enc    = make_encoder<typed_array_codec>(buffer);
+        auto                      enc    = make_encoder<codec::typed_array>(buffer);
         auto                      result = enc(as_bounded_size(values, 1, 3));
 
         REQUIRE_FALSE(result);
@@ -1534,7 +1534,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
 
     SUBCASE("owned decode") {
         typed_array<std::int32_t> decoded;
-        auto                      dec = make_decoder<typed_array_codec>(encoded_three);
+        auto                      dec = make_decoder<codec::typed_array>(encoded_three);
 
         REQUIRE(dec(as_bounded_size(decoded, 1, 3)));
         CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, 2, 3}));
@@ -1544,7 +1544,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
         const std::array<std::int32_t, 4> input_values{1, 2, 3, 4};
         auto                              input = encode_normal<std::int32_t>(std::span<const std::int32_t>{input_values});
         typed_array<std::int32_t>         decoded{9};
-        auto                              dec    = make_decoder<typed_array_codec>(input);
+        auto                              dec    = make_decoder<codec::typed_array>(input);
         auto                              result = dec(as_bounded_size(decoded, 1, 3));
 
         REQUIRE_FALSE(result);
@@ -1554,7 +1554,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
 
     SUBCASE("view decode") {
         typed_array_view<std::int32_t> decoded;
-        auto                           dec = make_decoder<typed_array_codec>(encoded_three);
+        auto                           dec = make_decoder<codec::typed_array>(encoded_three);
 
         REQUIRE(dec(as_bounded_size(decoded, 1, 3)));
         CHECK_EQ(decoded.size(), 3U);
@@ -1563,7 +1563,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
 
     SUBCASE("non-contiguous view decode") {
         std::deque<std::byte> input(encoded_three.begin(), encoded_three.end());
-        auto                  dec = make_decoder<typed_array_codec>(input);
+        auto                  dec = make_decoder<codec::typed_array>(input);
         using view_type           = typed_array_view_for<std::int32_t, decltype(dec)>;
         view_type decoded;
 
@@ -1575,7 +1575,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
     SUBCASE("misaligned payload preserves structural error") {
         auto                      input = to_bytes("d84e450100000000");
         typed_array<std::int32_t> decoded;
-        auto                      dec    = make_decoder<typed_array_codec>(input);
+        auto                      dec    = make_decoder<codec::typed_array>(input);
         auto                      result = dec(as_bounded_size(decoded, 1, 3));
 
         REQUIRE_FALSE(result);
@@ -1585,7 +1585,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
 
     SUBCASE("element-to-byte bound conversion does not overflow") {
         typed_array<std::int32_t> decoded;
-        auto                      dec = make_decoder<typed_array_codec>(encoded_three);
+        auto                      dec = make_decoder<codec::typed_array>(encoded_three);
 
         REQUIRE(dec(as_bounded_size(decoded, 0, std::numeric_limits<std::size_t>::max())));
         CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, 2, 3}));
@@ -1593,7 +1593,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
         constexpr auto max_representable_elements = std::numeric_limits<std::uint64_t>::max() / sizeof(std::int32_t);
         if constexpr (std::numeric_limits<std::size_t>::max() > max_representable_elements) {
             const auto impossible_min = static_cast<std::size_t>(max_representable_elements + 1U);
-            auto       rejected_dec   = make_decoder<typed_array_codec>(encoded_three);
+            auto       rejected_dec   = make_decoder<codec::typed_array>(encoded_three);
             auto       result         = rejected_dec(as_bounded_size(decoded, impossible_min, impossible_min));
 
             REQUIRE_FALSE(result);
@@ -1604,7 +1604,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
     SUBCASE("big-endian decode") {
         auto                         input = to_bytes("d84a4c00000001fffffffe00000003");
         typed_array_be<std::int32_t> decoded;
-        auto                         dec = make_decoder<typed_array_codec>(input);
+        auto                         dec = make_decoder<codec::typed_array>(input);
 
         REQUIRE(dec(as_bounded_size(decoded, 3, 3)));
         CHECK_EQ(decoded.values(), (std::vector<std::int32_t>{1, -2, 3}));
@@ -1614,7 +1614,7 @@ TEST_CASE("rfc8746 dynamically bounded typed arrays enforce runtime element coun
 TEST_CASE("rfc8746 dynamically bounded typed arrays roundtrip preconfigured aggregate composition") {
     auto check_roundtrip = [](const dynamic_bounded_typed_report &input) {
         auto output = make_dynamic_bounded_typed_report_output();
-        test_support::roundtrip_into<typed_array_codec>(input, output);
+        test_support::roundtrip_into<codec::typed_array>(input, output);
 
         CHECK(semantic_value(output) == semantic_value(input));
         CHECK_EQ(output.samples.min_size(), 1U);
@@ -1690,7 +1690,7 @@ TEST_CASE("rfc8746 typed array decode rejects truncated extended headers and lar
 TEST_CASE("rfc8746 typed array decode accepts non-minimal integer headers through the normal decoder") {
     const auto                     bytes = to_bytes("d9004e580401020304");
     typed_array_view<std::int32_t> decoded;
-    auto                           dec    = make_decoder<typed_array_codec>(bytes);
+    auto                           dec    = make_decoder<codec::typed_array>(bytes);
     const auto                     result = dec(decoded);
 
     REQUIRE(result);

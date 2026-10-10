@@ -47,7 +47,7 @@ truthful range semantics, sufficient capacity, and appropriate allocators.
 | Standard `flat_set`, `flat_multiset`, `flat_map`, `flat_multimap` | Direct array/map | C++26 mode, libstdc++ 16; gated on C++23 library macros |
 | Standard `inplace_vector` | Direct CBOR array, within capacity | C++26, libstdc++ 16 |
 | Standard `hive` | Insert-based array path | Feature-gated test present; unavailable in the local libstdc++ 16 installation |
-| `boost::shared_ptr<T>`, `boost::movelib::unique_ptr<T>` | Existing opt-in `shared_ptr_codec` / `unique_ptr_codec` | Ordinary integer and null values; no new graph-identity claim |
+| `boost::shared_ptr<T>`, `boost::movelib::unique_ptr<T>` | Existing opt-in `cbor::tags::codec::shared_ptr` / `cbor::tags::codec::unique_ptr` | Ordinary integer and null values; no new graph-identity claim |
 
 The 28 Boost container families above have executable coverage. Boost is an
 optional **test** dependency, with no new public build/link dependency. The

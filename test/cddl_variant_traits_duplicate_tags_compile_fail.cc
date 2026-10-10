@@ -1,5 +1,5 @@
+#include "cbor_tags/codec/typed_array.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -43,7 +43,7 @@ template <typename... Ts> struct variant_traits<variant_traits_compile_fail_test
 } // namespace cbor::tags
 
 int main() {
-    using namespace cbor::tags::ext::rfc8746;
+    using namespace cbor::tags::rfc8746;
 
     using value_type = variant_traits_compile_fail_test::manual_variant<typed_array<std::int32_t>, typed_array_view<std::int32_t>>;
 

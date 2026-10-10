@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/extensions/smart_ptr.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
 
 #include <array>
 #include <atomic>
@@ -31,7 +32,7 @@ void operator delete(void *pointer, std::size_t) noexcept { std::free(pointer); 
 
 int main() {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::smart_ptr;
+    using namespace cbor::tags::smart_ptr;
 
     const std::array bytes{
         std::byte{0xD8}, std::byte{0x1C}, std::byte{0x01}, std::byte{0xD8}, std::byte{0x1D}, std::byte{0x00},
@@ -39,7 +40,7 @@ int main() {
 
     shared_ptr_decode_scope table;
     table.reserve(1U);
-    auto dec = make_decoder<shared_ptr_codec>(bytes);
+    auto dec = make_decoder<codec::shared_ptr>(bytes);
     dec.set_shared_ptr_scope(table);
 
     std::shared_ptr<std::uint64_t> first;

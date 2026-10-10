@@ -1,9 +1,10 @@
 #include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_tags_config.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/typed_array.h"
+#include "cbor_tags/codec/unique_ptr.h"
 #include "cbor_tags/extensions/cbor_visualization.h"
-#include "cbor_tags/extensions/rfc8746_typed_arrays.h"
-#include "cbor_tags/extensions/smart_ptr.h"
 #include "cbor_tags/float16_ieee754.h"
 
 #include <array>
@@ -28,8 +29,8 @@
 #include <vector>
 
 using namespace cbor::tags;
-namespace rfc8746   = cbor::tags::ext::rfc8746;
-namespace smart_ptr = cbor::tags::ext::smart_ptr;
+namespace rfc8746   = cbor::tags::rfc8746;
+namespace smart_ptr = cbor::tags::smart_ptr;
 
 namespace cbor_tags_test_cddl {
 template <typename T> std::string cddl_schema_inline() {

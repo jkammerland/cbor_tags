@@ -23,8 +23,8 @@ struct nested_array_value {
     std::size_t completed{};
 };
 
-template <typename Self> struct nested_array_codec : decoder_mixin_base<Self> {
-    using decoder_mixin_base<Self>::decode;
+template <typename Self> struct nested_array_codec : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
 
     [[nodiscard]] status_code decode(nested_array_value &value, major_type major, std::byte additional_info) {
         auto &decoder = static_cast<Self &>(*this);

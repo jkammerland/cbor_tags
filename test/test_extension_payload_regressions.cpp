@@ -1,8 +1,8 @@
 #include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
-#include <cbor_tags/extensions/custom_codec_1.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
+#include <cbor_tags/codec/custom_1.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -11,7 +11,7 @@
 #include <vector>
 
 using namespace cbor::tags;
-using namespace cbor::tags::ext::rfc8746;
+using namespace cbor::tags::rfc8746;
 
 namespace {
 
@@ -67,7 +67,7 @@ TEST_CASE("extension payloads consume unsized non-contiguous input once") {
         CountingUnsizedByteRange  input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02},
                                          std::byte{0x03}, std::byte{0x04}, std::byte{0x05}}};
         typed_array<std::uint8_t> decoded;
-        auto                      dec = make_decoder<typed_array_codec>(input);
+        auto                      dec = make_decoder<codec::typed_array>(input);
 
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.values(), (std::vector<std::uint8_t>{1, 2, 3, 4, 5}));
@@ -78,7 +78,7 @@ TEST_CASE("extension payloads consume unsized non-contiguous input once") {
     SUBCASE("typed array views") {
         CountingUnsizedByteRange input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02},
                                         std::byte{0x03}, std::byte{0x04}, std::byte{0x05}}};
-        auto                     dec = make_decoder<typed_array_codec>(input);
+        auto                     dec = make_decoder<codec::typed_array>(input);
         using view_type              = typed_array_view_for<std::uint8_t, decltype(dec)>;
         view_type decoded;
 
@@ -92,7 +92,7 @@ TEST_CASE("extension payloads consume unsized non-contiguous input once") {
         CountingUnsizedByteRange input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02},
                                         std::byte{0x03}, std::byte{0x04}, std::byte{0x05}}};
         bounded_size<typed_array<std::uint8_t>, 1, 5> decoded;
-        auto                                          dec = make_decoder<typed_array_codec>(input);
+        auto                                          dec = make_decoder<codec::typed_array>(input);
 
         REQUIRE(dec(decoded));
         CHECK_EQ(decoded.value().values(), (std::vector<std::uint8_t>{1, 2, 3, 4, 5}));
@@ -103,7 +103,7 @@ TEST_CASE("extension payloads consume unsized non-contiguous input once") {
     SUBCASE("bounded typed array views") {
         CountingUnsizedByteRange input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02},
                                         std::byte{0x03}, std::byte{0x04}, std::byte{0x05}}};
-        auto                     dec = make_decoder<typed_array_codec>(input);
+        auto                     dec = make_decoder<codec::typed_array>(input);
         using view_type              = typed_array_view_for<std::uint8_t, decltype(dec)>;
         bounded_size<view_type, 1, 5> decoded;
 
@@ -117,9 +117,9 @@ TEST_CASE("extension payloads consume unsized non-contiguous input once") {
         CountingUnsizedByteRange input{
             {std::byte{0xC1}, std::byte{0x44}, std::byte{0x03}, std::byte{0x11}, std::byte{0x22}, std::byte{0x33}}};
         std::vector<std::uint8_t> decoded;
-        auto                      dec = make_decoder<cbor::tags::ext::custom_codec_1::custom_codec_1>(input);
+        auto                      dec = make_decoder<codec::custom_1>(input);
 
-        REQUIRE(dec(cbor::tags::ext::custom_codec_1::as_custom_codec_1(static_tag<1>{}, decoded)));
+        REQUIRE(dec(cbor::tags::custom_1::as_ref(static_tag<1>{}, decoded)));
         CHECK_EQ(decoded, (std::vector<std::uint8_t>{0x11, 0x22, 0x33}));
         CHECK_EQ(input.increments, input.bytes.size());
         CHECK(dec.tell() == input.end());
@@ -130,7 +130,7 @@ TEST_CASE("extension payloads retain terminal incomplete behavior for unsized in
     SUBCASE("owned typed arrays") {
         CountingUnsizedByteRange  input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02}}};
         typed_array<std::uint8_t> decoded{0xAA};
-        auto                      dec = make_decoder<typed_array_codec>(input);
+        auto                      dec = make_decoder<codec::typed_array>(input);
 
         const auto result = dec(decoded);
 
@@ -143,7 +143,7 @@ TEST_CASE("extension payloads retain terminal incomplete behavior for unsized in
 
     SUBCASE("typed array views report incomplete from direct extension dispatch") {
         CountingUnsizedByteRange input{{std::byte{0xD8}, std::byte{0x40}, std::byte{0x45}, std::byte{0x01}, std::byte{0x02}}};
-        auto                     dec = make_decoder<typed_array_codec>(input);
+        auto                     dec = make_decoder<codec::typed_array>(input);
         using view_type              = typed_array_view_for<std::uint8_t, decltype(dec)>;
         view_type decoded;
         const auto [major, additional_info] = dec.read_initial_byte();
@@ -158,9 +158,9 @@ TEST_CASE("extension payloads retain terminal incomplete behavior for unsized in
     SUBCASE("owning custom_codec_1 values") {
         CountingUnsizedByteRange  input{{std::byte{0xC1}, std::byte{0x44}, std::byte{0x03}, std::byte{0x11}}};
         std::vector<std::uint8_t> decoded{0xAA};
-        auto                      dec = make_decoder<cbor::tags::ext::custom_codec_1::custom_codec_1>(input);
+        auto                      dec = make_decoder<codec::custom_1>(input);
 
-        const auto result = dec(cbor::tags::ext::custom_codec_1::as_custom_codec_1(static_tag<1>{}, decoded));
+        const auto result = dec(cbor::tags::custom_1::as_ref(static_tag<1>{}, decoded));
 
         REQUIRE_FALSE(result);
         CHECK_EQ(result.error(), status_code::incomplete);

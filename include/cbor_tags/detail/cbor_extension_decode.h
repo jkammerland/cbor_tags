@@ -17,7 +17,7 @@ template <typename Decoder> [[nodiscard]] constexpr bool decoder_at_end(const De
 }
 
 template <typename Decoder>
-[[nodiscard]] constexpr status_code read_extension_initial_byte(Decoder &dec, major_type &major, std::byte &additional_info) {
+[[nodiscard]] constexpr status_code read_initial_byte(Decoder &dec, major_type &major, std::byte &additional_info) {
     if (decoder_at_end(dec)) {
         return status_code::incomplete;
     }
@@ -159,7 +159,7 @@ template <typename Decoder, typename Fn>
 
     major_type payload_major{};
     std::byte  payload_info{};
-    auto       status = read_extension_initial_byte(dec, payload_major, payload_info);
+    auto       status = detail::read_initial_byte(dec, payload_major, payload_info);
     if (status != status_code::success) {
         return status;
     }

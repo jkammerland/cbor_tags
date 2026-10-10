@@ -1,5 +1,6 @@
 #include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/extensions/smart_ptr.h"
+#include "cbor_tags/codec/shared_ptr.h"
+#include "cbor_tags/codec/unique_ptr.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -14,11 +15,11 @@ struct record {
 
 int main() {
     using namespace cbor::tags;
-    using namespace cbor::tags::ext::smart_ptr;
+    using namespace cbor::tags::smart_ptr;
 
     std::vector<std::byte> bytes;
     encoder<std::vector<std::byte>, Options<default_expected>, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder,
-            cbor_variant_encoder, shared_ptr_codec>
+            cbor_variant_encoder, codec::shared_ptr>
         enc{bytes};
 
     auto value = std::make_shared<record>();

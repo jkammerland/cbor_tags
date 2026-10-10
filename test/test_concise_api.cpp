@@ -1,8 +1,8 @@
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/codec/typed_array.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
-#include <cbor_tags/extensions/rfc8746_typed_arrays.h>
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <fmt/format.h>
@@ -35,8 +35,8 @@ struct value {
     int number{};
 };
 
-template <typename Self> struct value_codec : ct::codec_mixin_base<Self> {
-    using base = ct::codec_mixin_base<Self>;
+template <typename Self> struct value_codec : ct::codec::base<Self> {
+    using base = ct::codec::base<Self>;
     using base::decode;
     using base::encode;
 
@@ -91,7 +91,7 @@ TEST_CASE("CDDL traits describe custom wire representations") {
     CHECK(schema<ct::bounded_size<byte_array, 1, 3>>() == "root = #6.1001(bstr .size (2..6))");
     CHECK(schema<text_array>() == "root = #6.41([* tstr])");
     CHECK(schema<matrix>() == "root = #6.1040([[2*2 uint], [* tstr]])");
-    CHECK(schema<ct::ext::rfc8746::typed_array<std::int32_t>>() == "root = #6.78(bstr)");
+    CHECK(schema<ct::rfc8746::typed_array<std::int32_t>>() == "root = #6.78(bstr)");
 }
 
 TEST_CASE("CDDL schema supports defaults and explicit options") {
