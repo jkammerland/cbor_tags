@@ -3,6 +3,7 @@
 Read the numbered programs in order. Each is a standalone C++20 program, with
 its CDDL immediately above `main()` and short comments separating the steps.
 Examples 01 and 03 group related basics; later files introduce one feature each.
+Examples 19–22 form an experimental range, view and segment sequence.
 
 ## Learning order
 
@@ -26,6 +27,10 @@ Examples 01 and 03 group related basics; later files introduce one feature each.
 | [16_unique_pointer.cpp](16_unique_pointer.cpp) | Opt into unique pointers | A pointee encodes as its value; an empty pointer encodes null. |
 | [17_custom_codec.cpp](17_custom_codec.cpp) | Write an application codec | An explicit codec represents Temperature as one integer rather than an aggregate array. |
 | [18_cddl_schema.cpp](18_cddl_schema.cpp) | Generate a schema | Generate and print the same record schema introduced in example 04. |
+| [19_experimental_ranges.cpp](19_experimental_ranges.cpp) | Encode a filtered range | Avoid an intermediate container while still writing CBOR bytes. |
+| [20_experimental_byte_view.cpp](20_experimental_byte_view.cpp) | Borrow a decoded byte payload | A decoded span points into the encoded input rather than copying its payload. |
+| [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
+| [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
 
 ## What to expect
 
@@ -48,12 +53,51 @@ describe a sequence of items; brackets describe one array. CDDL describes array
 contents without choosing definite or indefinite encoding. Example 11 selects
 the indefinite encoding in C++.
 
+## Experimental ranges, views and segments
+
+> [!WARNING]
+> Examples 19–22 are experimental. Range, raw-view and segment APIs and borrowing
+> behavior may change. See [the detailed API guide](../doc/experimental_ranges.md).
+
+Use a **range wrapper** when a filter, transform or generated range would otherwise
+need an intermediate container. Example 19 encodes its filtered values directly;
+it still writes their CBOR representation into the output buffer. An unsized
+filtered range emits an indefinite array, consumed normally by the receiver.
+
+Use a **borrowed decode view** when a contiguous encoded input buffer already
+exists and copying a large definite text or byte-string payload would be wasteful.
+Example 20 checks that its decoded span points into that buffer. Encoding a span
+into an ordinary vector still copies its bytes. Borrowed payload views cannot
+combine indefinite string chunks into one contiguous view.
+
+Use **segments** when a consumer can accept several byte spans in order, such as
+a scatter/gather writer, and a large payload already exists elsewhere. Example 21
+has this layout:
+
+```text
+owned text header -> view into original text -> owned byte header -> view into original bytes
+```
+
+The list describes one ordered CBOR stream, not a new wire format. Small headers
+are stored in the segment container; contiguous lvalue payloads are borrowed.
+Keep those originals alive and unchanged until writing finishes. A consumer can
+write each `segment.bytes()` in order. `flatten_segments` creates a contiguous
+copy and removes the payload-copy benefit; use an ordinary buffer when contiguous
+output is what the consumer needs.
+
+Use a **raw encoded view** when an existing CBOR item should pass through a
+relay without converting its elements into application objects. Example 22
+locates the array as a borrowed view and passes its existing header and payload
+to `borrow_segments`; both refer to the original encoded input. Its final owning
+decode is a correctness check, not part of the copy-free forwarding operation.
+
 ## Build and run
 
 Use a compatible C++20 compiler, CMake 3.23 or newer, and Ninja. The existing
 CMake dependency setup supplies fmt and nameof. No OpenSSL dependency is needed.
 The first fourteen examples use core APIs; examples 15–17 explicitly install
-codec mixins, and example 18 includes the CDDL extension.
+codec mixins, and example 18 includes the CDDL extension. Examples 19–22 reuse
+those basics to demonstrate the experimental APIs without extra dependencies.
 
 ```bash
 cmake -S . -B build/examples -G Ninja \
