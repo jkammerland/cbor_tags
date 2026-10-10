@@ -2,9 +2,10 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_traversal.h"
 
-#include <concepts>
 #include <cstddef>
-#include <type_traits>
+#include <iomanip>
+#include <iostream>
+#include <string>
 #include <vector>
 
 using namespace cbor::tags;
@@ -25,25 +26,36 @@ int main() {
         return 1;
     }
 
-    // Count array headers only on entry, not on the matching leave event.
-    std::size_t array_count = 0;
-    auto count_arrays = [&array_count](const auto &value, const auto &context) {
-        using value_type = std::remove_cvref_t<decltype(value)>;
-        if constexpr (std::same_as<value_type, as_array_any>) {
-            if (context.kind == walk_event_kind::enter) {
-                ++array_count;
-            }
+    // Print value bytes at their nesting depth, with blank lines between completed groups.
+    bool separate_group = false;
+    auto print_bytes = [&separate_group](const auto &, const auto &context) {
+        if (context.kind == walk_event_kind::leave) {
+            separate_group = true;
+            return;
+        }
+        if (context.kind != walk_event_kind::value) {
+            return;
+        }
+
+        if (separate_group) {
+            std::cout << '\n';
+            separate_group = false;
+        }
+
+        for (auto byte : context.source) {
+            std::cout << std::string(context.depth * 2, ' ') << std::hex << std::setfill('0')
+                      << std::setw(2) << std::to_integer<unsigned>(byte) << '\n';
         }
     };
 
     // Walk the item with the named callback.
     auto decoder = make_decoder(buffer);
-    if (!walk_item(decoder, count_arrays)) {
+    if (!walk_item(decoder, print_bytes)) {
         return 1;
     }
 
-    // Check that all three arrays were visited and the item was consumed.
-    if (array_count != 3 || decoder.tell() != buffer.end()) {
+    // Check that the complete item was consumed.
+    if (decoder.tell() != buffer.end()) {
         return 2;
     }
     return 0;

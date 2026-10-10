@@ -9,3 +9,10 @@ foreach(EXAMPLE_SOURCE IN LISTS EXAMPLE_SOURCES)
   add_test(NAME "example_${EXAMPLE_NAME}" COMMAND $<TARGET_FILE:${EXAMPLE_TARGET}>)
   set_tests_properties("example_${EXAMPLE_NAME}" PROPERTIES LABELS "examples")
 endforeach()
+
+add_test(
+  NAME example_visitor_wire_output
+  COMMAND "${CMAKE_COMMAND}"
+    "-DEXAMPLE_EXECUTABLE=$<TARGET_FILE:cbor_tags_example_14_item_visitor>"
+    -P "${PROJECT_SOURCE_DIR}/test/visitor_example_wire_output.cmake")
+set_tests_properties(example_visitor_wire_output PROPERTIES LABELS "examples;cbor-wire")
