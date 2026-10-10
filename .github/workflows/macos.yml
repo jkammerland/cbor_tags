@@ -27,13 +27,15 @@ jobs:
               cxx: "clang++",
               xcode_version: "^26.0.0"
             }
-          - {
-              name: "macOS AppleClang 16",
-              runner: "macos-15",
-              cc: "clang",
-              cxx: "clang++",
+        # Retain one C++20 job for the older Apple toolchain.
+        include:
+          - cxx_standard: 20
+            config:
+              name: "macOS AppleClang 16"
+              runner: "macos-15"
+              cc: "clang"
+              cxx: "clang++"
               xcode_version: "^16.2.0"
-            }
 
     steps:
     - uses: actions/checkout@v6.0.2
@@ -135,13 +137,6 @@ jobs:
               cxx: "clang++",
               xcode_version: "^26.0.0"
             }
-          - {
-              name: "macOS AppleClang 16",
-              runner: "macos-15",
-              cc: "clang",
-              cxx: "clang++",
-              xcode_version: "^16.2.0"
-            }
         backend:
           - {
               name: "Boost.PFR names",
@@ -216,7 +211,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-26]
+        runner: [macos-26]
         cxx_standard: [20, 23]
     steps:
     - uses: actions/checkout@v6.0.2
