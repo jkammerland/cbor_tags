@@ -31,6 +31,15 @@ Claims use the integer labels in [RFC 8392 §3.1](https://www.rfc-editor.org/rfc
 Encoding claims alone does not sign them. The application validates issuer,
 audience and time constraints after signature verification.
 
+`claims_set::audience` is `std::optional<cwt::audience_claim>`; the variant
+holds one string or a vector of strings. Empty arrays are accepted.
+
+```cpp
+claims.audience = cwt::audience_claim{std::string{"coap://light.example.com"}};
+claims.audience = cwt::audience_claim{
+    std::vector<std::string>{"coap://light.example.com", "coap://sensor.example.com"}};
+```
+
 `encode_to_bytes` installs the CWT codec. With an encoder or decoder of your own,
 select it explicitly with `make_encoder<codec::cwt>` or
 `make_decoder<codec::cwt>`. Omitting it for CWT models is a compile-time error.
@@ -48,7 +57,9 @@ select it explicitly with `make_encoder<codec::cwt>` or
 
 Views use `std::string_view` and `std::span<const std::byte>` for text and byte
 payloads. Scalars are copied; vectors hold descriptors such as signatures and
-critical labels and may allocate. `as_view(owning_lvalue)` projects an existing
+critical labels and may allocate. `claims_view::audience` is an optional
+`audience_view`: one `std::string_view` or a vector of them. `as_view` preserves
+that shape and borrows each audience string. `as_view(owning_lvalue)` projects an existing
 owning model; owning temporaries are rejected. Keep the owner alive and its
 referenced storage stable until all views are finished.
 

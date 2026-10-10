@@ -13,8 +13,10 @@
 
 namespace cbor::tags::cwt {
 
-using byte_string  = std::vector<std::byte>;
-using numeric_date = std::variant<std::int64_t, double>;
+using byte_string    = std::vector<std::byte>;
+using numeric_date   = std::variant<std::int64_t, double>;
+using audience_claim = std::variant<std::string, std::vector<std::string>>;
+using audience_view  = std::variant<std::string_view, std::vector<std::string_view>>;
 
 inline constexpr std::uint64_t cwt_tag_value        = 61;
 inline constexpr std::uint64_t cose_sign1_tag_value = 18;
@@ -42,9 +44,10 @@ namespace detail {
 // Storage selection is internal; the public model templates are plain aggregates.
 // Borrowed text and bytes refer to the input buffer or projected owner. Vectors
 // own only their descriptors, so views may still allocate metadata.
-template <bool Borrowed> using text_storage  = std::conditional_t<Borrowed, std::string_view, std::string>;
-template <bool Borrowed> using byte_storage  = std::conditional_t<Borrowed, byte_view, byte_string>;
-template <bool Borrowed> using label_storage = std::variant<integer, text_storage<Borrowed>>;
+template <bool Borrowed> using text_storage     = std::conditional_t<Borrowed, std::string_view, std::string>;
+template <bool Borrowed> using byte_storage     = std::conditional_t<Borrowed, byte_view, byte_string>;
+template <bool Borrowed> using audience_storage = std::conditional_t<Borrowed, audience_view, audience_claim>;
+template <bool Borrowed> using label_storage    = std::variant<integer, text_storage<Borrowed>>;
 
 } // namespace detail
 
@@ -57,13 +60,13 @@ template <bool Borrowed> struct basic_header_map {
 };
 
 template <bool Borrowed> struct basic_claims_set {
-    std::optional<detail::text_storage<Borrowed>> issuer;
-    std::optional<detail::text_storage<Borrowed>> subject;
-    std::optional<detail::text_storage<Borrowed>> audience;
-    std::optional<numeric_date>                   expiration;
-    std::optional<numeric_date>                   not_before;
-    std::optional<numeric_date>                   issued_at;
-    std::optional<detail::byte_storage<Borrowed>> cwt_id;
+    std::optional<detail::text_storage<Borrowed>>     issuer;
+    std::optional<detail::text_storage<Borrowed>>     subject;
+    std::optional<detail::audience_storage<Borrowed>> audience;
+    std::optional<numeric_date>                       expiration;
+    std::optional<numeric_date>                       not_before;
+    std::optional<numeric_date>                       issued_at;
+    std::optional<detail::byte_storage<Borrowed>>     cwt_id;
 };
 
 template <bool Borrowed> struct basic_cose_signature {
@@ -158,6 +161,23 @@ template <typename T, typename Fn> auto view_optional(const std::optional<T> &va
     using V = decltype(project(*value));
     return value ? std::optional<V>{project(*value)} : std::optional<V>{};
 }
+
+inline audience_view view_audience(const audience_claim &audience) {
+    return std::visit(
+        [](const auto &item) -> audience_view {
+            if constexpr (std::same_as<std::remove_cvref_t<decltype(item)>, std::string>) {
+                return std::string_view{item};
+            } else {
+                std::vector<std::string_view> views;
+                views.reserve(item.size());
+                for (const auto &text : item) {
+                    views.emplace_back(text);
+                }
+                return views;
+            }
+        },
+        audience);
+}
 } // namespace detail
 
 [[nodiscard]] inline header_map_view as_view(const header_map &value) {
@@ -183,7 +203,7 @@ template <typename T, typename Fn> auto view_optional(const std::optional<T> &va
     const auto text = [](const auto &s) { return std::string_view{s}; };
     return {.issuer     = detail::view_optional(value.issuer, text),
             .subject    = detail::view_optional(value.subject, text),
-            .audience   = detail::view_optional(value.audience, text),
+            .audience   = detail::view_optional(value.audience, detail::view_audience),
             .expiration = value.expiration,
             .not_before = value.not_before,
             .issued_at  = value.issued_at,

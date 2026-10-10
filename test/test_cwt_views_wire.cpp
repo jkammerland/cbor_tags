@@ -161,4 +161,57 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK(incomplete.error() == status_code::incomplete);
         CHECK(view.issuer == "idp");
     }
+    TEST_CASE("cwt audience views borrow array items with exact framing") {
+        const auto  bytes = to_bytes("bf039f61616162ffff09");
+        claims_view view;
+        auto        dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(bytes);
+        const auto  result = dec(view);
+        REQUIRE(result);
+        REQUIRE(view.audience);
+        const auto &audiences = std::get<std::vector<std::string_view>>(*view.audience);
+        REQUIRE(audiences.size() == 2);
+        CHECK(audiences[0] == "a");
+        CHECK(audiences[1] == "b");
+        CHECK(audiences[0].data() == reinterpret_cast<const char *>(bytes.data() + 4));
+        CHECK(audiences[1].data() == reinterpret_cast<const char *>(bytes.data() + 6));
+        CHECK(to_hex(result->bytes()) == "bf039f61616162ffff");
+        const auto encoded = encode_to_bytes(view);
+        REQUIRE(encoded);
+        CHECK(to_hex(*encoded) == "a1038261616162");
+        int following{};
+        REQUIRE(dec(following));
+        CHECK(following == 9);
+        CHECK(dec.tell() == bytes.end());
+
+        for (const auto *hex : {"a10380", "a1039fff"}) {
+            const auto empty = to_bytes(hex);
+            REQUIRE(make_decoder<codec::cwt>(empty)(view));
+            REQUIRE(view.audience);
+            CHECK(std::get<std::vector<std::string_view>>(*view.audience).empty());
+        }
+    }
+
+    TEST_CASE("cwt audience views preserve their destination on malformed input") {
+        for (const auto *hex : {"a103826576616c696401", "a1039f6161", "a103817f61616162ff"}) {
+            CAPTURE(hex);
+            const auto  bytes = to_bytes(hex);
+            claims_view view{.issuer     = "retained",
+                             .subject    = std::nullopt,
+                             .audience   = std::string_view{"unchanged"},
+                             .expiration = std::nullopt,
+                             .not_before = std::nullopt,
+                             .issued_at  = std::nullopt,
+                             .cwt_id     = std::nullopt};
+            const auto  result = make_decoder<codec::cwt>(bytes)(view);
+            REQUIRE_FALSE(result);
+            CHECK(view.issuer == "retained");
+            REQUIRE(view.audience);
+            CHECK(*view.audience == audience_view{std::string_view{"unchanged"}});
+        }
+        const auto fragmented = to_bytes("a103817f61616162ff");
+        claims_set owned;
+        REQUIRE(make_decoder<codec::cwt>(fragmented)(owned));
+        REQUIRE(owned.audience);
+        CHECK(std::get<std::vector<std::string>>(*owned.audience) == std::vector<std::string>{"ab"});
+    }
 }

@@ -38,7 +38,8 @@ TEST_SUITE("roundtrip/cwt") {
         through_view<claims_view>(source, [&](const auto &decoded) {
             CHECK(decoded.issuer == source.issuer);
             CHECK(decoded.subject == source.subject);
-            CHECK(decoded.audience == source.audience);
+            REQUIRE(decoded.audience);
+            CHECK(std::get<0>(*decoded.audience) == std::get<0>(*source.audience));
             CHECK(decoded.expiration == source.expiration);
             CHECK(decoded.not_before == source.not_before);
             CHECK(decoded.issued_at == source.issued_at);
@@ -48,8 +49,43 @@ TEST_SUITE("roundtrip/cwt") {
         auto view = as_view(source);
         CHECK(view.issuer->data() == source.issuer->data());
         CHECK(view.subject->data() == source.subject->data());
-        CHECK(view.audience->data() == source.audience->data());
+        CHECK(std::get<0>(*view.audience).data() == std::get<0>(*source.audience).data());
         CHECK(view.cwt_id->data() == source.cwt_id->data());
+    }
+
+    TEST_CASE("cwt audience views preserve array shape and borrow each string") {
+        claims_set source;
+        source.audience       = std::vector<std::string>{"first", "second"};
+        const auto projection = as_view(source);
+        REQUIRE(projection.audience);
+        const auto &projected = std::get<std::vector<std::string_view>>(*projection.audience);
+        const auto &original  = std::get<std::vector<std::string>>(*source.audience);
+        REQUIRE(projected.size() == 2);
+        CHECK(projected[0].data() == original[0].data());
+        CHECK(projected[1].data() == original[1].data());
+        const auto bytes = encode_to_bytes(projection);
+        REQUIRE(bytes);
+        claims_view decoded;
+        REQUIRE(make_decoder<codec::cwt>(*bytes)(decoded));
+        REQUIRE(decoded.audience);
+        CHECK(std::get<std::vector<std::string_view>>(*decoded.audience) == projected);
+        const auto reencoded = encode_to_bytes(decoded);
+        REQUIRE(reencoded);
+        claims_set restored;
+        REQUIRE(make_decoder<codec::cwt>(*reencoded)(restored));
+        CHECK(restored.audience == source.audience);
+
+        source.audience  = std::vector<std::string>{};
+        const auto empty = as_view(source);
+        REQUIRE(empty.audience);
+        CHECK(std::get<std::vector<std::string_view>>(*empty.audience).empty());
+        const auto empty_bytes = encode_to_bytes(empty);
+        REQUIRE(empty_bytes);
+        REQUIRE(make_decoder<codec::cwt>(*empty_bytes)(decoded));
+        REQUIRE(decoded.audience);
+        CHECK(std::get<std::vector<std::string_view>>(*decoded.audience).empty());
+        source.audience.reset();
+        CHECK_FALSE(as_view(source).audience);
     }
 
     TEST_CASE("application data projects into cwt views") {
