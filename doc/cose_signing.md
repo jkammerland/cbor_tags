@@ -1,5 +1,7 @@
 # COSE signing and verification
 
+**Experimental:** COSE signing and verification APIs may change.
+
 Include `cbor_tags/cwt/cwt.h` for these backend-independent helpers.
 See [CWT and COSE models](cwt.md) for codec selection and payload lifetimes.
 

@@ -4,6 +4,7 @@ Read the numbered programs in order. Each is a standalone C++20 program, with
 its CDDL immediately above `main()` and short comments separating the steps.
 Examples 01 and 03 group related basics; later files introduce one feature each.
 Examples 19–22 form an experimental range, view and segment sequence.
+Example 23 introduces experimental CWT claim encoding and decoding.
 
 ## Learning order
 
@@ -31,6 +32,7 @@ Examples 19–22 form an experimental range, view and segment sequence.
 | [20_experimental_byte_view.cpp](20_experimental_byte_view.cpp) | Borrow a decoded byte payload | A decoded span points into the encoded input rather than copying its payload. |
 | [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
 | [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
+| [23_experimental_cwt_claims.cpp](23_experimental_cwt_claims.cpp) | Encode and decode CWT claims | Opt into registered integer claim labels; signing and application validation are separate steps. |
 
 ## CDDL
 
