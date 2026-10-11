@@ -5,13 +5,16 @@
 #include "cbor_tags/cwt/types.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cwt_codec.h"
+#include "cbor_tags/detail/cwt_countersignatures.h"
 #include "cbor_tags/detail/cwt_fields.h"
 
 namespace cbor::tags::codec {
 
-template <typename Self> struct cwt : base<Self> {
+template <typename Self> struct cwt : base<Self>, tags::cwt::detail::counter_codec<Self> {
     using base<Self>::encode;
     using base<Self>::decode;
+    using tags::cwt::detail::counter_codec<Self>::encode;
+    using tags::cwt::detail::counter_codec<Self>::decode;
 
     template <typename... Bindings> void encode(const tags::cwt::detail::field_map<Bindings...> &map) {
         tags::cwt::detail::encode_fields(static_cast<Self &>(*this), map);
