@@ -35,10 +35,10 @@ struct buffer_backend {
                 std::ranges::any_of(received, [&](auto bytes) { return bytes.data() == wanted.data() && bytes.size() == wanted.size(); }));
         }
         if (key.fail) {
-            return unexpected<status_code>{status_code::error};
+            return cbor::tags::unexpected<status_code>{status_code::error};
         }
         if (output.empty()) {
-            return unexpected<status_code>{status_code::size_limit_exceeded};
+            return cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded};
         }
         output.front() = std::byte{17};
         return 1U;
