@@ -48,6 +48,7 @@ through signing, token encoding, decoding and verification.
 | [31_experimental_cwt_type.cpp](31_experimental_cwt_type.cpp) | Describe the complete token | Protected `typ` distinguishes a COSE object from its payload content type. |
 | [32_experimental_cwt_header_claims.cpp](32_experimental_cwt_header_claims.cpp) | Carry claims in protected headers | Verify first, then compare replicated claims by value. |
 | [36_cwt_public_keys.cpp](36_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
+| [37_cwt_confirmation.cpp](37_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 
 ## CDDL
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cbor_tags/cwt/keys.h"
+#include "cbor_tags/cwt/confirmation.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cwt_codec.h"
 
@@ -152,6 +152,74 @@ template <typename Self> struct key_codec : codec::base<Self> {
             destination = std::move(key);
             return status_code::success;
         }
+    }
+
+    template <typename Key, bool B> void encode(const basic_confirmation<Key, B> &value) {
+        auto &enc = static_cast<Self &>(*this);
+        if (value.thumbprint && value.thumbprint->size() != 32)
+            throw tags::detail::encode_status_exception{status_code::error};
+        enc.encode(as_map{static_cast<std::uint64_t>(value.key.has_value() + value.kid.has_value() + value.thumbprint.has_value())});
+        if (value.key) {
+            enc.encode(1);
+            enc.encode(*value.key);
+        }
+        if (value.kid) {
+            enc.encode(3);
+            enc.encode(*value.kid);
+        }
+        if (value.thumbprint) {
+            enc.encode(5);
+            enc.encode(*value.thumbprint);
+        }
+    }
+
+    template <typename Key, bool B> status_code decode(basic_confirmation<Key, B> &value) {
+        auto      &dec = static_cast<Self &>(*this);
+        major_type major{};
+        std::byte  info{};
+        auto       status = tags::detail::read_initial_byte(dec, major, info);
+        return status == status_code::success ? decode(value, major, info) : status;
+    }
+
+    template <typename Key, bool B> status_code decode(basic_confirmation<Key, B> &destination, major_type major, std::byte info) {
+        auto                      &dec = static_cast<Self &>(*this);
+        basic_confirmation<Key, B> value;
+        bool                       encrypted = false;
+        seen_header_labels<>       seen;
+        auto                       status = decode_map_entries(dec, major, info, [&](major_type km, std::byte ki) {
+            auto label = decode_header_label(dec, km, ki);
+            if (!label)
+                return label.error();
+            seen.add(*label);
+            if (is_header_label(*label, 1)) {
+                Key  key;
+                auto s = dec.decode(key);
+                if (s == status_code::success)
+                    value.key = std::move(key);
+                return s;
+            }
+            if (is_header_label(*label, 3) || is_header_label(*label, 5)) {
+                byte_storage<B> bytes;
+                auto            s = dec.decode(bytes);
+                if (s == status_code::success) {
+                    if (is_header_label(*label, 3))
+                        value.kid = std::move(bytes);
+                    else
+                        value.thumbprint = std::move(bytes);
+                }
+                return s;
+            }
+            if (is_header_label(*label, 2))
+                encrypted = true;
+            typename Self::encoded_item_view ignored;
+            return dec.decode(ignored);
+        });
+        if (status != status_code::success)
+            return status;
+        if (seen.has_duplicates() || (encrypted && value.key) || (value.thumbprint && value.thumbprint->size() != 32))
+            return status_code::error;
+        destination = std::move(value);
+        return status_code::success;
     }
 };
 } // namespace cbor::tags::cwt::detail
