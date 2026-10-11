@@ -14,15 +14,6 @@ See standard specifications for more information:
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) (Concise Data Definition Language)
 - CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
 - CBOR Typed Arrays [RFC8746](https://datatracker.ietf.org/doc/html/rfc8746)
-- **Experimental:** CWT [RFC8392](https://www.rfc-editor.org/rfc/rfc8392.html) — [claims and codec guide](doc/cwt.md), [compiled example](examples/23_experimental_cwt_claims.cpp).
-- **Experimental:** COSE [RFC9052](https://www.rfc-editor.org/rfc/rfc9052.html) — [Sign/Sign1 models and signing helpers](doc/cose_signing.md).
-- **Experimental:** COSE ESP256 [RFC9864](https://www.rfc-editor.org/rfc/rfc9864.html) — [optional OpenSSL backend](doc/cwt_openssl.md).
-
-- **Experimental:** COSE countersignatures [RFC9338](https://www.rfc-editor.org/rfc/rfc9338.html) — [signing, verification and supported targets](doc/cwt_countersignatures.md).
-- **Experimental:** COSE header extensions [RFC9596](https://www.rfc-editor.org/rfc/rfc9596.html) / [RFC9597](https://www.rfc-editor.org/rfc/rfc9597.html) — [typed headers and claims](doc/cwt_headers.md).
-- **Experimental:** CWT confirmation [RFC8747](https://www.rfc-editor.org/rfc/rfc8747.html) and public-key thumbprints [RFC9679](https://www.rfc-editor.org/rfc/rfc9679.html) — [key models and providers](doc/cwt_keys.md).
-
-See [CWT and COSE standards coverage](doc/cwt_standards.md) for implemented capabilities and follow-ups.
 
 See [CBOR Conformance](doc/conformance.md) for the library's interoperability
 profile, intentional permissive behavior, and validation boundaries.
@@ -50,6 +41,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
   - [Release Artifacts](#release-artifacts)
 - [💡 CMake Integration](#-cmake-integration)
 - [Project Status](#project-status)
+- [CWT and COSE extensions](#cwt-and-cose-extensions)
 - [📚 Documentation](#-documentation)
   - [IANA Tag Registry](#iana-tag-registry)
 - [ Testing Performance and Benchmarks](#testing-performance-and-benchmarks)
@@ -1152,6 +1144,11 @@ remain experimental; their current contracts are documented in
 [Experimental Range And Segment APIs](doc/experimental_ranges.md). Planned work
 is tracked in [GitHub issues](https://github.com/jkammerland/cbor_tags/issues)
 instead of a static README checklist.
+
+## CWT and COSE extensions
+
+See the [CWT and COSE guide](doc/experimental_cwt.md) for experimental token and
+signature APIs, supported standards, and examples.
 
 ## 📚 Documentation
 
