@@ -16,11 +16,11 @@ template <typename Decoder> auto decode(Decoder &decoder, identity &&destination
         return result;
     }
     if (!fields.subject || !fields.expiration) {
-        return unexpected<status_code>{status_code::error};
+        return cbor::tags::unexpected<status_code>{status_code::error};
     }
     const auto *expiry = std::get_if<std::int64_t>(&*fields.expiration);
     if (!expiry) {
-        return unexpected<status_code>{status_code::error};
+        return cbor::tags::unexpected<status_code>{status_code::error};
     }
     destination = {.user = *fields.subject, .deadline = *expiry};
     return result;
