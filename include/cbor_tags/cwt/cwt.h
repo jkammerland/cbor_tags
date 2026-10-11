@@ -156,7 +156,8 @@ validate_sign_algorithm(const header_map &body_protected, const basic_header_map
     if (body_unprotected.alg || !body_unprotected.crit.empty() || signature_unprotected.alg || !signature_unprotected.crit.empty()) {
         return unexpected<status_code>{status_code::error};
     }
-    if (body_protected.alg && *body_protected.alg != expected) {
+    // A COSE_Sign algorithm belongs to each signer, never the shared body.
+    if (body_protected.alg) {
         return unexpected<status_code>{status_code::error};
     }
     if (signature_protected.alg && *signature_protected.alg != expected) {

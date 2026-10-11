@@ -196,6 +196,23 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message, std::size_t{1}));
     }
 
+    TEST_CASE("cose sign rejects a matching body algorithm for signing and verification") {
+        const std::vector<std::byte> payload{std::byte{0x31}};
+        const header_map body{.alg = algorithm::es256};
+
+        CHECK_FALSE(sign<toy_es256_backend>(nullptr, body, {}, payload));
+
+        auto message = sign<toy_es256_backend>(nullptr, {}, {}, payload);
+        REQUIRE(message);
+        REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message));
+
+        auto encoded = encode_protected_header(body);
+        REQUIRE(encoded);
+        message->protected_header = *encoded;
+        CHECK_FALSE(verify_sign<toy_es256_backend>(nullptr, *message));
+        CHECK_FALSE(add_signature<toy_es256_backend>(nullptr, *message, {}, {}));
+    }
+
     TEST_CASE("COSE Sign rejects conflicting or unprotected algorithm headers") {
         const std::vector<std::byte> payload{std::byte{0x01}};
 
