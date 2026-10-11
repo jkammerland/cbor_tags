@@ -10,7 +10,7 @@ TEST_SUITE("roundtrip/cwt") {
             .expiration = std::int64_t{1444064944},
             .not_before = std::int64_t{1443944944},
             .issued_at  = std::int64_t{1443944944},
-            .cwt_id     = byte_string{std::byte{0x0b}, std::byte{0x71}},
+            .cwt_id     = std::vector<std::byte>{std::byte{0x0b}, std::byte{0x71}},
         };
 
         std::vector<std::byte> encoded;
@@ -58,9 +58,9 @@ TEST_SUITE("roundtrip/cwt") {
             REQUIRE(signature_bytes);
 
             cose_signature decoded_signature{
-                .protected_header = byte_string{std::byte{0x10}},
-                .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x11}}, .crit = {}},
-                .signature        = byte_string{std::byte{0x12}},
+                .protected_header = std::vector<std::byte>{std::byte{0x10}},
+                .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x11}}, .crit = {}},
+                .signature        = std::vector<std::byte>{std::byte{0x12}},
             };
             REQUIRE(make_decoder<codec::cwt>(*signature_bytes)(decoded_signature));
             CHECK(decoded_signature.protected_header.empty());
@@ -70,20 +70,20 @@ TEST_SUITE("roundtrip/cwt") {
             const cose_sign source{
                 .protected_header = {},
                 .unprotected      = {},
-                .payload          = byte_string{std::byte{0x21}},
+                .payload          = std::vector<std::byte>{std::byte{0x21}},
                 .signatures       = {signature_source},
             };
             auto sign_bytes = encode_to_bytes(source);
             REQUIRE(sign_bytes);
 
             cose_sign decoded_sign{
-                .protected_header = byte_string{std::byte{0x22}},
-                .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x23}}, .crit = {}},
-                .payload          = byte_string{std::byte{0x24}},
+                .protected_header = std::vector<std::byte>{std::byte{0x22}},
+                .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x23}}, .crit = {}},
+                .payload          = std::vector<std::byte>{std::byte{0x24}},
                 .signatures       = {cose_signature{
-                    .protected_header = byte_string{std::byte{0x25}},
-                    .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x26}}, .crit = {}},
-                    .signature        = byte_string{std::byte{0x27}},
+                    .protected_header = std::vector<std::byte>{std::byte{0x25}},
+                    .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x26}}, .crit = {}},
+                    .signature        = std::vector<std::byte>{std::byte{0x27}},
                 }},
             };
             REQUIRE(make_decoder<codec::cwt>(*sign_bytes)(decoded_sign));
@@ -97,12 +97,12 @@ TEST_SUITE("roundtrip/cwt") {
         }
 
         SUBCASE("cose_sign1 clears authentication bytes absent from the new message") {
-            const byte_string payload{std::byte{0x31}};
-            cose_sign1        decoded{.protected_header = byte_string{std::byte{0x30}},
-                                      .unprotected      = {},
-                                      .payload          = payload,
-                                      .signature        = byte_string{std::byte{0x01}}};
-            decoded.unprotected.kid = byte_string{std::byte{0x32}};
+            const std::vector<std::byte> payload{std::byte{0x31}};
+            cose_sign1                   decoded{.protected_header = std::vector<std::byte>{std::byte{0x30}},
+                                                 .unprotected      = {},
+                                                 .payload          = payload,
+                                                 .signature        = std::vector<std::byte>{std::byte{0x01}}};
+            decoded.unprotected.kid = std::vector<std::byte>{std::byte{0x32}};
 
             const cose_sign1 source{
                 .protected_header = {},
@@ -123,20 +123,20 @@ TEST_SUITE("roundtrip/cwt") {
         SUBCASE("sig_structure switches cleanly between four and five element forms") {
             const sig_structure five{
                 .context        = "Signature",
-                .body_protected = byte_string{std::byte{0x61}},
-                .sign_protected = byte_string{std::byte{0x62}},
-                .external_aad   = byte_string{std::byte{0x63}},
-                .payload        = byte_string{std::byte{0x64}},
+                .body_protected = std::vector<std::byte>{std::byte{0x61}},
+                .sign_protected = std::vector<std::byte>{std::byte{0x62}},
+                .external_aad   = std::vector<std::byte>{std::byte{0x63}},
+                .payload        = std::vector<std::byte>{std::byte{0x64}},
             };
             auto five_bytes = encode_to_bytes(five);
             REQUIRE(five_bytes);
 
             sig_structure decoded{
                 .context        = "old",
-                .body_protected = byte_string{std::byte{0x71}},
-                .sign_protected = byte_string{std::byte{0x72}},
-                .external_aad   = byte_string{std::byte{0x73}},
-                .payload        = byte_string{std::byte{0x74}},
+                .body_protected = std::vector<std::byte>{std::byte{0x71}},
+                .sign_protected = std::vector<std::byte>{std::byte{0x72}},
+                .external_aad   = std::vector<std::byte>{std::byte{0x73}},
+                .payload        = std::vector<std::byte>{std::byte{0x74}},
             };
             REQUIRE(make_decoder<codec::cwt>(*five_bytes)(decoded));
             CHECK_EQ(decoded.context, five.context);
@@ -147,10 +147,10 @@ TEST_SUITE("roundtrip/cwt") {
 
             const sig_structure four{
                 .context        = "Signature1",
-                .body_protected = byte_string{std::byte{0x81}},
+                .body_protected = std::vector<std::byte>{std::byte{0x81}},
                 .sign_protected = std::nullopt,
-                .external_aad   = byte_string{std::byte{0x82}},
-                .payload        = byte_string{std::byte{0x83}},
+                .external_aad   = std::vector<std::byte>{std::byte{0x82}},
+                .payload        = std::vector<std::byte>{std::byte{0x83}},
             };
             auto four_bytes = encode_to_bytes(four);
             REQUIRE(four_bytes);
@@ -167,7 +167,7 @@ TEST_SUITE("roundtrip/cwt") {
         cose_sign empty{
             .protected_header = {},
             .unprotected      = {},
-            .payload          = byte_string{std::byte{0x01}},
+            .payload          = std::vector<std::byte>{std::byte{0x01}},
             .signatures       = {},
         };
         std::vector<std::byte> encoded;
@@ -180,7 +180,7 @@ TEST_SUITE("roundtrip/cwt") {
     TEST_CASE("COSE protected headers roundtrip supported critical labels") {
         header_map input{
             .alg  = algorithm::es256,
-            .kid  = byte_string{std::byte{0x01}},
+            .kid  = std::vector<std::byte>{std::byte{0x01}},
             .crit = {integer{1}, integer{4}},
         };
 
@@ -199,9 +199,9 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(sign1_protected);
         cose_sign1 sign1_message{
             .protected_header = *sign1_protected,
-            .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}}, .crit = {}},
-            .payload          = byte_string{std::byte{0x01}, std::byte{0x02}},
-            .signature        = byte_string(64, std::byte{0xA5}),
+            .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}}, .crit = {}},
+            .payload          = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}},
+            .signature        = std::vector<std::byte>(64, std::byte{0xA5}),
         };
 
         std::vector<std::byte> encoded_sign1;
@@ -219,12 +219,12 @@ TEST_SUITE("roundtrip/cwt") {
         CHECK_EQ(decoded_sign1.signature, sign1_message.signature);
 
         const auto signature_protected =
-            encode_protected_header(header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x02}}, .crit = {}});
+            encode_protected_header(header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x02}}, .crit = {}});
         REQUIRE(signature_protected);
         cose_signature signature{
             .protected_header = *signature_protected,
             .unprotected      = {},
-            .signature        = byte_string(64, std::byte{0x5A}),
+            .signature        = std::vector<std::byte>(64, std::byte{0x5A}),
         };
 
         std::vector<std::byte> encoded_signature;
@@ -241,7 +241,7 @@ TEST_SUITE("roundtrip/cwt") {
         cose_sign sign_message{
             .protected_header = *sign1_protected,
             .unprotected      = {},
-            .payload          = byte_string{std::byte{0x03}, std::byte{0x04}},
+            .payload          = std::vector<std::byte>{std::byte{0x03}, std::byte{0x04}},
             .signatures       = {signature},
         };
 

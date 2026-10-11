@@ -1083,8 +1083,8 @@ template <typename Segments, typename T> [[nodiscard]] inline Segments encode_pa
     return payload;
 }
 
-template <typename T> [[nodiscard]] inline cbor_segments encode_payload_segments(const T &value) {
-    return encode_payload_segments_as<cbor_segments>(value);
+template <typename T> [[nodiscard]] inline byte_segments encode_payload_segments(const T &value) {
+    return encode_payload_segments_as<byte_segments>(value);
 }
 
 template <typename Segments, typename T> [[nodiscard]] inline Segments encode_payload_borrowed_segments_as(const T &value) {
@@ -1094,8 +1094,8 @@ template <typename Segments, typename T> [[nodiscard]] inline Segments encode_pa
     return payload;
 }
 
-template <typename T> [[nodiscard]] inline cbor_segments encode_payload_borrowed_segments(const T &value) {
-    return encode_payload_borrowed_segments_as<cbor_segments>(value);
+template <typename T> [[nodiscard]] inline byte_segments encode_payload_borrowed_segments(const T &value) {
+    return encode_payload_borrowed_segments_as<byte_segments>(value);
 }
 
 template <typename T> [[nodiscard]] inline std::vector<std::byte> encode_payload(const T &value) {

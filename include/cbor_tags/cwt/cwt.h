@@ -5,19 +5,19 @@
 
 namespace cbor::tags::cwt {
 
-template <typename T> [[nodiscard]] inline expected<byte_string, status_code> encode_to_bytes(T &&value) {
-    byte_string output;
-    auto        enc    = make_encoder<codec::cwt>(output);
-    auto        result = enc(std::forward<T>(value));
+template <typename T> [[nodiscard]] inline expected<std::vector<std::byte>, status_code> encode_to_bytes(T &&value) {
+    std::vector<std::byte> output;
+    auto                   enc    = make_encoder<codec::cwt>(output);
+    auto                   result = enc(std::forward<T>(value));
     if (!result) {
         return unexpected<status_code>{result.error()};
     }
     return output;
 }
 
-[[nodiscard]] inline expected<byte_string, status_code> encode_protected_header(const header_map &header) {
+[[nodiscard]] inline expected<std::vector<std::byte>, status_code> encode_protected_header(const header_map &header) {
     if (header.empty()) {
-        return byte_string{};
+        return std::vector<std::byte>{};
     }
     return encode_to_bytes(header);
 }
@@ -39,7 +39,9 @@ template <typename Bytes> [[nodiscard]] inline expected<header_map, status_code>
     return header;
 }
 
-[[nodiscard]] inline byte_string copy_bytes(std::span<const std::byte> bytes) { return byte_string{bytes.begin(), bytes.end()}; }
+[[nodiscard]] inline std::vector<std::byte> copy_bytes(std::span<const std::byte> bytes) {
+    return std::vector<std::byte>{bytes.begin(), bytes.end()};
+}
 
 [[nodiscard]] inline expected<sig_structure, status_code>
 make_sign1_sig_structure(const cose_sign1 &message, std::span<const std::byte> external_aad = {},
@@ -74,7 +76,7 @@ make_sign_sig_structure(const cose_sign &message, const cose_signature &signatur
 }
 
 template <bool Borrowed>
-[[nodiscard]] inline expected<byte_string, status_code>
+[[nodiscard]] inline expected<std::vector<std::byte>, status_code>
 make_sign1_tbs(const basic_cose_sign1<Borrowed> &message, std::span<const std::byte> external_aad = {},
                std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     if (!message.payload && !detached_payload) {
@@ -84,12 +86,12 @@ make_sign1_tbs(const basic_cose_sign1<Borrowed> &message, std::span<const std::b
                                        .body_protected = message.protected_header,
                                        .sign_protected = std::nullopt,
                                        .external_aad   = external_aad,
-                                       .payload        = message.payload ? byte_view{*message.payload} : *detached_payload};
+                                       .payload = message.payload ? std::span<const std::byte>{*message.payload} : *detached_payload};
     return encode_to_bytes(structure);
 }
 
 template <bool Borrowed, bool SignatureBorrowed>
-[[nodiscard]] inline expected<byte_string, status_code>
+[[nodiscard]] inline expected<std::vector<std::byte>, status_code>
 make_sign_tbs(const basic_cose_sign<Borrowed> &message, const basic_cose_signature<SignatureBorrowed> &signature,
               std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     if (!message.payload && !detached_payload) {
@@ -97,9 +99,9 @@ make_sign_tbs(const basic_cose_sign<Borrowed> &message, const basic_cose_signatu
     }
     const sig_structure_view structure{.context        = "Signature",
                                        .body_protected = message.protected_header,
-                                       .sign_protected = byte_view{signature.protected_header},
+                                       .sign_protected = std::span<const std::byte>{signature.protected_header},
                                        .external_aad   = external_aad,
-                                       .payload        = message.payload ? byte_view{*message.payload} : *detached_payload};
+                                       .payload = message.payload ? std::span<const std::byte>{*message.payload} : *detached_payload};
     return encode_to_bytes(structure);
 }
 

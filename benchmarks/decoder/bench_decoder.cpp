@@ -791,9 +791,9 @@ template <std::size_t N> void run_encoded_view_benchmark() {
     });
 
     bench.run("Raw encoded item view", [&encoded] {
-        auto                                          dec = make_decoder(encoded);
-        typename decltype(dec)::raw_encoded_item_view output;
-        auto                                          result = dec(output);
+        auto                                      dec = make_decoder(encoded);
+        typename decltype(dec)::encoded_item_view output;
+        auto                                      result = dec(output);
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(output);
     });

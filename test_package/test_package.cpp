@@ -62,7 +62,7 @@ int main() {
             return 16;
         }
         std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{generated, EVP_PKEY_free};
-        const cwt::byte_string                              payload{std::byte{1}, std::byte{2}, std::byte{3}};
+        const std::vector<std::byte>                        payload{std::byte{1}, std::byte{2}, std::byte{3}};
         auto                                                message = cwt::sign1<cwt::openssl_es256_backend>(key.get(), {}, {}, payload);
         if (!message || !cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), *message)) {
             return 17;

@@ -265,7 +265,7 @@ payloads and rejects indefinite-length byte strings. Bounded scalar typed-array
 CDDL constrains the byte-string payload length; for multi-byte element types,
 the compact `.size (min..max)` interval can still admit byte lengths that are
 not a whole number of elements. Runtime decode validates the payload byte length
-before materializing values or creating a borrowed view, and still rejects
+before storing decoded values or creating a borrowed view, and still rejects
 payload lengths that are not element-aligned.
 
 `bounded_size` support for `homogeneous_array` and `multi_dimensional_array`
@@ -291,8 +291,7 @@ The borrowed helpers throw `std::logic_error` when the requested byte order does
 not match native byte order because they cannot represent a byte-swapped borrowed
 view. Use `encode_typed_array_segments_copy<ByteOrder>(...)` or the `_copy_be`
 convenience helper when portable segmented output matters more than zero-copy
-borrowing. `encode_typed_array_segments(...)` remains as a compatibility alias for
-the borrowed helper; new code should use the explicit borrowed or copy spelling.
+borrowing. Choose the explicit borrowed or copy helper to make ownership clear.
 
 ## Endian Performance
 

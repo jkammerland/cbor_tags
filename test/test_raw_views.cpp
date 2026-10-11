@@ -67,7 +67,7 @@ using returning_decoder_type =
 
 static_assert(std::same_as<decltype(std::declval<default_decoder_type &>()(std::declval<std::uint64_t &>())), expected<void, status_code>>);
 static_assert(std::same_as<decltype(std::declval<returning_decoder_type &>()(std::declval<std::uint64_t &>())),
-                           expected<typename returning_decoder_type::raw_encoded_item_view, status_code>>);
+                           expected<typename returning_decoder_type::encoded_item_view, status_code>>);
 
 struct zero_consumption_value {};
 
@@ -611,8 +611,8 @@ TEST_CASE("raw encoded views skip large random-access payloads by jumping") {
     input.bytes = {std::byte{0x5A}, std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x00}};
     input.bytes.resize(input.bytes.size() + 65536U, std::byte{0xAB});
 
-    auto                                          dec = make_decoder(input);
-    typename decltype(dec)::raw_encoded_item_view item;
+    auto                                      dec = make_decoder(input);
+    typename decltype(dec)::encoded_item_view item;
 
     REQUIRE(dec(item));
     CHECK_EQ(item.size(), input.bytes.size());
@@ -624,7 +624,7 @@ TEST_CASE("raw encoded views borrow non-contiguous input without copying") {
     auto                 contiguous = to_bytes("820102");
     std::list<std::byte> bytes(contiguous.begin(), contiguous.end());
     auto                 dec = make_decoder(bytes);
-    using array_view         = typename decltype(dec)::raw_encoded_array_view;
+    using array_view         = typename decltype(dec)::encoded_array_view;
     array_view             array;
     std::vector<std::byte> output;
     auto                   enc = make_encoder(output);

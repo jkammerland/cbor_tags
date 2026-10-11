@@ -676,7 +676,7 @@ int main() {
 ```
 
 > [!NOTE]
-> You can mix and match these methods above. For example, you can can use a free form cbor_tag with member functions for encoding/decoding. Or you could use a static tag with free form encode/decode methods. By not defining a tag or a cbor_tag() function you can also manually encode/decode the tag inside of your encode/decode functions.
+> You can mix and match these methods above. For example, you can use a free form cbor_tag with member functions for encoding/decoding. Or you could use a static tag with free form encode/decode methods. By not defining a tag or a cbor_tag() function you can also manually encode/decode the tag inside of your encode/decode functions.
 
 More examples on alternative methods can be found in wiki, such as how to handle non-default constructible types.
 
@@ -1141,7 +1141,7 @@ For bounded object fields, PMR allocation containment, and their CDDL, see
 The core encoder/decoder, tags, variants, CDDL generation, size bounds, and
 opt-in extension codecs are supported and covered by CI.
 
-Range wrappers, borrowed and raw views, lazy tag scanning, and segmented output
+Range wrappers, borrowed and encoded views, lazy tag scanning, and segmented output
 remain experimental; their current contracts are documented in
 [Experimental Range And Segment APIs](doc/experimental_ranges.md). Planned work
 is tracked in [GitHub issues](https://github.com/jkammerland/cbor_tags/issues)

@@ -34,7 +34,7 @@ TEST_SUITE("roundtrip/cwt") {
                                 .expiration = std::int64_t{42},
                                 .not_before = 1.5,
                                 .issued_at  = std::int64_t{-7},
-                                .cwt_id     = byte_string{std::byte{9}}};
+                                .cwt_id     = std::vector<std::byte>{std::byte{9}}};
         through_view<claims_view>(source, [&](const auto &decoded) {
             CHECK(decoded.issuer == source.issuer);
             CHECK(decoded.subject == source.subject);
@@ -117,7 +117,7 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("cose headers and envelopes roundtrip through borrowed models") {
-        const header_map header{.alg = algorithm::es256, .kid = byte_string{std::byte{7}}, .crit = {integer{1}, integer{4}}};
+        const header_map header{.alg = algorithm::es256, .kid = std::vector<std::byte>{std::byte{7}}, .crit = {integer{1}, integer{4}}};
         through_view<header_map_view>(header, [&](const auto &decoded) {
             CHECK(decoded.alg == header.alg);
             REQUIRE(decoded.kid);
@@ -134,7 +134,7 @@ TEST_SUITE("roundtrip/cwt") {
         });
         const cose_sign1 single{.protected_header = signature.protected_header,
                                 .unprotected      = header,
-                                .payload          = byte_string{std::byte{8}},
+                                .payload          = std::vector<std::byte>{std::byte{8}},
                                 .signature        = signature.signature};
         through_view<cose_sign1_view>(single, [&](const auto &decoded) {
             CHECK(std::ranges::equal(decoded.protected_header, single.protected_header));
@@ -170,7 +170,7 @@ TEST_SUITE("roundtrip/cwt") {
     TEST_CASE("sig structure views support four and five fields and replace stale state") {
         sig_structure      source{.context        = "Signature",
                                   .body_protected = {std::byte{1}},
-                                  .sign_protected = byte_string{std::byte{2}},
+                                  .sign_protected = std::vector<std::byte>{std::byte{2}},
                                   .external_aad   = {std::byte{3}},
                                   .payload        = {std::byte{4}}};
         sig_structure_view decoded = as_view(source);
@@ -208,8 +208,8 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(decoded);
         CHECK(decoded->issuer == source.issuer);
 
-        byte_string pointer_bytes;
-        auto        pointer = std::make_unique<claims_view>(projection);
+        std::vector<std::byte> pointer_bytes;
+        auto                   pointer = std::make_unique<claims_view>(projection);
         REQUIRE((make_encoder<codec::cwt, codec::unique_ptr>(pointer_bytes)(pointer)));
         std::unique_ptr<claims_view> pointer_result;
         REQUIRE((make_decoder<codec::cwt, codec::unique_ptr>(pointer_bytes)(pointer_result)));

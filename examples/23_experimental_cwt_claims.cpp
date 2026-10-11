@@ -20,11 +20,12 @@ int main() {
     // Hold the encoded claims that would normally become a COSE message's payload.
     std::vector<std::byte> buffer;
 
-    // Define the issuer, subject and expiration time in seconds since the Unix epoch.
-    cwt::claims_set source;
-    source.issuer = "coap://as.example.com";
-    source.subject = "alice";
-    source.expiration = std::int64_t{1893456000};
+    // Store issuer, subject and expiry as CWT claims, with time in Unix seconds.
+    cwt::claims_set source{
+        .issuer = "coap://as.example.com",
+        .subject = "alice",
+        .expiration = std::int64_t{1893456000},
+    };
 
     // Encode the claim map with the opt-in CWT codec.
     auto encoder = make_encoder<codec::cwt>(buffer);
@@ -32,10 +33,10 @@ int main() {
         return 1;
     }
 
-    // Declare an owning receiver for the registered claims.
+    // Store decoded claims in a claims_set that owns its strings.
     cwt::claims_set received;
 
-    // Decode the registered claim values into the receiver.
+    // Decode the claims, copying strings from the buffer.
     auto decoder = make_decoder<codec::cwt>(buffer);
     if (!decoder(received)) {
         return 1;

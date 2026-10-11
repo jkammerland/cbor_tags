@@ -26,7 +26,7 @@ using cbor::tags::test::detail::allocation_failure_guard;
 namespace {
 
 template <typename RawView>
-concept CanEncodeSegments = requires(const RawView &view) { to_segments(view); };
+concept CanCopySegments = requires(const RawView &view) { copy_segments(view); };
 
 template <typename RawView>
 concept CanBorrowSegments = requires(const RawView &view) { borrow_segments(view); };
@@ -36,16 +36,6 @@ concept CanBorrowSegmentsRvalue = requires { borrow_segments(std::declval<RawVie
 
 template <typename RawView>
 concept CanBorrowSegmentsExplicitRvalue = requires { borrow_segments<RawView>(std::declval<std::remove_reference_t<RawView>>()); };
-
-template <typename RawView>
-concept CanEncodeEncodedSegments = requires(const RawView &view) { encode_encoded_segments(view); };
-
-template <typename RawView>
-concept CanEncodeEncodedSegmentsRvalue = requires { encode_encoded_segments(std::declval<RawView>()); };
-
-template <typename RawView>
-concept CanEncodeEncodedSegmentsExplicitRvalue =
-    requires { encode_encoded_segments<RawView>(std::declval<std::remove_reference_t<RawView>>()); };
 
 template <typename Segments, typename Output>
 concept CanFlattenTo = requires(const Segments &segments, Output &output) { segments.flatten_to(output); };
@@ -240,7 +230,7 @@ template <typename Segments> bool has_borrowed_segment(const Segments &segments,
     return false;
 }
 
-int count_borrowed_segments(const cbor_segments &segments, const std::byte *data, std::size_t size) {
+int count_borrowed_segments(const byte_segments &segments, const std::byte *data, std::size_t size) {
     int count{};
     for (const auto &segment : segments) {
         if (segment.is_borrowed() && segment.data() == data && segment.size() == size) {
@@ -250,7 +240,7 @@ int count_borrowed_segments(const cbor_segments &segments, const std::byte *data
     return count;
 }
 
-int count_borrowed_segments(const cbor_segments &segments) {
+int count_borrowed_segments(const byte_segments &segments) {
     int count{};
     for (const auto &segment : segments) {
         if (segment.is_borrowed()) {
@@ -267,12 +257,6 @@ using tracking_byte_segments      = basic_byte_segments<tracking_byte_segment_st
 using split_byte_segments         = basic_byte_segments<non_coalescing_byte_segment_storage>;
 using declining_try_byte_segments = basic_byte_segments<declining_try_append_byte_segment_storage>;
 
-static_assert(std::same_as<byte_segment_kind, cbor_segment_kind>);
-static_assert(std::same_as<byte_segment, cbor_segment>);
-static_assert(std::same_as<byte_segments, cbor_segments>);
-static_assert(CborOutputBuffer<byte_segments>);
-static_assert(CborSegmentOutputBuffer<byte_segments>);
-static_assert(!CborAppendOutputBuffer<byte_segments>);
 static_assert(CborOutputBuffer<tiny_inline_byte_segments>);
 static_assert(CborSegmentOutputBuffer<tiny_inline_byte_segments>);
 static_assert(!CborAppendOutputBuffer<tiny_inline_byte_segments>);
@@ -286,13 +270,13 @@ static_assert(CborOutputBuffer<declining_try_byte_segments>);
 static_assert(CborSegmentOutputBuffer<declining_try_byte_segments>);
 static_assert(!CborAppendOutputBuffer<declining_try_byte_segments>);
 static_assert(!CanBuildByteSegments<invalid_byte_segment_storage>);
-static_assert(CborOutputBuffer<cbor_segments>);
-static_assert(CborSegmentOutputBuffer<cbor_segments>);
-static_assert(!CborAppendOutputBuffer<cbor_segments>);
-static_assert(CanFlattenTo<cbor_segments, std::vector<std::byte>>);
-static_assert(CanFlattenTo<cbor_segments, std::vector<unsigned char>>);
-static_assert(!CanFlattenTo<cbor_segments, std::vector<std::uint16_t>>);
-static_assert(!std::constructible_from<encoded_item_segments, cbor_segments>);
+static_assert(CborOutputBuffer<byte_segments>);
+static_assert(CborSegmentOutputBuffer<byte_segments>);
+static_assert(!CborAppendOutputBuffer<byte_segments>);
+static_assert(CanFlattenTo<byte_segments, std::vector<std::byte>>);
+static_assert(CanFlattenTo<byte_segments, std::vector<unsigned char>>);
+static_assert(!CanFlattenTo<byte_segments, std::vector<std::uint16_t>>);
+static_assert(!std::constructible_from<encoded_item_segments, byte_segments>);
 static_assert(!std::constructible_from<encoded_item_bstr, const encoded_item_segments &>);
 static_assert(!std::constructible_from<encoded_item_bstr, encoded_item_segments &&>);
 static_assert(CanWrapSegmentItemAsBstr<encoded_item_segments &>);
@@ -328,11 +312,11 @@ TEST_CASE("segment header encoding covers CBOR size boundaries") {
 TEST_CASE("cbor argument headers remain accepted as owned segment input") {
     const auto header = detail::encode_cbor_major_argument_header(24, std::byte{0x40});
 
-    const auto segment = cbor_segment::owned(header);
+    const auto segment = byte_segment::owned(header);
     CHECK(segment.is_owned());
     CHECK_EQ(to_hex(segment.bytes()), "5818");
 
-    cbor_segments segments;
+    byte_segments segments;
     segments.append_owned(header);
 
     CHECK_EQ(to_hex(flatten_segments(segments)), "5818");
@@ -346,7 +330,7 @@ TEST_CASE("cbor segments can be used as the normal encoder output backend") {
 
     auto make_bstrs = [&] { return blobs | std::views::transform([](std::span<const std::byte> blob) { return as_bstr_range(blob); }); };
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          segment_encoder = make_encoder(segmented);
     REQUIRE(segment_encoder(as_array{2}, as_array_range(ints), as_array_range(make_bstrs())));
 
@@ -373,7 +357,7 @@ TEST_CASE("segmented output roundtrips realistic aggregate composition") {
             segmented_report_state::active, note, samples, result, metrics, as_bstr_range(std::span<const std::byte>{payload}),
         };
 
-        cbor_segments segmented;
+        byte_segments segmented;
         auto          enc = make_encoder(segmented);
         REQUIRE(enc(input));
         CHECK(has_borrowed_segment(segmented, payload.data(), payload.size()));
@@ -443,7 +427,7 @@ TEST_CASE("bstr segment into helpers append to existing segment buffers") {
     auto span    = std::span<const std::byte>{payload};
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x00}});
 
         encode_bstr_segments_into(segments, span.first(2));
@@ -453,7 +437,7 @@ TEST_CASE("bstr segment into helpers append to existing segment buffers") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x00}});
 
         encode_indefinite_bstr_segments_into(segments, span, 2);
@@ -464,7 +448,7 @@ TEST_CASE("bstr segment into helpers append to existing segment buffers") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x00}});
 
         encode_tagged_bstr_segments_into(segments, std::uint64_t{24}, span.first(2));
@@ -474,7 +458,7 @@ TEST_CASE("bstr segment into helpers append to existing segment buffers") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x00}});
 
         encode_tagged_bstr_segments_into(segments, dynamic_tag<std::uint64_t>{24}, span.first(2));
@@ -486,7 +470,7 @@ TEST_CASE("bstr segment into helpers append to existing segment buffers") {
 
 TEST_CASE("bstr segment into helpers reject zero chunk size") {
     auto          payload = to_bytes("0102");
-    cbor_segments segments;
+    byte_segments segments;
 
     CHECK_THROWS_AS(encode_indefinite_bstr_segments_into(segments, std::span<const std::byte>{payload}, 0), std::invalid_argument);
 }
@@ -497,7 +481,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
     auto prefix  = to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(2);
 
         {
@@ -509,7 +493,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(6);
 
         {
@@ -521,7 +505,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(3);
 
         {
@@ -533,7 +517,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(3);
         segments.append_owned(std::span<const std::byte>{prefix});
 
@@ -546,7 +530,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(7);
         segments.append_owned(std::span<const std::byte>{prefix});
 
@@ -559,7 +543,7 @@ TEST_CASE("segment into helpers avoid allocation after segment reserve") {
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(4);
         segments.append_owned(std::span<const std::byte>{prefix});
 
@@ -587,7 +571,7 @@ TEST_CASE("byte segments forward owned-byte reserve to storage policy") {
 TEST_CASE("segmented byte string range preserves header order for non-contiguous payloads") {
     std::list<std::byte> payload{std::byte{0x00}, std::byte{0xFF}, std::byte{0x10}, std::byte{0x20}};
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          enc = make_encoder(segmented);
     REQUIRE(enc(as_bstr_range(payload)));
 
@@ -597,7 +581,7 @@ TEST_CASE("segmented byte string range preserves header order for non-contiguous
 TEST_CASE("segmented text string range preserves header order for non-contiguous payloads") {
     std::list<char> payload{'t', 'e', 'x', 't'};
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          enc = make_encoder(segmented);
     REQUIRE(enc(as_tstr_range(payload)));
 
@@ -606,7 +590,7 @@ TEST_CASE("segmented text string range preserves header order for non-contiguous
 }
 
 TEST_CASE("direct segmented encode writes are visible without operator flush") {
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          enc = make_encoder(segmented);
 
     enc.encode(as_array{1});
@@ -618,7 +602,7 @@ TEST_CASE("direct segmented encode writes are visible without operator flush") {
 TEST_CASE("direct segmented byte string encode borrows span payload") {
     auto payload = to_bytes("01020304");
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          enc = make_encoder(segmented);
     REQUIRE(enc(std::span<const std::byte>{payload}));
 
@@ -630,7 +614,7 @@ TEST_CASE("direct segmented raw encoded view encode borrows span payload") {
     auto bytes = to_bytes("820102");
     auto raw   = encoded_item_view{std::span<const std::byte>{bytes}};
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          enc = make_encoder(segmented);
     REQUIRE(enc(raw));
 
@@ -645,7 +629,7 @@ TEST_CASE("encoded item segments can be array elements map values tags and bstr 
     REQUIRE(item_result);
     auto item = std::move(item_result).value();
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          segment_encoder = make_encoder(segmented);
     REQUIRE(
         segment_encoder(as_array{4}, item, make_tag_pair(static_tag<100>{}, item), as_bstr(item), as_map{1}, std::string{"payload"}, item));
@@ -670,7 +654,7 @@ TEST_CASE("encoded item segments can be array elements map values tags and bstr 
 
 TEST_CASE("encoded item segment validation requires exactly one complete cbor item") {
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x01}});
 
         auto item = validate_item_segments(std::move(segments));
@@ -680,7 +664,7 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x01}, std::byte{0x02}});
 
         auto item = validate_item_segments(std::move(segments));
@@ -690,7 +674,7 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
     }
 
     {
-        cbor_segments segments;
+        byte_segments segments;
         segments.append_owned({std::byte{0x58}});
 
         auto item = validate_item_segments(std::move(segments));
@@ -705,7 +689,7 @@ TEST_CASE("typed array codec borrows payload when the encoder output is segmente
 
     std::vector<std::int32_t> values{1, -2, 3};
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          segment_encoder = make_encoder<codec::typed_array>(segmented);
     REQUIRE(segment_encoder(as_typed_array(values)));
 
@@ -723,7 +707,7 @@ TEST_CASE("owning typed array codec copies payload when the encoder output is se
 
     auto array = typed_array<std::int32_t>{{1, -2, 3}};
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          segment_encoder = make_encoder<codec::typed_array>(segmented);
     REQUIRE(segment_encoder(array));
 
@@ -740,7 +724,7 @@ TEST_CASE("segmented bstr range borrowing is limited to explicit borrowed ranges
     auto bytes = to_bytes("01020304");
 
     {
-        cbor_segments segmented;
+        byte_segments segmented;
         auto          enc = make_encoder(segmented);
         REQUIRE(enc(as_bstr_range(bytes)));
 
@@ -749,7 +733,7 @@ TEST_CASE("segmented bstr range borrowing is limited to explicit borrowed ranges
     }
 
     {
-        cbor_segments segmented;
+        byte_segments segmented;
         auto          enc = make_encoder(segmented);
         REQUIRE(enc(as_bstr_range(to_bytes("01020304"))));
 
@@ -763,7 +747,7 @@ TEST_CASE("segmented tstr range borrowing is limited to explicit borrowed ranges
     const auto  text_bytes = std::as_bytes(std::span{text.data(), text.size()});
 
     {
-        cbor_segments segmented;
+        byte_segments segmented;
         auto          enc = make_encoder(segmented);
         REQUIRE(enc(as_tstr_range(text)));
 
@@ -772,7 +756,7 @@ TEST_CASE("segmented tstr range borrowing is limited to explicit borrowed ranges
     }
 
     {
-        cbor_segments segmented;
+        byte_segments segmented;
         auto          enc = make_encoder(segmented);
         REQUIRE(enc(as_tstr_range(std::string{"text"})));
 
@@ -799,10 +783,10 @@ TEST_CASE("bstr segmented output flattens like normal encode and borrows payload
     CHECK_EQ(to_hex(flat), to_hex(encode_normal_bstr(span)));
     REQUIRE_EQ(segments.size(), 2U);
     CHECK(segments[0].is_owned());
-    CHECK_EQ(segments[0].kind(), cbor_segment_kind::owned);
+    CHECK_EQ(segments[0].kind(), byte_segment_kind::owned);
     CHECK_EQ(to_hex(segments[0].bytes()), "44");
     CHECK(segments[1].is_borrowed());
-    CHECK_EQ(segments[1].kind(), cbor_segment_kind::borrowed);
+    CHECK_EQ(segments[1].kind(), byte_segment_kind::borrowed);
     CHECK_EQ(segments[1].data(), payload.data());
     CHECK_EQ(segments[1].size(), payload.size());
 }
@@ -887,12 +871,12 @@ TEST_CASE("owned and borrowed cbor segments keep their lifetime contracts") {
     auto short_payload = to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
     auto long_payload  = to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
 
-    REQUIRE_EQ(short_payload.size(), cbor_segment::inline_owned_capacity);
-    REQUIRE_EQ(long_payload.size(), cbor_segment::inline_owned_capacity + 1U);
+    REQUIRE_EQ(short_payload.size(), byte_segment::inline_owned_capacity);
+    REQUIRE_EQ(long_payload.size(), byte_segment::inline_owned_capacity + 1U);
 
-    auto short_owned = cbor_segment::owned(std::span<const std::byte>{short_payload});
-    auto long_owned  = cbor_segment::owned(std::span<const std::byte>{long_payload});
-    auto borrowed    = cbor_segment::borrowed(std::span<const std::byte>{short_payload});
+    auto short_owned = byte_segment::owned(std::span<const std::byte>{short_payload});
+    auto long_owned  = byte_segment::owned(std::span<const std::byte>{long_payload});
+    auto borrowed    = byte_segment::borrowed(std::span<const std::byte>{short_payload});
 
     short_payload[0] = std::byte{0xFF};
     long_payload[0]  = std::byte{0xEE};
@@ -904,7 +888,7 @@ TEST_CASE("owned and borrowed cbor segments keep their lifetime contracts") {
     CHECK_EQ(to_hex(long_owned.bytes()), "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
     CHECK_EQ(to_hex(borrowed.bytes()), "ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
 
-    auto coalesced = cbor_segment::owned(std::span<const std::byte>{short_payload});
+    auto coalesced = byte_segment::owned(std::span<const std::byte>{short_payload});
     auto byte_20   = to_bytes("20");
     auto byte_21   = to_bytes("21");
 
@@ -930,7 +914,7 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
     {
         auto bytes      = to_bytes("820102");
         auto dec        = make_decoder(bytes);
-        using item_view = typename decltype(dec)::raw_encoded_item_view;
+        using item_view = typename decltype(dec)::encoded_item_view;
 
         item_view item;
         REQUIRE(dec(item));
@@ -941,22 +925,15 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         static_assert(CanBorrowSegments<item_view>);
         static_assert(!CanBorrowSegmentsRvalue<item_view>);
         static_assert(!CanBorrowSegmentsExplicitRvalue<const item_view &>);
-        static_assert(CanEncodeEncodedSegments<item_view>);
-        static_assert(!CanEncodeEncodedSegmentsRvalue<item_view>);
-        static_assert(!CanEncodeEncodedSegmentsExplicitRvalue<const item_view &>);
+
         std::vector<std::byte> appended;
         append_encoded_segments(appended, item);
         CHECK_EQ(to_hex(appended), "820102");
 
-        const auto segments = to_segments(item);
+        const auto segments = copy_segments(item);
         REQUIRE_EQ(segments.size(), 1U);
         CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
-
-        const auto as_segments_copy = as_segments(item);
-        REQUIRE_EQ(as_segments_copy.size(), 1U);
-        CHECK(as_segments_copy[0].is_owned());
-        CHECK_EQ(to_hex(flatten_segments(as_segments_copy)), "820102");
 
         const auto borrowed_segments = borrow_segments(item);
         REQUIRE_EQ(borrowed_segments.size(), 1U);
@@ -964,18 +941,7 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         CHECK_EQ(borrowed_segments[0].data(), bytes.data());
         CHECK_EQ(to_hex(flatten_segments(borrowed_segments)), "820102");
 
-        const auto encoded_segments = encode_encoded_segments(item);
-        REQUIRE_EQ(encoded_segments.size(), 1U);
-        CHECK(encoded_segments[0].is_borrowed());
-        CHECK_EQ(encoded_segments[0].data(), bytes.data());
-        CHECK_EQ(to_hex(flatten_segments(encoded_segments)), "820102");
-
-        const auto copied_segments = copy_segments(item);
-        REQUIRE_EQ(copied_segments.size(), 1U);
-        CHECK(copied_segments[0].is_owned());
-        CHECK_EQ(to_hex(flatten_segments(copied_segments)), "820102");
-
-        const auto encoded_segments_copy = encode_encoded_segments_copy(item);
+        const auto encoded_segments_copy = copy_segments(item);
         REQUIRE_EQ(encoded_segments_copy.size(), 1U);
         CHECK(encoded_segments_copy[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(encoded_segments_copy)), "820102");
@@ -988,7 +954,7 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         encoded_array_view array;
         REQUIRE(dec(array));
 
-        const auto segments = to_segments(array);
+        const auto segments = copy_segments(array);
         const auto flat     = flatten_segments(segments);
 
         REQUIRE_EQ(segments.size(), 1U);
@@ -1004,12 +970,12 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
     {
         auto bytes     = to_bytes("a10102");
         auto dec       = make_decoder(bytes);
-        using map_view = typename decltype(dec)::raw_encoded_map_view;
+        using map_view = typename decltype(dec)::encoded_map_view;
 
         map_view map;
         REQUIRE(dec(map));
 
-        const auto segments = to_segments(map);
+        const auto segments = copy_segments(map);
         REQUIRE_EQ(segments.size(), 1U);
         CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(segments)), "a10102");
@@ -1029,7 +995,7 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
         bool               suffix{};
         REQUIRE(dec(prefix, array, suffix));
 
-        const auto segments = to_segments(array);
+        const auto segments = copy_segments(array);
         REQUIRE_EQ(segments.size(), 1U);
         CHECK(segments[0].is_owned());
         CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
@@ -1042,14 +1008,14 @@ TEST_CASE("span-backed raw encoded views become one borrowed segment without nor
 }
 
 TEST_CASE("owning span-backed raw encoded views are copied into segments") {
-    cbor_segments segments;
+    byte_segments segments;
     {
         auto view = owning_encoded_item_view{copyable_owning_byte_view{to_bytes("820102")}};
 
         static_assert(!CanBorrowSegments<owning_encoded_item_view>);
-        static_assert(!CanEncodeEncodedSegments<owning_encoded_item_view>);
+
         static_assert(!CanVisitBorrowedSegments<owning_encoded_item_view>);
-        segments = to_segments(view);
+        segments = copy_segments(view);
 
         REQUIRE_EQ(segments.size(), 1U);
         CHECK(segments[0].is_owned());
@@ -1057,7 +1023,7 @@ TEST_CASE("owning span-backed raw encoded views are copied into segments") {
 
     CHECK_EQ(to_hex(flatten_segments(segments)), "820102");
 
-    segments = to_segments(owning_encoded_item_view{copyable_owning_byte_view{to_bytes("83010203")}});
+    segments = copy_segments(owning_encoded_item_view{copyable_owning_byte_view{to_bytes("83010203")}});
 
     REQUIRE_EQ(segments.size(), 1U);
     CHECK(segments[0].is_owned());
@@ -1068,9 +1034,9 @@ TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fall
     auto                 contiguous = to_bytes("9f01820203ff");
     std::list<std::byte> bytes(contiguous.begin(), contiguous.end());
     auto                 dec = make_decoder(bytes);
-    using array_view         = typename decltype(dec)::raw_encoded_array_view;
+    using array_view         = typename decltype(dec)::encoded_array_view;
 
-    static_assert(CanEncodeSegments<array_view>);
+    static_assert(CanCopySegments<array_view>);
     static_assert(!CanVisitBorrowedSegments<array_view>);
     static_assert(!CanBorrowSegments<array_view>);
 
@@ -1081,7 +1047,7 @@ TEST_CASE("non-contiguous raw encoded views use explicit owned segment copy fall
     append_encoded_segments(appended, array);
     CHECK_EQ(to_hex(appended), "9f01820203ff");
 
-    const auto segments = to_segments(array);
+    const auto segments = copy_segments(array);
     const auto flat     = flatten_segments(segments);
 
     REQUIRE_EQ(segments.size(), 1U);

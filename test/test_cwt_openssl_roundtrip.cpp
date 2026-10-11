@@ -8,9 +8,10 @@ TEST_SUITE("roundtrip/cwt") {
     TEST_CASE("CWT crypto backend signs and verifies COSE Sign1 ES256") {
         auto key = make_p256_key();
 
-        const byte_string payload{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
-        auto              message = sign1<crypto_es256_backend>(
-            key.get(), header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}, std::byte{0x02}}, .crit = {}}, {}, payload);
+        const std::vector<std::byte> payload{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
+        auto                         message = sign1<crypto_es256_backend>(
+            key.get(), header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}}, .crit = {}}, {},
+            payload);
 
         REQUIRE(message);
         CHECK_EQ(message->signature.size(), 64U);
@@ -27,9 +28,10 @@ TEST_SUITE("roundtrip/cwt") {
     TEST_CASE("CWT crypto backend signs and verifies COSE Sign ES256") {
         auto key = make_p256_key();
 
-        const byte_string payload{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
-        auto              message = sign<crypto_es256_backend>(
-            key.get(), {}, {}, payload, header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}, std::byte{0x02}}, .crit = {}});
+        const std::vector<std::byte> payload{std::byte{0xA1}, std::byte{0x01}, std::byte{0x02}};
+        auto                         message = sign<crypto_es256_backend>(
+            key.get(), {}, {}, payload,
+            header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}}, .crit = {}});
 
         REQUIRE(message);
         REQUIRE_EQ(message->signatures.size(), 1U);
@@ -49,8 +51,8 @@ TEST_SUITE("roundtrip/cwt") {
         auto secp256k1 = make_ec_key(NID_secp256k1);
         auto rsa       = make_rsa_key();
 
-        const byte_string payload{std::byte{0x01}};
-        auto              message = sign1<crypto_es256_backend>(p256.get(), {}, {}, payload);
+        const std::vector<std::byte> payload{std::byte{0x01}};
+        auto                         message = sign1<crypto_es256_backend>(p256.get(), {}, {}, payload);
         REQUIRE(message);
         REQUIRE(verify_sign1<crypto_es256_backend>(p256.get(), *message));
 
@@ -68,10 +70,10 @@ TEST_SUITE("roundtrip/cwt") {
 
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
     TEST_CASE("real es256 verification accepts decoded sign1 and sign views") {
-        auto              key = make_p256_key();
-        const byte_string payload{std::byte{1}, std::byte{2}, std::byte{3}};
-        const byte_string aad{std::byte{4}};
-        auto              single = sign1<crypto_es256_backend>(key.get(), {}, {}, payload, aad);
+        auto                         key = make_p256_key();
+        const std::vector<std::byte> payload{std::byte{1}, std::byte{2}, std::byte{3}};
+        const std::vector<std::byte> aad{std::byte{4}};
+        auto                         single = sign1<crypto_es256_backend>(key.get(), {}, {}, payload, aad);
         REQUIRE(single);
         auto encoded = encode_to_bytes(*single);
         REQUIRE(encoded);
@@ -96,9 +98,9 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(verify_signature<crypto_es256_backend>(key.get(), multi_view, multiple->signatures[0], aad));
         multi_view.payload.reset();
         CHECK_FALSE(verify_sign<crypto_es256_backend>(key.get(), multi_view, aad));
-        REQUIRE(verify_sign<crypto_es256_backend>(key.get(), multi_view, aad, byte_view{payload}));
+        REQUIRE(verify_sign<crypto_es256_backend>(key.get(), multi_view, aad, std::span<const std::byte>{payload}));
         view.payload.reset();
-        REQUIRE(verify_sign1<crypto_es256_backend>(key.get(), view, aad, byte_view{payload}));
+        REQUIRE(verify_sign1<crypto_es256_backend>(key.get(), view, aad, std::span<const std::byte>{payload}));
     }
 #endif
 

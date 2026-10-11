@@ -13,7 +13,6 @@
 
 namespace cbor::tags::cwt {
 
-using byte_string    = std::vector<std::byte>;
 using numeric_date   = std::variant<std::int64_t, double>;
 using audience_claim = std::variant<std::string, std::vector<std::string>>;
 using audience_view  = std::variant<std::string_view, std::vector<std::string_view>>;
@@ -36,37 +35,36 @@ enum class algorithm : std::int64_t {
 
 using header_label = std::variant<integer, std::string>;
 
-using byte_view         = std::span<const std::byte>;
 using header_label_view = std::variant<integer, std::string_view>;
 
 namespace detail {
 
 // Storage selection is internal; the public model templates are plain aggregates.
-// Borrowed text and bytes refer to the input buffer or projected owner. Vectors
-// own only their descriptors, so views may still allocate metadata.
+// Borrowed text and bytes refer to an input buffer or an existing object.
+// Vectors own their entries, so collections of views may still allocate.
 template <bool Borrowed> using text_storage     = std::conditional_t<Borrowed, std::string_view, std::string>;
-template <bool Borrowed> using byte_storage     = std::conditional_t<Borrowed, byte_view, byte_string>;
+template <bool Borrowed> using byte_storage     = std::conditional_t<Borrowed, std::span<const std::byte>, std::vector<std::byte>>;
 template <bool Borrowed> using audience_storage = std::conditional_t<Borrowed, audience_view, audience_claim>;
 template <bool Borrowed> using label_storage    = std::variant<integer, text_storage<Borrowed>>;
 
 } // namespace detail
 
 template <bool Borrowed> struct basic_header_map {
-    std::optional<algorithm>                      alg;
-    std::optional<detail::byte_storage<Borrowed>> kid;
-    std::vector<detail::label_storage<Borrowed>>  crit;
+    std::optional<algorithm>                      alg{};
+    std::optional<detail::byte_storage<Borrowed>> kid{};
+    std::vector<detail::label_storage<Borrowed>>  crit{};
 
     [[nodiscard]] constexpr bool empty() const noexcept { return !alg && !kid && crit.empty(); }
 };
 
 template <bool Borrowed> struct basic_claims_set {
-    std::optional<detail::text_storage<Borrowed>>     issuer;
-    std::optional<detail::text_storage<Borrowed>>     subject;
-    std::optional<detail::audience_storage<Borrowed>> audience;
-    std::optional<numeric_date>                       expiration;
-    std::optional<numeric_date>                       not_before;
-    std::optional<numeric_date>                       issued_at;
-    std::optional<detail::byte_storage<Borrowed>>     cwt_id;
+    std::optional<detail::text_storage<Borrowed>>     issuer{};
+    std::optional<detail::text_storage<Borrowed>>     subject{};
+    std::optional<detail::audience_storage<Borrowed>> audience{};
+    std::optional<numeric_date>                       expiration{};
+    std::optional<numeric_date>                       not_before{};
+    std::optional<numeric_date>                       issued_at{};
+    std::optional<detail::byte_storage<Borrowed>>     cwt_id{};
 };
 
 template <bool Borrowed> struct basic_cose_signature {
@@ -182,7 +180,7 @@ inline audience_view view_audience(const audience_claim &audience) {
 
 [[nodiscard]] inline header_map_view as_view(const header_map &value) {
     header_map_view result{.alg  = value.alg,
-                           .kid  = detail::view_optional(value.kid, [](const auto &bytes) { return byte_view{bytes}; }),
+                           .kid  = detail::view_optional(value.kid, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
                            .crit = {}};
     result.crit.reserve(value.crit.size());
     for (const auto &label : value.crit) {
@@ -207,7 +205,7 @@ inline audience_view view_audience(const audience_claim &audience) {
             .expiration = value.expiration,
             .not_before = value.not_before,
             .issued_at  = value.issued_at,
-            .cwt_id     = detail::view_optional(value.cwt_id, [](const auto &bytes) { return byte_view{bytes}; })};
+            .cwt_id     = detail::view_optional(value.cwt_id, [](const auto &bytes) { return std::span<const std::byte>{bytes}; })};
 }
 
 [[nodiscard]] inline cose_signature_view as_view(const cose_signature &value) {
@@ -217,8 +215,9 @@ inline audience_view view_audience(const audience_claim &audience) {
 [[nodiscard]] inline cose_sign_view as_view(const cose_sign &value) {
     cose_sign_view result{.protected_header = value.protected_header,
                           .unprotected      = as_view(value.unprotected),
-                          .payload          = detail::view_optional(value.payload, [](const auto &bytes) { return byte_view{bytes}; }),
-                          .signatures       = {}};
+                          .payload =
+                              detail::view_optional(value.payload, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
+                          .signatures = {}};
     result.signatures.reserve(value.signatures.size());
     for (const auto &signature : value.signatures)
         result.signatures.push_back(as_view(signature));
@@ -228,16 +227,17 @@ inline audience_view view_audience(const audience_claim &audience) {
 [[nodiscard]] inline cose_sign1_view as_view(const cose_sign1 &value) {
     return {.protected_header = value.protected_header,
             .unprotected      = as_view(value.unprotected),
-            .payload          = detail::view_optional(value.payload, [](const auto &bytes) { return byte_view{bytes}; }),
+            .payload          = detail::view_optional(value.payload, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
             .signature        = value.signature};
 }
 
 [[nodiscard]] inline sig_structure_view as_view(const sig_structure &value) {
     return {.context        = value.context,
             .body_protected = value.body_protected,
-            .sign_protected = detail::view_optional(value.sign_protected, [](const auto &bytes) { return byte_view{bytes}; }),
-            .external_aad   = value.external_aad,
-            .payload        = value.payload};
+            .sign_protected =
+                detail::view_optional(value.sign_protected, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
+            .external_aad = value.external_aad,
+            .payload      = value.payload};
 }
 
 template <detail::Model T>

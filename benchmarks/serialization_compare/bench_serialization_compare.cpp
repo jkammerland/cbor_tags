@@ -607,7 +607,7 @@ struct typed_array_segments {
 
 template <typename T>
     requires(std::is_same_v<T, std::int32_t> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double>)
-void encode_typed_array_segments_into(const std::vector<T> &value, typed_array_segments &segments) {
+void encode_typed_array_borrowed_segments_into(const std::vector<T> &value, typed_array_segments &segments) {
     const auto  payload = native_little_endian_bytes(value);
     std::size_t offset{};
     emit_typed_array_header(
@@ -625,9 +625,9 @@ void encode_typed_array_segments_into(const std::vector<T> &value, typed_array_s
 
 template <typename T>
     requires(std::is_same_v<T, std::int32_t> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double>)
-typed_array_segments encode_typed_array_segments(const std::vector<T> &value) {
+typed_array_segments encode_typed_array_borrowed_segments(const std::vector<T> &value) {
     typed_array_segments segments;
-    encode_typed_array_segments_into(value, segments);
+    encode_typed_array_borrowed_segments_into(value, segments);
     return segments;
 }
 
@@ -861,10 +861,12 @@ struct cbor_tags_typed_array_segments_codec {
     static constexpr std::string_view name = "cbor_tags_rfc8746_typed_array_segments";
 
     template <typename T> static void encode_into(const std::vector<T> &value, typed_array_segments &segments) {
-        encode_typed_array_segments_into(value, segments);
+        encode_typed_array_borrowed_segments_into(value, segments);
     }
 
-    template <typename T> static typed_array_segments encode(const std::vector<T> &value) { return encode_typed_array_segments(value); }
+    template <typename T> static typed_array_segments encode(const std::vector<T> &value) {
+        return encode_typed_array_borrowed_segments(value);
+    }
 
     template <typename T> static std::uint64_t decode_checksum(const typed_array_segments &segments) {
         return decode_typed_array_segment_checksum<typename T::value_type>(segments);

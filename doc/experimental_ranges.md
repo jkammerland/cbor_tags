@@ -8,7 +8,7 @@ This page covers a few related APIs that are easy to confuse:
 
 - range wrappers for encoding existing C++ ranges,
 - borrowed views for decoding without copying payload bytes,
-- raw encoded CBOR views for forwarding already-encoded items,
+- encoded CBOR views for forwarding already-encoded items,
 - lazy tag scanning,
 - segmented output for avoiding large payload copies.
 
@@ -17,7 +17,7 @@ copies. They are not one feature.
 
 For small, compiled programs with CDDL and executable checks, start with the
 [numbered experimental examples](../examples/README.md#learning-order).
-They introduce range encoding, borrowed decode views, segmented output and raw-view
+They introduce range encoding, borrowed decode views, segmented output and encoded-view
 forwarding separately.
 
 If you only want to encode normal C++ containers, you usually do not need this
@@ -333,9 +333,9 @@ decltype(dec)::tstr_view_t text;
 dec(text);
 ```
 
-## Raw Encoded Views
+## Encoded Item Views
 
-Raw encoded views are for already-encoded CBOR items.
+An encoded item view refers to a complete CBOR item, including its header.
 
 Use them when you want to copy, forward, or embed a complete CBOR item without
 decoding it into a C++ value and encoding it again.
@@ -346,23 +346,23 @@ auto enc = make_encoder(data);
 enc(std::vector<int>{1, 2, 3});
 
 auto dec = make_decoder(data);
-decltype(dec)::raw_encoded_array_view raw;
-dec(raw);
+decltype(dec)::encoded_array_view encoded;
+dec(encoded);
 
 std::vector<std::byte> forwarded;
 auto out = make_encoder(forwarded);
-out(raw); // re-emits the same encoded array bytes
+out(encoded); // re-emits the same encoded array bytes
 ```
 
-The raw view borrows from the decoder input. For contiguous input, `raw.span()`
-is available. For all supported input buffers, `raw.bytes()` can be iterated.
+The encoded view borrows from the decoder input. For contiguous input, `encoded.span()`
+is available. For all supported input buffers, `encoded.bytes()` can be iterated.
 
 ## Lazy Tag Scanning
 
 Lazy tag scanning is the part that is actually lazy about decoding payloads.
 
 `find_tags` scans nested CBOR structure and returns matches for the requested
-tag numbers. It does not materialize unrelated payloads as C++ objects. You
+tag numbers. It does not decode unrelated payloads into C++ objects. You
 decode a matched payload only when you ask for it.
 
 ```cpp
@@ -408,7 +408,7 @@ the original buffer is contiguous.
 
 Normal encoder output is one byte container, such as `std::vector<std::byte>`.
 
-`cbor_segments` is different. It stores output as a list of byte segments. Small
+`byte_segments` is different. It stores output as a list of byte segments. Small
 headers are owned by the segment container. Large payload spans can be borrowed
 instead of copied.
 
@@ -432,7 +432,7 @@ auto contiguous = flatten_segments(segments); // copies all segment bytes
 You can also use segments as the encoder output backend:
 
 ```cpp
-cbor_segments segments;
+byte_segments segments;
 auto enc = make_encoder(segments);
 enc(as_array{2}, 1, 2);
 
@@ -442,7 +442,7 @@ auto contiguous = segments.flatten();
 Append helpers let you build segmented output incrementally:
 
 ```cpp
-cbor_segments segments;
+byte_segments segments;
 auto payload_span = std::span<const std::byte>{payload};
 
 encode_bstr_segments_into(segments, payload_span);
@@ -465,29 +465,28 @@ segment.append_owned(copy);
 Flattening always copies. Borrowed segment payloads must outlive the segment
 container.
 
-## Convert Raw Views To Segments
+## Convert Encoded Views To Segments
 
-Use `to_segments` or `copy_segments` when the segment output should own the raw
-encoded bytes.
+Use `copy_segments` when the segment output should own a copy of the encoded bytes.
 
 ```cpp
 auto dec = make_decoder(buffer);
-decltype(dec)::raw_encoded_array_view raw;
-dec(raw);
+decltype(dec)::encoded_array_view encoded;
+dec(encoded);
 
-auto owned = to_segments(raw);
+auto owned = copy_segments(encoded);
 ```
 
-Use `borrow_segments` only when the raw view came from contiguous lvalue input
+Use `borrow_segments` only when the encoded view came from contiguous lvalue input
 that will outlive the segments.
 
 ```cpp
 std::vector<std::byte> buffer{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
 auto dec = make_decoder(buffer);
-decltype(dec)::raw_encoded_array_view raw;
-dec(raw);
+decltype(dec)::encoded_array_view encoded;
+dec(encoded);
 
-auto borrowed = borrow_segments(raw);
+auto borrowed = borrow_segments(encoded);
 ```
 
 ## Wrap Encoded Items In Bstr
@@ -529,13 +528,13 @@ enc(as_bstr_range(bytes));
 Use borrowed decode views when the input buffer already exists and you want a
 view into it instead of a copied string or byte vector.
 
-Use raw encoded views when the payload is already CBOR and you want to forward
+Use encoded item views when the payload is already CBOR and you want to forward
 it without decoding it.
 
 Use lazy tag scanning when you have a larger CBOR document and only care about
 specific tagged payloads.
 
-Use `cbor_segments` when the output should be written as pieces and large
+Use `byte_segments` when the output should be written as pieces and large
 payloads should not be copied into one contiguous output vector.
 
 ## Rules To Remember
@@ -547,7 +546,7 @@ payloads should not be copied into one contiguous output vector.
 - Non-sized array and map ranges emit indefinite arrays and maps.
 - Non-sized text and byte ranges emit indefinite strings made from definite
   chunks.
-- Borrowed decode views, raw encoded views, lazy tag matches, and borrowed
+- Borrowed decode views, encoded item views, lazy tag matches, and borrowed
   segments reference the original buffer.
 - Borrowed decode views for text and byte strings require definite string
   payloads; use owning strings or byte containers for indefinite strings.

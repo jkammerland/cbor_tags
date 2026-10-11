@@ -1426,7 +1426,7 @@ namespace cbor::tags::rfc8746 {
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments(std::span<const T> values) {
+[[nodiscard]] byte_segments encode_typed_array_borrowed_segments(std::span<const T> values) {
     // The returned payload segment borrows from values and must not outlive the
     // referenced element storage. Use encode_typed_array_segments_copy for owned
     // portable output, including byte-order conversion.
@@ -1452,7 +1452,7 @@ void encode_typed_array_borrowed_segments_into(Segments &segments, std::span<con
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
-[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments(std::span<T> values) {
+[[nodiscard]] byte_segments encode_typed_array_borrowed_segments(std::span<T> values) {
     return encode_typed_array_borrowed_segments<ByteOrder>(std::span<const T>{values.data(), values.size()});
 }
 
@@ -1464,37 +1464,13 @@ void encode_typed_array_borrowed_segments_into(Segments &segments, std::span<T> 
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] cbor_segments encode_typed_array_segments(std::span<const T> values) {
-    return encode_typed_array_borrowed_segments<ByteOrder>(values);
-}
-
-template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, tags::detail::ByteSegmentsOutputBuffer Segments, typename T>
-    requires IsTypedArrayElementFor<T, ByteOrder>
-void encode_typed_array_segments_into(Segments &segments, std::span<const T> values) {
-    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, values);
-}
-
-template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
-    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
-[[nodiscard]] cbor_segments encode_typed_array_segments(std::span<T> values) {
-    return encode_typed_array_borrowed_segments<ByteOrder>(values);
-}
-
-template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, tags::detail::ByteSegmentsOutputBuffer Segments, typename T>
-    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
-void encode_typed_array_segments_into(Segments &segments, std::span<T> values) {
-    encode_typed_array_borrowed_segments_into<ByteOrder>(segments, values);
-}
-
-template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
-    requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<const T> values) {
+[[nodiscard]] byte_segments encode_typed_array_segments_copy(std::span<const T> values) {
     const auto tag_header = tags::detail::encode_cbor_tag_header(typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag);
     auto       payload    = std::vector<std::byte>(values.size_bytes());
     detail::write_endian_payload_to<ByteOrder>(std::span<std::byte>{payload}, values);
     const auto bstr_header = tags::detail::encode_cbor_bstr_header(payload.size());
 
-    cbor_segments segments;
+    byte_segments segments;
     segments.reserve(3);
     segments.append_owned(tag_header.span());
     segments.append_owned(bstr_header.span());
@@ -1504,55 +1480,43 @@ template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typ
 
 template <typed_array_byte_order ByteOrder = typed_array_byte_order::little, typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, ByteOrder>)
-[[nodiscard]] cbor_segments encode_typed_array_segments_copy(std::span<T> values) {
+[[nodiscard]] byte_segments encode_typed_array_segments_copy(std::span<T> values) {
     return encode_typed_array_segments_copy<ByteOrder>(std::span<const T>{values.data(), values.size()});
 }
 
 template <typename T>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
-[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments_be(std::span<const T> values) {
+[[nodiscard]] byte_segments encode_typed_array_borrowed_segments_be(std::span<const T> values) {
     return encode_typed_array_borrowed_segments<typed_array_byte_order::big>(values);
 }
 
 template <typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
-[[nodiscard]] cbor_segments encode_typed_array_borrowed_segments_be(std::span<T> values) {
+[[nodiscard]] byte_segments encode_typed_array_borrowed_segments_be(std::span<T> values) {
     return encode_typed_array_borrowed_segments_be(std::span<const T>{values.data(), values.size()});
 }
 
 template <typename T>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
-[[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<const T> values) {
-    return encode_typed_array_borrowed_segments_be(values);
-}
-
-template <typename T>
-    requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
-[[nodiscard]] cbor_segments encode_typed_array_segments_be(std::span<T> values) {
-    return encode_typed_array_borrowed_segments_be(values);
-}
-
-template <typename T>
-    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
-[[nodiscard]] cbor_segments encode_typed_array_segments_copy_be(std::span<const T> values) {
+[[nodiscard]] byte_segments encode_typed_array_segments_copy_be(std::span<const T> values) {
     return encode_typed_array_segments_copy<typed_array_byte_order::big>(values);
 }
 
 template <typename T>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
-[[nodiscard]] cbor_segments encode_typed_array_segments_copy_be(std::span<T> values) {
+[[nodiscard]] byte_segments encode_typed_array_segments_copy_be(std::span<T> values) {
     return encode_typed_array_segments_copy_be(std::span<const T>{values.data(), values.size()});
 }
 
 template <typename T, typed_array_byte_order ByteOrder>
     requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] cbor_segments encode_segments(const typed_array_ref<T, ByteOrder> &array) {
-    return encode_typed_array_segments<ByteOrder>(array.values());
+[[nodiscard]] byte_segments encode_segments(const typed_array_ref<T, ByteOrder> &array) {
+    return encode_typed_array_borrowed_segments<ByteOrder>(array.values());
 }
 
 template <typename T, typed_array_byte_order ByteOrder>
     requires IsTypedArrayElementFor<T, ByteOrder>
-[[nodiscard]] cbor_segments encode_segments(const typed_array<T, ByteOrder> &array) {
+[[nodiscard]] byte_segments encode_segments(const typed_array<T, ByteOrder> &array) {
     return encode_typed_array_segments_copy<ByteOrder>(array.span());
 }
 

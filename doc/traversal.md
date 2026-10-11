@@ -32,32 +32,42 @@ visitor. For example, count arrays in an item:
 
 using namespace cbor::tags;
 
+/**
+arrays = [[int, int], [int]]
+*/
 int main() {
-    // Encode one outer array containing two inner arrays.
-    std::vector<std::vector<int>> source{{1, 2}, {3}};
+    // Hold the encoded data while the visitor reads it.
     std::vector<std::byte> buffer;
+
+    // Define one outer array containing two inner arrays.
+    std::vector<std::vector<int>> source{{1, 2}, {3}};
+
+    // Encode the nested arrays into the buffer.
     auto encoder = make_encoder(buffer);
     if (!encoder(source)) {
         return 1;
     }
 
+    // Count arrays when the visitor enters their headers.
     std::size_t array_count = 0;
     auto count_arrays = [&array_count](const auto &value, const auto &context) {
         using value_type = std::remove_cvref_t<decltype(value)>;
         if constexpr (std::same_as<value_type, as_array_any>) {
-            // An array has enter and leave events. Count it only on entry.
+            // Count each array on entry, excluding its leave event.
             if (context.kind == walk_event_kind::enter) {
                 ++array_count;
             }
         }
     };
 
+    // Walk one complete item with the array-counting callback.
     auto decoder = make_decoder(buffer);
     auto result = walk_item(decoder, count_arrays);
     if (!result) {
         return 1;
     }
 
+    // Check the count and complete consumption.
     assert(array_count == 3);
     assert(decoder.tell() == buffer.end());
     return 0;
