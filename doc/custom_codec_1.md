@@ -163,8 +163,8 @@ auto enc = make_encoder<codec::custom_1>(out);
 enc(cc1::as_ref(static_tag<1001>{}, message));
 ```
 
-Using `byte_segments` as the output buffer lets callers replay the encoded bytes
-to vectored I/O without first flattening them into one contiguous buffer:
+Using `byte_segments` as the output buffer lets callers write the separate byte
+segments without first combining them into one buffer:
 
 ```cpp
 #include <cbor_tags/cbor_segments.h>
