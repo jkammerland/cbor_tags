@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/codec.h"
+#include "cbor_tags/cwt/detail/headers.h"
 #include "cbor_tags/cwt/types.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cwt_codec.h"
@@ -28,42 +29,26 @@ template <typename Self> struct cwt : base<Self> {
         return status == status_code::success ? decode(map, major, info) : status;
     }
 
-    template <bool Borrowed> void encode(const tags::cwt::basic_header_map<Borrowed> &object) {
-        namespace helpers            = tags::cwt::detail;
-        auto &enc                    = static_cast<Self &>(*this);
-        const auto &[alg, kid, crit] = object;
-
-        if (helpers::validate_critical_labels(crit, alg.has_value(), kid.has_value()) != status_code::success) {
+    template <bool Borrowed, class Extra> void encode(const tags::cwt::basic_header_map<Borrowed, Extra> &object) {
+        namespace helpers = tags::cwt::detail;
+        if (helpers::validate_header_fields(object) != status_code::success) {
             throw tags::detail::encode_status_exception{status_code::error};
         }
-
-        std::uint64_t size{};
-        if (alg) {
-            ++size;
-        }
-        if (!crit.empty()) {
-            ++size;
-        }
-        if (kid) {
-            ++size;
+        for (const auto &label : helpers::selected_header_labels(object)) {
+            if (helpers::is_header_label(label, 7) || helpers::is_header_label(label, 9)) {
+                throw tags::detail::encode_status_exception{status_code::error};
+            }
         }
 
-        enc.encode(as_map{size});
-        if (alg) {
-            enc.encode(std::uint64_t{1});
-            enc.encode(*alg);
+        std::optional<std::span<const typename decltype(object.crit)::value_type>> critical;
+        if (!object.crit.empty()) {
+            critical = object.crit;
         }
-        if (!crit.empty()) {
-            enc.encode(std::uint64_t{2});
-            enc.encode(crit);
-        }
-        if (kid) {
-            enc.encode(std::uint64_t{4});
-            enc.encode(*kid);
-        }
+        auto map = helpers::header_fields(object, critical);
+        helpers::encode_fields(static_cast<Self &>(*this), map);
     }
 
-    template <bool Borrowed> [[nodiscard]] status_code decode(tags::cwt::basic_header_map<Borrowed> &value) {
+    template <bool Borrowed, class Extra> [[nodiscard]] status_code decode(tags::cwt::basic_header_map<Borrowed, Extra> &value) {
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  info{};
@@ -71,63 +56,58 @@ template <typename Self> struct cwt : base<Self> {
         return status == status_code::success ? decode(value, major, info) : status;
     }
 
-    template <bool Borrowed>
-    [[nodiscard]] status_code decode(tags::cwt::basic_header_map<Borrowed> &destination, major_type major, std::byte info) {
+    template <bool Borrowed, class Extra>
+    [[nodiscard]] status_code decode(tags::cwt::basic_header_map<Borrowed, Extra> &destination, major_type major, std::byte info) {
         if constexpr (Borrowed && !IsContiguous<typename Self::input_buffer_type>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            namespace helpers                         = tags::cwt::detail;
-            auto                                 &dec = static_cast<Self &>(*this);
-            tags::cwt::basic_header_map<Borrowed> decoded{};
-            helpers::seen_header_labels           seen_labels;
-            const auto status = helpers::decode_map_entries(dec, major, info, [&](major_type key_major, std::byte key_additional_info) {
-                auto key_result = helpers::decode_header_label(dec, key_major, key_additional_info);
-                if (!key_result) {
-                    return key_result.error();
-                }
-                auto key = std::move(*key_result);
-                seen_labels.add(key);
-
-                if (helpers::is_header_label(key, 1U)) {
-                    auto value = helpers::decode_algorithm(dec);
-                    if (!value) {
-                        return value.error();
+            namespace helpers                                = tags::cwt::detail;
+            auto                                        &dec = static_cast<Self &>(*this);
+            tags::cwt::basic_header_map<Borrowed, Extra> decoded{};
+            std::optional<decltype(decoded.crit)>        critical;
+            auto                                         map    = helpers::header_fields(decoded, critical);
+            const auto                                   status = helpers::decode_fields(
+                dec, map, major, info,
+                [&](const tags::cwt::header_label &label) {
+                    decoded.observed_labels.push_back(label);
+                    return status_code::success;
+                },
+                [&](const tags::cwt::header_label &label, auto &value) {
+                    if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, tags::cwt::algorithm>) {
+                        auto algorithm = helpers::decode_algorithm(dec);
+                        if (!algorithm) {
+                            return algorithm.error();
+                        }
+                        value = *algorithm;
+                        return status_code::success;
+                    } else if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, decltype(decoded.crit)>) {
+                        return helpers::decode_critical_labels(dec, value);
+                    } else {
+                        if (helpers::is_header_label(label, 15)) {
+                            if (tags::detail::decoder_at_end(dec)) {
+                                return status_code::incomplete;
+                            }
+                            // Inspect only the next item's major type, leaving ADL its complete item.
+                            const auto initial = std::to_integer<std::uint8_t>(static_cast<std::byte>(*dec.tell()));
+                            if ((initial >> 5) != static_cast<std::uint8_t>(major_type::Map)) {
+                                return status_code::error;
+                            }
+                        }
+                        return dec.decode(value);
                     }
-                    decoded.alg = *value;
-                } else if (helpers::is_header_label(key, 2U)) {
-                    std::vector<helpers::label_storage<Borrowed>> labels;
-                    const auto                                    labels_status = helpers::decode_critical_labels(dec, labels);
-                    if (labels_status != status_code::success) {
-                        return labels_status;
-                    }
-                    decoded.crit = std::move(labels);
-                } else if (helpers::is_header_label(key, 4U)) {
-                    helpers::byte_storage<Borrowed> value;
-                    const auto                      value_status = dec.decode(value);
-                    if (value_status != status_code::success) {
-                        return value_status;
-                    }
-                    decoded.kid = std::move(value);
-                } else {
-                    // Unknown labels are checked for duplicates within this header
-                    // map, then discarded. Checking them across protected and
-                    // unprotected headers requires application access to both maps.
-                    typename Self::encoded_item_view ignored;
-                    return dec.decode(ignored);
-                }
-                return status_code::success;
-            });
+                });
             if (status != status_code::success) {
                 return status;
             }
-            if (seen_labels.has_duplicates()) {
+            if (critical) {
+                if (critical->empty()) {
+                    return status_code::error;
+                }
+                decoded.crit = std::move(*critical);
+            }
+            if (helpers::validate_header_fields(decoded) != status_code::success) {
                 return status_code::error;
             }
-
-            if (helpers::validate_critical_labels(decoded.crit, decoded.alg.has_value(), decoded.kid.has_value()) != status_code::success) {
-                return status_code::error;
-            }
-
             destination = std::move(decoded);
             return status_code::success;
         }
@@ -278,7 +258,11 @@ template <typename Self> struct cwt : base<Self> {
         }
     }
 
-    template <bool Borrowed> void encode(const tags::cwt::basic_cose_signature<Borrowed> &object) {
+    template <bool Borrowed, class Extra> void encode(const tags::cwt::basic_cose_signature<Borrowed, Extra> &object) {
+        if (object.unprotected.typ) {
+            throw tags::detail::encode_status_exception{status_code::error};
+        }
+
         auto &enc                                              = static_cast<Self &>(*this);
         const auto &[protected_header, unprotected, signature] = object;
 
@@ -288,7 +272,7 @@ template <typename Self> struct cwt : base<Self> {
         enc.encode(signature);
     }
 
-    template <bool Borrowed> [[nodiscard]] status_code decode(tags::cwt::basic_cose_signature<Borrowed> &value) {
+    template <bool Borrowed, class Extra> [[nodiscard]] status_code decode(tags::cwt::basic_cose_signature<Borrowed, Extra> &value) {
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  info{};
@@ -296,25 +280,33 @@ template <typename Self> struct cwt : base<Self> {
         return status == status_code::success ? decode(value, major, info) : status;
     }
 
-    template <bool Borrowed>
-    [[nodiscard]] status_code decode(tags::cwt::basic_cose_signature<Borrowed> &destination, major_type major, std::byte info) {
+    template <bool Borrowed, class Extra>
+    [[nodiscard]] status_code decode(tags::cwt::basic_cose_signature<Borrowed, Extra> &destination, major_type major, std::byte info) {
         if constexpr (Borrowed && !IsContiguous<typename Self::input_buffer_type>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            namespace helpers                             = tags::cwt::detail;
-            auto                                     &dec = static_cast<Self &>(*this);
-            tags::cwt::basic_cose_signature<Borrowed> decoded{};
-            const auto                                status =
+            namespace helpers                                    = tags::cwt::detail;
+            auto                                            &dec = static_cast<Self &>(*this);
+            tags::cwt::basic_cose_signature<Borrowed, Extra> decoded{};
+            const auto                                       status =
                 helpers::decode_array_fields(dec, major, info, decoded.protected_header, decoded.unprotected, decoded.signature);
             if (status != status_code::success) {
                 return status;
+            }
+            if (decoded.unprotected.typ) {
+                return status_code::error;
             }
             destination = std::move(decoded);
             return status_code::success;
         }
     }
 
-    template <bool Borrowed> void encode(const tags::cwt::basic_cose_sign<Borrowed> &object) {
+    template <bool Borrowed, class BodyExtra, class SignerExtra>
+    void encode(const tags::cwt::basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &object) {
+        if (object.unprotected.typ) {
+            throw tags::detail::encode_status_exception{status_code::error};
+        }
+
         auto &enc                                                        = static_cast<Self &>(*this);
         const auto &[protected_header, unprotected, payload, signatures] = object;
 
@@ -328,7 +320,8 @@ template <typename Self> struct cwt : base<Self> {
         enc.encode(signatures);
     }
 
-    template <bool Borrowed> [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign<Borrowed> &value) {
+    template <bool Borrowed, class BodyExtra, class SignerExtra>
+    [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &value) {
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  info{};
@@ -336,14 +329,15 @@ template <typename Self> struct cwt : base<Self> {
         return status == status_code::success ? decode(value, major, info) : status;
     }
 
-    template <bool Borrowed>
-    [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign<Borrowed> &destination, major_type major, std::byte info) {
+    template <bool Borrowed, class BodyExtra, class SignerExtra>
+    [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &destination, major_type major,
+                                     std::byte info) {
         if constexpr (Borrowed && !IsContiguous<typename Self::input_buffer_type>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            namespace helpers                        = tags::cwt::detail;
-            auto                                &dec = static_cast<Self &>(*this);
-            tags::cwt::basic_cose_sign<Borrowed> decoded{};
+            namespace helpers                                                = tags::cwt::detail;
+            auto                                                        &dec = static_cast<Self &>(*this);
+            tags::cwt::basic_cose_sign<Borrowed, BodyExtra, SignerExtra> decoded{};
             const auto status = helpers::decode_array_fields(dec, major, info, decoded.protected_header, decoded.unprotected,
                                                              decoded.payload, decoded.signatures);
             if (status != status_code::success) {
@@ -352,12 +346,19 @@ template <typename Self> struct cwt : base<Self> {
             if (decoded.signatures.empty()) {
                 return status_code::unexpected_group_size;
             }
+            if (decoded.unprotected.typ) {
+                return status_code::error;
+            }
             destination = std::move(decoded);
             return status_code::success;
         }
     }
 
-    template <bool Borrowed> void encode(const tags::cwt::basic_cose_sign1<Borrowed> &object) {
+    template <bool Borrowed, class Extra> void encode(const tags::cwt::basic_cose_sign1<Borrowed, Extra> &object) {
+        if (object.unprotected.typ) {
+            throw tags::detail::encode_status_exception{status_code::error};
+        }
+
         auto &enc                                                       = static_cast<Self &>(*this);
         const auto &[protected_header, unprotected, payload, signature] = object;
 
@@ -368,7 +369,7 @@ template <typename Self> struct cwt : base<Self> {
         enc.encode(signature);
     }
 
-    template <bool Borrowed> [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign1<Borrowed> &value) {
+    template <bool Borrowed, class Extra> [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign1<Borrowed, Extra> &value) {
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  info{};
@@ -376,18 +377,21 @@ template <typename Self> struct cwt : base<Self> {
         return status == status_code::success ? decode(value, major, info) : status;
     }
 
-    template <bool Borrowed>
-    [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign1<Borrowed> &destination, major_type major, std::byte info) {
+    template <bool Borrowed, class Extra>
+    [[nodiscard]] status_code decode(tags::cwt::basic_cose_sign1<Borrowed, Extra> &destination, major_type major, std::byte info) {
         if constexpr (Borrowed && !IsContiguous<typename Self::input_buffer_type>) {
             return status_code::contiguous_view_on_non_contiguous_data;
         } else {
-            namespace helpers                         = tags::cwt::detail;
-            auto                                 &dec = static_cast<Self &>(*this);
-            tags::cwt::basic_cose_sign1<Borrowed> decoded{};
+            namespace helpers                                = tags::cwt::detail;
+            auto                                        &dec = static_cast<Self &>(*this);
+            tags::cwt::basic_cose_sign1<Borrowed, Extra> decoded{};
             const auto status = helpers::decode_array_fields(dec, major, info, decoded.protected_header, decoded.unprotected,
                                                              decoded.payload, decoded.signature);
             if (status != status_code::success) {
                 return status;
+            }
+            if (decoded.unprotected.typ) {
+                return status_code::error;
             }
             destination = std::move(decoded);
             return status_code::success;
