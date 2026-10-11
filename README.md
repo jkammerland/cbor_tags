@@ -19,6 +19,7 @@ See standard specifications for more information:
 - **Experimental:** COSE ESP256 [RFC9864](https://www.rfc-editor.org/rfc/rfc9864.html) — [optional OpenSSL backend](doc/cwt_openssl.md).
 
 - **Experimental:** COSE header extensions [RFC9596](https://www.rfc-editor.org/rfc/rfc9596.html) / [RFC9597](https://www.rfc-editor.org/rfc/rfc9597.html) — [typed headers and claims](doc/cwt_headers.md).
+- **Experimental:** CWT confirmation [RFC8747](https://www.rfc-editor.org/rfc/rfc8747.html) and public-key thumbprints [RFC9679](https://www.rfc-editor.org/rfc/rfc9679.html) — [key models and providers](doc/cwt_keys.md).
 
 See [CWT and COSE standards coverage](doc/cwt_standards.md) for implemented capabilities and follow-ups.
 

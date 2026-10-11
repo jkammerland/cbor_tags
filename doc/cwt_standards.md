@@ -27,18 +27,18 @@ This table lists implemented capabilities and their dedicated regression suites.
 | Caller storage and custom layouts | Examples 27–29 and CWT signing tests | Borrowed collections may allocate descriptors; source bytes remain caller-owned. |
 | Typed map/header extensions | `test_cwt_fields_*`, `test_cwt_headers_*`, examples 30–32 | Selected fields only; automatic preservation of unknown values is outside scope. |
 | Countersignatures | Planned follow-up stack | V2 full/abbreviated operations and explicit legacy full verification. |
-| Public COSE keys and confirmation | Planned follow-up stack | EC2, OKP, RSA public forms; confirmation and deterministic thumbprints. |
+| Public COSE keys and confirmation | `test_cwt_keys_*`, `test_cwt_confirmation_*`, `test_cwt_thumbprint_*`, examples 36–39 | EC2, OKP, RSA public forms; no secret-key transport or encrypted confirmation. |
 
 ## Direct extensions
 
 | Specification | Follow-up |
 |---|---|
-| [RFC 8747](https://www.rfc-editor.org/rfc/rfc8747.html) | Public confirmation methods planned. Proof of presenter possession remains an application operation. |
+| [RFC 8747](https://www.rfc-editor.org/rfc/rfc8747.html) | Public key, key-ID and thumbprint confirmation; encrypted confirmation is deferred. Proof of presenter possession is an application operation, separate from authenticating the issuer token. |
 | [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html) | Countersignature stack planned for Sign1, individual signatures, and full countersignatures; other targets deferred. |
 | [RFC 9360](https://www.rfc-editor.org/rfc/rfc9360.html) | X.509 header representations and trust/path validation need separate work. |
 | [RFC 9596](https://www.rfc-editor.org/rfc/rfc9596.html) | Protected `typ` header implemented. Application selects expected media type. |
 | [RFC 9597](https://www.rfc-editor.org/rfc/rfc9597.html) | CWT Claims header implemented. Replicated claims require application semantic comparison or explicit profile rules. |
-| [RFC 9679](https://www.rfc-editor.org/rfc/rfc9679.html) | Deterministic public-key thumbprints planned with optional hash providers. |
+| [RFC 9679](https://www.rfc-editor.org/rfc/rfc9679.html) | SHA-256 public-key thumbprints. Thumbprints identify key material, not its allowed operations. |
 | [RFC 9781](https://www.rfc-editor.org/rfc/rfc9781.html) | UCCS is a distinct externally protected format, not an unsigned tag-61 token. Dedicated profile deferred. |
 | [RFC 9921](https://www.rfc-editor.org/rfc/rfc9921.html) | Timestamp headers and RFC 3161 verification deferred. |
 | [RFC 9942](https://www.rfc-editor.org/rfc/rfc9942.html) | COSE receipts and proof verification deferred. |
