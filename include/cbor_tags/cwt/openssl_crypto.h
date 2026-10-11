@@ -28,6 +28,17 @@ struct openssl_esp256_backend {
         return detail::openssl_compat_es256_sign(key, std::forward<Parts>(parts), output);
     }
 
+    template <typename Key, detail::SignatureParts Parts>
+        requires requires(const Key &key) {
+            key.get();
+            key.algorithm_id();
+        }
+    [[nodiscard]] static expected<void, status_code> verify(const Key &key, Parts &&parts, std::span<const std::byte> signature) {
+        if (key.algorithm_id() != algorithm_id)
+            return unexpected<status_code>{status_code::error};
+        return verify(key.get(), std::forward<Parts>(parts), signature);
+    }
+
     template <detail::SignatureParts Parts>
     [[nodiscard]] static expected<void, status_code> verify(EVP_PKEY *key, Parts &&parts, std::span<const std::byte> signature) {
         return detail::openssl_compat_es256_verify(key, std::forward<Parts>(parts), signature);
@@ -37,6 +48,17 @@ struct openssl_esp256_backend {
 // Explicit compatibility verification; new tokens use ESP256.
 struct openssl_es256_verifier {
     static constexpr algorithm algorithm_id = algorithm::es256;
+
+    template <typename Key, detail::SignatureParts Parts>
+        requires requires(const Key &key) {
+            key.get();
+            key.algorithm_id();
+        }
+    [[nodiscard]] static expected<void, status_code> verify(const Key &key, Parts &&parts, std::span<const std::byte> signature) {
+        if (key.algorithm_id() != algorithm_id)
+            return unexpected<status_code>{status_code::error};
+        return verify(key.get(), std::forward<Parts>(parts), signature);
+    }
 
     template <detail::SignatureParts Parts>
     [[nodiscard]] static expected<void, status_code> verify(EVP_PKEY *key, Parts &&parts, std::span<const std::byte> signature) {

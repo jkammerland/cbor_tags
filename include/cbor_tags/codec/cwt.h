@@ -7,12 +7,13 @@
 #include "cbor_tags/detail/cwt_codec.h"
 #include "cbor_tags/detail/cwt_countersignatures.h"
 #include "cbor_tags/detail/cwt_fields.h"
+#include "cbor_tags/detail/cwt_keys.h"
 
 namespace cbor::tags::codec {
 
-template <typename Self> struct cwt : base<Self>, tags::cwt::detail::countersignature_codec<Self> {
-    using base<Self>::encode;
-    using base<Self>::decode;
+template <typename Self> struct cwt : tags::cwt::detail::key_codec<Self>, tags::cwt::detail::countersignature_codec<Self> {
+    using tags::cwt::detail::key_codec<Self>::encode;
+    using tags::cwt::detail::key_codec<Self>::decode;
     using tags::cwt::detail::countersignature_codec<Self>::encode;
     using tags::cwt::detail::countersignature_codec<Self>::decode;
 
