@@ -28,11 +28,11 @@ using cose_sign_tag  = static_tag<cose_sign_tag_value>;
 // Wire identifiers; built-in signing/verification currently implements ESP256 only.
 // Other algorithms can be supplied through the Backend template parameter.
 enum class algorithm : std::int64_t {
-    esp256 = -9,
-    esp384 = -51,
-    esp512 = -52,
+    esp256  = -9,
+    esp384  = -51,
+    esp512  = -52,
     ed25519 = -19,
-    ed448 = -53,
+    ed448   = -53,
     // Deprecated RFC 9053 identifiers remain distinct wire values.
     es256 = -7,
     eddsa = -8,
