@@ -2,6 +2,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/codec/cwt.h>
 #include <doctest/doctest.h>
+#include <ostream>
 
 using namespace cbor::tags;
 
