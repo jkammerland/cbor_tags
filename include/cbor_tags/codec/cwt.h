@@ -4,12 +4,29 @@
 #include "cbor_tags/cwt/types.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cwt_codec.h"
+#include "cbor_tags/detail/cwt_fields.h"
 
 namespace cbor::tags::codec {
 
 template <typename Self> struct cwt : base<Self> {
     using base<Self>::encode;
     using base<Self>::decode;
+
+    template <typename... Bindings> void encode(const tags::cwt::detail::field_map<Bindings...> &map) {
+        tags::cwt::detail::encode_fields(static_cast<Self &>(*this), map);
+    }
+
+    template <typename... Bindings> status_code decode(tags::cwt::detail::field_map<Bindings...> &map, major_type major, std::byte info) {
+        return tags::cwt::detail::decode_fields(static_cast<Self &>(*this), map, major, info);
+    }
+
+    template <typename... Bindings> status_code decode(tags::cwt::detail::field_map<Bindings...> &map) {
+        auto      &dec = static_cast<Self &>(*this);
+        major_type major{};
+        std::byte  info{};
+        const auto status = tags::detail::read_initial_byte(dec, major, info);
+        return status == status_code::success ? decode(map, major, info) : status;
+    }
 
     template <bool Borrowed> void encode(const tags::cwt::basic_header_map<Borrowed> &object) {
         namespace helpers            = tags::cwt::detail;

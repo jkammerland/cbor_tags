@@ -44,6 +44,7 @@ through signing, token encoding, decoding and verification.
 | [27_experimental_cwt_custom_types.cpp](27_experimental_cwt_custom_types.cpp) | Choose application field names and storage | Encode an owning application type and decode into a different type with borrowed text. |
 | [28_experimental_cwt_borrowed_token.cpp](28_experimental_cwt_borrowed_token.cpp) | Sign and receive through views | Use a caller-owned signature buffer, encode segments, then decode views, verify with AAD and check claims. |
 | [29_experimental_cwt_borrowed_multi_signer.cpp](29_experimental_cwt_borrowed_multi_signer.cpp) | Share one payload between signers | Keep separate signature buffers and require both trusted signers before reading borrowed claims. |
+| [30_experimental_cwt_fields.cpp](30_experimental_cwt_fields.cpp) | Select application fields | Integer and text labels bind to independently chosen receiver storage. |
 
 ## CDDL
 
