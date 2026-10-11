@@ -153,6 +153,5 @@ template <typename Self> struct key_codec : codec::base<Self> {
             return status_code::success;
         }
     }
-
 };
 } // namespace cbor::tags::cwt::detail
