@@ -140,9 +140,8 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
     return der;
 }
 
-template <typename Key>
-[[nodiscard]] inline expected<std::vector<std::byte>, status_code> openssl_compat_es256_sign(Key                       *key,
-                                                                                             std::span<const std::byte> to_be_signed) {
+template <typename Key, SignatureParts Parts>
+[[nodiscard]] inline expected<std::vector<std::byte>, status_code> openssl_compat_es256_sign(Key *key, Parts &&parts) {
     auto key_status = validate_openssl_es256_key(key);
     if (!key_status) {
         return unexpected<status_code>{key_status.error()};
@@ -158,9 +157,10 @@ template <typename Key>
     }
 
     std::size_t der_size{};
-    const auto *input = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    if (EVP_DigestSignUpdate(context.get(), input, to_be_signed.size()) != 1) {
-        return unexpected<status_code>{status_code::error};
+    for (const auto bytes : parts) {
+        if (!bytes.empty() && EVP_DigestSignUpdate(context.get(), bytes.data(), bytes.size()) != 1) {
+            return unexpected<status_code>{status_code::error};
+        }
     }
     if (EVP_DigestSignFinal(context.get(), nullptr, &der_size) != 1) {
         return unexpected<status_code>{status_code::error};
@@ -175,8 +175,8 @@ template <typename Key>
     return ecdsa_der_to_raw_es256(std::as_bytes(std::span<const unsigned char>{der.data(), der.size()}));
 }
 
-template <typename Key>
-[[nodiscard]] inline expected<void, status_code> openssl_compat_es256_verify(Key *key, std::span<const std::byte> to_be_signed,
+template <typename Key, SignatureParts Parts>
+[[nodiscard]] inline expected<void, status_code> openssl_compat_es256_verify(Key *key, Parts &&parts,
                                                                              std::span<const std::byte> signature) {
     auto key_status = validate_openssl_es256_key(key);
     if (!key_status) {
@@ -197,10 +197,10 @@ template <typename Key>
         return unexpected<status_code>{status_code::error};
     }
 
-    const auto *input         = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    const auto  update_status = EVP_DigestVerifyUpdate(context.get(), input, to_be_signed.size());
-    if (update_status != 1) {
-        return unexpected<status_code>{status_code::error};
+    for (const auto bytes : parts) {
+        if (!bytes.empty() && EVP_DigestVerifyUpdate(context.get(), bytes.data(), bytes.size()) != 1) {
+            return unexpected<status_code>{status_code::error};
+        }
     }
 
     const auto verify_status = EVP_DigestVerifyFinal(context.get(), der->data(), der->size());

@@ -8,7 +8,9 @@
 #include <openssl/ec.h>
 #include <openssl/evp.h>
 #include <openssl/obj_mac.h>
+#include <ranges>
 #include <span>
+#include <utility>
 #include <vector>
 
 using namespace cbor::tags;
@@ -22,15 +24,18 @@ struct application_backend {
     static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
 
     // Replace this provider call with your library's ES256 signing operation.
+    template <std::ranges::input_range Parts>
     static expected<std::vector<std::byte>, status_code> sign(const application_key &key,
-        std::span<const std::byte> to_be_signed) {
-        return cwt::openssl_es256_backend::sign(key.handle.get(), to_be_signed);
+        Parts &&parts) {
+        return cwt::openssl_es256_backend::sign(key.handle.get(), std::forward<Parts>(parts));
     }
 
     // Replace this provider call with your library's ES256 verification operation.
-    static expected<void, status_code> verify(const application_key &key,
-        std::span<const std::byte> to_be_signed, std::span<const std::byte> signature) {
-        return cwt::openssl_es256_backend::verify(key.handle.get(), to_be_signed, signature);
+    template <std::ranges::input_range Parts>
+    static expected<void, status_code> verify(const application_key &key, Parts &&parts,
+        std::span<const std::byte> signature) {
+        return cwt::openssl_es256_backend::verify(key.handle.get(), std::forward<Parts>(parts),
+            signature);
     }
 };
 

@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor_segments.h"
 #include "cbor_tags/codec/cwt.h"
+#include "cbor_tags/cwt/detail/signature_input.h"
 
 namespace cbor::tags::cwt {
 
@@ -76,7 +77,7 @@ make_sign_sig_structure(const cose_sign &message, const cose_signature &signatur
 }
 
 template <bool Borrowed>
-[[nodiscard]] inline expected<std::vector<std::byte>, status_code>
+[[nodiscard]] inline expected<byte_segments, status_code>
 make_sign1_tbs(const basic_cose_sign1<Borrowed> &message, std::span<const std::byte> external_aad = {},
                std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     if (!message.payload && !detached_payload) {
@@ -87,11 +88,11 @@ make_sign1_tbs(const basic_cose_sign1<Borrowed> &message, std::span<const std::b
                                        .sign_protected = std::nullopt,
                                        .external_aad   = external_aad,
                                        .payload = message.payload ? std::span<const std::byte>{*message.payload} : *detached_payload};
-    return encode_to_bytes(structure);
+    return detail::encode_signature_input(structure);
 }
 
 template <bool Borrowed, bool SignatureBorrowed>
-[[nodiscard]] inline expected<std::vector<std::byte>, status_code>
+[[nodiscard]] inline expected<byte_segments, status_code>
 make_sign_tbs(const basic_cose_sign<Borrowed> &message, const basic_cose_signature<SignatureBorrowed> &signature,
               std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
     if (!message.payload && !detached_payload) {
@@ -102,8 +103,25 @@ make_sign_tbs(const basic_cose_sign<Borrowed> &message, const basic_cose_signatu
                                        .sign_protected = std::span<const std::byte>{signature.protected_header},
                                        .external_aad   = external_aad,
                                        .payload = message.payload ? std::span<const std::byte>{*message.payload} : *detached_payload};
-    return encode_to_bytes(structure);
+    return detail::encode_signature_input(structure);
 }
+
+// Returned segments borrow the models, so temporary models cannot be used here.
+template <bool Borrowed>
+void make_sign1_tbs(const basic_cose_sign1<Borrowed> &&, std::span<const std::byte> = {},
+                    std::optional<std::span<const std::byte>> = std::nullopt) = delete;
+
+template <bool BodyBorrowed, bool SignatureBorrowed>
+void make_sign_tbs(const basic_cose_sign<BodyBorrowed> &&, const basic_cose_signature<SignatureBorrowed> &, std::span<const std::byte> = {},
+                   std::optional<std::span<const std::byte>> = std::nullopt) = delete;
+
+template <bool BodyBorrowed, bool SignatureBorrowed>
+void make_sign_tbs(const basic_cose_sign<BodyBorrowed> &, const basic_cose_signature<SignatureBorrowed> &&, std::span<const std::byte> = {},
+                   std::optional<std::span<const std::byte>> = std::nullopt) = delete;
+
+template <bool BodyBorrowed, bool SignatureBorrowed>
+void make_sign_tbs(const basic_cose_sign<BodyBorrowed> &&, const basic_cose_signature<SignatureBorrowed> &&,
+                   std::span<const std::byte> = {}, std::optional<std::span<const std::byte>> = std::nullopt) = delete;
 
 template <bool Borrowed>
 [[nodiscard]] inline expected<void, status_code>
@@ -163,7 +181,7 @@ template <typename Backend, typename SigningKey>
         return unexpected<status_code>{to_be_signed.error()};
     }
 
-    auto signature = Backend::sign(std::forward<SigningKey>(key), std::span<const std::byte>{to_be_signed->data(), to_be_signed->size()});
+    auto signature = Backend::sign(std::forward<SigningKey>(key), detail::signature_parts(*to_be_signed));
     if (!signature) {
         return unexpected<status_code>{signature.error()};
     }
@@ -205,8 +223,7 @@ sign_signature(SigningKey &&key, const cose_sign &message, header_map protected_
         return unexpected<status_code>{to_be_signed.error()};
     }
 
-    auto signature_bytes =
-        Backend::sign(std::forward<SigningKey>(key), std::span<const std::byte>{to_be_signed->data(), to_be_signed->size()});
+    auto signature_bytes = Backend::sign(std::forward<SigningKey>(key), detail::signature_parts(*to_be_signed));
     if (!signature_bytes) {
         return unexpected<status_code>{signature_bytes.error()};
     }
@@ -276,7 +293,7 @@ template <typename Backend, typename VerificationKey, bool Borrowed>
         return unexpected<status_code>{to_be_signed.error()};
     }
 
-    return Backend::verify(std::forward<VerificationKey>(key), std::span<const std::byte>{to_be_signed->data(), to_be_signed->size()},
+    return Backend::verify(std::forward<VerificationKey>(key), detail::signature_parts(*to_be_signed),
                            std::span<const std::byte>{message.signature.data(), message.signature.size()});
 }
 
@@ -303,7 +320,7 @@ verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message
         return unexpected<status_code>{to_be_signed.error()};
     }
 
-    return Backend::verify(std::forward<VerificationKey>(key), std::span<const std::byte>{to_be_signed->data(), to_be_signed->size()},
+    return Backend::verify(std::forward<VerificationKey>(key), detail::signature_parts(*to_be_signed),
                            std::span<const std::byte>{signature.signature.data(), signature.signature.size()});
 }
 

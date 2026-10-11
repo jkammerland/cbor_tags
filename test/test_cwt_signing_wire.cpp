@@ -19,7 +19,7 @@ TEST_SUITE("cbor_wire/cwt") {
 
         const auto to_be_signed = make_sign1_tbs(message);
         REQUIRE(to_be_signed);
-        CHECK_EQ(to_hex(*to_be_signed), "846a5369676e61747572653143a101264043010203");
+        CHECK_EQ(to_hex(to_be_signed->flatten()), "846a5369676e61747572653143a101264043010203");
 
         std::vector<std::byte> encoded;
         auto                   enc = make_encoder<codec::cwt>(encoded);
@@ -51,7 +51,7 @@ TEST_SUITE("cbor_wire/cwt") {
 
         const auto to_be_signed = make_sign_tbs(message, signature);
         REQUIRE(to_be_signed);
-        CHECK_EQ(to_hex(*to_be_signed), "85695369676e617475726543a1012644a104410140420102");
+        CHECK_EQ(to_hex(to_be_signed->flatten()), "85695369676e617475726543a1012644a104410140420102");
 
         std::vector<std::byte> encoded;
         auto                   enc = make_encoder<codec::cwt>(encoded);
@@ -59,6 +59,24 @@ TEST_SUITE("cbor_wire/cwt") {
 
         CHECK(encoded.size() > signature.signature.size());
         CHECK_EQ(to_hex(std::span<const std::byte>{encoded.data(), 9}), "d83dd8628443a10126");
+    }
+
+    TEST_CASE("segmented signing input uses exact byte string length boundaries") {
+        for (const auto &[size, header] : std::array<std::pair<std::size_t, std::string_view>, 5>{
+                 {{0, "40"}, {23, "57"}, {24, "5818"}, {255, "58ff"}, {256, "590100"}}}) {
+            const cose_sign1 message{.protected_header = {},
+                                     .unprotected      = {},
+                                     .payload          = std::vector<std::byte>(size, std::byte{0xab}),
+                                     .signature        = {}};
+            auto             input = make_sign1_tbs(message);
+            REQUIRE(input);
+            std::string expected_hex = "846a5369676e6174757265314040";
+            expected_hex += header;
+            for (std::size_t i = 0; i < size; ++i) {
+                expected_hex += "ab";
+            }
+            CHECK(to_hex(input->flatten()) == expected_hex);
+        }
     }
 
 } // TEST_SUITE("cbor_wire/cwt")
