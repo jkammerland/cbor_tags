@@ -44,9 +44,13 @@ through signing, token encoding, decoding and verification.
 | [27_experimental_cwt_custom_types.cpp](27_experimental_cwt_custom_types.cpp) | Choose application field names and storage | Encode an owning application type and decode into a different type with borrowed text. |
 | [28_experimental_cwt_borrowed_token.cpp](28_experimental_cwt_borrowed_token.cpp) | Sign and receive through views | Use a caller-owned signature buffer, encode segments, then decode views, verify with AAD and check claims. |
 | [29_experimental_cwt_borrowed_multi_signer.cpp](29_experimental_cwt_borrowed_multi_signer.cpp) | Share one payload between signers | Keep separate signature buffers and require both trusted signers before reading borrowed claims. |
+
 | [30_experimental_cwt_fields.cpp](30_experimental_cwt_fields.cpp) | Select application fields | Integer and text labels bind to independently chosen receiver storage. |
 | [31_experimental_cwt_type.cpp](31_experimental_cwt_type.cpp) | Describe the complete token | Protected `typ` distinguishes a COSE object from its payload content type. |
 | [32_experimental_cwt_header_claims.cpp](32_experimental_cwt_header_claims.cpp) | Carry claims in protected headers | Verify first, then compare replicated claims by value. |
+| [33_experimental_cwt_countersignature.cpp](33_experimental_cwt_countersignature.cpp) | Countersign a completed signature | A Sign1 countersignature binds the original signature as well as its payload. |
+| [34_experimental_cwt_abbreviated_countersignature.cpp](34_experimental_cwt_abbreviated_countersignature.cpp) | Use an abbreviated countersignature | The application supplies its algorithm and key context. |
+| [35_experimental_cwt_countersignature_chain.cpp](35_experimental_cwt_countersignature_chain.cpp) | Verify a countersignature chain | Each verification step authenticates its selected signature only. |
 | [36_cwt_public_keys.cpp](36_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
 | [37_cwt_confirmation.cpp](37_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 | [38_cwt_key_thumbprint.cpp](38_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
@@ -88,7 +92,7 @@ Run one example directly:
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
 
-Examples 24–26, 28–29, 32, and 38–39 additionally require OpenSSL development files and the explicit opt-in:
+Examples 24–26, 28–29, 32–35, and 38–39 additionally require OpenSSL development files and the explicit opt-in:
 
 ```bash
 cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON

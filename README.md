@@ -18,6 +18,7 @@ See standard specifications for more information:
 - **Experimental:** COSE [RFC9052](https://www.rfc-editor.org/rfc/rfc9052.html) — [Sign/Sign1 models and signing helpers](doc/cose_signing.md).
 - **Experimental:** COSE ESP256 [RFC9864](https://www.rfc-editor.org/rfc/rfc9864.html) — [optional OpenSSL backend](doc/cwt_openssl.md).
 
+- **Experimental:** COSE countersignatures [RFC9338](https://www.rfc-editor.org/rfc/rfc9338.html) — [signing, verification and supported targets](doc/cwt_countersignatures.md).
 - **Experimental:** COSE header extensions [RFC9596](https://www.rfc-editor.org/rfc/rfc9596.html) / [RFC9597](https://www.rfc-editor.org/rfc/rfc9597.html) — [typed headers and claims](doc/cwt_headers.md).
 - **Experimental:** CWT confirmation [RFC8747](https://www.rfc-editor.org/rfc/rfc8747.html) and public-key thumbprints [RFC9679](https://www.rfc-editor.org/rfc/rfc9679.html) — [key models and providers](doc/cwt_keys.md).
 

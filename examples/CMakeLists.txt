@@ -8,6 +8,9 @@ set(OPENSSL_EXAMPLES
   28_experimental_cwt_borrowed_token
   29_experimental_cwt_borrowed_multi_signer
   32_experimental_cwt_header_claims
+  33_experimental_cwt_countersignature
+  34_experimental_cwt_abbreviated_countersignature
+  35_experimental_cwt_countersignature_chain
   38_cwt_key_thumbprint
   39_cwt_confirmation_token)
 
