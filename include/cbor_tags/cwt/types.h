@@ -56,12 +56,20 @@ template <bool Borrowed> using label_storage    = std::variant<integer, text_sto
 
 } // namespace detail
 
-template <bool Borrowed> struct basic_header_map {
+template <bool Borrowed, class Extra = std::monostate> struct basic_header_map {
     std::optional<algorithm>                      alg{};
     std::optional<detail::byte_storage<Borrowed>> kid{};
     std::vector<detail::label_storage<Borrowed>>  crit{};
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return !alg && !kid && crit.empty(); }
+    std::optional<std::variant<std::uint64_t, detail::text_storage<Borrowed>>> typ{};
+    [[no_unique_address]] Extra                                                extra{};
+
+    // Receive-side labels include skipped entries; encoding uses the selected fields.
+    std::vector<header_label> observed_labels{};
+
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return !alg && !kid && crit.empty() && !typ && std::same_as<Extra, std::monostate>;
+    }
 };
 
 template <bool Borrowed> struct basic_claims_set {
@@ -74,22 +82,22 @@ template <bool Borrowed> struct basic_claims_set {
     std::optional<detail::byte_storage<Borrowed>>     cwt_id{};
 };
 
-template <bool Borrowed> struct basic_cose_signature {
-    detail::byte_storage<Borrowed> protected_header;
-    basic_header_map<Borrowed>     unprotected;
-    detail::byte_storage<Borrowed> signature;
+template <bool Borrowed, class Extra = std::monostate> struct basic_cose_signature {
+    detail::byte_storage<Borrowed>    protected_header;
+    basic_header_map<Borrowed, Extra> unprotected;
+    detail::byte_storage<Borrowed>    signature;
 };
 
-template <bool Borrowed> struct basic_cose_sign {
-    detail::byte_storage<Borrowed>                protected_header;
-    basic_header_map<Borrowed>                    unprotected;
-    std::optional<detail::byte_storage<Borrowed>> payload;
-    std::vector<basic_cose_signature<Borrowed>>   signatures;
+template <bool Borrowed, class BodyExtra = std::monostate, class SignerExtra = std::monostate> struct basic_cose_sign {
+    detail::byte_storage<Borrowed>                           protected_header;
+    basic_header_map<Borrowed, BodyExtra>                    unprotected;
+    std::optional<detail::byte_storage<Borrowed>>            payload;
+    std::vector<basic_cose_signature<Borrowed, SignerExtra>> signatures;
 };
 
-template <bool Borrowed> struct basic_cose_sign1 {
+template <bool Borrowed, class Extra = std::monostate> struct basic_cose_sign1 {
     detail::byte_storage<Borrowed>                protected_header;
-    basic_header_map<Borrowed>                    unprotected;
+    basic_header_map<Borrowed, Extra>             unprotected;
     std::optional<detail::byte_storage<Borrowed>> payload;
     detail::byte_storage<Borrowed>                signature;
 };
@@ -107,7 +115,7 @@ namespace detail {
 template <typename T> struct model {
     static constexpr bool supported = false;
 };
-template <bool Borrowed> struct model<basic_header_map<Borrowed>> {
+template <bool Borrowed, class Extra> struct model<basic_header_map<Borrowed, Extra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
@@ -115,15 +123,15 @@ template <bool Borrowed> struct model<basic_claims_set<Borrowed>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
-template <bool Borrowed> struct model<basic_cose_signature<Borrowed>> {
+template <bool Borrowed, class Extra> struct model<basic_cose_signature<Borrowed, Extra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
-template <bool Borrowed> struct model<basic_cose_sign<Borrowed>> {
+template <bool Borrowed, class BodyExtra, class SignerExtra> struct model<basic_cose_sign<Borrowed, BodyExtra, SignerExtra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
-template <bool Borrowed> struct model<basic_cose_sign1<Borrowed>> {
+template <bool Borrowed, class Extra> struct model<basic_cose_sign1<Borrowed, Extra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
@@ -147,6 +155,9 @@ template <typename Decoder, detail::Model T> auto decode(Decoder &, T &&) -> typ
     static_assert(always_false<T>::value, "CWT types require codec::cwt");
     return {};
 }
+
+using media_type      = std::variant<std::uint64_t, std::string>;
+using media_type_view = std::variant<std::uint64_t, std::string_view>;
 
 using header_map          = basic_header_map<false>;
 using header_map_view     = basic_header_map<true>;
@@ -201,6 +212,10 @@ inline audience_view view_audience(const audience_claim &audience) {
             },
             label));
     }
+    if (value.typ) {
+        result.typ = std::visit([](const auto &type) -> media_type_view { return type; }, *value.typ);
+    }
+    result.observed_labels = value.observed_labels;
     return result;
 }
 

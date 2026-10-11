@@ -6,7 +6,8 @@ set(OPENSSL_EXAMPLES
   25_experimental_cwt_token
   26_experimental_cwt_multi_signer
   28_experimental_cwt_borrowed_token
-  29_experimental_cwt_borrowed_multi_signer)
+  29_experimental_cwt_borrowed_multi_signer
+  32_experimental_cwt_header_claims)
 
 foreach(EXAMPLE_SOURCE IN LISTS EXAMPLE_SOURCES)
   get_filename_component(EXAMPLE_NAME "${EXAMPLE_SOURCE}" NAME_WE)
