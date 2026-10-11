@@ -13,13 +13,14 @@ namespace cbor::tags::cwt {
 struct openssl_es256_backend {
     static constexpr algorithm algorithm_id = algorithm::es256;
 
-    [[nodiscard]] static expected<std::vector<std::byte>, status_code> sign(EVP_PKEY *key, std::span<const std::byte> to_be_signed) {
-        return detail::openssl_compat_es256_sign(key, to_be_signed);
+    template <detail::SignatureParts Parts>
+    [[nodiscard]] static expected<std::vector<std::byte>, status_code> sign(EVP_PKEY *key, Parts &&parts) {
+        return detail::openssl_compat_es256_sign(key, std::forward<Parts>(parts));
     }
 
-    [[nodiscard]] static expected<void, status_code> verify(EVP_PKEY *key, std::span<const std::byte> to_be_signed,
-                                                            std::span<const std::byte> signature) {
-        return detail::openssl_compat_es256_verify(key, to_be_signed, signature);
+    template <detail::SignatureParts Parts>
+    [[nodiscard]] static expected<void, status_code> verify(EVP_PKEY *key, Parts &&parts, std::span<const std::byte> signature) {
+        return detail::openssl_compat_es256_verify(key, std::forward<Parts>(parts), signature);
     }
 };
 

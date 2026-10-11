@@ -19,6 +19,10 @@ The backend receives the encoded COSE `Sig_structure`, not just the payload or a
 precomputed digest. For ES256, the provider applies SHA-256 and returns a 64-byte
 `r || s` signature, converting its native signature format if necessary.
 
+Each input range yields `std::span<const std::byte>` values in signing order.
+Consume it once during the call; do not retain its spans. Empty spans contribute
+no bytes. The library does not flatten the input for a contiguous-only provider.
+
 Provide an algorithm identifier and operations with these signatures:
 
 ```cpp
@@ -28,10 +32,12 @@ using namespace cbor::tags;
 
 struct custom_backend {
     static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
+    template <std::ranges::input_range Parts>
     static expected<std::vector<std::byte>, status_code>
-    sign(void *key, std::span<const std::byte> to_be_signed);
+    sign(void *key, Parts&& parts);
+    template <std::ranges::input_range Parts>
     static expected<void, status_code>
-    verify(void *key, std::span<const std::byte> to_be_signed,
+    verify(void *key, Parts&& parts,
            std::span<const std::byte> signature);
 };
 // cwt::sign1<custom_backend>(key, {}, {}, payload)
@@ -73,15 +79,21 @@ Check `bytes` first. Use `add_signature` or `sign_signature` for more signatures
 `make_sign1_tbs` and `make_sign_tbs` produce the corresponding
 [Sig_structure (§4.4)](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4).
 
-`verify_sign1`, `verify_signature`, `verify_sign`, `make_sign1_tbs` and
-`make_sign_tbs` accept borrowed models. Verification still parses protected
-headers and allocates the bytes to be signed. Signing helpers return owning
-results. `sign` and `sign1` copy the supplied payload into that result;
-`add_signature` appends an owned signature to the existing message. AAD spans
-borrow caller-owned storage for the call and are not retained in the message.
-The helpers encode headers, payload and AAD into temporary bytes for signing or
-verification; the backend receives views of those bytes for the duration of its
-call. These helpers are not an allocation-free signing path.
+`make_sign1_tbs` and `make_sign_tbs` return `byte_segments`: generated CBOR
+headers followed by views into the original protected bytes, payload and AAD.
+Here, `tbs` means "to be signed". Their model arguments must be named objects;
+keep all referenced storage alive and stable until the segments have been consumed.
+Call `flatten()` explicitly if another API needs one contiguous buffer.
+
+`verify_sign1`, `verify_signature` and `verify_sign` accept borrowed models and
+pass those byte views directly to the backend. Verification preserves the original
+protected-header encoding. Header validation and segment descriptors may still
+allocate; verification does not concatenate the signed input.
+
+Signing helpers return owning results. `sign` and `sign1` copy the supplied
+payload into that result; `add_signature` appends an owned signature to the
+existing message. Their backend input is segmented too. AAD spans borrow
+caller-owned storage for the call and are not retained in the message.
 
 For a null payload, verification requires a detached payload. `std::nullopt`
 means missing; an engaged empty span means a valid empty payload:

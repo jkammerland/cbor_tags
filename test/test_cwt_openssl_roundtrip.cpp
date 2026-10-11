@@ -1,5 +1,8 @@
 #include "cwt_openssl_test_support.h"
 
+#include <array>
+#include <sstream>
+
 using namespace cwt_test;
 
 TEST_SUITE("roundtrip/cwt") {
@@ -105,3 +108,27 @@ TEST_SUITE("roundtrip/cwt") {
 #endif
 
 } // TEST_SUITE("roundtrip/cwt")
+
+#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
+TEST_SUITE("roundtrip/cwt") {
+    TEST_CASE("openssl consumes single pass signature input") {
+        auto                                            key = make_p256_key();
+        const std::vector<std::byte>                    bytes(1024, std::byte{7});
+        const std::array<std::span<const std::byte>, 4> spans{std::span<const std::byte>{}, std::span<const std::byte>{bytes}.first(33),
+                                                              std::span<const std::byte>{bytes}.subspan(33), std::span<const std::byte>{}};
+        std::istringstream                              order{"0 1 2 3"};
+        auto parts = std::ranges::istream_view<std::size_t>(order) | std::views::transform([&](std::size_t index) { return spans[index]; });
+        static_assert(!std::ranges::forward_range<decltype(parts)>);
+
+        auto signature = crypto_es256_backend::sign(key.get(), parts);
+        REQUIRE(signature);
+        const std::array contiguous{std::span<const std::byte>{bytes}};
+        REQUIRE(crypto_es256_backend::verify(key.get(), contiguous, *signature));
+
+        std::istringstream verification_order{"0 1 2 3"};
+        auto               verification_parts = std::ranges::istream_view<std::size_t>(verification_order) |
+                                                std::views::transform([&](std::size_t index) { return spans[index]; });
+        REQUIRE(crypto_es256_backend::verify(key.get(), verification_parts, *signature));
+    }
+}
+#endif
