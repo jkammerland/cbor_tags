@@ -32,9 +32,15 @@ using namespace cbor::tags;
 
 struct custom_backend {
     static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
+
     template <std::ranges::input_range Parts>
     static expected<std::vector<std::byte>, status_code>
     sign(void *key, Parts&& parts);
+
+    template <std::ranges::input_range Parts>
+    static expected<std::size_t, status_code>
+    sign(void *key, Parts&& parts, std::span<std::byte> signature_output);
+
     template <std::ranges::input_range Parts>
     static expected<void, status_code>
     verify(void *key, Parts&& parts,
@@ -187,3 +193,27 @@ if (!protected_map || (protected_map->kid && message.unprotected.kid)) {
     return reject_message();
 }
 ```
+
+## Borrowed sending and receiving
+
+[Example 28](../examples/28_experimental_cwt_borrowed_token.cpp) signs into an
+application-owned array and encodes the token into `byte_segments`. Their layout
+is ordered CBOR headers and views into the original header, payload and signature
+storage. AAD is used during signing and is absent from the outgoing token.
+
+The example copies those segments once to simulate delivery into a receiver-owned
+buffer; this transport simulation is separate from the borrowed signing and
+encoding paths. The receiver decodes `cose_sign1_view`, reconstructs identical
+AAD, verifies the original bytes, then decodes `claims_view` and applies its
+issuer, audience and expiration policy. Its views borrow the receive buffer,
+which must remain alive and unchanged while the authenticated data is used.
+
+[Example 29](../examples/29_experimental_cwt_borrowed_multi_signer.cpp) shares one
+payload between two signatures and verifies both with their respective trusted
+keys before decoding claims. The signatures vector owns descriptors; the byte
+fields borrow the receive buffer. Provider state, segment descriptors and parsed
+header metadata may still allocate.
+
+These view examples use contiguous input and definite text/byte fields. Use an
+owning destination for noncontiguous input or fragmented indefinite strings;
+borrowed decoding does not silently create an owning copy.
