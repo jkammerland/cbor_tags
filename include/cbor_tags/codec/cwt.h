@@ -6,12 +6,13 @@
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cwt_codec.h"
 #include "cbor_tags/detail/cwt_fields.h"
+#include "cbor_tags/detail/cwt_keys.h"
 
 namespace cbor::tags::codec {
 
-template <typename Self> struct cwt : base<Self> {
-    using base<Self>::encode;
-    using base<Self>::decode;
+template <typename Self> struct cwt : tags::cwt::detail::key_codec<Self> {
+    using tags::cwt::detail::key_codec<Self>::encode;
+    using tags::cwt::detail::key_codec<Self>::decode;
 
     template <typename... Bindings> void encode(const tags::cwt::detail::field_map<Bindings...> &map) {
         tags::cwt::detail::encode_fields(static_cast<Self &>(*this), map);

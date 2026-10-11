@@ -65,7 +65,7 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/cwt")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/cwt*")
 # Expected is a standalone value/error abstraction; keep its tests separate from
 # codec roundtrips and CBOR wire fixtures.
 add_test(NAME expected_contract COMMAND tests "--test-suite=expected/contract")
@@ -259,9 +259,9 @@ add_test(
     "-DPASS_REGEX=walk_item visitor must return exactly void or status_code"
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
-add_test(NAME cwt_wire COMMAND tests "--test-suite=cbor_wire/cwt")
+add_test(NAME cwt_wire COMMAND tests "--test-suite=cbor_wire/cwt*")
 set_tests_properties(cwt_wire PROPERTIES LABELS "cbor-wire")
-add_test(NAME cwt_roundtrip COMMAND tests "--test-suite=roundtrip/cwt")
+add_test(NAME cwt_roundtrip COMMAND tests "--test-suite=roundtrip/cwt*")
 set_tests_properties(cwt_roundtrip PROPERTIES LABELS "roundtrip")
 foreach(STORAGE IN ITEMS OWNED VIEW)
   foreach(OPERATION IN ITEMS ENCODE DECODE)
