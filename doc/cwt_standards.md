@@ -9,7 +9,7 @@ capabilities. Recognizing an identifier does not implement its algorithm.
 |---|---|
 | [RFC 7049](https://www.rfc-editor.org/info/rfc7049) | Obsoleted by RFC 8949. |
 | [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html) | Current CBOR foundation; see [CBOR conformance](conformance.md). |
-| [RFC 8152](https://www.rfc-editor.org/info/rfc8152) | Obsoleted by RFC 9052 and RFC 9053. Explicit legacy countersignature verification is planned. |
+| [RFC 8152](https://www.rfc-editor.org/info/rfc8152) | Obsoleted by RFC 9052 and RFC 9053. Explicit legacy full countersignature verification is available; generation remains V2. |
 | [RFC 8392](https://www.rfc-editor.org/rfc/rfc8392.html) | Current CWT foundation. Base claims and signed tokens; MAC/encrypted/nested protection is not implemented by the CWT helpers. |
 | [RFC 9052](https://www.rfc-editor.org/rfc/rfc9052.html) | COSE structures, updated by RFC 9338. Sign1 and Sign are implemented; required services and algorithms depend on the application profile. |
 | [RFC 9053](https://www.rfc-editor.org/rfc/rfc9053.html) | Initial algorithms, updated by RFC 9864. Optional OpenSSL P-256/SHA-256 provider. |
@@ -26,7 +26,7 @@ This table lists implemented capabilities and their dedicated regression suites.
 | Optional real crypto | `test_cwt_openssl_roundtrip.cpp`, `test_cwt_openssl_wire.cpp` | OpenSSL is optional; custom providers use the same segment contract. |
 | Caller storage and custom layouts | Examples 27–29 and CWT signing tests | Borrowed collections may allocate descriptors; source bytes remain caller-owned. |
 | Typed map/header extensions | `test_cwt_fields_*`, `test_cwt_headers_*`, examples 30–32 | Selected fields only; automatic preservation of unknown values is outside scope. |
-| Countersignatures | Planned follow-up stack | V2 full/abbreviated operations and explicit legacy full verification. |
+| Countersignatures | `test_cwt_countersignatures_wire.cpp`, `test_cwt_countersignatures_roundtrip.cpp`, examples 33–35 | V2 full/abbreviated operations, explicit legacy full verification, selected recursive headers. |
 | Public COSE keys and confirmation | Planned follow-up stack | EC2, OKP, RSA public forms; confirmation and deterministic thumbprints. |
 
 ## Direct extensions
@@ -34,7 +34,7 @@ This table lists implemented capabilities and their dedicated regression suites.
 | Specification | Follow-up |
 |---|---|
 | [RFC 8747](https://www.rfc-editor.org/rfc/rfc8747.html) | Public confirmation methods planned. Proof of presenter possession remains an application operation. |
-| [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html) | Countersignature stack planned for Sign1, individual signatures, and full countersignatures; other targets deferred. |
+| [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html) | [Countersignatures](cwt_countersignatures.md) implemented for Sign1, individual signatures, and full countersignatures; whole Sign and encryption/MAC targets deferred. |
 | [RFC 9360](https://www.rfc-editor.org/rfc/rfc9360.html) | X.509 header representations and trust/path validation need separate work. |
 | [RFC 9596](https://www.rfc-editor.org/rfc/rfc9596.html) | Protected `typ` header implemented. Application selects expected media type. |
 | [RFC 9597](https://www.rfc-editor.org/rfc/rfc9597.html) | CWT Claims header implemented. Replicated claims require application semantic comparison or explicit profile rules. |

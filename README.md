@@ -17,6 +17,7 @@ See standard specifications for more information:
 - **Experimental:** CWT [RFC8392](https://www.rfc-editor.org/rfc/rfc8392.html) — [claims and codec guide](doc/cwt.md), [compiled example](examples/23_experimental_cwt_claims.cpp).
 - **Experimental:** COSE [RFC9052](https://www.rfc-editor.org/rfc/rfc9052.html) — [Sign/Sign1 models and signing helpers](doc/cose_signing.md).
 - **Experimental:** COSE ESP256 [RFC9864](https://www.rfc-editor.org/rfc/rfc9864.html) — [optional OpenSSL backend](doc/cwt_openssl.md).
+- **Experimental:** COSE countersignatures [RFC9338](https://www.rfc-editor.org/rfc/rfc9338.html) — [full and abbreviated countersignatures](doc/cwt_countersignatures.md).
 
 - **Experimental:** COSE header extensions [RFC9596](https://www.rfc-editor.org/rfc/rfc9596.html) / [RFC9597](https://www.rfc-editor.org/rfc/rfc9597.html) — [typed headers and claims](doc/cwt_headers.md).
 
