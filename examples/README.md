@@ -49,7 +49,7 @@ through signing, token encoding, decoding and verification.
 | [32_experimental_cwt_header_claims.cpp](32_experimental_cwt_header_claims.cpp) | Carry claims in protected headers | Verify first, then compare replicated claims by value. |
 | [36_cwt_public_keys.cpp](36_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
 | [37_cwt_confirmation.cpp](37_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
-| [38_cwt_key_thumbprint.cpp](38_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministic required-parameter projection. |
+| [38_cwt_key_thumbprint.cpp](38_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
 | [39_cwt_confirmation_token.cpp](39_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
 
 ## CDDL

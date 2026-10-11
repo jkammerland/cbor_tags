@@ -30,7 +30,7 @@ cwt::ec2_public_key rfc_key() {
 
 TEST_SUITE_BEGIN("cbor_wire/cwt/keys");
 
-TEST_CASE("cwt thumbprint wire projects RFC 9679 fields without metadata") {
+TEST_CASE("cwt thumbprint wire encodes RFC 9679 fields without metadata") {
     auto key    = rfc_key();
     key.alg     = cwt::algorithm::esp256;
     key.kid     = unhex("deadbeef");
@@ -52,7 +52,7 @@ TEST_CASE("cwt thumbprint wire projects RFC 9679 fields without metadata") {
     CHECK_FALSE(cwt::make_key_thumbprint_input(key));
 }
 
-TEST_CASE("cwt thumbprint wire projects rsa and okp required parameters") {
+TEST_CASE("cwt thumbprint wire encodes rsa and okp required parameters") {
     cwt::rsa_public_key rsa;
     rsa.modulus    = unhex("8001");
     rsa.exponent   = unhex("010001");

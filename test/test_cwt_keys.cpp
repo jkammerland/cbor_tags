@@ -69,7 +69,7 @@ TEST_CASE("cwt rsa and okp public keys round trip") {
     CHECK(decoded_okp.curve == okp.curve);
 }
 
-TEST_CASE("cwt public key projections borrow named owners") {
+TEST_CASE("cwt public key views borrow named owners") {
     cwt::ec2_public_key key;
     key.x.assign(32, std::byte{7});
     key.y     = std::vector<std::byte>(32, std::byte{8});
