@@ -42,12 +42,12 @@ auto decode(Decoder &decoder, received_claims &&destination) -> typename Decoder
         return result;
     }
     if (!fields.subject || !fields.expiration) {
-        return unexpected<status_code>{status_code::error};
+        return cbor::tags::unexpected<status_code>{status_code::error};
     }
 
     const auto *expiry = std::get_if<std::int64_t>(&*fields.expiration);
     if (!expiry) {
-        return unexpected<status_code>{status_code::error};
+        return cbor::tags::unexpected<status_code>{status_code::error};
     }
 
     destination = {.name = *fields.subject, .deadline = *expiry};
