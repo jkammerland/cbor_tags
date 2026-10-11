@@ -159,13 +159,13 @@ when that layout is not practical.
 ```cpp
 auto dec = make_decoder_with_options<encoded_item_view_decoder_options>(buffer);
 Claims claims{};
-auto encoded = dec(claims); // expected<raw_encoded_item_view, status_code>
+auto encoded = dec(claims); // expected<encoded_item_view, status_code>
 ```
 
 On success, the borrowed view covers exactly the bytes consumed by this call.
 Keep the input alive and unchanged. Variadic calls include all arguments;
 header-only calls return the consumed prefix; zero consumption returns an empty
-view. Typed decoding stays single-pass. Direct decoding into a raw item, array
+view. Typed decoding stays single-pass. Direct decoding into a encoded item, array
 or map view instead structurally parses one complete item to find its end.
 
 ## Wrapping Groups

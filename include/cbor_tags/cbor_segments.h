@@ -28,8 +28,6 @@ enum class byte_segment_kind : std::uint8_t {
     borrowed,
 };
 
-using cbor_segment_kind = byte_segment_kind;
-
 template <std::size_t InlineOwnedCapacity = 32> class basic_byte_segment {
   public:
     static constexpr std::size_t inline_owned_capacity = InlineOwnedCapacity;
@@ -127,7 +125,6 @@ template <std::size_t InlineOwnedCapacity = 32> class basic_byte_segment {
 };
 
 using byte_segment = basic_byte_segment<>;
-using cbor_segment = byte_segment;
 
 template <std::size_t InlineOwnedCapacity = 32> struct default_byte_segment_storage {
     using segment_type   = basic_byte_segment<InlineOwnedCapacity>;
@@ -284,7 +281,6 @@ class basic_byte_segments {
 };
 
 using byte_segments = basic_byte_segments<>;
-using cbor_segments = byte_segments;
 
 namespace detail {
 
@@ -335,31 +331,29 @@ template <typename Segments> class byte_segment_byte_iterator {
     std::size_t                       offset_{};
 };
 
-using cbor_segment_byte_iterator = byte_segment_byte_iterator<cbor_segments>;
-
 } // namespace detail
 
 class encoded_item_segments {
   public:
     encoded_item_segments() = delete;
 
-    [[nodiscard]] const cbor_segments   &segments() const noexcept { return segments_; }
+    [[nodiscard]] const byte_segments   &segments() const noexcept { return segments_; }
     [[nodiscard]] std::size_t            total_size() const noexcept { return segments_.total_size(); }
     [[nodiscard]] std::vector<std::byte> flatten() const { return segments_.flatten(); }
 
   private:
     struct validated_t {};
 
-    explicit encoded_item_segments(cbor_segments segments, validated_t) : segments_(std::move(segments)) {}
+    explicit encoded_item_segments(byte_segments segments, validated_t) : segments_(std::move(segments)) {}
 
-    cbor_segments segments_{};
+    byte_segments segments_{};
 
-    friend expected<encoded_item_segments, status_code> validate_item_segments(cbor_segments segments);
+    friend expected<encoded_item_segments, status_code> validate_item_segments(byte_segments segments);
 };
 
-[[nodiscard]] inline expected<encoded_item_segments, status_code> validate_item_segments(cbor_segments segments) {
-    auto cursor = detail::byte_segment_byte_iterator<cbor_segments>{segments.begin(), segments.end()};
-    auto end    = detail::byte_segment_byte_iterator<cbor_segments>{segments.end(), segments.end()};
+[[nodiscard]] inline expected<encoded_item_segments, status_code> validate_item_segments(byte_segments segments) {
+    auto cursor = detail::byte_segment_byte_iterator<byte_segments>{segments.begin(), segments.end()};
+    auto end    = detail::byte_segment_byte_iterator<byte_segments>{segments.end(), segments.end()};
 
     auto status = status_code::success;
     if (!detail::cbor_item_skipper<>::skip_item(cursor, end, status)) {
@@ -627,8 +621,8 @@ inline void encode_bstr_segments_into(Segments &segments, std::span<const std::b
     segments.append_borrowed(payload);
 }
 
-[[nodiscard]] inline cbor_segments encode_bstr_segments(std::span<const std::byte> payload) {
-    cbor_segments segments;
+[[nodiscard]] inline byte_segments encode_bstr_segments(std::span<const std::byte> payload) {
+    byte_segments segments;
     encode_bstr_segments_into(segments, payload);
     return segments;
 }
@@ -663,8 +657,8 @@ inline void encode_indefinite_bstr_segments_into(Segments &segments, std::span<c
         chunk_size);
 }
 
-[[nodiscard]] inline cbor_segments encode_indefinite_bstr_segments(std::span<const std::byte> payload, std::size_t chunk_size = 4096) {
-    cbor_segments segments;
+[[nodiscard]] inline byte_segments encode_indefinite_bstr_segments(std::span<const std::byte> payload, std::size_t chunk_size = 4096) {
+    byte_segments segments;
     encode_indefinite_bstr_segments_into(segments, payload, chunk_size);
     return segments;
 }
@@ -683,14 +677,14 @@ inline void encode_tagged_bstr_segments_into(Segments &segments, std::uint64_t t
     segments.append_borrowed(payload);
 }
 
-[[nodiscard]] inline cbor_segments encode_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload) {
-    cbor_segments segments;
+[[nodiscard]] inline byte_segments encode_tagged_bstr_segments(std::uint64_t tag, std::span<const std::byte> payload) {
+    byte_segments segments;
     encode_tagged_bstr_segments_into(segments, tag, payload);
     return segments;
 }
 
 template <std::uint64_t Tag>
-[[nodiscard]] inline cbor_segments encode_tagged_bstr_segments(static_tag<Tag>, std::span<const std::byte> payload) {
+[[nodiscard]] inline byte_segments encode_tagged_bstr_segments(static_tag<Tag>, std::span<const std::byte> payload) {
     return encode_tagged_bstr_segments(Tag, payload);
 }
 
@@ -700,7 +694,7 @@ inline void encode_tagged_bstr_segments_into(Segments &segments, static_tag<Tag>
 }
 
 template <IsUnsigned Tag>
-[[nodiscard]] inline cbor_segments encode_tagged_bstr_segments(dynamic_tag<Tag> tag, std::span<const std::byte> payload) {
+[[nodiscard]] inline byte_segments encode_tagged_bstr_segments(dynamic_tag<Tag> tag, std::span<const std::byte> payload) {
     return encode_tagged_bstr_segments(static_cast<std::uint64_t>(tag.cbor_tag), payload);
 }
 
@@ -711,8 +705,8 @@ inline void encode_tagged_bstr_segments_into(Segments &segments, dynamic_tag<Tag
 
 template <typename RawView>
     requires(!std::is_reference_v<RawView>) && detail::BorrowedSpanBackedEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments borrow_segments(const RawView &view) {
-    cbor_segments segments;
+[[nodiscard]] inline byte_segments borrow_segments(const RawView &view) {
+    byte_segments segments;
     segments.reserve_segments(1);
     segments.append_borrowed(view.span());
     return segments;
@@ -720,49 +714,21 @@ template <typename RawView>
 
 template <typename RawView>
     requires(!std::is_reference_v<RawView>) && detail::BorrowedSpanBackedEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments borrow_segments(RawView &&) = delete;
+[[nodiscard]] inline byte_segments borrow_segments(RawView &&) = delete;
 
 template <typename RawView>
     requires IsEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments copy_segments(const RawView &view) {
+[[nodiscard]] inline byte_segments copy_segments(const RawView &view) {
     std::vector<std::byte> bytes;
     bytes.reserve(view.size());
     for (auto byte : view.bytes()) {
         bytes.push_back(static_cast<std::byte>(byte));
     }
 
-    cbor_segments segments;
+    byte_segments segments;
     segments.reserve_segments(1);
     segments.append_owned(bytes);
     return segments;
-}
-
-template <typename RawView>
-    requires IsEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments to_segments(const RawView &view) {
-    return copy_segments(view);
-}
-
-template <typename RawView>
-    requires IsEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments as_segments(const RawView &view) {
-    return to_segments(view);
-}
-
-template <typename RawView>
-    requires(!std::is_reference_v<RawView>) && detail::BorrowedSpanBackedEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments encode_encoded_segments(const RawView &view) {
-    return borrow_segments(view);
-}
-
-template <typename RawView>
-    requires(!std::is_reference_v<RawView>) && detail::BorrowedSpanBackedEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments encode_encoded_segments(RawView &&) = delete;
-
-template <typename RawView>
-    requires IsEncodedItemView<RawView>
-[[nodiscard]] inline cbor_segments encode_encoded_segments_copy(const RawView &view) {
-    return copy_segments(view);
 }
 
 } // namespace cbor::tags
@@ -772,7 +738,7 @@ template <typename RawView>
 namespace cbor::tags {
 
 template <typename T> [[nodiscard]] inline expected<encoded_item_segments, status_code> encode_item_segments(T &&value) {
-    cbor_segments segments;
+    byte_segments segments;
     auto          enc    = make_encoder(segments);
     const auto    result = enc(std::forward<T>(value));
     if (!result) {
@@ -784,7 +750,7 @@ template <typename T> [[nodiscard]] inline expected<encoded_item_segments, statu
 template <template <typename> typename... Extensions, typename T>
     requires(sizeof...(Extensions) > 0)
 [[nodiscard]] inline expected<encoded_item_segments, status_code> encode_item_segments(T &&value) {
-    cbor_segments segments;
+    byte_segments segments;
     auto          enc    = make_encoder<Extensions...>(segments);
     const auto    result = enc(std::forward<T>(value));
     if (!result) {

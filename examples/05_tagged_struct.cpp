@@ -23,7 +23,7 @@ int main() {
     std::vector<std::byte> buffer;
 
     // Define a record with a static identifying tag.
-    Record source{42, "ready"};
+    Record source{.id = 42, .name = "ready"};
 
     // Encode the tag followed by the record array.
     auto encoder = make_encoder(buffer);

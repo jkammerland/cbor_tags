@@ -1,9 +1,8 @@
 # Codec Extensions
 
-`cbor_tags` keeps non-default wire policies behind explicit codec extensions.
-Public codec selectors live in `cbor::tags::codec`, with matching headers under
-`cbor_tags/codec/`. Include the header and pass the codec mixin to `make_encoder` or
-`make_decoder`:
+A codec defines how a type is encoded and decoded. Optional codecs live in
+`cbor::tags::codec`, with matching headers under `cbor_tags/codec/`. Include the
+header and select the codec when creating an encoder or decoder:
 
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
@@ -24,9 +23,8 @@ The same naming rule applies throughout the library: `codec::cwt`,
 `codec::typed_array`, `codec::unique_ptr`, `codec::shared_ptr`,
 `codec::std_expected`, `codec::std_indirect` and `codec::custom_1` use the matching
 `cbor_tags/codec/<name>.h` header. Feature data types live in their feature
-namespace, such as `cwt::claims_view` or `rfc8746::typed_array`. The former
-`extensions/` codec headers and suffixed codec names have no compatibility aliases.
-See [CWT and COSE](cwt.md) for the owning/view model split.
+namespace, such as `cwt::claims_view` or `rfc8746::typed_array`.
+See [CWT and COSE](cwt.md) for types that own their data and views that borrow existing data.
 
 Multiple extensions can be installed together when their overloads are designed
 to compose:
@@ -187,7 +185,7 @@ my_root<T> as_my_root(my_session&, const T&&) = delete;
 
 Current public extension headers:
 
-- `cbor_tags/codec/cwt.h`: CWT claims and COSE owning/borrowed wire models.
+- `cbor_tags/codec/cwt.h`: CWT claims and COSE messages, with owning types and views.
   See [CWT and COSE](cwt.md).
 - `cbor_tags/codec/custom_1.h`: schema-bound `tag(bstr)` payload
   codec. See [Custom Codec 1](custom_codec_1.md).

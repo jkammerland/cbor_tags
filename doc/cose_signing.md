@@ -24,15 +24,13 @@ Provide an algorithm identifier and operations with these signatures:
 ```cpp
 #include <cbor_tags/cwt/cwt.h>
 
-namespace tags = cbor::tags;
-namespace cwt = tags::cwt;
-namespace codec = tags::codec;
+using namespace cbor::tags;
 
 struct custom_backend {
     static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
-    static tags::expected<cwt::byte_string, tags::status_code>
+    static expected<std::vector<std::byte>, status_code>
     sign(void *key, std::span<const std::byte> to_be_signed);
-    static tags::expected<void, tags::status_code>
+    static expected<void, status_code>
     verify(void *key, std::span<const std::byte> to_be_signed,
            std::span<const std::byte> signature);
 };
@@ -50,8 +48,8 @@ if (bytes) {
     if (message) {
         auto verified = cwt::verify_sign1<custom_backend>(key, *message);
         if (verified) {
-            cwt::byte_string token;
-            auto result = tags::make_encoder<codec::cwt>(token)(
+            std::vector<std::byte> token;
+            auto result = make_encoder<codec::cwt>(token)(
                 cwt::as_cwt(cwt::as_cose_sign1(*message)));
             // Check result before sending token.
         }
@@ -78,7 +76,12 @@ Check `bytes` first. Use `add_signature` or `sign_signature` for more signatures
 `verify_sign1`, `verify_signature`, `verify_sign`, `make_sign1_tbs` and
 `make_sign_tbs` accept borrowed models. Verification still parses protected
 headers and allocates the bytes to be signed. Signing helpers return owning
-results, and the backend interface is unchanged.
+results. `sign` and `sign1` copy the supplied payload into that result;
+`add_signature` appends an owned signature to the existing message. AAD spans
+borrow caller-owned storage for the call and are not retained in the message.
+The helpers encode headers, payload and AAD into temporary bytes for signing or
+verification; the backend receives views of those bytes for the duration of its
+call. These helpers are not an allocation-free signing path.
 
 For a null payload, verification requires a detached payload. `std::nullopt`
 means missing; an engaged empty span means a valid empty payload:
@@ -99,12 +102,13 @@ policy. It uses the built-in OpenSSL backend; substitute the backend and key
 from [example 24](../examples/24_experimental_cwt_backend.cpp) at the signing and
 verification calls to use your own provider.
 
-External AAD is authenticated but absent from the token. Both parties must
-supply identical bytes from their application context; this example binds the
+Additional authenticated data (AAD) is authenticated but absent from the token.
+Both parties must supply identical bytes, transported separately or reconstructed
+from agreed application context; this example binds the
 token to one request purpose. Missing or different AAD causes verification to
 fail, as required by [COSE external data processing](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3).
 
-The example uses a pretrusted key, checks its protected key ID, and injects a
+The example uses a key already trusted by the receiver, checks its protected key ID, and injects a
 fixed Unix time to keep the demonstration reproducible. A service supplies its
 current time and trusted key configuration; `kid` identifies a key but does not
 establish trust. Signature verification and application claim validation are
@@ -118,7 +122,7 @@ first signature; `add_signature` appends the second over the same payload and
 external AAD. Each signature has its own protected algorithm and key ID.
 
 The example's application policy requires exactly two signatures in an agreed
-order and verifies each index with its corresponding pretrusted key. It rejects
+order and verifies each index with its corresponding trusted key. It rejects
 a wrong key, a damaged signature and a missing signer. The no-index
 `verify_sign(key, message, aad)` overload checks every signature using that one
 key; use the indexed overload or `verify_signature` when signers have different
@@ -130,7 +134,7 @@ signature policy succeeds.
 
 - Signing helpers reject unprotected `alg`/`crit` and conflicting algorithms.
   Unknown noncritical headers are discarded. Applications enforce any stricter
-  cross-bucket duplicate policy from [RFC 9052 §3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3),
+  policy for duplicate labels across protected and unprotected headers from [RFC 9052 §3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3),
   checking unknown labels before discarding them. Known `kid` duplication can be
   checked after decoding:
 

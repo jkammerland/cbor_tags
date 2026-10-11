@@ -92,10 +92,10 @@ template <typename Self> struct cwt : base<Self> {
                     }
                     decoded.kid = std::move(value);
                 } else {
-                    // Unknown parameters are validated for uniqueness within this
-                    // bucket, then discarded. Cross-bucket duplicate checks for
-                    // unknown labels require a higher-level raw-header policy.
-                    typename Self::raw_encoded_item_view ignored;
+                    // Unknown labels are checked for duplicates within this header
+                    // map, then discarded. Checking them across protected and
+                    // unprotected headers requires application access to both maps.
+                    typename Self::encoded_item_view ignored;
                     return dec.decode(ignored);
                 }
                 return status_code::success;
@@ -207,7 +207,7 @@ template <typename Self> struct cwt : base<Self> {
 
                 const auto *key = std::get_if<integer>(&label);
                 if (key == nullptr || key->is_negative) {
-                    typename Self::raw_encoded_item_view ignored;
+                    typename Self::encoded_item_view ignored;
                     return dec.decode(ignored);
                 } else if (key->value == 1U) {
                     helpers::text_storage<Borrowed> value;
@@ -244,7 +244,7 @@ template <typename Self> struct cwt : base<Self> {
                     }
                     decoded.cwt_id = std::move(value);
                 } else {
-                    typename Self::raw_encoded_item_view ignored;
+                    typename Self::encoded_item_view ignored;
                     return dec.decode(ignored);
                 }
                 return status_code::success;

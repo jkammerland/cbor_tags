@@ -484,7 +484,8 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
         CHECK(zc_vector.flatten() == custom_vector);
 
         if constexpr (std::endian::native == std::endian::little) {
-            auto const typed_zc_vector = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
+            auto const typed_zc_vector =
+                rfc8746::encode_typed_array_borrowed_segments(std::span<const double>{values.data(), values.size()});
             CHECK(typed_zc_vector.total_size() == typed_vector.size());
             CHECK(typed_zc_vector.flatten() == typed_vector);
         }
@@ -516,11 +517,12 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
         });
 
         if constexpr (std::endian::native == std::endian::little) {
-            auto const typed_zc_vector = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
-            auto const typed_zc_name   = std::string{"rfc8746 typed array zc vector<double>["} + std::to_string(count) +
-                                         "] encode segment assembly (represented bytes)";
+            auto const typed_zc_vector =
+                rfc8746::encode_typed_array_borrowed_segments(std::span<const double>{values.data(), values.size()});
+            auto const typed_zc_name = std::string{"rfc8746 typed array zc vector<double>["} + std::to_string(count) +
+                                       "] encode segment assembly (represented bytes)";
             bench.batch(typed_zc_vector.total_size()).run(typed_zc_name, [&] {
-                auto segments = rfc8746::encode_typed_array_segments(std::span<const double>{values.data(), values.size()});
+                auto segments = rfc8746::encode_typed_array_borrowed_segments(std::span<const double>{values.data(), values.size()});
                 ankerl::nanobench::doNotOptimizeAway(segments);
             });
         }
@@ -536,7 +538,7 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
 
         if constexpr (std::endian::native == std::endian::little) {
             auto const typed_zc_float_vector =
-                rfc8746::encode_typed_array_segments(std::span<const float>{float_values.data(), float_values.size()});
+                rfc8746::encode_typed_array_borrowed_segments(std::span<const float>{float_values.data(), float_values.size()});
             CHECK(typed_zc_float_vector.total_size() == typed_float_vector.size());
             CHECK(typed_zc_float_vector.flatten() == typed_float_vector);
         }
@@ -569,11 +571,12 @@ TEST_CASE("custom_codec_1 encode wire throughput benchmarks") {
 
         if constexpr (std::endian::native == std::endian::little) {
             auto const typed_zc_float_vector =
-                rfc8746::encode_typed_array_segments(std::span<const float>{float_values.data(), float_values.size()});
+                rfc8746::encode_typed_array_borrowed_segments(std::span<const float>{float_values.data(), float_values.size()});
             auto const typed_zc_float_name = std::string{"rfc8746 typed array zc vector<float>["} + std::to_string(count) +
                                              "] encode segment assembly (represented bytes)";
             bench.batch(typed_zc_float_vector.total_size()).run(typed_zc_float_name, [&] {
-                auto segments = rfc8746::encode_typed_array_segments(std::span<const float>{float_values.data(), float_values.size()});
+                auto segments =
+                    rfc8746::encode_typed_array_borrowed_segments(std::span<const float>{float_values.data(), float_values.size()});
                 ankerl::nanobench::doNotOptimizeAway(segments);
             });
         }

@@ -5,15 +5,17 @@
 namespace cwt_test {
 
 struct toy_es256_backend {
-    static constexpr algorithm                algorithm_id = algorithm::es256;
-    static expected<byte_string, status_code> sign(void *, std::span<const std::byte>) { return byte_string{}; }
-    static expected<void, status_code>        verify(void *, std::span<const std::byte>, std::span<const std::byte>) { return {}; }
+    static constexpr algorithm                           algorithm_id = algorithm::es256;
+    static expected<std::vector<std::byte>, status_code> sign(void *, std::span<const std::byte>) { return std::vector<std::byte>{}; }
+    static expected<void, status_code> verify(void *, std::span<const std::byte>, std::span<const std::byte>) { return {}; }
 };
 
 struct signature_presence_es256_backend {
     static constexpr algorithm algorithm_id = algorithm::es256;
 
-    static expected<byte_string, status_code> sign(void *, std::span<const std::byte>) { return byte_string{std::byte{0x01}}; }
+    static expected<std::vector<std::byte>, status_code> sign(void *, std::span<const std::byte>) {
+        return std::vector<std::byte>{std::byte{0x01}};
+    }
 
     static expected<void, status_code> verify(void *, std::span<const std::byte>, std::span<const std::byte> signature) {
         if (signature.empty()) {

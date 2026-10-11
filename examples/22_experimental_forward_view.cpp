@@ -1,4 +1,4 @@
-// Experimental: raw-view and segment APIs may change.
+// Experimental: encoded-view and segment APIs may change.
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_raw_views.h"
@@ -28,7 +28,7 @@ int main() {
     // Declare a receiver that views the complete encoded array, including its header.
     encoded_array_view_for<decltype(buffer)> encoded;
 
-    // Locate the encoded item without materializing its elements.
+    // Locate the complete encoded array without decoding its elements.
     auto decoder = make_decoder(buffer);
     if (!decoder(encoded)) {
         return 1;
@@ -47,7 +47,7 @@ int main() {
     // Use the forwarded byte view as the verification decoder's input.
     auto forwarded_bytes = forwarded[0].bytes();
 
-    // Declare an owning receiver solely to verify the forwarded array's values.
+    // Store decoded elements in a vector to check the forwarded array.
     std::vector<int> received;
 
     // Decode the forwarded array for verification.

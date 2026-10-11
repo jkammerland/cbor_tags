@@ -5,12 +5,12 @@ using namespace cwt_test;
 TEST_SUITE("roundtrip/cwt") {
 
     TEST_CASE("cose_sign1 replacement clears prior verification state") {
-        const byte_string payload{std::byte{0x31}};
-        auto              seeded = sign1<signature_presence_es256_backend>(nullptr, {}, {}, payload);
+        const std::vector<std::byte> payload{std::byte{0x31}};
+        auto                         seeded = sign1<signature_presence_es256_backend>(nullptr, {}, {}, payload);
         REQUIRE(seeded);
 
         cose_sign1 decoded      = std::move(*seeded);
-        decoded.unprotected.kid = byte_string{std::byte{0x32}};
+        decoded.unprotected.kid = std::vector<std::byte>{std::byte{0x32}};
         REQUIRE(verify_sign1<signature_presence_es256_backend>(nullptr, decoded));
 
         const cose_sign1 source{
@@ -48,8 +48,8 @@ TEST_SUITE("roundtrip/cwt") {
         CHECK(empty_sign1->payload.empty());
         REQUIRE(verify_sign1<toy_es256_backend>(nullptr, sign1_message, {}, empty_payload));
 
-        const byte_string embedded{std::byte{0x01}};
-        const byte_string detached{std::byte{0x02}};
+        const std::vector<std::byte> embedded{std::byte{0x01}};
+        const std::vector<std::byte> detached{std::byte{0x02}};
         sign1_message.payload = embedded;
         auto embedded_sign1   = make_sign1_sig_structure(sign1_message, {}, std::span<const std::byte>{detached.data(), detached.size()});
         REQUIRE(embedded_sign1);
@@ -80,8 +80,8 @@ TEST_SUITE("roundtrip/cwt") {
         cose_sign1 message{
             .protected_header = *protected_header,
             .unprotected      = {},
-            .payload          = byte_string{std::byte{0x01}},
-            .signature        = byte_string(64, std::byte{0x00}),
+            .payload          = std::vector<std::byte>{std::byte{0x01}},
+            .signature        = std::vector<std::byte>(64, std::byte{0x00}),
         };
 
         auto result = verify_sign1<toy_es256_backend>(nullptr, message);
@@ -90,7 +90,7 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("COSE Sign1 rejects conflicting or unprotected algorithm headers") {
-        const byte_string payload{std::byte{0x01}};
+        const std::vector<std::byte> payload{std::byte{0x01}};
 
         auto sign_conflict =
             sign1<toy_es256_backend>(nullptr, header_map{.alg = algorithm::es384, .kid = std::nullopt, .crit = {}}, {}, payload);
@@ -109,7 +109,7 @@ TEST_SUITE("roundtrip/cwt") {
             .protected_header = *protected_header,
             .unprotected      = header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}},
             .payload          = payload,
-            .signature        = byte_string(64, std::byte{0x00}),
+            .signature        = std::vector<std::byte>(64, std::byte{0x00}),
         };
 
         auto verify_unprotected_alg = verify_sign1<toy_es256_backend>(nullptr, message);
@@ -118,8 +118,8 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("COSE signing rejects critical labels in unprotected headers") {
-        const byte_string payload{std::byte{0x01}};
-        const header_map  unprotected_critical{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}}, .crit = {integer{4}}};
+        const std::vector<std::byte> payload{std::byte{0x01}};
+        const header_map unprotected_critical{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}}, .crit = {integer{4}}};
 
         auto sign1_result = sign1<toy_es256_backend>(nullptr, {}, unprotected_critical, payload);
         REQUIRE_FALSE(sign1_result);
@@ -148,10 +148,10 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("COSE Sign helpers create and validate signature entries") {
-        const byte_string payload{std::byte{0x01}, std::byte{0x02}};
+        const std::vector<std::byte> payload{std::byte{0x01}, std::byte{0x02}};
 
         auto message = sign<toy_es256_backend>(nullptr, {}, {}, payload,
-                                               header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}}, .crit = {}});
+                                               header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}}, .crit = {}});
         REQUIRE(message);
         REQUIRE_EQ(message->signatures.size(), 1U);
         CHECK(message->protected_header.empty());
@@ -159,7 +159,7 @@ TEST_SUITE("roundtrip/cwt") {
         auto signature_header = decode_protected_header(message->signatures.front().protected_header);
         REQUIRE(signature_header);
         CHECK_EQ(signature_header->alg, algorithm::es256);
-        CHECK_EQ(signature_header->kid, byte_string{std::byte{0x01}});
+        CHECK_EQ(signature_header->kid, std::vector<std::byte>{std::byte{0x01}});
 
         REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message));
         REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message, std::size_t{0}));
@@ -170,26 +170,26 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("COSE Sign helpers append and validate multiple signature entries") {
-        const byte_string payload{std::byte{0x01}, std::byte{0x02}};
+        const std::vector<std::byte> payload{std::byte{0x01}, std::byte{0x02}};
 
         auto message = sign<toy_es256_backend>(nullptr, {}, {}, payload,
-                                               header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}}, .crit = {}});
+                                               header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}}, .crit = {}});
         REQUIRE(message);
 
         auto appended = add_signature<toy_es256_backend>(
-            nullptr, *message, header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x02}}, .crit = {}}, {});
+            nullptr, *message, header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x02}}, .crit = {}}, {});
         REQUIRE(appended);
         REQUIRE_EQ(message->signatures.size(), 2U);
 
         auto first_header = decode_protected_header(message->signatures[0].protected_header);
         REQUIRE(first_header);
         CHECK_EQ(first_header->alg, algorithm::es256);
-        CHECK_EQ(first_header->kid, byte_string{std::byte{0x01}});
+        CHECK_EQ(first_header->kid, std::vector<std::byte>{std::byte{0x01}});
 
         auto second_header = decode_protected_header(message->signatures[1].protected_header);
         REQUIRE(second_header);
         CHECK_EQ(second_header->alg, algorithm::es256);
-        CHECK_EQ(second_header->kid, byte_string{std::byte{0x02}});
+        CHECK_EQ(second_header->kid, std::vector<std::byte>{std::byte{0x02}});
 
         REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message));
         REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message, std::size_t{0}));
@@ -197,7 +197,7 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("COSE Sign rejects conflicting or unprotected algorithm headers") {
-        const byte_string payload{std::byte{0x01}};
+        const std::vector<std::byte> payload{std::byte{0x01}};
 
         auto sign_body_conflict =
             sign<toy_es256_backend>(nullptr, header_map{.alg = algorithm::es384, .kid = std::nullopt, .crit = {}}, {}, payload);
@@ -224,7 +224,7 @@ TEST_SUITE("roundtrip/cwt") {
             .signatures       = {cose_signature{
                 .protected_header = {},
                 .unprotected      = header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}},
-                .signature        = byte_string(64, std::byte{0x00}),
+                .signature        = std::vector<std::byte>(64, std::byte{0x00}),
             }},
         };
 

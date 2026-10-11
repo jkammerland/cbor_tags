@@ -34,11 +34,11 @@ example 26 requires signatures from two independent keys.
 | [19_experimental_ranges.cpp](19_experimental_ranges.cpp) | Encode a filtered range | Avoid an intermediate container while still writing CBOR bytes. |
 | [20_experimental_byte_view.cpp](20_experimental_byte_view.cpp) | Borrow a decoded byte payload | A decoded span points into the encoded input rather than copying its payload. |
 | [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
-| [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
+| [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without decoding or re-encoding its elements. |
 | [23_experimental_cwt_claims.cpp](23_experimental_cwt_claims.cpp) | Encode and decode CWT claims | Opt into registered integer claim labels; signing and application validation are separate steps. |
 | [24_experimental_cwt_backend.cpp](24_experimental_cwt_backend.cpp) | Connect a custom crypto backend | Forward an application key through signing and verification, using OpenSSL as the replaceable provider. |
-| [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged envelope, then validate the verified claims. |
-| [26_experimental_cwt_multi_signer.cpp](26_experimental_cwt_multi_signer.cpp) | Require two token signers | Append a COSE_Sign signature and verify each signer with its own pretrusted key. |
+| [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged message, then validate the verified claims. |
+| [26_experimental_cwt_multi_signer.cpp](26_experimental_cwt_multi_signer.cpp) | Require two token signers | Append a COSE_Sign signature and verify each signer with its own trusted key. |
 
 ## CDDL
 

@@ -20,7 +20,7 @@ int main() {
     std::vector<std::byte> buffer;
 
     // Define a record with public aggregate members.
-    Record source{42, "ready"};
+    Record source{.id = 42, .name = "ready"};
 
     // Encode the members as an array in declaration order.
     auto encoder = make_encoder(buffer);

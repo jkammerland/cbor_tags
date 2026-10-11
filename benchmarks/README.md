@@ -152,7 +152,7 @@ Rows named `rfc8746 typed array ... encode` use the public
 little-endian hosts the typed-array payload is appended from the native
 contiguous vector bytes, so the hot path is header work plus one payload append.
 Rows named `rfc8746 typed array zc ... encode segment assembly (represented bytes)` use
-`rfc8746::encode_typed_array_segments(...)`; on little-endian hosts the payload
+`rfc8746::encode_typed_array_borrowed_segments(...)`; on little-endian hosts the payload
 segment is borrowed from the source vector. Decode rows are split between
 `decode owning`, which materializes a `std::vector<T>`, and `decode borrowed`,
 which decodes a `typed_array_view<T>` over the input payload without copying the

@@ -79,9 +79,9 @@ TEST_SUITE("cbor_wire/status_errors") {
                 CAPTURE(major);
                 CAPTURE(info);
                 with_input_ranges({static_cast<std::byte>((major << 5U) | info)}, [](const auto &input) {
-                    auto                                          dec = make_decoder(input);
-                    typename decltype(dec)::raw_encoded_item_view value;
-                    const auto                                    result = dec(value);
+                    auto                                      dec = make_decoder(input);
+                    typename decltype(dec)::encoded_item_view value;
+                    const auto                                result = dec(value);
                     REQUIRE_FALSE(result);
                     CHECK_EQ(result.error(), status_code::invalid_additional_info);
 
@@ -214,9 +214,9 @@ TEST_SUITE("cbor_wire/status_errors") {
         for (const auto &[hex, expected_status] : cases) {
             CAPTURE(hex);
             with_input_ranges(to_bytes(hex), [&](const auto &input) {
-                auto                                         dec = make_decoder(input);
-                typename decltype(dec)::raw_encoded_map_view value;
-                const auto                                   result = dec(value);
+                auto                                     dec = make_decoder(input);
+                typename decltype(dec)::encoded_map_view value;
+                const auto                               result = dec(value);
                 REQUIRE_FALSE(result);
                 CHECK_EQ(result.error(), expected_status);
             });

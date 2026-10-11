@@ -11,6 +11,7 @@
 #include <openssl/obj_mac.h>
 #include <span>
 #include <string_view>
+#include <vector>
 
 using namespace cbor::tags;
 
@@ -39,11 +40,12 @@ bool verify_both_signers(const cwt::cose_sign &message, EVP_PKEY *first_key, EVP
         return false;
     }
 
-    // Match each protected key ID to its pretrusted key before verifying.
+    // Match each protected key ID to a key the receiver already trusts.
     auto first_header = cwt::decode_protected_header(message.signatures[0].protected_header);
     auto second_header = cwt::decode_protected_header(message.signatures[1].protected_header);
-    if (!first_header || !second_header || first_header->kid != cwt::byte_string{std::byte{1}} ||
-        second_header->kid != cwt::byte_string{std::byte{2}}) {
+    if (!first_header || !second_header ||
+        first_header->kid != std::vector<std::byte>{std::byte{1}} ||
+        second_header->kid != std::vector<std::byte>{std::byte{2}}) {
         return false;
     }
 
@@ -67,12 +69,13 @@ claims = { 2 => tstr }
 */
 int main() {
     // Hold the encoded claims and the complete multi-signer token separately.
-    cwt::byte_string claims_buffer;
-    cwt::byte_string token_buffer;
+    std::vector<std::byte> claims_buffer;
+    std::vector<std::byte> token_buffer;
 
     // Define the claim that both signers will authenticate.
-    cwt::claims_set source;
-    source.subject = "alice";
+    cwt::claims_set source{
+        .subject = "alice",
+    };
 
     // Encode the shared claims payload once.
     auto claims_encoder = make_encoder<codec::cwt>(claims_buffer);
@@ -80,35 +83,39 @@ int main() {
         return 1;
     }
 
-    // Generate two independent keys standing in for pretrusted signer keys.
+    // Generate two independent keys representing signers the receiver already trusts.
     auto first_key = make_example_key();
     auto second_key = make_example_key();
     if (!first_key || !second_key) {
         return 1;
     }
 
-    // Supply the same application context to both signers and the receiver.
+    // Additional authenticated data (AAD) binds both signatures to context outside the token.
     constexpr std::string_view context = "sensor-api:v1:joint-approval";
+
+    // Borrow these context bytes; the receiver must independently supply identical bytes.
     const auto external_aad = std::as_bytes(std::span{context.data(), context.size()});
 
-    // Give the first signer its own protected algorithm and key ID.
-    cwt::header_map first_header;
-    first_header.alg = cwt::algorithm::es256;
-    first_header.kid = cwt::byte_string{std::byte{1}};
+    // Set the first signer's algorithm and key ID in headers authenticated by its signature.
+    cwt::header_map first_header{
+        .alg = cwt::algorithm::es256,
+        .kid = std::vector<std::byte>{std::byte{1}},
+    };
 
-    // Create a COSE_Sign message with the first signature.
+    // Copy the claims into a COSE_Sign message that owns its payload, headers and signatures.
     auto message = cwt::sign<cwt::openssl_es256_backend>(first_key.get(), {}, {}, claims_buffer,
         first_header, {}, external_aad);
     if (!message) {
         return 1;
     }
 
-    // Give the second signer a distinct protected key ID.
-    cwt::header_map second_header;
-    second_header.alg = cwt::algorithm::es256;
-    second_header.kid = cwt::byte_string{std::byte{2}};
+    // Set the second signer's authenticated headers with a distinct key ID.
+    cwt::header_map second_header{
+        .alg = cwt::algorithm::es256,
+        .kid = std::vector<std::byte>{std::byte{2}},
+    };
 
-    // Append the second signature without changing the shared payload or headers.
+    // Append a signature; the message owns it and retains its existing payload and headers.
     if (!cwt::add_signature<cwt::openssl_es256_backend>(second_key.get(), *message, second_header,
             {}, external_aad)) {
         return 1;
@@ -120,12 +127,12 @@ int main() {
         return 1;
     }
 
-    // Bind the expected tags to an owning receiver for all signatures.
+    // Require the CWT and COSE_Sign tags when decoding into a message that owns its data.
     cwt::cose_sign received;
     auto signed_token = make_tag_pair(cwt::cose_sign_tag{}, received);
     auto token = make_tag_pair(cwt::cwt_tag{}, signed_token);
 
-    // Decode exactly one complete tagged token.
+    // Decode one complete token, copying its headers, payload and signatures from the buffer.
     auto token_decoder = make_decoder<codec::cwt>(token_buffer);
     if (!token_decoder(token) || token_decoder.tell() != token_buffer.end()) {
         return 2;
@@ -137,10 +144,10 @@ int main() {
         return 2;
     }
 
-    // Declare the verified claims destination.
+    // Store the decoded claims in a claims_set that owns its strings.
     cwt::claims_set claims;
 
-    // Decode and check the authenticated subject claim.
+    // Copy the authenticated subject from the message payload and check its value.
     auto claims_decoder = make_decoder<codec::cwt>(*received.payload);
     if (!claims_decoder(claims) || claims_decoder.tell() != received.payload->end() ||
         claims.subject != "alice") {

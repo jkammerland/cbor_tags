@@ -8,9 +8,7 @@ See [signing and verification](cose_signing.md) for backend-independent policy.
 ```cpp
 #include <cbor_tags/cwt/openssl_crypto.h>
 
-namespace tags = cbor::tags;
-namespace cwt = tags::cwt;
-namespace codec = tags::codec;
+using namespace cbor::tags;
 
 // key: EVP_PKEY* containing an EC P-256 key; bytes: encoded claims above.
 if (bytes) {
@@ -18,8 +16,8 @@ if (bytes) {
     if (message) {
         auto verified = cwt::verify_sign1<cwt::openssl_es256_backend>(key, *message);
         if (verified) {
-            cwt::byte_string token;
-            auto result = tags::make_encoder<codec::cwt>(token)(
+            std::vector<std::byte> token;
+            auto result = make_encoder<codec::cwt>(token)(
                 cwt::as_cwt(cwt::as_cose_sign1(*message)));
             // Check result before sending token.
         }

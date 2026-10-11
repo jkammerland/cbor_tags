@@ -23,7 +23,7 @@ TEST_SUITE("roundtrip/cwt") {
 
         claims_set claims{};
         claims.issuer   = "issuer";
-        claims.cwt_id   = byte_string{std::byte{17}, std::byte{34}};
+        claims.cwt_id   = std::vector<std::byte>{std::byte{17}, std::byte{34}};
         const auto view = project(claims);
         static_assert(std::same_as<decltype(view), const claims_view>);
         REQUIRE(view.issuer);
