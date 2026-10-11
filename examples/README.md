@@ -49,6 +49,7 @@ through signing, token encoding, decoding and verification.
 | [32_experimental_cwt_header_claims.cpp](32_experimental_cwt_header_claims.cpp) | Carry claims in protected headers | Verify first, then compare replicated claims by value. |
 | [36_cwt_public_keys.cpp](36_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
 | [37_cwt_confirmation.cpp](37_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
+| [38_cwt_key_thumbprint.cpp](38_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministic required-parameter projection. |
 
 ## CDDL
 
@@ -86,7 +87,7 @@ Run one example directly:
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
 
-Examples 24–26, 28–29, and 32 additionally require OpenSSL development files and the explicit opt-in:
+Examples 24–26, 28–29, 32 and 38 additionally require OpenSSL development files and the explicit opt-in:
 
 ```bash
 cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON
