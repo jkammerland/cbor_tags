@@ -102,11 +102,11 @@ policy. It uses the built-in OpenSSL backend; substitute the backend and key
 from [example 24](../examples/24_experimental_cwt_backend.cpp) at the signing and
 verification calls to use your own provider.
 
-Additional authenticated data (AAD) is authenticated but absent from the token.
+[Additional authenticated data (AAD)](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3)
+is authenticated but absent from the token.
 Both parties must supply identical bytes, transported separately or reconstructed
 from agreed application context; this example binds the
-token to one request purpose. Missing or different AAD causes verification to
-fail, as required by [COSE external data processing](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3).
+token to one request purpose.
 
 The example uses a key already trusted by the receiver, checks its protected key ID, and injects a
 fixed Unix time to keep the demonstration reproducible. A service supplies its
