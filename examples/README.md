@@ -4,6 +4,10 @@ Read the numbered programs in order. Each is a standalone C++20 program, with
 its CDDL immediately above `main()` and short comments separating the steps.
 Examples 01 and 03 group related basics; later files introduce one feature each.
 Examples 19–22 form an experimental range, view and segment sequence.
+Example 23 introduces experimental CWT claim encoding and decoding; example 24
+connects an application crypto backend using optional OpenSSL.
+Example 25 builds a complete signed token with external AAD and receiver validation;
+example 26 requires signatures from two independent keys.
 
 ## Learning order
 
@@ -31,6 +35,10 @@ Examples 19–22 form an experimental range, view and segment sequence.
 | [20_experimental_byte_view.cpp](20_experimental_byte_view.cpp) | Borrow a decoded byte payload | A decoded span points into the encoded input rather than copying its payload. |
 | [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
 | [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
+| [23_experimental_cwt_claims.cpp](23_experimental_cwt_claims.cpp) | Encode and decode CWT claims | Opt into registered integer claim labels; signing and application validation are separate steps. |
+| [24_experimental_cwt_backend.cpp](24_experimental_cwt_backend.cpp) | Connect a custom crypto backend | Forward an application key through signing and verification, using OpenSSL as the replaceable provider. |
+| [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged envelope, then validate the verified claims. |
+| [26_experimental_cwt_multi_signer.cpp](26_experimental_cwt_multi_signer.cpp) | Require two token signers | Append a COSE_Sign signature and verify each signer with its own pretrusted key. |
 
 ## CDDL
 
@@ -67,3 +75,14 @@ Run one example directly:
 
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
+
+Examples 24–26 additionally require OpenSSL development files and the explicit opt-in:
+
+```bash
+cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON
+cmake --build build/examples --target \
+  cbor_tags_example_24_experimental_cwt_backend \
+  cbor_tags_example_25_experimental_cwt_token \
+  cbor_tags_example_26_experimental_cwt_multi_signer
+ctest --test-dir build/examples -R '^example_(24|25|26)_' --output-on-failure --no-tests=error
+```

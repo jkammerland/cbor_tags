@@ -1,9 +1,23 @@
 # COSE signing and verification
 
+**Experimental:** COSE signing and verification APIs may change.
+
 Include `cbor_tags/cwt/cwt.h` for these backend-independent helpers.
 See [CWT and COSE models](cwt.md) for codec selection and payload lifetimes.
 
 ## Backend contract
+
+The runnable [custom backend example](../examples/24_experimental_cwt_backend.cpp)
+uses an application-owned key and OpenSSL as a replaceable provider. Its two
+provider calls are the integration points for your crypto library or HSM SDK;
+map provider failures to `unexpected<status_code>` and return success only after
+signing or verification succeeds. The crypto examples require the optional
+`CBOR_TAGS_ENABLE_CWT_OPENSSL` build flag.
+
+Keys can be application-defined types; the helpers forward them to your backend.
+The backend receives the encoded COSE `Sig_structure`, not just the payload or a
+precomputed digest. For ES256, the provider applies SHA-256 and returns a 64-byte
+`r || s` signature, converting its native signature format if necessary.
 
 Provide an algorithm identifier and operations with these signatures:
 
@@ -75,6 +89,42 @@ auto result = cwt::verify_sign1<custom_backend>(
 ```
 
 An embedded payload takes precedence over the detached argument.
+
+## Complete token with external AAD
+
+[Example 25](../examples/25_experimental_cwt_token.cpp) builds a complete
+CWT-tagged COSE_Sign1 token: encode claims, protect `alg` and `kid`, sign with
+external AAD, serialize, decode, verify, then apply issuer, audience and expiry
+policy. It uses the built-in OpenSSL backend; substitute the backend and key
+from [example 24](../examples/24_experimental_cwt_backend.cpp) at the signing and
+verification calls to use your own provider.
+
+External AAD is authenticated but absent from the token. Both parties must
+supply identical bytes from their application context; this example binds the
+token to one request purpose. Missing or different AAD causes verification to
+fail, as required by [COSE external data processing](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3).
+
+The example uses a pretrusted key, checks its protected key ID, and injects a
+fixed Unix time to keep the demonstration reproducible. A service supplies its
+current time and trusted key configuration; `kid` identifies a key but does not
+establish trust. Signature verification and application claim validation are
+separate steps: the example also rejects expiry at the exact deadline.
+
+## Multiple signers
+
+[Example 26](../examples/26_experimental_cwt_multi_signer.cpp) creates a
+CWT-tagged COSE_Sign token with two independent ES256 keys. `sign` creates the
+first signature; `add_signature` appends the second over the same payload and
+external AAD. Each signature has its own protected algorithm and key ID.
+
+The example's application policy requires exactly two signatures in an agreed
+order and verifies each index with its corresponding pretrusted key. It rejects
+a wrong key, a damaged signature and a missing signer. The no-index
+`verify_sign(key, message, aad)` overload checks every signature using that one
+key; use the indexed overload or `verify_signature` when signers have different
+keys. Key selection and whether one, all or a threshold of signers is required
+remain application policy. Apply the claim policy from example 25 after that
+signature policy succeeds.
 
 ## Header policy
 

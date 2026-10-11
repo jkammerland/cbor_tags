@@ -1,5 +1,7 @@
 # OpenSSL ES256 backend
 
+**Experimental:** The optional OpenSSL ES256 backend API may change.
+
 Include `cbor_tags/cwt/openssl_crypto.h` for the optional OpenSSL implementation.
 See [signing and verification](cose_signing.md) for backend-independent policy.
 

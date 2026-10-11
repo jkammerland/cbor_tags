@@ -10,9 +10,13 @@ This is a library for encoding and decoding Concise Binary Object Representation
 The primary advantage of using this library is the ability to define your own data structures and encode/decode them in a way that is both efficient and easy to distribute. All another party needs is to know the tag number and the Concise Data Definition of the object. If using this library on both ends, just the struct definition is enough to encode/decode the data.
 
 See standard specifications for more information:
+
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) (Concise Data Definition Language)
 - CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
 - CBOR Typed Arrays [RFC8746](https://datatracker.ietf.org/doc/html/rfc8746)
+- **Experimental:** CWT [RFC8392](https://www.rfc-editor.org/rfc/rfc8392.html) — [claims and codec guide](doc/cwt.md), [compiled example](examples/23_experimental_cwt_claims.cpp).
+- **Experimental:** COSE [RFC9052](https://www.rfc-editor.org/rfc/rfc9052.html) — [Sign/Sign1 models and signing helpers](doc/cose_signing.md).
+- **Experimental:** COSE ES256 [RFC9053 §2.1](https://www.rfc-editor.org/rfc/rfc9053.html#section-2.1) — [optional OpenSSL backend](doc/cwt_openssl.md).
 
 See [CBOR Conformance](doc/conformance.md) for the library's interoperability
 profile, intentional permissive behavior, and validation boundaries.

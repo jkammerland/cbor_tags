@@ -277,6 +277,7 @@ jobs:
             cmake -S /work -B /tmp/build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCBOR_TAGS_BUILD_TESTS=ON \
+              -DCBOR_TAGS_BUILD_EXAMPLES=ON \
               -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON \
               -DCBOR_TAGS_USE_STD_EXPECTED=${{ matrix.std_expected }} \
               -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \

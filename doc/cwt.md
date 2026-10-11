@@ -1,11 +1,16 @@
 # CWT and COSE
 
+**Experimental:** CWT and COSE model and codec APIs may change.
+
 Plain owning and borrowed models live in `cbor_tags/cwt/types.h` under
 `cbor::tags::cwt`. Their opt-in wire codec is `cbor::tags::codec::cwt`, provided by
 `cbor_tags/codec/cwt.h`. The convenience header `cbor_tags/cwt/cwt.h` includes
 the codec and serialization/tag helpers.
 
 ## Encode and decode claims
+
+Start with the [compiled claims example](../examples/23_experimental_cwt_claims.cpp)
+for a complete encode/decode program with its CDDL and explicit result checks.
 
 ```cpp
 #include <cbor_tags/cwt/cwt.h>
