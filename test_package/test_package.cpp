@@ -50,7 +50,7 @@ int main() {
 #if CBOR_TAGS_TEST_PACKAGE_HAS_CWT_OPENSSL
     {
         namespace cwt = cbor::tags::cwt;
-        static_assert(cwt::openssl_es256_backend::algorithm_id == cwt::algorithm::es256);
+        static_assert(cwt::openssl_esp256_backend::algorithm_id == cwt::algorithm::esp256);
 
         std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> context{EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free};
         if (!context || EVP_PKEY_keygen_init(context.get()) != 1 ||
@@ -62,13 +62,13 @@ int main() {
             return 16;
         }
         std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{generated, EVP_PKEY_free};
-        const cwt::byte_string                              payload{std::byte{1}, std::byte{2}, std::byte{3}};
-        auto                                                message = cwt::sign1<cwt::openssl_es256_backend>(key.get(), {}, {}, payload);
-        if (!message || !cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), *message)) {
+        const std::vector<std::byte>                        payload{std::byte{1}, std::byte{2}, std::byte{3}};
+        auto                                                message = cwt::sign1<cwt::openssl_esp256_backend>(key.get(), {}, {}, payload);
+        if (!message || !cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), *message)) {
             return 17;
         }
         message->payload->front() ^= std::byte{1};
-        if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), *message)) {
+        if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), *message)) {
             return 18;
         }
     }

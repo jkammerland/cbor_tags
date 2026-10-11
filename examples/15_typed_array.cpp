@@ -24,7 +24,7 @@ int main() {
         return 1;
     }
 
-    // Declare an owning typed-array receiver.
+    // Store decoded numbers in a typed array that owns its elements.
     rfc8746::typed_array<std::int32_t> received;
 
     // Decode the tagged byte string with the typed-array codec.

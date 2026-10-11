@@ -16,24 +16,34 @@ signing or verification succeeds. The crypto examples require the optional
 
 Keys can be application-defined types; the helpers forward them to your backend.
 The backend receives the encoded COSE `Sig_structure`, not just the payload or a
-precomputed digest. For ES256, the provider applies SHA-256 and returns a 64-byte
+precomputed digest. For ESP256, the provider applies SHA-256 and returns a 64-byte
 `r || s` signature, converting its native signature format if necessary.
+
+Each input range yields `std::span<const std::byte>` values in signing order.
+Consume it once during the call; do not retain its spans. Empty spans contribute
+no bytes. The library does not flatten the input for a contiguous-only provider.
 
 Provide an algorithm identifier and operations with these signatures:
 
 ```cpp
 #include <cbor_tags/cwt/cwt.h>
 
-namespace tags = cbor::tags;
-namespace cwt = tags::cwt;
-namespace codec = tags::codec;
+using namespace cbor::tags;
 
 struct custom_backend {
-    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
-    static tags::expected<cwt::byte_string, tags::status_code>
-    sign(void *key, std::span<const std::byte> to_be_signed);
-    static tags::expected<void, tags::status_code>
-    verify(void *key, std::span<const std::byte> to_be_signed,
+    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::esp256;
+
+    template <std::ranges::input_range Parts>
+    static expected<std::vector<std::byte>, status_code>
+    sign(void *key, Parts&& parts);
+
+    template <std::ranges::input_range Parts>
+    static expected<std::size_t, status_code>
+    sign(void *key, Parts&& parts, std::span<std::byte> signature_output);
+
+    template <std::ranges::input_range Parts>
+    static expected<void, status_code>
+    verify(void *key, Parts&& parts,
            std::span<const std::byte> signature);
 };
 // cwt::sign1<custom_backend>(key, {}, {}, payload)
@@ -50,8 +60,8 @@ if (bytes) {
     if (message) {
         auto verified = cwt::verify_sign1<custom_backend>(key, *message);
         if (verified) {
-            cwt::byte_string token;
-            auto result = tags::make_encoder<codec::cwt>(token)(
+            std::vector<std::byte> token;
+            auto result = make_encoder<codec::cwt>(token)(
                 cwt::as_cwt(cwt::as_cose_sign1(*message)));
             // Check result before sending token.
         }
@@ -75,10 +85,52 @@ Check `bytes` first. Use `add_signature` or `sign_signature` for more signatures
 `make_sign1_tbs` and `make_sign_tbs` produce the corresponding
 [Sig_structure (§4.4)](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4).
 
-`verify_sign1`, `verify_signature`, `verify_sign`, `make_sign1_tbs` and
-`make_sign_tbs` accept borrowed models. Verification still parses protected
-headers and allocates the bytes to be signed. Signing helpers return owning
-results, and the backend interface is unchanged.
+`make_sign1_tbs` and `make_sign_tbs` return `byte_segments`: generated CBOR
+headers followed by views into the original protected bytes, payload and AAD.
+Here, `tbs` means "to be signed". Their model arguments must be named objects;
+keep all referenced storage alive and stable until the segments have been consumed.
+Call `flatten()` explicitly if another API needs one contiguous buffer.
+
+`verify_sign1`, `verify_signature` and `verify_sign` accept borrowed models and
+pass those byte views directly to the backend. Verification preserves the original
+protected-header encoding. Header validation and segment descriptors may still
+allocate; verification does not concatenate the signed input.
+
+Signing helpers return owning results. `sign` and `sign1` copy the supplied
+payload into that result; `add_signature` appends an owned signature to the
+existing message. Their backend input is segmented too. AAD spans borrow
+caller-owned storage for the call and are not retained in the message.
+
+## Caller-owned signature storage
+
+Pass an explicit `cose_sign1_view` and a writable byte span to `sign1` to keep
+payload ownership in your application:
+
+```cpp
+std::array<std::byte, 64> signature;
+
+auto written = cwt::sign1<custom_backend>(key, message, signature, external_aad);
+if (written) {
+    message.signature = std::span<const std::byte>{signature}.first(*written);
+}
+```
+
+The message must contain already encoded protected headers with the algorithm
+selected. This overload does not insert an algorithm or change the message;
+it ignores the existing signature field and returns the number of output bytes
+written. `sign_signature(key, message_view, signer_view, output, aad, detached)`
+provides the corresponding operation for each COSE_Sign signer.
+
+Implement the backend overload `sign(key, parts, std::span<std::byte> output)`
+returning `expected<std::size_t, status_code>` for this path. A backend needs only
+the overloads used by its callers. OpenSSL supports both and rejects output shorter
+than 64 bytes with `size_limit_exceeded` before writing. A larger buffer's suffix
+is untouched. Disregard output contents after a failure.
+
+Keep payload, headers and AAD stable throughout the call. Signature output must
+not overlap those inputs. When encoding a view into `byte_segments`, keep all
+referenced storage, including the completed signature, alive until the output
+has been consumed.
 
 For a null payload, verification requires a detached payload. `std::nullopt`
 means missing; an engaged empty span means a valid empty payload:
@@ -99,12 +151,13 @@ policy. It uses the built-in OpenSSL backend; substitute the backend and key
 from [example 24](../examples/24_experimental_cwt_backend.cpp) at the signing and
 verification calls to use your own provider.
 
-External AAD is authenticated but absent from the token. Both parties must
-supply identical bytes from their application context; this example binds the
-token to one request purpose. Missing or different AAD causes verification to
-fail, as required by [COSE external data processing](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3).
+[Additional authenticated data (AAD)](https://www.rfc-editor.org/rfc/rfc9052.html#section-4.3)
+is authenticated but absent from the token.
+Both parties must supply identical bytes, transported separately or reconstructed
+from agreed application context; this example binds the
+token to one request purpose.
 
-The example uses a pretrusted key, checks its protected key ID, and injects a
+The example uses a key already trusted by the receiver, checks its protected key ID, and injects a
 fixed Unix time to keep the demonstration reproducible. A service supplies its
 current time and trusted key configuration; `kid` identifies a key but does not
 establish trust. Signature verification and application claim validation are
@@ -113,12 +166,12 @@ separate steps: the example also rejects expiry at the exact deadline.
 ## Multiple signers
 
 [Example 26](../examples/26_experimental_cwt_multi_signer.cpp) creates a
-CWT-tagged COSE_Sign token with two independent ES256 keys. `sign` creates the
+CWT-tagged COSE_Sign token with two independent ESP256 keys. `sign` creates the
 first signature; `add_signature` appends the second over the same payload and
 external AAD. Each signature has its own protected algorithm and key ID.
 
 The example's application policy requires exactly two signatures in an agreed
-order and verifies each index with its corresponding pretrusted key. It rejects
+order and verifies each index with its corresponding trusted key. It rejects
 a wrong key, a damaged signature and a missing signer. The no-index
 `verify_sign(key, message, aad)` overload checks every signature using that one
 key; use the indexed overload or `verify_signature` when signers have different
@@ -130,7 +183,7 @@ signature policy succeeds.
 
 - Signing helpers reject unprotected `alg`/`crit` and conflicting algorithms.
   Unknown noncritical headers are discarded. Applications enforce any stricter
-  cross-bucket duplicate policy from [RFC 9052 §3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3),
+  policy for duplicate labels across protected and unprotected headers from [RFC 9052 §3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3),
   checking unknown labels before discarding them. Known `kid` duplication can be
   checked after decoding:
 
@@ -140,3 +193,27 @@ if (!protected_map || (protected_map->kid && message.unprotected.kid)) {
     return reject_message();
 }
 ```
+
+## Borrowed sending and receiving
+
+[Example 28](../examples/28_experimental_cwt_borrowed_token.cpp) signs into an
+application-owned array and encodes the token into `byte_segments`. Their layout
+is ordered CBOR headers and views into the original header, payload and signature
+storage. AAD is used during signing and is absent from the outgoing token.
+
+The example copies those segments once to simulate delivery into a receiver-owned
+buffer; this transport simulation is separate from the borrowed signing and
+encoding paths. The receiver decodes `cose_sign1_view`, reconstructs identical
+AAD, verifies the original bytes, then decodes `claims_view` and applies its
+issuer, audience and expiration policy. Its views borrow the receive buffer,
+which must remain alive and unchanged while the authenticated data is used.
+
+[Example 29](../examples/29_experimental_cwt_borrowed_multi_signer.cpp) shares one
+payload between two signatures and verifies both with their respective trusted
+keys before decoding claims. The signatures vector owns descriptors; the byte
+fields borrow the receive buffer. Provider state, segment descriptors and parsed
+header metadata may still allocate.
+
+These view examples use contiguous input and definite text/byte fields. Use an
+owning destination for noncontiguous input or fragmented indefinite strings;
+borrowed decoding does not silently create an owning copy.

@@ -108,7 +108,7 @@ UTF-8 policy, and the permitted simple values.
   the default decoder policy; see [CDDL Standard Coverage](cddl_standard_coverage.md).
 - RFC 8746 typed arrays are provided by an opt-in codec; see
   [RFC 8746 Typed Arrays](rfc8746_typed_arrays.md).
-- Experimental raw views, range wrappers, lazy tag scanning, and segmented output
+- Experimental encoded views, range wrappers, lazy tag scanning, and segmented output
   are described in [Experimental Range And Segment APIs](experimental_ranges.md).
 
 Support for a CBOR feature does not imply that every target C++ type accepts it.

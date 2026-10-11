@@ -144,13 +144,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using input_buffer_type = InputBuffer;
     using byte              = std::byte;
 
-    using iterator_t             = std::ranges::iterator_t<const InputBuffer>;
-    using subrange               = std::ranges::subrange<iterator_t>;
-    using bstr_view_t            = bstr_view<subrange>;
-    using tstr_view_t            = tstr_view<subrange>;
-    using raw_encoded_item_view  = encoded_item_view_for<InputBuffer>;
-    using raw_encoded_array_view = encoded_array_view_for<InputBuffer>;
-    using raw_encoded_map_view   = encoded_map_view_for<InputBuffer>;
+    using iterator_t         = std::ranges::iterator_t<const InputBuffer>;
+    using subrange           = std::ranges::subrange<iterator_t>;
+    using bstr_view_t        = bstr_view<subrange>;
+    using tstr_view_t        = tstr_view<subrange>;
+    using encoded_item_view  = encoded_item_view_for<InputBuffer>;
+    using encoded_array_view = encoded_array_view_for<InputBuffer>;
+    using encoded_map_view   = encoded_map_view_for<InputBuffer>;
 
     using expected_type   = typename detail::decoder_return_type<Options, InputBuffer>::type;
     using unexpected_type = typename expected_type::error_type;
@@ -1811,9 +1811,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return unexpected<decltype(collect_status.result)>(collect_status.result);
         }
 
-        const auto            cursor = tell();
-        const auto            size   = current_offset() - start_offset;
-        raw_encoded_item_view encoded_item;
+        const auto        cursor = tell();
+        const auto        size   = current_offset() - start_offset;
+        encoded_item_view encoded_item;
         assign_encoded_view(encoded_item, start, cursor, size);
         return expected_type{std::move(encoded_item)};
     }
@@ -2134,8 +2134,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 raw_range_type{std::span<const std::byte>{reinterpret_cast<const std::byte *>(begin), static_cast<std::size_t>(size)}}}};
         } else {
             static_assert(always_false<raw_range_type>::value,
-                          "Decode contiguous raw views only from contiguous buffers; use encoded_*_view_for<Buffer> or the decoder "
-                          "raw_encoded_*_view aliases for non-contiguous buffers.");
+                          "Decode contiguous encoded views only from contiguous buffers; use encoded_*_view_for<Buffer> or the decoder "
+                          "encoded_*_view aliases for non-contiguous buffers.");
         }
     }
 };

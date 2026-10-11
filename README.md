@@ -16,7 +16,12 @@ See standard specifications for more information:
 - CBOR Typed Arrays [RFC8746](https://datatracker.ietf.org/doc/html/rfc8746)
 - **Experimental:** CWT [RFC8392](https://www.rfc-editor.org/rfc/rfc8392.html) — [claims and codec guide](doc/cwt.md), [compiled example](examples/23_experimental_cwt_claims.cpp).
 - **Experimental:** COSE [RFC9052](https://www.rfc-editor.org/rfc/rfc9052.html) — [Sign/Sign1 models and signing helpers](doc/cose_signing.md).
-- **Experimental:** COSE ES256 [RFC9053 §2.1](https://www.rfc-editor.org/rfc/rfc9053.html#section-2.1) — [optional OpenSSL backend](doc/cwt_openssl.md).
+- **Experimental:** COSE ESP256 [RFC9864](https://www.rfc-editor.org/rfc/rfc9864.html) — [optional OpenSSL backend](doc/cwt_openssl.md).
+
+- **Experimental:** COSE header extensions [RFC9596](https://www.rfc-editor.org/rfc/rfc9596.html) / [RFC9597](https://www.rfc-editor.org/rfc/rfc9597.html) — [typed headers and claims](doc/cwt_headers.md).
+- **Experimental:** CWT confirmation [RFC8747](https://www.rfc-editor.org/rfc/rfc8747.html) and public-key thumbprints [RFC9679](https://www.rfc-editor.org/rfc/rfc9679.html) — [key models and providers](doc/cwt_keys.md).
+
+See [CWT and COSE standards coverage](doc/cwt_standards.md) for implemented capabilities and follow-ups.
 
 See [CBOR Conformance](doc/conformance.md) for the library's interoperability
 profile, intentional permissive behavior, and validation boundaries.
@@ -676,7 +681,7 @@ int main() {
 ```
 
 > [!NOTE]
-> You can mix and match these methods above. For example, you can can use a free form cbor_tag with member functions for encoding/decoding. Or you could use a static tag with free form encode/decode methods. By not defining a tag or a cbor_tag() function you can also manually encode/decode the tag inside of your encode/decode functions.
+> You can mix and match these methods above. For example, you can use a free form cbor_tag with member functions for encoding/decoding. Or you could use a static tag with free form encode/decode methods. By not defining a tag or a cbor_tag() function you can also manually encode/decode the tag inside of your encode/decode functions.
 
 More examples on alternative methods can be found in wiki, such as how to handle non-default constructible types.
 
@@ -1141,7 +1146,7 @@ For bounded object fields, PMR allocation containment, and their CDDL, see
 The core encoder/decoder, tags, variants, CDDL generation, size bounds, and
 opt-in extension codecs are supported and covered by CI.
 
-Range wrappers, borrowed and raw views, lazy tag scanning, and segmented output
+Range wrappers, borrowed and encoded views, lazy tag scanning, and segmented output
 remain experimental; their current contracts are documented in
 [Experimental Range And Segment APIs](doc/experimental_ranges.md). Planned work
 is tracked in [GitHub issues](https://github.com/jkammerland/cbor_tags/issues)

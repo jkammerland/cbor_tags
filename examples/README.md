@@ -8,6 +8,8 @@ Example 23 introduces experimental CWT claim encoding and decoding; example 24
 connects an application crypto backend using optional OpenSSL.
 Example 25 builds a complete signed token with external AAD and receiver validation;
 example 26 requires signatures from two independent keys.
+Example 27 chooses application layouts; examples 28–29 keep payload bytes borrowed
+through signing, token encoding, decoding and verification.
 
 ## Learning order
 
@@ -34,11 +36,21 @@ example 26 requires signatures from two independent keys.
 | [19_experimental_ranges.cpp](19_experimental_ranges.cpp) | Encode a filtered range | Avoid an intermediate container while still writing CBOR bytes. |
 | [20_experimental_byte_view.cpp](20_experimental_byte_view.cpp) | Borrow a decoded byte payload | A decoded span points into the encoded input rather than copying its payload. |
 | [21_experimental_segments.cpp](21_experimental_segments.cpp) | Encode headers and borrowed payloads | Keep headers in owned segments and views into original text and bytes in wire order. |
-| [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without materializing or re-encoding its elements. |
+| [22_experimental_forward_view.cpp](22_experimental_forward_view.cpp) | Forward an encoded view | Borrow a complete encoded array without decoding or re-encoding its elements. |
 | [23_experimental_cwt_claims.cpp](23_experimental_cwt_claims.cpp) | Encode and decode CWT claims | Opt into registered integer claim labels; signing and application validation are separate steps. |
 | [24_experimental_cwt_backend.cpp](24_experimental_cwt_backend.cpp) | Connect a custom crypto backend | Forward an application key through signing and verification, using OpenSSL as the replaceable provider. |
-| [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged envelope, then validate the verified claims. |
-| [26_experimental_cwt_multi_signer.cpp](26_experimental_cwt_multi_signer.cpp) | Require two token signers | Append a COSE_Sign signature and verify each signer with its own pretrusted key. |
+| [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged message, then validate the verified claims. |
+| [26_experimental_cwt_multi_signer.cpp](26_experimental_cwt_multi_signer.cpp) | Require two token signers | Append a COSE_Sign signature and verify each signer with its own trusted key. |
+| [27_experimental_cwt_custom_types.cpp](27_experimental_cwt_custom_types.cpp) | Choose application field names and storage | Encode an owning application type and decode into a different type with borrowed text. |
+| [28_experimental_cwt_borrowed_token.cpp](28_experimental_cwt_borrowed_token.cpp) | Sign and receive through views | Use a caller-owned signature buffer, encode segments, then decode views, verify with AAD and check claims. |
+| [29_experimental_cwt_borrowed_multi_signer.cpp](29_experimental_cwt_borrowed_multi_signer.cpp) | Share one payload between signers | Keep separate signature buffers and require both trusted signers before reading borrowed claims. |
+| [30_experimental_cwt_fields.cpp](30_experimental_cwt_fields.cpp) | Select application fields | Integer and text labels bind to independently chosen receiver storage. |
+| [31_experimental_cwt_type.cpp](31_experimental_cwt_type.cpp) | Describe the complete token | Protected `typ` distinguishes a COSE object from its payload content type. |
+| [32_experimental_cwt_header_claims.cpp](32_experimental_cwt_header_claims.cpp) | Carry claims in protected headers | Verify first, then compare replicated claims by value. |
+| [36_cwt_public_keys.cpp](36_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
+| [37_cwt_confirmation.cpp](37_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
+| [38_cwt_key_thumbprint.cpp](38_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
+| [39_cwt_confirmation_token.cpp](39_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
 
 ## CDDL
 
@@ -76,13 +88,15 @@ Run one example directly:
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
 
-Examples 24–26 additionally require OpenSSL development files and the explicit opt-in:
+Examples 24–26, 28–29, 32, and 38–39 additionally require OpenSSL development files and the explicit opt-in:
 
 ```bash
 cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON
 cmake --build build/examples --target \
   cbor_tags_example_24_experimental_cwt_backend \
   cbor_tags_example_25_experimental_cwt_token \
-  cbor_tags_example_26_experimental_cwt_multi_signer
-ctest --test-dir build/examples -R '^example_(24|25|26)_' --output-on-failure --no-tests=error
+  cbor_tags_example_26_experimental_cwt_multi_signer \
+  cbor_tags_example_28_experimental_cwt_borrowed_token \
+  cbor_tags_example_29_experimental_cwt_borrowed_multi_signer
+ctest --test-dir build/examples -R '^example_(24|25|26|28|29)_' --output-on-failure --no-tests=error
 ```

@@ -5,10 +5,10 @@
 #include <ranges>
 
 namespace {
-template <typename... Items> expected<byte_string, status_code> encode_header_items(std::uint64_t size, Items &&...items) {
-    byte_string encoded;
-    auto        enc    = make_encoder<codec::cwt>(encoded);
-    auto        result = enc(as_map{size}, std::forward<Items>(items)...);
+template <typename... Items> expected<std::vector<std::byte>, status_code> encode_header_items(std::uint64_t size, Items &&...items) {
+    std::vector<std::byte> encoded;
+    auto                   enc    = make_encoder<codec::cwt>(encoded);
+    auto                   result = enc(as_map{size}, std::forward<Items>(items)...);
     if (!result) {
         return cbor::tags::unexpected<status_code>{result.error()};
     }
@@ -27,7 +27,7 @@ TEST_SUITE("cbor_wire/cwt") {
             .expiration = std::int64_t{1444064944},
             .not_before = std::int64_t{1443944944},
             .issued_at  = std::int64_t{1443944944},
-            .cwt_id     = byte_string{std::byte{0x0b}, std::byte{0x71}},
+            .cwt_id     = std::vector<std::byte>{std::byte{0x0b}, std::byte{0x71}},
         };
 
         std::vector<std::byte> encoded;
@@ -55,7 +55,7 @@ TEST_SUITE("cbor_wire/cwt") {
     }
 
     TEST_CASE("COSE protected headers reject invalid critical label sets") {
-        auto check_rejected = [](expected<byte_string, status_code> encoded) {
+        auto check_rejected = [](expected<std::vector<std::byte>, status_code> encoded) {
             REQUIRE(encoded);
             auto decoded = decode_protected_header(*encoded);
             REQUIRE_FALSE(decoded);
@@ -82,36 +82,36 @@ TEST_SUITE("cbor_wire/cwt") {
     TEST_CASE("COSE truncated signing structures preserve the destination") {
         SUBCASE("truncated cose_sign1 preserves the destination") {
             const cose_sign1 source{
-                .protected_header = byte_string{std::byte{0x41}},
-                .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x42}}, .crit = {}},
-                .payload          = byte_string{std::byte{0x43}},
-                .signature        = byte_string{std::byte{0x44}},
+                .protected_header = std::vector<std::byte>{std::byte{0x41}},
+                .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x42}}, .crit = {}},
+                .payload          = std::vector<std::byte>{std::byte{0x43}},
+                .signature        = std::vector<std::byte>{std::byte{0x44}},
             };
             auto encoded = encode_to_bytes(source);
             REQUIRE(encoded);
             encoded->pop_back();
 
             cose_sign1 decoded{
-                .protected_header = byte_string{std::byte{0x51}},
-                .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x52}}, .crit = {}},
-                .payload          = byte_string{std::byte{0x53}},
-                .signature        = byte_string{std::byte{0x54}},
+                .protected_header = std::vector<std::byte>{std::byte{0x51}},
+                .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x52}}, .crit = {}},
+                .payload          = std::vector<std::byte>{std::byte{0x53}},
+                .signature        = std::vector<std::byte>{std::byte{0x54}},
             };
             auto result = make_decoder<codec::cwt>(*encoded)(decoded);
             REQUIRE_FALSE(result);
-            CHECK_EQ(decoded.protected_header, byte_string{std::byte{0x51}});
-            CHECK_EQ(decoded.unprotected.kid, byte_string{std::byte{0x52}});
-            CHECK_EQ(decoded.payload, std::optional<byte_string>{byte_string{std::byte{0x53}}});
-            CHECK_EQ(decoded.signature, byte_string{std::byte{0x54}});
+            CHECK_EQ(decoded.protected_header, std::vector<std::byte>{std::byte{0x51}});
+            CHECK_EQ(decoded.unprotected.kid, std::vector<std::byte>{std::byte{0x52}});
+            CHECK_EQ(decoded.payload, std::optional<std::vector<std::byte>>{std::vector<std::byte>{std::byte{0x53}}});
+            CHECK_EQ(decoded.signature, std::vector<std::byte>{std::byte{0x54}});
         }
 
         SUBCASE("truncated sig_structure preserves the destination") {
             const sig_structure source{
                 .context        = "Signature",
-                .body_protected = byte_string{std::byte{0x91}},
-                .sign_protected = byte_string{std::byte{0x92}},
-                .external_aad   = byte_string{std::byte{0x93}},
-                .payload        = byte_string{std::byte{0x94}},
+                .body_protected = std::vector<std::byte>{std::byte{0x91}},
+                .sign_protected = std::vector<std::byte>{std::byte{0x92}},
+                .external_aad   = std::vector<std::byte>{std::byte{0x93}},
+                .payload        = std::vector<std::byte>{std::byte{0x94}},
             };
             auto encoded = encode_to_bytes(source);
             REQUIRE(encoded);
@@ -119,37 +119,37 @@ TEST_SUITE("cbor_wire/cwt") {
 
             sig_structure decoded{
                 .context        = "old",
-                .body_protected = byte_string{std::byte{0xA1}},
-                .sign_protected = byte_string{std::byte{0xA2}},
-                .external_aad   = byte_string{std::byte{0xA3}},
-                .payload        = byte_string{std::byte{0xA4}},
+                .body_protected = std::vector<std::byte>{std::byte{0xA1}},
+                .sign_protected = std::vector<std::byte>{std::byte{0xA2}},
+                .external_aad   = std::vector<std::byte>{std::byte{0xA3}},
+                .payload        = std::vector<std::byte>{std::byte{0xA4}},
             };
             auto result = make_decoder<codec::cwt>(*encoded)(decoded);
             REQUIRE_FALSE(result);
             CHECK_EQ(decoded.context, "old");
-            CHECK_EQ(decoded.body_protected, byte_string{std::byte{0xA1}});
-            CHECK_EQ(decoded.sign_protected, std::optional<byte_string>{byte_string{std::byte{0xA2}}});
-            CHECK_EQ(decoded.external_aad, byte_string{std::byte{0xA3}});
-            CHECK_EQ(decoded.payload, byte_string{std::byte{0xA4}});
+            CHECK_EQ(decoded.body_protected, std::vector<std::byte>{std::byte{0xA1}});
+            CHECK_EQ(decoded.sign_protected, std::optional<std::vector<std::byte>>{std::vector<std::byte>{std::byte{0xA2}}});
+            CHECK_EQ(decoded.external_aad, std::vector<std::byte>{std::byte{0xA3}});
+            CHECK_EQ(decoded.payload, std::vector<std::byte>{std::byte{0xA4}});
         }
     }
 
     TEST_CASE("COSE Sign rejects an empty wire signature array") {
         auto      input = to_bytes("8440a0410180");
         cose_sign decoded{
-            .protected_header = byte_string{std::byte{0x11}},
-            .unprotected      = header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x12}}, .crit = {}},
-            .payload          = byte_string{std::byte{0x13}},
-            .signatures       = {cose_signature{.protected_header = {}, .unprotected = {}, .signature = byte_string{std::byte{0x14}}}},
+            .protected_header = std::vector<std::byte>{std::byte{0x11}},
+            .unprotected      = header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x12}}, .crit = {}},
+            .payload          = std::vector<std::byte>{std::byte{0x13}},
+            .signatures = {cose_signature{.protected_header = {}, .unprotected = {}, .signature = std::vector<std::byte>{std::byte{0x14}}}},
         };
         auto decode_result = make_decoder<codec::cwt>(input)(decoded);
         REQUIRE_FALSE(decode_result);
         CHECK_EQ(decode_result.error(), status_code::unexpected_group_size);
-        CHECK_EQ(decoded.protected_header, byte_string{std::byte{0x11}});
-        CHECK_EQ(decoded.unprotected.kid, byte_string{std::byte{0x12}});
-        CHECK_EQ(decoded.payload, std::optional<byte_string>{byte_string{std::byte{0x13}}});
+        CHECK_EQ(decoded.protected_header, std::vector<std::byte>{std::byte{0x11}});
+        CHECK_EQ(decoded.unprotected.kid, std::vector<std::byte>{std::byte{0x12}});
+        CHECK_EQ(decoded.payload, std::optional<std::vector<std::byte>>{std::vector<std::byte>{std::byte{0x13}}});
         REQUIRE_EQ(decoded.signatures.size(), 1U);
-        CHECK_EQ(decoded.signatures.front().signature, byte_string{std::byte{0x14}});
+        CHECK_EQ(decoded.signatures.front().signature, std::vector<std::byte>{std::byte{0x14}});
     }
 
     TEST_CASE("encoded item view options decode non-empty CWT claims maps") {
@@ -333,8 +333,8 @@ TEST_SUITE("cbor_wire/cwt") {
         cose_sign1 message{
             .protected_header = *protected_header,
             .unprotected      = {},
-            .payload          = byte_string{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}},
-            .signature        = byte_string(64, std::byte{0xA5}),
+            .payload          = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}},
+            .signature        = std::vector<std::byte>(64, std::byte{0xA5}),
         };
 
         const auto to_be_signed = encode_to_bytes(sig_structure{.context        = "Signature1",
@@ -370,7 +370,7 @@ TEST_SUITE("cbor_wire/cwt") {
 
             REQUIRE(make_decoder<codec::cwt>(input)(decoded));
             CHECK_EQ(decoded.alg, algorithm::es256);
-            CHECK_EQ(decoded.kid, byte_string{std::byte{0xaa}});
+            CHECK_EQ(decoded.kid, std::vector<std::byte>{std::byte{0xaa}});
             CHECK_EQ(decoded.crit, (std::vector<header_label>{integer{1}, integer{4}}));
         }
 
@@ -418,7 +418,7 @@ TEST_SUITE("cbor_wire/cwt") {
     }
 
     TEST_CASE("COSE protected headers reject malformed labels and values") {
-        auto check_rejected = [](expected<byte_string, status_code> encoded) {
+        auto check_rejected = [](expected<std::vector<std::byte>, status_code> encoded) {
             REQUIRE(encoded);
             auto decoded = decode_protected_header(*encoded);
             REQUIRE_FALSE(decoded);
@@ -449,19 +449,19 @@ TEST_SUITE("cbor_wire/cwt") {
         const auto body_protected = encode_protected_header(header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}});
         REQUIRE(body_protected);
         const auto signature_protected =
-            encode_protected_header(header_map{.alg = std::nullopt, .kid = byte_string{std::byte{0x01}}, .crit = {}});
+            encode_protected_header(header_map{.alg = std::nullopt, .kid = std::vector<std::byte>{std::byte{0x01}}, .crit = {}});
         REQUIRE(signature_protected);
 
         cose_sign message{
             .protected_header = *body_protected,
             .unprotected      = {},
-            .payload          = byte_string{std::byte{0x01}, std::byte{0x02}},
+            .payload          = std::vector<std::byte>{std::byte{0x01}, std::byte{0x02}},
             .signatures       = {},
         };
         cose_signature signature{
             .protected_header = *signature_protected,
             .unprotected      = {},
-            .signature        = byte_string(64, std::byte{0xA5}),
+            .signature        = std::vector<std::byte>(64, std::byte{0xA5}),
         };
         message.signatures.push_back(signature);
 
@@ -507,7 +507,7 @@ TEST_SUITE("cbor_wire/cwt") {
             check.template operator()<cose_signature>(wire, [](const auto &value) {
                 CHECK(value.protected_header.empty());
                 CHECK(value.unprotected.empty());
-                CHECK(value.signature == byte_string{std::byte{'b'}});
+                CHECK(value.signature == std::vector<std::byte>{std::byte{'b'}});
             });
         }
         for (const auto *wire : {"8440a041614162", "9f40a041614162ff"}) {
@@ -516,8 +516,8 @@ TEST_SUITE("cbor_wire/cwt") {
                 CHECK(value.protected_header.empty());
                 CHECK(value.unprotected.empty());
                 REQUIRE(value.payload);
-                CHECK(*value.payload == byte_string{std::byte{'a'}});
-                CHECK(value.signature == byte_string{std::byte{'b'}});
+                CHECK(*value.payload == std::vector<std::byte>{std::byte{'a'}});
+                CHECK(value.signature == std::vector<std::byte>{std::byte{'b'}});
             });
         }
         for (const bool indefinite_outer : {false, true}) {
@@ -530,11 +530,11 @@ TEST_SUITE("cbor_wire/cwt") {
                         CHECK(value.protected_header.empty());
                         CHECK(value.unprotected.empty());
                         REQUIRE(value.payload);
-                        CHECK(*value.payload == byte_string{std::byte{'a'}});
+                        CHECK(*value.payload == std::vector<std::byte>{std::byte{'a'}});
                         REQUIRE_EQ(value.signatures.size(), 1U);
                         CHECK(value.signatures.front().protected_header.empty());
                         CHECK(value.signatures.front().unprotected.empty());
-                        CHECK(value.signatures.front().signature == byte_string{std::byte{'b'}});
+                        CHECK(value.signatures.front().signature == std::vector<std::byte>{std::byte{'b'}});
                     });
                 }
             }
@@ -549,30 +549,31 @@ TEST_SUITE("cbor_wire/cwt") {
         const auto check = []<typename Envelope>(const fixture &test) {
             CAPTURE(test.wire);
             Envelope value;
-            value.protected_header = byte_string{std::byte{'p'}};
-            value.unprotected.kid  = byte_string{std::byte{'k'}};
+            value.protected_header = std::vector<std::byte>{std::byte{'p'}};
+            value.unprotected.kid  = std::vector<std::byte>{std::byte{'k'}};
             if constexpr (std::same_as<Envelope, cose_sign>) {
-                value.signatures = {cose_signature{.protected_header = {}, .unprotected = {}, .signature = byte_string{std::byte{'s'}}}};
+                value.signatures = {
+                    cose_signature{.protected_header = {}, .unprotected = {}, .signature = std::vector<std::byte>{std::byte{'s'}}}};
             } else {
-                value.signature = byte_string{std::byte{'s'}};
+                value.signature = std::vector<std::byte>{std::byte{'s'}};
             }
             if constexpr (!std::same_as<Envelope, cose_signature>) {
-                value.payload = byte_string{std::byte{'v'}};
+                value.payload = std::vector<std::byte>{std::byte{'v'}};
             }
             const auto bytes  = to_bytes(test.wire);
             const auto result = make_decoder<codec::cwt>(bytes)(value);
             REQUIRE_FALSE(result);
             CHECK(result.error() == test.status);
-            CHECK(value.protected_header == byte_string{std::byte{'p'}});
-            CHECK(value.unprotected.kid == std::optional<byte_string>{byte_string{std::byte{'k'}}});
+            CHECK(value.protected_header == std::vector<std::byte>{std::byte{'p'}});
+            CHECK(value.unprotected.kid == std::optional<std::vector<std::byte>>{std::vector<std::byte>{std::byte{'k'}}});
             if constexpr (std::same_as<Envelope, cose_sign>) {
                 REQUIRE_EQ(value.signatures.size(), 1U);
-                CHECK(value.signatures.front().signature == byte_string{std::byte{'s'}});
+                CHECK(value.signatures.front().signature == std::vector<std::byte>{std::byte{'s'}});
             } else {
-                CHECK(value.signature == byte_string{std::byte{'s'}});
+                CHECK(value.signature == std::vector<std::byte>{std::byte{'s'}});
             }
             if constexpr (!std::same_as<Envelope, cose_signature>) {
-                CHECK(value.payload == std::optional<byte_string>{byte_string{std::byte{'v'}}});
+                CHECK(value.payload == std::optional<std::vector<std::byte>>{std::vector<std::byte>{std::byte{'v'}}});
             }
         };
         for (const auto &test :
@@ -613,8 +614,8 @@ TEST_SUITE("cbor_wire/cwt") {
         REQUIRE(result);
         CHECK_EQ(to_hex(result->bytes()), "d83dd29f40a041614162ff");
         REQUIRE(value.payload);
-        CHECK(*value.payload == byte_string{std::byte{'a'}});
-        CHECK(value.signature == byte_string{std::byte{'b'}});
+        CHECK(*value.payload == std::vector<std::byte>{std::byte{'a'}});
+        CHECK(value.signature == std::vector<std::byte>{std::byte{'b'}});
         int following{};
         REQUIRE(dec(following));
         CHECK_EQ(following, 7);

@@ -148,7 +148,7 @@ template <typename T>
 concept CanEncodeTypedArrayBorrowedSegmentsBe = requires(T &&values) { encode_typed_array_borrowed_segments_be(std::forward<T>(values)); };
 
 template <typename T>
-concept CanEncodeTypedArraySegmentsBe = requires(T &&values) { encode_typed_array_segments_be(std::forward<T>(values)); };
+concept CanEncodeTypedArraySegmentsBe = requires(T &&values) { encode_typed_array_borrowed_segments_be(std::forward<T>(values)); };
 
 template <typename T>
 concept CanWrapAsHomogeneousArray = requires(T &&values) { as_homogeneous_array(std::forward<T>(values)); };
@@ -979,7 +979,7 @@ TEST_CASE("rfc8746 typed array normal encoding matches flattened segments") {
     const std::vector<std::int32_t> values{-5, 42, 1000};
     const auto                      span   = std::span<const std::int32_t>{values};
     const auto                      normal = encode_normal(span);
-    cbor_segments                   segments;
+    byte_segments                   segments;
 
     if constexpr (std::endian::native == std::endian::little) {
         segments = encode_segments(as_typed_array(span));
@@ -1004,14 +1004,14 @@ TEST_CASE("rfc8746 typed array owned segment fallback matches normal encoding") 
 TEST_CASE("rfc8746 borrowed segmented output rejects converted byte order") {
     const std::vector<std::int32_t> values{1, -2, 3};
     const auto                      span = std::span<const std::int32_t>{values};
-    cbor_segments                   segments;
+    byte_segments                   segments;
 
     if constexpr (std::endian::native == std::endian::little) {
-        CHECK_THROWS_AS((void)encode_typed_array_segments<typed_array_byte_order::big>(span), std::logic_error);
-        CHECK_THROWS_AS(encode_typed_array_segments_into<typed_array_byte_order::big>(segments, span), std::logic_error);
+        CHECK_THROWS_AS((void)encode_typed_array_borrowed_segments<typed_array_byte_order::big>(span), std::logic_error);
+        CHECK_THROWS_AS(encode_typed_array_borrowed_segments_into<typed_array_byte_order::big>(segments, span), std::logic_error);
     } else if constexpr (std::endian::native == std::endian::big) {
-        CHECK_THROWS_AS((void)encode_typed_array_segments<typed_array_byte_order::little>(span), std::logic_error);
-        CHECK_THROWS_AS(encode_typed_array_segments_into<typed_array_byte_order::little>(segments, span), std::logic_error);
+        CHECK_THROWS_AS((void)encode_typed_array_borrowed_segments<typed_array_byte_order::little>(span), std::logic_error);
+        CHECK_THROWS_AS(encode_typed_array_borrowed_segments_into<typed_array_byte_order::little>(segments, span), std::logic_error);
     }
 }
 
@@ -1037,13 +1037,13 @@ TEST_CASE("rfc8746 big-endian typed array segment helpers mirror explicit byte-o
     if constexpr (std::endian::native == std::endian::big) {
         const auto explicit_borrowed = encode_typed_array_borrowed_segments<typed_array_byte_order::big>(span);
         const auto named_borrowed    = encode_typed_array_borrowed_segments_be(span);
-        const auto legacy_borrowed   = encode_typed_array_segments_be(span);
+        const auto legacy_borrowed   = encode_typed_array_borrowed_segments_be(span);
 
         CHECK_EQ(to_hex(flatten_segments(named_borrowed)), to_hex(flatten_segments(explicit_borrowed)));
         CHECK_EQ(to_hex(flatten_segments(legacy_borrowed)), to_hex(flatten_segments(explicit_borrowed)));
     } else {
         CHECK_THROWS_AS((void)encode_typed_array_borrowed_segments_be(span), std::logic_error);
-        CHECK_THROWS_AS((void)encode_typed_array_segments_be(span), std::logic_error);
+        CHECK_THROWS_AS((void)encode_typed_array_borrowed_segments_be(span), std::logic_error);
     }
 
     static_assert(CanEncodeTypedArrayBorrowedSegmentsBe<std::span<const double>>);
@@ -1058,7 +1058,7 @@ TEST_CASE("rfc8746 typed array segmented output borrows native little-endian pay
         const auto                      span           = std::span<const std::int32_t>{values};
         const auto                      original_bytes = std::as_bytes(span);
 
-        const auto segments = encode_typed_array_segments(span);
+        const auto segments = encode_typed_array_borrowed_segments(span);
 
         REQUIRE_EQ(segments.size(), 2U);
         CHECK(segments[0].is_owned());
@@ -1074,12 +1074,12 @@ TEST_CASE("rfc8746 typed array segmented into helper does not allocate after res
         const auto                span           = std::span<std::int32_t>{values};
         const auto                original_bytes = std::as_bytes(span);
 
-        cbor_segments segments;
+        byte_segments segments;
         segments.reserve_segments(3);
 
         {
             allocation_failure_guard guard;
-            encode_typed_array_segments_into(segments, span);
+            encode_typed_array_borrowed_segments_into(segments, span);
         }
 
         CHECK_EQ(to_hex(flatten_segments(segments)), to_hex(encode_normal(std::span<const std::int32_t>{values})));

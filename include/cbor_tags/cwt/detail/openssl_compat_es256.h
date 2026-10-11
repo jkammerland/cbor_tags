@@ -76,7 +76,12 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
     return {};
 }
 
-[[nodiscard]] inline expected<byte_string, status_code> ecdsa_der_to_raw_es256(std::span<const std::byte> der_signature) {
+[[nodiscard]] inline expected<std::size_t, status_code> ecdsa_der_to_raw_es256(std::span<const std::byte> der_signature,
+                                                                               std::span<std::byte>       output) {
+    if (output.size() < 64U) {
+        return unexpected<status_code>{status_code::size_limit_exceeded};
+    }
+
     const auto *cursor = reinterpret_cast<const unsigned char *>(der_signature.data());
     const auto *end    = cursor + der_signature.size();
 
@@ -92,16 +97,15 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
         return unexpected<status_code>{status_code::error};
     }
 
-    byte_string raw(64);
-    auto        r_result = bn_to_fixed_bytes(r, std::span<std::byte>{raw.data(), 32U});
+    auto r_result = bn_to_fixed_bytes(r, output.first(32U));
     if (!r_result) {
         return unexpected<status_code>{r_result.error()};
     }
-    auto s_result = bn_to_fixed_bytes(s, std::span<std::byte>{raw.data() + 32, 32U});
+    auto s_result = bn_to_fixed_bytes(s, output.subspan(32U, 32U));
     if (!s_result) {
         return unexpected<status_code>{s_result.error()};
     }
-    return raw;
+    return 64U;
 }
 
 [[nodiscard]] inline expected<std::vector<unsigned char>, status_code> ecdsa_raw_es256_to_der(std::span<const std::byte> raw_signature) {
@@ -140,8 +144,12 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
     return der;
 }
 
-template <typename Key>
-[[nodiscard]] inline expected<byte_string, status_code> openssl_compat_es256_sign(Key *key, std::span<const std::byte> to_be_signed) {
+template <typename Key, SignatureParts Parts>
+[[nodiscard]] inline expected<std::size_t, status_code> openssl_compat_es256_sign(Key *key, Parts &&parts, std::span<std::byte> output) {
+    if (output.size() < 64U) {
+        return unexpected<status_code>{status_code::size_limit_exceeded};
+    }
+
     auto key_status = validate_openssl_es256_key(key);
     if (!key_status) {
         return unexpected<status_code>{key_status.error()};
@@ -157,9 +165,10 @@ template <typename Key>
     }
 
     std::size_t der_size{};
-    const auto *input = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    if (EVP_DigestSignUpdate(context.get(), input, to_be_signed.size()) != 1) {
-        return unexpected<status_code>{status_code::error};
+    for (const auto bytes : parts) {
+        if (!bytes.empty() && EVP_DigestSignUpdate(context.get(), bytes.data(), bytes.size()) != 1) {
+            return unexpected<status_code>{status_code::error};
+        }
     }
     if (EVP_DigestSignFinal(context.get(), nullptr, &der_size) != 1) {
         return unexpected<status_code>{status_code::error};
@@ -171,11 +180,11 @@ template <typename Key>
     }
     der.resize(der_size);
 
-    return ecdsa_der_to_raw_es256(std::as_bytes(std::span<const unsigned char>{der.data(), der.size()}));
+    return ecdsa_der_to_raw_es256(std::as_bytes(std::span<const unsigned char>{der.data(), der.size()}), output);
 }
 
-template <typename Key>
-[[nodiscard]] inline expected<void, status_code> openssl_compat_es256_verify(Key *key, std::span<const std::byte> to_be_signed,
+template <typename Key, SignatureParts Parts>
+[[nodiscard]] inline expected<void, status_code> openssl_compat_es256_verify(Key *key, Parts &&parts,
                                                                              std::span<const std::byte> signature) {
     auto key_status = validate_openssl_es256_key(key);
     if (!key_status) {
@@ -196,10 +205,10 @@ template <typename Key>
         return unexpected<status_code>{status_code::error};
     }
 
-    const auto *input         = reinterpret_cast<const unsigned char *>(to_be_signed.data());
-    const auto  update_status = EVP_DigestVerifyUpdate(context.get(), input, to_be_signed.size());
-    if (update_status != 1) {
-        return unexpected<status_code>{status_code::error};
+    for (const auto bytes : parts) {
+        if (!bytes.empty() && EVP_DigestVerifyUpdate(context.get(), bytes.data(), bytes.size()) != 1) {
+            return unexpected<status_code>{status_code::error};
+        }
     }
 
     const auto verify_status = EVP_DigestVerifyFinal(context.get(), der->data(), der->size());

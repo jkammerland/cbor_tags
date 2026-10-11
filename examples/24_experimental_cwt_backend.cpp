@@ -8,7 +8,10 @@
 #include <openssl/ec.h>
 #include <openssl/evp.h>
 #include <openssl/obj_mac.h>
+#include <ranges>
 #include <span>
+#include <utility>
+#include <vector>
 
 using namespace cbor::tags;
 
@@ -18,18 +21,21 @@ struct application_key {
 };
 
 struct application_backend {
-    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
+    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::esp256;
 
-    // Replace this provider call with your library's ES256 signing operation.
-    static expected<cwt::byte_string, status_code> sign(const application_key &key,
-        std::span<const std::byte> to_be_signed) {
-        return cwt::openssl_es256_backend::sign(key.handle.get(), to_be_signed);
+    // Replace this provider call with your library's ESP256 signing operation.
+    template <std::ranges::input_range Parts>
+    static expected<std::vector<std::byte>, status_code> sign(const application_key &key,
+        Parts &&parts) {
+        return cwt::openssl_esp256_backend::sign(key.handle.get(), std::forward<Parts>(parts));
     }
 
-    // Replace this provider call with your library's ES256 verification operation.
-    static expected<void, status_code> verify(const application_key &key,
-        std::span<const std::byte> to_be_signed, std::span<const std::byte> signature) {
-        return cwt::openssl_es256_backend::verify(key.handle.get(), to_be_signed, signature);
+    // Replace this provider call with your library's ESP256 verification operation.
+    template <std::ranges::input_range Parts>
+    static expected<void, status_code> verify(const application_key &key, Parts &&parts,
+        std::span<const std::byte> signature) {
+        return cwt::openssl_esp256_backend::verify(key.handle.get(), std::forward<Parts>(parts),
+            signature);
     }
 };
 
@@ -57,11 +63,12 @@ claims = { 2 => tstr }
 */
 int main() {
     // Hold the encoded claims passed to the signing helper.
-    cwt::byte_string buffer;
+    std::vector<std::byte> buffer;
 
-    // Define the subject claim for this example.
-    cwt::claims_set source;
-    source.subject = "alice";
+    // Store the subject in a claims_set that owns its text.
+    cwt::claims_set source{
+        .subject = "alice",
+    };
 
     // Encode the claims as the COSE message's payload.
     auto encoder = make_encoder<codec::cwt>(buffer);
@@ -75,7 +82,7 @@ int main() {
         return 1;
     }
 
-    // Select the application backend when signing the encoded claims.
+    // Sign through the application backend, copying the claims into the returned message.
     auto message = cwt::sign1<application_backend>(key, {}, {}, buffer);
     if (!message) {
         return 1;

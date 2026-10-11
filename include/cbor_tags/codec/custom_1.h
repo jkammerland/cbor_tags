@@ -82,10 +82,10 @@ template <typename Tag, typename T>
     requires(!std::is_lvalue_reference_v<T>)
 void as_ref(Tag &&, T &&) = delete;
 
-template <typename Tag, typename T> [[nodiscard]] inline cbor_segments encode_borrowed_segments(Tag &&tag, const T &value) {
+template <typename Tag, typename T> [[nodiscard]] inline byte_segments encode_borrowed_segments(Tag &&tag, const T &value) {
     auto payload = codec_detail::encode_payload_borrowed_segments(value);
 
-    cbor_segments segments;
+    byte_segments segments;
     segments.reserve_segments(payload.size() + 2U);
     segments.append_owned(cbor_detail::encode_cbor_tag_header(codec_detail::tag_to_uint64(tag)).span());
     segments.append_owned(cbor_detail::encode_cbor_bstr_header(payload.total_size()).span());
@@ -101,7 +101,7 @@ template <typename Tag, typename T> [[nodiscard]] inline cbor_segments encode_bo
     return segments;
 }
 
-template <typename T> [[nodiscard]] inline cbor_segments encode_borrowed_segments(const T &value) {
+template <typename T> [[nodiscard]] inline byte_segments encode_borrowed_segments(const T &value) {
     return encode_borrowed_segments(codec_detail::tag_for(value), value);
 }
 

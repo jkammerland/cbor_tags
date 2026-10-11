@@ -15,8 +15,8 @@ using namespace cbor::tags;
 items = (tstr, bstr)
 */
 int main() {
-    // Hold ordered headers and original-data views for scatter/gather output.
-    cbor_segments segments;
+    // Store headers and views into the original data as ordered output pieces.
+    byte_segments segments;
 
     // Keep both original payloads alive and unchanged until the segments are consumed.
     std::string text = "ready";

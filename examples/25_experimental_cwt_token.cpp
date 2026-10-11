@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 using namespace cbor::tags;
 
@@ -53,20 +54,21 @@ token = #6.61(#6.18([
     payload: bstr .cbor claims,
     signature: bstr .size 64
 ]))
-protected-header = { 1 => -7, 4 => bstr }
+protected-header = { 1 => -9, 4 => bstr }
 claims = { 1 => tstr, 2 => tstr, 3 => tstr, 4 => int }
 */
 int main() {
     // Keep the encoded claims and complete token in separate buffers.
-    cwt::byte_string claims_buffer;
-    cwt::byte_string token_buffer;
+    std::vector<std::byte> claims_buffer;
+    std::vector<std::byte> token_buffer;
 
     // Define the issuer, subject, intended recipient and expiration in Unix seconds.
-    cwt::claims_set source;
-    source.issuer = "coap://as.example.com";
-    source.subject = "alice";
-    source.audience = std::string{"coap://sensor.example.com"};
-    source.expiration = std::int64_t{1893456000};
+    cwt::claims_set source{
+        .issuer = "coap://as.example.com",
+        .subject = "alice",
+        .audience = std::string{"coap://sensor.example.com"},
+        .expiration = std::int64_t{1893456000},
+    };
 
     // Encode the claims that will be carried inside the signed token.
     auto claims_encoder = make_encoder<codec::cwt>(claims_buffer);
@@ -74,52 +76,55 @@ int main() {
         return 1;
     }
 
-    // Use one pretrusted key for this example's sender and receiver.
+    // Use one key that the receiver already trusts for this example.
     auto key = make_example_key();
     if (!key) {
         return 1;
     }
 
-    // Bind the signature to application context supplied separately from the token.
+    // Additional authenticated data (AAD) binds the signature to context outside the token.
     constexpr std::string_view request_context = "sensor-api:v1:read-temperature";
+
+    // Borrow the context bytes from a string literal that remains alive throughout the program.
     const auto external_aad =
         std::as_bytes(std::span{request_context.data(), request_context.size()});
 
-    // Protect the algorithm and the identifier of the pretrusted key.
-    const cwt::byte_string key_id{std::byte{1}};
-    cwt::header_map protected_header;
-    protected_header.alg = cwt::algorithm::es256;
-    protected_header.kid = key_id;
+    // Set the algorithm and key ID in the headers authenticated by the signature.
+    const std::vector<std::byte> key_id{std::byte{1}};
+    cwt::header_map protected_header{
+        .alg = cwt::algorithm::esp256,
+        .kid = key_id,
+    };
 
-    // Sign the claims and external AAD with an embedded payload.
-    auto message = cwt::sign1<cwt::openssl_es256_backend>(key.get(), protected_header, {},
+    // Sign with AAD, copying claims into a message that owns its payload, headers and signature.
+    auto message = cwt::sign1<cwt::openssl_esp256_backend>(key.get(), protected_header, {},
         claims_buffer, external_aad);
     if (!message) {
         return 1;
     }
 
-    // Encode the CWT tag, COSE_Sign1 tag and signed envelope for transport.
+    // Write the tags and signed message into the token buffer.
     auto token_encoder = make_encoder<codec::cwt>(token_buffer);
     if (!token_encoder(cwt::as_cwt(cwt::as_cose_sign1(*message)))) {
         return 1;
     }
 
-    // Bind the expected tags to an owning envelope receiver.
+    // Require the CWT and COSE_Sign1 tags when decoding into a message that owns its data.
     cwt::cose_sign1 received;
     auto signed_token = make_tag_pair(cwt::cose_sign1_tag{}, received);
     auto token = make_tag_pair(cwt::cwt_tag{}, signed_token);
 
-    // Decode exactly one complete tagged token from the admitted input buffer.
+    // Decode one complete token, copying its headers, payload and signature from the buffer.
     auto token_decoder = make_decoder<codec::cwt>(token_buffer);
     if (!token_decoder(token) || token_decoder.tell() != token_buffer.end()) {
         return 2;
     }
 
-    // Verify with the pretrusted key and the receiver's matching request context.
+    // Reconstruct identical AAD bytes from the receiver's context and verify with its trusted key.
     constexpr std::string_view receiver_context = "sensor-api:v1:read-temperature";
     const auto receiver_aad =
         std::as_bytes(std::span{receiver_context.data(), receiver_context.size()});
-    if (!cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, receiver_aad)) {
+    if (!cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, receiver_aad)) {
         return 2;
     }
 
@@ -129,10 +134,10 @@ int main() {
         return 2;
     }
 
-    // Declare the verified claims destination.
+    // Store the decoded claims in a claims_set that owns its strings.
     cwt::claims_set claims;
 
-    // Decode claims only after the signature has been verified.
+    // After verification, decode the claims and copy their strings from the message payload.
     auto claims_decoder = make_decoder<codec::cwt>(*received.payload);
     if (!claims_decoder(claims) || claims_decoder.tell() != received.payload->end()) {
         return 2;
@@ -147,12 +152,12 @@ int main() {
     // Confirm that a different request context cannot verify the same token.
     constexpr std::string_view other_context = "sensor-api:v1:write-temperature";
     const auto wrong_aad = std::as_bytes(std::span{other_context.data(), other_context.size()});
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, wrong_aad)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, wrong_aad)) {
         return 3;
     }
 
     // Confirm that omitting the required external AAD also fails verification.
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received)) {
         return 3;
     }
 
@@ -161,7 +166,7 @@ int main() {
         return 3;
     }
     received.payload->back() ^= std::byte{1};
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, receiver_aad)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, receiver_aad)) {
         return 3;
     }
 

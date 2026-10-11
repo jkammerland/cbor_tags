@@ -1,9 +1,14 @@
 # CWT and COSE
 
+A CBOR Web Token (CWT) carries claims such as an issuer, subject and expiry.
+CBOR Object Signing and Encryption (COSE) provides structures for protecting
+those claims; this library supports signing and verifying COSE messages.
+
 **Experimental:** CWT and COSE model and codec APIs may change.
 
-Plain owning and borrowed models live in `cbor_tags/cwt/types.h` under
-`cbor::tags::cwt`. Their opt-in wire codec is `cbor::tags::codec::cwt`, provided by
+Types that own their data and views that borrow existing data live in
+`cbor_tags/cwt/types.h` under
+`cbor::tags::cwt`. Their optional codec is `cbor::tags::codec::cwt`, provided by
 `cbor_tags/codec/cwt.h`. The convenience header `cbor_tags/cwt/cwt.h` includes
 the codec and serialization/tag helpers.
 
@@ -15,19 +20,18 @@ for a complete encode/decode program with its CDDL and explicit result checks.
 ```cpp
 #include <cbor_tags/cwt/cwt.h>
 
-namespace tags = cbor::tags;
-namespace cwt = tags::cwt;
-namespace codec = tags::codec;
+using namespace cbor::tags;
 
-cwt::claims_set claims{};
-claims.issuer = "coap://as.example.com";
-claims.subject = "erikw";
-claims.expiration = std::int64_t{1444064944};
+cwt::claims_set claims{
+    .issuer = "coap://as.example.com",
+    .subject = "erikw",
+    .expiration = std::int64_t{1444064944},
+};
 
 auto bytes = cwt::encode_to_bytes(claims);
 if (bytes) {
     cwt::claims_set decoded{};
-    auto result = tags::make_decoder<codec::cwt>(*bytes)(decoded);
+    auto result = make_decoder<codec::cwt>(*bytes)(decoded);
     // Check result before using decoded.
 }
 ```
@@ -64,25 +68,37 @@ Views use `std::string_view` and `std::span<const std::byte>` for text and byte
 payloads. Scalars are copied; vectors hold descriptors such as signatures and
 critical labels and may allocate. `claims_view::audience` is an optional
 `audience_view`: one `std::string_view` or a vector of them. `as_view` preserves
-that shape and borrows each audience string. `as_view(owning_lvalue)` projects an existing
-owning model; owning temporaries are rejected. Keep the owner alive and its
+that shape and borrows each audience string. `as_view(value)` creates a view of
+an existing object; temporary objects are rejected. Keep the owner alive and its
 referenced storage stable until all views are finished.
 
-Application types can use any field names and nesting. Project the required
-fields into the supplied view:
+Application types can use any field names and nesting. Refer to the required
+fields through a claims view:
 
 ```cpp
 struct application_token {
-    struct identity { std::string provider; std::string user; } identity;
+    struct identity {
+        std::string provider;
+        std::string user;
+    } identity;
     std::int64_t deadline;
 };
-application_token token{{"provider", "alice"}, 1444064944};
-cwt::claims_view projection{
+
+// Keep the application data alive while its text is borrowed.
+application_token token{
+    .identity = {.provider = "provider", .user = "alice"},
+    .deadline = 1444064944,
+};
+
+// Borrow the two strings and copy the integer deadline.
+cwt::claims_view claims{
     .issuer = token.identity.provider,
     .subject = token.identity.user,
     .expiration = token.deadline,
 };
-auto projected_bytes = cwt::encode_to_bytes(projection);
+
+// Encode the claims into an independent byte buffer.
+auto bytes = cwt::encode_to_bytes(claims);
 ```
 
 Decode a view directly from contiguous input:
@@ -90,16 +106,44 @@ Decode a view directly from contiguous input:
 ```cpp
 if (bytes) {
     cwt::claims_view decoded;
-    auto result = tags::make_decoder<codec::cwt>(*bytes)(decoded);
+    auto result = make_decoder<codec::cwt>(*bytes)(decoded);
     // On success, decoded borrows from *bytes. Keep that buffer alive and stable.
 }
 ```
 
 Borrowed decoding accepts definite text/byte fields within definite or indefinite
-claim maps and COSE envelopes. Fragmented indefinite text/bytes require an owning
+claim maps and COSE messages. Fragmented indefinite text/bytes require an owning
 model; a single view cannot represent their separate chunks. Noncontiguous input
 returns `contiguous_view_on_non_contiguous_data`. As with owning models, errors
 preserve the destination and leave the decoder cursor terminal.
+
+Choose the protected-header destination in the same way:
+
+```cpp
+cwt::header_map_view headers;
+auto result = cwt::decode_protected_header(message.protected_header, headers);
+```
+
+The input must be a named buffer whose storage remains valid while its views are
+used. Empty protected bytes produce an empty map. The helper rejects trailing
+bytes and replaces the destination only on success. Use `header_map` as the
+destination to copy the fields instead, or keep the existing owning-result
+`decode_protected_header(bytes)` convenience.
+
+Decode an envelope view first, verify its original bytes with the receiver's
+external AAD, then decode claims from its payload and apply application policy.
+`verify_sign1` and `verify_sign` consume borrowed signature input without combining
+it into a temporary byte buffer. They may still allocate parsed header metadata
+and segment descriptors. A key ID can select a candidate trusted key; parsing it
+does not authenticate the message.
+
+[Example 27](../examples/27_experimental_cwt_custom_types.cpp) defines ordinary
+application `encode` and `decode` functions. The sender owns its text; the
+receiver chooses different field names and `std::string_view`. Its decoder
+requires the application's subject and integer expiry before assigning the
+result, and consumes the claims map through the existing CWT codec. The decoder
+forwards its destination to `decode`, hence the `received_claims&&` parameter. Custom
+schemas can instead use the normal codec customization mechanisms.
 
 ## Build
 
@@ -114,7 +158,7 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
 
 ## Decode and validation rules
 
-- Claim maps and COSE envelopes accept definite or indefinite lengths. Envelopes
+- Claim maps and COSE messages accept definite or indefinite lengths. Messages
   require exact field counts and closing breaks; `COSE_Sign` requires at least
   one signature. `Sig_structure` encoding uses definite arrays.
 - Complete CWT/COSE decodes replace the destination only on success. Failure
@@ -129,5 +173,5 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
 ## Signing and verification
 
 See [COSE signing and verification](cose_signing.md) for the backend contract and
-signing policy. The optional [OpenSSL ES256 backend](cwt_openssl.md) provides
+signing policy. The optional [OpenSSL ESP256 backend](cwt_openssl.md) provides
 a first-party implementation.

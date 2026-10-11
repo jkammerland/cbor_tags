@@ -13,7 +13,6 @@
 
 namespace cbor::tags::cwt {
 
-using byte_string    = std::vector<std::byte>;
 using numeric_date   = std::variant<std::int64_t, double>;
 using audience_claim = std::variant<std::string, std::vector<std::string>>;
 using audience_view  = std::variant<std::string_view, std::vector<std::string_view>>;
@@ -26,65 +25,79 @@ using cwt_tag        = static_tag<cwt_tag_value>;
 using cose_sign1_tag = static_tag<cose_sign1_tag_value>;
 using cose_sign_tag  = static_tag<cose_sign_tag_value>;
 
-// Wire identifiers; built-in signing/verification currently implements ES256 only.
+// Wire identifiers; built-in signing/verification currently implements ESP256 only.
 // Other algorithms can be supplied through the Backend template parameter.
 enum class algorithm : std::int64_t {
+    esp256  = -9,
+    esp384  = -51,
+    esp512  = -52,
+    ed25519 = -19,
+    ed448   = -53,
+    // Deprecated RFC 9053 identifiers remain distinct wire values.
     es256 = -7,
+    eddsa = -8,
     es384 = -35,
     es512 = -36,
 };
 
 using header_label = std::variant<integer, std::string>;
 
-using byte_view         = std::span<const std::byte>;
 using header_label_view = std::variant<integer, std::string_view>;
 
 namespace detail {
 
 // Storage selection is internal; the public model templates are plain aggregates.
-// Borrowed text and bytes refer to the input buffer or projected owner. Vectors
-// own only their descriptors, so views may still allocate metadata.
+// Borrowed text and bytes refer to an input buffer or an existing object.
+// Vectors own their entries, so collections of views may still allocate.
 template <bool Borrowed> using text_storage     = std::conditional_t<Borrowed, std::string_view, std::string>;
-template <bool Borrowed> using byte_storage     = std::conditional_t<Borrowed, byte_view, byte_string>;
+template <bool Borrowed> using byte_storage     = std::conditional_t<Borrowed, std::span<const std::byte>, std::vector<std::byte>>;
 template <bool Borrowed> using audience_storage = std::conditional_t<Borrowed, audience_view, audience_claim>;
 template <bool Borrowed> using label_storage    = std::variant<integer, text_storage<Borrowed>>;
 
 } // namespace detail
 
-template <bool Borrowed> struct basic_header_map {
-    std::optional<algorithm>                      alg;
-    std::optional<detail::byte_storage<Borrowed>> kid;
-    std::vector<detail::label_storage<Borrowed>>  crit;
+template <bool Borrowed, class Extra = std::monostate> struct basic_header_map {
+    std::optional<algorithm>                      alg{};
+    std::optional<detail::byte_storage<Borrowed>> kid{};
+    std::vector<detail::label_storage<Borrowed>>  crit{};
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return !alg && !kid && crit.empty(); }
+    std::optional<std::variant<std::uint64_t, detail::text_storage<Borrowed>>> typ{};
+    [[no_unique_address]] Extra                                                extra{};
+
+    // Receive-side labels include skipped entries; encoding uses the selected fields.
+    std::vector<header_label> observed_labels{};
+
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return !alg && !kid && crit.empty() && !typ && std::same_as<Extra, std::monostate>;
+    }
 };
 
 template <bool Borrowed> struct basic_claims_set {
-    std::optional<detail::text_storage<Borrowed>>     issuer;
-    std::optional<detail::text_storage<Borrowed>>     subject;
-    std::optional<detail::audience_storage<Borrowed>> audience;
-    std::optional<numeric_date>                       expiration;
-    std::optional<numeric_date>                       not_before;
-    std::optional<numeric_date>                       issued_at;
-    std::optional<detail::byte_storage<Borrowed>>     cwt_id;
+    std::optional<detail::text_storage<Borrowed>>     issuer{};
+    std::optional<detail::text_storage<Borrowed>>     subject{};
+    std::optional<detail::audience_storage<Borrowed>> audience{};
+    std::optional<numeric_date>                       expiration{};
+    std::optional<numeric_date>                       not_before{};
+    std::optional<numeric_date>                       issued_at{};
+    std::optional<detail::byte_storage<Borrowed>>     cwt_id{};
 };
 
-template <bool Borrowed> struct basic_cose_signature {
-    detail::byte_storage<Borrowed> protected_header;
-    basic_header_map<Borrowed>     unprotected;
-    detail::byte_storage<Borrowed> signature;
+template <bool Borrowed, class Extra = std::monostate> struct basic_cose_signature {
+    detail::byte_storage<Borrowed>    protected_header;
+    basic_header_map<Borrowed, Extra> unprotected;
+    detail::byte_storage<Borrowed>    signature;
 };
 
-template <bool Borrowed> struct basic_cose_sign {
+template <bool Borrowed, class BodyExtra = std::monostate, class SignerExtra = std::monostate> struct basic_cose_sign {
+    detail::byte_storage<Borrowed>                           protected_header;
+    basic_header_map<Borrowed, BodyExtra>                    unprotected;
+    std::optional<detail::byte_storage<Borrowed>>            payload;
+    std::vector<basic_cose_signature<Borrowed, SignerExtra>> signatures;
+};
+
+template <bool Borrowed, class Extra = std::monostate> struct basic_cose_sign1 {
     detail::byte_storage<Borrowed>                protected_header;
-    basic_header_map<Borrowed>                    unprotected;
-    std::optional<detail::byte_storage<Borrowed>> payload;
-    std::vector<basic_cose_signature<Borrowed>>   signatures;
-};
-
-template <bool Borrowed> struct basic_cose_sign1 {
-    detail::byte_storage<Borrowed>                protected_header;
-    basic_header_map<Borrowed>                    unprotected;
+    basic_header_map<Borrowed, Extra>             unprotected;
     std::optional<detail::byte_storage<Borrowed>> payload;
     detail::byte_storage<Borrowed>                signature;
 };
@@ -102,7 +115,7 @@ namespace detail {
 template <typename T> struct model {
     static constexpr bool supported = false;
 };
-template <bool Borrowed> struct model<basic_header_map<Borrowed>> {
+template <bool Borrowed, class Extra> struct model<basic_header_map<Borrowed, Extra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
@@ -110,15 +123,15 @@ template <bool Borrowed> struct model<basic_claims_set<Borrowed>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
-template <bool Borrowed> struct model<basic_cose_signature<Borrowed>> {
+template <bool Borrowed, class Extra> struct model<basic_cose_signature<Borrowed, Extra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
-template <bool Borrowed> struct model<basic_cose_sign<Borrowed>> {
+template <bool Borrowed, class BodyExtra, class SignerExtra> struct model<basic_cose_sign<Borrowed, BodyExtra, SignerExtra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
-template <bool Borrowed> struct model<basic_cose_sign1<Borrowed>> {
+template <bool Borrowed, class Extra> struct model<basic_cose_sign1<Borrowed, Extra>> {
     static constexpr bool supported = true;
     static constexpr bool borrowed  = Borrowed;
 };
@@ -142,6 +155,9 @@ template <typename Decoder, detail::Model T> auto decode(Decoder &, T &&) -> typ
     static_assert(always_false<T>::value, "CWT types require codec::cwt");
     return {};
 }
+
+using media_type      = std::variant<std::uint64_t, std::string>;
+using media_type_view = std::variant<std::uint64_t, std::string_view>;
 
 using header_map          = basic_header_map<false>;
 using header_map_view     = basic_header_map<true>;
@@ -182,7 +198,7 @@ inline audience_view view_audience(const audience_claim &audience) {
 
 [[nodiscard]] inline header_map_view as_view(const header_map &value) {
     header_map_view result{.alg  = value.alg,
-                           .kid  = detail::view_optional(value.kid, [](const auto &bytes) { return byte_view{bytes}; }),
+                           .kid  = detail::view_optional(value.kid, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
                            .crit = {}};
     result.crit.reserve(value.crit.size());
     for (const auto &label : value.crit) {
@@ -196,6 +212,10 @@ inline audience_view view_audience(const audience_claim &audience) {
             },
             label));
     }
+    if (value.typ) {
+        result.typ = std::visit([](const auto &type) -> media_type_view { return type; }, *value.typ);
+    }
+    result.observed_labels = value.observed_labels;
     return result;
 }
 
@@ -207,7 +227,7 @@ inline audience_view view_audience(const audience_claim &audience) {
             .expiration = value.expiration,
             .not_before = value.not_before,
             .issued_at  = value.issued_at,
-            .cwt_id     = detail::view_optional(value.cwt_id, [](const auto &bytes) { return byte_view{bytes}; })};
+            .cwt_id     = detail::view_optional(value.cwt_id, [](const auto &bytes) { return std::span<const std::byte>{bytes}; })};
 }
 
 [[nodiscard]] inline cose_signature_view as_view(const cose_signature &value) {
@@ -217,8 +237,9 @@ inline audience_view view_audience(const audience_claim &audience) {
 [[nodiscard]] inline cose_sign_view as_view(const cose_sign &value) {
     cose_sign_view result{.protected_header = value.protected_header,
                           .unprotected      = as_view(value.unprotected),
-                          .payload          = detail::view_optional(value.payload, [](const auto &bytes) { return byte_view{bytes}; }),
-                          .signatures       = {}};
+                          .payload =
+                              detail::view_optional(value.payload, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
+                          .signatures = {}};
     result.signatures.reserve(value.signatures.size());
     for (const auto &signature : value.signatures)
         result.signatures.push_back(as_view(signature));
@@ -228,16 +249,17 @@ inline audience_view view_audience(const audience_claim &audience) {
 [[nodiscard]] inline cose_sign1_view as_view(const cose_sign1 &value) {
     return {.protected_header = value.protected_header,
             .unprotected      = as_view(value.unprotected),
-            .payload          = detail::view_optional(value.payload, [](const auto &bytes) { return byte_view{bytes}; }),
+            .payload          = detail::view_optional(value.payload, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
             .signature        = value.signature};
 }
 
 [[nodiscard]] inline sig_structure_view as_view(const sig_structure &value) {
     return {.context        = value.context,
             .body_protected = value.body_protected,
-            .sign_protected = detail::view_optional(value.sign_protected, [](const auto &bytes) { return byte_view{bytes}; }),
-            .external_aad   = value.external_aad,
-            .payload        = value.payload};
+            .sign_protected =
+                detail::view_optional(value.sign_protected, [](const auto &bytes) { return std::span<const std::byte>{bytes}; }),
+            .external_aad = value.external_aad,
+            .payload      = value.payload};
 }
 
 template <detail::Model T>

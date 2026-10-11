@@ -27,7 +27,7 @@ int main() {
         return 1;
     }
 
-    // Declare an ordinary owning container for the filtered values.
+    // Store the decoded values in a vector.
     std::vector<int> received;
 
     // Decode the array into the receiver.

@@ -15,7 +15,7 @@ struct Temperature {
 
 namespace codec {
 
-// This codec gives Temperature the wire representation of one integer.
+// This codec encodes and decodes Temperature as one CBOR integer.
 template <typename Self> struct temperature : cbor::tags::codec::base<Self> {
     using base = cbor::tags::codec::base<Self>;
     using base::decode;
@@ -43,7 +43,7 @@ int main() {
     std::vector<std::byte> buffer;
 
     // Define an application temperature value.
-    app::Temperature source{21};
+    app::Temperature source{.degrees = 21};
 
     // Install the application codec explicitly on the encoder.
     auto encoder = make_encoder<app::codec::temperature>(buffer);
@@ -52,21 +52,21 @@ int main() {
     }
 
     // Declare receivers for the ordinary integer and application value.
-    int wire_value{};
+    int decoded_integer{};
     app::Temperature received;
 
-    // The ordinary decoder also sees one integer on the wire.
-    auto wire_decoder = make_decoder(buffer);
-    if (!wire_decoder(wire_value)) {
+    // Decode the same data as an ordinary integer.
+    auto integer_decoder = make_decoder(buffer);
+    if (!integer_decoder(decoded_integer)) {
         return 2;
     }
 
     // Check the integer representation and complete consumption.
-    if (wire_value != source.degrees || wire_decoder.tell() != buffer.end()) {
+    if (decoded_integer != source.degrees || integer_decoder.tell() != buffer.end()) {
         return 2;
     }
 
-    // Install the same wire policy on the application decoder.
+    // Use the same codec to decode the integer into Temperature.
     auto decoder = make_decoder<app::codec::temperature>(buffer);
     if (!decoder(received)) {
         return 1;

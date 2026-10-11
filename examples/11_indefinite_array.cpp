@@ -22,7 +22,7 @@ int main() {
         return 1;
     }
 
-    // Declare an owning receiver for the array.
+    // Store the decoded elements in a vector.
     std::vector<int> received;
 
     // Decode through the closing break with the ordinary container decoder.

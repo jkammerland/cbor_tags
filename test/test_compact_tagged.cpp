@@ -1410,7 +1410,7 @@ TEST_CASE("custom_codec_1 segmented output preserves wire format without flatten
     auto                   contiguous_encoder = make_encoder<codec::custom_1>(contiguous);
     REQUIRE(contiguous_encoder(as_ref(static_tag<15>{}, values)));
 
-    cbor_segments segmented;
+    byte_segments segmented;
     auto          segment_encoder = make_encoder<codec::custom_1>(segmented);
     REQUIRE(segment_encoder(as_ref(static_tag<15>{}, values)));
 
