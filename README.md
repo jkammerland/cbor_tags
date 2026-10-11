@@ -18,6 +18,8 @@ See standard specifications for more information:
 - **Experimental:** COSE [RFC9052](https://www.rfc-editor.org/rfc/rfc9052.html) — [Sign/Sign1 models and signing helpers](doc/cose_signing.md).
 - **Experimental:** COSE ES256 [RFC9053 §2.1](https://www.rfc-editor.org/rfc/rfc9053.html#section-2.1) — [optional OpenSSL backend](doc/cwt_openssl.md).
 
+See [CWT and COSE standards coverage](doc/cwt_standards.md) for implemented capabilities and follow-ups.
+
 See [CBOR Conformance](doc/conformance.md) for the library's interoperability
 profile, intentional permissive behavior, and validation boundaries.
 
