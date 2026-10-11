@@ -15,7 +15,17 @@ struct openssl_es256_backend {
 
     template <detail::SignatureParts Parts>
     [[nodiscard]] static expected<std::vector<std::byte>, status_code> sign(EVP_PKEY *key, Parts &&parts) {
-        return detail::openssl_compat_es256_sign(key, std::forward<Parts>(parts));
+        std::vector<std::byte> signature(64);
+        auto                   result = sign(key, std::forward<Parts>(parts), signature);
+        if (!result) {
+            return unexpected<status_code>{result.error()};
+        }
+        return signature;
+    }
+
+    template <detail::SignatureParts Parts>
+    [[nodiscard]] static expected<std::size_t, status_code> sign(EVP_PKEY *key, Parts &&parts, std::span<std::byte> output) {
+        return detail::openssl_compat_es256_sign(key, std::forward<Parts>(parts), output);
     }
 
     template <detail::SignatureParts Parts>

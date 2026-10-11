@@ -76,7 +76,12 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
     return {};
 }
 
-[[nodiscard]] inline expected<std::vector<std::byte>, status_code> ecdsa_der_to_raw_es256(std::span<const std::byte> der_signature) {
+[[nodiscard]] inline expected<std::size_t, status_code> ecdsa_der_to_raw_es256(std::span<const std::byte> der_signature,
+                                                                               std::span<std::byte>       output) {
+    if (output.size() < 64U) {
+        return unexpected<status_code>{status_code::size_limit_exceeded};
+    }
+
     const auto *cursor = reinterpret_cast<const unsigned char *>(der_signature.data());
     const auto *end    = cursor + der_signature.size();
 
@@ -92,16 +97,15 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
         return unexpected<status_code>{status_code::error};
     }
 
-    std::vector<std::byte> raw(64);
-    auto                   r_result = bn_to_fixed_bytes(r, std::span<std::byte>{raw.data(), 32U});
+    auto r_result = bn_to_fixed_bytes(r, output.first(32U));
     if (!r_result) {
         return unexpected<status_code>{r_result.error()};
     }
-    auto s_result = bn_to_fixed_bytes(s, std::span<std::byte>{raw.data() + 32, 32U});
+    auto s_result = bn_to_fixed_bytes(s, output.subspan(32U, 32U));
     if (!s_result) {
         return unexpected<status_code>{s_result.error()};
     }
-    return raw;
+    return 64U;
 }
 
 [[nodiscard]] inline expected<std::vector<unsigned char>, status_code> ecdsa_raw_es256_to_der(std::span<const std::byte> raw_signature) {
@@ -141,7 +145,11 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
 }
 
 template <typename Key, SignatureParts Parts>
-[[nodiscard]] inline expected<std::vector<std::byte>, status_code> openssl_compat_es256_sign(Key *key, Parts &&parts) {
+[[nodiscard]] inline expected<std::size_t, status_code> openssl_compat_es256_sign(Key *key, Parts &&parts, std::span<std::byte> output) {
+    if (output.size() < 64U) {
+        return unexpected<status_code>{status_code::size_limit_exceeded};
+    }
+
     auto key_status = validate_openssl_es256_key(key);
     if (!key_status) {
         return unexpected<status_code>{key_status.error()};
@@ -172,7 +180,7 @@ template <typename Key, SignatureParts Parts>
     }
     der.resize(der_size);
 
-    return ecdsa_der_to_raw_es256(std::as_bytes(std::span<const unsigned char>{der.data(), der.size()}));
+    return ecdsa_der_to_raw_es256(std::as_bytes(std::span<const unsigned char>{der.data(), der.size()}), output);
 }
 
 template <typename Key, SignatureParts Parts>
