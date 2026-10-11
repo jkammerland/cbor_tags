@@ -51,10 +51,10 @@ through signing, token encoding, decoding and verification.
 | [33_experimental_cwt_countersignature.cpp](33_experimental_cwt_countersignature.cpp) | Countersign a completed signature | A Sign1 countersignature binds the original signature as well as its payload. |
 | [34_experimental_cwt_abbreviated_countersignature.cpp](34_experimental_cwt_abbreviated_countersignature.cpp) | Use an abbreviated countersignature | The application supplies its algorithm and key context. |
 | [35_experimental_cwt_countersignature_chain.cpp](35_experimental_cwt_countersignature_chain.cpp) | Verify a countersignature chain | Each verification step authenticates its selected signature only. |
-| [36_cwt_public_keys.cpp](36_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
-| [37_cwt_confirmation.cpp](37_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
-| [38_cwt_key_thumbprint.cpp](38_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
-| [39_cwt_confirmation_token.cpp](39_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
+| [36_experimental_cwt_public_keys.cpp](36_experimental_cwt_public_keys.cpp) | Encode public key material | COSE_Key represents public parameters independently of a crypto library. |
+| [37_experimental_cwt_confirmation.cpp](37_experimental_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
+| [38_experimental_cwt_key_thumbprint.cpp](38_experimental_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
+| [39_experimental_cwt_confirmation_token.cpp](39_experimental_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
 
 ## CDDL
 

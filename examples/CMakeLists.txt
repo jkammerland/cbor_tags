@@ -11,8 +11,8 @@ set(OPENSSL_EXAMPLES
   33_experimental_cwt_countersignature
   34_experimental_cwt_abbreviated_countersignature
   35_experimental_cwt_countersignature_chain
-  38_cwt_key_thumbprint
-  39_cwt_confirmation_token)
+  38_experimental_cwt_key_thumbprint
+  39_experimental_cwt_confirmation_token)
 
 foreach(EXAMPLE_SOURCE IN LISTS EXAMPLE_SOURCES)
   get_filename_component(EXAMPLE_NAME "${EXAMPLE_SOURCE}" NAME_WE)
