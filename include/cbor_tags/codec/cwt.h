@@ -10,11 +10,11 @@
 
 namespace cbor::tags::codec {
 
-template <typename Self> struct cwt : base<Self>, tags::cwt::detail::counter_codec<Self> {
+template <typename Self> struct cwt : base<Self>, tags::cwt::detail::countersignature_codec<Self> {
     using base<Self>::encode;
     using base<Self>::decode;
-    using tags::cwt::detail::counter_codec<Self>::encode;
-    using tags::cwt::detail::counter_codec<Self>::decode;
+    using tags::cwt::detail::countersignature_codec<Self>::encode;
+    using tags::cwt::detail::countersignature_codec<Self>::decode;
 
     template <typename... Bindings> void encode(const tags::cwt::detail::field_map<Bindings...> &map) {
         tags::cwt::detail::encode_fields(static_cast<Self &>(*this), map);

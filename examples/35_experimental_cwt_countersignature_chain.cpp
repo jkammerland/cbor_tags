@@ -13,7 +13,7 @@ auto make_key() {
 }
 
 /**
-counter = [bstr, { ? 11 => counter / [+ counter] }, bstr]
+countersignature = [bstr, { ? 11 => countersignature / [+ countersignature] }, bstr]
 */
 int main() {
     auto issuer = make_key();
@@ -28,8 +28,8 @@ int main() {
         return 1;
     }
 
-    // Select recursive headers only for messages that need counter chains.
-    using headers = cwt::counter_headers<>;
+    // Select recursive headers only for messages that need countersignature chains.
+    using headers = cwt::countersignature_headers<>;
     auto first = cwt::countersign<cwt::openssl_esp256_backend>(notary.get(), *token,
         headers::signature_type{});
     if (!first) {
@@ -50,7 +50,7 @@ int main() {
         return 1;
     }
 
-    cwt::counter_headers_view::signature_type received;
+    cwt::countersignature_headers_view::signature_type received;
     auto decoder = make_decoder<codec::cwt>(buffer);
     if (!decoder(received) || !received.unprotected.extra.full) {
         return 1;

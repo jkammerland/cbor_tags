@@ -4,17 +4,17 @@
 #include <list>
 
 TEST_SUITE("cbor_wire/cwt/countersignatures") {
-    TEST_CASE("counter signature input includes independent framing and original signature") {
+    TEST_CASE("countersignature signature input includes independent framing and original signature") {
         cose_sign1       target{.protected_header = {std::byte{0xa0}},
                                 .unprotected      = {},
                                 .payload          = std::vector<std::byte>{std::byte{0x01}},
                                 .signature        = {std::byte{0x02}}};
-        cose_signature   counter{.protected_header = {std::byte{0xa0}}, .unprotected = {}, .signature = {}};
+        cose_signature   countersignature{.protected_header = {std::byte{0xa0}}, .unprotected = {}, .signature = {}};
         const std::array aad{std::byte{0x03}};
-        auto             input = make_countersign_tbs(target, counter, aad);
+        auto             input = make_countersign_tbs(target, countersignature, aad);
         REQUIRE(input);
 
-        // [context, target protected, counter protected, AAD, payload, [signature]].
+        // [context, target protected, countersignature protected, AAD, payload, [signature]].
         std::vector<std::byte> expected{std::byte{0x86}, std::byte{0x72}};
         for (char c : std::string_view{"CounterSignatureV2"}) {
             expected.push_back(std::byte(c));
@@ -45,13 +45,13 @@ TEST_SUITE("cbor_wire/cwt/countersignatures") {
         CHECK(input->flatten() == expected);
     }
 
-    TEST_CASE("full counter collections accept singleton and list and reject empty or malformed arrays") {
+    TEST_CASE("full countersignature collections accept singleton and list and reject empty or malformed arrays") {
         const std::vector<std::vector<std::byte>> valid{
             {std::byte{0x83}, std::byte{0x40}, std::byte{0xa0}, std::byte{0x41}, std::byte{0x01}},
             {std::byte{0x81}, std::byte{0x83}, std::byte{0x40}, std::byte{0xa0}, std::byte{0x41}, std::byte{0x01}},
             {std::byte{0x9f}, std::byte{0x40}, std::byte{0xa0}, std::byte{0x41}, std::byte{0x01}, std::byte{0xff}}};
         for (auto bytes : valid) {
-            counter_collection<cose_signature> result;
+            countersignature_collection<cose_signature> result;
             REQUIRE(make_decoder<codec::cwt>(bytes)(result));
             REQUIRE(result.signatures.size() == 1);
             CHECK(result.signatures.front().signature == std::vector<std::byte>{std::byte{1}});
@@ -64,39 +64,39 @@ TEST_SUITE("cbor_wire/cwt/countersignatures") {
             {std::byte{0x83}, std::byte{0x40}, std::byte{0xa0}},
             {std::byte{0x84}, std::byte{0x40}, std::byte{0xa0}, std::byte{0x40}, std::byte{0x00}}};
         for (auto bytes : invalid) {
-            counter_collection<cose_signature> result;
+            countersignature_collection<cose_signature> result;
             CHECK_FALSE(make_decoder<codec::cwt>(bytes)(result));
         }
 
-        counter_collection<cose_signature, true> legacy;
-        auto                                     bytes = valid.front();
+        countersignature_collection<cose_signature, true> legacy;
+        auto                                              bytes = valid.front();
         REQUIRE(make_decoder<codec::cwt>(bytes)(legacy));
         CHECK_FALSE(encode_to_bytes(legacy));
-        CHECK_FALSE(encode_to_bytes(counter_collection<cose_signature>{}));
+        CHECK_FALSE(encode_to_bytes(countersignature_collection<cose_signature>{}));
     }
 
-    TEST_CASE("counter collections decode once from unsized noncontiguous input") {
+    TEST_CASE("countersignature collections decode once from unsized noncontiguous input") {
         std::list<std::byte> bytes{std::byte{0x83}, std::byte{0x40}, std::byte{0xa0}, std::byte{0x41}, std::byte{0x01}};
         std::ranges::subrange<decltype(bytes.cbegin()), decltype(bytes.cend()), std::ranges::subrange_kind::unsized> input{bytes.cbegin(),
                                                                                                                            bytes.cend()};
         static_assert(!std::ranges::sized_range<decltype(input)>);
-        counter_collection<cose_signature> owned;
-        auto                               decoder = make_decoder<codec::cwt>(input);
+        countersignature_collection<cose_signature> owned;
+        auto                                        decoder = make_decoder<codec::cwt>(input);
         REQUIRE(decoder(owned));
         CHECK(decoder.tell() == bytes.end());
         CHECK(owned.signatures.front().signature == std::vector<std::byte>{std::byte{1}});
 
-        counter_collection<cose_signature_view> borrowed;
-        auto                                    unavailable = make_decoder<codec::cwt>(input)(borrowed);
+        countersignature_collection<cose_signature_view> borrowed;
+        auto                                             unavailable = make_decoder<codec::cwt>(input)(borrowed);
         REQUIRE_FALSE(unavailable);
         CHECK(unavailable.error() == status_code::contiguous_view_on_non_contiguous_data);
     }
 
-    TEST_CASE("direct counter dispatch returns incomplete for a truncated byte-string length") {
-        std::vector<std::byte>             bytes{std::byte{0x83}, std::byte{0x58}};
-        counter_collection<cose_signature> result;
-        auto                               decoder = make_decoder<codec::cwt>(bytes);
-        auto                               status  = status_code::success;
+    TEST_CASE("direct countersignature dispatch returns incomplete for a truncated byte-string length") {
+        std::vector<std::byte>                      bytes{std::byte{0x83}, std::byte{0x58}};
+        countersignature_collection<cose_signature> result;
+        auto                                        decoder = make_decoder<codec::cwt>(bytes);
+        auto                                        status  = status_code::success;
         CHECK_NOTHROW(status = decoder.decode(result));
         CHECK(status == status_code::incomplete);
         CHECK(decoder.tell() == bytes.end());
@@ -117,7 +117,9 @@ TEST_SUITE("cbor_wire/cwt/countersignatures") {
                               .unprotected      = {},
                               .payload          = std::vector<std::byte>{std::byte{1}},
                               .signature        = {std::byte{2}}};
-        cose_signature counter{.protected_header = {std::byte{0xa1}, std::byte{1}, std::byte{0x28}}, .unprotected = {}, .signature = {}};
+        cose_signature countersignature{.protected_header = {std::byte{0xa1}, std::byte{1}, std::byte{0x28}},
+                                        .unprotected      = {},
+                                        .signature        = {}};
 
         std::vector<std::byte> input{std::byte{0x85}, std::byte{0x70}};
         for (char c : std::string_view{"CounterSignature"}) {
@@ -128,12 +130,12 @@ TEST_SUITE("cbor_wire/cwt/countersignatures") {
         const std::array parts{std::span<const std::byte>{input}};
         auto             signature = openssl_esp256_backend::sign(key.get(), parts);
         REQUIRE(signature);
-        counter.signature = *signature;
+        countersignature.signature = *signature;
 
-        REQUIRE(verify_legacy_countersignature<openssl_esp256_backend>(key.get(), target, counter));
-        CHECK_FALSE(verify_countersignature<openssl_esp256_backend>(key.get(), target, counter));
+        REQUIRE(verify_legacy_countersignature<openssl_esp256_backend>(key.get(), target, countersignature));
+        CHECK_FALSE(verify_countersignature<openssl_esp256_backend>(key.get(), target, countersignature));
         target.signature.front() ^= std::byte{1};
-        CHECK(verify_legacy_countersignature<openssl_esp256_backend>(key.get(), target, counter));
+        CHECK(verify_legacy_countersignature<openssl_esp256_backend>(key.get(), target, countersignature));
     }
 #endif
 }

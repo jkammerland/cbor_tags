@@ -47,9 +47,9 @@ through signing, token encoding, decoding and verification.
 | [30_experimental_cwt_fields.cpp](30_experimental_cwt_fields.cpp) | Select application fields | Integer and text labels bind to independently chosen receiver storage. |
 | [31_experimental_cwt_type.cpp](31_experimental_cwt_type.cpp) | Describe the complete token | Protected `typ` distinguishes a COSE object from its payload content type. |
 | [32_experimental_cwt_header_claims.cpp](32_experimental_cwt_header_claims.cpp) | Carry claims in protected headers | Verify first, then compare replicated claims by value. |
-| [33_experimental_cwt_countersignature.cpp](33_experimental_cwt_countersignature.cpp) | Verify a second party's full countersignature | The counter binds the original signature and has independent AAD. |
-| [34_experimental_cwt_abbreviated_counter.cpp](34_experimental_cwt_abbreviated_counter.cpp) | Write an abbreviated counter into caller storage | The application selects the counter's algorithm and key. |
-| [35_experimental_cwt_counter_chain.cpp](35_experimental_cwt_counter_chain.cpp) | Decode and verify a borrowed counter chain | Select recursive headers and verify each required layer separately. |
+| [33_experimental_cwt_countersignature.cpp](33_experimental_cwt_countersignature.cpp) | Verify a second party's full countersignature | The countersignature binds the original signature and has independent AAD. |
+| [34_experimental_cwt_abbreviated_countersignature.cpp](34_experimental_cwt_abbreviated_countersignature.cpp) | Write an abbreviated countersignature into caller storage | The application selects the countersignature's algorithm and key. |
+| [35_experimental_cwt_countersignature_chain.cpp](35_experimental_cwt_countersignature_chain.cpp) | Decode and verify a borrowed countersignature chain | Select recursive headers and verify each required layer separately. |
 
 ## CDDL
 

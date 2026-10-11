@@ -14,7 +14,7 @@ auto make_key() {
 
 /**
 token = [bstr, {}, bstr, bstr]
-abbreviated-counter = bstr
+abbreviated-countersignature = bstr
 */
 int main() {
     auto issuer = make_key();
@@ -39,7 +39,7 @@ int main() {
         return 1;
     }
 
-    // The application supplies the abbreviated counter's algorithm and key.
+    // The application supplies the abbreviated countersignature's algorithm and key.
     auto signature = std::span<const std::byte>{storage}.first(*written);
     if (!cwt::verify_sign1<cwt::openssl_esp256_backend>(issuer.get(), *token) ||
         !cwt::verify_countersignature0<cwt::openssl_esp256_backend>(notary.get(), *token, signature,

@@ -14,7 +14,7 @@ auto make_key() {
 
 /**
 token = [bstr, {}, bstr, bstr]
-counter = #6.19([bstr, {}, bstr])
+countersignature = #6.19([bstr, {}, bstr])
 */
 int main() {
     auto issuer = make_key();
@@ -31,17 +31,17 @@ int main() {
         return 1;
     }
 
-    auto counter = cwt::countersign<cwt::openssl_esp256_backend>(notary.get(), *token,
+    auto countersignature = cwt::countersign<cwt::openssl_esp256_backend>(notary.get(), *token,
         cwt::cose_signature{}, notary_aad);
-    if (!counter) {
+    if (!countersignature) {
         return 1;
     }
 
-    // Keep the standalone counter's transport buffer separate from its model.
+    // Keep the standalone countersignature's transport buffer separate from its model.
     std::vector<std::byte> buffer;
 
     auto encoder = make_encoder<codec::cwt>(buffer);
-    if (!encoder(cwt::as_countersignature(*counter))) {
+    if (!encoder(cwt::as_countersignature(*countersignature))) {
         return 1;
     }
 

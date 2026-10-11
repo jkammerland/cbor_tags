@@ -1,14 +1,14 @@
 #pragma once
 
-#include "cbor_tags/cwt/counter_types.h"
+#include "cbor_tags/cwt/countersignature_types.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 #include "cbor_tags/detail/cwt_codec.h"
 
 namespace cbor::tags::cwt::detail {
 
-template <typename Self> struct counter_codec {
+template <typename Self> struct countersignature_codec {
 
-    template <typename Signature, bool Legacy> void encode(const counter_collection<Signature, Legacy> &value) {
+    template <typename Signature, bool Legacy> void encode(const countersignature_collection<Signature, Legacy> &value) {
         auto &enc = static_cast<Self &>(*this);
         if (Legacy || value.signatures.empty()) {
             throw tags::detail::encode_status_exception{status_code::error};
@@ -20,7 +20,7 @@ template <typename Self> struct counter_codec {
         }
     }
 
-    template <typename Signature, bool Legacy> status_code decode(counter_collection<Signature, Legacy> &value) {
+    template <typename Signature, bool Legacy> status_code decode(countersignature_collection<Signature, Legacy> &value) {
         auto      &dec = static_cast<Self &>(*this);
         major_type major{};
         std::byte  info{};
@@ -29,12 +29,12 @@ template <typename Self> struct counter_codec {
     }
 
     template <typename Signature, bool Legacy>
-    status_code decode(counter_collection<Signature, Legacy> &value, major_type major, std::byte info) try {
-        auto                                 &dec = static_cast<Self &>(*this);
-        counter_collection<Signature, Legacy> decoded;
-        bool                                  singleton = false;
-        std::size_t                           index     = 0;
-        Signature                             single{};
+    status_code decode(countersignature_collection<Signature, Legacy> &value, major_type major, std::byte info) try {
+        auto                                          &dec = static_cast<Self &>(*this);
+        countersignature_collection<Signature, Legacy> decoded;
+        bool                                           singleton = false;
+        std::size_t                                    index     = 0;
+        Signature                                      single{};
 
         // The first element distinguishes a signature's bstr from a list's array.
         auto status = decode_group_entries(dec, major, info, major_type::Array, status_code::no_match_for_array_on_buffer,
