@@ -198,7 +198,7 @@ TEST_SUITE("roundtrip/cwt") {
 
     TEST_CASE("cose sign rejects a matching body algorithm for signing and verification") {
         const std::vector<std::byte> payload{std::byte{0x31}};
-        const header_map body{.alg = algorithm::es256};
+        const header_map             body{.alg = algorithm::es256};
 
         CHECK_FALSE(sign<toy_es256_backend>(nullptr, body, {}, payload));
 
