@@ -8,6 +8,8 @@ Example 23 introduces experimental CWT claim encoding and decoding; example 24
 connects an application crypto backend using optional OpenSSL.
 Example 25 builds a complete signed token with external AAD and receiver validation;
 example 26 requires signatures from two independent keys.
+Example 27 chooses application layouts; examples 28–29 keep payload bytes borrowed
+through signing, token encoding, decoding and verification.
 
 ## Learning order
 
@@ -39,6 +41,9 @@ example 26 requires signatures from two independent keys.
 | [24_experimental_cwt_backend.cpp](24_experimental_cwt_backend.cpp) | Connect a custom crypto backend | Forward an application key through signing and verification, using OpenSSL as the replaceable provider. |
 | [25_experimental_cwt_token.cpp](25_experimental_cwt_token.cpp) | Send and verify a complete CWT | Protect headers, supply external AAD, encode and decode the tagged message, then validate the verified claims. |
 | [26_experimental_cwt_multi_signer.cpp](26_experimental_cwt_multi_signer.cpp) | Require two token signers | Append a COSE_Sign signature and verify each signer with its own trusted key. |
+| [27_experimental_cwt_custom_types.cpp](27_experimental_cwt_custom_types.cpp) | Choose application field names and storage | Encode an owning application type and decode into a different type with borrowed text. |
+| [28_experimental_cwt_borrowed_token.cpp](28_experimental_cwt_borrowed_token.cpp) | Sign and receive through views | Use a caller-owned signature buffer, encode segments, then decode views, verify with AAD and check claims. |
+| [29_experimental_cwt_borrowed_multi_signer.cpp](29_experimental_cwt_borrowed_multi_signer.cpp) | Share one payload between signers | Keep separate signature buffers and require both trusted signers before reading borrowed claims. |
 
 ## CDDL
 
@@ -76,13 +81,15 @@ Run one example directly:
 For multi-configuration generators, build with `--config Debug`, test with
 `-C Debug`, and run the executable from `examples/Debug`; Windows adds `.exe`.
 
-Examples 24–26 additionally require OpenSSL development files and the explicit opt-in:
+Examples 24–26 and 28–29 additionally require OpenSSL development files and the explicit opt-in:
 
 ```bash
 cmake -S . -B build/examples -DCBOR_TAGS_ENABLE_CWT_OPENSSL=ON
 cmake --build build/examples --target \
   cbor_tags_example_24_experimental_cwt_backend \
   cbor_tags_example_25_experimental_cwt_token \
-  cbor_tags_example_26_experimental_cwt_multi_signer
-ctest --test-dir build/examples -R '^example_(24|25|26)_' --output-on-failure --no-tests=error
+  cbor_tags_example_26_experimental_cwt_multi_signer \
+  cbor_tags_example_28_experimental_cwt_borrowed_token \
+  cbor_tags_example_29_experimental_cwt_borrowed_multi_signer
+ctest --test-dir build/examples -R '^example_(24|25|26|28|29)_' --output-on-failure --no-tests=error
 ```

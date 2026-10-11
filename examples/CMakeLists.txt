@@ -4,7 +4,9 @@ list(SORT EXAMPLE_SOURCES)
 set(OPENSSL_EXAMPLES
   24_experimental_cwt_backend
   25_experimental_cwt_token
-  26_experimental_cwt_multi_signer)
+  26_experimental_cwt_multi_signer
+  28_experimental_cwt_borrowed_token
+  29_experimental_cwt_borrowed_multi_signer)
 
 foreach(EXAMPLE_SOURCE IN LISTS EXAMPLE_SOURCES)
   get_filename_component(EXAMPLE_NAME "${EXAMPLE_SOURCE}" NAME_WE)

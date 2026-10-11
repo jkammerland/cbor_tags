@@ -137,6 +137,14 @@ it into a temporary byte buffer. They may still allocate parsed header metadata
 and segment descriptors. A key ID can select a candidate trusted key; parsing it
 does not authenticate the message.
 
+[Example 27](../examples/27_experimental_cwt_custom_types.cpp) defines ordinary
+application `encode` and `decode` functions. The sender owns its text; the
+receiver chooses different field names and `std::string_view`. Its decoder
+requires the application's subject and integer expiry before assigning the
+result, and consumes the claims map through the existing CWT codec. The decoder
+forwards its destination to `decode`, hence the `received_claims&&` parameter. Custom
+schemas can instead use the normal codec customization mechanisms.
+
 ## Build
 
 ```cmake
