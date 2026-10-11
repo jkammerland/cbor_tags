@@ -95,6 +95,37 @@ payload into that result; `add_signature` appends an owned signature to the
 existing message. Their backend input is segmented too. AAD spans borrow
 caller-owned storage for the call and are not retained in the message.
 
+## Caller-owned signature storage
+
+Pass an explicit `cose_sign1_view` and a writable byte span to `sign1` to keep
+payload ownership in your application:
+
+```cpp
+std::array<std::byte, 64> signature;
+
+auto written = cwt::sign1<custom_backend>(key, message, signature, external_aad);
+if (written) {
+    message.signature = std::span<const std::byte>{signature}.first(*written);
+}
+```
+
+The message must contain already encoded protected headers with the algorithm
+selected. This overload does not insert an algorithm or change the message;
+it ignores the existing signature field and returns the number of output bytes
+written. `sign_signature(key, message_view, signer_view, output, aad, detached)`
+provides the corresponding operation for each COSE_Sign signer.
+
+Implement the backend overload `sign(key, parts, std::span<std::byte> output)`
+returning `expected<std::size_t, status_code>` for this path. A backend needs only
+the overloads used by its callers. OpenSSL supports both and rejects output shorter
+than 64 bytes with `size_limit_exceeded` before writing. A larger buffer's suffix
+is untouched. Disregard output contents after a failure.
+
+Keep payload, headers and AAD stable throughout the call. Signature output must
+not overlap those inputs. When encoding a view into `byte_segments`, keep all
+referenced storage, including the completed signature, alive until the output
+has been consumed.
+
 For a null payload, verification requires a detached payload. `std::nullopt`
 means missing; an engaged empty span means a valid empty payload:
 

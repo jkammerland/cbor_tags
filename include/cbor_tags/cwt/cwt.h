@@ -23,19 +23,32 @@ template <typename T> [[nodiscard]] inline expected<std::vector<std::byte>, stat
     return encode_to_bytes(header);
 }
 
-template <typename Bytes> [[nodiscard]] inline expected<header_map, status_code> decode_protected_header(const Bytes &bytes) {
-    header_map header{};
+// A borrowed destination keeps references into the caller's named input buffer.
+template <typename Bytes, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code> decode_protected_header(Bytes &bytes, basic_header_map<Borrowed> &destination) {
+    basic_header_map<Borrowed> decoded{};
     if (bytes.empty()) {
-        return header;
+        destination = std::move(decoded);
+        return {};
     }
 
-    auto dec    = make_decoder<codec::cwt>(bytes);
-    auto result = dec(header);
+    auto decoder = make_decoder<codec::cwt>(bytes);
+    auto result  = decoder(decoded);
     if (!result) {
         return unexpected<status_code>{result.error()};
     }
-    if (dec.tell() != bytes.end()) {
+    if (decoder.tell() != bytes.end()) {
         return unexpected<status_code>{status_code::error};
+    }
+    destination = std::move(decoded);
+    return {};
+}
+
+template <typename Bytes> [[nodiscard]] inline expected<header_map, status_code> decode_protected_header(const Bytes &bytes) {
+    header_map header{};
+    auto       result = decode_protected_header(bytes, header);
+    if (!result) {
+        return unexpected<status_code>{result.error()};
     }
     return header;
 }
@@ -150,6 +163,59 @@ validate_sign_algorithm(const header_map &body_protected, const basic_header_map
         return unexpected<status_code>{status_code::error};
     }
     return {};
+}
+
+// Sign existing protected bytes without changing the message or owning its payload.
+template <typename Backend, typename SigningKey, typename Message>
+    requires std::same_as<std::remove_cvref_t<Message>, cose_sign1_view>
+[[nodiscard]] inline expected<std::size_t, status_code> sign1(SigningKey &&key, Message &&message, std::span<std::byte> signature_output,
+                                                              std::span<const std::byte>                external_aad     = {},
+                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    auto protected_header = decode_protected_header(message.protected_header);
+    if (!protected_header) {
+        return unexpected<status_code>{protected_header.error()};
+    }
+    auto status = validate_sign1_algorithm(*protected_header, message.unprotected, Backend::algorithm_id);
+    if (!status) {
+        return unexpected<status_code>{status.error()};
+    }
+    if (!protected_header->alg) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    auto input = make_sign1_tbs(message, external_aad, detached_payload);
+    if (!input) {
+        return unexpected<status_code>{input.error()};
+    }
+    return Backend::sign(std::forward<SigningKey>(key), detail::signature_parts(*input), signature_output);
+}
+
+template <typename Backend, typename SigningKey, typename Message, typename Signer>
+    requires std::same_as<std::remove_cvref_t<Message>, cose_sign_view> && std::same_as<std::remove_cvref_t<Signer>, cose_signature_view>
+[[nodiscard]] inline expected<std::size_t, status_code>
+sign_signature(SigningKey &&key, Message &&message, Signer &&signer, std::span<std::byte> signature_output,
+               std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    auto body_header = decode_protected_header(message.protected_header);
+    if (!body_header) {
+        return unexpected<status_code>{body_header.error()};
+    }
+    auto signer_header = decode_protected_header(signer.protected_header);
+    if (!signer_header) {
+        return unexpected<status_code>{signer_header.error()};
+    }
+    auto status = validate_sign_algorithm(*body_header, message.unprotected, *signer_header, signer.unprotected, Backend::algorithm_id);
+    if (!status) {
+        return unexpected<status_code>{status.error()};
+    }
+    if (!body_header->alg && !signer_header->alg) {
+        return unexpected<status_code>{status_code::error};
+    }
+
+    auto input = make_sign_tbs(message, signer, external_aad, detached_payload);
+    if (!input) {
+        return unexpected<status_code>{input.error()};
+    }
+    return Backend::sign(std::forward<SigningKey>(key), detail::signature_parts(*input), signature_output);
 }
 
 template <typename Backend, typename SigningKey>

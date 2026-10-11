@@ -117,6 +117,26 @@ model; a single view cannot represent their separate chunks. Noncontiguous input
 returns `contiguous_view_on_non_contiguous_data`. As with owning models, errors
 preserve the destination and leave the decoder cursor terminal.
 
+Choose the protected-header destination in the same way:
+
+```cpp
+cwt::header_map_view headers;
+auto result = cwt::decode_protected_header(message.protected_header, headers);
+```
+
+The input must be a named buffer whose storage remains valid while its views are
+used. Empty protected bytes produce an empty map. The helper rejects trailing
+bytes and replaces the destination only on success. Use `header_map` as the
+destination to copy the fields instead, or keep the existing owning-result
+`decode_protected_header(bytes)` convenience.
+
+Decode an envelope view first, verify its original bytes with the receiver's
+external AAD, then decode claims from its payload and apply application policy.
+`verify_sign1` and `verify_sign` consume borrowed signature input without combining
+it into a temporary byte buffer. They may still allocate parsed header metadata
+and segment descriptors. A key ID can select a candidate trusted key; parsing it
+does not authenticate the message.
+
 ## Build
 
 ```cmake
