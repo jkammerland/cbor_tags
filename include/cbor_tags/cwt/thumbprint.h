@@ -9,9 +9,9 @@
 
 namespace cbor::tags::cwt {
 
-// The deterministic projection owns framing and borrows public key bytes.
+// The thumbprint input owns CBOR headers and borrows public key bytes.
 template <detail::PublicKey Key> [[nodiscard]] expected<byte_segments, status_code> make_key_thumbprint_input(const Key &key) {
-    if (!detail::valid_public_key(key))
+    if (!detail::valid_public_key_structure(key))
         return unexpected<status_code>{status_code::error};
     if constexpr (Key::key_type != 3) {
         if (!std::holds_alternative<std::int64_t>(key.curve))

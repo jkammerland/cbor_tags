@@ -27,7 +27,7 @@ template <typename Self> struct key_codec : codec::base<Self> {
     }
 
     template <PublicKey Key> void encode_key(const Key &key) {
-        if (!valid_public_key(key))
+        if (!valid_public_key_structure(key))
             throw tags::detail::encode_status_exception{status_code::error};
         auto         &enc   = static_cast<Self &>(*this);
         std::uint64_t count = Key::key_type == 2 ? 4 : 3;
@@ -147,7 +147,8 @@ template <typename Self> struct key_codec : codec::base<Self> {
             });
             if (status != status_code::success)
                 return status;
-            if (!type_seen || !first || !second || (Key::key_type == 2 && !third) || seen.has_duplicates() || !valid_public_key(key))
+            if (!type_seen || !first || !second || (Key::key_type == 2 && !third) || seen.has_duplicates() ||
+                !valid_public_key_structure(key))
                 return status_code::error;
             destination = std::move(key);
             return status_code::success;

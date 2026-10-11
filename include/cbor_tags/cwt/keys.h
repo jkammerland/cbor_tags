@@ -49,7 +49,7 @@ template <bool B> struct public_key_model<basic_rsa_public_key<B>> : std::true_t
 template <typename T>
 concept PublicKey = public_key_model<std::remove_cvref_t<T>>::value;
 
-template <PublicKey Key> bool valid_public_key(const Key &key) {
+template <PublicKey Key> bool valid_public_key_structure(const Key &key) {
     if constexpr (Key::key_type == 3) {
         return !key.modulus.empty() && !key.exponent.empty() && key.modulus.front() != std::byte{} && key.exponent.front() != std::byte{};
     } else {
@@ -92,7 +92,7 @@ template <PublicKey Key> bool valid_public_key(const Key &key) {
 // Key metadata is an admission restriction, not a cryptographic validity proof.
 template <detail::PublicKey Key>
 [[nodiscard]] expected<void, status_code> validate_key_use(const Key &key, algorithm alg, std::int64_t operation = 2) {
-    if (!detail::valid_public_key(key) || (key.alg && *key.alg != alg))
+    if (!detail::valid_public_key_structure(key) || (key.alg && *key.alg != alg))
         return unexpected<status_code>{status_code::error};
     if (key.key_ops && std::ranges::find(*key.key_ops, operation) == key.key_ops->end())
         return unexpected<status_code>{status_code::error};
