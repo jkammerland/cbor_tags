@@ -14,6 +14,7 @@ See standard specifications for more information:
 - CDDL [RFC8610](https://datatracker.ietf.org/doc/html/rfc8610) (Concise Data Definition Language)
 - CBOR [RFC8949](https://datatracker.ietf.org/doc/html/rfc8949) (Concise Binary Object Representation)
 - CBOR Typed Arrays [RFC8746](https://datatracker.ietf.org/doc/html/rfc8746)
+- [experimental] [CBOR Web Token support](doc/experimental_cwt.md)
 
 See [CBOR Conformance](doc/conformance.md) for the library's interoperability
 profile, intentional permissive behavior, and validation boundaries.
