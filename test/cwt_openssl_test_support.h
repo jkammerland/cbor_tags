@@ -13,7 +13,7 @@
 namespace cwt_test {
 
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
-using crypto_es256_backend = openssl_es256_backend;
+using crypto_esp256_backend = openssl_esp256_backend;
 
 struct evp_pkey_deleter {
     void operator()(EVP_PKEY *key) const noexcept {

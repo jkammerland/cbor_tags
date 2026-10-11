@@ -16,7 +16,7 @@ signing or verification succeeds. The crypto examples require the optional
 
 Keys can be application-defined types; the helpers forward them to your backend.
 The backend receives the encoded COSE `Sig_structure`, not just the payload or a
-precomputed digest. For ES256, the provider applies SHA-256 and returns a 64-byte
+precomputed digest. For ESP256, the provider applies SHA-256 and returns a 64-byte
 `r || s` signature, converting its native signature format if necessary.
 
 Each input range yields `std::span<const std::byte>` values in signing order.
@@ -31,7 +31,7 @@ Provide an algorithm identifier and operations with these signatures:
 using namespace cbor::tags;
 
 struct custom_backend {
-    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
+    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::esp256;
 
     template <std::ranges::input_range Parts>
     static expected<std::vector<std::byte>, status_code>
@@ -166,7 +166,7 @@ separate steps: the example also rejects expiry at the exact deadline.
 ## Multiple signers
 
 [Example 26](../examples/26_experimental_cwt_multi_signer.cpp) creates a
-CWT-tagged COSE_Sign token with two independent ES256 keys. `sign` creates the
+CWT-tagged COSE_Sign token with two independent ESP256 keys. `sign` creates the
 first signature; `add_signature` appends the second over the same payload and
 external AAD. Each signature has its own protected algorithm and key ID.
 
