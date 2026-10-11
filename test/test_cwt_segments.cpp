@@ -52,7 +52,7 @@ struct observing_backend {
         CHECK(signature.data() == observation.signature.data());
         CHECK(signature.size() == observation.signature.size());
         if (observation.fail) {
-            return unexpected<status_code>{status_code::error};
+            return cbor::tags::unexpected<status_code>{status_code::error};
         }
         return {};
     }
