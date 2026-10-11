@@ -138,25 +138,25 @@ TEST_SUITE("roundtrip/cwt") {
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
     TEST_CASE("openssl signs into exact and larger buffers without touching the suffix") {
         auto key    = make_p256_key();
-        auto header = encode_protected_header(header_map{.alg = algorithm::es256});
+        auto header = encode_protected_header(header_map{.alg = algorithm::esp256});
         REQUIRE(header);
         const std::array payload{std::byte{7}};
         cose_sign1_view  message{.protected_header = *header, .unprotected = {}, .payload = payload, .signature = {}};
 
         for (const auto capacity : {64U, 80U}) {
             std::vector<std::byte> output(capacity, std::byte{99});
-            auto                   result = sign1<crypto_es256_backend>(key.get(), message, output);
+            auto                   result = sign1<crypto_esp256_backend>(key.get(), message, output);
             REQUIRE(result);
             REQUIRE(*result == 64U);
             message.signature = std::span<const std::byte>{output}.first(*result);
-            REQUIRE(verify_sign1<crypto_es256_backend>(key.get(), message));
+            REQUIRE(verify_sign1<crypto_esp256_backend>(key.get(), message));
             CHECK(std::ranges::all_of(std::span{output}.subspan(*result), [](auto byte) { return byte == std::byte{99}; }));
             message.signature = {};
         }
 
         std::array<std::byte, 63> short_output;
         short_output.fill(std::byte{99});
-        auto result = sign1<crypto_es256_backend>(key.get(), message, short_output);
+        auto result = sign1<crypto_esp256_backend>(key.get(), message, short_output);
         REQUIRE_FALSE(result);
         CHECK(result.error() == status_code::size_limit_exceeded);
         CHECK(std::ranges::all_of(short_output, [](auto byte) { return byte == std::byte{99}; }));
@@ -165,7 +165,7 @@ TEST_SUITE("roundtrip/cwt") {
     TEST_CASE("caller buffers hold two signatures over one borrowed payload") {
         auto first_key  = make_p256_key();
         auto second_key = make_p256_key();
-        auto header     = encode_protected_header(header_map{.alg = algorithm::es256});
+        auto header     = encode_protected_header(header_map{.alg = algorithm::esp256});
         REQUIRE(header);
         const std::array          payload{std::byte{7}, std::byte{9}};
         const std::array          aad{std::byte{5}};
@@ -175,18 +175,18 @@ TEST_SUITE("roundtrip/cwt") {
         cose_signature_view       first{.protected_header = *header, .unprotected = {}, .signature = {}};
         cose_signature_view       second = first;
 
-        auto first_result  = sign_signature<crypto_es256_backend>(first_key.get(), message, first, first_output, aad);
-        auto second_result = sign_signature<crypto_es256_backend>(second_key.get(), message, second, second_output, aad);
+        auto first_result  = sign_signature<crypto_esp256_backend>(first_key.get(), message, first, first_output, aad);
+        auto second_result = sign_signature<crypto_esp256_backend>(second_key.get(), message, second, second_output, aad);
         REQUIRE(first_result);
         REQUIRE(second_result);
         first.signature    = std::span<const std::byte>{first_output}.first(*first_result);
         second.signature   = std::span<const std::byte>{second_output}.first(*second_result);
         message.signatures = {first, second};
 
-        REQUIRE(verify_sign<crypto_es256_backend>(first_key.get(), message, std::size_t{0}, aad));
-        REQUIRE(verify_sign<crypto_es256_backend>(second_key.get(), message, std::size_t{1}, aad));
-        CHECK_FALSE(verify_sign<crypto_es256_backend>(first_key.get(), message, std::size_t{1}, aad));
-        CHECK_FALSE(verify_sign<crypto_es256_backend>(first_key.get(), message, std::size_t{0}));
+        REQUIRE(verify_sign<crypto_esp256_backend>(first_key.get(), message, std::size_t{0}, aad));
+        REQUIRE(verify_sign<crypto_esp256_backend>(second_key.get(), message, std::size_t{1}, aad));
+        CHECK_FALSE(verify_sign<crypto_esp256_backend>(first_key.get(), message, std::size_t{1}, aad));
+        CHECK_FALSE(verify_sign<crypto_esp256_backend>(first_key.get(), message, std::size_t{0}));
         CHECK(message.payload->data() == payload.data());
     }
 #endif

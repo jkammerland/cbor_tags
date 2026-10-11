@@ -54,7 +54,7 @@ token = #6.61(#6.18([
     payload: bstr .cbor claims,
     signature: bstr .size 64
 ]))
-protected-header = { 1 => -7, 4 => bstr }
+protected-header = { 1 => -9, 4 => bstr }
 claims = { 1 => tstr, 2 => tstr, 3 => tstr, 4 => int }
 */
 int main() {
@@ -92,12 +92,12 @@ int main() {
     // Set the algorithm and key ID in the headers authenticated by the signature.
     const std::vector<std::byte> key_id{std::byte{1}};
     cwt::header_map protected_header{
-        .alg = cwt::algorithm::es256,
+        .alg = cwt::algorithm::esp256,
         .kid = key_id,
     };
 
     // Sign with AAD, copying claims into a message that owns its payload, headers and signature.
-    auto message = cwt::sign1<cwt::openssl_es256_backend>(key.get(), protected_header, {},
+    auto message = cwt::sign1<cwt::openssl_esp256_backend>(key.get(), protected_header, {},
         claims_buffer, external_aad);
     if (!message) {
         return 1;
@@ -124,7 +124,7 @@ int main() {
     constexpr std::string_view receiver_context = "sensor-api:v1:read-temperature";
     const auto receiver_aad =
         std::as_bytes(std::span{receiver_context.data(), receiver_context.size()});
-    if (!cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, receiver_aad)) {
+    if (!cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, receiver_aad)) {
         return 2;
     }
 
@@ -152,12 +152,12 @@ int main() {
     // Confirm that a different request context cannot verify the same token.
     constexpr std::string_view other_context = "sensor-api:v1:write-temperature";
     const auto wrong_aad = std::as_bytes(std::span{other_context.data(), other_context.size()});
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, wrong_aad)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, wrong_aad)) {
         return 3;
     }
 
     // Confirm that omitting the required external AAD also fails verification.
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received)) {
         return 3;
     }
 
@@ -166,7 +166,7 @@ int main() {
         return 3;
     }
     received.payload->back() ^= std::byte{1};
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, receiver_aad)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, receiver_aad)) {
         return 3;
     }
 

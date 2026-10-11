@@ -10,8 +10,8 @@
 
 namespace cbor::tags::cwt {
 
-struct openssl_es256_backend {
-    static constexpr algorithm algorithm_id = algorithm::es256;
+struct openssl_esp256_backend {
+    static constexpr algorithm algorithm_id = algorithm::esp256;
 
     template <detail::SignatureParts Parts>
     [[nodiscard]] static expected<std::vector<std::byte>, status_code> sign(EVP_PKEY *key, Parts &&parts) {
@@ -27,6 +27,16 @@ struct openssl_es256_backend {
     [[nodiscard]] static expected<std::size_t, status_code> sign(EVP_PKEY *key, Parts &&parts, std::span<std::byte> output) {
         return detail::openssl_compat_es256_sign(key, std::forward<Parts>(parts), output);
     }
+
+    template <detail::SignatureParts Parts>
+    [[nodiscard]] static expected<void, status_code> verify(EVP_PKEY *key, Parts &&parts, std::span<const std::byte> signature) {
+        return detail::openssl_compat_es256_verify(key, std::forward<Parts>(parts), signature);
+    }
+};
+
+// Explicit compatibility verification; new tokens use ESP256.
+struct openssl_es256_verifier {
+    static constexpr algorithm algorithm_id = algorithm::es256;
 
     template <detail::SignatureParts Parts>
     [[nodiscard]] static expected<void, status_code> verify(EVP_PKEY *key, Parts &&parts, std::span<const std::byte> signature) {

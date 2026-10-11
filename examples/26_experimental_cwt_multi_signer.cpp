@@ -50,9 +50,9 @@ bool verify_both_signers(const cwt::cose_sign &message, EVP_PKEY *first_key, EVP
     }
 
     // Verify each signature with its own key over the shared payload and AAD.
-    return cwt::verify_sign<cwt::openssl_es256_backend>(first_key, message, std::size_t{0},
+    return cwt::verify_sign<cwt::openssl_esp256_backend>(first_key, message, std::size_t{0},
                external_aad) &&
-           cwt::verify_sign<cwt::openssl_es256_backend>(second_key, message, std::size_t{1},
+           cwt::verify_sign<cwt::openssl_esp256_backend>(second_key, message, std::size_t{1},
                external_aad);
 }
 
@@ -64,7 +64,7 @@ token = #6.61(#6.98([
     signatures: [signature, signature]
 ]))
 signature = [protected: bstr .cbor signer-header, unprotected: {}, signature: bstr .size 64]
-signer-header = { 1 => -7, 4 => bstr }
+signer-header = { 1 => -9, 4 => bstr }
 claims = { 2 => tstr }
 */
 int main() {
@@ -98,12 +98,12 @@ int main() {
 
     // Set the first signer's algorithm and key ID in headers authenticated by its signature.
     cwt::header_map first_header{
-        .alg = cwt::algorithm::es256,
+        .alg = cwt::algorithm::esp256,
         .kid = std::vector<std::byte>{std::byte{1}},
     };
 
     // Copy the claims into a COSE_Sign message that owns its payload, headers and signatures.
-    auto message = cwt::sign<cwt::openssl_es256_backend>(first_key.get(), {}, {}, claims_buffer,
+    auto message = cwt::sign<cwt::openssl_esp256_backend>(first_key.get(), {}, {}, claims_buffer,
         first_header, {}, external_aad);
     if (!message) {
         return 1;
@@ -111,12 +111,12 @@ int main() {
 
     // Set the second signer's authenticated headers with a distinct key ID.
     cwt::header_map second_header{
-        .alg = cwt::algorithm::es256,
+        .alg = cwt::algorithm::esp256,
         .kid = std::vector<std::byte>{std::byte{2}},
     };
 
     // Append a signature; the message owns it and retains its existing payload and headers.
-    if (!cwt::add_signature<cwt::openssl_es256_backend>(second_key.get(), *message, second_header,
+    if (!cwt::add_signature<cwt::openssl_esp256_backend>(second_key.get(), *message, second_header,
             {}, external_aad)) {
         return 1;
     }
@@ -155,7 +155,7 @@ int main() {
     }
 
     // Confirm that the first key cannot verify the second signer's signature.
-    if (cwt::verify_sign<cwt::openssl_es256_backend>(first_key.get(), received, std::size_t{1},
+    if (cwt::verify_sign<cwt::openssl_esp256_backend>(first_key.get(), received, std::size_t{1},
             external_aad)) {
         return 3;
     }

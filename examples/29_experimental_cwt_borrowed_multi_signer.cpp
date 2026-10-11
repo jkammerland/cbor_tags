@@ -46,9 +46,9 @@ bool verify_both_signers(const cwt::cose_sign_view &message, EVP_PKEY *first_key
     }
 
     // Authenticate each signature before accepting its protected key identifier.
-    if (!cwt::verify_sign<cwt::openssl_es256_backend>(first_key, message, std::size_t{0},
+    if (!cwt::verify_sign<cwt::openssl_esp256_backend>(first_key, message, std::size_t{0},
             external_aad) ||
-        !cwt::verify_sign<cwt::openssl_es256_backend>(second_key, message, std::size_t{1},
+        !cwt::verify_sign<cwt::openssl_esp256_backend>(second_key, message, std::size_t{1},
             external_aad)) {
         return false;
     }
@@ -75,7 +75,7 @@ token = #6.61(#6.98([
     signatures: [signature, signature]
 ]))
 signature = [protected: bstr .cbor header, unprotected: {}, signature: bstr .size 64]
-header = { 1 => -7, 4 => bstr }
+header = { 1 => -9, 4 => bstr }
 claims = { 2 => tstr }
 */
 int main() {
@@ -106,11 +106,11 @@ int main() {
 
     // Protect each signer's algorithm and its configured key identifier.
     cwt::header_map first_header{
-        .alg = cwt::algorithm::es256,
+        .alg = cwt::algorithm::esp256,
         .kid = std::vector<std::byte>{std::byte{1}},
     };
     cwt::header_map second_header{
-        .alg = cwt::algorithm::es256,
+        .alg = cwt::algorithm::esp256,
         .kid = std::vector<std::byte>{std::byte{2}},
     };
 
@@ -152,15 +152,15 @@ int main() {
     };
 
     // Write the first signature without copying the shared payload.
-    auto first_written = cwt::sign_signature<cwt::openssl_es256_backend>(first_key.get(), message,
+    auto first_written = cwt::sign_signature<cwt::openssl_esp256_backend>(first_key.get(), message,
         first_signer, first_signature, external_aad);
     if (!first_written) {
         return 1;
     }
 
     // Write the second signature over the same payload and AAD.
-    auto second_written = cwt::sign_signature<cwt::openssl_es256_backend>(second_key.get(), message,
-        second_signer, second_signature, external_aad);
+    auto second_written = cwt::sign_signature<cwt::openssl_esp256_backend>(second_key.get(),
+        message, second_signer, second_signature, external_aad);
     if (!second_written) {
         return 1;
     }

@@ -45,7 +45,7 @@ token = #6.61(#6.18([
     payload: bstr .cbor claims,
     signature: bstr .size 64
 ]))
-header = { 1 => -7, 4 => bstr }
+header = { 1 => -9, 4 => bstr }
 claims = { 1 => tstr, 2 => tstr, 3 => tstr, 4 => int }
 */
 int main() {
@@ -79,7 +79,7 @@ int main() {
     // Protect the algorithm and the application's expected key identifier.
     const std::vector<std::byte> key_id{std::byte{1}};
     cwt::header_map header{
-        .alg = cwt::algorithm::es256,
+        .alg = cwt::algorithm::esp256,
         .kid = key_id,
     };
 
@@ -108,7 +108,7 @@ int main() {
 
     // Write the signature directly into the application's buffer.
     auto written =
-        cwt::sign1<cwt::openssl_es256_backend>(key.get(), message, signature, external_aad);
+        cwt::sign1<cwt::openssl_esp256_backend>(key.get(), message, signature, external_aad);
     if (!written) {
         return 1;
     }
@@ -142,7 +142,7 @@ int main() {
         std::as_bytes(std::span{receiver_context.data(), receiver_context.size()});
 
     // Verify the borrowed bytes before interpreting the claims.
-    if (!cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received, receiver_aad)) {
+    if (!cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received, receiver_aad)) {
         return 2;
     }
 
@@ -184,7 +184,7 @@ int main() {
     }
 
     // Confirm that omitting the receiver's required AAD rejects the token.
-    if (cwt::verify_sign1<cwt::openssl_es256_backend>(key.get(), received)) {
+    if (cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), received)) {
         return 3;
     }
     return 0;

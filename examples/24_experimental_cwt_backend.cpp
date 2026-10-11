@@ -21,20 +21,20 @@ struct application_key {
 };
 
 struct application_backend {
-    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::es256;
+    static constexpr cwt::algorithm algorithm_id = cwt::algorithm::esp256;
 
-    // Replace this provider call with your library's ES256 signing operation.
+    // Replace this provider call with your library's ESP256 signing operation.
     template <std::ranges::input_range Parts>
     static expected<std::vector<std::byte>, status_code> sign(const application_key &key,
         Parts &&parts) {
-        return cwt::openssl_es256_backend::sign(key.handle.get(), std::forward<Parts>(parts));
+        return cwt::openssl_esp256_backend::sign(key.handle.get(), std::forward<Parts>(parts));
     }
 
-    // Replace this provider call with your library's ES256 verification operation.
+    // Replace this provider call with your library's ESP256 verification operation.
     template <std::ranges::input_range Parts>
     static expected<void, status_code> verify(const application_key &key, Parts &&parts,
         std::span<const std::byte> signature) {
-        return cwt::openssl_es256_backend::verify(key.handle.get(), std::forward<Parts>(parts),
+        return cwt::openssl_esp256_backend::verify(key.handle.get(), std::forward<Parts>(parts),
             signature);
     }
 };
