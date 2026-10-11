@@ -1,6 +1,5 @@
 # CWT and COSE standards coverage
 
-The CWT APIs are experimental. This inventory was reviewed on 2026-10-11.
 A wire model, a cryptographic provider, and an application protocol are separate
 capabilities. Recognizing an identifier does not implement its algorithm.
 
@@ -68,7 +67,7 @@ Application branches are inventoried separately from core CWT support:
 These protocols are not implicitly implemented by accepting their CBOR labels.
 For registered claims, consult the [CWT registry](https://www.iana.org/assignments/cwt/).
 
-As of the review date, SD-CWT, OAuth status lists, CBOR-encoded certificates,
+SD-CWT, OAuth status lists, CBOR-encoded certificates,
 and COSE HPKE are Internet-Drafts, not published RFC capabilities of this library.
 Recheck their publication status before beginning a provider or profile implementation.
 Reported errata are not treated as adopted normative changes.
