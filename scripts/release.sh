@@ -197,6 +197,9 @@ verify_tag() {
     local cmake_version=""
     local vcpkg_version=""
     local conan_version=""
+    local metadata_output
+    metadata_output="$(read_metadata_versions "${metadata_dir}")" || die "could not read project versions"
+
     local key value
     while IFS='=' read -r key value; do
         case "${key}" in
@@ -205,7 +208,8 @@ verify_tag() {
             conan_version) conan_version="${value}" ;;
             *) die "unexpected metadata key: ${key}" ;;
         esac
-    done < <(read_metadata_versions "${metadata_dir}")
+    done <<<"${metadata_output}"
+    [[ -n "${cmake_version}" && -n "${vcpkg_version}" && -n "${conan_version}" ]] || die "missing project version"
 
     local tag_version="${tag#v}"
     [[ "${cmake_version}" == "${tag_version}" ]] || die "release tag ${tag} does not match CMake project version ${cmake_version:-missing}"
@@ -399,6 +403,11 @@ metadata_version() {
     local cmake_version=""
     local vcpkg_version=""
     local conan_version=""
+    # Capture the parser status before comparing versions; process substitution
+    # would hide failure and allow three empty values to compare equal.
+    local metadata_output
+    metadata_output="$(read_metadata_versions "${repo_root}")" || die "could not read project versions"
+
     local key value
     while IFS='=' read -r key value; do
         case "${key}" in
@@ -407,7 +416,8 @@ metadata_version() {
             conan_version) conan_version="${value}" ;;
             *) die "unexpected metadata key: ${key}" ;;
         esac
-    done < <(read_metadata_versions "${repo_root}")
+    done <<<"${metadata_output}"
+    [[ -n "${cmake_version}" && -n "${vcpkg_version}" && -n "${conan_version}" ]] || die "missing project version"
     [[ "${cmake_version}" == "${vcpkg_version}" && "${cmake_version}" == "${conan_version}" ]] ||
         die "project versions disagree: CMake=${cmake_version}, vcpkg=${vcpkg_version}, Conan=${conan_version}"
     printf '%s\n' "${cmake_version}"
@@ -465,7 +475,10 @@ require_exact_assets() {
         signed) expected_assets="$(expected_signed_assets "${version}" | sort)" ;;
         *) die "unknown asset set: ${asset_kind}" ;;
     esac
-    actual_assets="$(find "${package_dir}" -maxdepth 1 -type f -printf '%f\n' | sort)"
+    [[ -d "${package_dir}" && ! -L "${package_dir}" ]] || die "release asset directory must be a non-symlink directory"
+    [[ -z "$(find "${package_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+        die "release assets must be regular non-symlink files"
+    actual_assets="$(find "${package_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
     if [[ "${expected_assets}" != "${actual_assets}" ]]; then
         diff -u <(printf '%s\n' "${expected_assets}") <(printf '%s\n' "${actual_assets}") || true
         die "${package_dir} does not contain the exact ${asset_kind} release asset set"
@@ -489,12 +502,21 @@ verify_checksums() {
     local package_dir payload_name
     package_dir="$(dirname -- "${payload}")"
     payload_name="$(basename -- "${payload}")"
-    [[ -f "${payload}.sha256" ]] || die "missing SHA-256 checksum for ${payload_name}"
-    [[ -f "${payload}.sha512" ]] || die "missing SHA-512 checksum for ${payload_name}"
+    local asset
+    for asset in "${payload}" "${payload}.sha256" "${payload}.sha512"; do
+        [[ -f "${asset}" && ! -L "${asset}" ]] || die "checksum assets must be regular non-symlink files: ${asset}"
+    done
+
+    # Only hash the expected payload. A downloaded sidecar cannot select files
+    # outside the release directory or add extra checksum records.
     (
         cd -- "${package_dir}"
-        sha256sum -c "${payload_name}.sha256"
-        sha512sum -c "${payload_name}.sha512"
+        local algorithm digest
+        for algorithm in sha256 sha512; do
+            digest="$("${algorithm}sum" -- "${payload_name}")" || die "failed to hash ${payload_name}"
+            printf '%s\n' "${digest}" | cmp -s - "${payload_name}.${algorithm}" ||
+                die "noncanonical or incorrect ${algorithm} checksum for ${payload_name}"
+        done
     )
 }
 

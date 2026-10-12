@@ -88,6 +88,30 @@ expect_drift_rejected "vcpkg.json out of step"
 write_metadata 0.24.0 0.24.0 0.25.0
 expect_drift_rejected "conanfile.py out of step"
 
+expect_parser_failure() {
+    local description="$1"
+    if output="$(bash "${fixture}/scripts/release.sh" check-versions 2>&1)"; then
+        echo "FAIL: ${description} unexpectedly succeeded" >&2
+        exit 1
+    fi
+    if grep -qF 'Project versions agree' <<<"${output}"; then
+        echo "FAIL: ${description} reported agreement after parser failure" >&2
+        exit 1
+    fi
+    grep -qF 'could not read project versions' <<<"${output}"
+    echo "OK: ${description}"
+}
+
+for metadata_file in CMakeLists.txt vcpkg.json conanfile.py; do
+    write_metadata 0.24.0 0.24.0 0.24.0
+    rm -- "${fixture}/${metadata_file}"
+    expect_parser_failure "missing ${metadata_file}"
+
+    write_metadata 0.24.0 0.24.0 0.24.0
+    printf 'invalid metadata !\n' >"${fixture}/${metadata_file}"
+    expect_parser_failure "malformed ${metadata_file}"
+done
+
 # The real repository must agree as-is; this is the check CI relies on.
 if ! output="$(bash "${repo_root}/scripts/release.sh" check-versions 2>&1)"; then
     echo "FAIL: the checked-in project metadata disagrees:" >&2
