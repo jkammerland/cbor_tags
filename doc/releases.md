@@ -32,6 +32,12 @@ to keep the CMake package metadata covered without publishing that install tree.
 The release driver normalizes ZIP metadata to UTC so the unsigned packages are
 byte-reproducible regardless of the operator's local timezone.
 
+Checksum sidecars contain exactly one newline-terminated record, with the
+lowercase digest, two spaces, and the expected asset basename. Verification
+hashes the explicitly selected asset and compares this complete record; it does
+not let downloaded checksum files select filenames. Release assets and their
+sidecars must be regular files, with no symlinks or extra directory entries.
+
 The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
 driver checks its document name, CC0-1.0 data license, MIT project license,
 root package, direct dependency packages, dependency versions, and `dependsOn`
@@ -145,7 +151,7 @@ gh secret list --repo jkammerland/cbor_tags --env release
      --repo jkammerland/cbor_tags \
      --name signed-release-tag-vX.Y.Z \
      --dir build/release-tag
-   (cd build/release-tag && sha256sum -c vX.Y.Z.bundle.sha256)
+   (cd build/release-tag && sha256sum -- vX.Y.Z.bundle | cmp - vX.Y.Z.bundle.sha256)
 
    git fetch build/release-tag/vX.Y.Z.bundle \
      refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
