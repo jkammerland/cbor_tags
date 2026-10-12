@@ -368,6 +368,7 @@ if(CBOR_TAGS_BUILD_TESTS)
         NAME release_commit_checks
         COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_commit_checks_test.sh)
       if(CBOR_TAGS_GPG_EXECUTABLE)
+        add_test(NAME release_trust_anchor COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_trust_anchor_test.sh)
         add_test(NAME release_verifier_integration COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_verifier_integration_test.sh)
         add_test(
           NAME release_asset_verifier_integration

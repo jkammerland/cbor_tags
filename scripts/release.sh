@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "${repo_root}/scripts/release-verification.sh"
 readonly release_signing_fingerprint="7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D"
 readonly release_cmake_series="4.4"
 readonly sbom_experimental_value="2d856d6d-53e8-488b-a17f-d486d2cac317"
@@ -162,23 +163,21 @@ verify_tag() {
     chmod 700 "${gnupg_home}"
     trap 'rm -rf -- "${gnupg_home}"' RETURN
 
-    GNUPGHOME="${gnupg_home}" gpg --batch --quiet --no-autostart --import "${public_key}"
+    authenticate_release_key "${gnupg_home}" "${public_key}" "${expected_fingerprint}"
 
-    local imported_fingerprint
-    imported_fingerprint="$(GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --with-colons --fingerprint | awk -F: '/^fpr:/ { print toupper($10); exit }')"
-    [[ "${imported_fingerprint}" == "${expected_fingerprint}" ]] ||
-        die "release public key fingerprint is ${imported_fingerprint:-missing}, expected ${expected_fingerprint}"
+    # Git invokes this wrapper so tag verification has the same isolated GPG
+    # options as detached asset verification, regardless of Git user config.
+    printf '%s\n' '#!/usr/bin/env bash' \
+        'exec gpg --no-options --batch --no-autostart --no-auto-key-retrieve --auto-key-locate clear "$@"' >"${gnupg_home}/verify-gpg"
+    chmod 700 "${gnupg_home}/verify-gpg"
 
     local verification_output
-    if ! verification_output="$(GNUPGHOME="${gnupg_home}" git verify-tag --raw "${tag_ref}" 2>&1)"; then
+    if ! verification_output="$(GNUPGHOME="${gnupg_home}" git -c "gpg.program=${gnupg_home}/verify-gpg" verify-tag --raw "${tag_ref}" 2>&1)"; then
         printf '%s\n' "${verification_output}" >&2
         die "release tag ${tag} does not have a valid signature"
     fi
 
-    local tag_fingerprint
-    tag_fingerprint="$(awk '/^\[GNUPG:\] VALIDSIG / { print toupper($3); exit }' <<<"${verification_output}")"
-    [[ "${tag_fingerprint}" == "${expected_fingerprint}" ]] ||
-        die "release tag ${tag} was signed by ${tag_fingerprint:-unknown}, expected ${expected_fingerprint}"
+    authenticate_release_signature "${verification_output}" "${expected_fingerprint}" "release tag ${tag}"
 
     local tag_commit
     tag_commit="$(git rev-list -n 1 "${tag_ref}")"
@@ -546,39 +545,20 @@ verify_signed_assets() {
             cmp "${canonical_public_key}" "${package_dir}/cbor_tags-release-public-key.asc" ||
                 die "release asset public key differs from the canonical committed key"
         fi
-        GNUPGHOME="${gnupg_home}" gpg --batch --quiet --no-autostart --import "${package_dir}/cbor_tags-release-public-key.asc"
-
-        local imported_fingerprints=()
-        mapfile -t imported_fingerprints < <(
-            GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --with-colons --fingerprint |
-                awk -F: '
-                    /^pub:/ { want_fingerprint = 1; next }
-                    want_fingerprint && /^fpr:/ { print toupper($10); want_fingerprint = 0 }
-                '
-        )
-        [[ ${#imported_fingerprints[@]} -eq 1 ]] ||
-            die "release asset public key must contain exactly one primary key, found ${#imported_fingerprints[@]}"
-        [[ "${imported_fingerprints[0]}" == "${expected_fingerprint}" ]] ||
-            die "release asset public key fingerprint is ${imported_fingerprints[0]:-missing}, expected ${expected_fingerprint}"
+        authenticate_release_key "${gnupg_home}" "${package_dir}/cbor_tags-release-public-key.asc" "${expected_fingerprint}"
 
         local stem="cbor_tags-${version}"
-        local payload verification_output signature_fingerprints
+        local payload verification_output
         for payload in "${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json"; do
             verify_checksums "${package_dir}/${payload}"
             if ! verification_output="$(
-                GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --status-fd 1 --verify \
+                release_gpg "${gnupg_home}" --status-fd 1 --verify \
                     "${package_dir}/${payload}.sig" "${package_dir}/${payload}" 2>&1
             )"; then
                 printf '%s\n' "${verification_output}" >&2
                 die "release asset ${payload} does not have a valid signature"
             fi
-            mapfile -t signature_fingerprints < <(
-                awk '/^\[GNUPG:\] VALIDSIG / { print toupper($3) }' <<<"${verification_output}"
-            )
-            [[ ${#signature_fingerprints[@]} -eq 1 ]] ||
-                die "release asset ${payload} must have exactly one valid signature, found ${#signature_fingerprints[@]}"
-            [[ "${signature_fingerprints[0]}" == "${expected_fingerprint}" ]] ||
-                die "release asset ${payload} was signed by ${signature_fingerprints[0]:-unknown}, expected ${expected_fingerprint}"
+            authenticate_release_signature "${verification_output}" "${expected_fingerprint}" "release asset ${payload}"
         done
     )
 }

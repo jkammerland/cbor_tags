@@ -33,6 +33,10 @@ lightweight tags and GitHub source archives; install-package assets through
 - Publication requires immutable releases to be enabled and verifies the
   published assets and GitHub release attestation.
 
+To verify a download, run the release notes' verification commands with Bash in
+the directory containing all release assets. They require the fingerprint above;
+the downloaded public key is not itself a source of trust.
+
 ## One-Time Repository Setup
 
 Before publishing:
