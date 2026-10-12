@@ -1,8 +1,8 @@
 #pragma once
 
-#include "cbor_tags/cbor_concepts.h"
+#include "cbor_tags/cbor.h"
 #include "cbor_tags/cbor_reflection.h"
-#include "cbor_tags/codec.h"
+#include "cbor_tags/detail/cbor_codec_fwd.h"
 #include "cbor_tags/detail/cbor_payload_overload.h"
 #include "cbor_tags/detail/cbor_variant_traits.h"
 
@@ -131,6 +131,8 @@ consteval bool codec_payload_encodes_one_item(payload_context<Context>, std::boo
     using type                       = std::remove_cvref_t<T>;
     constexpr auto effective_context = payload_is_decoder<Self> ? Context : payload_decode_context::direct;
     using visit                      = payload_visit<type, effective_context, CoreOnly>;
+    // Distinct type categories intentionally share the same complete-item verdict.
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if constexpr ((std::is_same_v<visit, Parents> || ...)) {
         // Only a revisit through the same dispatch route is already checked.
         // Runtime recursion and resource policy remain caller-owned.

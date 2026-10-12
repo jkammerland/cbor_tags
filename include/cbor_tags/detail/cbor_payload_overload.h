@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cbor_tags/codec.h"
+#include "cbor_tags/cbor.h"
 
 namespace cbor::tags::detail {
 

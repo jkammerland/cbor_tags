@@ -9,6 +9,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_item_shape.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -283,11 +284,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsArray T, std::size_t Min, std::size_t Max>
     constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsArrayHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, bounded_size<T, Min, Max>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         return decode_bounded_array(value.value(), major, additionalInfo, Min, Max);
     }
 
     template <IsMap T, std::size_t Min, std::size_t Max>
     constexpr status_code decode(bounded_size<T, Min, Max> &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsMapHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, bounded_size<T, Min, Max>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         return decode_bounded_map(value.value(), major, additionalInfo, Min, Max);
     }
 
@@ -300,10 +311,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsArray T> constexpr status_code decode(dynamic_bounded_size<T> &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsArrayHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, dynamic_bounded_size<T>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         return decode_bounded_array(value.value(), major, additionalInfo, value.min_size(), value.max_size());
     }
 
     template <IsMap T> constexpr status_code decode(dynamic_bounded_size<T> &value, major_type major, byte additionalInfo) {
+        if constexpr (!IsMapHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, dynamic_bounded_size<T>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         return decode_bounded_map(value.value(), major, additionalInfo, value.min_size(), value.max_size());
     }
 
@@ -491,6 +512,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsRangeOfCborValues T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+        // Dynamic ranges accept both definite and indefinite child dispatch routes.
+        static_assert(detail::codec_payload_encodes_one_item<self_t, T>({}, std::true_type{}),
+                      "CBOR container children must encode exactly one CBOR item");
+
         if constexpr (IsMap<T>) {
             if (major != major_type::Map) {
                 return status_code::no_match_for_map_on_buffer;
@@ -2165,11 +2190,17 @@ template <typename T> struct cbor_indefinite_decoder {
                 return dec.decode_indef_tstr(value.value_);
             }
         } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            static_assert(detail::codec_payload_encodes_one_item<T, as_indefinite<U>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+
             if (major != major_type::Map || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_map_on_buffer;
             }
             return dec.decode_indef_map(value.value_);
         } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            static_assert(detail::codec_payload_encodes_one_item<T, as_indefinite<U>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+
             if (major != major_type::Array || additionalInfo != static_cast<byte>(31)) {
                 return status_code::no_match_for_array_on_buffer;
             }

@@ -9,6 +9,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_argument.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
+#include "cbor_tags/detail/cbor_item_shape.h"
 
 #include <algorithm>
 #include <bit>
@@ -98,10 +99,20 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <IsArray T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        if constexpr (!IsArrayHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, bounded_size<T, Min, Max>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         encode_bounded_size(value);
     }
 
     template <IsMap T, std::size_t Min, std::size_t Max> constexpr void encode(const bounded_size<T, Min, Max> &value) {
+        if constexpr (!IsMapHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, bounded_size<T, Min, Max>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         encode_bounded_size(value);
     }
 
@@ -110,10 +121,20 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <IsArray T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        if constexpr (!IsArrayHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, dynamic_bounded_size<T>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         encode_bounded_size(value.value(), value.min_size(), value.max_size());
     }
 
     template <IsMap T> constexpr void encode(const dynamic_bounded_size<T> &value) {
+        if constexpr (!IsMapHeader<T>) {
+            static_assert(detail::codec_payload_encodes_one_item<self_t, dynamic_bounded_size<T>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+        }
+
         encode_bounded_size(value.value(), value.min_size(), value.max_size());
     }
 
@@ -130,6 +151,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <IsArray T> constexpr void encode(const T &value) {
+        // Validate the selected core route; child item codecs remain application-owned.
+        static_assert(detail::codec_payload_encodes_one_item<self_t, T>({}, std::true_type{}),
+                      "CBOR container children must encode exactly one CBOR item");
+
         encode_major_and_size(value.size(), static_cast<byte_type>(0x80));
         if constexpr (detail::is_owning_float_array<T>::value &&
                       std::same_as<self_t, encoder<OutputBuffer, Options, cbor_header_encoder, cbor_indefinite_encoder,
@@ -144,6 +169,9 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <IsMap T> constexpr void encode(const T &value) {
+        static_assert(detail::codec_payload_encodes_one_item<self_t, T>({}, std::true_type{}),
+                      "CBOR container children must encode exactly one CBOR item");
+
         encode_major_and_size(value.size(), static_cast<byte_type>(0xA0));
         for (const auto &[key, mapped_value] : value) {
             encode(key);
@@ -326,7 +354,29 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <std::size_t Min, std::size_t Max, typename T> constexpr void encode_bounded_size(const bounded_size<T, Min, Max> &value) {
-        encode_bounded_size(value.value(), Min, Max);
+        if constexpr (Max == 0U && (IsArray<T> || IsMap<T>) && !IsAnyHeader<T> &&
+                      !detail::codec_payload_has_customization<self_t, T, detail::payload_decode_context::direct>()) {
+            // A static zero bound proves there are no children. Do not instantiate
+            // the ordinary range overload, which validates potentially nonempty schemas.
+            const auto &range = [&]() -> decltype(auto) {
+                if constexpr (IsIndefiniteWrapper<T>) {
+                    return (value.value().value_);
+                } else {
+                    return (value.value());
+                }
+            }();
+            if (std::ranges::size(range) != 0U) {
+                throw detail::encode_status_exception{status_code::size_limit_exceeded};
+            }
+
+            if constexpr (IsIndefiniteWrapper<T>) {
+                appender_.multi_append(data_, static_cast<byte_type>(IsMap<T> ? 0xBF : 0x9F), static_cast<byte_type>(0xFF));
+            } else {
+                encode_major_and_size(0U, static_cast<byte_type>(IsMap<T> ? 0xA0 : 0x80));
+            }
+        } else {
+            encode_bounded_size(value.value(), Min, Max);
+        }
     }
 
     template <typename T> constexpr void encode_bounded_size(const T &wrapped, std::size_t min, std::size_t max) {
@@ -376,6 +426,9 @@ template <typename T> struct cbor_indefinite_encoder {
             enc.encode(value.value_);
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
         } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
+            static_assert(detail::codec_payload_encodes_one_item<T, as_indefinite<U>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_map>()));
             for (const auto &[key, mapped_value] : value.value_) {
                 enc.encode(key);
@@ -383,6 +436,9 @@ template <typename T> struct cbor_indefinite_encoder {
             }
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
         } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
+            static_assert(detail::codec_payload_encodes_one_item<T, as_indefinite<U>>({}, std::true_type{}),
+                          "CBOR container children must encode exactly one CBOR item");
+
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_array>()));
             for (const auto &item : value.value_) {
                 enc.encode(item);
