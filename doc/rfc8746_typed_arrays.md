@@ -172,6 +172,8 @@ Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
 
 ## CDDL Rendering
 
+Concise Data Definition Language (CDDL) describes the encoded data structure.
+
 `cddl::schema_to<T>` renders the RFC 8746 wrappers as semantic tags around their
 wire payload shape:
 

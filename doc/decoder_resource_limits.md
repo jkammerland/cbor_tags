@@ -108,7 +108,7 @@ justifies `reserve`.
 This section describes ordinary core typed decoding. An extension may define
 its own documented terminal availability/status boundary, but that does not
 authorize a prewalk for recovery, ordinary decode validation, or rollback. A
-scanner is a separately designed semantic feature (for example, CDDL or
+scanner is a separately designed semantic feature (for example, Concise Data Definition Language (CDDL) or
 lazy-tag discovery), not a generic extension escape hatch. Such a feature
 needs its own documentation and tests, returns an explicit terminal status,
 and does not make prewalking or rollback valid in the core decoder.

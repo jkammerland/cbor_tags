@@ -1,4 +1,4 @@
-# CDDL Standard Coverage
+# Concise Data Definition Language (CDDL) Standard Coverage
 
 This document tracks how `cddl::schema_to` maps C++ types to CDDL grammar from
 RFC 8610 and the RFC 9682 updated ABNF.
