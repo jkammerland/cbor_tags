@@ -138,6 +138,13 @@ int main() {
 
 ## Verification rules
 
+The protected algorithm must match the backend. A profile that authenticates its
+algorithm outside the message can pass `implicit_algorithm_profile` immediately
+after the message (or after the signature/index for COSE_Sign), before the parsed
+destinations. This requires the protected algorithm to be absent. Algorithm
+admission happens before cryptographic verification, critical processing, and
+publication of parsed headers.
+
 | Step | Contract |
 |---|---|
 | Parse | Use original protected bytes and the selected codecs; reject misplaced or duplicate labels. |

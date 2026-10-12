@@ -8,6 +8,31 @@ using namespace cwt_test;
 TEST_SUITE("roundtrip/cwt") {
 
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
+    TEST_CASE("cryptographically valid algless Sign1 requires an explicit implicit profile") {
+        auto       key = make_p256_key();
+        cose_sign1 message{.payload = std::vector<std::byte>{std::byte{1}, std::byte{2}}};
+
+        // Profiles that omit alg issue signatures through the low-level input/backend API.
+        auto input = make_sign1_tbs(message);
+        REQUIRE(input);
+        auto signature = crypto_esp256_backend::sign(key.get(), cbor::tags::cwt::detail::signature_parts(*input));
+        REQUIRE(signature);
+        message.signature = std::move(*signature);
+        REQUIRE(crypto_esp256_backend::verify(key.get(), cbor::tags::cwt::detail::signature_parts(*input), message.signature));
+        CHECK_FALSE(verify_sign1<crypto_esp256_backend>(key.get(), message));
+        REQUIRE(verify_sign1<crypto_esp256_backend>(key.get(), message, implicit_algorithm_profile));
+
+        auto encoded = encode_to_bytes(message);
+        REQUIRE(encoded);
+        cose_sign1_view view;
+        REQUIRE(make_decoder<codec::cwt>(*encoded)(view));
+        CHECK_FALSE(verify_sign1<crypto_esp256_backend>(key.get(), view));
+        REQUIRE(verify_sign1<crypto_esp256_backend>(key.get(), view, implicit_algorithm_profile));
+
+        message.payload->front() ^= std::byte{1};
+        CHECK_FALSE(verify_sign1<crypto_esp256_backend>(key.get(), message, implicit_algorithm_profile));
+    }
+
     TEST_CASE("CWT crypto backend signs and verifies COSE Sign1 ESP256") {
         auto key = make_p256_key();
 

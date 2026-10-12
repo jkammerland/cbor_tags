@@ -67,6 +67,13 @@ int main() {
 
 ## Targets and storage
 
+Full and legacy full verification require a protected algorithm matching the
+backend. An application profile that independently authenticates the algorithm
+can pass `implicit_algorithm_profile` after the countersignature, before any
+parsed-header destination; this requires the algorithm to be absent. The
+output-span full signing overload always requires an explicit algorithm.
+Abbreviated CounterSignature0 behavior is unchanged.
+
 | Choice | Contract |
 |---|---|
 | Sign1 target | Binds original protected bytes, payload, and original signature. |
@@ -85,4 +92,4 @@ int main() {
 
 Chains explicitly select recursive headers; singleton/list inputs normalize to a nonempty collection. Application extra fields must not recursively contain the same header model.
 
-Legacy full verification requires `verify_legacy_countersignature`: on Sign1 it does not bind the original signature. Legacy generation, abbreviated legacy operations, and implicit fallback are unsupported; see [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html).
+Legacy full verification requires `verify_legacy_countersignature`: on Sign1 it does not bind the original signature. Legacy generation, abbreviated legacy operations, and automatic fallback to legacy verification are unsupported; see [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html).
