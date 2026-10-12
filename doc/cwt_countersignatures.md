@@ -1,17 +1,88 @@
 # Experimental countersignatures
 
-Include `cbor_tags/cwt/countersignatures.h` for [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html) full and abbreviated countersignatures. The API is experimental; OpenSSL remains optional, and custom providers use the existing segmented signing contract.
+An issuer signs a message; a notary countersigns it with separate external context ([example 33](../examples/33_experimental_cwt_countersignature.cpp)); build with `CBOR_TAGS_ENABLE_CWT_OPENSSL=ON`.
 
-`countersign<Backend>(key, target, countersignature, aad)` returns an owning full countersignature. The output-span overload returns bytes written without attaching them. `countersign0` produces an abbreviated signature; its algorithm and key come from the application. Full countersignatures use their own protected algorithm, independently of the original signer's algorithm. `verify_countersignature` and `verify_countersignature0` verify only the selected countersignature. Always verify the original signature and every additional layer required by the application.
+```cpp
+// Experimental: countersignature APIs may change.
+#include <array>
+#include <cbor_tags/cwt/countersignatures.h>
+#include <cbor_tags/cwt/openssl_crypto.h>
+#include <memory>
 
-A Sign1 target binds its original protected bytes, embedded or explicitly supplied detached payload, and original signature. An individual COSE_Sign signer or full countersignature binds its own protected bytes and signature. Its countersignature does not directly bind the parent message's payload; the parent's signature must also be verified. Whole COSE_Sign targets are deliberately unsupported.
+using namespace cbor::tags;
 
-`make_countersign_tbs` and `make_countersign0_tbs` return segments containing CBOR headers interleaved with views into the original data, in encoding order. The views refer to protected headers, AAD, payload, and signature bytes. Keep these named models and buffers alive and unchanged until the provider finishes. The provider consumes the segments once. Countersignature AAD is independent of the original signer's AAD and is not stored in the message.
+// Each signer owns an independent P-256 key.
+auto make_key() {
+    return std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>{
+        EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "prime256v1"), EVP_PKEY_free};
+}
 
-Select `countersignature_headers<>` as a header model's `Extra` to carry full countersignatures under label 11, abbreviated bytes under label 12, and received legacy full countersignatures under label 7. `countersignature_headers_view` borrows string bytes while owning collection descriptors. Full singleton/list encodings normalize into `countersignature_collection::signatures`; empty collections are rejected. Recursive chains exist only in models that explicitly select these headers. `countersignature_headers<Borrowed, Extra>` adds application fields through `cwt_fields(Extra&)`; `Extra` must not recursively contain the same countersignature headers.
+/**
+token = [bstr, {}, bstr, bstr]
+countersignature = #6.19([bstr, {}, bstr])
+*/
+int main() {
+    auto issuer = make_key();
+    auto notary = make_key();
+    if (!issuer || !notary) {
+        return 1;
+    }
 
-The typed-header overloads accept a parsed-header destination and additional codec template arguments. Verification also accepts a critical-parameter processor and publishes parsed headers only after cryptographic verification and critical processing succeed. These outputs may borrow the countersignature's protected bytes, so pass a named countersignature. Unsupported critical parameters fail closed in the simple overloads.
+    // The notary binds its own external context independently of the issuer.
+    const std::array payload{std::byte{1}};
+    const std::array notary_aad{std::byte{2}};
+    auto token = cwt::sign1<cwt::openssl_esp256_backend>(issuer.get(), {}, {}, payload);
+    if (!token) {
+        return 1;
+    }
 
-Use `as_countersignature` for standalone tag 19. Encoding a legacy full collection fails. `verify_legacy_countersignature` explicitly implements the older input construction: for Sign1 it does not bind the original signature. There is no implicit fallback, legacy generation, or legacy abbreviated operation. Existing wire bytes are never relabeled or reconstructed for verification.
+    auto countersignature = cwt::countersign<cwt::openssl_esp256_backend>(notary.get(), *token,
+        cwt::cose_signature{}, notary_aad);
+    if (!countersignature) {
+        return 1;
+    }
 
-Examples [33](../examples/33_experimental_cwt_countersignature.cpp), [34](../examples/34_experimental_cwt_abbreviated_countersignature.cpp), and [35](../examples/35_experimental_cwt_countersignature_chain.cpp) introduce full countersignatures, caller storage with abbreviated countersignatures, and borrowed countersignature chains respectively.
+    // Keep the standalone countersignature's transport buffer separate from its model.
+    std::vector<std::byte> buffer;
+
+    auto encoder = make_encoder<codec::cwt>(buffer);
+    if (!encoder(cwt::as_countersignature(*countersignature))) {
+        return 1;
+    }
+
+    auto received = cwt::as_countersignature(cwt::cose_signature{});
+    auto decoder = make_decoder<codec::cwt>(buffer);
+    if (!decoder(received)) {
+        return 1;
+    }
+
+    // A countersignature does not replace verification of the original token.
+    if (!cwt::verify_sign1<cwt::openssl_esp256_backend>(issuer.get(), *token) ||
+        !cwt::verify_countersignature<cwt::openssl_esp256_backend>(notary.get(), *token,
+            received.second, notary_aad)) {
+        return 1;
+    }
+}
+```
+
+## Targets and storage
+
+| Choice | Contract |
+|---|---|
+| Sign1 target | Binds original protected bytes, payload, and original signature. |
+| Individual signature or countersignature target | Binds its protected bytes and signature; also verify the parent signature to authenticate its payload. |
+| Whole COSE_Sign target | Unsupported. |
+| Full countersignature | Uses its own protected algorithm. |
+| Abbreviated countersignature | The application supplies its algorithm and key. |
+| External context | Independent of the original signer's AAD and absent from the message. |
+| Segmented signing input | CBOR headers interleaved with views into original data, in encoding order; keep the data stable until the backend finishes. |
+| Parsed header output | Assigned after verification and critical processing; views borrow the countersignature's protected bytes. |
+
+## Next examples
+
+- [Caller storage and abbreviated countersignatures](../examples/34_experimental_cwt_abbreviated_countersignature.cpp).
+- [Borrowed countersignature chains](../examples/35_experimental_cwt_countersignature_chain.cpp).
+
+Chains explicitly select recursive headers; singleton/list inputs normalize to a nonempty collection. Application extra fields must not recursively contain the same header model.
+
+Legacy full verification requires `verify_legacy_countersignature`: on Sign1 it does not bind the original signature. Legacy generation, abbreviated legacy operations, and implicit fallback are unsupported; see [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html).
