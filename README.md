@@ -910,7 +910,18 @@ f5 63 416d74 21 ff'
 
 # Validate text-string UTF-8 in diagnostic output
 cborctl diagnostic --input hex --no-format-by-rows --check-tstr-utf8 62c328
+
+# Bound source text, decoded CBOR, and rendered output independently
+cborctl diagnostic --input hex --max-source-size 4096 --max-input-size 1024 --max-output-size 8192 01
 ```
+
+Both CLI commands accept `--max-source-size`, `--max-input-size`, and
+`--max-output-size` in bytes. Source limits include whitespace, hex comments,
+and spaces inserted between positional arguments. Output limits include the
+final newline; a failed decode or render writes no partial output to stdout.
+These limits apply when specified. Smart annotation retains its 16 MiB decoded
+input and output defaults. Plain annotation and diagnostic notation have no
+default size limits; their existing nesting depth defaults still apply.
 
 ## 🤝 CDDL Schema Generation
 Generate a CDDL schema with `cddl::schema_to<T>`, for example for struct `A`:

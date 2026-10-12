@@ -1,5 +1,6 @@
 #include "cbor_tags/extensions/cbor_visualization.h"
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -36,24 +37,44 @@ struct input_error final : std::runtime_error {
     return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
 
-[[nodiscard]] std::string read_stdin() {
-    std::string input{std::istreambuf_iterator<char>{std::cin}, std::istreambuf_iterator<char>{}};
+void check_size(std::size_t size, std::size_t additional, std::optional<std::size_t> limit, std::string_view kind) {
+    if (limit && (size > *limit || additional > *limit - size)) {
+        throw input_error(text::format("{} size limit exceeded", kind));
+    }
+}
+
+[[nodiscard]] std::string read_stdin(std::optional<std::size_t> limit) {
+    std::string            input;
+    std::array<char, 4096> chunk{};
+    while (std::cin) {
+        // Read at most one byte beyond the remaining allowance to detect overflow.
+        auto count = chunk.size();
+        if (limit && *limit - input.size() < count) {
+            count = *limit - input.size() + 1U;
+        }
+        std::cin.read(chunk.data(), static_cast<std::streamsize>(count));
+        const auto received = static_cast<std::size_t>(std::cin.gcount());
+        check_size(input.size(), received, limit, "source");
+        input.append(chunk.data(), received);
+    }
     if (std::cin.bad()) {
         throw input_error("failed to read stdin");
     }
     return input;
 }
 
-[[nodiscard]] std::string input_text_from_positionals(const std::vector<std::string> &positionals) {
+[[nodiscard]] std::string input_text_from_positionals(const std::vector<std::string_view> &positionals, std::optional<std::size_t> limit) {
     if (positionals.empty() || (positionals.size() == 1U && positionals.front() == "-")) {
-        return read_stdin();
+        return read_stdin(limit);
     }
 
     std::string result;
     for (const auto &part : positionals) {
         if (!result.empty()) {
+            check_size(result.size(), 1U, limit, "source");
             result.push_back(' ');
         }
+        check_size(result.size(), part.size(), limit, "source");
         result.append(part);
     }
     return result;
@@ -72,10 +93,7 @@ struct input_error final : std::runtime_error {
     return -1;
 }
 
-[[nodiscard]] std::string strip_hex_comments_and_ws(std::string_view input) {
-    std::string result;
-    result.reserve(input.size());
-
+template <typename Visitor> void visit_hex_digits(std::string_view input, Visitor visitor) {
     auto in_comment = false;
     for (const auto value : input) {
         if (in_comment) {
@@ -91,39 +109,34 @@ struct input_error final : std::runtime_error {
         if (is_ascii_space(value)) {
             continue;
         }
-        result.push_back(value);
+        visitor(value);
     }
-    return result;
 }
 
-[[nodiscard]] std::vector<std::byte> decode_hex(std::string_view input) {
-    const auto cleaned = strip_hex_comments_and_ws(input);
-    if (cleaned.size() % 2U != 0U) {
+[[nodiscard]] std::vector<std::byte> decode_hex(std::string_view input, std::optional<std::size_t> limit) {
+    auto digit_count = std::size_t{};
+    visit_hex_digits(input, [&](char) { ++digit_count; });
+    if (digit_count % 2U != 0U) {
         throw input_error("hex input has odd number of digits");
     }
 
     std::vector<std::byte> output;
-    output.reserve(cleaned.size() / 2U);
-    for (auto index = std::size_t{}; index < cleaned.size(); index += 2U) {
-        const auto high = hex_value(cleaned[index]);
-        const auto low  = hex_value(cleaned[index + 1U]);
-        if (high < 0 || low < 0) {
-            throw input_error(text::format("hex input contains non-hex character near offset {}", index));
+    auto                   index = std::size_t{};
+    auto                   high  = 0;
+    visit_hex_digits(input, [&](char digit) {
+        const auto value = hex_value(digit);
+        if (value < 0) {
+            throw input_error(text::format("hex input contains non-hex character near offset {}", index - index % 2U));
         }
-        output.push_back(static_cast<std::byte>((high << 4U) | low));
-    }
+        if (index % 2U == 0U) {
+            high = value;
+        } else {
+            check_size(output.size(), 1U, limit, "input");
+            output.push_back(static_cast<std::byte>((high << 4U) | value));
+        }
+        ++index;
+    });
     return output;
-}
-
-[[nodiscard]] std::string strip_base64_ws(std::string_view input) {
-    std::string result;
-    result.reserve(input.size());
-    for (const auto value : input) {
-        if (!is_ascii_space(value)) {
-            result.push_back(value);
-        }
-    }
-    return result;
 }
 
 [[nodiscard]] int base64_value(char value) noexcept {
@@ -145,31 +158,14 @@ struct input_error final : std::runtime_error {
     return -1;
 }
 
-void validate_base64_padding(std::string_view input, std::size_t padding_begin) {
-    for (auto index = padding_begin; index < input.size(); ++index) {
-        if (input[index] != '=') {
-            throw input_error("base64 padding must be at the end");
-        }
-    }
-
-    const auto padding_count = input.size() - padding_begin;
-    if (padding_count > 2U) {
-        throw input_error("base64 padding may contain at most two '=' characters");
-    }
-    if (input.size() % 4U != 0U) {
-        throw input_error("padded base64 length must be a multiple of four");
-    }
-}
-
-void validate_base64_tail_bits(const std::vector<int> &values, std::size_t padding_count) {
-    if (values.empty()) {
+void validate_base64_tail_bits(std::size_t data_count, int last, std::size_t padding_count) {
+    if (data_count == 0U) {
         if (padding_count != 0U) {
             throw input_error("base64 padding without data");
         }
         return;
     }
 
-    const auto data_count = values.size();
     if (data_count % 4U == 1U) {
         throw input_error("base64 input length is invalid");
     }
@@ -180,7 +176,6 @@ void validate_base64_tail_bits(const std::vector<int> &values, std::size_t paddi
         throw input_error("base64 input has invalid double padding");
     }
 
-    const auto last = values.back();
     if ((padding_count == 2U || (padding_count == 0U && data_count % 4U == 2U)) && (last & 0x0F) != 0) {
         throw input_error("base64 input has non-zero trailing bits");
     }
@@ -189,45 +184,57 @@ void validate_base64_tail_bits(const std::vector<int> &values, std::size_t paddi
     }
 }
 
-[[nodiscard]] std::vector<std::byte> decode_base64(std::string_view input) {
-    const auto cleaned       = strip_base64_ws(input);
-    const auto padding_begin = cleaned.find('=');
-    if (padding_begin != std::string::npos) {
-        validate_base64_padding(cleaned, padding_begin);
-    } else if (cleaned.size() % 4U == 1U) {
+[[nodiscard]] std::vector<std::byte> decode_base64(std::string_view input, std::optional<std::size_t> limit) {
+    auto data_count    = std::size_t{};
+    auto padding_count = std::size_t{};
+    for (const auto value : input) {
+        if (is_ascii_space(value)) {
+            continue;
+        }
+        if (value == '=') {
+            ++padding_count;
+        } else {
+            if (padding_count != 0U) {
+                throw input_error("base64 padding must be at the end");
+            }
+            ++data_count;
+        }
+    }
+    if (padding_count > 2U) {
+        throw input_error("base64 padding may contain at most two '=' characters");
+    }
+    if (padding_count != 0U && (data_count + padding_count) % 4U != 0U) {
+        throw input_error("padded base64 length must be a multiple of four");
+    }
+    if (padding_count == 0U && data_count % 4U == 1U) {
         throw input_error("base64 input length is invalid");
     }
 
-    const auto padding_count = padding_begin == std::string::npos ? std::size_t{} : cleaned.size() - padding_begin;
-    const auto data_count    = cleaned.size() - padding_count;
-
-    std::vector<int> values;
-    values.reserve(data_count);
-    for (auto index = std::size_t{}; index < data_count; ++index) {
-        const auto value = base64_value(cleaned[index]);
+    std::vector<std::byte> output;
+    auto                   accumulator = std::uint32_t{};
+    auto                   bit_count   = 0U;
+    auto                   index       = std::size_t{};
+    auto                   last        = 0;
+    for (const auto digit : input) {
+        if (is_ascii_space(digit) || digit == '=') {
+            continue;
+        }
+        const auto value = base64_value(digit);
         if (value < 0) {
             throw input_error(text::format("base64 input contains invalid character near offset {}", index));
         }
-        values.push_back(value);
-    }
-
-    validate_base64_tail_bits(values, padding_count);
-
-    std::vector<std::byte> output;
-    output.reserve((values.size() * 3U) / 4U);
-
-    auto accumulator = std::uint32_t{};
-    auto bit_count   = 0U;
-    for (const auto value : values) {
+        last = value;
+        ++index;
         accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(value);
         bit_count += 6U;
         if (bit_count >= 8U) {
             bit_count -= 8U;
+            check_size(output.size(), 1U, limit, "input");
             output.push_back(static_cast<std::byte>((accumulator >> bit_count) & 0xFFU));
             accumulator &= (std::uint32_t{1U} << bit_count) - 1U;
         }
     }
-
+    validate_base64_tail_bits(data_count, last, padding_count);
     return output;
 }
 
@@ -272,11 +279,11 @@ void validate_base64_tail_bits(const std::vector<int> &values, std::size_t paddi
     throw usage_error("expected subcommand 'annotate' or 'diagnostic'");
 }
 
-[[nodiscard]] std::vector<std::byte> decode_input(std::string_view input, input_format format) {
+[[nodiscard]] std::vector<std::byte> decode_input(std::string_view input, input_format format, std::optional<std::size_t> limit) {
     if (format == input_format::hex) {
-        return decode_hex(input);
+        return decode_hex(input, limit);
     }
-    return decode_base64(input);
+    return decode_base64(input, limit);
 }
 
 void print_usage(std::ostream &out, std::string_view executable) {
@@ -287,11 +294,16 @@ void print_usage(std::ostream &out, std::string_view executable) {
         << "  --input hex|base64     Required input encoding. No auto-detection.\n"
         << "  DATA                   Input text. If omitted or exactly '-', read stdin.\n"
         << "  --                     End options; use before base64url data starting with '-'.\n\n"
+        << "Resource options (both commands):\n"
+        << "  --max-source-size N    Input text bytes, including whitespace and comments.\n"
+        << "  --max-input-size N     Decoded CBOR bytes.\n"
+        << "  --max-output-size N    Rendered bytes, including the final newline.\n"
+        << "  Limits apply when set; smart annotation defaults to 16 MiB input/output.\n\n"
         << "Annotation options:\n"
         << "  --mode smart|no_annotation\n"
         << "  --current-indent N --offset N --max-depth N --annotation-column N\n"
         << "  --indent-width N --comment-indent-width N --max-structure-depth N\n"
-        << "  --max-input-size N --max-output-size N\n\n"
+        << "\n"
         << "Diagnostic options:\n"
         << "  --format-by-rows --no-format-by-rows\n"
         << "  --override-array-by-columns --no-override-array-by-columns\n"
@@ -304,7 +316,10 @@ struct parsed_arguments {
     std::optional<input_format>   input;
     cbor::tags::AnnotationOptions annotation_options;
     cbor::tags::DiagnosticOptions diagnostic_options;
-    std::vector<std::string>      positionals;
+    std::optional<std::size_t>    max_source_size;
+    std::optional<std::size_t>    max_input_size;
+    std::optional<std::size_t>    max_output_size;
+    std::vector<std::string_view> positionals;
 };
 
 [[nodiscard]] std::string_view require_value(int &index, int argc, char *argv[], std::string_view option_name) {
@@ -318,6 +333,18 @@ struct parsed_arguments {
 void parse_common_option(parsed_arguments &parsed, std::string_view option, std::string_view value) {
     if (option == "--input") {
         parsed.input = parse_input_format(value);
+        return;
+    }
+    if (option == "--max-source-size") {
+        parsed.max_source_size = parse_size(value, option);
+        return;
+    }
+    if (option == "--max-input-size") {
+        parsed.max_input_size = parse_size(value, option);
+        return;
+    }
+    if (option == "--max-output-size") {
+        parsed.max_output_size = parse_size(value, option);
         return;
     }
     throw usage_error(text::format("unknown option '{}'", option));
@@ -341,10 +368,6 @@ void parse_annotation_option(parsed_arguments &parsed, std::string_view option, 
         options.comment_indent_width = parse_size(value, option);
     } else if (option == "--max-structure-depth") {
         options.max_structure_depth = parse_size(value, option);
-    } else if (option == "--max-input-size") {
-        options.max_input_size = parse_size(value, option);
-    } else if (option == "--max-output-size") {
-        options.max_output_size = parse_size(value, option);
     } else {
         parse_common_option(parsed, option, value);
     }
@@ -403,8 +426,8 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
 [[nodiscard]] bool option_takes_value(std::string_view option) noexcept {
     return option == "--input" || option == "--mode" || option == "--current-indent" || option == "--offset" || option == "--max-depth" ||
            option == "--annotation-column" || option == "--indent-width" || option == "--comment-indent-width" ||
-           option == "--max-structure-depth" || option == "--max-input-size" || option == "--max-output-size" || option == "--row-offset" ||
-           option == "--row-current-indent" || option == "--current-depth";
+           option == "--max-structure-depth" || option == "--max-source-size" || option == "--max-input-size" ||
+           option == "--max-output-size" || option == "--row-offset" || option == "--row-current-indent" || option == "--current-depth";
 }
 
 [[nodiscard]] parsed_arguments parse_arguments(int argc, char *argv[]) {
@@ -443,6 +466,29 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
     return parsed;
 }
 
+class output_text {
+  public:
+    using value_type = char;
+
+    explicit output_text(std::optional<std::size_t> limit) : limit_(limit) {}
+
+    void check_visualization_append(std::size_t additional) const { check_size(text_.size(), additional, limit_, "output"); }
+
+    void push_back(char value) {
+        check_visualization_append(1U);
+        text_.push_back(value);
+    }
+
+    [[nodiscard]] bool               empty() const noexcept { return text_.empty(); }
+    [[nodiscard]] std::size_t        size() const noexcept { return text_.size(); }
+    [[nodiscard]] char               back() const { return text_.back(); }
+    [[nodiscard]] const std::string &str() const noexcept { return text_; }
+
+  private:
+    std::optional<std::size_t> limit_;
+    std::string                text_;
+};
+
 [[nodiscard]] int run(int argc, char *argv[]) {
     if (argc >= 2 && (std::string_view{argv[1]} == "--help" || std::string_view{argv[1]} == "-h")) {
         print_usage(std::cout, argv[0]);
@@ -460,10 +506,18 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
         throw;
     }
 
-    const auto input  = input_text_from_positionals(parsed.positionals);
-    const auto buffer = decode_input(input, *parsed.input);
+    // Only smart annotation has historical input and output defaults.
+    if (parsed.command == command_mode::annotate && parsed.annotation_options.mode == cbor::tags::AnnotationMode::smart) {
+        parsed.max_input_size                     = parsed.max_input_size.value_or(parsed.annotation_options.max_input_size);
+        parsed.max_output_size                    = parsed.max_output_size.value_or(parsed.annotation_options.max_output_size);
+        parsed.annotation_options.max_input_size  = *parsed.max_input_size;
+        parsed.annotation_options.max_output_size = *parsed.max_output_size;
+    }
 
-    std::string output;
+    const auto input  = input_text_from_positionals(parsed.positionals, parsed.max_source_size);
+    const auto buffer = decode_input(input, *parsed.input, parsed.max_input_size);
+
+    output_text output(parsed.max_output_size);
     if (parsed.command == command_mode::annotate) {
         cbor::tags::buffer_annotate(buffer, output, parsed.annotation_options);
     } else {
@@ -471,10 +525,10 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
     }
 
     if (!output.empty()) {
-        std::cout << output;
         if (output.back() != '\n') {
-            std::cout << '\n';
+            output.push_back('\n');
         }
+        std::cout << output.str();
     }
     return 0;
 }
