@@ -139,23 +139,12 @@ does not authenticate the message.
 
 Verification requires a protected `alg` equal to the selected backend's algorithm.
 For COSE_Sign, each verified signer must carry it; the shared body must not.
-Missing and mismatched algorithms fail before the backend runs. Signing helpers
-continue to insert an algorithm for owning messages or require it when signing
-existing protected bytes into caller storage.
-
-An application profile that independently authenticates its algorithm choice can
-explicitly opt into omitted algorithms:
+An application that independently authenticates its algorithm choice can use
+`implicit_algorithm_profile`, which requires `alg` to be absent:
 
 ```cpp
 auto result = cwt::verify_sign1<Backend>(key, message, cwt::implicit_algorithm_profile);
-auto selected = cwt::verify_sign<Backend>(key, multi, index, cwt::implicit_algorithm_profile);
 ```
-
-This profile requires `alg` to be absent and rejects any explicit algorithm,
-including one matching the backend. It applies to owning and borrowed messages,
-individual signatures, and full countersignatures. Issue such messages through
-the low-level TBS and backend APIs; the high-level signing helpers require explicit
-algorithms. The tag is an application policy choice, never inferred from the token.
 
 [Example 27](../examples/27_experimental_cwt_custom_types.cpp) defines ordinary
 application `encode` and `decode` functions. The sender owns its text; the

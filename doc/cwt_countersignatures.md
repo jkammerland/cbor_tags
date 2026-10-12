@@ -67,13 +67,6 @@ int main() {
 
 ## Targets and storage
 
-Full and legacy full verification require a protected algorithm matching the
-backend. An application profile that independently authenticates the algorithm
-can pass `implicit_algorithm_profile` after the countersignature, before any
-parsed-header destination; this requires the algorithm to be absent. The
-output-span full signing overload always requires an explicit algorithm.
-Abbreviated CounterSignature0 behavior is unchanged.
-
 | Choice | Contract |
 |---|---|
 | Sign1 target | Binds original protected bytes, payload, and original signature. |
