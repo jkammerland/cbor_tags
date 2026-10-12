@@ -22,16 +22,15 @@ asset_names=(
     "${stem}.spdx.json"
     "${stem}.spdx.json.sha256"
     "${stem}.spdx.json.sha512"
-    "${stem}.spdx.json.sig"
     "${stem}.tar.gz"
     "${stem}.tar.gz.sha256"
     "${stem}.tar.gz.sha512"
-    "${stem}.tar.gz.sig"
     "${stem}.zip"
     "${stem}.zip.sha256"
     "${stem}.zip.sha512"
-    "${stem}.zip.sig"
     cbor_tags-release-public-key.asc
+    "${stem}.release-manifest"
+    "${stem}.release-manifest.sig"
 )
 for asset_name in "${asset_names[@]}"; do
     printf 'fixture:%s\n' "${asset_name}" >"${package_dir}/${asset_name}"
@@ -47,6 +46,23 @@ if [[ "$1" == verify-tag ]]; then
     printf 'release_tag_object=%s\n' "${FAKE_TAG_OBJECT}"
     printf 'release_commit=%s\n' "${FAKE_TAG_COMMIT}"
     printf 'release_version=%s\n' "${FAKE_VERSION}"
+elif [[ "$1" == verify-assets ]]; then
+    shift
+    repository="" version="" tag="" tag_object="" commit=""
+    while (($#)); do
+        case "$1" in
+            --repository) repository="$2" ;;
+            --version) version="$2" ;;
+            --tag) tag="$2" ;;
+            --tag-object) tag_object="$2" ;;
+            --commit) commit="$2" ;;
+            --package-dir) ;;
+            *) exit 2 ;;
+        esac
+        shift 2
+    done
+    [[ "${repository}" == "${GITHUB_REPOSITORY}" && "${version}" == "${FAKE_VERSION}" &&
+       "${tag}" == "${FAKE_TAG}" && "${tag_object}" == "${FAKE_TAG_OBJECT}" && "${commit}" == "${FAKE_TAG_COMMIT}" ]]
 fi
 EOF
 
@@ -285,6 +301,7 @@ audit_args=(
 generated_notes="$(
     bash "${repo_root}/scripts/publish-release.sh" notes \
         --tag "${tag}" \
+        --tag-object "${tag_object}" \
         --commit "${commit}" \
         --version "${version}" \
         --output "${generated_root}/notes.md"
@@ -292,6 +309,12 @@ generated_notes="$(
 [[ "${generated_notes}" == "${generated_root}/notes.md" ]]
 grep -F 'Signed cbor_tags v0.22.0 source archives.' "${generated_root}/notes.md" >/dev/null
 grep -F 'Generated fixture notes' "${generated_root}/notes.md" >/dev/null
+awk '/^```sh$/ {in_commands=1; next} /^```$/ && in_commands {exit} in_commands {print}' \
+    "${generated_root}/notes.md" >"${generated_root}/consumer-commands.sh"
+bash -n "${generated_root}/consumer-commands.sh"
+grep -Fx 'expected_fingerprint=7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D' "${generated_root}/consumer-commands.sh" >/dev/null
+grep -Fx "verify_signed_assets . ${version} \"\${expected_fingerprint}\" '' ${GITHUB_REPOSITORY} ${tag} ${tag_object} ${commit}" \
+    "${generated_root}/consumer-commands.sh" >/dev/null
 echo 'release-notes: OK'
 
 reset_state() {

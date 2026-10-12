@@ -25,6 +25,7 @@ if [[ -z "${version}" ]]; then
 fi
 readonly version
 readonly stem="cbor_tags-${version}"
+identity_args=(--repository jkammerland/cbor_tags --tag "v${version}" --tag-object 1111111111111111111111111111111111111111 --commit 2222222222222222222222222222222222222222 --version "${version}")
 payloads=("${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json")
 
 for payload in "${payloads[@]}"; do
@@ -49,10 +50,10 @@ fixture_fingerprint="$(
 export GNUPGHOME="${fixture_home}"
 export GPG_SIGNING_KEY="${fixture_fingerprint}"
 unset GPG_PASSPHRASE_FILE
-bash "${repo_root}/scripts/release.sh" sign --package-dir "${package_dir}" >/dev/null
+bash "${repo_root}/scripts/release.sh" sign --package-dir "${package_dir}" "${identity_args[@]}" >/dev/null
 if bash "${repo_root}/scripts/release.sh" verify-assets \
     --package-dir "${package_dir}" \
-    --version "${version}" >"${test_root}/test-key.out" 2>&1; then
+    "${identity_args[@]}" >"${test_root}/test-key.out" 2>&1; then
     echo 'test-key release unexpectedly passed production-key verification' >&2
     exit 1
 fi
@@ -70,7 +71,7 @@ attacker_fingerprint="$(
 )"
 [[ -n "${attacker_fingerprint}" ]]
 
-for payload in "${payloads[@]}"; do
+for payload in "${stem}.release-manifest"; do
     GNUPGHOME="${attacker_home}" gpg --batch --yes --pinentry-mode loopback --passphrase '' \
         --local-user "${attacker_fingerprint}" \
         --output "${package_dir}/${payload}.sig" \
@@ -83,7 +84,7 @@ done
 
 if bash "${repo_root}/scripts/release.sh" verify-assets \
     --package-dir "${package_dir}" \
-    --version "${version}" >"${test_root}/mixed-key.out" 2>&1; then
+    "${identity_args[@]}" >"${test_root}/mixed-key.out" 2>&1; then
     echo 'mixed trusted/attacker key asset unexpectedly verified attacker signatures' >&2
     exit 1
 fi

@@ -274,17 +274,26 @@ jobs:
             printf 'GPG_PASSPHRASE_FILE=%s\n' "${passphrase_file}" >> "${GITHUB_ENV}"
           fi
 
-      - name: Sign validated release payloads
+      - name: Sign validated release manifest
         if: steps.state.outputs.release_state != 'published'
         shell: bash
         run: |
           set -euxo pipefail
           bash scripts/release.sh sign \
             --package-dir build/release-packages \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${RELEASE_VERSION}" \
+            --tag "${RELEASE_TAG}" \
+            --tag-object "${RELEASE_TAG_OBJECT}" \
+            --commit "${RELEASE_COMMIT}" \
             --require-release-key
           bash scripts/release.sh verify-assets \
             --package-dir build/release-packages \
-            --version "${RELEASE_VERSION}"
+            --version "${RELEASE_VERSION}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --tag "${RELEASE_TAG}" \
+            --tag-object "${RELEASE_TAG_OBJECT}" \
+            --commit "${RELEASE_COMMIT}"
 
       - name: Upload signed workflow artifacts
         if: steps.state.outputs.release_state != 'published'
