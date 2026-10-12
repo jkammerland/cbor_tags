@@ -285,7 +285,8 @@ foreach(CASE IN ITEMS DUPLICATE TEMPORARY BOOLEAN MISSING_ENCODER MISSING_DECODE
   elseif(CASE MATCHES "MISSING")
     set(DIAGNOSTIC "CWT fields require codec::cwt")
   else()
-    set(DIAGNOSTIC "no matching function")
+    # MSVC inserts "overloaded" in the no-matching-function diagnostic.
+    set(DIAGNOSTIC "no matching (overloaded )?function")
   endif()
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
