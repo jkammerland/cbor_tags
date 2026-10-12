@@ -98,6 +98,41 @@ template <typename Self, typename T, payload_decode_context Context> consteval b
     }
 }
 
+// This is a progress check, not the complete-item rule below. Only built-in
+// direct group decoding can succeed without reading a header or any fields.
+// Custom decoder bodies remain an application contract, not a structural proof.
+template <typename Self, typename T> consteval bool builtin_decode_consumes_zero_bytes();
+
+template <typename Self, typename Tuple> consteval bool builtin_group_decode_consumes_zero_bytes() {
+    if constexpr (std::tuple_size_v<Tuple> > 1U && Self::options::wrap_groups) {
+        return false;
+    } else {
+        return []<std::size_t... Is>(std::index_sequence<Is...>) {
+            return (builtin_decode_consumes_zero_bytes<Self, std::tuple_element_t<Is, Tuple>>() && ...);
+        }(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+    }
+}
+
+template <typename Self, typename T> consteval bool builtin_decode_consumes_zero_bytes() {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (codec_payload_has_customization<Self, type, payload_decode_context::direct>() || IsTag<type>) {
+        return false;
+    } else {
+        if constexpr (IsAggregate<type>) {
+            using tuple_type = std::remove_cvref_t<decltype(to_tuple(std::declval<type &>()))>;
+
+            // The reflected tuple is only a field view; its own codec is not called.
+            return builtin_group_decode_consumes_zero_bytes<Self, tuple_type>();
+        } else if constexpr (IsUntaggedTuple<type>) {
+            return builtin_group_decode_consumes_zero_bytes<Self, type>();
+        } else {
+            // Optional, variant, range and scalar entry points read an initial byte.
+            // Nested ranges enforce their own count policy when instantiated.
+            return false;
+        }
+    }
+}
+
 template <typename Self, typename Tuple, std::size_t Offset, typename... Parents,
           payload_decode_context Context = payload_decode_context::direct>
 consteval bool codec_group_encodes_one_item(payload_context<Context> = {}) {
