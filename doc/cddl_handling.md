@@ -1,4 +1,4 @@
-# CBOR CDDL Schema Generator And Visualization
+# CBOR Concise Data Definition Language (CDDL) Schema Generator And Visualization
 
 A C++ header-only library for generating CDDL schemas from C++ types and annotating CBOR data with diagnostic information.
 

@@ -412,6 +412,8 @@ segment once and returns `incomplete` if that segment ends early.
 
 ## CDDL
 
+Concise Data Definition Language (CDDL) describes the encoded data structure.
+
 `std::unique_ptr<T>` renders as:
 
 ```cddl
