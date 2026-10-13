@@ -85,4 +85,4 @@ int main() {
 
 Chains explicitly select recursive headers; singleton/list inputs normalize to a nonempty collection. Application extra fields must not recursively contain the same header model.
 
-Legacy full verification requires `verify_legacy_countersignature`: on Sign1 it does not bind the original signature. Legacy generation, abbreviated legacy operations, and implicit fallback are unsupported; see [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html).
+Legacy full verification requires `verify_legacy_countersignature`: on Sign1 it does not bind the original signature. Legacy generation, abbreviated legacy operations, and automatic fallback to legacy verification are unsupported; see [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html).

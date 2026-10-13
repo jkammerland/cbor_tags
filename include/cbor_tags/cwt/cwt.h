@@ -6,6 +6,26 @@
 
 namespace cbor::tags::cwt {
 
+// The application must authenticate the algorithm choice outside the COSE message.
+struct implicit_algorithm_profile_t {
+    // No default constructor: existing calls may use {} for an empty AAD span.
+    explicit constexpr implicit_algorithm_profile_t(std::in_place_t) {}
+};
+inline constexpr implicit_algorithm_profile_t implicit_algorithm_profile{std::in_place};
+
+namespace detail {
+enum class verification_algorithm_policy { explicit_algorithm, implicit_algorithm };
+
+inline expected<void, status_code> validate_verification_algorithm(const std::optional<algorithm> &selected, algorithm backend,
+                                                                   verification_algorithm_policy policy) {
+    const bool accepted = policy == verification_algorithm_policy::implicit_algorithm ? !selected : selected && *selected == backend;
+    if (!accepted) {
+        return unexpected<status_code>{status_code::error};
+    }
+    return {};
+}
+} // namespace detail
+
 template <template <typename> typename... Codecs, typename T>
 [[nodiscard]] inline expected<std::vector<std::byte>, status_code> encode_to_bytes(T &&value) {
     std::vector<std::byte> output;
@@ -372,15 +392,20 @@ sign(SigningKey &&key, header_map protected_header, header_map unprotected, std:
     return message;
 }
 
+namespace detail {
 template <typename Backend, typename VerificationKey, bool Borrowed>
-[[nodiscard]] inline expected<void, status_code> verify_sign1(VerificationKey &&key, const basic_cose_sign1<Borrowed> &message,
-                                                              std::span<const std::byte>                external_aad     = {},
-                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+[[nodiscard]] inline expected<void, status_code>
+verify_sign1_with_policy(VerificationKey &&key, const basic_cose_sign1<Borrowed> &message, verification_algorithm_policy policy,
+                         std::span<const std::byte> external_aad, std::optional<std::span<const std::byte>> detached_payload) {
     auto protected_header = decode_protected_header(message.protected_header);
     if (!protected_header) {
         return unexpected<status_code>{protected_header.error()};
     }
     auto algorithm_status = validate_sign1_algorithm(*protected_header, message.unprotected, Backend::algorithm_id);
+    if (!algorithm_status) {
+        return unexpected<status_code>{algorithm_status.error()};
+    }
+    algorithm_status = validate_verification_algorithm(protected_header->alg, Backend::algorithm_id, policy);
     if (!algorithm_status) {
         return unexpected<status_code>{algorithm_status.error()};
     }
@@ -396,8 +421,9 @@ template <typename Backend, typename VerificationKey, bool Borrowed>
 
 template <typename Backend, typename VerificationKey, bool Borrowed, bool SignatureBorrowed>
 [[nodiscard]] inline expected<void, status_code>
-verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, const basic_cose_signature<SignatureBorrowed> &signature,
-                 std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+verify_signature_with_policy(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
+                             const basic_cose_signature<SignatureBorrowed> &signature, verification_algorithm_policy policy,
+                             std::span<const std::byte> external_aad, std::optional<std::span<const std::byte>> detached_payload) {
     auto body_protected = decode_protected_header(message.protected_header);
     if (!body_protected) {
         return unexpected<status_code>{body_protected.error()};
@@ -408,6 +434,10 @@ verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message
     }
     auto algorithm_status =
         validate_sign_algorithm(*body_protected, message.unprotected, *signature_protected, signature.unprotected, Backend::algorithm_id);
+    if (!algorithm_status) {
+        return unexpected<status_code>{algorithm_status.error()};
+    }
+    algorithm_status = validate_verification_algorithm(signature_protected->alg, Backend::algorithm_id, policy);
     if (!algorithm_status) {
         return unexpected<status_code>{algorithm_status.error()};
     }
@@ -422,30 +452,105 @@ verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message
 }
 
 template <typename Backend, typename VerificationKey, bool Borrowed>
-[[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
-                                                             std::size_t signature_index, std::span<const std::byte> external_aad = {},
-                                                             std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+[[nodiscard]] inline expected<void, status_code> verify_sign_with_policy(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
+                                                                         verification_algorithm_policy policy, std::size_t signature_index,
+                                                                         std::span<const std::byte>                external_aad,
+                                                                         std::optional<std::span<const std::byte>> detached_payload) {
     if (signature_index >= message.signatures.size()) {
         return unexpected<status_code>{status_code::unexpected_group_size};
     }
-    return verify_signature<Backend>(std::forward<VerificationKey>(key), message, message.signatures[signature_index], external_aad,
-                                     detached_payload);
+    return verify_signature_with_policy<Backend>(std::forward<VerificationKey>(key), message, message.signatures[signature_index], policy,
+                                                 external_aad, detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code>
+verify_sign_with_policy(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, verification_algorithm_policy policy,
+                        std::span<const std::byte> external_aad, std::optional<std::span<const std::byte>> detached_payload) {
+    if (message.signatures.empty()) {
+        return unexpected<status_code>{status_code::unexpected_group_size};
+    }
+    for (const auto &signature : message.signatures) {
+        auto result = verify_signature_with_policy<Backend>(key, message, signature, policy, external_aad, detached_payload);
+        if (!result) {
+            return result;
+        }
+    }
+    return {};
+}
+} // namespace detail
+
+template <typename Backend, typename VerificationKey, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code> verify_sign1(VerificationKey &&key, const basic_cose_sign1<Borrowed> &message,
+                                                              std::span<const std::byte>                external_aad     = {},
+                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_sign1_with_policy<Backend>(std::forward<VerificationKey>(key), message,
+                                                     detail::verification_algorithm_policy::explicit_algorithm, external_aad,
+                                                     detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code> verify_sign1(VerificationKey &&key, const basic_cose_sign1<Borrowed> &message,
+                                                              implicit_algorithm_profile_t, std::span<const std::byte> external_aad = {},
+                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_sign1_with_policy<Backend>(std::forward<VerificationKey>(key), message,
+                                                     detail::verification_algorithm_policy::implicit_algorithm, external_aad,
+                                                     detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed, bool SignatureBorrowed>
+[[nodiscard]] inline expected<void, status_code>
+verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, const basic_cose_signature<SignatureBorrowed> &signature,
+                 std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_signature_with_policy<Backend>(std::forward<VerificationKey>(key), message, signature,
+                                                         detail::verification_algorithm_policy::explicit_algorithm, external_aad,
+                                                         detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed, bool SignatureBorrowed>
+[[nodiscard]] inline expected<void, status_code>
+verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, const basic_cose_signature<SignatureBorrowed> &signature,
+                 implicit_algorithm_profile_t, std::span<const std::byte> external_aad = {},
+                 std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_signature_with_policy<Backend>(std::forward<VerificationKey>(key), message, signature,
+                                                         detail::verification_algorithm_policy::implicit_algorithm, external_aad,
+                                                         detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
+                                                             std::size_t signature_index, std::span<const std::byte> external_aad = {},
+                                                             std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
+                                                    detail::verification_algorithm_policy::explicit_algorithm, signature_index,
+                                                    external_aad, detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code>
+verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, std::size_t signature_index, implicit_algorithm_profile_t,
+            std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
+                                                    detail::verification_algorithm_policy::implicit_algorithm, signature_index,
+                                                    external_aad, detached_payload);
 }
 
 template <typename Backend, typename VerificationKey, bool Borrowed>
 [[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
                                                              std::span<const std::byte>                external_aad     = {},
                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
-    if (message.signatures.empty()) {
-        return unexpected<status_code>{status_code::unexpected_group_size};
-    }
-    for (const auto &signature : message.signatures) {
-        auto result = verify_signature<Backend>(key, message, signature, external_aad, detached_payload);
-        if (!result) {
-            return result;
-        }
-    }
-    return {};
+    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
+                                                    detail::verification_algorithm_policy::explicit_algorithm, external_aad,
+                                                    detached_payload);
+}
+
+template <typename Backend, typename VerificationKey, bool Borrowed>
+[[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed>  &message,
+                                                             implicit_algorithm_profile_t, std::span<const std::byte> external_aad = {},
+                                                             std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
+    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
+                                                    detail::verification_algorithm_policy::implicit_algorithm, external_aad,
+                                                    detached_payload);
 }
 
 template <bool Borrowed> [[nodiscard]] inline auto as_cose_sign1(basic_cose_sign1<Borrowed> value) {

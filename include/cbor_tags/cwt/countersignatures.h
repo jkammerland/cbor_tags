@@ -62,12 +62,18 @@ countersignature_input(Target &target, std::optional<std::span<const std::byte>>
 }
 
 template <typename Backend, typename Countersignature>
-expected<void, status_code> validate_countersignature_headers(const Countersignature &countersignature) {
+expected<void, status_code>
+validate_countersignature_headers(const Countersignature       &countersignature,
+                                  verification_algorithm_policy policy = verification_algorithm_policy::explicit_algorithm) {
     auto header = decode_protected_header(countersignature.protected_header);
     if (!header) {
         return unexpected<status_code>{header.error()};
     }
-    return validate_sign1_algorithm(*header, countersignature.unprotected, Backend::algorithm_id);
+    auto valid = validate_sign1_algorithm(*header, countersignature.unprotected, Backend::algorithm_id);
+    if (!valid) {
+        return valid;
+    }
+    return validate_verification_algorithm(header->alg, Backend::algorithm_id, policy);
 }
 
 } // namespace detail
@@ -143,19 +149,38 @@ countersign(Key &&key, Target &target, basic_cose_signature<false, E> countersig
     return countersignature;
 }
 
-template <typename Backend, typename Key, detail::CountersignatureTarget Target, bool B, typename E>
+namespace detail {
+template <bool Legacy, typename Backend, typename Key, CountersignatureTarget Target, bool B, typename E>
 [[nodiscard]] expected<void, status_code>
-verify_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature, std::span<const std::byte> aad = {},
-                        std::optional<std::span<const std::byte>> detached = std::nullopt) {
-    auto valid = detail::validate_countersignature_headers<Backend>(countersignature);
+verify_countersignature_with_policy(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature,
+                                    verification_algorithm_policy policy, std::span<const std::byte> aad,
+                                    std::optional<std::span<const std::byte>> detached) {
+    auto valid = validate_countersignature_headers<Backend>(countersignature, policy);
     if (!valid) {
         return valid;
     }
-    auto input = make_countersign_tbs(target, countersignature, aad, detached);
+    auto input = countersignature_input(target, std::span<const std::byte>{countersignature.protected_header}, aad, detached, Legacy);
     if (!input) {
         return unexpected<status_code>{input.error()};
     }
     return Backend::verify(std::forward<Key>(key), detail::signature_parts(*input), countersignature.signature);
+}
+} // namespace detail
+
+template <typename Backend, typename Key, detail::CountersignatureTarget Target, bool B, typename E>
+[[nodiscard]] expected<void, status_code>
+verify_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature, std::span<const std::byte> aad = {},
+                        std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_countersignature_with_policy<false, Backend>(
+        std::forward<Key>(key), target, countersignature, detail::verification_algorithm_policy::explicit_algorithm, aad, detached);
+}
+
+template <typename Backend, typename Key, detail::CountersignatureTarget Target, bool B, typename E>
+[[nodiscard]] expected<void, status_code>
+verify_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature, implicit_algorithm_profile_t,
+                        std::span<const std::byte> aad = {}, std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_countersignature_with_policy<false, Backend>(
+        std::forward<Key>(key), target, countersignature, detail::verification_algorithm_policy::implicit_algorithm, aad, detached);
 }
 
 // Legacy verification intentionally omits Sign1's original signature as specified by RFC 8152.
@@ -163,15 +188,16 @@ template <typename Backend, typename Key, detail::CountersignatureTarget Target,
 [[nodiscard]] expected<void, status_code>
 verify_legacy_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature,
                                std::span<const std::byte> aad = {}, std::optional<std::span<const std::byte>> detached = std::nullopt) {
-    auto valid = detail::validate_countersignature_headers<Backend>(countersignature);
-    if (!valid) {
-        return valid;
-    }
-    auto input = detail::countersignature_input(target, std::span<const std::byte>{countersignature.protected_header}, aad, detached, true);
-    if (!input) {
-        return unexpected<status_code>{input.error()};
-    }
-    return Backend::verify(std::forward<Key>(key), detail::signature_parts(*input), countersignature.signature);
+    return detail::verify_countersignature_with_policy<true, Backend>(
+        std::forward<Key>(key), target, countersignature, detail::verification_algorithm_policy::explicit_algorithm, aad, detached);
+}
+
+template <typename Backend, typename Key, detail::CountersignatureTarget Target, bool B, typename E>
+[[nodiscard]] expected<void, status_code>
+verify_legacy_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature, implicit_algorithm_profile_t,
+                               std::span<const std::byte> aad = {}, std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_countersignature_with_policy<true, Backend>(
+        std::forward<Key>(key), target, countersignature, detail::verification_algorithm_policy::implicit_algorithm, aad, detached);
 }
 
 template <typename Backend, typename Key, detail::CountersignatureTarget Target>
@@ -240,9 +266,13 @@ template <bool Legacy, typename Backend, template <class> class... Codecs, typen
 expected<void, status_code>
 verify_countersignature_with_headers(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature,
                                      basic_header_map<HB, HE> &authenticated, Processor &&process, std::span<const std::byte> aad,
-                                     std::optional<std::span<const std::byte>> detached) {
+                                     std::optional<std::span<const std::byte>> detached, verification_algorithm_policy policy) {
     basic_header_map<HB, HE> parsed;
     auto                     status = read_sign1_headers<Codecs...>(countersignature, parsed, Backend::algorithm_id);
+    if (!status) {
+        return unexpected<status_code>{status.error()};
+    }
+    status = validate_verification_algorithm(parsed.alg, Backend::algorithm_id, policy);
     if (!status) {
         return unexpected<status_code>{status.error()};
     }
@@ -270,7 +300,19 @@ verify_countersignature(Key &&key, Target &target, const basic_cose_signature<B,
                         basic_header_map<HB, HE> &authenticated, Processor &&process, std::span<const std::byte> aad = {},
                         std::optional<std::span<const std::byte>> detached = std::nullopt) {
     return detail::verify_countersignature_with_headers<false, Backend, Codecs...>(
-        std::forward<Key>(key), target, countersignature, authenticated, std::forward<Processor>(process), aad, detached);
+        std::forward<Key>(key), target, countersignature, authenticated, std::forward<Processor>(process), aad, detached,
+        detail::verification_algorithm_policy::explicit_algorithm);
+}
+
+template <typename Backend, template <class> class... Codecs, typename Key, detail::CountersignatureTarget Target, bool B, typename E,
+          bool HB, typename HE, typename Processor>
+[[nodiscard]] expected<void, status_code>
+verify_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature, implicit_algorithm_profile_t,
+                        basic_header_map<HB, HE> &authenticated, Processor &&process, std::span<const std::byte> aad = {},
+                        std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_countersignature_with_headers<false, Backend, Codecs...>(
+        std::forward<Key>(key), target, countersignature, authenticated, std::forward<Processor>(process), aad, detached,
+        detail::verification_algorithm_policy::implicit_algorithm);
 }
 
 template <typename Backend, template <class> class... Codecs, typename Key, detail::CountersignatureTarget Target, bool B, typename E,
@@ -280,7 +322,19 @@ verify_legacy_countersignature(Key &&key, Target &target, const basic_cose_signa
                                basic_header_map<HB, HE> &authenticated, Processor &&process, std::span<const std::byte> aad = {},
                                std::optional<std::span<const std::byte>> detached = std::nullopt) {
     return detail::verify_countersignature_with_headers<true, Backend, Codecs...>(
-        std::forward<Key>(key), target, countersignature, authenticated, std::forward<Processor>(process), aad, detached);
+        std::forward<Key>(key), target, countersignature, authenticated, std::forward<Processor>(process), aad, detached,
+        detail::verification_algorithm_policy::explicit_algorithm);
+}
+
+template <typename Backend, template <class> class... Codecs, typename Key, detail::CountersignatureTarget Target, bool B, typename E,
+          bool HB, typename HE, typename Processor>
+[[nodiscard]] expected<void, status_code>
+verify_legacy_countersignature(Key &&key, Target &target, const basic_cose_signature<B, E> &countersignature, implicit_algorithm_profile_t,
+                               basic_header_map<HB, HE> &authenticated, Processor &&process, std::span<const std::byte> aad = {},
+                               std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_countersignature_with_headers<true, Backend, Codecs...>(
+        std::forward<Key>(key), target, countersignature, authenticated, std::forward<Processor>(process), aad, detached,
+        detail::verification_algorithm_policy::implicit_algorithm);
 }
 
 // Parsed output may borrow the countersignature's protected bytes.
@@ -292,6 +346,14 @@ template <typename Backend, template <class> class... Codecs, typename Key, deta
 void verify_countersignature(Key &&, Target &, const basic_cose_signature<B, E> &&, basic_header_map<HB, HE> &, Args &&...) = delete;
 template <typename Backend, template <class> class... Codecs, typename Key, detail::CountersignatureTarget Target, bool B, typename E,
           bool HB, typename HE, typename... Args>
+void verify_countersignature(Key &&, Target &, const basic_cose_signature<B, E> &&, implicit_algorithm_profile_t,
+                             basic_header_map<HB, HE> &, Args &&...) = delete;
+template <typename Backend, template <class> class... Codecs, typename Key, detail::CountersignatureTarget Target, bool B, typename E,
+          bool HB, typename HE, typename... Args>
 void verify_legacy_countersignature(Key &&, Target &, const basic_cose_signature<B, E> &&, basic_header_map<HB, HE> &, Args &&...) = delete;
+template <typename Backend, template <class> class... Codecs, typename Key, detail::CountersignatureTarget Target, bool B, typename E,
+          bool HB, typename HE, typename... Args>
+void verify_legacy_countersignature(Key &&, Target &, const basic_cose_signature<B, E> &&, implicit_algorithm_profile_t,
+                                    basic_header_map<HB, HE> &, Args &&...) = delete;
 
 } // namespace cbor::tags::cwt
