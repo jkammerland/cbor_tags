@@ -266,6 +266,13 @@ run_bounded_cli(smart_zero_empty 0 "" "__skip__" "" annotate --input hex --max-i
 
 run_bounded_cli(diagnostic_output_exact 0 "[1]\n" "__skip__" "01" diagnostic --input hex --no-format-by-rows --max-output-size 4)
 run_bounded_cli(diagnostic_newline_over 1 "" "output size limit exceeded" "01" diagnostic --input hex --no-format-by-rows --max-output-size 3)
+
+# Closing-row padding and the final stdout newline both count toward the limit.
+run_bounded_cli(diagnostic_row_padding_exact 0 "[\n[\n    1\n  ]\n]\n" "__skip__" "8101"
+  diagnostic --input hex --format-by-rows --no-override-array-by-columns --row-offset 2 --row-current-indent 1 --max-output-size 16)
+run_bounded_cli(diagnostic_row_padding_over 1 "" "output size limit exceeded" "8101"
+  diagnostic --input hex --format-by-rows --no-override-array-by-columns --row-offset 2 --row-current-indent 1 --max-output-size 15)
+
 run_bounded_cli(plain_output_exact 0 "01\n" "__skip__" "01" annotate --input hex --mode no_annotation --max-output-size 3)
 run_bounded_cli(plain_output_over 1 "" "output size limit exceeded" "01" annotate --input hex --mode no_annotation --max-output-size 2)
 run_bounded_cli(plain_output_zero 0 "" "__skip__" "" annotate --input hex --mode no_annotation --max-output-size 0)

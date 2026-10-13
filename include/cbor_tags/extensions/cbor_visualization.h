@@ -1653,12 +1653,12 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         if constexpr (!std::ranges::input_range<T>) {
             check_depth(depth);
         }
-        auto item_options = options;
+        auto item_options           = options;
         item_options.current_indent = detail::visualization_size_add(item_options.current_indent, depth);
-        item_options.offset = detail::visualization_size_add(item_options.offset, depth);
+        item_options.offset         = detail::visualization_size_add(item_options.offset, depth);
         if constexpr (std::ranges::input_range<T>) {
             item_options.current_indent = detail::visualization_size_add(item_options.current_indent, 1U);
-            item_options.offset = detail::visualization_size_add(item_options.offset, 1U);
+            item_options.offset         = detail::visualization_size_add(item_options.offset, 1U);
             detail::format_bytes(output_buffer, context.source.begin(), context.source.end(), item_options);
         } else {
             const auto after_initial = std::next(context.source.begin());
@@ -1897,7 +1897,7 @@ template <typename OutputBuffer> struct smart_annotator {
 
     void emit_annotated_line(std::size_t depth, std::string left, std::string_view comment) {
         const auto indentation = indent_size(depth);
-        const auto left_size = checked_add(left.size(), indentation);
+        const auto left_size   = checked_add(left.size(), indentation);
         if (left_size >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
@@ -1913,7 +1913,7 @@ template <typename OutputBuffer> struct smart_annotator {
 
     void emit_plain_line(std::size_t depth, std::string left) {
         const auto indentation = indent_size(depth);
-        const auto left_size = checked_add(left.size(), indentation);
+        const auto left_size   = checked_add(left.size(), indentation);
         if (left_size >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
@@ -1951,7 +1951,7 @@ template <typename OutputBuffer> struct smart_annotator {
         while (offset < length) {
             const auto chunk = std::min(bytes_per_line, length - offset);
             ensure_output_capacity(checked_add(checked_add(indent_size(depth), checked_mul(chunk, 2U)), 1U));
-            auto       left  = hex_range(begin + offset, begin + offset + chunk, false);
+            auto left = hex_range(begin + offset, begin + offset + chunk, false);
             if (offset == 0U) {
                 emit_annotated_line(depth, std::move(left), comment);
             } else {
@@ -2276,10 +2276,11 @@ template <typename OutputBuffer> struct diagnostic_renderer {
         }
     }
 
-    [[nodiscard]] std::string indent(std::size_t levels, std::size_t additional = 0U) const {
+    [[nodiscard]] std::string indent(std::size_t levels) const {
         const auto size = visualization_size_mul(options.row_options.offset, levels);
-        ensure_visualization_capacity(output_buffer, visualization_size_add(size, additional));
-        return std::string(size, ' ');
+        ensure_visualization_capacity(output_buffer, size);
+        std::string result(size, ' ');
+        return result;
     }
 
     void before_item() {
@@ -2298,8 +2299,7 @@ template <typename OutputBuffer> struct diagnostic_renderer {
                 append_diagnostic_separator(output_buffer, parent.rows);
             }
             if (parent.rows) {
-                text::format_to(std::back_inserter(output_buffer), "{}",
-                                indent(visualization_size_add(parent.indent, 1U)));
+                text::format_to(std::back_inserter(output_buffer), "{}", indent(visualization_size_add(parent.indent, 1U)));
             }
         } else if (parent.kind == item_kind::text || parent.kind == item_kind::binary) {
             if (parent.children != 0U) {
@@ -2395,7 +2395,10 @@ template <typename OutputBuffer> struct diagnostic_renderer {
         if (item.kind == item_kind::array || item.kind == item_kind::map) {
             --row_depth;
             if (item.rows && item.children != 0U) {
-                text::format_to(std::back_inserter(output_buffer), "\n{}", indent(item.indent, 1U));
+                // Bound the leading newline and padding together before allocating.
+                const auto padding = visualization_size_mul(options.row_options.offset, item.indent);
+                ensure_visualization_capacity(output_buffer, visualization_size_add(padding, 1U));
+                text::format_to(std::back_inserter(output_buffer), "\n{}", std::string(padding, ' '));
             }
             text::format_to(std::back_inserter(output_buffer), "{}", item.kind == item_kind::array ? "]" : "}");
         } else if (item.kind == item_kind::tag) {
