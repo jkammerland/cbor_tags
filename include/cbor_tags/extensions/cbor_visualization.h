@@ -69,8 +69,8 @@ struct AnnotationOptions {
     size_t         indent_width{3};
     size_t         comment_indent_width{2};
     size_t         max_structure_depth{64};
-    size_t         max_input_size{std::size_t{16U} * 1024U * 1024U};
-    size_t         max_output_size{std::size_t{16U} * 1024U * 1024U};
+    size_t         max_input_size{std::numeric_limits<size_t>::max()};
+    size_t         max_output_size{std::numeric_limits<size_t>::max()};
 };
 
 namespace cddl {

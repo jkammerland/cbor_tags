@@ -298,7 +298,7 @@ void print_usage(std::ostream &out, std::string_view executable) {
         << "  --max-source-size N    Input text bytes, including whitespace and comments.\n"
         << "  --max-input-size N     Decoded CBOR bytes.\n"
         << "  --max-output-size N    Rendered bytes, including the final newline.\n"
-        << "  Limits apply when set; smart annotation defaults to 16 MiB input/output.\n\n"
+        << "  No byte limits by default; limits apply only when set.\n\n"
         << "Annotation options:\n"
         << "  --mode smart|no_annotation\n"
         << "  --current-indent N --offset N --max-depth N --annotation-column N\n"
@@ -506,12 +506,10 @@ class output_text {
         throw;
     }
 
-    // Only smart annotation has historical input and output defaults.
+    // Smart rendering shares explicitly supplied budgets with the CLI pipeline.
     if (parsed.command == command_mode::annotate && parsed.annotation_options.mode == cbor::tags::AnnotationMode::smart) {
-        parsed.max_input_size                     = parsed.max_input_size.value_or(parsed.annotation_options.max_input_size);
-        parsed.max_output_size                    = parsed.max_output_size.value_or(parsed.annotation_options.max_output_size);
-        parsed.annotation_options.max_input_size  = *parsed.max_input_size;
-        parsed.annotation_options.max_output_size = *parsed.max_output_size;
+        parsed.annotation_options.max_input_size  = parsed.max_input_size.value_or(parsed.annotation_options.max_input_size);
+        parsed.annotation_options.max_output_size = parsed.max_output_size.value_or(parsed.annotation_options.max_output_size);
     }
 
     const auto input  = input_text_from_positionals(parsed.positionals, parsed.max_source_size);

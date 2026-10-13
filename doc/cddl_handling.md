@@ -542,9 +542,8 @@ Creates annotated hex view of CBOR data
 - `indent_width`: Left-column indentation step in smart mode
 - `comment_indent_width`: Right-column nesting indentation step in smart mode
 - `max_structure_depth`: Hard smart-mode nesting limit
-- `max_input_size`: Hard smart-mode input size limit before copying bytes
-- `max_output_size`: Hard smart-mode generated output limit to avoid unbounded
-  memory growth
+- `max_input_size`: Optional smart-mode input byte limit; unlimited by default
+- `max_output_size`: Optional smart-mode output byte limit; unlimited by default
 - `diagnostic_data`: Unsupported; setting it throws `std::runtime_error`
 
 Smart mode keeps header comments aligned and wraps text/byte payload hex before

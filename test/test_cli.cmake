@@ -296,7 +296,7 @@ run_bounded_cli(invalid_base64_padding_no_stdout 1 "" "padding must be at the en
 run_bounded_cli(invalid_base64_tail_no_stdout 1 "" "non-zero trailing bits" "AB==" diagnostic --input base64 --max-output-size 32)
 run_bounded_cli(late_malformed_no_stdout 1 "" "Malformed CBOR" "0118" diagnostic --input hex --max-output-size 32)
 
-# Plain annotation and diagnostic retain their historical unlimited output default.
+# No rendering mode imposes a default byte cap.
 function(check_unlimited_output NAME)
   set(OUTPUT_FILE "${WORK}/${NAME}.stdout")
   execute_process(COMMAND "${CLI}" ${ARGN} RESULT_VARIABLE RESULT OUTPUT_FILE "${OUTPUT_FILE}" ERROR_VARIABLE STDERR)
@@ -308,3 +308,4 @@ endfunction()
 
 check_unlimited_output(plain_unlimited annotate --input hex --mode no_annotation --current-indent 8388608 01)
 check_unlimited_output(diagnostic_unlimited diagnostic --input hex --row-offset 16777216 8101)
+check_unlimited_output(smart_unlimited annotate --input hex --annotation-column 16777217 01)
