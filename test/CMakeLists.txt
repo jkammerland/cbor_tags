@@ -66,6 +66,24 @@ endif()
 
 # add tests for ctest
 add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/cwt*")
+
+add_test(NAME container_item_shape_wire COMMAND tests "--test-suite=cbor_wire/container_item_shape")
+set_tests_properties(container_item_shape_wire PROPERTIES LABELS "cbor-wire")
+
+# Reject only unbounded zero-input iterations, including nested count loops.
+foreach(SHAPE ARRAY_EMPTY ARRAY_NESTED_EMPTY ARRAY_TUPLE_EMPTY ARRAY_UNWRAPPED_EMPTY MAP_EMPTY
+    OPTIONAL_ARRAY_EMPTY VARIANT_ARRAY_EMPTY)
+  string(TOLOWER "container_zero_input_${SHAPE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL container_item_shape_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_CONTAINER_${SHAPE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=Zero-byte container entries require an explicit count bound"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+
 # Expected is a standalone value/error abstraction; keep its tests separate from
 # codec roundtrips and CBOR wire fixtures.
 add_test(NAME expected_contract COMMAND tests "--test-suite=expected/contract")

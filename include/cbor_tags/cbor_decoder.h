@@ -9,6 +9,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_item_shape.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -491,6 +492,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsRangeOfCborValues T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+        // Only the unbounded count-driven route needs this guard. Fixed targets
+        // and bounded_size routes already have an application-selected count cap.
+        if constexpr (IsMap<T>) {
+            static_assert(!detail::builtin_decode_consumes_zero_bytes<self_t, typename T::key_type>() ||
+                              !detail::builtin_decode_consumes_zero_bytes<self_t, typename T::mapped_type>(),
+                          "Zero-byte container entries require an explicit count bound");
+        } else if constexpr (!IsFixedArray<T>) {
+            static_assert(!detail::builtin_decode_consumes_zero_bytes<self_t, typename T::value_type>(),
+                          "Zero-byte container entries require an explicit count bound");
+        }
+
         if constexpr (IsMap<T>) {
             if (major != major_type::Map) {
                 return status_code::no_match_for_map_on_buffer;
