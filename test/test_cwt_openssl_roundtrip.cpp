@@ -10,7 +10,10 @@ TEST_SUITE("roundtrip/cwt") {
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
     TEST_CASE("cryptographically valid algless Sign1 requires an explicit implicit profile") {
         auto       key = make_p256_key();
-        cose_sign1 message{.payload = std::vector<std::byte>{std::byte{1}, std::byte{2}}};
+        cose_sign1 message{.protected_header = {},
+                           .unprotected      = {},
+                           .payload          = std::vector<std::byte>{std::byte{1}, std::byte{2}},
+                           .signature        = {}};
 
         // Profiles that omit alg issue signatures through the low-level input/backend API.
         auto input = make_sign1_tbs(message);

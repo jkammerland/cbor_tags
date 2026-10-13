@@ -76,7 +76,10 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
             auto header = encode_protected_header(header_map{.alg = explicit_algorithm ? std::optional{algorithm::es256} : std::nullopt});
             REQUIRE(header);
 
-            cose_sign1 message{.protected_header = *header, .payload = std::vector<std::byte>{std::byte{1}}, .signature = {std::byte{2}}};
+            cose_sign1 message{.protected_header = *header,
+                               .unprotected      = {},
+                               .payload          = std::vector<std::byte>{std::byte{1}},
+                               .signature        = {std::byte{2}}};
             algorithm_policy_test::check_sign1_profiles(message, explicit_algorithm);
 
             auto encoded = encode_to_bytes(message);
@@ -85,7 +88,10 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
             REQUIRE(make_decoder<codec::cwt>(*encoded)(view));
             algorithm_policy_test::check_sign1_profiles(view, explicit_algorithm);
 
-            cose_sign multi{.payload = message.payload, .signatures = {{.protected_header = *header, .signature = {std::byte{2}}}}};
+            cose_sign multi{.protected_header = {},
+                            .unprotected      = {},
+                            .payload          = message.payload,
+                            .signatures       = {{.protected_header = *header, .unprotected = {}, .signature = {std::byte{2}}}}};
             algorithm_policy_test::check_sign_profiles(multi, multi.signatures.front(), explicit_algorithm);
 
             auto multi_encoded = encode_to_bytes(multi);
@@ -99,7 +105,10 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
     TEST_CASE("mismatched algorithms and every missing signer are rejected before crypto") {
         auto mismatch = encode_protected_header(header_map{.alg = algorithm::es384});
         REQUIRE(mismatch);
-        cose_sign1 message{.protected_header = *mismatch, .payload = std::vector<std::byte>{std::byte{1}}};
+        cose_sign1 message{.protected_header = *mismatch,
+                           .unprotected      = {},
+                           .payload          = std::vector<std::byte>{std::byte{1}},
+                           .signature        = {}};
         unsigned   calls = 0;
         CHECK_FALSE(verify_sign1<algorithm_policy_test::counting_backend>(calls, message));
         CHECK_FALSE(verify_sign1<algorithm_policy_test::counting_backend>(calls, message, implicit_algorithm_profile));
@@ -107,7 +116,10 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
 
         auto matching = encode_protected_header(header_map{.alg = algorithm::es256});
         REQUIRE(matching);
-        cose_sign multi{.payload = message.payload, .signatures = {{.protected_header = *matching}, {}}};
+        cose_sign multi{.protected_header = {},
+                        .unprotected      = {},
+                        .payload          = message.payload,
+                        .signatures       = {{.protected_header = *matching, .unprotected = {}, .signature = {}}, {}}};
         CHECK_FALSE(verify_sign<algorithm_policy_test::counting_backend>(calls, multi, std::size_t{1}));
         CHECK(calls == 0);
         CHECK_FALSE(verify_sign<algorithm_policy_test::counting_backend>(calls, multi));
@@ -132,7 +144,10 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
             extended_header source{.alg = alg, .crit = {std::string{"revision"}}, .extra = {.revision = 42}};
             auto            header = encode_protected_header(source);
             REQUIRE(header);
-            cose_sign1 message{.protected_header = *header, .payload = std::vector<std::byte>{std::byte{1}}};
+            cose_sign1 message{.protected_header = *header,
+                               .unprotected      = {},
+                               .payload          = std::vector<std::byte>{std::byte{1}},
+                               .signature        = {}};
             unsigned   calls     = 0;
             unsigned   processed = 0;
             auto       process   = [&](auto, auto, const auto &) -> expected<void, status_code> {
@@ -164,7 +179,10 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
                                    .extra = {.revision = 42}};
             auto            header = encode_protected_header(source);
             REQUIRE(header);
-            cose_sign       message{.payload = std::vector<std::byte>{std::byte{1}}, .signatures = {{.protected_header = *header}}};
+            cose_sign       message{.protected_header = {},
+                                    .unprotected      = {},
+                                    .payload          = std::vector<std::byte>{std::byte{1}},
+                                    .signatures       = {{.protected_header = *header, .unprotected = {}, .signature = {}}}};
             header_map      body{.kid = std::vector<std::byte>{std::byte{9}}};
             extended_header signer{.extra = {.revision = 9}};
             unsigned        calls     = 0;
@@ -214,11 +232,14 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
 
     TEST_CASE("full and legacy countersignatures require the selected algorithm profile") {
         using namespace algorithm_policy_test;
-        cose_sign1 target{.payload = std::vector<std::byte>{std::byte{1}}, .signature = {std::byte{2}}};
+        cose_sign1 target{.protected_header = {},
+                          .unprotected      = {},
+                          .payload          = std::vector<std::byte>{std::byte{1}},
+                          .signature        = {std::byte{2}}};
         for (const bool explicit_algorithm : {false, true}) {
             auto header = encode_protected_header(header_map{.alg = explicit_algorithm ? std::optional{algorithm::es256} : std::nullopt});
             REQUIRE(header);
-            cose_signature signature{.protected_header = *header, .signature = {std::byte{3}}};
+            cose_signature signature{.protected_header = *header, .unprotected = {}, .signature = {std::byte{3}}};
             unsigned       calls = 0;
             CHECK(bool(verify_countersignature<counting_backend>(calls, target, signature)) == explicit_algorithm);
             CHECK(calls == unsigned(explicit_algorithm));
@@ -242,14 +263,14 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
 
     TEST_CASE("typed full and legacy countersignatures admit policy before critical processing") {
         using namespace algorithm_policy_test;
-        cose_signature target{.signature = {std::byte{1}}};
+        cose_signature target{.protected_header = {}, .unprotected = {}, .signature = {std::byte{1}}};
         for (const bool explicit_algorithm : {false, true}) {
             extended_header source{.alg   = explicit_algorithm ? std::optional{algorithm::es256} : std::nullopt,
                                    .crit  = {std::string{"revision"}},
                                    .extra = {.revision = 42}};
             auto            header = encode_protected_header(source);
             REQUIRE(header);
-            cose_signature_view signature{.protected_header = *header};
+            cose_signature_view signature{.protected_header = *header, .unprotected = {}, .signature = {}};
             extended_header     authenticated{.extra = {.revision = 9}};
             unsigned            calls     = 0;
             unsigned            processed = 0;
@@ -291,7 +312,7 @@ TEST_SUITE("roundtrip/cwt/algorithm_policy") {
 
     TEST_CASE("caller storage full countersigning rejects absent algorithms before signing") {
         using namespace algorithm_policy_test;
-        cose_signature            target{.signature = {std::byte{1}}};
+        cose_signature            target{.protected_header = {}, .unprotected = {}, .signature = {std::byte{1}}};
         cose_signature            signature;
         unsigned                  calls = 0;
         std::array<std::byte, 64> output;

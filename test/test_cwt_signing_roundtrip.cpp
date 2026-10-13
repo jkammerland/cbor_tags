@@ -57,7 +57,7 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(embedded_sign1);
         CHECK_EQ(embedded_sign1->payload, embedded);
 
-        cose_signature signature{.protected_header = *protected_header};
+        cose_signature signature{.protected_header = *protected_header, .unprotected = {}, .signature = {}};
         cose_sign      sign_message{
             .protected_header = {},
             .unprotected      = {},
