@@ -305,6 +305,7 @@ jobs:
           bash -euxo pipefail -c '
             dnf -y install \
               cmake \
+              diffutils \
               gcc-c++ \
               git \
               ninja-build

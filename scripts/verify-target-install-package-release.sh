@@ -18,7 +18,7 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
-for command_name in curl gpg sha256sum tar; do
+for command_name in curl gpg sha256sum cmp tar; do
     require_command "${command_name}"
 done
 [[ -f "${public_key}" ]] || die "release public key not found: ${public_key}"
@@ -42,12 +42,18 @@ for suffix in "" .sha256 .sig; do
         "${dependency_url}/${dependency_archive}${suffix}"
 done
 
-published_sha256="$(awk 'NR == 1 { print tolower($1) }' "${verify_dir}/${dependency_archive}.sha256")"
-[[ "${published_sha256}" == "${dependency_sha256}" ]] ||
-    die "published checksum is ${published_sha256:-missing}, expected ${dependency_sha256}"
+for suffix in "" .sha256 .sig; do
+    asset="${verify_dir}/${dependency_archive}${suffix}"
+    [[ -f "${asset}" && ! -L "${asset}" ]] || die "dependency assets must be regular non-symlink files"
+done
+
+printf '%s  %s\n' "${dependency_sha256}" "${dependency_archive}" |
+    cmp -s - "${verify_dir}/${dependency_archive}.sha256" ||
+    die "published checksum is noncanonical or does not match the pinned digest"
 (
     cd -- "${verify_dir}"
-    sha256sum --check "${dependency_archive}.sha256"
+    actual_checksum="$(sha256sum -- "${dependency_archive}")" || die "could not hash dependency archive"
+    [[ "${actual_checksum}" == "${dependency_sha256}  ${dependency_archive}" ]] || die "dependency archive digest mismatch"
 )
 
 GNUPGHOME="${gnupg_home}" gpg --batch --quiet --no-autostart --import "${public_key}"

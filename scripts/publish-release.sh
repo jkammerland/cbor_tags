@@ -270,7 +270,8 @@ write_release_notes() {
         echo "gpg --import cbor_tags-release-public-key.asc"
         echo "gpg --verify cbor_tags-${version}.tar.gz.sig cbor_tags-${version}.tar.gz"
         echo "gpg --verify cbor_tags-${version}.spdx.json.sig cbor_tags-${version}.spdx.json"
-        echo "sha256sum -c cbor_tags-${version}.tar.gz.sha256"
+        echo "sha256sum -- cbor_tags-${version}.tar.gz | cmp - cbor_tags-${version}.tar.gz.sha256"
+        echo "sha512sum -- cbor_tags-${version}.tar.gz | cmp - cbor_tags-${version}.tar.gz.sha512"
         echo '```'
         echo
         printf '%s\n' "${generated_notes}"

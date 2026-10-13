@@ -1,17 +1,7 @@
 # Releases
 
-The `Prepare Tagged Release` workflow accepts an existing signed tag, validates
-it without access to release secrets, builds and validates unsigned assets,
-waits for approval on the protected `release` environment, and signs a release
-candidate. The final publication uses `scripts/publish-release.sh` from an
-administrator's authenticated GitHub CLI so the repository's administration-
-protected immutable-release setting can be verified before anything is made
-public.
-
-Existing releases through `v0.22.0` predate this workflow. They use lightweight
-tags and GitHub-generated source archives; they are not retroactively converted.
-Release `v0.24.0` and earlier install-package assets retain their historical
-`-cmake` filename suffix; new releases use the names documented below.
+Protected workflows prepare signed tags and release candidates. An administrator
+publishes the verified candidate with `scripts/publish-release.sh`.
 
 ## Release Assets
 
@@ -22,66 +12,30 @@ For version `X.Y.Z`, the workflow publishes exactly 13 assets:
 - `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
 - `cbor_tags-release-public-key.asc` for offline signature verification.
 
-The archives contain the exact tracked source snapshot for the signed release
-commit. They do not contain a pre-installed CMake tree. The workflow extracts
-both archives, compares every file digest and executable bit against the
-canonical Git snapshot, and builds an example from each one before publication.
-It separately stages one internal install and builds `test_package` against it
-to keep the CMake package metadata covered without publishing that install tree.
+The archives reproduce the tracked source at the signed release commit, not a
+pre-installed CMake tree. The SPDX 3 JSON-LD SBOM describes the project and its
+direct dependencies. Verification rejects altered, missing, or unexpected assets.
 
-The release driver normalizes ZIP metadata to UTC so the unsigned packages are
-byte-reproducible regardless of the operator's local timezone.
-
-The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
-driver checks its document name, CC0-1.0 data license, MIT project license,
-root package, direct dependency packages, dependency versions, and `dependsOn`
-relationship before signing it as a standalone asset.
+Historical releases keep their original formats. Releases through `v0.22.0` use
+lightweight tags and GitHub source archives; install-package assets through
+`v0.24.0` use the `-cmake` filename suffix.
 
 ## Trust Model
 
-The release workflow enforces all of these conditions:
-
-- it is dispatched from the repository default branch;
-- all four expected push workflows for the exact release commit have completed
-  successfully before either tag signing or release publication can proceed;
-- the input is an annotated tag signed by exactly
-  `7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D`;
-- the tagged commit is contained in `master`;
-- the tag version matches `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`;
-- the annotated tag object and peeled commit are rechecked after environment
-  approval and immediately before publication;
-- the TGZ and ZIP source archives are generated from the exact release commit
-  and compared file-for-file with its canonical Git snapshot;
-- the exact `target_install_package.cmake` v7.1.0 release archive is pinned by
-  SHA-256 and its signature is verified against the committed release key
-  before release configuration;
-- an existing draft is reported for explicit operator inspection and deletion,
-  while an existing published release is audited without mutation;
-- every uploaded asset name and GitHub-computed SHA-256 digest matches the
-  signed local asset set before publication;
-- the published public-key asset is byte-identical to the committed canonical
-  key, contains exactly one primary key, and every detached signature reports
-  exactly one `VALIDSIG` from the configured fingerprint;
-- the repository immutable-releases setting is checked before any draft
-  mutation and again immediately before making the release public;
-- GitHub's release attestation and every uploaded asset are verified after
-  publication.
-
-The public key is committed at `.github/release-signing-key.asc`. Private key
-material is available only to jobs approved through the protected `release`
-environment. The signing job does not receive it until all CMake
-configuration, dependency fetching, compilation, and package validation have
-completed. It uploads the signed candidate but has no release-write permission.
-The protected `Prepare Signed Release Tag` workflow may also use the key to
-produce a tag bundle for administrator verification and push; it cannot push
-tags itself. `target_install_package.cmake` is consumed from the signed
-archive of its verified immutable `v7.1.0` release, with the exact archive
-SHA-256 pinned in CMake.
+- Release tags are signed, annotated tags on `master`, with successful CI for
+  the tagged commit.
+- The tag version must match `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`.
+- Tags and assets use the release key committed at
+  `.github/release-signing-key.asc`, fingerprint
+  `7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D`.
+- Signing requires approval through the protected `release` environment;
+  package builds have no access to signing secrets.
+- Publication requires immutable releases to be enabled and verifies the
+  published assets and GitHub release attestation.
 
 ## One-Time Repository Setup
 
-Complete this setup before merging the release workflow or publishing the next
-version:
+Before publishing:
 
 1. Enable immutable releases under **Settings > General > Releases**.
 2. Create an environment named `release` under **Settings > Environments**.
@@ -94,39 +48,14 @@ version:
    and deletion. Give repository administrators an explicit bypass for the
    controlled signed-tag operation.
 
-The signing key currently used by the workflow can be installed with:
-
-```bash
-gpg --armor --export-secret-keys \
-  7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D |
-  gh secret set GPG_PRIVATE_KEY \
-    --repo jkammerland/cbor_tags \
-    --env release
-
-gh secret set GPG_SIGNING_KEY \
-  --repo jkammerland/cbor_tags \
-  --env release \
-  --body 7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D
-
-gh secret set GPG_PASSPHRASE \
-  --repo jkammerland/cbor_tags \
-  --env release
-```
-
-The passphrase command prompts without placing the secret in shell history.
-Confirm the environment secret names with:
-
-```bash
-gh secret list --repo jkammerland/cbor_tags --env release
-```
+`GPG_PRIVATE_KEY` is the armored private key, `GPG_SIGNING_KEY` is the fingerprint
+above, and `GPG_PASSPHRASE` is its passphrase. Enter secrets through GitHub settings
+or `gh secret set` prompts, not shell command arguments.
 
 ## Publishing A Release
 
 1. Update the version in `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`.
-2. Merge that version bump and wait for the four `master` push workflows. The
-   tag-signing and candidate workflows also verify their successful conclusions
-   for the exact release commit and fail closed if a run is missing, pending,
-   or unsuccessful.
+2. Merge the version bump and wait for all required `master` CI checks to pass.
 3. Dispatch the protected tag-signing workflow from `master` and approve the
    `release` environment:
 
@@ -145,7 +74,7 @@ gh secret list --repo jkammerland/cbor_tags --env release
      --repo jkammerland/cbor_tags \
      --name signed-release-tag-vX.Y.Z \
      --dir build/release-tag
-   (cd build/release-tag && sha256sum -c vX.Y.Z.bundle.sha256)
+   (cd build/release-tag && sha256sum -- vX.Y.Z.bundle | cmp - vX.Y.Z.bundle.sha256)
 
    git fetch build/release-tag/vX.Y.Z.bundle \
      refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
@@ -167,11 +96,9 @@ gh secret list --repo jkammerland/cbor_tags --env release
      -f tag=vX.Y.Z
    ```
 
-6. Download the signed candidate and publish it with the authenticated
-   administrator CLI. The publisher checks immutable releases before draft
-   mutation and again immediately before publication. Run this handoff on
-   Linux with Bash 4 or newer and GNU `sha256sum` from a clean detached
-   worktree at the signed release commit:
+6. Publish the signed candidate from a clean detached worktree at the release
+   commit, using an administrator's authenticated GitHub CLI. Run this on Linux
+   with Bash 4 or newer and GNU `sha256sum`:
 
    ```bash
    git fetch origin \
@@ -209,24 +136,19 @@ gh secret list --repo jkammerland/cbor_tags --env release
        --notes-file build/release-publish/release-notes.md
    ```
 
-Do not create the GitHub release with ad-hoc `gh release create` commands.
-The publisher script makes the release, its assets, and its tag immutable and
-then verifies the release attestation and every asset. If an erroneous immutable
-release is deleted, advance to a new version rather than attempting to recreate
-the same tag. A candidate-workflow rerun for an existing published release
-performs a read-only rebuild and audit. A failed local publish that left a draft
-fails closed with its exact release ID so the operator can inspect and explicitly
-delete it before retrying; it never deletes the signed tag.
+Use the publisher script, not ad-hoc `gh release create` commands. If a failed
+publish leaves a draft, inspect and explicitly delete that draft before retrying.
+An existing published release is only audited, never modified. Corrections to
+an immutable release require a new version, even if the release was deleted.
 
 ## Local Package Validation
 
-With CMake 4.4.x, Ninja, GPG, and the manifest's vcpkg baseline available:
+With CMake 4.4.x, Ninja, GPG, and the project's vcpkg baseline available:
 
 ```bash
 VCPKG_ROOT=/path/to/vcpkg bash scripts/release.sh build
 bash scripts/release.sh sign
 ```
 
-The build command never reads GPG key material. Without `GPG_SIGNING_KEY`, the
-local signing command generates an ephemeral test key. CI adds
-`--require-release-key`, which requires the dedicated release fingerprint.
+Without `GPG_SIGNING_KEY`, local signing uses an ephemeral test key. Such assets
+are for testing only; production signing requires the release key.
