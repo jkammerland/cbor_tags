@@ -5,12 +5,17 @@ publishes the verified candidate with `scripts/publish-release.sh`.
 
 ## Release Assets
 
-For version `X.Y.Z`, the workflow publishes exactly 13 assets:
+For version `X.Y.Z`, the workflow publishes exactly 12 assets:
 
 - `cbor_tags-X.Y.Z.tar.gz` and `.zip` reproducible source trees;
-- detached `.sig`, `.sha256`, and `.sha512` files for both archives;
-- `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
-- `cbor_tags-release-public-key.asc` for offline signature verification.
+- `.sha256` and `.sha512` files for both archives;
+- `cbor_tags-X.Y.Z.spdx.json`, with both checksum files;
+- `cbor_tags-release-public-key.asc` for offline signature verification;
+- `cbor_tags-X.Y.Z.release-manifest` and its detached `.sig`.
+
+One signed manifest binds all assets to the repository, version, signed tag, and
+commit. It replaces per-payload signatures. Verification requires the expected
+release identity; a downloaded manifest cannot choose it.
 
 The archives reproduce the tracked source at the signed release commit, not a
 pre-installed CMake tree. The SPDX 3 JSON-LD SBOM describes the project and its
@@ -18,7 +23,8 @@ direct dependencies. Verification rejects altered, missing, or unexpected assets
 
 Historical releases keep their original formats. Releases through `v0.22.0` use
 lightweight tags and GitHub source archives; install-package assets through
-`v0.24.0` use the `-cmake` filename suffix.
+`v0.24.0` use the `-cmake` filename suffix. The current verifier accepts only the
+manifest-based format.
 
 ## Trust Model
 
@@ -126,6 +132,7 @@ or `gh secret set` prompts, not shell command arguments.
    GH_REPO=jkammerland/cbor_tags \
      bash scripts/publish-release.sh notes \
        --tag vX.Y.Z \
+       --tag-object "${tag_object}" \
        --commit "${commit}" \
        --version X.Y.Z \
        --output build/release-publish/release-notes.md
@@ -151,8 +158,15 @@ With CMake 4.4.x, Ninja, GPG, and the project's vcpkg baseline available:
 
 ```bash
 VCPKG_ROOT=/path/to/vcpkg bash scripts/release.sh build
-bash scripts/release.sh sign
+bash scripts/release.sh sign \
+  --repository jkammerland/cbor_tags \
+  --version X.Y.Z \
+  --tag vX.Y.Z \
+  --tag-object FULL_ANNOTATED_TAG_OBJECT_ID \
+  --commit FULL_PEELED_COMMIT_ID
 ```
 
 Without `GPG_SIGNING_KEY`, local signing uses an ephemeral test key. Such assets
 are for testing only; production signing requires the release key.
+
+Use the verified tag's full object and commit IDs for the identity placeholders.
