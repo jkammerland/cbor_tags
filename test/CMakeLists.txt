@@ -1000,6 +1000,7 @@ if(TARGET cborctl)
     COMMAND
       ${CMAKE_COMMAND}
       "-DCLI=$<TARGET_FILE:cborctl>"
+      "-DCLI_SIZEOF_SIZE_T=${CMAKE_SIZEOF_VOID_P}"
       "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cborctl"
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/test_cli.cmake")

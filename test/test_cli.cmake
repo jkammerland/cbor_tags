@@ -224,3 +224,88 @@ run_cli(invalid_base64_padded_length 1 "__skip__" "error: padded base64 length m
 run_cli(invalid_base64_length_mod_one 1 "__skip__" "error: base64 input length is invalid" diagnostic --input base64 A)
 run_cli(invalid_base64_padded_trailing_bits 1 "__skip__" "error: base64 input has non-zero trailing bits" diagnostic --input base64 "AB==")
 run_cli(invalid_base64_unpadded_trailing_bits 1 "__skip__" "error: base64 input has non-zero trailing bits" diagnostic --input base64 "AAB")
+
+# Limits cover collected source bytes, decoded bytes, and the final stdout newline.
+function(run_bounded_cli NAME EXPECTED_EXIT EXPECTED_STDOUT STDERR_CONTAINS SOURCE)
+  set(STDIN_FILE "${WORK}/${NAME}.stdin")
+  file(WRITE "${STDIN_FILE}" "${SOURCE}")
+  execute_process(
+    COMMAND "${CLI}" ${ARGN}
+    INPUT_FILE "${STDIN_FILE}"
+    RESULT_VARIABLE RESULT
+    OUTPUT_VARIABLE STDOUT
+    ERROR_VARIABLE STDERR)
+  if(NOT RESULT EQUAL EXPECTED_EXIT OR NOT STDOUT STREQUAL EXPECTED_STDOUT)
+    message(FATAL_ERROR "${NAME}: expected exit ${EXPECTED_EXIT}, stdout=[${EXPECTED_STDOUT}]; got ${RESULT}, stdout=[${STDOUT}], stderr=[${STDERR}]")
+  endif()
+  check_contains("${NAME}" "${STDERR}" "${STDERR_CONTAINS}" "stderr")
+endfunction()
+
+run_bounded_cli(source_exact 0 "[1]\n" "__skip__" "01 #x" diagnostic --input hex --no-format-by-rows --max-source-size 5)
+run_bounded_cli(source_one_over 1 "" "source size limit exceeded" "01 #x" diagnostic --input hex --no-format-by-rows --max-source-size 4)
+run_bounded_cli(annotate_source_over 1 "" "source size limit exceeded" "01" annotate --input hex --max-source-size 1)
+run_bounded_cli(positional_exact 0 "[1, 2]\n" "__skip__" "" diagnostic --input hex --no-format-by-rows --max-source-size 5 01 02)
+run_bounded_cli(positional_one_over 1 "" "source size limit exceeded" "" diagnostic --input hex --no-format-by-rows --max-source-size 4 01 02)
+run_bounded_cli(source_zero 0 "[]\n" "__skip__" "" diagnostic --input hex --no-format-by-rows --max-source-size 0)
+run_bounded_cli(source_zero_nonempty 1 "" "source size limit exceeded" " " diagnostic --input hex --max-source-size 0)
+
+string(REPEAT "x" 4093 CHUNK_COMMENT)
+set(CHUNK_SOURCE "#${CHUNK_COMMENT}\n01")
+run_bounded_cli(source_chunk_exact 0 "[1]\n" "__skip__" "${CHUNK_SOURCE}" diagnostic --input hex --no-format-by-rows --max-source-size 4097)
+run_bounded_cli(source_chunk_over 1 "" "source size limit exceeded" "${CHUNK_SOURCE}" diagnostic --input hex --no-format-by-rows --max-source-size 4096)
+
+run_bounded_cli(hex_input_exact 0 "[1, 2]\n" "__skip__" "01 02 #ignored" diagnostic --input hex --no-format-by-rows --max-input-size 2)
+run_bounded_cli(hex_input_over 1 "" "input size limit exceeded" "01 02" diagnostic --input hex --max-input-size 1)
+run_bounded_cli(base64_input_exact 0 "[1, 2]\n" "__skip__" "A Q I =" diagnostic --input base64 --no-format-by-rows --max-input-size 2)
+run_bounded_cli(base64_input_over 1 "" "input size limit exceeded" "AQI=" diagnostic --input base64 --max-input-size 1)
+run_bounded_cli(input_zero 0 "[]\n" "__skip__" "#ignored" diagnostic --input hex --no-format-by-rows --max-input-size 0)
+run_bounded_cli(input_zero_nonempty 1 "" "input size limit exceeded" "AA==" diagnostic --input base64 --max-input-size 0)
+run_bounded_cli(plain_input_over 1 "" "input size limit exceeded" "0102" annotate --input hex --mode no_annotation --max-input-size 1)
+run_bounded_cli(smart_input_over 1 "" "input size limit exceeded" "0102" annotate --input hex --max-input-size 1)
+run_bounded_cli(smart_zero_empty 0 "" "__skip__" "" annotate --input hex --max-input-size 0 --max-output-size 0)
+
+run_bounded_cli(diagnostic_output_exact 0 "[1]\n" "__skip__" "01" diagnostic --input hex --no-format-by-rows --max-output-size 4)
+run_bounded_cli(diagnostic_newline_over 1 "" "output size limit exceeded" "01" diagnostic --input hex --no-format-by-rows --max-output-size 3)
+
+# Closing-row padding and the final stdout newline both count toward the limit.
+run_bounded_cli(diagnostic_row_padding_exact 0 "[\n[\n    1\n  ]\n]\n" "__skip__" "8101"
+  diagnostic --input hex --format-by-rows --no-override-array-by-columns --row-offset 2 --row-current-indent 1 --max-output-size 16)
+run_bounded_cli(diagnostic_row_padding_over 1 "" "output size limit exceeded" "8101"
+  diagnostic --input hex --format-by-rows --no-override-array-by-columns --row-offset 2 --row-current-indent 1 --max-output-size 15)
+
+run_bounded_cli(plain_output_exact 0 "01\n" "__skip__" "01" annotate --input hex --mode no_annotation --max-output-size 3)
+run_bounded_cli(plain_output_over 1 "" "output size limit exceeded" "01" annotate --input hex --mode no_annotation --max-output-size 2)
+run_bounded_cli(plain_output_zero 0 "" "__skip__" "" annotate --input hex --mode no_annotation --max-output-size 0)
+run_bounded_cli(diagnostic_output_zero 1 "" "output size limit exceeded" "" diagnostic --input hex --max-output-size 0)
+run_bounded_cli(smart_output_exact 0 "01 # unsigned(1)\n" "__skip__" "01" annotate --input hex --annotation-column 3 --max-output-size 17)
+run_bounded_cli(smart_output_over 1 "" "output size limit exceeded" "01" annotate --input hex --annotation-column 3 --max-output-size 16)
+
+# Huge requested padding must fail before allocating it, including overflow cases.
+run_bounded_cli(plain_huge_indent 1 "" "output size limit exceeded" "01" annotate --input hex --mode no_annotation --current-indent 1000000000 --max-output-size 32)
+run_bounded_cli(diagnostic_huge_indent 1 "" "output size limit exceeded" "8101" diagnostic --input hex --row-offset 1000000000 --max-output-size 32)
+run_bounded_cli(smart_huge_indent 1 "" "output size limit exceeded" "01" annotate --input hex --current-indent 1000000000 --annotation-column 4000000000 --max-output-size 32)
+if(CLI_SIZEOF_SIZE_T EQUAL 4)
+  set(CLI_SIZE_MAX 4294967295)
+else()
+  set(CLI_SIZE_MAX 18446744073709551615)
+endif()
+run_bounded_cli(plain_indent_overflow 1 "" "size overflow" "01" annotate --input hex --mode no_annotation --current-indent ${CLI_SIZE_MAX} --max-output-size 32)
+run_bounded_cli(diagnostic_indent_overflow 1 "" "size overflow" "8101" diagnostic --input hex --row-current-indent ${CLI_SIZE_MAX} --max-output-size 32)
+run_bounded_cli(diagnostic_no_extra_depth_cap 0 "[1]\n" "__skip__" "01" diagnostic --input hex --no-format-by-rows --max-depth 2048 --current-depth 1025)
+run_bounded_cli(invalid_base64_padding_no_stdout 1 "" "padding must be at the end" "Yg==AA" diagnostic --input base64 --max-output-size 32)
+run_bounded_cli(invalid_base64_tail_no_stdout 1 "" "non-zero trailing bits" "AB==" diagnostic --input base64 --max-output-size 32)
+run_bounded_cli(late_malformed_no_stdout 1 "" "Malformed CBOR" "0118" diagnostic --input hex --max-output-size 32)
+
+# No rendering mode imposes a default byte cap.
+function(check_unlimited_output NAME)
+  set(OUTPUT_FILE "${WORK}/${NAME}.stdout")
+  execute_process(COMMAND "${CLI}" ${ARGN} RESULT_VARIABLE RESULT OUTPUT_FILE "${OUTPUT_FILE}" ERROR_VARIABLE STDERR)
+  file(SIZE "${OUTPUT_FILE}" OUTPUT_SIZE)
+  if(NOT RESULT EQUAL 0 OR NOT OUTPUT_SIZE GREATER 16777216)
+    message(FATAL_ERROR "${NAME}: expected successful output above 16 MiB; exit=${RESULT}, bytes=${OUTPUT_SIZE}, stderr=[${STDERR}]")
+  endif()
+endfunction()
+
+check_unlimited_output(plain_unlimited annotate --input hex --mode no_annotation --current-indent 8388608 01)
+check_unlimited_output(diagnostic_unlimited diagnostic --input hex --row-offset 16777216 8101)
+check_unlimited_output(smart_unlimited annotate --input hex --annotation-column 16777217 01)
