@@ -38,9 +38,11 @@ EOF
 cat >"${fake_bin}/gpg" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "$1" == --no-options && " $* " == *' --no-auto-key-retrieve '* && " $* " == *' --auto-key-locate clear '* ]]
 for argument in "$@"; do
     case "${argument}" in
-        --fingerprint)
+        show-only)
+            printf 'pub::::::::::\n'
             printf 'fpr:::::::::%s:\n' \
                 "${FAKE_PUBLIC_FINGERPRINT:-7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D}"
             exit 0

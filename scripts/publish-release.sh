@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "${repo_root}/scripts/release-verification.sh"
 release_driver="${RELEASE_DRIVER:-${repo_root}/scripts/release.sh}"
 
 die() {
@@ -267,11 +268,7 @@ write_release_notes() {
         echo "Verify an archive and the SBOM with:"
         echo
         echo '```sh'
-        echo "gpg --import cbor_tags-release-public-key.asc"
-        echo "gpg --verify cbor_tags-${version}.tar.gz.sig cbor_tags-${version}.tar.gz"
-        echo "gpg --verify cbor_tags-${version}.spdx.json.sig cbor_tags-${version}.spdx.json"
-        echo "sha256sum -- cbor_tags-${version}.tar.gz | cmp - cbor_tags-${version}.tar.gz.sha256"
-        echo "sha512sum -- cbor_tags-${version}.tar.gz | cmp - cbor_tags-${version}.tar.gz.sha512"
+        write_release_verification_commands "${version}"
         echo '```'
         echo
         printf '%s\n' "${generated_notes}"
