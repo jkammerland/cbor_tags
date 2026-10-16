@@ -139,6 +139,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          # Repair v0.28.0 tooling without changing the signed commit used by git archive HEAD.
+          if [[ "${RELEASE_TAG}" == v0.28.0 ]]; then
+            git restore --source="${GITHUB_SHA}" --worktree -- scripts/release.sh
+          fi
           bash scripts/release.sh build --package-dir build/release-packages
 
       - name: Upload reproducible unsigned artifacts

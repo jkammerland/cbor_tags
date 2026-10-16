@@ -636,7 +636,7 @@ run_source_consumer() {
         -DCBOR_TAGS_BUILD_TESTS=OFF \
         -DCBOR_TAGS_INSTALL=OFF
     cmake --build "${consumer_build_dir}" --parallel
-    "${consumer_build_dir}/examples/cbor_tags_basic_roundtrip"
+    "${consumer_build_dir}/examples/cbor_tags_example_01_basic_values"
 }
 
 require_release_cmake() {
