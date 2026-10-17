@@ -40,8 +40,9 @@ Commands:
              [--expected-fingerprint <fingerprint>]
       Verify the annotated tag signature, master ancestry, and all project versions.
 
-  build [--package-dir <dir>]
+  build [--source-dir <dir>] [--package-dir <dir>]
       Build and validate unsigned reproducible source archives and an SPDX SBOM.
+      Source defaults to this checkout and must be a clean Git checkout.
 
   sign [--package-dir <dir>] [--require-release-key]
       Sign validated release payloads and export the public verification key.
@@ -396,6 +397,7 @@ PY
 }
 
 metadata_version() {
+    local metadata_dir="${1:-${repo_root}}"
     local cmake_version=""
     local vcpkg_version=""
     local conan_version=""
@@ -407,7 +409,7 @@ metadata_version() {
             conan_version) conan_version="${value}" ;;
             *) die "unexpected metadata key: ${key}" ;;
         esac
-    done < <(read_metadata_versions "${repo_root}")
+    done < <(read_metadata_versions "${metadata_dir}")
     [[ "${cmake_version}" == "${vcpkg_version}" && "${cmake_version}" == "${conan_version}" ]] ||
         die "project versions disagree: CMake=${cmake_version}, vcpkg=${vcpkg_version}, Conan=${conan_version}"
     printf '%s\n' "${cmake_version}"
@@ -610,10 +612,11 @@ packaged_sbom() {
 }
 
 run_installed_consumer() {
-    local prefix="$1"
-    local dependency_prefix="$2"
-    local consumer_build_dir="$3"
-    cmake -S "${repo_root}/test_package" -B "${consumer_build_dir}" -G Ninja \
+    local source_root="$1"
+    local prefix="$2"
+    local dependency_prefix="$3"
+    local consumer_build_dir="$4"
+    cmake -S "${source_root}/test_package" -B "${consumer_build_dir}" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_STANDARD=20 \
         -DCMAKE_PREFIX_PATH="${prefix};${dependency_prefix}"
@@ -625,18 +628,20 @@ run_source_consumer() {
     local source_root="$1"
     local toolchain_file="$2"
     local consumer_build_dir="$3"
-    cmake -S "${source_root}" -B "${consumer_build_dir}" -G Ninja \
+    cmake -S "${repo_root}/test/consumer/source_archive" -B "${consumer_build_dir}" -G Ninja \
+        -DCBOR_TAGS_SOURCE_DIR="${source_root}" \
+        -DVCPKG_MANIFEST_DIR="${source_root}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_STANDARD=20 \
         -DCMAKE_CXX_STANDARD_REQUIRED=ON \
         -DCMAKE_CXX_EXTENSIONS=OFF \
         -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}" \
         -DCPM_SOURCE_CACHE="${repo_root}/build/cpm_cache" \
-        -DCBOR_TAGS_BUILD_EXAMPLES=ON \
+        -DCBOR_TAGS_BUILD_EXAMPLES=OFF \
         -DCBOR_TAGS_BUILD_TESTS=OFF \
         -DCBOR_TAGS_INSTALL=OFF
-    cmake --build "${consumer_build_dir}" --parallel
-    "${consumer_build_dir}/examples/cbor_tags_basic_roundtrip"
+    cmake --build "${consumer_build_dir}" --target cbor_tags_source_consumer --parallel
+    ctest --test-dir "${consumer_build_dir}" --output-on-failure --no-tests=error
 }
 
 require_release_cmake() {
@@ -751,9 +756,15 @@ create_reproducible_archives() {
 
 build_release() {
     local package_dir="${repo_root}/build/release-packages"
+    local source_root="${repo_root}"
 
     while (($#)); do
         case "$1" in
+            --source-dir)
+                [[ $# -ge 2 ]] || die "--source-dir requires a value"
+                source_root="$2"
+                shift 2
+                ;;
             --package-dir)
                 [[ $# -ge 2 ]] || die "--package-dir requires a value"
                 package_dir="$2"
@@ -767,12 +778,30 @@ build_release() {
         esac
     done
 
+    # Build metadata and archived files must describe the same unmodified source.
+    require_command git
+    [[ -d "${source_root}" ]] || die "release source directory not found: ${source_root}"
+    source_root="$(cd -- "${source_root}" && pwd -P)"
+    [[ "$(git -C "${source_root}" rev-parse --show-toplevel)" == "${source_root}" ]] ||
+        die "release source must be a Git checkout root"
+    local source_status
+    source_status="$(git -C "${source_root}" status --porcelain --untracked-files=normal)" ||
+        die "could not inspect release source checkout"
+    [[ -z "${source_status}" ]] ||
+        die "release source checkout must be clean"
+
+    package_dir="$(canonical_build_path "${package_dir}")"
+    local work_dir="${repo_root}/build/release"
+    case "${source_root}/" in
+        "${work_dir}/"*|"${package_dir}/"*) die "release source overlaps generated output" ;;
+    esac
+
     require_command cmake
+    require_command ctest
     require_command cmp
     require_command curl
     require_command diff
     require_command gpg
-    require_command git
     require_command ninja
     require_command sha256sum
     require_command sha512sum
@@ -790,8 +819,6 @@ build_release() {
     fi
     [[ -f "${toolchain_file}" ]] || die "CMAKE_TOOLCHAIN_FILE or VCPKG_ROOT must identify a vcpkg toolchain"
 
-    package_dir="$(canonical_build_path "${package_dir}")"
-    local work_dir="${repo_root}/build/release"
     local build_dir="${work_dir}/package-build"
     local install_dir="${work_dir}/install"
     local canonical_dir="${work_dir}/canonical"
@@ -801,14 +828,14 @@ build_release() {
     reset_generated_dir "${package_dir}"
 
     local cmake_version
-    cmake_version="$(metadata_version)"
+    cmake_version="$(metadata_version "${source_root}")"
     if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
-        SOURCE_DATE_EPOCH="$(git -C "${repo_root}" log -1 --format=%ct HEAD)"
+        SOURCE_DATE_EPOCH="$(git -C "${source_root}" log -1 --format=%ct HEAD)"
         export SOURCE_DATE_EPOCH
     fi
 
     log "Configure release validation build"
-    cmake -S "${repo_root}" -B "${build_dir}" -G Ninja \
+    cmake -S "${source_root}" -B "${build_dir}" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_STANDARD=20 \
         -DCMAKE_CXX_STANDARD_REQUIRED=ON \
@@ -838,7 +865,7 @@ build_release() {
 
     log "Create reproducible source archives"
     mkdir -p -- "${canonical_dir}"
-    git -C "${repo_root}" archive \
+    git -C "${source_root}" archive \
         --format=tar \
         --prefix="${package_stem}/" \
         HEAD | tar -xf - -C "${canonical_dir}"
@@ -895,7 +922,7 @@ build_release() {
     [[ -d "${dependency_prefix}" ]] || die "release dependency prefix not found: ${dependency_prefix}"
 
     log "Build one staged-install consumer"
-    run_installed_consumer "${install_prefix}" "${dependency_prefix}" "${work_dir}/consumer-install"
+    run_installed_consumer "${source_root}" "${install_prefix}" "${dependency_prefix}" "${work_dir}/consumer-install"
 
     log "Build source consumers from both archives"
     run_source_consumer "${tgz_source_root}" "${toolchain_file}" "${work_dir}/consumer-tgz"
