@@ -32,7 +32,7 @@ git -C "${source_root}" -c user.name=Test -c user.email=test@example.invalid \
     -c commit.gpgsign=false -c core.hooksPath=/dev/null commit --quiet -m fixture
 source_commit="$(git -C "${source_root}" rev-parse HEAD)"
 
-cat >"${consumer_root}/main.cpp" <<'CPP'
+cat >"${consumer_root}/main.cc" <<'CPP'
 #include <cstdlib>
 #include <fstream>
 
