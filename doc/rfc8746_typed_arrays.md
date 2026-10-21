@@ -9,8 +9,10 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/codec/typed_array.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 using namespace cbor::tags;
@@ -109,14 +111,90 @@ enc(as_multi_dimensional_column_major_array(dimensions, cells)); // #6.1040([dim
 
 ## Copied And Borrowed Decode Forms
 
-Use `as_typed_array(values)` to encode an existing span or vector without
-changing the application type:
+Use `as_typed_array(values)` to encode an existing compatible numeric sequence
+without changing the application type. Contiguous and non-contiguous sequences
+are supported. A source must model `std::ranges::forward_range` and expose real
+`T&` or `const T&` references to a supported scalar element type; proxy-reference
+and value-only ranges are excluded:
 
 ```cpp
 std::vector<double> values{1.0, -2.5};
 enc(as_typed_array(values));
 enc(as_typed_array_be(values));
 ```
+
+The same factories decode into compatible writable forward sequences.
+Destinations that support `clear()` and ordered append through `push_back()` or
+`insert_after()` replace their contents and may grow; examples include
+`std::vector`, `std::deque`, `std::list`, `std::forward_list`, and compatible
+small-vector types. Their existing allocator is preserved. A vector, including
+one with a custom or PMR allocator, reuses its capacity when sufficient:
+
+```cpp
+std::vector<double> destination;
+destination.reserve(1024);
+
+auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
+auto result = dec(as_bounded_size<0, 1024>(as_typed_array(destination)));
+if (!result) {
+    // This decoder is terminal; handle result.error().
+    return;
+}
+
+// destination.size() is the decoded element count.
+```
+
+`reserve(1024)` provides reusable storage; it does not impose a 1,024-element
+limit. Use static or runtime `as_bounded_size` bounds when the application needs
+a limit. Without a bound, decoding may grow a resizable sequence. When the
+destination exposes `max_size()`, that remains an upper limit; an impossible
+element count returns `status_code::size_limit_exceeded` before modifying it.
+Sequences exposing `full()` and `capacity()`, such as circular buffers, also
+require the decoded count to fit their capacity. Excess values are rejected
+before any writes so appending cannot silently overwrite earlier elements.
+
+Non-contiguous destinations retain the encoded element order, including a
+singly linked sequence:
+
+```cpp
+#include <forward_list>
+
+std::forward_list<double> destination;
+auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
+auto result = dec(as_typed_array(destination));
+```
+
+Writable forward ranges that do not support replacement and growth require
+exactly their current element count. This includes `std::array`, both
+fixed-extent and dynamic-extent spans, and suitable unsized forward views:
+
+```cpp
+std::array<double, 2> storage{};
+auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
+auto result = dec(as_typed_array(std::span{storage}));
+
+// Success requires exactly two elements; their values are copied into storage.
+// A shorter or longer payload returns unexpected_group_size, leaving it unchanged.
+```
+
+An unsized destination range is counted before writing to it. This traverses
+destination elements, not the decoder input.
+
+Use `as_typed_array_be(destination)` for the corresponding big-endian tag. The
+factories expect the selected tag; they do not automatically accept either byte
+order. On success, destination values have native C++ representation and do not
+borrow the encoded input.
+
+Sequence wrappers borrow lvalue owning sequences; temporary owning sequences,
+including const temporaries, are rejected. Copyable borrowed view descriptors,
+such as spans and subranges, are stored by value whether passed as lvalues or
+temporaries; their backing storage must remain valid. Keep the referenced
+sequence or view storage alive for every use of the wrapper. Read-only storage,
+such as a const vector or `std::span<const T>`, remains encode-only;
+a const `std::span<T>` descriptor still refers to writable elements.
+`typed_array_ref<T>` remains an encode-only public type; writable factory
+results over contiguous storage can convert to it when an explicit encode-only
+type is required. Associative ranges such as maps and sets are excluded.
 
 Decode into `typed_array<T>` when you want the result object to store its own
 `std::vector<T>` copy of the decoded values:
@@ -170,6 +248,30 @@ dec(view);
 
 Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
 
+### Destination Failures
+
+Decoding into an existing sequence is terminal on failure. The following
+rules describe the retained destination and reader position; they do not make
+the decoder resumable:
+
+| Failure | Destination | Reader |
+|---------|-------------|--------|
+| Invalid tag/header, element-byte alignment, bounds, exact element count, or `max_size()` | Unchanged | Stops at the failed check; parsed header bytes stay consumed. Checks after a complete payload-length header leave the payload unread. |
+| Truncated payload in contiguous or sized input | Unchanged | After the tag and byte-string headers; payload remains unread. |
+| Truncated payload in unsized non-contiguous input | A resizable sequence retains completed elements as its new prefix; a fixed-size destination retains an overwritten prefix and its unchanged tail. An incomplete element is never written. | At end of input; returns `status_code::incomplete`. |
+| Allocation failure | May retain a decoded prefix | Stops where the failure occurs; returns `status_code::out_of_memory`. |
+
+For unsized non-contiguous input, decoding consumes the declared payload once,
+without a preliminary traversal or reservation based only on its length header.
+After validating headers and limits, a resizable sequence replaces its previous
+contents as complete elements arrive. A fixed-size destination writes each
+completed element in place.
+
+Use separate decoder input and mutable destination storage, following the
+[input/output aliasing contract](decoder_resource_limits.md).
+The runtime checks are not general alias analysis. A successful decode consumes
+the requested typed-array item and leaves any following CBOR item unread.
+
 ## CDDL Rendering
 
 Concise Data Definition Language (CDDL) describes the encoded data structure.
@@ -221,12 +323,19 @@ enc(ct::as_bounded_size(
 
 rfc8746::typed_array<std::int32_t> decoded;
 dec(ct::as_bounded_size(decoded, 1, max_samples));
+
+std::vector<std::int32_t> destination;
+destination.reserve(max_samples);
+dec(ct::as_bounded_size(
+    rfc8746::as_typed_array(destination), 1, max_samples));
 ```
 
 Runtime bounds work for owned scalar typed arrays, borrowed encode wrappers,
-and typed-array decode views. They are still element counts. The decoder checks
-the corresponding payload byte range and element alignment before allocating
-owned values or assigning a view.
+mutable sequence wrappers, and typed-array decode views. They are still
+element counts. The decoder checks the corresponding payload byte range and
+element alignment before changing destination storage or assigning a view.
+Bounds do not relax the exact element-count requirement of a fixed-size
+destination.
 
 `dynamic_bounded_size<T>` cannot be rendered as type-based CDDL because its
 limits belong to an object, not its type. Use `bounded_size<T, Min, Max>` when
@@ -234,7 +343,9 @@ the typed-array limit is part of the schema.
 
 `bounded_size` around any scalar typed-array wrapper renders bounded CDDL.
 `typed_array<T>` supports bounded encode and decode, `typed_array_ref<T>`
-supports bounded encode, and `typed_array_view<T>` supports bounded decode.
+supports bounded encode, writable `as_typed_array()`/`as_typed_array_be()`
+wrappers support bounded encode and decode, and `typed_array_view<T>` supports
+bounded decode.
 
 Structural wrappers render their actual encoded payload:
 
@@ -359,6 +470,8 @@ using duplicate_typed_array_tag = std::variant<typed_array<std::int32_t>, typed_
 ```
 
 `typed_array_ref<T>` is an encode wrapper and is not a variant decode target.
+Writable sequence wrappers are destination adaptors and are not variant
+decode targets either; use the owning or view types above as alternatives.
 `typed_array_view<T>` is a decode/CDDL view; it can appear as a decoded
 multi-dimensional payload type, but encode factories require an encodable
 payload such as a CBOR array, `typed_array<T>`, `typed_array_ref<T>`, or
@@ -370,6 +483,7 @@ homogeneous array wrapper.
 - `uint8_clamped` and opaque `float128_t`,
 - little-endian and big-endian integer and floating-point arrays,
 - `typed_array<T>` value storage and `typed_array_view<T>` borrowed byte views,
+- decode into existing resizable sequences or exact-size writable ranges,
 - non-contiguous input view aliases,
 - borrowed encode wrappers,
 - segmented output helpers,
