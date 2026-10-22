@@ -1173,7 +1173,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
         // alternatives. If we are here, then we have already checked that this is the right tag.
         if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
-            auto tag_status = this->decode(detail::get_major_6_tag_from_class(value));
+            auto        tag = detail::get_major_6_tag_from_class(value);
+            status_code tag_status;
+
+            // Numeric metadata must validate both the tag major type and its value.
+            if constexpr (detail::is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
+                tag_status = this->decode(tag);
+            } else {
+                auto expected_tag = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(tag)};
+                tag_status        = this->decode(expected_tag);
+            }
+
             if (tag_status != status_code::success) {
                 return tag_status;
             }

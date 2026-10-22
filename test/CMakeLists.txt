@@ -890,6 +890,9 @@ set_tests_properties(typed_array_destinations_wire PROPERTIES LABELS "cbor-wire"
 add_test(NAME transcoder_byte_counts_wire COMMAND tests "--test-suite=cbor_wire/transcoder_byte_counts")
 set_tests_properties(transcoder_byte_counts_wire PROPERTIES LABELS "cbor-wire")
 
+add_test(NAME custom_class_tags_wire COMMAND tests "--test-suite=cbor_wire/custom_class_tags")
+set_tests_properties(custom_class_tags_wire PROPERTIES LABELS "cbor-wire")
+
 function(add_byte_count_compile_fail CASE DIAGNOSTIC)
   string(TOLOWER "transcoder_byte_count_${CASE}_compile_fails" TEST_NAME)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL transcoder_byte_count_compile_fail.cc)
