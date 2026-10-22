@@ -33,7 +33,7 @@ struct status_result {
 
     status_code status{status_code::success};
     status_result() = default;
-    status_result(unexpected<status_code> failure) : status(failure.error()) {}
+    status_result(cbor::tags::unexpected<status_code> failure) : status(failure.error()) {}
 
     bool        has_value() const noexcept { return status == status_code::success; }
     explicit    operator bool() const noexcept { return has_value(); }
@@ -199,7 +199,7 @@ struct failing_value {
         if (!prefix) {
             return prefix;
         }
-        return decltype(prefix){unexpected<status_code>{status_code::size_limit_exceeded}};
+        return decltype(prefix){cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded}};
     }
 
     template <typename Decoder> auto decode(Decoder &dec) {
@@ -207,7 +207,7 @@ struct failing_value {
         if (!prefix) {
             return prefix;
         }
-        return decltype(prefix){unexpected<status_code>{status_code::size_limit_exceeded}};
+        return decltype(prefix){cbor::tags::unexpected<status_code>{status_code::size_limit_exceeded}};
     }
 };
 
