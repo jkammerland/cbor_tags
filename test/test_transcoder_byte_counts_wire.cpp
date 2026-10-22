@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <ranges>
 #include <span>
@@ -241,6 +242,14 @@ template <typename Self> struct direct_codec : codec::base<Self> {
     }
 };
 
+std::uint64_t segmented_wire_size(const byte_segments &segments) {
+    std::uint64_t total{};
+    for (const auto &segment : segments) {
+        total += static_cast<std::uint64_t>(segment.size());
+    }
+    return total;
+}
+
 } // namespace
 
 TEST_SUITE("cbor_wire/transcoder_byte_counts") {
@@ -336,6 +345,91 @@ TEST_SUITE("cbor_wire/transcoder_byte_counts") {
         CHECK_EQ(output[1].data(), backing.data());
         CHECK_EQ(output[1].size(), 2U);
         CHECK(output[2].is_owned());
+    }
+
+    TEST_CASE("segmented byte counts preserve logical wire lengths beyond four gibibytes") {
+        // Reuse one small backing array; only the segment descriptors grow.
+        constexpr std::size_t   payload_size  = 65536;
+        constexpr std::size_t   payload_count = 65536;
+        constexpr std::uint64_t wire_size     = 5ULL + 65536ULL * (5ULL + 65536ULL);
+        static_assert(wire_size == 4295294981ULL);
+        std::array<std::byte, payload_size> backing{};
+        backing.front() = std::byte{0xa5};
+        backing.back()  = std::byte{0x5a};
+        const std::vector<std::span<const std::byte>> payloads(payload_count, std::span<const std::byte>{backing});
+
+        byte_segments output;
+        auto          wide_enc    = make_encoder_with_options<legacy_count_options>(output);
+        const auto    wide_result = wide_enc(payloads);
+        REQUIRE(wide_result);
+        CHECK_EQ(*wide_result, wire_size);
+        CHECK_EQ(segmented_wire_size(output), wire_size);
+
+        // Check the independent CBOR headers, order, and borrowing without
+        // flattening or visiting the repeated four-gibibyte payload contents.
+        const auto initial_header = to_bytes("9a000100005a00010000");
+        const auto payload_header = to_bytes("5a00010000");
+        REQUIRE_EQ(output.size(), payload_count * 2U);
+        bool headers_match  = true;
+        bool borrowed_match = true;
+        for (std::size_t index = 0; index < output.size(); ++index) {
+            const auto &segment = output[index];
+            if (index % 2U == 0U) {
+                const auto &expected_header = index == 0U ? initial_header : payload_header;
+                headers_match               = headers_match && segment.is_owned() && std::ranges::equal(segment.bytes(), expected_header);
+            } else {
+                borrowed_match = borrowed_match && segment.is_borrowed() && segment.data() == backing.data() &&
+                                 segment.size() == backing.size() && segment.bytes().front() == std::byte{0xa5} &&
+                                 segment.bytes().back() == std::byte{0x5a};
+            }
+        }
+        CHECK(headers_match);
+        CHECK(borrowed_match);
+
+        std::uint64_t expected_total = wire_size;
+        if constexpr (std::same_as<count_options, legacy_count_options>) {
+            // On ABIs where the result types alias, the first actual call
+            // already exercises the size_t option without duplicating metadata.
+            const expected<std::size_t, status_code> native_result = wide_result;
+            REQUIRE(native_result);
+            CHECK_EQ(*native_result, wire_size);
+        } else {
+            auto       native_enc    = make_encoder_with_options<count_options>(output);
+            const auto native_result = native_enc(payloads);
+            if constexpr (std::numeric_limits<std::size_t>::max() < wire_size) {
+                REQUIRE_FALSE(native_result);
+                CHECK_EQ(native_result.error(), status_code::size_limit_exceeded);
+            } else {
+                REQUIRE(native_result);
+                CHECK_EQ(*native_result, wire_size);
+            }
+            // A failed count conversion is terminal after the write completes.
+            expected_total += wire_size;
+            CHECK_EQ(segmented_wire_size(output), expected_total);
+        }
+
+        // A large existing total must not narrow the local count of later calls.
+        auto       native_enc  = make_encoder_with_options<count_options>(output);
+        const auto empty       = native_enc();
+        const auto native_tail = native_enc(24U);
+        const auto wide_tail   = wide_enc(25U);
+        REQUIRE(empty);
+        REQUIRE(native_tail);
+        REQUIRE(wide_tail);
+        CHECK_EQ(*empty, 0U);
+        CHECK_EQ(*native_tail, 2U);
+        CHECK_EQ(*wide_tail, 2U);
+
+        nested_value nested;
+        const auto   nested_result = native_enc(7U, nested, 8U);
+        REQUIRE(nested_result);
+        CHECK_EQ(*nested_result, 6U);
+        CHECK_EQ(nested.header_count, 1U);
+        CHECK_EQ(nested.first_count, 2U);
+        CHECK_EQ(nested.second_count, 1U);
+
+        REQUIRE(make_encoder(output)(7U));
+        CHECK_EQ(segmented_wire_size(output), expected_total + 11U);
     }
 
     TEST_CASE("byte counts include standalone headers without requiring a payload") {

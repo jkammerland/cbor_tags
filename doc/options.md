@@ -181,6 +181,9 @@ calls succeed with a count of zero. Existing options using
 `expected<std::uint64_t, status_code>` also return actual byte counts; the
 default success type remains `void`.
 
+Customizations that directly return `enc(...)` or `dec(...)` should use an
+`auto` return type so their result follows the selected options.
+
 Failures return the usual error. The output or destination may retain a partial
 prefix, and failure remains terminal. Byte-count returns cannot be combined
 with encoded-item-view returns.
@@ -188,6 +191,11 @@ with encoded-item-view returns.
 Count-returning encoders require measurable output: fixed buffers, sized
 containers, or segmented buffers. Unsupported unsized custom outputs are
 rejected at compile time only when a count return is selected.
+
+Segmented output is measured with checked wide arithmetic, so borrowed payloads
+can exceed the native `std::size_t` range. If measurement overflows, or the
+current call's count does not fit the selected result type, the call returns
+`status_code::size_limit_exceeded`.
 
 ## Return Encoded Item Views
 

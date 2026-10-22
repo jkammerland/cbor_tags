@@ -283,9 +283,24 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         if constexpr (IsFixedArray<OutputBuffer>) {
             return appender_.head_;
         } else if constexpr (CborSegmentOutputBuffer<OutputBuffer>) {
-            if constexpr (requires {
-                              { std::as_const(data_).total_size() } -> std::integral;
+            if constexpr (std::ranges::forward_range<const OutputBuffer> &&
+                          requires(std::ranges::range_reference_t<const OutputBuffer> segment) {
+                              { segment.bytes() } -> std::same_as<std::span<const std::byte>>;
                           }) {
+                // Borrowed segments can represent more bytes than native size_t.
+                // Measure their payload extents before narrowing the call's delta.
+                std::uintmax_t total{};
+                for (auto &&segment : std::as_const(data_)) {
+                    const auto size = static_cast<std::uintmax_t>(segment.bytes().size());
+                    if (size > (std::numeric_limits<std::uintmax_t>::max)() - total) {
+                        throw detail::encode_status_exception{status_code::size_limit_exceeded};
+                    }
+                    total += size;
+                }
+                return total;
+            } else if constexpr (requires {
+                                     { std::as_const(data_).total_size() } -> std::integral;
+                                 }) {
                 return std::as_const(data_).total_size();
             } else {
                 static_assert(always_false<OutputBuffer>::value,
