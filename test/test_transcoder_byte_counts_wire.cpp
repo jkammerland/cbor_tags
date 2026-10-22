@@ -390,7 +390,7 @@ TEST_SUITE("cbor_wire/transcoder_byte_counts") {
         if constexpr (std::same_as<count_options, legacy_count_options>) {
             // On ABIs where the result types alias, the first actual call
             // already exercises the size_t option without duplicating metadata.
-            const expected<std::size_t, status_code> native_result = wide_result;
+            const auto native_result = wide_result;
             REQUIRE(native_result);
             CHECK_EQ(*native_result, wire_size);
         } else {
