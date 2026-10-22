@@ -13,6 +13,7 @@
 #include <doctest/doctest.h>
 #include <fmt/format.h>
 #include <forward_list>
+#include <iterator>
 #include <list>
 #include <map>
 #include <memory_resource>
@@ -42,9 +43,43 @@ struct deep_const_view : std::ranges::view_interface<deep_const_view> {
     auto end() const noexcept { return values->cend(); }
 };
 
+struct asymmetric_capability_view : std::ranges::view_interface<asymmetric_capability_view> {
+    using const_iterator = std::common_iterator<std::counted_iterator<std::int32_t *>, std::default_sentinel_t>;
+
+    std::span<std::int32_t> elements;
+
+    explicit asymmetric_capability_view(std::span<std::int32_t> values) noexcept : elements(values) {}
+
+    auto data() noexcept { return elements.data(); }
+    auto begin() noexcept { return elements.data(); }
+    auto end() noexcept { return elements.data() + elements.size(); }
+    auto begin() const noexcept {
+        return const_iterator{std::counted_iterator{elements.data(), static_cast<std::ptrdiff_t>(elements.size())}};
+    }
+    auto end() const noexcept { return const_iterator{std::default_sentinel}; }
+    auto size() const noexcept { return elements.size(); }
+};
+
+struct appendable_view : std::ranges::view_interface<appendable_view> {
+    std::vector<std::int32_t> *values;
+    std::size_t                limit;
+
+    appendable_view(std::vector<std::int32_t> &sequence, std::size_t max) noexcept : values(&sequence), limit(max) {}
+
+    auto begin() const noexcept { return values->begin(); }
+    auto end() const noexcept { return values->end(); }
+    auto size() const noexcept { return values->size(); }
+
+    void clear() noexcept { values->clear(); }
+    void push_back(std::int32_t value) { values->push_back(value); }
+    auto max_size() noexcept { return limit; }
+};
+
 } // namespace typed_array_destination_test
 
-template <> inline constexpr bool std::ranges::enable_borrowed_range<typed_array_destination_test::deep_const_view> = true;
+template <> inline constexpr bool std::ranges::enable_borrowed_range<typed_array_destination_test::deep_const_view>            = true;
+template <> inline constexpr bool std::ranges::enable_borrowed_range<typed_array_destination_test::asymmetric_capability_view> = true;
+template <> inline constexpr bool std::ranges::enable_borrowed_range<typed_array_destination_test::appendable_view>            = true;
 
 using namespace cbor::tags;
 using namespace cbor::tags::rfc8746;
@@ -60,6 +95,37 @@ concept CanWrapBigEndianDestination = requires(T &&value) { as_typed_array_be(st
 
 using vector_destination = decltype(as_typed_array(std::declval<std::vector<std::int32_t> &>()));
 using span_destination   = decltype(as_typed_array(std::declval<std::span<std::int32_t, 3>>()));
+
+// Borrowing descriptors stays constexpr even when the backing elements are mutable.
+std::int32_t   constexpr_backing[2]{};
+constexpr auto constexpr_span    = as_typed_array(std::span<std::int32_t>{constexpr_backing});
+constexpr auto constexpr_span_be = as_typed_array_be(std::span<std::int32_t>{constexpr_backing});
+static_assert(constexpr_span.values().size() == 2);
+static_assert(constexpr_span_be.values().size() == 2);
+static_assert(constexpr_span.values().data() == constexpr_backing);
+static_assert(constexpr_span_be.values().data() == constexpr_backing);
+static_assert(std::same_as<std::ranges::range_reference_t<decltype(constexpr_span.values())>, std::int32_t &>);
+
+constexpr typed_array_ref<std::int32_t>                              constexpr_readonly    = constexpr_span;
+constexpr typed_array_ref<std::int32_t, typed_array_byte_order::big> constexpr_readonly_be = constexpr_span_be;
+static_assert(constexpr_readonly.values().size() == 2);
+static_assert(constexpr_readonly_be.values().size() == 2);
+static_assert(constexpr_readonly.values().data() == constexpr_backing);
+static_assert(constexpr_readonly_be.values().data() == constexpr_backing);
+
+constexpr auto constexpr_subrange    = as_typed_array(std::ranges::subrange{constexpr_backing, constexpr_backing + 2});
+constexpr auto constexpr_subrange_be = as_typed_array_be(std::ranges::subrange{constexpr_backing, constexpr_backing + 2});
+static_assert(constexpr_subrange.values().size() == 2);
+static_assert(constexpr_subrange_be.values().size() == 2);
+
+// Reference-backed wrappers retain constexpr access to their original binding.
+std::vector<std::int32_t> constexpr_bound_vector;
+constexpr auto            constexpr_vector    = as_typed_array(constexpr_bound_vector);
+constexpr auto            constexpr_vector_be = as_typed_array_be(constexpr_bound_vector);
+constexpr auto            constexpr_array     = as_typed_array(constexpr_backing);
+static_assert(&constexpr_vector.values() == &constexpr_bound_vector);
+static_assert(&constexpr_vector_be.values() == &constexpr_bound_vector);
+static_assert(std::ranges::size(constexpr_array.values()) == 2);
 
 static_assert(!std::default_initializable<vector_destination>);
 static_assert(!std::default_initializable<span_destination>);
@@ -181,6 +247,32 @@ template <typename Container> void check_sequence_destination() {
     const auto                      empty_bytes = encoded_values(empty);
     REQUIRE(make_decoder<codec::typed_array>(empty_bytes)(as_typed_array(output)));
     CHECK(output.empty());
+}
+
+template <typed_array_byte_order Order> void check_asymmetric_capability_view() {
+    using view_type = typed_array_destination_test::asymmetric_capability_view;
+    static_assert(std::ranges::contiguous_range<view_type>);
+    static_assert(std::ranges::forward_range<const view_type>);
+    static_assert(!std::ranges::contiguous_range<const view_type>);
+    static_assert(std::same_as<std::ranges::range_reference_t<view_type>, std::ranges::range_reference_t<const view_type>>);
+
+    const std::vector<std::int32_t> source{1, -2, 3};
+    const auto                      bytes = encoded_values<Order>(source);
+    std::array<std::int32_t, 3>     backing{};
+    auto                            wrapped = wrap<std::int32_t, Order>(view_type{backing});
+    REQUIRE(make_decoder<codec::typed_array>(bytes)(wrapped));
+    check_values<std::int32_t>(backing, source);
+
+    const auto                          &const_wrapper = wrapped;
+    typed_array_ref<std::int32_t, Order> readonly      = const_wrapper;
+    CHECK_EQ(readonly.values().data(), backing.data());
+    CHECK_EQ(readonly.values().size(), backing.size());
+
+    std::vector<std::byte> reencoded;
+    REQUIRE(make_encoder<codec::typed_array>(reencoded)(const_wrapper));
+    std::vector<std::int32_t> copied;
+    REQUIRE(make_decoder<codec::typed_array>(reencoded)(wrap<std::int32_t, Order>(copied)));
+    CHECK_EQ(copied, source);
 }
 
 } // namespace
@@ -357,6 +449,31 @@ TEST_SUITE("roundtrip/typed_array_destinations") {
         std::vector<std::int32_t> copied;
         REQUIRE(make_decoder<codec::typed_array>(reencoded)(as_typed_array(copied)));
         CHECK_EQ(copied, source);
+    }
+
+    TEST_CASE("typed array borrowed views preserve mutable range capabilities") {
+        check_asymmetric_capability_view<typed_array_byte_order::little>();
+        check_asymmetric_capability_view<typed_array_byte_order::big>();
+    }
+
+    TEST_CASE("typed array appendable borrowed views preserve destination operations and limits") {
+        using view_type = typed_array_destination_test::appendable_view;
+        static_assert(std::ranges::contiguous_range<view_type>);
+        static_assert(std::ranges::contiguous_range<const view_type>);
+        static_assert(std::same_as<std::ranges::range_reference_t<view_type>, std::ranges::range_reference_t<const view_type>>);
+
+        const std::vector<std::int32_t> source{1, -2, 3};
+        const auto                      bytes = encoded_values(source);
+        std::vector<std::int32_t>       backing;
+        REQUIRE(make_decoder<codec::typed_array>(bytes)(as_typed_array(view_type{backing, 3})));
+        CHECK_EQ(backing, source);
+
+        backing.assign({91});
+        const auto wrapped = as_typed_array(view_type{backing, 2});
+        const auto result  = make_decoder<codec::typed_array>(bytes)(as_bounded_size(wrapped, 0, 3));
+        REQUIRE_FALSE(result);
+        CHECK_EQ(result.error(), status_code::size_limit_exceeded);
+        CHECK_EQ(backing, (std::vector<std::int32_t>{91}));
     }
 
     TEST_CASE("mutable typed array destinations support sized non-contiguous input") {

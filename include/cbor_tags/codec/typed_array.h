@@ -446,6 +446,55 @@ concept TypedArrayRangeFor = tags::detail::TypedArraySequenceRange<R> && IsTyped
                              (std::same_as<std::ranges::range_reference_t<R>, std::ranges::range_value_t<R> &> ||
                               std::same_as<std::ranges::range_reference_t<R>, const std::ranges::range_value_t<R> &>);
 
+template <typename R>
+concept TypedArrayConstEquivalentRange =
+    std::ranges::forward_range<const R> && std::same_as<std::ranges::range_reference_t<R>, std::ranges::range_reference_t<const R>> &&
+    (std::ranges::contiguous_range<R> == std::ranges::contiguous_range<const R>) &&
+    (std::ranges::sized_range<R> == std::ranges::sized_range<const R>);
+
+// Simple descriptors and reference bindings remain usable in constant expressions.
+template <typename Storage, bool Mutable = !std::is_reference_v<Storage> && !std::is_const_v<Storage> &&
+                                           (!TypedArrayConstEquivalentRange<Storage> || tags::detail::TypedArrayAppendableRange<Storage>)>
+class typed_array_range_storage {
+  public:
+    constexpr explicit typed_array_range_storage(Storage values) noexcept(std::is_nothrow_constructible_v<Storage, Storage &&>)
+        : values_(std::forward<Storage>(values)) {}
+
+    [[nodiscard]] constexpr decltype(auto) get() noexcept {
+        if constexpr (std::is_reference_v<Storage>) {
+            return values_.get();
+        } else {
+            return (values_);
+        }
+    }
+
+    [[nodiscard]] constexpr decltype(auto) get() const noexcept {
+        if constexpr (std::is_reference_v<Storage>) {
+            return values_.get();
+        } else {
+            return (values_);
+        }
+    }
+
+  private:
+    using stored_type = std::conditional_t<std::is_reference_v<Storage>, std::reference_wrapper<std::remove_reference_t<Storage>>, Storage>;
+    stored_type values_;
+};
+
+// Stateful iteration, changed const capabilities, and growable views need mutable
+// descriptor access while preserving the selected borrowed-element constness.
+template <typename Storage> class typed_array_range_storage<Storage, true> {
+  public:
+    constexpr explicit typed_array_range_storage(Storage values) noexcept(std::is_nothrow_constructible_v<Storage, Storage &&>)
+        : values_(std::forward<Storage>(values)) {}
+
+    [[nodiscard]] constexpr Storage &get() noexcept { return values_; }
+    [[nodiscard]] constexpr Storage &get() const noexcept { return values_; }
+
+  private:
+    mutable Storage values_;
+};
+
 // Retain the sequence itself so decoding can reuse its storage and allocator.
 // Borrowed view descriptors are stored by value; owning sequences by reference.
 template <typename Storage, typed_array_byte_order ByteOrder> class typed_array_range_ref {
@@ -459,15 +508,8 @@ template <typename Storage, typed_array_byte_order ByteOrder> class typed_array_
     constexpr explicit typed_array_range_ref(Storage values) noexcept(std::is_nothrow_constructible_v<Storage, Storage &&>)
         : values_(std::forward<Storage>(values)) {}
 
-    [[nodiscard]] constexpr decltype(auto) values() const noexcept {
-        if constexpr (std::is_reference_v<Storage>) {
-            return values_.get();
-        } else if constexpr (std::is_const_v<Storage>) {
-            return std::as_const(values_);
-        } else {
-            return (values_);
-        }
-    }
+    [[nodiscard]] constexpr decltype(auto) values() noexcept { return values_.get(); }
+    [[nodiscard]] constexpr decltype(auto) values() const noexcept { return values_.get(); }
 
     // Explicit read-only annotations keep the existing snapshot/lifetime rules.
     constexpr operator typed_array_ref<value_type, ByteOrder>() const
@@ -478,11 +520,7 @@ template <typename Storage, typed_array_byte_order ByteOrder> class typed_array_
     }
 
   private:
-    // Iteration can cache state in a view descriptor without changing the
-    // constness of its borrowed elements.
-    using stored_type = std::conditional_t<std::is_reference_v<Storage>, std::reference_wrapper<std::remove_reference_t<Storage>>,
-                                           std::remove_const_t<Storage>>;
-    mutable stored_type values_;
+    typed_array_range_storage<Storage> values_;
 };
 
 // A const span still exposes mutable elements. A view whose const iteration
