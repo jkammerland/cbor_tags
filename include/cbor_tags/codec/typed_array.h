@@ -5,6 +5,7 @@
 #include "cbor_tags/codec.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_extension_encode.h"
+#include "cbor_tags/detail/cbor_typed_array_range.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -437,14 +439,128 @@ class typed_array_ref {
     std::span<const value_type> values_{};
 };
 
-template <IsTypedArrayElement T> [[nodiscard]] constexpr auto as_typed_array(std::span<const T> values) noexcept {
+namespace detail {
+
+template <typename R, typed_array_byte_order ByteOrder>
+concept TypedArrayRangeFor = tags::detail::TypedArraySequenceRange<R> && IsTypedArrayElementFor<std::ranges::range_value_t<R>, ByteOrder> &&
+                             (std::same_as<std::ranges::range_reference_t<R>, std::ranges::range_value_t<R> &> ||
+                              std::same_as<std::ranges::range_reference_t<R>, const std::ranges::range_value_t<R> &>);
+
+template <typename R>
+concept TypedArrayConstEquivalentRange =
+    std::ranges::forward_range<const R> && std::same_as<std::ranges::range_reference_t<R>, std::ranges::range_reference_t<const R>> &&
+    (std::ranges::contiguous_range<R> == std::ranges::contiguous_range<const R>) &&
+    (std::ranges::sized_range<R> == std::ranges::sized_range<const R>);
+
+// Simple descriptors and reference bindings remain usable in constant expressions.
+template <typename Storage, bool Mutable = !std::is_reference_v<Storage> && !std::is_const_v<Storage> &&
+                                           (!TypedArrayConstEquivalentRange<Storage> || tags::detail::TypedArrayAppendableRange<Storage>)>
+class typed_array_range_storage {
+  public:
+    constexpr explicit typed_array_range_storage(Storage values) noexcept(std::is_nothrow_constructible_v<Storage, Storage &&>)
+        : values_(std::forward<Storage>(values)) {}
+
+    [[nodiscard]] constexpr decltype(auto) get() noexcept {
+        if constexpr (std::is_reference_v<Storage>) {
+            return values_.get();
+        } else {
+            return (values_);
+        }
+    }
+
+    [[nodiscard]] constexpr decltype(auto) get() const noexcept {
+        if constexpr (std::is_reference_v<Storage>) {
+            return values_.get();
+        } else {
+            return (values_);
+        }
+    }
+
+  private:
+    using stored_type = std::conditional_t<std::is_reference_v<Storage>, std::reference_wrapper<std::remove_reference_t<Storage>>, Storage>;
+    stored_type values_;
+};
+
+// Stateful iteration, changed const capabilities, and growable views need mutable
+// descriptor access while preserving the selected borrowed-element constness.
+template <typename Storage> class typed_array_range_storage<Storage, true> {
+  public:
+    constexpr explicit typed_array_range_storage(Storage values) noexcept(std::is_nothrow_constructible_v<Storage, Storage &&>)
+        : values_(std::forward<Storage>(values)) {}
+
+    [[nodiscard]] constexpr Storage &get() noexcept { return values_; }
+    [[nodiscard]] constexpr Storage &get() const noexcept { return values_; }
+
+  private:
+    mutable Storage values_;
+};
+
+// Retain the sequence itself so decoding can reuse its storage and allocator.
+// Borrowed view descriptors are stored by value; owning sequences by reference.
+template <typename Storage, typed_array_byte_order ByteOrder> class typed_array_range_ref {
+  public:
+    using value_type                              = std::ranges::range_value_t<Storage>;
+    using range_type                              = Storage;
+    static constexpr auto          byte_order     = ByteOrder;
+    static constexpr std::uint64_t cbor_array_tag = typed_array_traits<value_type, ByteOrder>::tag;
+    static constexpr std::uint64_t cbor_tag       = cbor_array_tag;
+
+    constexpr explicit typed_array_range_ref(Storage values) noexcept(std::is_nothrow_constructible_v<Storage, Storage &&>)
+        : values_(std::forward<Storage>(values)) {}
+
+    [[nodiscard]] constexpr decltype(auto) values() noexcept { return values_.get(); }
+    [[nodiscard]] constexpr decltype(auto) values() const noexcept { return values_.get(); }
+
+    // Explicit read-only annotations keep the existing snapshot/lifetime rules.
+    constexpr operator typed_array_ref<value_type, ByteOrder>() const
+        requires(std::ranges::contiguous_range<Storage> && std::ranges::sized_range<Storage>)
+    {
+        return typed_array_ref<value_type, ByteOrder>{
+            std::span<const value_type>{std::ranges::data(values()), std::ranges::size(values())}};
+    }
+
+  private:
+    typed_array_range_storage<Storage> values_;
+};
+
+// A const span still exposes mutable elements. A view whose const iteration
+// exposes const elements must retain that read-only boundary when copied.
+template <typename R>
+using typed_array_descriptor_t =
+    std::conditional_t<std::is_const_v<std::remove_reference_t<R>> && !tags::detail::TypedArrayWritableRange<R>,
+                       const std::remove_cvref_t<R>, std::remove_cvref_t<R>>;
+
+template <typename R>
+using typed_array_stored_range_t =
+    std::conditional_t<std::ranges::view<std::remove_cvref_t<R>> && std::ranges::borrowed_range<std::remove_cvref_t<R>> &&
+                           std::copy_constructible<std::remove_cvref_t<R>>,
+                       typed_array_descriptor_t<R>, R>;
+
+template <typed_array_byte_order ByteOrder, typename R> [[nodiscard]] constexpr auto make_typed_array_range_ref(R &&values) {
+    using value_type = std::ranges::range_value_t<R>;
+    if constexpr (!tags::detail::TypedArrayDestinationRange<R> && std::ranges::contiguous_range<R> && std::ranges::sized_range<R>) {
+        return typed_array_ref<value_type, ByteOrder>{std::span<const value_type>{std::ranges::data(values), std::ranges::size(values)}};
+    } else {
+        return typed_array_range_ref<typed_array_stored_range_t<R>, ByteOrder>{std::forward<R>(values)};
+    }
+}
+
+} // namespace detail
+
+template <IsTypedArrayElement T, std::size_t Extent>
+[[nodiscard]] constexpr auto as_typed_array(std::span<const T, Extent> values) noexcept {
     return typed_array_ref<std::remove_cv_t<T>>{std::span<const std::remove_cv_t<T>>{values.data(), values.size()}};
 }
 
-template <IsTypedArrayElement T>
+template <IsTypedArrayElement T, std::size_t Extent>
     requires(!std::is_const_v<T>)
-[[nodiscard]] constexpr auto as_typed_array(std::span<T> values) noexcept {
-    return as_typed_array(std::span<const T>{values.data(), values.size()});
+[[nodiscard]] constexpr auto as_typed_array(std::span<T, Extent> values) noexcept {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::little>(std::move(values));
+}
+
+template <IsTypedArrayElement T, typename Allocator>
+[[nodiscard]] constexpr auto as_typed_array(std::vector<T, Allocator> &values) noexcept {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::little>(values);
 }
 
 template <IsTypedArrayElement T, typename Allocator>
@@ -452,19 +568,26 @@ template <IsTypedArrayElement T, typename Allocator>
     return as_typed_array(std::span<const T>{values.data(), values.size()});
 }
 
-template <IsTypedArrayElement T, typename Allocator> void as_typed_array(std::vector<T, Allocator> &&values) = delete;
+template <IsTypedArrayElement T, typename Allocator> void as_typed_array(std::vector<T, Allocator> &&values)       = delete;
+template <IsTypedArrayElement T, typename Allocator> void as_typed_array(const std::vector<T, Allocator> &&values) = delete;
 
-template <typename T>
+template <typename T, std::size_t Extent>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
-[[nodiscard]] constexpr auto as_typed_array_be(std::span<const T> values) noexcept {
+[[nodiscard]] constexpr auto as_typed_array_be(std::span<const T, Extent> values) noexcept {
     return typed_array_ref<std::remove_cv_t<T>, typed_array_byte_order::big>{
         std::span<const std::remove_cv_t<T>>{values.data(), values.size()}};
 }
 
-template <typename T>
+template <typename T, std::size_t Extent>
     requires(!std::is_const_v<T> && IsTypedArrayElementFor<T, typed_array_byte_order::big>)
-[[nodiscard]] constexpr auto as_typed_array_be(std::span<T> values) noexcept {
-    return as_typed_array_be(std::span<const T>{values.data(), values.size()});
+[[nodiscard]] constexpr auto as_typed_array_be(std::span<T, Extent> values) noexcept {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::big>(std::move(values));
+}
+
+template <typename T, typename Allocator>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+[[nodiscard]] constexpr auto as_typed_array_be(std::vector<T, Allocator> &values) noexcept {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::big>(values);
 }
 
 template <typename T, typename Allocator>
@@ -476,6 +599,46 @@ template <typename T, typename Allocator>
 template <typename T, typename Allocator>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
 void as_typed_array_be(std::vector<T, Allocator> &&values) = delete;
+
+template <typename T, typename Allocator>
+    requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
+void as_typed_array_be(const std::vector<T, Allocator> &&values) = delete;
+
+template <typename R>
+    requires detail::TypedArrayRangeFor<R, typed_array_byte_order::little>
+[[nodiscard]] constexpr auto as_typed_array(R &values) {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::little>(values);
+}
+
+template <typename R>
+    requires detail::TypedArrayRangeFor<R, typed_array_byte_order::big>
+[[nodiscard]] constexpr auto as_typed_array_be(R &values) {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::big>(values);
+}
+
+template <typename R>
+    requires(!std::is_lvalue_reference_v<R> && detail::TypedArrayRangeFor<R, typed_array_byte_order::little> && std::ranges::view<R> &&
+             std::ranges::borrowed_range<R>)
+[[nodiscard]] constexpr auto as_typed_array(R &&values) {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::little>(std::forward<R>(values));
+}
+
+template <typename R>
+    requires(!std::is_lvalue_reference_v<R> && detail::TypedArrayRangeFor<R, typed_array_byte_order::big> && std::ranges::view<R> &&
+             std::ranges::borrowed_range<R>)
+[[nodiscard]] constexpr auto as_typed_array_be(R &&values) {
+    return detail::make_typed_array_range_ref<typed_array_byte_order::big>(std::forward<R>(values));
+}
+
+template <typename R>
+    requires(!std::is_lvalue_reference_v<R> && detail::TypedArrayRangeFor<R, typed_array_byte_order::little> &&
+             !(std::ranges::view<R> && std::ranges::borrowed_range<R>))
+void as_typed_array(R &&values) = delete;
+
+template <typename R>
+    requires(!std::is_lvalue_reference_v<R> && detail::TypedArrayRangeFor<R, typed_array_byte_order::big> &&
+             !(std::ranges::view<R> && std::ranges::borrowed_range<R>))
+void as_typed_array_be(R &&values) = delete;
 
 template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder = typed_array_byte_order::little>
     requires IsTypedArrayElementFor<T, ByteOrder>
@@ -662,6 +825,8 @@ using typed_array_view_be = typed_array_view<T, ByteRange, typed_array_byte_orde
 template <typename T> struct is_typed_array_wrapper : std::false_type {};
 template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wrapper<typed_array<T, ByteOrder>> : std::true_type {};
 template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
+template <typename R, typed_array_byte_order ByteOrder>
+struct is_typed_array_wrapper<detail::typed_array_range_ref<R, ByteOrder>> : std::true_type {};
 template <typename T, detail::TypedArrayPayloadRange ByteRange, typed_array_byte_order ByteOrder>
 struct is_typed_array_wrapper<typed_array_view<T, ByteRange, ByteOrder>> : std::true_type {};
 
@@ -669,9 +834,16 @@ template <typename T> struct is_typed_array_encode_wrapper : std::false_type {};
 template <typename T, typed_array_byte_order ByteOrder> struct is_typed_array_encode_wrapper<typed_array<T, ByteOrder>> : std::true_type {};
 template <typename T, typed_array_byte_order ByteOrder>
 struct is_typed_array_encode_wrapper<typed_array_ref<T, ByteOrder>> : std::true_type {};
+template <typename R, typed_array_byte_order ByteOrder>
+struct is_typed_array_encode_wrapper<detail::typed_array_range_ref<R, ByteOrder>> : std::true_type {};
 
 template <typename T>
 concept TypedArrayEncodeTarget = is_typed_array_encode_wrapper<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept MutableTypedArrayRangeTarget = is_typed_array_wrapper<std::remove_cvref_t<T>>::value && requires {
+    typename std::remove_cvref_t<T>::range_type;
+} && tags::detail::TypedArrayDestinationRange<typename std::remove_cvref_t<T>::range_type>;
 
 template <typename T>
 concept OwnedTypedArrayTarget =
@@ -841,6 +1013,13 @@ template <typename T, rfc8746::typed_array_byte_order ByteOrder> struct tagged_b
     static constexpr std::uint64_t element_byte_size = rfc8746::detail::typed_array_element_byte_size<T, ByteOrder>();
 };
 
+template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+struct tagged_bstr_array_traits<rfc8746::detail::typed_array_range_ref<R, ByteOrder>> {
+    using value_type                                 = std::ranges::range_value_t<R>;
+    static constexpr std::uint64_t tag               = rfc8746::typed_array_traits<value_type, ByteOrder>::tag;
+    static constexpr std::uint64_t element_byte_size = rfc8746::detail::typed_array_element_byte_size<value_type, ByteOrder>();
+};
+
 template <typename T, rfc8746::detail::TypedArrayPayloadRange ByteRange, rfc8746::typed_array_byte_order ByteOrder>
 struct tagged_bstr_array_traits<rfc8746::typed_array_view<T, ByteRange, ByteOrder>> {
     static constexpr std::uint64_t tag               = rfc8746::typed_array_traits<std::remove_cv_t<T>, ByteOrder>::tag;
@@ -921,6 +1100,30 @@ template <typename Self> struct typed_array : base<Self> {
         encode_borrowed_values<T, ByteOrder>(array.values());
     }
 
+    template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+    void encode(const rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
+        using value_type = std::ranges::range_value_t<R>;
+        auto &values     = array.values();
+        if constexpr (std::ranges::contiguous_range<R> && std::ranges::sized_range<R>) {
+            encode_borrowed_values<value_type, ByteOrder>(
+                std::span<const value_type>{std::ranges::data(values), std::ranges::size(values)});
+        } else {
+            // Non-contiguous sequences stream stack-local representations into
+            // owned output bytes, preserving order without a payload temporary.
+            auto      &enc   = static_cast<Self &>(*this);
+            const auto count = tags::detail::typed_array_range_size(values);
+            if (count > std::numeric_limits<std::uint64_t>::max() / sizeof(value_type)) {
+                throw tags::detail::encode_status_exception{status_code::size_limit_exceeded};
+            }
+            enc.encode(static_tag<rfc8746::typed_array_traits<value_type, ByteOrder>::tag>{});
+            tags::detail::encode_extension_bstr_header(enc, count * sizeof(value_type));
+            for (const auto value : values) {
+                const auto bits = rfc8746::detail::native_to_wire_bits<ByteOrder>(rfc8746::detail::to_bits<ByteOrder>(value));
+                tags::detail::append_extension_owned_bytes(enc, std::as_bytes(std::span{&bits, 1}));
+            }
+        }
+    }
+
     template <typename Array> void encode(const rfc8746::homogeneous_array<Array> &array) {
         encode_homogeneous_array_payload(array.values());
     }
@@ -985,6 +1188,71 @@ template <typename Self> struct typed_array : base<Self> {
         return rfc8746::detail::decode_payload_after_tag<value_type, ByteOrder>(
             dec, tag, [&](major_type payload_major, std::byte payload_info) {
                 return decode_typed_array_view_payload<T, ByteRange, ByteOrder>(view, payload_major, payload_info);
+            });
+    }
+
+    template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+        requires tags::detail::TypedArrayDestinationRange<R>
+    [[nodiscard]] status_code decode(rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array, major_type major,
+                                     std::byte additional_info) {
+        auto &dec = static_cast<Self &>(*this);
+        return rfc8746::detail::decode_payload<std::ranges::range_value_t<R>, ByteOrder>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_mutable_typed_array_payload(array, payload_major, payload_info, 0, std::numeric_limits<std::size_t>::max());
+            });
+    }
+
+    template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+        requires tags::detail::TypedArrayDestinationRange<R>
+    [[nodiscard]] status_code decode(rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array, std::uint64_t tag) {
+        auto &dec = static_cast<Self &>(*this);
+        return rfc8746::detail::decode_payload_after_tag<std::ranges::range_value_t<R>, ByteOrder>(
+            dec, tag, [&](major_type payload_major, std::byte payload_info) {
+                return decode_mutable_typed_array_payload(array, payload_major, payload_info, 0, std::numeric_limits<std::size_t>::max());
+            });
+    }
+
+    template <rfc8746::MutableTypedArrayRangeTarget Array, std::size_t Min, std::size_t Max>
+    [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, major_type major, std::byte additional_info) {
+        using array_type = std::remove_cvref_t<Array>;
+        rfc8746::detail::validate_static_typed_array_bounds<Min, Max, typename array_type::value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
+        return rfc8746::detail::decode_payload<typename array_type::value_type, array_type::byte_order>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_mutable_typed_array_payload(bounded.value(), payload_major, payload_info, Min, Max);
+            });
+    }
+
+    template <rfc8746::MutableTypedArrayRangeTarget Array, std::size_t Min, std::size_t Max>
+    [[nodiscard]] status_code decode(bounded_size<Array, Min, Max> &bounded, std::uint64_t tag) {
+        using array_type = std::remove_cvref_t<Array>;
+        rfc8746::detail::validate_static_typed_array_bounds<Min, Max, typename array_type::value_type, array_type::byte_order>();
+        auto &dec = static_cast<Self &>(*this);
+        return rfc8746::detail::decode_payload_after_tag<typename array_type::value_type, array_type::byte_order>(
+            dec, tag, [&](major_type payload_major, std::byte payload_info) {
+                return decode_mutable_typed_array_payload(bounded.value(), payload_major, payload_info, Min, Max);
+            });
+    }
+
+    template <rfc8746::MutableTypedArrayRangeTarget Array>
+    [[nodiscard]] status_code decode(dynamic_bounded_size<Array> &bounded, major_type major, std::byte additional_info) {
+        using array_type = std::remove_cvref_t<Array>;
+        auto &dec        = static_cast<Self &>(*this);
+        return rfc8746::detail::decode_payload<typename array_type::value_type, array_type::byte_order>(
+            dec, major, additional_info, [&](major_type payload_major, std::byte payload_info) {
+                return decode_mutable_typed_array_payload(bounded.value(), payload_major, payload_info, bounded.min_size(),
+                                                          bounded.max_size());
+            });
+    }
+
+    template <rfc8746::MutableTypedArrayRangeTarget Array>
+    [[nodiscard]] status_code decode(dynamic_bounded_size<Array> &bounded, std::uint64_t tag) {
+        using array_type = std::remove_cvref_t<Array>;
+        auto &dec        = static_cast<Self &>(*this);
+        return rfc8746::detail::decode_payload_after_tag<typename array_type::value_type, array_type::byte_order>(
+            dec, tag, [&](major_type payload_major, std::byte payload_info) {
+                return decode_mutable_typed_array_payload(bounded.value(), payload_major, payload_info, bounded.min_size(),
+                                                          bounded.max_size());
             });
     }
 
@@ -1160,11 +1428,44 @@ template <typename Self> struct typed_array : base<Self> {
         return static_cast<std::uint64_t>(array.values().size());
     }
 
+    template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+    [[nodiscard]] static std::uint64_t typed_array_element_count(const rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
+        return tags::detail::typed_array_range_size(array.values());
+    }
+
     template <typename Array> static void require_bounded_typed_array_element_count(const Array &array, std::size_t min, std::size_t max) {
         const auto size = typed_array_element_count(array);
         if (tags::detail::bounded_size_status(size, min, max) != status_code::success) {
             throw tags::detail::encode_status_exception{status_code::size_limit_exceeded};
         }
+    }
+
+    template <rfc8746::MutableTypedArrayRangeTarget Array>
+    [[nodiscard]] status_code decode_mutable_typed_array_payload(Array &array, major_type major, std::byte info, std::size_t min,
+                                                                 std::size_t max) {
+        using value_type          = typename Array::value_type;
+        constexpr auto byte_order = Array::byte_order;
+        if (major != major_type::ByteString || info == std::byte{31}) {
+            return status_code::no_match_for_bstr_on_buffer;
+        }
+
+        std::uint64_t byte_count{};
+        auto          status = decode_payload_size(info, byte_count);
+        if (status != status_code::success) {
+            return status;
+        }
+        status = rfc8746::detail::bounded_typed_array_payload_size_status<value_type, byte_order>(byte_count, min, max);
+        if (status != status_code::success) {
+            return status;
+        }
+        if (byte_count % sizeof(value_type) != 0U) {
+            return status_code::unexpected_group_size;
+        }
+
+        auto &dec = static_cast<Self &>(*this);
+        return tags::detail::decode_typed_array_range<rfc8746::detail::native_matches_byte_order<byte_order>>(
+            dec, array.values(), byte_count,
+            [](std::span<const std::byte> bytes) { return rfc8746::detail::from_endian<byte_order, value_type>(bytes); });
     }
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
@@ -1512,6 +1813,29 @@ template <typename T, typed_array_byte_order ByteOrder>
     requires IsTypedArrayElementFor<T, ByteOrder>
 [[nodiscard]] byte_segments encode_segments(const typed_array_ref<T, ByteOrder> &array) {
     return encode_typed_array_borrowed_segments<ByteOrder>(array.values());
+}
+
+template <typename R, typed_array_byte_order ByteOrder>
+[[nodiscard]] byte_segments encode_segments(const detail::typed_array_range_ref<R, ByteOrder> &array) {
+    using value_type = std::ranges::range_value_t<R>;
+    if constexpr (std::ranges::contiguous_range<R> && std::ranges::sized_range<R>) {
+        return encode_typed_array_borrowed_segments<ByteOrder>(
+            std::span<const value_type>{std::ranges::data(array.values()), std::ranges::size(array.values())});
+    } else {
+        // Discontiguous source elements cannot form one borrowed byte span.
+        byte_segments segments;
+        const auto    count = tags::detail::typed_array_range_size(array.values());
+        if (count > std::numeric_limits<std::uint64_t>::max() / sizeof(value_type)) {
+            throw tags::detail::encode_status_exception{status_code::size_limit_exceeded};
+        }
+        segments.append_owned(tags::detail::encode_cbor_tag_header(typed_array_traits<value_type, ByteOrder>::tag));
+        segments.append_owned(tags::detail::encode_cbor_bstr_header(count * sizeof(value_type)));
+        for (const auto value : array.values()) {
+            const auto bits = detail::native_to_wire_bits<ByteOrder>(detail::to_bits<ByteOrder>(value));
+            segments.append_owned(std::as_bytes(std::span{&bits, 1}));
+        }
+        return segments;
+    }
 }
 
 template <typename T, typed_array_byte_order ByteOrder>

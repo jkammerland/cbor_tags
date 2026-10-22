@@ -29,7 +29,7 @@ through signing, token encoding, decoding and verification.
 | [12_array_header.cpp](12_array_header.cpp) | Read a header separately | The header declares a count and leaves the elements unread. |
 | [13_item_validation.cpp](13_item_validation.cpp) | Validate one item | Validation checks the next complete item and leaves subsequent items unread. |
 | [14_item_visitor.cpp](14_item_visitor.cpp) | Visit one item | Print value bytes at their nesting depth, separating groups and omitting container headers. |
-| [15_typed_array.cpp](15_typed_array.cpp) | Opt into typed arrays | Signed 32-bit elements use RFC 8746 tag 78 and a little-endian byte-string payload. |
+| [15_typed_array.cpp](15_typed_array.cpp) | Opt into typed arrays | RFC 8746 arrays decode into owning typed arrays, reusable numeric sequences, or exact-size spans. |
 | [16_unique_pointer.cpp](16_unique_pointer.cpp) | Opt into unique pointers | A pointee encodes as its value; an empty pointer encodes null. |
 | [17_custom_codec.cpp](17_custom_codec.cpp) | Write an application codec | An explicit codec represents Temperature as one integer rather than an aggregate array. |
 | [18_cddl_schema.cpp](18_cddl_schema.cpp) | Generate a schema | Generate and print the same record schema introduced in example 04. |

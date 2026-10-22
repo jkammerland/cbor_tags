@@ -884,6 +884,22 @@ add_typed_array_variant_compile_fail_test(typed_array_variant_static_tag_compile
 add_typed_array_variant_compile_fail_test(typed_array_variant_any_tag_compile_fails typed_array_variant_any_tag_compile_fail.cc)
 add_typed_array_variant_compile_fail_test(typed_array_variant_duplicate_tag_compile_fails typed_array_variant_duplicate_tag_compile_fail.cc)
 
+add_test(NAME typed_array_destinations_wire COMMAND tests "--test-suite=cbor_wire/typed_array_destinations")
+set_tests_properties(typed_array_destinations_wire PROPERTIES LABELS "cbor-wire")
+
+# Instantiate the public decoder call to verify readonly wrappers are encode-only.
+foreach(CASE CONST_VECTOR CONST_SPAN CONST_VECTOR_BE CONST_SPAN_BE CONST_LIST CONST_LIST_BE CONST_VIEW)
+  string(TOLOWER "typed_array_destination_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL typed_array_destination_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TYPED_DEST_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=deleted|encode-only|no matching|no member named"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+
 function(add_bounded_fixed_string_compile_fail_test TEST_NAME COMPILE_DEFINITION)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL cddl_bounded_fixed_string_compile_fail.cc)
   target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
