@@ -47,8 +47,22 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
+            // Each public call measures its own complete write, including nested customizations.
+            [[maybe_unused]] const auto start_offset = [&] {
+                if constexpr (detail::returns_byte_count_v<expected_type>) {
+                    return current_offset();
+                } else {
+                    return std::size_t{};
+                }
+            }();
+
             (encode(std::forward<T>(args)), ...);
-            return expected_type{};
+
+            if constexpr (detail::returns_byte_count_v<expected_type>) {
+                return detail::make_byte_count_result<expected_type>(current_offset() - start_offset);
+            } else {
+                return expected_type{};
+            }
         } catch (const detail::encode_status_exception &e) { return unexpected<status_code>(e.status); } catch (const std::bad_alloc &) {
             return unexpected<status_code>(status_code::out_of_memory);
         } catch (...) {
@@ -265,6 +279,29 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     OutputBuffer                  &data_;
 
   private:
+    [[nodiscard]] constexpr auto current_offset() const {
+        if constexpr (IsFixedArray<OutputBuffer>) {
+            return appender_.head_;
+        } else if constexpr (CborSegmentOutputBuffer<OutputBuffer>) {
+            if constexpr (requires {
+                              { std::as_const(data_).total_size() } -> std::integral;
+                          }) {
+                return std::as_const(data_).total_size();
+            } else {
+                static_assert(always_false<OutputBuffer>::value,
+                              "byte-count encoder results require segment output buffers with an integral total_size()");
+                return size_type{};
+            }
+        } else if constexpr (std::ranges::sized_range<const OutputBuffer>) {
+            return std::ranges::size(std::as_const(data_));
+        } else {
+            static_assert(always_false<OutputBuffer>::value,
+                          "byte-count encoder results require sized byte output buffers; unsized output is supported with status-only "
+                          "results");
+            return size_type{};
+        }
+    }
+
     template <typename T> constexpr bool try_encode_float_array(const T &value) {
         if constexpr (IsFixedArray<OutputBuffer> || std::same_as<OutputBuffer, std::vector<byte_type>>) {
             using float_type     = typename T::value_type;
@@ -435,6 +472,12 @@ template <template <typename> typename... Extensions, CborOutputBuffer OutputBuf
     requires(sizeof...(Extensions) > 0)
 inline auto make_encoder(OutputBuffer &buffer) {
     return encoder<OutputBuffer, default_options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder,
+                   Extensions...>(buffer);
+}
+
+template <IsOptions EncoderOptions, template <typename> typename... Extensions, CborOutputBuffer OutputBuffer>
+inline auto make_encoder_with_options(OutputBuffer &buffer) {
+    return encoder<OutputBuffer, EncoderOptions, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder,
                    Extensions...>(buffer);
 }
 } // namespace cbor::tags

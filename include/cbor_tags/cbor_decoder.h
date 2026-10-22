@@ -164,6 +164,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (detail::return_encoded_item_view_option_v<Options>) {
                 return decode_with_encoded_item_view(std::forward<T>(args)...);
             } else {
+                // Local snapshots include nested customization calls without
+                // adding a second traversal of non-contiguous input.
+                [[maybe_unused]] const auto start = [&] {
+                    if constexpr (detail::returns_byte_count_v<expected_type>) {
+                        return current_offset();
+                    } else {
+                        return std::size_t{};
+                    }
+                }();
+
                 status_collector<self_t> collect_status{*this};
 
                 auto success = (collect_status(std::forward<T>(args)) && ...);
@@ -171,7 +181,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (!success) {
                     return unexpected<decltype(collect_status.result)>(collect_status.result);
                 }
-                return expected_type{};
+                if constexpr (detail::returns_byte_count_v<expected_type>) {
+                    return detail::make_byte_count_result<expected_type>(current_offset() - start);
+                } else {
+                    return expected_type{};
+                }
             }
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);

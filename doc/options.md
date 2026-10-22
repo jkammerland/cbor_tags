@@ -154,6 +154,41 @@ Passing the complete output span as the source, or otherwise overlapping the
 source with bytes the encoder writes, remains unsupported. Use separate storage
 when that layout is not practical.
 
+## Return Byte Counts
+
+Select `expected<std::size_t, status_code>` to return the number of bytes
+written or consumed by each successful call:
+
+```cpp
+using count_options =
+    Options<Option<expected<std::size_t, status_code>>, default_wrapping>;
+
+std::vector<std::byte> buffer;
+auto enc = make_encoder_with_options<count_options>(buffer);
+auto written = enc(1U, 24U);
+assert(written && *written == 3);
+
+unsigned first{}, second{};
+auto dec = make_decoder_with_options<count_options>(buffer);
+auto consumed = dec(first, second);
+assert(consumed && *consumed == 3);
+assert(first == 1U && second == 24U);
+```
+
+Counts include all arguments and their headers and tags. They apply to the
+current call, not the accumulated buffer or decoder position. Zero-argument
+calls succeed with a count of zero. Existing options using
+`expected<std::uint64_t, status_code>` also return actual byte counts; the
+default success type remains `void`.
+
+Failures return the usual error. The output or destination may retain a partial
+prefix, and failure remains terminal. Byte-count returns cannot be combined
+with encoded-item-view returns.
+
+Count-returning encoders require measurable output: fixed buffers, sized
+containers, or segmented buffers. Unsupported unsized custom outputs are
+rejected at compile time only when a count return is selected.
+
 ## Return Encoded Item Views
 
 ```cpp
@@ -178,9 +213,12 @@ is part of `default_options`.
 using no_group_wrapping = Options<default_expected>;
 ```
 
-The public factories currently use `default_options` for encoders. Advanced
-code can instantiate the `encoder<...>` type directly when it needs a custom
-encoder option set.
+Use `make_encoder_with_options<no_group_wrapping>(buffer)` to select encoder
+options. Codec extensions compose in the same way as decoder options:
+
+```cpp
+auto enc = make_encoder_with_options<no_group_wrapping, my_extension>(buffer);
+```
 
 ## Custom Option Sets
 

@@ -119,6 +119,26 @@ template <typename T> struct Option {
 using default_expected = Option<expected<void, status_code>>;
 
 namespace detail {
+
+// Recognize the configured expected types without requiring value_type on
+// application-defined status-only results. One specialization handles ABIs
+// where size_t and uint64_t are aliases.
+template <typename Result> struct byte_count_result : std::false_type {};
+
+template <typename Value>
+struct byte_count_result<expected<Value, status_code>>
+    : std::bool_constant<std::same_as<Value, std::size_t> || std::same_as<Value, std::uint64_t>> {};
+
+template <typename Result> inline constexpr bool returns_byte_count_v = byte_count_result<Result>::value;
+
+template <typename Result, typename Count> [[nodiscard]] constexpr Result make_byte_count_result(Count count) {
+    using count_type = typename Result::value_type;
+    if (!std::in_range<count_type>(count)) {
+        return unexpected<status_code>{status_code::size_limit_exceeded};
+    }
+    return Result{static_cast<count_type>(count)};
+}
+
 struct wrap_groups {};
 struct strict_integer_decode {};
 struct assume_no_input_output_aliasing {};
@@ -269,6 +289,8 @@ template <typename... T> struct ReturnTypeHelper {
     static auto get_return_type() {
         if constexpr (contains<Option<expected<void, status_code>>, T...>()) {
             return std::type_identity<expected<void, status_code>>{};
+        } else if constexpr (contains<Option<expected<std::size_t, status_code>>, T...>()) {
+            return std::type_identity<expected<std::size_t, status_code>>{};
         } else if constexpr (contains<Option<expected<std::uint64_t, status_code>>, T...>()) {
             return std::type_identity<expected<std::uint64_t, status_code>>{};
         } else {
@@ -319,6 +341,8 @@ struct decoder_return_type {
 };
 
 template <typename Options, typename InputBuffer> struct decoder_return_type<Options, InputBuffer, true> {
+    static_assert(!returns_byte_count_v<typename Options::return_type>,
+                  "byte-count returns cannot be combined with return_encoded_item_view");
     using type = expected<encoded_item_view_for<InputBuffer>, status_code>;
 };
 } // namespace detail
