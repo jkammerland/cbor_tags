@@ -2,10 +2,12 @@
 
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/codec.h>
 #include <cstddef>
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -40,6 +42,22 @@ struct convertible_tagged : scalar_customization {
     static constexpr convertible_tag cbor_tag{};
 };
 
+struct mutable_numeric_tag {
+    constexpr operator std::uint64_t() { return 100; }
+};
+
+struct mutable_conversion_tagged : scalar_customization {
+    mutable_numeric_tag cbor_tag;
+};
+
+struct rvalue_numeric_tag {
+    constexpr operator std::uint64_t() && { return 100; }
+};
+
+struct rvalue_conversion_tagged : scalar_customization {
+    rvalue_numeric_tag cbor_tag;
+};
+
 struct member_static_tagged : scalar_customization {
     static_tag<100> cbor_tag;
 };
@@ -67,12 +85,102 @@ struct function_tagged {
     template <typename Decoder> auto decode(Decoder &dec) { return dec(static_tag<cbor_tag()>{}, number); }
 };
 
+template <typename Self> struct rvalue_tag_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    unsigned rvalue_tag_encodes{};
+    unsigned rvalue_tag_decodes{};
+
+    void encode(static_tag<100> &&) {
+        ++rvalue_tag_encodes;
+        static_cast<Self &>(*this).encode_tag_argument(100);
+    }
+
+    void encode(dynamic_tag<std::uint64_t> &&tag) {
+        ++rvalue_tag_encodes;
+        static_cast<Self &>(*this).encode_tag_argument(tag.cbor_tag);
+    }
+
+    status_code decode(static_tag<100> &&tag) {
+        ++rvalue_tag_decodes;
+        auto &dec                = static_cast<Self &>(*this);
+        const auto [major, info] = dec.read_initial_byte();
+        return dec.decode(tag, major, info);
+    }
+
+    status_code decode(dynamic_tag<std::uint64_t> &&tag) {
+        ++rvalue_tag_decodes;
+        auto &dec                = static_cast<Self &>(*this);
+        const auto [major, info] = dec.read_initial_byte();
+        return dec.decode(tag, major, info);
+    }
+};
+
+template <typename Tagged, typename Options> void check_qualified_numeric_metadata() {
+    std::vector<std::byte> output;
+    const auto             encoded = make_encoder_with_options<Options>(output)(Tagged{});
+    REQUIRE(encoded);
+    CHECK_EQ(to_hex(output), "d86401");
+
+    const auto input = to_bytes("d86401");
+    Tagged     destination;
+    destination.number = 77;
+    const auto decoded = make_decoder_with_options<Options>(input)(destination);
+    REQUIRE(decoded);
+    CHECK_EQ(destination.number, 1U);
+
+    for (const auto &test :
+         {std::pair{"186401", status_code::no_match_for_tag_on_buffer}, std::pair{"d86501", status_code::no_match_for_tag}}) {
+        CAPTURE(test.first);
+        const auto invalid  = to_bytes(test.first);
+        destination.number  = 77;
+        const auto rejected = make_decoder_with_options<Options>(invalid)(destination);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error() == test.second);
+        CHECK_EQ(destination.number, 77U);
+    }
+
+    if constexpr (detail::returns_byte_count_v<typename Options::return_type>) {
+        CHECK_EQ(*encoded, 3U);
+        CHECK_EQ(*decoded, 3U);
+    }
+}
+
 static_assert(IsClassWithTagOverload<integral_tagged>);
+static_assert(IsClassWithTagOverload<mutable_conversion_tagged>);
+static_assert(IsClassWithTagOverload<rvalue_conversion_tagged>);
 static_assert(!IsClassWithTagOverload<function_tagged>);
 
 } // namespace
 
 TEST_SUITE("cbor_wire/custom_class_tags") {
+
+    TEST_CASE_TEMPLATE("numeric metadata preserves admitted conversion qualifiers", Tagged, mutable_conversion_tagged,
+                       rvalue_conversion_tagged) {
+        SUBCASE("default results") { check_qualified_numeric_metadata<Tagged, default_options>(); }
+        SUBCASE("byte count results") { check_qualified_numeric_metadata<Tagged, count_options>(); }
+    }
+
+    TEST_CASE_TEMPLATE("automatic wrapper tags retain rvalue codec dispatch", Tagged, member_static_tagged, member_dynamic_tagged) {
+        std::vector<std::byte> output;
+        auto                   enc     = make_encoder_with_options<count_options, rvalue_tag_codec>(output);
+        const auto             encoded = enc(Tagged{});
+        REQUIRE(encoded);
+        CHECK_EQ(*encoded, 3U);
+        CHECK_EQ(to_hex(output), "d86401");
+        CHECK_EQ(enc.rvalue_tag_encodes, 1U);
+
+        const auto input = to_bytes("d86401");
+        auto       dec   = make_decoder_with_options<count_options, rvalue_tag_codec>(input);
+        Tagged     destination;
+        destination.number = 77;
+        const auto decoded = dec(destination);
+        REQUIRE(decoded);
+        CHECK_EQ(*decoded, 3U);
+        CHECK_EQ(destination.number, 1U);
+        CHECK_EQ(dec.rvalue_tag_decodes, 1U);
+    }
 
     TEST_CASE_TEMPLATE("custom integral tag metadata encodes and validates a tag item", Options, default_options, count_options) {
         std::vector<std::byte> output;

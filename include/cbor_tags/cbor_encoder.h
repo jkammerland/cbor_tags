@@ -224,13 +224,13 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
         // Automatic tag encoding
         if constexpr (IsClassWithTagOverload<C>) {
-            const auto tag = detail::get_major_6_tag_from_class(value);
+            auto tag = detail::get_major_6_tag_from_class(value);
 
             // Metadata names a tag number; explicit tag wrappers keep their dispatch.
             if constexpr (detail::is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
-                this->encode(tag);
+                this->encode(std::move(tag));
             } else {
-                this->encode_tag_argument(static_cast<std::uint64_t>(tag));
+                this->encode_tag_argument(static_cast<std::uint64_t>(std::move(tag)));
             }
         }
 

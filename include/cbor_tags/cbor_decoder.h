@@ -1178,9 +1178,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
             // Numeric metadata must validate both the tag major type and its value.
             if constexpr (detail::is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
-                tag_status = this->decode(tag);
+                if constexpr (requires { this->decode(std::move(tag)); }) {
+                    tag_status = this->decode(std::move(tag));
+                } else {
+                    // Core dynamic-tag decoding takes a mutable expected-tag wrapper.
+                    tag_status = this->decode(tag);
+                }
             } else {
-                auto expected_tag = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(tag)};
+                auto expected_tag = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(std::move(tag))};
                 tag_status        = this->decode(expected_tag);
             }
 
