@@ -65,7 +65,7 @@ if(CBOR_TAGS_TIDY_TARGET AND CBOR_TAGS_TIDY_TESTS)
 endif()
 
 # add tests for ctest
-add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/cwt*")
+add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/resumable,roundtrip/cwt*")
 
 add_test(NAME container_item_shape_wire COMMAND tests "--test-suite=cbor_wire/container_item_shape")
 set_tests_properties(container_item_shape_wire PROPERTIES LABELS "cbor-wire")
@@ -262,6 +262,48 @@ add_test(NAME integer_arguments_wire COMMAND tests "--test-suite=cbor_wire/integ
 set_tests_properties(integer_arguments_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME traversal_wire COMMAND tests "--test-suite=cbor_wire/traversal")
 set_tests_properties(traversal_wire PROPERTIES LABELS "cbor-wire")
+
+add_test(NAME resumable_roundtrip COMMAND tests "--test-suite=roundtrip/resumable")
+add_test(NAME resumable_wire COMMAND tests "--test-suite=cbor_wire/resumable")
+set_tests_properties(resumable_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME resumable_boundaries_wire COMMAND tests "--test-suite=cbor_wire/resumable_boundaries")
+set_tests_properties(resumable_boundaries_wire PROPERTIES LABELS "cbor-wire")
+add_executable(test_resumable_allocation_failure test_resumable_allocation_failure.cc)
+target_link_libraries(test_resumable_allocation_failure PRIVATE cbor::tags)
+add_test(NAME test_resumable_allocation_failure COMMAND test_resumable_allocation_failure)
+add_dependencies(tests test_resumable_allocation_failure)
+add_executable(test_resumable_header_isolation test_resumable_header_isolation.cc)
+target_link_libraries(test_resumable_header_isolation PRIVATE cbor::tags)
+add_test(NAME test_resumable_header_isolation COMMAND test_resumable_header_isolation)
+add_dependencies(tests test_resumable_header_isolation)
+
+foreach(CASE UNSAFE_INPUT UNSAFE_BATCH UNSAFE_TUPLE UNSAFE_ARRAY_WRAPPER EOF_NOT_LAST ZERO_WIDTH_GENERATOR HEADER_GENERATOR
+    ZERO_WIDTH_CONTAINER SYNC_ENCODER_CODEC SYNC_DECODER_CODEC)
+  string(TOLOWER "resumable_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE ${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  if(CASE STREQUAL "UNSAFE_INPUT" OR CASE STREQUAL "UNSAFE_BATCH")
+    set(EXPECTED_DIAGNOSTIC "no match|no matching")
+  elseif(CASE STREQUAL "UNSAFE_TUPLE")
+    set(EXPECTED_DIAGNOSTIC "resumable decode tuple destinations")
+  elseif(CASE STREQUAL "UNSAFE_ARRAY_WRAPPER")
+    set(EXPECTED_DIAGNOSTIC "resumable decode array wrappers")
+  elseif(CASE STREQUAL "EOF_NOT_LAST")
+    set(EXPECTED_DIAGNOSTIC "end_of_input must be the last feed argument")
+  elseif(CASE STREQUAL "ZERO_WIDTH_CONTAINER")
+    set(EXPECTED_DIAGNOSTIC "Zero-byte container entries")
+  elseif(CASE STREQUAL "SYNC_ENCODER_CODEC" OR CASE STREQUAL "SYNC_DECODER_CODEC")
+    set(EXPECTED_DIAGNOSTIC "synchronous codec requires")
+  else()
+    set(EXPECTED_DIAGNOSTIC "generator element must encode exactly one complete CBOR item")
+  endif()
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=${EXPECTED_DIAGNOSTIC}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
 add_test(NAME traversal_roundtrip COMMAND tests "--test-suite=roundtrip/traversal")
 set_tests_properties(traversal_roundtrip PROPERTIES LABELS "roundtrip")
 

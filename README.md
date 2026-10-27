@@ -227,7 +227,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". The primary decoder is still a one-shot API: retry/resume after incomplete input is reserved for a future explicit resumable decoder entry point.
+> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete one-shot decode returns status_code "incomplete" and cannot be resumed. For chunked input, use the separate [resumable decoder](doc/resumable.md).
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -1158,6 +1158,7 @@ Additional docs:
 - [CBOR Conformance](doc/conformance.md)
 - [Custom Codec 1](doc/custom_codec_1.md)
 - [Encoder And Decoder Options](doc/options.md)
+- [Resumable encoding, decoding and validation](doc/resumable.md)
 - [Codec Extensions](doc/codec_extensions.md)
 - [CWT and COSE owning and borrowed models](doc/cwt.md)
 - [Standard and Boost container interoperability](doc/container_interoperability.md)

@@ -54,6 +54,7 @@ through signing, token encoding, decoding and verification.
 | [37_experimental_cwt_confirmation.cpp](37_experimental_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 | [38_experimental_cwt_key_thumbprint.cpp](38_experimental_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
 | [39_experimental_cwt_confirmation_token.cpp](39_experimental_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
+| [40_resumable.cpp](40_resumable.cpp) | Work with resumable input and output | Feed byte chunks and await completion or individual values. |
 
 ## CDDL
 
