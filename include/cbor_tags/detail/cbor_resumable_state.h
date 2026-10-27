@@ -148,7 +148,9 @@ struct resumable_io {
         if (direction == resumable_direction::output_generator && output_written != 0U) {
             yielded_output.emplace(output[output_index].produced());
             output_written = 0;
-            ++output_index;
+            // A final partial buffer still has usable caller-owned capacity.
+            if (output[output_index].empty())
+                ++output_index;
             yielded         = true;
             yielded_claimed = false;
         } else {

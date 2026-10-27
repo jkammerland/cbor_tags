@@ -36,6 +36,16 @@ struct tagged_second {
     int                            value{};
 };
 
+struct tagged_transcode {
+    constexpr tagged_transcode() {}
+    int                            value{};
+    friend constexpr std::uint64_t cbor_tag(const tagged_transcode &) { return 100; }
+};
+
+template <typename Context> typename Context::task_type resumable_transcode(Context &context, tagged_transcode &value) {
+    co_return co_await context(value.value);
+}
+
 struct header_custom {
     int value{};
 };
@@ -218,6 +228,57 @@ TEST_CASE("resumable decoding preserves tag selection through optional variants"
     REQUIRE(operation.result());
     REQUIRE_EQ(decoded.index(), 1U);
     CHECK_EQ(std::get<1>(decoded).value, 42);
+}
+
+TEST_CASE("tagged transcode hooks work in variants and optional alternatives") {
+    std::vector<std::byte> encoded;
+    REQUIRE(make_encoder(encoded)(static_tag<100>{}, 42));
+
+    SUBCASE("direct") {
+        tagged_transcode decoded;
+        auto             operation = make_resumable_decoder()(decoded);
+        for (const auto &byte : encoded)
+            (void)operation(std::span{&byte, 1});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK_EQ(decoded.value, 42);
+    }
+
+    SUBCASE("variant") {
+        std::variant<tagged_transcode, int> decoded;
+        auto                                operation = make_resumable_decoder()(decoded);
+        for (const auto &byte : encoded)
+            (void)operation(std::span{&byte, 1});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        REQUIRE_EQ(decoded.index(), 0U);
+        CHECK_EQ(std::get<0>(decoded).value, 42);
+    }
+
+    SUBCASE("optional variant alternative") {
+        std::variant<std::optional<tagged_transcode>, tagged_second> decoded;
+        auto                                                         operation = make_resumable_decoder()(decoded);
+        for (const auto &byte : encoded)
+            (void)operation(std::span{&byte, 1});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        REQUIRE_EQ(decoded.index(), 0U);
+        REQUIRE(std::get<0>(decoded));
+        CHECK_EQ(std::get<0>(decoded)->value, 42);
+    }
+
+    SUBCASE("tag mismatch selects a later alternative") {
+        std::vector<std::byte> later;
+        REQUIRE(make_encoder(later)(tagged_second{7}));
+        std::variant<std::optional<tagged_transcode>, tagged_second> decoded;
+        auto                                                         operation = make_resumable_decoder()(decoded);
+        for (const auto &byte : later)
+            (void)operation(std::span{&byte, 1});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        REQUIRE_EQ(decoded.index(), 1U);
+        CHECK_EQ(std::get<1>(decoded).value, 7);
+    }
 }
 
 TEST_CASE("header codecs decode direct and already-inspected items") {

@@ -585,6 +585,12 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
             if (tag != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
                 co_return status_code::no_match_for_tag;
             co_return co_await resumable_decode(*this, value);
+        } else if constexpr (requires {
+                                 { resumable_transcode(*this, value) } -> std::same_as<task_type>;
+                             } && IsClassWithTagOverload<type>) {
+            if (tag != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
+                co_return status_code::no_match_for_tag;
+            co_return co_await resumable_transcode(*this, value);
         } else if constexpr (IsAggregate<type> && HasInlineTag<type>) {
             if (tag != type::cbor_tag)
                 co_return status_code::no_match_for_tag;

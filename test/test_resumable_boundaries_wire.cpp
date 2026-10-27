@@ -141,4 +141,114 @@ TEST_SUITE("cbor_wire/resumable_boundaries") {
         REQUIRE_FALSE(payload.result());
         CHECK(payload.result().error() == status_code::incomplete);
     }
+
+    TEST_CASE("final output generator prefixes retain the unused buffer suffix") {
+        const int                      first = 1;
+        const std::array<std::byte, 6> second{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}, std::byte{6}};
+        std::vector<std::byte>         expected;
+        REQUIRE(make_encoder(expected)(first, second));
+        REQUIRE_EQ(expected.size(), 8U);
+
+        std::array<std::byte, 8> output{};
+        auto                     generator = make_resumable_encoder().chunks(first);
+        const auto               initial   = generator(output);
+        CHECK_EQ(initial.bytes, 1U);
+        auto current = generator.next();
+        REQUIRE(current.await_ready());
+        REQUIRE(current.await_resume());
+        REQUIRE_EQ(generator.remaining_output().size(), 1U);
+
+        const auto reuse = [&] {
+            auto       encoder  = make_resumable_encoder()(second);
+            const auto progress = encoder(generator.remaining_output());
+            REQUIRE(encoder.done());
+            REQUIRE(encoder.result());
+            CHECK_EQ(progress.bytes, 7U);
+            std::vector<std::byte> prefix;
+            for (const auto chunk : progress.produced())
+                for (const auto byte : chunk)
+                    prefix.push_back(byte);
+            CHECK_EQ(prefix.size(), 7U);
+            const std::vector<std::byte> combined{output.begin(), output.end()};
+            CHECK(combined == expected);
+        };
+
+        SUBCASE("before acknowledging the final prefix") {
+            reuse();
+            std::vector<std::byte> published;
+            for (const auto byte : generator.value())
+                published.push_back(byte);
+            REQUIRE_EQ(published.size(), 1U);
+            CHECK_EQ(published.front(), expected.front());
+            auto acknowledge = generator.next();
+            REQUIRE(acknowledge.await_ready());
+            CHECK_FALSE(acknowledge.await_resume());
+            REQUIRE(generator.result());
+            CHECK_EQ(generator.remaining_output().size(), 1U);
+        }
+
+        SUBCASE("after acknowledging the final prefix") {
+            auto acknowledge = generator.next();
+            REQUIRE(acknowledge.await_ready());
+            CHECK_FALSE(acknowledge.await_resume());
+            REQUIRE(generator.result());
+            REQUIRE_EQ(generator.remaining_output().size(), 1U);
+            reuse();
+        }
+    }
+
+    TEST_CASE("final output generator skips an exhausted buffer") {
+        std::array<std::byte, 1> first{};
+        std::array<std::byte, 8> spare{};
+        auto                     generator = make_resumable_encoder().chunks(1);
+        (void)generator(first, spare);
+        auto current = generator.next();
+        REQUIRE(current.await_ready());
+        REQUIRE(current.await_resume());
+        REQUIRE_EQ(generator.remaining_output().size(), 1U);
+
+        auto acknowledge = generator.next();
+        REQUIRE(acknowledge.await_ready());
+        CHECK_FALSE(acknowledge.await_resume());
+        REQUIRE(generator.result());
+        REQUIRE_EQ(generator.remaining_output().size(), 1U);
+        auto       following = make_resumable_encoder()(2);
+        const auto progress  = following(generator.remaining_output());
+        REQUIRE(following.result());
+        CHECK_EQ(progress.bytes, 1U);
+        int first_value{};
+        int second_value{};
+        REQUIRE(make_decoder(first)(first_value));
+        REQUIRE(make_decoder(spare)(second_value));
+        CHECK_EQ(first_value, 1);
+        CHECK_EQ(second_value, 2);
+    }
+
+    TEST_CASE("failed output generators retain a partially used buffer") {
+        std::vector<int>         too_short{3};
+        std::array<std::byte, 8> output{};
+        auto                     generator = make_resumable_encoder().chunks(1, as_bounded_size<2, 2>(too_short));
+        const auto               feed      = generator(output);
+        CHECK_EQ(feed.bytes, 1U);
+        auto current = generator.next();
+        REQUIRE(current.await_ready());
+        REQUIRE(current.await_resume());
+        REQUIRE_EQ(generator.remaining_output().size(), 1U);
+
+        auto acknowledge = generator.next();
+        REQUIRE(acknowledge.await_ready());
+        CHECK_FALSE(acknowledge.await_resume());
+        REQUIRE_FALSE(generator.result());
+        CHECK(generator.result().error() == status_code::size_limit_exceeded);
+        REQUIRE_EQ(generator.remaining_output().size(), 1U);
+        auto       following = make_resumable_encoder()(2);
+        const auto progress  = following(generator.remaining_output());
+        REQUIRE(following.result());
+        CHECK_EQ(progress.bytes, 1U);
+        int first{};
+        int second{};
+        REQUIRE(make_decoder(output)(first, second));
+        CHECK_EQ(first, 1);
+        CHECK_EQ(second, 2);
+    }
 }
