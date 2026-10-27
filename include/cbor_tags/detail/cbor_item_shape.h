@@ -92,7 +92,12 @@ consteval bool codec_payload_encodes_one_item(payload_context<Context> = {}, std
 
 template <typename Self, typename T, payload_decode_context Context> consteval bool codec_payload_has_customization() {
     if constexpr (payload_is_decoder<Self>) {
-        return IsClassWithDecodingOverload<Self, T> || codec_payload_mixin_customization<Self>::template accepts<T, Context>();
+        // A selected codec can replace a synchronous class customization whose
+        // body is not valid for this decoder. Do not instantiate that body.
+        if constexpr (codec_payload_mixin_customization<Self>::template accepts<T, Context>())
+            return true;
+        else
+            return IsClassWithDecodingOverload<Self, T>;
     } else {
         return IsClassWithEncodingOverload<Self, T> || codec_payload_mixin_customization<Self>::template accepts<T>();
     }

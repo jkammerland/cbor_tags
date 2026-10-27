@@ -218,11 +218,14 @@ template <detail::resumable_direction Direction> class resumable_operation {
     resumable_operation &operator=(const resumable_operation &) = delete;
     resumable_operation(resumable_operation &&) noexcept        = default;
     resumable_operation &operator=(resumable_operation &&other) noexcept {
+        auto &result = *this;
         if (this != &other) {
-            detail::cancel_state(io_);
-            io_ = std::move(other.io_);
+            // Terminal delivery may destroy either owner. Finish the transfer
+            // before notifying and retain the previous state independently.
+            auto previous = std::exchange(io_, std::move(other.io_));
+            detail::cancel_state(previous);
         }
-        return *this;
+        return result;
     }
     ~resumable_operation() { detail::cancel_state(io_); }
 
@@ -414,6 +417,18 @@ template <typename T, detail::resumable_direction Direction> class resumable_gen
   public:
     resumable_generator(std::shared_ptr<detail::resumable_io> io, std::shared_ptr<std::optional<T>> value)
         : base(std::move(io)), value_(std::move(value)) {}
+    resumable_generator(resumable_generator &&) noexcept = default;
+    resumable_generator &operator=(resumable_generator &&other) noexcept {
+        auto &result = *this;
+        if (this != &other) {
+            // The base assignment cannot notify before the derived value slot
+            // is installed: the old consumer may destroy this generator inline.
+            auto previous = std::exchange(this->io_, std::move(other.io_));
+            value_        = std::move(other.value_);
+            detail::cancel_state(previous);
+        }
+        return result;
+    }
     [[nodiscard]] next_awaiter next() { return next_awaiter{this->io_, value_}; }
     [[nodiscard]] const T     &value() const {
         assert(this->io_ && this->io_->yielded);

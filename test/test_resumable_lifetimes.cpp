@@ -8,6 +8,7 @@
 #include <doctest/doctest.h>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -112,6 +113,82 @@ template <typename Context> typename Context::task_type resumable_encode(Context
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_lifetimes") {
+    TEST_CASE("operation replacement can destroy either owner during cancellation delivery") {
+        int  first{};
+        int  second{};
+        auto factory         = make_resumable_decoder();
+        using operation_type = decltype(factory(first));
+        auto operation       = std::make_unique<operation_type>(factory(first));
+        auto replacement     = std::make_unique<operation_type>(factory(second));
+        bool destroy_destination{};
+        SUBCASE("destination owner") { destroy_destination = true; }
+        SUBCASE("source owner") { destroy_destination = false; }
+
+        std::optional<operation_result> result;
+        auto                            consumer = await_result(*operation, result, [&] {
+            // The replacement must be visible before the old waiter is notified.
+            CHECK_FALSE(operation->done());
+            if (destroy_destination)
+                operation.reset();
+            else
+                replacement.reset();
+        });
+        REQUIRE_FALSE(consumer.done());
+        *operation = std::move(*replacement);
+
+        REQUIRE(consumer.done());
+        CHECK_NOTHROW(consumer.rethrow());
+        REQUIRE(result);
+        REQUIRE_FALSE(*result);
+        CHECK(result->error() == status_code::cancelled);
+        CHECK(static_cast<bool>(operation) != destroy_destination);
+
+        if (operation) {
+            std::vector<std::byte> encoded;
+            REQUIRE(make_encoder(encoded)(1234));
+            (void)(*operation)(encoded);
+            REQUIRE(operation->result());
+            CHECK_EQ(second, 1234);
+        }
+    }
+
+    TEST_CASE("generator replacement installs its value slot before notifying the old waiter") {
+        using generator_type = decltype(make_resumable_decoder().items<int>());
+        auto generator       = std::make_unique<generator_type>(make_resumable_decoder().items<int>());
+        auto replacement     = std::make_unique<generator_type>(make_resumable_decoder().elements<int>());
+        bool destroy_destination{};
+        SUBCASE("destination owner") { destroy_destination = true; }
+        SUBCASE("source owner") { destroy_destination = false; }
+
+        std::optional<operation_result> result;
+        auto                            consumer = await_result(*generator, result, [&] {
+            // Reading the new generator here exercises the derived value_ slot.
+            const std::vector<int> source{17, 300};
+            std::vector<std::byte> encoded;
+            REQUIRE(make_encoder(encoded)(source));
+            (void)(*generator)(encoded);
+            std::vector<int> decoded;
+            auto             reader = collect_values(*generator, decoded);
+            REQUIRE(reader.done());
+            CHECK_NOTHROW(reader.rethrow());
+            CHECK(decoded == source);
+            REQUIRE(generator->result());
+            if (destroy_destination)
+                generator.reset();
+            else
+                replacement.reset();
+        });
+        REQUIRE_FALSE(consumer.done());
+        *generator = std::move(*replacement);
+
+        REQUIRE(consumer.done());
+        CHECK_NOTHROW(consumer.rethrow());
+        REQUIRE(result);
+        REQUIRE_FALSE(*result);
+        CHECK(result->error() == status_code::cancelled);
+        CHECK(static_cast<bool>(generator) != destroy_destination);
+    }
+
     TEST_CASE("decoder result waiter can destroy or move its operation inline") {
         const std::string      source = "consumer owns the operation";
         std::vector<std::byte> encoded;

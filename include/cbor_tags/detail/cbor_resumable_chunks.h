@@ -39,10 +39,12 @@ struct readable_cursor {
 };
 
 template <typename Iterator, typename Sentinel> struct readable_cursor_model final : readable_cursor {
-    Iterator current;
-    Sentinel last;
+    Iterator                   current;
+    Sentinel                   last;
+    std::optional<std::size_t> remaining;
 
-    readable_cursor_model(const Iterator &begin, const Sentinel &end) : current(begin), last(end) {}
+    readable_cursor_model(const Iterator &begin, const Sentinel &end, std::optional<std::size_t> count = {})
+        : current(begin), last(end), remaining(count) {}
 
     [[nodiscard]] std::unique_ptr<readable_cursor> clone() const override { return std::make_unique<readable_cursor_model>(*this); }
     [[nodiscard]] bool                             empty() const override { return current == last; }
@@ -50,7 +52,11 @@ template <typename Iterator, typename Sentinel> struct readable_cursor_model fin
         const std::iter_value_t<Iterator> value = *current;
         return static_cast<std::byte>(cbor_byte_to_u8(value));
     }
-    void advance() override { ++current; }
+    void advance() override {
+        ++current;
+        if (remaining)
+            --*remaining;
+    }
 
     [[nodiscard]] bool equal(const readable_cursor &other) const override {
         const auto *same = dynamic_cast<const readable_cursor_model *>(&other);
@@ -58,13 +64,16 @@ template <typename Iterator, typename Sentinel> struct readable_cursor_model fin
     }
 
     [[nodiscard]] std::optional<std::span<const std::byte>> contiguous() const override {
-        if constexpr (std::contiguous_iterator<Iterator> && std::sized_sentinel_for<Sentinel, Iterator> &&
-                      !std::is_volatile_v<std::remove_reference_t<std::iter_reference_t<Iterator>>>) {
-            const auto count = static_cast<std::size_t>(last - current);
-            return std::as_bytes(std::span{std::to_address(current), count});
-        } else {
-            return std::nullopt;
+        if constexpr (std::contiguous_iterator<Iterator> && !std::is_volatile_v<std::remove_reference_t<std::iter_reference_t<Iterator>>>) {
+            // A sized range can know its extent even when its sentinel cannot
+            // be subtracted. Preserve that promise without walking the bytes.
+            if (remaining)
+                return std::as_bytes(std::span{std::to_address(current), *remaining});
+            if constexpr (std::sized_sentinel_for<Sentinel, Iterator>) {
+                return std::as_bytes(std::span{std::to_address(current), static_cast<std::size_t>(last - current)});
+            }
         }
+        return std::nullopt;
     }
 
     [[nodiscard]] std::unique_ptr<readable_cursor> take(std::size_t limit, std::size_t &count) override {
@@ -77,7 +86,9 @@ template <typename Iterator, typename Sentinel> struct readable_cursor_model fin
         }
         auto prefix = std::make_unique<readable_cursor_model<Iterator, Iterator>>(current, next);
         current     = next;
-        count       = used;
+        if (remaining)
+            *remaining -= used;
+        count = used;
         return prefix;
     }
 };
@@ -87,7 +98,7 @@ template <typename Iterator, typename Sentinel> struct readable_cursor_model fin
 // A copied descriptor owns only its cursor; the original byte storage stays borrowed.
 class readable_chunk {
     std::unique_ptr<detail::readable_cursor> cursor_;
-    const void                              *identity_{};
+    const volatile void                     *identity_{};
 
     explicit readable_chunk(std::unique_ptr<detail::readable_cursor> cursor) : cursor_(std::move(cursor)) {}
 
@@ -139,7 +150,12 @@ class readable_chunk {
                  !std::same_as<std::remove_cvref_t<R>, readable_chunk>)
     explicit readable_chunk(R &&range)
         : cursor_(std::make_unique<detail::readable_cursor_model<std::ranges::iterator_t<R>, std::ranges::sentinel_t<R>>>(
-              std::ranges::begin(range), std::ranges::end(range))) {
+              std::ranges::begin(range), std::ranges::end(range), [&]() -> std::optional<std::size_t> {
+                  if constexpr (std::ranges::sized_range<R>)
+                      return static_cast<std::size_t>(std::ranges::size(range));
+                  else
+                      return std::nullopt;
+              }())) {
         if constexpr (std::is_lvalue_reference_v<R>)
             identity_ = std::addressof(range);
     }
@@ -156,7 +172,7 @@ class readable_chunk {
     readable_chunk &operator=(readable_chunk &&) noexcept = default;
 
     [[nodiscard]] bool                                      empty() const { return !cursor_ || cursor_->empty(); }
-    [[nodiscard]] const void                               *identity() const noexcept { return identity_; }
+    [[nodiscard]] const volatile void                      *identity() const noexcept { return identity_; }
     [[nodiscard]] iterator                                  begin() const { return iterator{cursor_ ? cursor_->clone() : nullptr}; }
     [[nodiscard]] std::default_sentinel_t                   end() const noexcept { return {}; }
     [[nodiscard]] std::optional<std::span<const std::byte>> try_span() const {

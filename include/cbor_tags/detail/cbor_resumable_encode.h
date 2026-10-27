@@ -136,6 +136,10 @@ struct resumable_encoder_context : Codecs<resumable_encoder_context<Options, Cod
     template <typename T>
         requires(IsArrayRangeWrapper<T> || IsMapRangeWrapper<T> || IsStringRangeWrapper<T>)
     task_type encode(T &value) {
+        return encode_range(value);
+    }
+
+    template <typename T> task_type encode_range(T &value) {
         if (io.terminal && io.status == status_code::cancelled)
             co_return status_code::cancelled;
         auto &range      = value.range_;
@@ -206,6 +210,10 @@ struct resumable_encoder_context : Codecs<resumable_encoder_context<Options, Cod
     template <typename T>
         requires IsAnyBoundedSizeWrapper<T>
     task_type encode(T &value) {
+        return encode_bounded(value);
+    }
+
+    template <typename T> task_type encode_bounded(T &value) {
         if (io.terminal && io.status == status_code::cancelled)
             co_return status_code::cancelled;
         using type    = std::remove_cvref_t<T>;
@@ -380,31 +388,10 @@ struct resumable_encoder_context : Codecs<resumable_encoder_context<Options, Cod
         } else if constexpr (std::same_as<type, end_array> || std::same_as<type, end_map> || std::same_as<type, end_string> ||
                              std::same_as<type, indefinite_break>) {
             co_await byte(std::byte{0xff});
+        } else if constexpr (IsArrayRangeWrapper<type> || IsMapRangeWrapper<type> || IsStringRangeWrapper<type>) {
+            co_return co_await encode_range(value);
         } else if constexpr (IsAnyBoundedSizeWrapper<type>) {
-            const auto &wrapped = value.value();
-            const auto &target  = [&]() -> const auto  &{
-                if constexpr (IsIndefiniteWrapper<std::remove_cvref_t<decltype(wrapped)>>)
-                    return wrapped.value_;
-                else
-                    return wrapped;
-            }();
-            static_assert(std::ranges::sized_range<decltype(target)>, "bounded resumable encoding requires a sized range");
-            const auto size = std::ranges::size(target);
-            const auto min  = [&] {
-                if constexpr (IsDynamicBoundedSizeWrapper<type>)
-                    return value.min_size();
-                else
-                    return type::min_size;
-            }();
-            const auto max = [&] {
-                if constexpr (IsDynamicBoundedSizeWrapper<type>)
-                    return value.max_size();
-                else
-                    return type::max_size;
-            }();
-            if (bounded_size_status(size, min, max) != status_code::success)
-                co_return status_code::size_limit_exceeded;
-            co_return co_await encode(wrapped);
+            co_return co_await encode_bounded(value);
         } else if constexpr (IsIndefiniteWrapper<type>) {
             using wrapped_type = std::remove_cvref_t<decltype(value.value_)>;
             if constexpr (IsTextString<wrapped_type> || IsBinaryString<wrapped_type>) {

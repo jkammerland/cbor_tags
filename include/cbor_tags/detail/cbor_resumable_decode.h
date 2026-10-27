@@ -165,6 +165,13 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
                                              } || ...);
 
     template <typename T>
+    static constexpr bool has_tag_codec = (requires(Codecs<self_type> &codec, T &value, std::uint64_t tag) {
+                                              { codec.resumable_decode(value, tag) } -> std::same_as<task_type>;
+                                          } || ...) || (requires(Codecs<self_type> &codec, T &value, std::uint64_t tag) {
+                                              { codec.decode(value, tag) } -> std::same_as<task_type>;
+                                          } || ...);
+
+    template <typename T>
     static constexpr bool has_sync_codec = (requires(Codecs<self_type> &codec, T &value) {
                                                { codec.decode(value) } -> std::same_as<status_code>;
                                            } || ...) || (requires(Codecs<self_type> &codec, T &value, major_type major, std::byte info) {
@@ -256,6 +263,23 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
             co_return status_code::unsupported_operation;
     }
 
+    template <std::size_t I = 0, typename T> task_type invoke_tag_codec(T &value, std::uint64_t tag) {
+        if constexpr (I < sizeof...(Codecs)) {
+            using codec_type = std::tuple_element_t<I, std::tuple<Codecs<self_type>...>>;
+            if constexpr (requires(codec_type &codec) {
+                              { codec.resumable_decode(value, tag) } -> std::same_as<task_type>;
+                          }) {
+                co_return co_await static_cast<codec_type &>(*this).resumable_decode(value, tag);
+            } else if constexpr (requires(codec_type &codec) {
+                                     { codec.decode(value, tag) } -> std::same_as<task_type>;
+                                 }) {
+                co_return co_await static_cast<codec_type &>(*this).decode(value, tag);
+            } else
+                co_return co_await invoke_tag_codec<I + 1>(value, tag);
+        } else
+            co_return status_code::unsupported_operation;
+    }
+
     template <typename T> task_type decode(T &value) {
         if (io.terminal && io.status == status_code::cancelled)
             co_return status_code::cancelled;
@@ -267,6 +291,11 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
                              }) {
             const auto h = co_await header();
             co_return co_await decode_header(value, h);
+        } else if constexpr (has_tag_codec<type>) {
+            const auto h = co_await header();
+            if (h.major != major_type::Tag)
+                co_return status_code::no_match_for_tag_on_buffer;
+            co_return co_await invoke_tag_codec(value, co_await argument(h.info));
         } else if constexpr (has_sync_codec<type>) {
             static_assert(!has_sync_codec<type>, "synchronous codec requires an explicit resumable decode hook");
         } else if constexpr (requires {
@@ -363,45 +392,46 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
                 value = T{};
             co_return status_code::success;
         }
-        while (true) {
-            if (!io.has_input()) {
-                if (io.eof)
-                    co_return status_code::incomplete;
-                co_await resumable_wait_more_input{io};
-                continue;
-            }
-            const auto span = io.input[io.input_index].try_span();
-            if (!span)
-                co_return status_code::contiguous_view_on_non_contiguous_data;
-            if (span->size() >= length) {
-                using element    = typename type_identity_for_view<T>::type;
-                const auto *data = reinterpret_cast<const element *>(span->data());
-                if (length > std::numeric_limits<std::size_t>::max() - io.total)
-                    co_return status_code::size_limit_exceeded;
-                if constexpr (requires { value.range; }) {
-                    using range_type = std::remove_cvref_t<decltype(value.range)>;
-                    if constexpr (std::constructible_from<range_type, const element *, std::size_t>) {
-                        value = T{range_type{data, static_cast<std::size_t>(length)}};
-                    } else {
-                        co_return status_code::contiguous_view_on_non_contiguous_data;
-                    }
-                } else {
-                    value = T{data, static_cast<std::size_t>(length)};
-                }
-                std::size_t count{};
-                auto        consumed = io.input[io.input_index].take(static_cast<std::size_t>(length), count);
-                (void)consumed;
-                io.total += count;
-                co_return status_code::success;
-            }
-            for (auto index = io.input_index + 1U; index < io.input.size(); ++index) {
-                if (!io.input[index].empty())
-                    co_return status_code::contiguous_view_on_non_contiguous_data;
-            }
+        while (!io.has_input()) {
             if (io.eof)
                 co_return status_code::incomplete;
             co_await resumable_wait_more_input{io};
         }
+        if (length > std::numeric_limits<std::size_t>::max() - io.total)
+            co_return status_code::size_limit_exceeded;
+
+        // Consume the declared prefix once. Its common end exposes a contiguous
+        // span even when the original chunk had an unsized sentinel.
+        std::size_t count{};
+        const auto  prefix = io.input[io.input_index].take(static_cast<std::size_t>(length), count);
+        io.total += count;
+        const auto span = prefix.try_span();
+        if (!span)
+            co_return status_code::contiguous_view_on_non_contiguous_data;
+        if (count != length) {
+            // A borrowed view cannot join separate chunks. Preserve the EOF
+            // distinction until another nonempty chunk or EOF is supplied.
+            while (!io.has_input()) {
+                if (io.eof)
+                    co_return status_code::incomplete;
+                co_await resumable_wait_more_input{io};
+            }
+            co_return status_code::contiguous_view_on_non_contiguous_data;
+        }
+
+        using element    = typename type_identity_for_view<T>::type;
+        const auto *data = reinterpret_cast<const element *>(span->data());
+        if constexpr (requires { value.range; }) {
+            using range_type = std::remove_cvref_t<decltype(value.range)>;
+            if constexpr (std::constructible_from<range_type, const element *, std::size_t>) {
+                value = T{range_type{data, count}};
+            } else {
+                co_return status_code::contiguous_view_on_non_contiguous_data;
+            }
+        } else {
+            value = T{data, count};
+        }
+        co_return status_code::success;
     }
 
     template <typename T> struct type_identity_for_view {
@@ -555,7 +585,9 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
 
     template <typename T> task_type decode_tagged(T &value, std::uint64_t tag) {
         using type = std::remove_cvref_t<T>;
-        if constexpr (IsOptional<type>) {
+        if constexpr (has_tag_codec<type>) {
+            co_return co_await invoke_tag_codec(value, tag);
+        } else if constexpr (IsOptional<type>) {
             using item_type = typename type::value_type;
             auto item       = make_decode_value_for_optional<item_type>(value);
             auto status     = co_await decode_tagged(item, tag);
@@ -575,10 +607,6 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
                 co_return status_code::no_match_for_tag;
             auto fields = tuple_tail(value);
             co_return co_await group(fields);
-        } else if constexpr (has_forwarding<type> && IsClassWithTagOverload<type>) {
-            if (tag != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
-                co_return status_code::no_match_for_tag;
-            co_return co_await forward_custom(value, false);
         } else if constexpr (requires {
                                  { resumable_decode(*this, value) } -> std::same_as<task_type>;
                              } && IsClassWithTagOverload<type>) {
@@ -591,6 +619,10 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
             if (tag != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
                 co_return status_code::no_match_for_tag;
             co_return co_await resumable_transcode(*this, value);
+        } else if constexpr (has_forwarding<type> && IsClassWithTagOverload<type>) {
+            if (tag != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
+                co_return status_code::no_match_for_tag;
+            co_return co_await forward_custom(value, false);
         } else if constexpr (IsAggregate<type> && HasInlineTag<type>) {
             if (tag != type::cbor_tag)
                 co_return status_code::no_match_for_tag;
@@ -651,22 +683,16 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
         using type = std::remove_cvref_t<T>;
         if constexpr (has_header_codec<type>) {
             co_return co_await invoke_header_codec(value, h);
-        } else if constexpr (has_sync_codec<type> && !has_codec<type>) {
+        } else if constexpr (has_sync_codec<type> && !has_codec<type> && !has_tag_codec<type>) {
             static_assert(!has_sync_codec<type>, "synchronous codec requires an explicit resumable decode hook");
         } else if constexpr (requires {
                                  { resumable_decode(*this, value, h.major, h.info) } -> std::same_as<task_type>;
                              }) {
             co_return co_await resumable_decode(*this, value, h.major, h.info);
-        } else if constexpr (has_forwarding<type>) {
-            if constexpr (IsClassWithTagOverload<type>) {
-                if (h.major != major_type::Tag)
-                    co_return status_code::no_match_for_tag_on_buffer;
-                if ((co_await argument(h.info)) != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
-                    co_return status_code::no_match_for_tag;
-            } else {
-                pending_header = h;
-            }
-            co_return co_await forward_custom(value, false);
+        } else if constexpr (has_tag_codec<type>) {
+            if (h.major != major_type::Tag)
+                co_return status_code::no_match_for_tag_on_buffer;
+            co_return co_await invoke_tag_codec(value, co_await argument(h.info));
         } else if constexpr (
             has_codec<type> ||
             requires {
@@ -691,6 +717,16 @@ struct resumable_decoder_context : Codecs<resumable_decoder_context<Options, Cod
                 co_return co_await resumable_decode(*this, value);
             else
                 co_return co_await resumable_transcode(*this, value);
+        } else if constexpr (has_forwarding<type>) {
+            if constexpr (IsClassWithTagOverload<type>) {
+                if (h.major != major_type::Tag)
+                    co_return status_code::no_match_for_tag_on_buffer;
+                if ((co_await argument(h.info)) != static_cast<std::uint64_t>(get_major_6_tag_from_class(value)))
+                    co_return status_code::no_match_for_tag;
+            } else {
+                pending_header = h;
+            }
+            co_return co_await forward_custom(value, false);
         } else if constexpr (std::same_as<type, bool>) {
             if (h.major != major_type::Simple)
                 co_return status_code::no_match_for_simple_on_buffer;
@@ -906,14 +942,21 @@ struct codec_payload_mixin_customization<resumable_decoder_context<Options, Code
     using self_type = resumable_decoder_context<Options, Codecs...>;
 
     template <typename T, payload_decode_context> static consteval bool accepts() {
-        return self_type::template has_codec<T> || self_type::template has_header_codec<T> || self_type::template has_forwarding<T> ||
-               requires(self_type &context, T &value) {
-                   { resumable_decode(context, value) } -> std::same_as<resumable_task<status_code>>;
-               } || requires(self_type &context, T &value) {
-                   { resumable_transcode(context, value) } -> std::same_as<resumable_task<status_code>>;
-               } || requires(self_type &context, T &value, major_type major, std::byte info) {
-                   { resumable_decode(context, value, major, info) } -> std::same_as<resumable_task<status_code>>;
-               };
+        if constexpr (
+            self_type::template has_codec<T> || self_type::template has_header_codec<T> || self_type::template has_tag_codec<T> ||
+            requires(self_type &context, T &value) {
+                { resumable_decode(context, value) } -> std::same_as<resumable_task<status_code>>;
+            } ||
+            requires(self_type &context, T &value) {
+                { resumable_transcode(context, value) } -> std::same_as<resumable_task<status_code>>;
+            } ||
+            requires(self_type &context, T &value, major_type major, std::byte info) {
+                { resumable_decode(context, value, major, info) } -> std::same_as<resumable_task<status_code>>;
+            }) {
+            return true;
+        } else {
+            return self_type::template has_forwarding<T>;
+        }
     }
 };
 
