@@ -1275,6 +1275,11 @@ CBOR_TAGS_TEST_LOGS=1 ./build/test/tests --reporter=console
 
 Leave the variable unset (default) to keep passing runs quiet while still capturing context on failures.
 
+## Resumable codecs
+
+For ordered input/output chunks, raw coroutine integration, generators, and validation,
+see [resumable encoding and decoding](doc/resumable.md).
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

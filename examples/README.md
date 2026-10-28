@@ -103,3 +103,5 @@ cmake --build build/examples --target \
   cbor_tags_example_29_experimental_cwt_borrowed_multi_signer
 ctest --test-dir build/examples -R '^example_(24|25|26|28|29)_' --output-on-failure --no-tests=error
 ```
+
+- [`40_resumable.cpp`](40_resumable.cpp): decode a reflected message across text and integer chunk boundaries.

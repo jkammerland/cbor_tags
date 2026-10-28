@@ -25,9 +25,17 @@
 
 namespace cbor::tags {
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_header_encoder;
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_indefinite_encoder;
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_optional_encoder;
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_variant_encoder;
 
 template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>

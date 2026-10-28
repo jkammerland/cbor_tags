@@ -45,6 +45,33 @@ template <typename T> [[nodiscard]] constexpr std::uint8_t utf8_byte(T value) no
              (prefix.first == 0xF0U && prefix.second < 0x90U) || (prefix.first == 0xF4U && prefix.second > 0x8FU));
 }
 
+// Carries only a partial code point; payload ownership remains with the caller.
+struct utf8_state {
+    std::uint8_t first{};
+    std::size_t  remaining{};
+    bool         second{};
+
+    bool consume(std::uint8_t value) noexcept {
+        if (remaining == 0) {
+            const auto length = utf8_sequence_length(value);
+            if (length == 0)
+                return false;
+            first     = value;
+            remaining = length - 1;
+            second    = true;
+            return true;
+        }
+        if (!is_utf8_continuation_byte(value))
+            return false;
+        if (second && !is_valid_utf8_second_byte({.first = first, .second = value}))
+            return false;
+        second = false;
+        --remaining;
+        return true;
+    }
+    bool complete() const noexcept { return remaining == 0; }
+};
+
 template <typename Iterator, typename Sentinel> [[nodiscard]] bool is_valid_utf8(Iterator begin, const Sentinel &end) {
     while (begin != end) {
         std::array<std::uint8_t, 4> sequence{};

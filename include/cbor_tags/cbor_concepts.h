@@ -540,6 +540,25 @@ concept HasInlineTag = requires {
 
 // A proxy that can have access to a number of predefined functions
 struct Access {
+    template <typename T, typename Class> static constexpr auto resumable_decode(T &decoder, Class &obj) {
+        if constexpr (requires { obj.resumable_decode(decoder); })
+            return obj.resumable_decode(decoder);
+        else
+            return detail::FalseType{};
+    }
+    template <typename T, typename Class> static constexpr auto resumable_encode(T &encoder, const Class &obj) {
+        if constexpr (requires { obj.resumable_encode(encoder); })
+            return obj.resumable_encode(encoder);
+        else
+            return detail::FalseType{};
+    }
+    template <typename T, typename Class> static constexpr auto resumable_transcode(T &codec, Class &obj) {
+        if constexpr (requires { obj.resumable_transcode(codec); })
+            return obj.resumable_transcode(codec);
+        else
+            return detail::FalseType{};
+    }
+
     // Transcode function
     template <typename T, typename Class> static constexpr auto transcode(T &transcoder, Class &&obj) {
         if constexpr (requires { obj.transcode(transcoder); }) {

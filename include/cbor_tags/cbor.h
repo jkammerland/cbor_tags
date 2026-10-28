@@ -55,7 +55,8 @@ enum class status_code : uint8_t {
     invalid_additional_info,
     malformed_structure,
     input_output_aliasing,
-    unsupported_operation
+    unsupported_operation,
+    cancelled
 };
 
 namespace codec {
@@ -107,6 +108,7 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::malformed_structure: return "Malformed CBOR item structure";
     case status_code::input_output_aliasing: return "CBOR input and output storage overlap";
     case status_code::unsupported_operation: return "Unsupported CBOR operation for the selected type";
+    case status_code::cancelled: return "CBOR operation cancelled";
     default: return "Unknown CBOR status code";
     }
 }

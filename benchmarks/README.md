@@ -197,3 +197,91 @@ benchmark-local byte-range, contiguous bulk-copy buffer, and borrowed
 header-plus-payload segment paths so range overhead and the zero-copy ceiling
 are visible separately. The byte-range and bulk-copy rows are encode variants;
 their decode validation uses the public `cbor_tags` typed-array codec.
+
+## Resumable throughput and completion latency
+
+Build the native targets in Release mode:
+
+```bash
+cmake -S . -B build/resumable-bench -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
+  -DCBOR_TAGS_BUILD_TESTS=OFF
+cmake --build build/resumable-bench \
+  --target bench_resumable_throughput bench_resumable_latency --parallel
+ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency)' --output-on-failure
+```
+
+`bench_resumable_throughput` compares ordinary encode/decode with resumable
+encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
+chunks. Separate validation rows compare `validate_item` with the resumable
+validator, without creating decoded values. Fixtures are deterministic nested
+records, scalar arrays, text, and binary strings. Nested records contain a
+4096-character string and 64 integers
+spanning CBOR integer widths. The default fixture budget is 16 MiB; scalar
+arrays use approximately that many encoded bytes and print the actual count.
+
+```bash
+build/resumable-bench/benchmarks/resumable/bench_resumable_throughput
+build/resumable-bench/benchmarks/resumable/bench_resumable_throughput \
+  --bytes 16777216 --repetitions 3 --epochs 9 --workload structured
+```
+
+Each round reverses mode order. Nanobench runs nine epochs of at least 20 ms
+per row by default. Output includes every row's encoded MB/s, ns/byte, epoch
+minimum/maximum, iteration count, and a median/range across the three rounds.
+Decode rows create fresh destinations, including allocation and destruction of
+the previous destination. Encode rows reuse equally sized caller-provided
+output storage. Operation creation, source descriptors, and chunk feeding are
+included. Fixture construction, preflight comparisons, and full content checks
+are outside timing. `--self-test` checks all paths using small fixtures without
+running throughput measurements.
+
+For an ordinary-code baseline, compile the same harness against the baseline
+checkout's headers with `CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1` (or the matching
+CMake option). This removes the resumable header dependency and retains the same
+ordinary rows and fixtures. Compare `--mode one-shot` from both builds with the
+same compiler and flags, alternating whole executable runs. Run comparisons
+sequentially on otherwise idle hardware; a current ordinary/resumable comparison
+alone does not establish whether ordinary decoding regressed from the baseline.
+
+`bench_resumable_latency` measures real elapsed completion time while an
+independent producer admits chunks on absolute `steady_clock` deadlines. It
+compares buffering until the final arrival followed by ordinary decode with
+incremental resumable decode. This is an in-process arrival benchmark over
+prebuilt input, without network transfer or ingress-copy costs. The producer
+continues admitting bytes independently when the decoder falls behind; the
+consumer may then supply several already-arrived chunks together.
+
+```bash
+# Full requested experiment: about 16 minutes plus fixture construction/decode.
+build/resumable-bench/benchmarks/resumable/bench_resumable_latency
+
+# Shorter manual experiment with the same scheduling and correctness checks.
+build/resumable-bench/benchmarks/resumable/bench_resumable_latency \
+  --bytes 1000000 --rate 100000000 --chunk 4096 --repetitions 3
+```
+
+Defaults are **exactly 1,000,000,000 encoded bytes**, **100,000,000 bits/s**,
+65536-byte chunks, and three paired repetitions for each of two workloads:
+nested records and one large bstr. Thus each trial has a nominal 80-second
+arrival interval; both modes across both workloads make 12 trials. Structured
+fixtures use a small padding bstr to hit the exact encoded length. The source
+value, encoded bytes, and destination coexist, so a full run needs several GB
+of memory. Both modes use fresh, unreserved destinations. Full equality and byte
+count checks run after the completion timestamp.
+
+The first chunk arrives after its transmission duration. For every sample the
+CLI reports total completion seconds, the actual final arrival time, final-byte
+to completion tail, and maximum/mean/final scheduling lateness. Summary lines
+report median/minimum/maximum and sample count for each metric. Scheduling
+lateness remains visible instead of being attributed to decoder latency; three
+samples do not establish a p95. `--workload structured|bstr`,
+`--mode one-shot|resumable`, `--bytes`, `--rate`, `--chunk`, and `--repetitions`
+select smaller or focused experiments. Some requested bstr sizes at CBOR header
+width transitions are unrepresentable and are rejected explicitly. Structured
+fixtures require at least 8192 encoded bytes.
+
+Only the small `--self-test` cases are registered with CTest. They verify exact
+fixture size, decoded content, completion after the last arrival, and that the
+publisher never admits bytes before their deadlines. They do not impose timing
+thresholds or run the full 1 GB experiment.

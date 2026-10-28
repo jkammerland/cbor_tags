@@ -1075,3 +1075,18 @@ endforeach()
 if(CBOR_TAGS_TEST_BOOST_ROOT)
   target_include_directories(tests SYSTEM PRIVATE "${CBOR_TAGS_TEST_BOOST_ROOT}")
 endif()
+
+# Coroutine semantic and literal-wire checks remain distinct.
+add_test(NAME resumable_wire COMMAND tests "--test-suite=cbor_wire/resumable")
+set_tests_properties(resumable_wire PROPERTIES LABELS "cbor-wire")
+add_executable(test_resumable_compile test_resumable_compile.cc)
+target_link_libraries(test_resumable_compile PRIVATE cbor::tags)
+add_test(NAME resumable_compile COMMAND test_resumable_compile)
+add_executable(resumable_zero_input_compile_fails EXCLUDE_FROM_ALL test_resumable_compile.cc)
+target_compile_definitions(resumable_zero_input_compile_fails PRIVATE CBOR_RESUMABLE_UNBOUNDED_ZERO_INPUT)
+target_link_libraries(resumable_zero_input_compile_fails PRIVATE cbor::tags)
+add_test(NAME resumable_zero_input_compile_fails COMMAND ${CMAKE_COMMAND}
+  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_zero_input_compile_fails" "-DCONFIG=$<CONFIG>"
+  "-DPASS_REGEX=Zero-byte container entries require an explicit count bound"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+set_tests_properties(resumable_zero_input_compile_fails PROPERTIES LABELS "compile-fail")

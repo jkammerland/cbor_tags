@@ -1812,18 +1812,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status;
     }
 
+    constexpr status_code decode_wrapped_group_header(major_type major, byte additional_info, std::uint64_t size) {
+        if (major != major_type::Array)
+            return status_code::no_match_for_array_on_buffer;
+        return decode_unsigned(additional_info) == size ? status_code::success : status_code::unexpected_group_size;
+    }
+
     template <typename Tuple> constexpr status_code decode_group_from_header(Tuple &&tuple, major_type major, byte additional_info) {
         constexpr auto size = std::tuple_size_v<std::remove_cvref_t<Tuple>>;
         if constexpr (size == 0U) {
             // An empty group cannot account for an already-consumed item header.
             return status_code::unexpected_group_size;
         } else if constexpr (size > 1U && Options::wrap_groups) {
-            if (major != major_type::Array) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            if (decode_unsigned(additional_info) != size) {
-                return status_code::unexpected_group_size;
-            }
+            const auto status = decode_wrapped_group_header(major, additional_info, size);
+            if (status != status_code::success)
+                return status;
             return std::apply([this](auto &&...args) { return this->applier(args...); }, tuple);
         } else {
             // Single-field and unwrapped groups pass the header to their first
@@ -2181,6 +2184,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 };
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_indefinite_decoder {
     using byte = std::byte;
 
@@ -2239,6 +2244,8 @@ template <typename T> struct cbor_indefinite_decoder {
     }
 };
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_header_decoder {
     constexpr auto get_and_validate_header(major_type expectedMajorType) {
         auto [initialByte, additionalInfo] = detail::underlying<T>(this).read_initial_byte();
