@@ -288,61 +288,89 @@ thresholds or run the full 1 GB experiment.
 
 ### Measurements for the resumable implementation
 
-Measured implementation `fc9c1704` against ordinary baseline `4e3fd952` on an
-AMD Ryzen 9 7950X with GCC 16.2.1, GNU C++20, `-O3 -DNDEBUG`. Throughput ran on
-one pinned logical CPU. Frequency scaling and the `powersave` governor remained
-enabled. The paced producer and consumer used unrestricted CPU affinity.
-Subsequent fixes affect variant/tag customizations absent from these fixtures;
-the subsequent precision change affects printed output only.
+The integer-array optimization was compared against `d7e93fe3` on an AMD Ryzen
+9 7950X with GCC 16.2.1, GNU C++20, `-O3 -DNDEBUG`. Throughput ran on one pinned
+logical CPU; frequency scaling and the `powersave` governor remained enabled.
+Three fresh alternating baseline/candidate pairs used nine epochs of at least
+20 ms per row, after separately measuring each optimization step. All fixture
+and post-measurement content checks passed.
 
-Throughput below is encoded **MB/s**, median **[minimum, maximum]** across three
-rounds, each using nine epochs of at least 20 ms. Fixtures contain 16,777,216
-encoded bytes, except the scalar array with 15,379,114 bytes. All fixture and
-post-measurement content checks passed.
+The table reports encoded **MB/s**, median **[minimum, maximum]** across those
+three final pairs. Fixtures contain 16,777,216 encoded bytes, except the scalar
+array: 5,592,405 uint32 values, repeating the eight values from `integer_at()`,
+occupying 15,379,114 encoded bytes. Decode includes fresh destination allocation;
+encode starts with equally preallocated output in both versions.
 
-| Workload / operation | Ordinary | Resumable, whole buffer | Resumable, 64 KiB chunks |
-|---|---:|---:|---:|
-| structured decode | 7658 [7618, 8194] | 3074 [3004, 3129] | 2829 [2343, 2927] |
-| structured encode | 15012 [14928, 15554] | 3277 [3256, 3433] | 3329 [3159, 3435] |
-| bstr decode | 32221 [31418, 32619] | 32395 [32167, 33009] | 12176 [11208, 12193] |
-| bstr encode | 31850 [29825, 32251] | 33176 [32148, 33272] | 32821 [28836, 33169] |
-| tstr decode | 29004 [28958, 31346] | 28550 [28517, 32272] | 7471 [7075, 7821] |
-| tstr encode | 27711 [27449, 31548] | 28392 [27278, 31649] | 24962 [24677, 25285] |
-| scalar decode | 1277 [1270, 1278] | 201 [200, 201] | 196 [195, 197] |
-| scalar encode | 3478 [3464, 3492] | 197 [190, 199] | 194 [194, 196] |
-| structured validation | 1465 [1411, 1568] | 656 [656, 746] | 738 [662, 739] |
-| tstr validation | 1748 [1740, 1756] | 860 [764, 861] | 863 [857, 865] |
-| scalar validation | 498 [496, 502] | 207 [179, 208] | 202 [187, 206] |
+| Resumable operation | Before, whole buffer | After, whole buffer | Before, 64 KiB | After, 64 KiB |
+|---|---:|---:|---:|---:|
+| scalar encode | 197 [189, 203] | 3034 [2792, 3058] | 196 [193, 198] | 2500 [2382, 3142] |
+| scalar decode | 203 [177, 206] | 1879 [1794, 1881] | 197 [184, 200] | 751 [725, 844] |
+| structured encode | 3507 [3492, 3618] | 11714 [9901, 12089] | 3399 [3239, 3581] | 10727 [9209, 11662] |
+| structured decode | 3415 [3373, 3431] | 7608 [6219, 8202] | 3021 [2696, 3045] | 6516 [5754, 7465] |
+| bstr encode | 36290 [35394, 38241] | 37936 [37499, 38279] | 34203 [33445, 34753] | 32621 [31333, 36136] |
+| bstr decode | 37926 [36868, 38293] | 38631 [38295, 38843] | 12246 [12078, 12455] | 12265 [11869, 12688] |
+| tstr encode | 37304 [37065, 37499] | 37617 [36925, 39730] | 31759 [30459, 34521] | 34078 [34024, 34360] |
+| tstr decode | 37428 [35645, 38629] | 38792 [36780, 39437] | 8477 [8380, 8536] | 8403 [7372, 8437] |
 
-Binary-string validation skips the declared payload, so its reported represented
-bytes/s is not memory-scanning throughput and is omitted from this table.
-Resumability has substantial costs for scalar arrays: about 6.5 times longer
-decode and 18 times longer encode with 64 KiB chunks. Ready scalar results avoid
-per-integer coroutine frames; chunk cursor handling and structural continuation
-still cost work. These results do not support replacing every ordinary call with
-a resumable call.
+Scalar encode takes **78.13 to 5.07 ms** with the whole buffer and **78.36 to
+6.15 ms** with 64 KiB chunks. Decode takes **75.71 to 8.18 ms** and **78.02 to
+20.48 ms**, respectively. Median paired speedups (baseline time divided by
+candidate time within each pair) are 15.41x/12.61x for encode and 9.26x/3.94x for
+decode, whole-buffer/64 KiB. Chunked samples varied noticeably; the table retains
+the fresh final results rather than substituting faster exploratory samples.
 
-The separate baseline comparison compiled **both** harnesses with
-`CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1`. An earlier comparison using a full candidate
-translation unit was discarded because its extra instantiations confounded the
-comparison. Three alternating matched pairs gave noisy results: structured
-decode was 0.1199 [0.1189, 0.1375] ns/B at baseline and 0.1341 [0.1146, 0.1412]
-ns/B in the candidate, while individual paired changes were -2.4%, +17.7%, and
--3.6%. Scalar encode was initially 0.3321 [0.3290, 0.3726] versus
-0.3892 [0.3698, 0.4101] ns/B. Binary/text encode and decode medians improved
-roughly 3–5% in that run.
+The separate steps explain the improvement:
 
-A bounded scalar follow-up used the same binaries, three alternating pairs,
-and 21 epochs per row. Encode measured 0.3246 [0.3080, 0.3254] versus
-0.3336 [0.3292, 0.3345] ns/B, a 2.8% increase in median time; paired increases
-were 8.3%, 1.4%, and 2.8%. Decode medians differed by -0.4%. The optimized scalar
-encoding wrapper had the same 166 instructions, integer loop, register
-allocation, and alignment in both binaries, with a different code address.
-No snapshot or coroutine instructions were added to ordinary encoding.
-Timing equivalence is nevertheless **not established** by these measurements.
+- Sharing the ordinary synchronous element loop improved encode about 1.8x and
+  decode about 1.5x, without changing primitive parsing.
+- Running the ordinary span codecs within each contiguous window added roughly
+  8.2–8.8x encode and 2.8x decode improvements over that loop alone. Only boundary
+  integers need chunk-aware cursor handling; incomplete integers retry as items.
+- Guarded destination reservation added 2.17x for whole-buffer decode. It did not
+  materially improve the 64 KiB case: a small admitted chunk cannot justify
+  reserving from the entire declared array length.
 
-All **12 full paced trials** passed, each admitting exactly 1 GB at 100 Mb/s in
-64 KiB chunks. Each table entry is a median [minimum, maximum] across three
+In the final full benchmark executable, ordinary scalar encode/decode measured
+3300/1315 MB/s. Resumable 64 KiB encode/decode therefore still take approximately
+1.32x/1.75x the ordinary time. Custom integer codecs and indefinite-array decoding
+retain generic dispatch; noncontiguous chunks use ordinary segmented codecs.
+
+Validation was not optimized. Its final structured/text resumable medians were
+about 4–5% lower than baseline (text 64 KiB: 881 to 834 MB/s; structured: 755 to
+719 MB/s). Binary-string validation skips the payload and is not memory-scanning
+throughput. These measurements do not establish that every mode is faster.
+
+The separate ordinary comparison compiled **both** harnesses with
+`CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1`, using the same three-pair procedure:
+
+| Ordinary operation | Before, MB/s | After, MB/s |
+|---|---:|---:|
+| scalar encode | 3028 [2762, 3049] | 3194 [3183, 3203] |
+| scalar decode | 961 [959, 966] | 964 [963, 964] |
+| structured encode | 20569 [19910, 21306] | 20592 [20182, 20844] |
+| structured decode | 8891 [8351, 9644] | 9879 [9409, 10269] |
+
+The measured ordinary scalar encode body is instruction-for-instruction
+identical after normalizing linked addresses: 166 instructions and 671 hot
+bytes, with an identical cold path. Scalar decode likewise retains 296
+instructions and 1,144 bytes. The shared loop's empty callbacks and predicates
+add no instructions in these paths. The measurements show no scalar regression
+from this optimization; they do not establish zero variation or equivalence
+across all types. Ordinary text validation also measured lower, 1907 to
+1800 MB/s (median paired speedup 0.944x).
+
+To reproduce the paired throughput measurements, run each baseline/candidate
+executable with `--workload all --repetitions 1 --epochs 9`, pinned with
+`taskset -c 2`, alternating executable order over three pairs. Repeat with both
+ordinary-only executables and `--mode one-shot`. The final customization guard
+fix left the benchmark machine code unchanged; rebuilt native selftests passed.
+
+The following latency results predate the integer-array optimization: measured
+implementation `fc9c1704` against ordinary baseline `4e3fd952`, on the same CPU
+and compiler, with unrestricted producer/consumer CPU affinity. They were not
+rerun for this optimization. All **12 full paced trials** passed, each admitting
+exactly 1 GB at 100 Mb/s in 64 KiB chunks. Each table entry is a median
+[minimum, maximum] across three
 trials. Completion includes decoding but excludes the final equality check.
 
 | Workload | Ordinary total, s | Resumable total, s | Ordinary final-byte tail, ms | Resumable final-byte tail, µs |

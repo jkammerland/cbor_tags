@@ -483,6 +483,12 @@ class output_source {
     auto remaining_output() const { return chunks_.remaining(working_); }
     auto available_output_span() { return chunks_.available_output_span(working_); }
 
+    // Publish bytes already written through the current contiguous window.
+    void advance(std::size_t count) {
+        [[maybe_unused]] const auto advanced = chunks_.advance(working_, count);
+        assert(advanced == count);
+    }
+
     void push_back(std::byte value) {
         if (!chunks_.write_byte(working_, value)) {
             throw detail::encode_status_exception{status_code::incomplete};

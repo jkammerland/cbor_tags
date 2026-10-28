@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_decode_elements.h"
 #include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_item_shape.h"
@@ -576,8 +577,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // unsized input contains it. Keep the element loop one-pass rather
         // than adding a validation traversal.
         detail::appender<T> appender_;
-        for (auto i = length; i > 0; --i) {
-            if constexpr (IsMap<T>) {
+        if constexpr (!IsMap<T>) {
+            return detail::decode_array_elements(*this, value, appender_, length);
+        } else {
+            for (auto i = length; i > 0; --i) {
                 using key_type    = typename T::key_type;
                 using mapped_type = typename T::mapped_type;
                 using value_type  = std::pair<key_type, mapped_type>;
@@ -602,14 +605,6 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     }
                     appender_(value, std::move(result));
                 }
-            } else {
-                using value_type = typename T::value_type;
-                auto result      = detail::make_decode_value_for<value_type>(value);
-                auto status      = decode(result);
-                if (status != status_code::success) {
-                    return status;
-                }
-                appender_(value, std::move(result));
             }
         }
 

@@ -484,6 +484,89 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         }
     }
 
+    template <typename T> static consteval bool ordinary_integer_override() {
+        return (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value); } || ...) ||
+               (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value, major_type{}, std::byte{}); } || ...);
+    }
+
+    template <typename T> static consteval bool builtin_integer_array() {
+        if constexpr (!IsArray<T> || IsString<T>) {
+            return false;
+        } else {
+            using value_type = typename T::value_type;
+            if constexpr (!std::integral<value_type> || !(IsUnsigned<value_type> || IsSigned<value_type>) || sizeof(value_type) > 8 ||
+                          has_explicit_hook<value_type>() || has_mixin<value_type>()) {
+                // Discard ordinary probes entirely when an explicit hook owns
+                // the item, including overloads with deduced return types.
+                return false;
+            } else {
+                return !ordinary_integer_override<value_type>() &&
+                       !codec_payload_has_customization<ordinary_type, value_type, payload_decode_context::direct>() &&
+                       !codec_payload_has_customization<ordinary_type, value_type, payload_decode_context::header>();
+            }
+        }
+    }
+
+    // Drain ordinary elements synchronously. A failed child leaves the logical
+    // count and destination at the last complete element, even after an exception.
+    template <typename T> status_code segmented_integer_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
+        auto        completed = ordinary_.reader_;
+        status_code status;
+        try {
+            status = decode_array_elements(ordinary_, value, append, remaining, [&] { completed = ordinary_.reader_; });
+        } catch (const decode_status_exception &error) { status = error.status; } catch (const parse_incomplete_exception &) {
+            status = status_code::incomplete;
+        } catch (...) { status = resumable_exception_status(); }
+
+        ordinary_.reader_ = completed;
+        commit();
+        return status;
+    }
+
+    template <typename T>
+    status_code integer_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
+        decoder<std::span<const std::byte>, Options> contiguous(window);
+        std::size_t                                  completed{};
+        status_code                                  status;
+        try {
+            // Any native integer can occupy nine wire bytes, even a narrow
+            // destination. Keep conversion and strictness policy in the core codec.
+            status = decode_array_elements(
+                contiguous, value, append, remaining, [&] { completed = contiguous.reader_.position_; },
+                [&] { return window.size() - contiguous.reader_.position_ >= 9; });
+        } catch (const decode_status_exception &error) { status = error.status; } catch (const parse_incomplete_exception &) {
+            status = status_code::incomplete;
+        } catch (...) { status = resumable_exception_status(); }
+
+        source_.advance(ordinary_.reader_.position_, completed);
+        ordinary_.reader_.current_offset_ += completed;
+        commit();
+        return status;
+    }
+
+    template <typename T> status_code integer_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
+        while (remaining != 0) {
+            const auto window = source_.available_span(ordinary_.reader_.position_);
+            if (!window)
+                return segmented_integer_elements(value, append, remaining);
+
+            if (window->size() >= 9) {
+                const auto status = integer_window(value, append, remaining, *window);
+                if (status != status_code::success)
+                    return status;
+            } else {
+                // Only the boundary child needs the chunk-aware reader. It can
+                // cross already admitted chunks without suspending the container.
+                std::uint64_t one    = 1;
+                const auto    status = segmented_integer_elements(value, append, one);
+                remaining -= 1 - one;
+                if (status != status_code::success)
+                    return status;
+            }
+        }
+        return status_code::success;
+    }
+
     template <typename T>
     resumable<status_code> container(T &value, std::uint64_t minimum = 0, std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max(),
                                      bool require_indefinite = false) {
@@ -511,6 +594,28 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if (!header.indefinite)
                 co_return co_await payload(value, header.size, append);
         }
+        if constexpr (builtin_integer_array<T>()) {
+            if (!header.indefinite) {
+                auto                  remaining = header.size;
+                [[maybe_unused]] bool reserved{};
+                while (remaining != 0) {
+                    if constexpr (HasReserve<T> && std::ranges::sized_range<const Source>) {
+                        // Reuse the ordinary one-byte-per-element lower bound.
+                        // Insufficient admitted bytes defer reservation, not decoding.
+                        if (!reserved && require_minimum_container_payload(ordinary_.reader_, source_, remaining) == status_code::success) {
+                            append.reserve_for_append(value, remaining);
+                            reserved = true;
+                        }
+                    }
+                    status = integer_elements(value, append, remaining);
+                    if (status != status_code::incomplete || eof())
+                        co_return status;
+                    co_await wait();
+                }
+                co_return status_code::success;
+            }
+        }
+
         std::uint64_t count{};
         while (header.indefinite || count < header.size) {
             if (header.indefinite) {

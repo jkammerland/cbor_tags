@@ -1,5 +1,6 @@
 #include "test_util.h"
 
+#include <algorithm>
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
@@ -8,8 +9,10 @@
 #include <cbor_tags/codec.h>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <list>
 #include <map>
+#include <memory_resource>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -25,6 +28,21 @@ namespace {
 
 using input_chunks  = std::list<std::span<const std::byte>>;
 using output_chunks = std::list<std::span<std::byte>>;
+
+struct counting_resource : std::pmr::memory_resource {
+    std::size_t allocations{};
+
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocations;
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void *pointer, std::size_t bytes, std::size_t alignment) override {
+        std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+    }
+
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
 
 struct wire_message {
     std::string                name;
@@ -108,6 +126,190 @@ status_code operation_status(const expected<std::size_t, status_code> &result) {
 } // namespace
 
 TEST_SUITE("cbor_wire/resumable") {
+
+    TEST_CASE("integer arrays commit only complete elements across each wire width") {
+        const auto                       bytes = to_bytes("86001718181901001a000100001b010203040506070809");
+        const std::vector<std::uint64_t> expected{0, 23, 24, 256, 65536, 0x0102030405060708ULL};
+        const std::array<std::size_t, 6> element_ends{2, 3, 5, 8, 13, 22};
+        const std::span<const std::byte> input{bytes};
+
+        for (std::size_t cut = 0; cut < element_ends.back(); ++cut) {
+            CAPTURE(cut);
+            input_chunks               storage;
+            auto                       source = make_input_source(storage);
+            std::vector<std::uint64_t> actual{99};
+            auto                       operation = make_resumable_decoder(source)(actual);
+            operation(input.first(cut));
+            REQUIRE_FALSE(operation.done());
+
+            std::vector<std::uint64_t> committed{99};
+            for (std::size_t index = 0; index < element_ends.size() && element_ends[index] <= cut; ++index)
+                committed.push_back(expected[index]);
+            CHECK(actual == committed);
+
+            operation(input.subspan(cut));
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 22U);
+            committed.assign(1, 99);
+            committed.insert(committed.end(), expected.begin(), expected.end());
+            CHECK(actual == committed);
+            CHECK(to_hex(operation.remaining_input()) == "09");
+        }
+
+        // All admitted chunks are available during the same inline resume.
+        input_chunks               storage;
+        auto                       source = make_input_source(storage);
+        std::vector<std::uint64_t> actual;
+        auto                       operation = make_resumable_decoder(source)(actual);
+        std::array                 chunks{input.first(4), input.subspan(4, 12), input.subspan(16)};
+        operation(chunks);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == 22U);
+        CHECK(actual == expected);
+        CHECK(to_hex(operation.remaining_input()) == "09");
+    }
+
+    TEST_CASE("integer arrays retain wide wire narrowing policy across every split") {
+        const auto                       bytes = to_bytes("821b00000000000001001b0000000100000007");
+        const std::span<const std::byte> input{bytes};
+        for (std::size_t cut = 0; cut < input.size(); ++cut) {
+            CAPTURE(cut);
+            {
+                input_chunks               storage;
+                auto                       source = make_input_source(storage);
+                std::vector<std::uint32_t> actual;
+                auto                       operation = make_resumable_decoder(source)(actual);
+                operation(input.first(cut));
+                REQUIRE_FALSE(operation.done());
+                operation(input.subspan(cut));
+                REQUIRE(operation.done());
+                REQUIRE(operation.result());
+                CHECK(*operation.result() == 19U);
+                CHECK(actual == std::vector<std::uint32_t>{256, 7});
+            }
+
+            {
+                input_chunks               storage;
+                auto                       source = make_input_source(storage);
+                std::vector<std::uint32_t> actual;
+                auto                       operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
+                operation(input.first(cut));
+                REQUIRE_FALSE(operation.done());
+                operation(input.subspan(cut));
+                REQUIRE(operation.done());
+                REQUIRE_FALSE(operation.result());
+                CHECK(operation.result().error() == status_code::no_match_for_uint_on_buffer);
+                CHECK(actual == std::vector<std::uint32_t>{256});
+            }
+        }
+    }
+
+    TEST_CASE("integer array errors retain the committed prefix and offending item") {
+        const std::array cases{
+            std::pair{"1c", status_code::invalid_additional_info},     std::pair{"1d", status_code::invalid_additional_info},
+            std::pair{"1e", status_code::invalid_additional_info},     std::pair{"1f", status_code::invalid_additional_info},
+            std::pair{"20", status_code::no_match_for_uint_on_buffer}, std::pair{"f5", status_code::no_match_for_uint_on_buffer},
+        };
+        for (const auto &[bad_item, status] : cases) {
+            CAPTURE(bad_item);
+            const auto                 tail  = std::string{bad_item} + "030000000000000000";
+            const auto                 bytes = to_bytes("8301" + tail);
+            input_chunks               storage;
+            auto                       source = make_input_source(storage);
+            std::vector<std::uint64_t> actual;
+            auto                       operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status);
+            CHECK(actual == std::vector<std::uint64_t>{1});
+            CHECK(to_hex(operation.remaining_input()) == tail);
+        }
+    }
+
+    TEST_CASE("integer arrays encode into empty and tiny output windows") {
+        const std::vector<std::uint64_t> values{0, 23, 24, 256, 65536, 0x0102030405060708ULL};
+        for (std::size_t chunk_size = 1; chunk_size <= 9; ++chunk_size) {
+            CAPTURE(chunk_size);
+            std::array<std::byte, 22> bytes{};
+            output_chunks             storage;
+            auto                      sink      = make_output_source(storage);
+            auto                      operation = make_resumable_encoder(sink)(values);
+            operation(std::span<std::byte>{});
+            REQUIRE_FALSE(operation.done());
+            for (std::size_t offset = 0; offset < bytes.size(); offset += chunk_size)
+                operation(std::span{bytes}.subspan(offset, std::min(chunk_size, bytes.size() - offset)));
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+            CHECK(to_hex(bytes) == "86001718181901001a000100001b0102030405060708");
+        }
+    }
+
+    TEST_CASE("integer array output eof preserves the completed prefix") {
+        const std::vector<std::uint64_t> values{1, std::numeric_limits<std::uint64_t>::max(), 3};
+        for (std::size_t partial = 0; partial < 9; ++partial) {
+            CAPTURE(partial);
+            std::vector<std::byte> bytes(2 + partial);
+            output_chunks          storage;
+            auto                   sink      = make_output_source(storage);
+            auto                   operation = make_resumable_encoder(sink)(values);
+            operation(bytes);
+            REQUIRE_FALSE(operation.done());
+            CHECK(to_hex(operation.produced()) == "8301");
+
+            operation.finish();
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(to_hex(operation.produced()) == "8301");
+        }
+    }
+
+    TEST_CASE("integer arrays do not reserve destination storage from a header alone") {
+        const auto                      bytes = to_bytes("9b0000000100000000");
+        counting_resource               resource;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        input_chunks                    storage;
+        auto                            source    = make_input_source(storage);
+        auto                            operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+        REQUIRE_FALSE(operation.done());
+        CHECK(actual.empty());
+        CHECK(resource.allocations == 0U);
+
+        operation.finish();
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::incomplete);
+        CHECK(resource.allocations == 0U);
+    }
+
+    TEST_CASE("admitted integer arrays reserve once including an existing destination prefix") {
+        const auto                      bytes = to_bytes("88000117181818ff19010019ffff1a00010000");
+        counting_resource               resource;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        actual.reserve(2);
+        actual.push_back(91);
+        actual.push_back(92);
+        resource.allocations = 0;
+
+        input_chunks storage;
+        auto         source    = make_input_source(storage);
+        auto         operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == bytes.size());
+        CHECK(std::vector<std::uint32_t>{actual.begin(), actual.end()} ==
+              std::vector<std::uint32_t>{91, 92, 0, 1, 23, 24, 255, 256, 65535, 65536});
+        CHECK(actual.get_allocator().resource() == &resource);
+        CHECK(resource.allocations == 1U);
+    }
 
     TEST_CASE("variant alternatives do not instantiate bypassed ordinary customizations") {
         const auto bytes = to_bytes("d86401");

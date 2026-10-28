@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <iterator>
+#include <limits>
 #include <list>
 #include <map>
 #include <memory_resource>
@@ -154,6 +156,122 @@ template <typename Self> struct contextual_variant_codec : codec::base<Self> {
         }
         value.value = decoded + 1000;
         return status_code::success;
+    }
+};
+
+struct integer_codec_calls {
+    static inline std::size_t encoded{};
+    static inline std::size_t decoded{};
+};
+
+// Shift the application value to distinguish dispatch from the built-in codec.
+template <typename Self> struct ordinary_uint32_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    void encode(std::uint32_t value) {
+        static_cast<Self &>(*this).encode(static_cast<std::uint64_t>(value) + 1000);
+        ++integer_codec_calls::encoded;
+    }
+
+    status_code decode(std::uint32_t &value) {
+        const auto [major, info] = static_cast<Self &>(*this).read_initial_byte();
+        return decode(value, major, info);
+    }
+
+    status_code decode(std::uint32_t &value, major_type major, std::byte info) {
+        std::uint64_t wire_value{};
+        const auto    status = static_cast<Self &>(*this).decode(wire_value, major, info);
+        if (status != status_code::success)
+            return status;
+        if (wire_value < 1000 || wire_value - 1000 > std::numeric_limits<std::uint32_t>::max())
+            return status_code::no_match_for_uint_on_buffer;
+
+        value = static_cast<std::uint32_t>(wire_value - 1000);
+        ++integer_codec_calls::decoded;
+        return status_code::success;
+    }
+};
+
+// Plain mixins may customize only the overload receiving an already-read header.
+template <typename Self> struct plain_uint32_codec {
+    status_code decode(std::uint32_t &value, major_type major, std::byte info) {
+        std::uint64_t wire_value{};
+        const auto    status = static_cast<Self &>(*this).decode(wire_value, major, info);
+        if (status != status_code::success)
+            return status;
+        if (wire_value < 3000 || wire_value - 3000 > std::numeric_limits<std::uint32_t>::max())
+            return status_code::no_match_for_uint_on_buffer;
+
+        value = static_cast<std::uint32_t>(wire_value - 3000);
+        ++integer_codec_calls::decoded;
+        return status_code::success;
+    }
+};
+
+template <typename Self> struct explicit_uint32_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    template <typename Value>
+        requires std::same_as<std::remove_cvref_t<Value>, std::uint32_t>
+    resumable<status_code> resumable_encode(Value &value) {
+        ++integer_codec_calls::encoded;
+        const auto wire_value = static_cast<std::uint64_t>(value) + 2000;
+        co_return co_await static_cast<Self &>(*this)(wire_value);
+    }
+
+    resumable<status_code> resumable_decode(std::uint32_t &value) {
+        ++integer_codec_calls::decoded;
+        std::uint64_t wire_value{};
+        const auto    status = co_await static_cast<Self &>(*this)(wire_value);
+        if (status != status_code::success)
+            co_return status;
+        if (wire_value < 2000 || wire_value - 2000 > std::numeric_limits<std::uint32_t>::max())
+            co_return status_code::no_match_for_uint_on_buffer;
+
+        value = static_cast<std::uint32_t>(wire_value - 2000);
+        co_return status_code::success;
+    }
+};
+
+template <typename Self> struct explicit_only_uint32_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    // Deduced return types expose accidental instantiation during eligibility checks.
+    template <typename T>
+        requires std::same_as<std::remove_cvref_t<T>, std::uint32_t>
+    auto encode(T &) {
+        static_assert(sizeof(Self) == 0, "ordinary integer encode must be bypassed");
+    }
+
+    template <typename T>
+        requires std::same_as<std::remove_cvref_t<T>, std::uint32_t>
+    auto decode(T &) {
+        static_assert(sizeof(Self) == 0, "ordinary integer decode must be bypassed");
+        return status_code::success;
+    }
+
+    template <typename T>
+        requires std::same_as<std::remove_cvref_t<T>, std::uint32_t>
+    resumable<status_code> resumable_encode(T &value) {
+        ++integer_codec_calls::encoded;
+        const auto wire_value = static_cast<std::uint64_t>(value) + 4000;
+        co_return co_await static_cast<Self &>(*this)(wire_value);
+    }
+
+    resumable<status_code> resumable_decode(std::uint32_t &value) {
+        ++integer_codec_calls::decoded;
+        std::uint64_t wire_value{};
+        const auto    status = co_await static_cast<Self &>(*this)(wire_value);
+        if (status != status_code::success)
+            co_return status;
+        if (wire_value < 4000 || wire_value - 4000 > std::numeric_limits<std::uint32_t>::max())
+            co_return status_code::no_match_for_uint_on_buffer;
+
+        value = static_cast<std::uint32_t>(wire_value - 4000);
+        co_return status_code::success;
     }
 };
 
@@ -397,6 +515,224 @@ resumable<status_code> resumable_transcode(Context &context, Value &value) {
 } // namespace
 
 TEST_SUITE("roundtrip/resumable") {
+
+    TEST_CASE_TEMPLATE("integer arrays preserve signed and unsigned boundaries across every split", T, std::uint8_t, std::uint16_t,
+                       std::uint32_t, std::uint64_t, std::int8_t, std::int16_t, std::int32_t, std::int64_t) {
+        std::vector<T> expected{0, 1, 23, 24, std::numeric_limits<T>::max()};
+        for (const std::uint64_t boundary : {255ULL, 256ULL, 65535ULL, 65536ULL, 4294967295ULL, 4294967296ULL}) {
+            if (boundary <= static_cast<std::uint64_t>(std::numeric_limits<T>::max()))
+                expected.push_back(static_cast<T>(boundary));
+        }
+        if constexpr (std::is_signed_v<T>) {
+            expected.insert(expected.end(), {-1, -24, -25, std::numeric_limits<T>::min()});
+            for (const std::int64_t boundary : {-256LL, -257LL, -65536LL, -65537LL, -4294967296LL, -4294967297LL}) {
+                if (boundary >= static_cast<std::int64_t>(std::numeric_limits<T>::min()))
+                    expected.push_back(static_cast<T>(boundary));
+            }
+        }
+
+        check_every_decode_split(expected);
+        check_every_encode_split(expected);
+        check_every_decode_split(std::deque<T>{expected.begin(), expected.end()});
+    }
+
+    TEST_CASE("integer arrays retain ordinary codec overrides through bytewise admission") {
+        const std::vector<std::uint32_t> expected{0, 24, 65536};
+        const std::vector<std::uint64_t> shifted{1000, 1024, 66536};
+        const auto                       reference = ordinary_bytes(shifted);
+        std::vector<std::byte>           bytes(reference.size());
+        output_chunks                    output_storage;
+        auto                             sink = make_output_source(output_storage);
+        integer_codec_calls::encoded          = 0;
+        auto encoder                          = make_resumable_encoder<ordinary_uint32_codec>(sink)(expected);
+        for (auto &byte : bytes)
+            encoder(std::span{&byte, 1});
+
+        REQUIRE(encoder.done());
+        REQUIRE(encoder.result());
+        CHECK(*encoder.result() == bytes.size());
+        CHECK(integer_codec_calls::encoded == expected.size());
+        std::vector<std::uint64_t> encoded_values;
+        REQUIRE(make_decoder(bytes)(encoded_values));
+        CHECK(encoded_values == shifted);
+
+        input_chunks               input_storage;
+        auto                       source = make_input_source(input_storage);
+        std::vector<std::uint32_t> actual;
+        integer_codec_calls::decoded = 0;
+        auto decoder                 = make_resumable_decoder<ordinary_uint32_codec>(source)(actual);
+        for (const auto &byte : reference)
+            decoder(std::span{&byte, 1});
+
+        REQUIRE(decoder.done());
+        REQUIRE(decoder.result());
+        CHECK(*decoder.result() == reference.size());
+        CHECK(integer_codec_calls::decoded == expected.size());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("integer arrays retain ordinary codec overrides with full contiguous buffers") {
+        const std::vector<std::uint32_t> expected{0, 24, 65536};
+        const std::vector<std::uint64_t> shifted{1000, 1024, 66536};
+        const auto                       reference = ordinary_bytes(shifted);
+        REQUIRE(reference.size() > 9U);
+        std::vector<std::byte> bytes(reference.size());
+        output_chunks          output_storage;
+        auto                   sink  = make_output_source(output_storage);
+        integer_codec_calls::encoded = 0;
+        auto encoder                 = make_resumable_encoder<ordinary_uint32_codec>(sink)(expected);
+        encoder(bytes);
+
+        REQUIRE(encoder.done());
+        REQUIRE(encoder.result());
+        CHECK(*encoder.result() == bytes.size());
+        CHECK(integer_codec_calls::encoded == expected.size());
+        std::vector<std::uint64_t> encoded_values;
+        REQUIRE(make_decoder(bytes)(encoded_values));
+        CHECK(encoded_values == shifted);
+
+        input_chunks               input_storage;
+        auto                       source = make_input_source(input_storage);
+        std::vector<std::uint32_t> actual;
+        integer_codec_calls::decoded = 0;
+        auto decoder                 = make_resumable_decoder<ordinary_uint32_codec>(source)(actual);
+        decoder(reference);
+        REQUIRE(decoder.done());
+        REQUIRE(decoder.result());
+        CHECK(*decoder.result() == reference.size());
+        CHECK(integer_codec_calls::decoded == expected.size());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("integer arrays retain plain header codec overrides with full contiguous input") {
+        const std::vector<std::uint32_t> expected{0, 24, 65536, std::numeric_limits<std::uint32_t>::max()};
+        const std::vector<std::uint64_t> shifted{3000, 3024, 68536, 4294970295ULL};
+        const auto                       reference = ordinary_bytes(shifted);
+        REQUIRE(reference.size() > 9U);
+        input_chunks               storage;
+        auto                       source = make_input_source(storage);
+        std::vector<std::uint32_t> actual;
+        integer_codec_calls::decoded = 0;
+        auto operation               = make_resumable_decoder<plain_uint32_codec>(source)(actual);
+        operation(reference);
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == reference.size());
+        CHECK(integer_codec_calls::decoded == expected.size());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("integer arrays invoke explicit hooks once per element across bytewise admission") {
+        const std::vector<std::uint32_t> expected{0, 24, 65536};
+        const std::vector<std::uint64_t> shifted{2000, 2024, 67536};
+        const auto                       reference = ordinary_bytes(shifted);
+        std::vector<std::byte>           bytes(reference.size());
+        output_chunks                    output_storage;
+        auto                             sink = make_output_source(output_storage);
+        integer_codec_calls::encoded          = 0;
+        auto encoder                          = make_resumable_encoder<explicit_uint32_codec>(sink)(expected);
+        for (auto &byte : bytes)
+            encoder(std::span{&byte, 1});
+
+        REQUIRE(encoder.done());
+        REQUIRE(encoder.result());
+        CHECK(integer_codec_calls::encoded == expected.size());
+        std::vector<std::uint64_t> encoded_values;
+        REQUIRE(make_decoder(bytes)(encoded_values));
+        CHECK(encoded_values == shifted);
+
+        input_chunks               input_storage;
+        auto                       source = make_input_source(input_storage);
+        std::vector<std::uint32_t> actual;
+        integer_codec_calls::decoded = 0;
+        auto decoder                 = make_resumable_decoder<explicit_uint32_codec>(source)(actual);
+        for (const auto &byte : reference)
+            decoder(std::span{&byte, 1});
+
+        REQUIRE(decoder.done());
+        REQUIRE(decoder.result());
+        CHECK(integer_codec_calls::decoded == expected.size());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("explicit integer hooks bypass ordinary auto return codec instantiation") {
+        const std::vector<std::uint32_t> expected{0, 24, 65536};
+        const std::vector<std::uint64_t> shifted{4000, 4024, 69536};
+        const auto                       reference = ordinary_bytes(shifted);
+
+        for (const bool bytewise : {false, true}) {
+            CAPTURE(bytewise);
+            std::vector<std::byte> bytes(reference.size());
+            output_chunks          output_storage;
+            auto                   sink  = make_output_source(output_storage);
+            integer_codec_calls::encoded = 0;
+            auto encoder                 = make_resumable_encoder<explicit_only_uint32_codec>(sink)(expected);
+            if (bytewise) {
+                for (auto &byte : bytes)
+                    encoder(std::span{&byte, 1});
+            } else {
+                encoder(bytes);
+            }
+
+            REQUIRE(encoder.done());
+            REQUIRE(encoder.result());
+            CHECK(*encoder.result() == bytes.size());
+            CHECK(integer_codec_calls::encoded == expected.size());
+            std::vector<std::uint64_t> encoded_values;
+            REQUIRE(make_decoder(bytes)(encoded_values));
+            CHECK(encoded_values == shifted);
+
+            input_chunks               input_storage;
+            auto                       source = make_input_source(input_storage);
+            std::vector<std::uint32_t> actual;
+            integer_codec_calls::decoded = 0;
+            auto decoder                 = make_resumable_decoder<explicit_only_uint32_codec>(source)(actual);
+            if (bytewise) {
+                for (const auto &byte : reference)
+                    decoder(std::span{&byte, 1});
+            } else {
+                decoder(reference);
+            }
+
+            REQUIRE(decoder.done());
+            REQUIRE(decoder.result());
+            CHECK(*decoder.result() == reference.size());
+            CHECK(integer_codec_calls::decoded == expected.size());
+            CHECK(actual == expected);
+        }
+    }
+
+    TEST_CASE("integer arrays encode and decode through noncontiguous chunk storage") {
+        const std::array<std::int64_t, 5> expected{1, -24, 256, -65537, std::numeric_limits<std::int64_t>::min()};
+        const auto                        reference = ordinary_bytes(expected);
+        std::list<std::byte>              bytes(reference.size());
+        const auto                        middle = std::next(bytes.begin(), reference.size() / 2);
+        using chunk                              = std::ranges::subrange<std::list<std::byte>::iterator>;
+        std::array chunks{chunk{bytes.begin(), middle}, chunk{middle, bytes.end()}};
+        static_assert(!std::ranges::contiguous_range<chunk>);
+        std::list<chunk> output_storage;
+        auto             sink    = make_output_source(output_storage);
+        auto             encoder = make_resumable_encoder(sink)(expected);
+        encoder(chunks);
+
+        REQUIRE(encoder.done());
+        REQUIRE(encoder.result());
+        CHECK(*encoder.result() == reference.size());
+        std::array<std::int64_t, 5> ordinary_actual{};
+        REQUIRE(make_decoder(bytes)(ordinary_actual));
+        CHECK(ordinary_actual == expected);
+
+        std::list<chunk>            input_storage;
+        auto                        source = make_input_source(input_storage);
+        std::array<std::int64_t, 5> actual{};
+        auto                        decoder = make_resumable_decoder(source)(actual);
+        decoder(chunks);
+        REQUIRE(decoder.done());
+        REQUIRE(decoder.result());
+        CHECK(*decoder.result() == reference.size());
+        CHECK(actual == expected);
+    }
 
     TEST_CASE("reflected message survives every three-chunk partition") {
         const resumable_message          expected{"abc", {1, 24}};

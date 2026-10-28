@@ -1,9 +1,12 @@
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/detail/cbor_resumable_source.h>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <iterator>
 #include <list>
 #include <ranges>
 #include <span>
@@ -81,6 +84,29 @@ static_assert(!std::ranges::sized_range<unsized_source>);
 } // namespace
 
 TEST_SUITE("resumable/source") {
+
+    TEST_CASE("integer arrays traverse admitted unsized chunks once") {
+        const std::vector<std::int64_t> expected{0, 24, -25, 256, -65537, 4294967296LL};
+        std::vector<std::byte>          wire;
+        REQUIRE(ct::make_encoder(wire)(expected));
+        std::list<std::byte> bytes(wire.begin(), wire.end());
+        const auto           middle = std::next(bytes.begin(), wire.size() / 2);
+        std::size_t          increments{};
+        unsized_storage      storage;
+        auto                 source = ct::make_input_source(storage);
+
+        // Admit the complete item before decoding, so retries cannot add legitimate traversal.
+        source.append(unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}},
+                      unsized_chunk{counted_iterator{middle, &increments}, counted_iterator{bytes.end(), &increments}});
+        CHECK(increments == 0U);
+        std::vector<std::int64_t> actual;
+        auto                      operation = ct::make_resumable_decoder(source)(actual);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == wire.size());
+        CHECK(actual == expected);
+        CHECK(increments == wire.size());
+    }
 
     TEST_CASE("input cursors survive empty chunks and later admission") {
         std::array    first{std::byte{1}, std::byte{2}};

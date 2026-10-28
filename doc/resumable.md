@@ -161,6 +161,15 @@ factories preserve one-shot group wrapping and integer policy. Structural
 traversal reuses reflection, allocators, appenders, header decoding, and variant
 mapping. Ordinary primitives are not byte-by-byte coroutine implementations.
 
+Built-in integer arrays drain available input/output in a synchronous loop shared
+with ordinary encoding and decoding. Contiguous chunks use the ordinary span
+codecs; an integer crossing a chunk boundary uses the chunk-aware codec and is
+retried as one item if incomplete. The container awaits only when it needs more
+input or output. Custom integer codecs and explicit hooks keep their normal
+dispatch. Definite-array decoding can reserve destination space once enough
+admitted bytes satisfy the ordinary minimum-payload guard; a length header alone
+does not trigger reservation, and unsized input is never prewalked.
+
 ## Validation
 
 ```cpp

@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/cbor_encode_elements.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 
 #include <algorithm>
@@ -160,9 +161,9 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                 return;
             }
         }
-        for (const auto &item : value) {
-            encode(item);
-        }
+        auto       current = std::ranges::begin(value);
+        const auto last    = std::ranges::end(value);
+        detail::encode_array_elements(*this, current, last);
     }
 
     template <IsMap T> constexpr void encode(const T &value) {

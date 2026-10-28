@@ -373,6 +373,86 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         co_return co_await payload(bytes);
     }
 
+    template <typename Range> static consteval bool has_builtin_integer_elements() {
+        using reference = std::ranges::range_reference_t<Range>;
+        using element   = std::remove_reference_t<reference>;
+        using value     = std::remove_cv_t<element>;
+        if constexpr (!std::integral<value> || !(IsUnsigned<value> || IsSigned<value>) || sizeof(value) > 8 ||
+                      !std::is_lvalue_reference_v<reference> || !std::same_as<value, std::ranges::range_value_t<Range>>) {
+            return false;
+        } else {
+            if constexpr (explicit_hook_kind<element>() != 0 || has_mixin<element>()) {
+                // A bypassed ordinary overload may have a deduced return type whose
+                // body is intentionally invalid for this context. Do not probe it.
+                return false;
+            } else {
+                // Include mutable-only codec overloads, even though the ordinary
+                // array loop itself binds every source element as const.
+                constexpr bool ordinary_override = (requires(Codecs<ordinary_type> &codec, element &item) { codec.encode(item); } || ...);
+                return !ordinary_override && !codec_payload_has_customization<ordinary_type, value, payload_decode_context::direct>();
+            }
+        }
+    }
+
+    template <typename Iterator, typename Sentinel, typename Available = encode_elements_available>
+    status_code segmented_integer_elements(Iterator &current, const Sentinel &last, Available available = {}) {
+        auto        completed = source_.position();
+        status_code status;
+        try {
+            encode_array_elements(ordinary_, current, last, [&] { completed = source_.position(); }, available);
+            status = status_code::success;
+        } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
+            status = resumable_exception_status();
+        }
+
+        // Keep successfully encoded children, and retry only the unfinished
+        // element. The shared loop leaves its iterator on that element.
+        source_.restore(completed);
+        commit();
+        return status;
+    }
+
+    template <typename Iterator, typename Sentinel>
+    status_code integer_window(Iterator &current, const Sentinel &last, std::span<std::byte> window) {
+        encoder<std::span<std::byte>, Options> contiguous(window);
+        constexpr auto                         maximum_size = 1 + sizeof(std::iter_value_t<Iterator>);
+        status_code                            status;
+        try {
+            // Capacity for the native type's largest representation guarantees
+            // that the ordinary primitive finishes without a partial write.
+            encode_array_elements(contiguous, current, last, encoded_element_complete{},
+                                  [&] { return window.size() - contiguous.appender_.head_ >= maximum_size; });
+            status = status_code::success;
+        } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
+            status = resumable_exception_status();
+        }
+
+        source_.advance(contiguous.appender_.head_);
+        commit();
+        return status;
+    }
+
+    template <typename Iterator, typename Sentinel> status_code integer_elements(Iterator &current, const Sentinel &last) {
+        constexpr auto maximum_size = 1 + sizeof(std::iter_value_t<Iterator>);
+        while (current != last) {
+            const auto window = source_.available_output_span();
+            if (!window)
+                return segmented_integer_elements(current, last);
+
+            status_code status;
+            if (window->size() >= maximum_size) {
+                status = integer_window(current, last, *window);
+            } else {
+                // Only the boundary child needs the chunk-aware writer. It can
+                // cross already supplied chunks before returning to the span loop.
+                status = segmented_integer_elements(current, last, [first = true]() mutable { return std::exchange(first, false); });
+            }
+            if (status != status_code::success)
+                return status;
+        }
+        return status_code::success;
+    }
+
     template <bool Map, typename Range> resumable<status_code> container(Range &range, bool force_indefinite = false) {
         constexpr auto major      = Map ? std::byte{0xa0} : std::byte{0x80};
         const bool     indefinite = force_indefinite || !std::ranges::sized_range<Range>;
@@ -384,20 +464,34 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if (status != status_code::success)
             co_return status;
 
-        for (auto &&entry : range) {
-            if constexpr (Map)
-                status = co_await (*this)(pair_first(entry), pair_second(entry));
-            else if constexpr (CborRangeComponent<decltype(entry)> ||
-                               std::same_as<std::remove_cvref_t<decltype(entry)>, std::ranges::range_value_t<Range>>)
-                status = co_await item(entry);
-            else {
-                // Input-range proxies must be materialized before suspension.
-                using value_type  = std::ranges::range_value_t<Range>;
-                auto materialized = static_cast<value_type>(entry);
-                status            = co_await item(materialized);
+        if constexpr (!Map && has_builtin_integer_elements<Range>()) {
+            auto       current = std::ranges::begin(range);
+            const auto last    = std::ranges::end(range);
+            while (current != last) {
+                status = integer_elements(current, last);
+                if (status != status_code::incomplete || eof()) {
+                    if (status != status_code::success)
+                        co_return status;
+                    break;
+                }
+                co_await wait();
             }
-            if (status != status_code::success)
-                co_return status;
+        } else {
+            for (auto &&entry : range) {
+                if constexpr (Map)
+                    status = co_await (*this)(pair_first(entry), pair_second(entry));
+                else if constexpr (CborRangeComponent<decltype(entry)> ||
+                                   std::same_as<std::remove_cvref_t<decltype(entry)>, std::ranges::range_value_t<Range>>)
+                    status = co_await item(entry);
+                else {
+                    // Input-range proxies must be materialized before suspension.
+                    using value_type  = std::ranges::range_value_t<Range>;
+                    auto materialized = static_cast<value_type>(entry);
+                    status            = co_await item(materialized);
+                }
+                if (status != status_code::success)
+                    co_return status;
+            }
         }
         if (indefinite)
             co_return co_await byte(std::byte{0xff});
