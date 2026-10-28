@@ -168,14 +168,19 @@ retried as one item if incomplete. The container awaits only when it needs more
 input or output. Custom integer codecs and explicit hooks keep their normal
 dispatch.
 
-For definite built-in integer arrays, a reservable destination reserves space
-for its existing elements plus the declared count as soon as the complete header
-and configured size bounds are validated. Payload bytes need not have arrived;
-this also applies to unsized input without prewalking it. The caller owns
-allocation limits and can use `as_bounded_size<0, limit>(values)` or a bounded
-allocator. Allocation failure returns `status_code::out_of_memory`. Empty arrays
-do not reserve, and containers without reservation support grow normally.
-One-shot decoding retains its existing availability checks.
+For definite strings, arrays, and maps whose destination appender supports
+reservation, structural decoding reserves space for existing contents plus the
+declared size as soon as the complete header and configured size bounds are
+validated. Payload bytes need not have arrived; this also applies to unsized
+input without prewalking it. For maps, the declared size counts key/value pairs,
+including duplicate keys; reserving an unordered map prepares its buckets but
+does not allocate its elements. Fixed destinations retain their extent checks.
+
+The caller owns allocation limits and can use `as_bounded_size<0, limit>(values)`
+or a bounded allocator. Allocation failure returns `status_code::out_of_memory`.
+Empty items and indefinite headers do not reserve, and containers without
+reservation support grow normally. One-shot decoding retains its existing
+availability checks.
 
 ## Validation
 

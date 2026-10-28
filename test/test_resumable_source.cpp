@@ -10,6 +10,8 @@
 #include <list>
 #include <ranges>
 #include <span>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 namespace ct = cbor::tags;
@@ -84,6 +86,49 @@ static_assert(!std::ranges::sized_range<unsized_source>);
 } // namespace
 
 TEST_SUITE("resumable/source") {
+
+    TEST_CASE_TEMPLATE("unsized sequences reserve from complete headers without prewalking payload", T, std::string, std::vector<std::byte>,
+                       std::vector<double>) {
+        T expected;
+        if constexpr (ct::IsTextString<T>)
+            expected.assign(64, 'a');
+        else if constexpr (ct::IsBinaryString<T>)
+            expected.assign(64, std::byte{0xab});
+        else
+            expected.assign(64, 1.5);
+
+        std::vector<std::byte> wire;
+        REQUIRE(ct::make_encoder(wire)(expected));
+        using header_type = std::conditional_t<ct::IsTextString<T>, ct::as_text_any,
+                                               std::conditional_t<ct::IsBinaryString<T>, ct::as_bstr_any, ct::as_array_any>>;
+        header_type decoded_header;
+        auto        header_decoder = ct::make_decoder(wire);
+        REQUIRE(header_decoder(decoded_header));
+        REQUIRE(decoded_header.size == expected.size());
+        std::list<std::byte> header(wire.cbegin(), header_decoder.tell());
+        std::list<std::byte> payload(header_decoder.tell(), wire.cend());
+        std::size_t          increments{};
+        unsized_storage      storage;
+        auto                 source = ct::make_input_source(storage);
+        T                    actual;
+        auto                 operation = ct::make_resumable_decoder(source)(actual);
+        operation(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+
+        REQUIRE_FALSE(operation.done());
+        CHECK(actual.empty());
+        CHECK(actual.capacity() >= expected.size());
+        CHECK(increments == header.size());
+        const auto capacity = actual.capacity();
+
+        // Admit the complete payload so only a prewalk, not retries, can add traversal.
+        operation(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == wire.size());
+        CHECK(actual == expected);
+        CHECK(actual.capacity() == capacity);
+        CHECK(increments == wire.size());
+    }
 
     TEST_CASE("unsized integer input reserves from the header and traverses payload once") {
         const std::vector<std::int64_t> expected{1, 256, -65537};

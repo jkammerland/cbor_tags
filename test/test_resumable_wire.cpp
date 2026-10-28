@@ -5,6 +5,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
+#include <cbor_tags/cbor_segments.h>
 #include <cbor_tags/cbor_traversal.h>
 #include <cbor_tags/codec.h>
 #include <cstddef>
@@ -20,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -27,8 +29,20 @@ using namespace cbor::tags;
 
 namespace {
 
-using input_chunks  = std::list<std::span<const std::byte>>;
-using output_chunks = std::list<std::span<std::byte>>;
+using input_chunks   = std::list<std::span<const std::byte>>;
+using output_chunks  = std::list<std::span<std::byte>>;
+using reservable_map = std::pmr::unordered_map<int, int>;
+
+template <typename T> constexpr std::string_view container_major_hex() {
+    if constexpr (IsTextString<T>)
+        return "7";
+    else if constexpr (IsBinaryString<T>)
+        return "5";
+    else if constexpr (IsMap<T>)
+        return "b";
+    else
+        return "9";
+}
 
 struct counting_resource : std::pmr::memory_resource {
     std::size_t allocations{};
@@ -501,6 +515,254 @@ TEST_SUITE("cbor_wire/resumable") {
         CHECK(operation.result().error() == status_code::unexpected_group_size);
         CHECK(std::vector<std::uint32_t>{backing.begin(), backing.end()} == std::vector<std::uint32_t>{91, 92});
         CHECK(resource.allocations == 0U);
+    }
+
+    TEST_CASE_TEMPLATE("definite reservable containers validate headers before allocation", T, std::pmr::string,
+                       std::pmr::vector<std::byte>, std::pmr::vector<double>, reservable_map) {
+        const std::string major{container_major_hex<T>()};
+        const auto        header = to_bytes(major + "840");
+        counting_resource resource;
+        T                 actual{&resource};
+        if constexpr (IsMap<T>) {
+            // Force growth regardless of the implementation's initial bucket count.
+            actual.max_load_factor(1.0f / static_cast<float>(std::max<std::size_t>(1, actual.bucket_count())));
+        }
+        resource.allocations = 0;
+        input_chunks storage;
+        auto         source = make_input_source(storage);
+
+        SUBCASE("complete header reserves before payload") {
+            auto operation = make_resumable_decoder(source)(actual);
+            operation(header);
+            REQUIRE_FALSE(operation.done());
+            CHECK(actual.empty());
+            if constexpr (IsMap<T>) {
+                CHECK(resource.allocations > 0U);
+                CHECK(static_cast<double>(actual.bucket_count()) * actual.max_load_factor() >= 64.0);
+            } else {
+                CHECK(resource.allocations == 1U);
+            }
+            const auto allocations = resource.allocations;
+
+            operation.finish();
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(actual.empty());
+            CHECK(resource.allocations == allocations);
+        }
+
+        SUBCASE("incomplete header does not allocate") {
+            auto operation = make_resumable_decoder(source)(actual);
+            operation(std::span<const std::byte>{header}.first(1), end_of_input);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(resource.allocations == 0U);
+        }
+
+        SUBCASE("reserved additional information does not allocate") {
+            const auto malformed = to_bytes(major + "c");
+            auto       operation = make_resumable_decoder(source)(actual);
+            operation(malformed);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::invalid_additional_info);
+            CHECK(resource.allocations == 0U);
+        }
+
+        SUBCASE("bounds reject before allocator invocation") {
+            resource.refuse_allocation = true;
+            auto bounded               = as_bounded_size<0, 32>(actual);
+            auto operation             = make_resumable_decoder(source)(bounded);
+            operation(header);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::size_limit_exceeded);
+            CHECK(resource.allocations == 0U);
+        }
+
+        SUBCASE("allocator refusal is reported before payload") {
+            resource.refuse_allocation = true;
+            auto operation             = make_resumable_decoder(source)(actual);
+            operation(header);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::out_of_memory);
+            CHECK(actual.empty());
+            CHECK(resource.allocations == 1U);
+            CHECK(resource.last_request > 0U);
+        }
+
+        SUBCASE("impossible append count retains prefix without allocator invocation") {
+            if constexpr (IsMap<T>)
+                actual.emplace(1, 2);
+            else
+                actual.push_back(typename T::value_type{});
+            const T prefix{actual};
+            resource.allocations       = 0;
+            resource.refuse_allocation = true;
+            const auto impossible      = to_bytes(major + "bffffffffffffffff");
+            auto       operation       = make_resumable_decoder(source)(actual);
+            operation(impossible);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::out_of_memory);
+            CHECK(actual == prefix);
+            CHECK(resource.allocations == 0U);
+        }
+    }
+
+    TEST_CASE_TEMPLATE("definite sequences reserve prefix and payload once across incremental input", T, std::pmr::string,
+                       std::pmr::vector<std::byte>, std::pmr::vector<double>) {
+        counting_resource resource;
+        T                 actual{&resource};
+        actual.assign(2, typename T::value_type{});
+        const T     prefix{actual};
+        T           expected{actual};
+        std::string payload_hex;
+        for (std::size_t index = 0; index < 64; ++index) {
+            if constexpr (IsTextString<T>) {
+                expected.push_back('a');
+                payload_hex += "61";
+            } else if constexpr (IsBinaryString<T>) {
+                expected.push_back(std::byte{0xab});
+                payload_hex += "ab";
+            } else {
+                // The ordinary double codec requires a binary64 wire value.
+                expected.push_back(1.0);
+                payload_hex += "fb3ff0000000000000";
+            }
+        }
+        REQUIRE(actual.capacity() < expected.size());
+        resource.allocations = 0;
+        const auto   header  = to_bytes(std::string{container_major_hex<T>()} + "840");
+        const auto   payload = to_bytes(payload_hex);
+        input_chunks storage;
+        auto         source    = make_input_source(storage);
+        auto         operation = make_resumable_decoder(source)(actual);
+        operation(header);
+        REQUIRE_FALSE(operation.done());
+        CHECK(actual == prefix);
+        CHECK(actual.capacity() >= expected.size());
+        CHECK(resource.allocations == 1U);
+        const auto capacity = actual.capacity();
+
+        for (const auto &byte : payload) {
+            operation(std::span{&byte, 1});
+            CHECK(actual.capacity() == capacity);
+            CHECK(resource.allocations == 1U);
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == header.size() + payload.size());
+        CHECK(actual == expected);
+        CHECK(actual.get_allocator().resource() == &resource);
+    }
+
+    TEST_CASE("unordered maps reserve buckets before committing complete pairs and replace duplicate keys") {
+        const auto                       bytes = to_bytes("a30119010001190200021818");
+        const std::span<const std::byte> input{bytes};
+        counting_resource                resource;
+        reservable_map                   actual{&resource};
+        actual.emplace(9, 90);
+        actual.max_load_factor(1.0f / static_cast<float>(std::max<std::size_t>(1, actual.bucket_count())));
+        const auto initial_buckets = actual.bucket_count();
+        resource.allocations       = 0;
+        input_chunks storage;
+        auto         source    = make_input_source(storage);
+        auto         operation = make_resumable_decoder(source)(actual);
+        operation(input.first(1));
+        REQUIRE_FALSE(operation.done());
+        REQUIRE(actual.size() == 1U);
+        CHECK(actual.at(9) == 90);
+        CHECK(resource.allocations > 0U);
+        CHECK(actual.bucket_count() > initial_buckets);
+        CHECK(static_cast<double>(actual.bucket_count()) * actual.max_load_factor() >= 4.0);
+        const auto buckets     = actual.bucket_count();
+        const auto allocations = resource.allocations;
+
+        // A complete key and partial value do not publish a map entry.
+        operation(input.subspan(1, 3));
+        REQUIRE(actual.size() == 1U);
+        CHECK(actual.count(1) == 0U);
+        CHECK(resource.allocations == allocations);
+        operation(input.subspan(4, 1));
+        REQUIRE(actual.size() == 2U);
+        CHECK(actual.at(1) == 256);
+
+        operation(input.subspan(5, 3));
+        REQUIRE(actual.size() == 2U);
+        CHECK(actual.at(1) == 256);
+        operation(input.subspan(8, 1));
+        REQUIRE(actual.size() == 2U);
+        CHECK(actual.at(1) == 512);
+        operation(input.subspan(9, 2));
+        CHECK(actual.count(2) == 0U);
+        operation(input.subspan(11));
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == bytes.size());
+        REQUIRE(actual.size() == 3U);
+        CHECK(actual.at(1) == 512);
+        CHECK(actual.at(2) == 24);
+        CHECK(actual.at(9) == 90);
+        CHECK(actual.bucket_count() == buckets);
+        CHECK(actual.get_allocator().resource() == &resource);
+    }
+
+    TEST_CASE_TEMPLATE("empty and indefinite containers do not reserve on their initial header", T, std::pmr::string,
+                       std::pmr::vector<std::byte>, std::pmr::vector<double>, reservable_map) {
+        for (const bool indefinite : {false, true}) {
+            CAPTURE(indefinite);
+            const auto        header = indefinite ? to_bytes(std::string{container_major_hex<T>()} + "f")
+                                                  : to_bytes(IsTextString<T>     ? "60"
+                                                             : IsBinaryString<T> ? "40"
+                                                             : IsMap<T>          ? "a0"
+                                                                                 : "80");
+            const auto        end    = to_bytes("ff");
+            counting_resource resource;
+            T                 actual{&resource};
+            resource.allocations       = 0;
+            resource.refuse_allocation = true;
+            input_chunks storage;
+            auto         source    = make_input_source(storage);
+            auto         operation = make_resumable_decoder(source)(actual);
+            operation(header);
+            CHECK(actual.empty());
+            CHECK(resource.allocations == 0U);
+            if (indefinite) {
+                REQUIRE_FALSE(operation.done());
+                operation(end);
+            }
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == (indefinite ? 2U : 1U));
+            CHECK(resource.allocations == 0U);
+        }
+    }
+
+    TEST_CASE("specialized segment appenders retain incremental array decoding without element reservation") {
+        const auto                       bytes = to_bytes("820102");
+        const std::span<const std::byte> input{bytes};
+        byte_segments                    actual;
+        input_chunks                     storage;
+        auto                             source    = make_input_source(storage);
+        auto                             operation = make_resumable_decoder(source)(actual);
+        operation(input.first(1));
+        REQUIRE_FALSE(operation.done());
+        CHECK(actual.flatten().empty());
+
+        operation(input.subspan(1, 1));
+        REQUIRE_FALSE(operation.done());
+        CHECK(to_hex(actual.flatten()) == "01");
+        operation(input.subspan(2));
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == 3U);
+        CHECK(to_hex(actual.flatten()) == "0102");
     }
 
     TEST_CASE("variant alternatives do not instantiate bypassed ordinary customizations") {

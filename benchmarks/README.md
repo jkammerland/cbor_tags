@@ -286,6 +286,57 @@ fixture size, decoded content, completion after the last arrival, and that the
 publisher never admits bytes before their deadlines. They do not impose timing
 thresholds or run the full 1 GB experiment.
 
+### Immediate reservation for strings and generic containers
+
+Resumable decoding also reserves supported definite strings, arrays, and maps
+after validating the header and configured bounds, before waiting for payload.
+The caller owns allocation limits. The same appender accounts for an existing
+destination prefix; fixed-size and indefinite containers retain their paths.
+
+Compared against `0cdc5572` on an AMD Ryzen 9 7950X with GCC 16.2.1,
+GNU C++20, `-O3 -DNDEBUG`, CPU 2 pinned, and frequency scaling/powersave
+unchanged. Each existing fixture contains 16,777,216 encoded bytes. Three
+alternating executable pairs per workload used `--repetitions 1 --epochs 9`,
+with `--workload` set to `structured`, `bstr`, or `tstr`, and `taskset -c 2`.
+Native selftests and every timed run's decoded-content checks passed.
+
+The table gives encoded MB/s median [minimum, maximum]. Speedups are medians
+[minimum, maximum] of baseline time divided by candidate time within each pair.
+Each decode includes fresh destination allocation.
+
+| Resumable decode | Input | Before, MB/s | After, MB/s | Paired speedup |
+|---|---|---:|---:|---:|
+| structured | whole buffer | 8260 [6928, 8480] | 8490 [7918, 8697] | 1.00x [0.96, 1.26] |
+| structured | 1460 bytes | 2502 [2343, 2671] | 5470 [5310, 5694] | 2.12x [2.05, 2.43] |
+| structured | 4096 bytes | 5394 [3682, 5515] | 7027 [6994, 7053] | 1.30x [1.28, 1.90] |
+| structured | 64 KiB | 7381 [5999, 7502] | 8284 [7100, 8398] | 1.12x [0.96, 1.38] |
+| bstr | whole buffer | 38331 [37763, 38652] | 39064 [38058, 40296] | 1.02x [1.01, 1.04] |
+| bstr | 1460 bytes | 8256 [8157, 8667] | 16619 [13108, 17253] | 1.99x [1.61, 2.01] |
+| bstr | 4096 bytes | 10416 [10124, 10601] | 24107 [23735, 25030] | 2.34x [2.31, 2.36] |
+| bstr | 64 KiB | 13358 [13088, 13766] | 36376 [36354, 37342] | 2.72x [2.64, 2.85] |
+| tstr | whole buffer | 39731 [38452, 40845] | 39768 [38378, 40347] | 1.00x [0.97, 1.02] |
+| tstr | 1460 bytes | 8981 [8742, 9053] | 18519 [18113, 20045] | 2.07x [2.05, 2.23] |
+| tstr | 4096 bytes | 7899 [7561, 8137] | 26293 [25149, 26486] | 3.23x [3.18, 3.50] |
+| tstr | 64 KiB | 9045 [8553, 9089] | 35625 [35068, 36800] | 4.07x [3.86, 4.17] |
+
+At 64 KiB, median completion times fell from **2.273 to 2.025 ms** for
+structured data, **1.256 to 0.461 ms** for bstr, and **1.855 to 0.471 ms** for
+tstr. Every chunked text/binary pair improved. Structured results varied more:
+one pair was slower for both whole-buffer and 64 KiB decoding.
+
+A separate PMR trace checked the complete decoded fixtures. Binary destination
+allocations for whole/1460/4096/65536-byte input changed from 1/16/14/10 to one
+in every mode; text changed from 1/15/14/10 to one. The structured outer vector
+changed from 13 allocations to one, with capacity 4096 to 3921 records. These
+counts exclude nested allocations, source descriptors, and coroutine frames.
+
+Other rows also changed despite their unchanged implementation: 1460-byte
+resumable encode had paired speedups of 0.92x for bstr and 0.89x for tstr;
+ordinary bstr decode measured 40362 to 38476 MB/s (0.94x paired). This full
+benchmark executable comparison does not isolate code-layout effects from
+environmental variation or establish no regression in every mode. There is no
+separate timed map fixture. No paced 1 GB latency run was repeated.
+
 ### Immediate reservation for definite integer arrays
 
 Resumable decoding now reserves a built-in definite integer array's declared

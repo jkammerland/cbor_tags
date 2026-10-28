@@ -590,19 +590,19 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 co_return status_code::unexpected_group_size;
         }
         appender<T> append;
+        // The caller owns allocation limits. Appenders opt into element-count
+        // reservation; some containers reserve descriptors rather than elements.
+        if constexpr (AppendReservable<T> && requires { append.reserve_for_append(value, header.size); }) {
+            if (!header.indefinite && header.size != 0)
+                append.reserve_for_append(value, header.size);
+        }
+
         if constexpr (IsString<T>) {
             if (!header.indefinite)
                 co_return co_await payload(value, header.size, append);
         }
         if constexpr (builtin_integer_array<T>()) {
             if (!header.indefinite) {
-                // The caller owns allocation limits. Reserve after validating
-                // the header and bounds, before any payload chunks need arrive.
-                if constexpr (HasReserve<T>) {
-                    if (header.size != 0)
-                        append.reserve_for_append(value, header.size);
-                }
-
                 auto remaining = header.size;
                 while (remaining != 0) {
                     status = integer_elements(value, append, remaining);
