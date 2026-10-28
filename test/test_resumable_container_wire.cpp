@@ -1,11 +1,17 @@
 #include "test_util.h"
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <list>
 #include <map>
+#include <memory_resource>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,6 +26,36 @@ using input_chunks          = std::list<std::span<const std::byte>>;
 using output_chunks         = std::list<std::span<std::byte>>;
 using ordered_integer_map   = std::map<std::uint32_t, std::uint64_t>;
 using unordered_integer_map = std::unordered_map<std::uint32_t, std::uint64_t>;
+
+struct string_allocation_resource : std::pmr::memory_resource {
+    std::size_t allocations{};
+    bool        refuse{};
+
+    void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocations;
+        if (refuse)
+            throw std::bad_alloc{};
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+    void do_deallocate(void *pointer, std::size_t bytes, std::size_t alignment) override {
+        std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+    }
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
+
+// Container APIs can expose a wider max_size() than their size_type.
+struct narrow_byte_buffer : std::vector<std::byte> {
+    using size_type = std::uint32_t;
+    size_type requested{};
+
+    size_type   size() const { return static_cast<size_type>(std::vector<std::byte>::size()); }
+    size_type   capacity() const { return static_cast<size_type>(std::vector<std::byte>::capacity()); }
+    std::size_t max_size() const { return 100; }
+    void        reserve(size_type count) {
+        requested = count;
+        std::vector<std::byte>::reserve(count);
+    }
+};
 
 template <typename T> void check_integer_array_splits(std::string_view hex, const std::vector<T> &expected) {
     const auto                       bytes = to_bytes(hex);
@@ -47,6 +83,222 @@ template <typename T> void check_integer_array_splits(std::string_view hex, cons
 } // namespace
 
 TEST_SUITE("cbor_wire/resumable") {
+
+    TEST_CASE("indefinite string growth accepts mixed size types and clamps to max size") {
+        const auto bytes = to_bytes("5f4162ff");
+        for (const std::uint32_t initial_capacity : {3U, 60U}) {
+            CAPTURE(initial_capacity);
+            narrow_byte_buffer actual;
+            actual.reserve(initial_capacity);
+            actual.assign(actual.capacity(), std::byte{0x61});
+            const auto previous_capacity = actual.capacity();
+            actual.requested             = 0;
+            input_chunks storage;
+            auto         source    = make_input_source(storage);
+            auto         operation = make_resumable_decoder(source)(actual);
+            operation(std::span<const std::byte>{bytes}.first(2));
+            REQUIRE_FALSE(operation.done());
+            CHECK(actual.size() == previous_capacity);
+            CHECK(actual.requested == std::min<std::size_t>(2 * previous_capacity, actual.max_size()));
+            const auto capacity = actual.capacity();
+            operation(std::span<const std::byte>{bytes}.subspan(2));
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+            CHECK(actual.size() == previous_capacity + 1);
+            CHECK(actual.back() == std::byte{0x62});
+            CHECK(actual.capacity() == capacity);
+        }
+    }
+
+    TEST_CASE_TEMPLATE("indefinite string chunks reserve the declared payload before copying", T, std::pmr::string,
+                       std::pmr::vector<std::byte>) {
+        for (const bool truncated : {false, true}) {
+            CAPTURE(truncated);
+            const auto                   header = to_bytes(IsTextString<T> ? "7f7840" : "5f5840");
+            const std::vector<std::byte> payload(64, std::byte{0x61});
+            const auto                   end = to_bytes("ff09");
+            string_allocation_resource   resource;
+            T                            actual{&resource};
+            actual.assign(8, typename T::value_type{});
+            const T prefix{actual};
+            resource.allocations = 0;
+            input_chunks storage;
+            auto         source    = make_input_source(storage);
+            auto         operation = make_resumable_decoder(source)(actual);
+            operation(header);
+            REQUIRE_FALSE(operation.done());
+            CHECK(actual == prefix);
+            CHECK(actual.capacity() >= prefix.size() + payload.size());
+            CHECK(resource.allocations == 1U);
+            const auto capacity     = actual.capacity();
+            const auto payload_size = truncated ? 3U : payload.size();
+            for (const auto &byte : std::span{payload}.first(payload_size)) {
+                operation(std::span{&byte, 1});
+                CHECK(resource.allocations == 1U);
+                CHECK(actual.capacity() == capacity);
+            }
+            T expected{prefix};
+            expected.insert(expected.end(), payload_size, static_cast<typename T::value_type>(0x61));
+            CHECK(actual == expected);
+
+            if (truncated) {
+                operation.finish();
+                REQUIRE(operation.done());
+                REQUIRE_FALSE(operation.result());
+                CHECK(operation.result().error() == status_code::incomplete);
+            } else {
+                operation(end);
+                REQUIRE(operation.done());
+                REQUIRE(operation.result());
+                CHECK(*operation.result() == header.size() + payload.size() + 1);
+                CHECK(to_hex(operation.remaining_input()) == "09");
+            }
+            CHECK(actual == expected);
+            CHECK(actual.capacity() == capacity);
+            CHECK(resource.allocations == 1U);
+        }
+    }
+
+    TEST_CASE_TEMPLATE("tiny indefinite string chunks grow geometrically without payload reallocations", T, std::pmr::string,
+                       std::pmr::vector<std::byte>) {
+        constexpr std::size_t count = 512;
+        std::string           hex   = IsTextString<T> ? "7f" : "5f";
+        for (std::size_t index = 0; index < count; ++index)
+            hex += IsTextString<T> ? "6161" : "4161";
+        hex += "ff09";
+        const auto                       bytes = to_bytes(hex);
+        const std::span<const std::byte> input{bytes};
+        string_allocation_resource       resource;
+        T                                actual{&resource};
+        resource.allocations = 0;
+        input_chunks storage;
+        auto         source    = make_input_source(storage);
+        auto         operation = make_resumable_decoder(source)(actual);
+        operation(input.first(1));
+
+        for (std::size_t index = 0; index < count; ++index) {
+            CAPTURE(index);
+            const auto capacity    = actual.capacity();
+            const auto allocations = resource.allocations;
+            operation(input.subspan(1 + 2 * index, 1));
+            REQUIRE_FALSE(operation.done());
+            CHECK(actual.size() == index);
+            CHECK(actual.capacity() >= index + 1);
+            if (capacity >= index + 1) {
+                CHECK(resource.allocations == allocations);
+            } else {
+                CHECK(resource.allocations == allocations + 1);
+                CHECK(actual.capacity() >= 2 * capacity);
+            }
+            const auto reserved_allocations = resource.allocations;
+            operation(input.subspan(2 + 2 * index, 1));
+            CHECK(resource.allocations == reserved_allocations);
+        }
+        operation(input.subspan(1 + 2 * count));
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == 2 * count + 2);
+        CHECK(actual == T(count, static_cast<typename T::value_type>(0x61)));
+        CHECK(resource.allocations <= std::bit_width(count) + 1);
+        CHECK(to_hex(operation.remaining_input()) == "09");
+    }
+
+    TEST_CASE_TEMPLATE("indefinite string child validation precedes reservation", T, std::pmr::string, std::pmr::vector<std::byte>) {
+        const std::string          outer = IsTextString<T> ? "7f" : "5f";
+        const std::string          major = IsTextString<T> ? "7" : "5";
+        string_allocation_resource resource;
+        T                          actual{&resource};
+        resource.allocations = 0;
+        input_chunks storage;
+        auto         source = make_input_source(storage);
+
+        SUBCASE("incomplete child header") {
+            const auto bytes     = to_bytes(outer + major + "8");
+            auto       operation = make_resumable_decoder(source)(actual);
+            operation(bytes, end_of_input);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(resource.allocations == 0U);
+        }
+        SUBCASE("wrong child major") {
+            const auto bytes     = to_bytes(outer + (IsTextString<T> ? "5840" : "7840"));
+            auto       operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::malformed_structure);
+            CHECK(resource.allocations == 0U);
+        }
+        SUBCASE("nested indefinite child") {
+            const auto bytes     = to_bytes(outer + outer);
+            auto       operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::malformed_structure);
+            CHECK(resource.allocations == 0U);
+        }
+        SUBCASE("bounds reject the declared child length") {
+            const auto bytes     = to_bytes(outer + major + "840");
+            auto       bounded   = as_bounded_size<0, 32>(actual);
+            auto       operation = make_resumable_decoder(source)(bounded);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::size_limit_exceeded);
+            CHECK(resource.allocations == 0U);
+        }
+        SUBCASE("allocator refusal follows a valid child header") {
+            resource.refuse      = true;
+            const auto bytes     = to_bytes(outer + major + "840");
+            auto       operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::out_of_memory);
+            CHECK(resource.allocations == 1U);
+        }
+        SUBCASE("unrepresentable child length fails before allocator invocation") {
+            resource.refuse      = true;
+            const auto bytes     = to_bytes(outer + major + "bffffffffffffffff");
+            auto       operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::out_of_memory);
+            CHECK(resource.allocations == 0U);
+        }
+        CHECK(actual.empty());
+    }
+
+    TEST_CASE("indefinite byte strings retain nonreservable and fixed destination behavior") {
+        const auto bytes = to_bytes("5f4201024103ff09");
+        SUBCASE("nonreservable sequence") {
+            input_chunks          storage;
+            auto                  source = make_input_source(storage);
+            std::deque<std::byte> actual{std::byte{0xaa}};
+            auto                  operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 7U);
+            CHECK(to_hex(actual) == "aa010203");
+            CHECK(to_hex(operation.remaining_input()) == "09");
+        }
+        SUBCASE("fixed destination rejects indefinite extent") {
+            input_chunks storage;
+            auto         source = make_input_source(storage);
+            std::array   actual{std::byte{0xaa}, std::byte{0xbb}, std::byte{0xcc}};
+            auto         operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::unexpected_group_size);
+            CHECK(to_hex(actual) == "aabbcc");
+        }
+    }
 
     TEST_CASE_TEMPLATE("integer maps commit keys and complete pairs at every input boundary", Map, ordered_integer_map,
                        unordered_integer_map) {

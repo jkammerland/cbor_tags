@@ -31,6 +31,39 @@ struct override_calls {
     static inline std::size_t encoded{};
 };
 
+struct counted_byte_iterator {
+    using value_type        = std::byte;
+    using difference_type   = std::ptrdiff_t;
+    using iterator_category = std::bidirectional_iterator_tag;
+    using iterator_concept  = std::bidirectional_iterator_tag;
+    std::list<std::byte>::iterator position;
+    std::size_t                   *increments{};
+
+    std::byte             &operator*() const { return *position; }
+    counted_byte_iterator &operator++() {
+        ++position;
+        ++*increments;
+        return *this;
+    }
+    counted_byte_iterator operator++(int) {
+        const auto previous = *this;
+        ++*this;
+        return previous;
+    }
+    counted_byte_iterator &operator--() {
+        --position;
+        return *this;
+    }
+    counted_byte_iterator operator--(int) {
+        const auto previous = *this;
+        --*this;
+        return previous;
+    }
+    friend bool operator==(const counted_byte_iterator &left, const counted_byte_iterator &right) {
+        return left.position == right.position;
+    }
+};
+
 template <typename Self> struct direct_integer_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
@@ -157,6 +190,44 @@ template <template <typename> typename Codec> void check_integer_map_override(st
 } // namespace
 
 TEST_SUITE("roundtrip/resumable") {
+
+    TEST_CASE_TEMPLATE("indefinite string payloads reserve before unsized input and traverse once", T, std::string,
+                       std::vector<std::byte>) {
+        const T                expected(96, static_cast<typename T::value_type>(0x61));
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(as_indefinite{expected}));
+        using header_type = std::conditional_t<IsTextString<T>, as_text_any, as_bstr_any>;
+        header_type outer;
+        header_type child;
+        auto        header_decoder = make_decoder(wire);
+        REQUIRE(header_decoder(outer, child));
+        REQUIRE(outer.indefinite);
+        REQUIRE_FALSE(child.indefinite);
+        REQUIRE(child.size == expected.size());
+        std::list<std::byte> header(wire.cbegin(), header_decoder.tell());
+        std::list<std::byte> payload(header_decoder.tell(), wire.cend());
+        std::size_t          increments{};
+        using chunk = std::ranges::subrange<counted_byte_iterator>;
+        static_assert(!std::ranges::sized_range<chunk>);
+        std::list<chunk> storage;
+        auto             source = make_input_source(storage);
+        T                actual;
+        auto             operation = make_resumable_decoder(source)(actual);
+        operation(chunk{counted_byte_iterator{header.begin(), &increments}, counted_byte_iterator{header.end(), &increments}});
+        REQUIRE_FALSE(operation.done());
+        CHECK(actual.empty());
+        CHECK(actual.capacity() >= expected.size());
+        CHECK(increments == header.size());
+        const auto capacity = actual.capacity();
+
+        operation(chunk{counted_byte_iterator{payload.begin(), &increments}, counted_byte_iterator{payload.end(), &increments}});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == wire.size());
+        CHECK(actual == expected);
+        CHECK(actual.capacity() == capacity);
+        CHECK(increments == wire.size());
+    }
 
     TEST_CASE_TEMPLATE("integer maps retain values across every encode and decode split", Map, signed_ordered_map, signed_unordered_map) {
         const Map expected{{-25, 24}, {256, 65536}, {std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::uint64_t>::max()}};

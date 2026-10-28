@@ -114,13 +114,17 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // Bulk string transfer uses the same destination appender as one-shot decoding.
     template <typename T> resumable<status_code> payload(T &value, std::uint64_t length, appender<T> &append) {
-        while (length != 0) {
-            if (empty()) {
-                if (eof())
-                    co_return status_code::incomplete;
-                co_await wait();
-                continue;
-            }
+        drain_payload(value, length, append);
+        if (length == 0)
+            return status_code::success;
+        if (eof())
+            return status_code::incomplete;
+        return await_payload(value, length, append);
+    }
+
+  private:
+    template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
+        while (length != 0 && !empty()) {
             if (const auto span = source_.available_span(ordinary_.reader_.position_); span && !span->empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
@@ -133,10 +137,19 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             }
             commit();
         }
+    }
+
+    // Allocate a frame only when the current payload actually needs more input.
+    template <typename T> resumable<status_code> await_payload(T &value, std::uint64_t length, appender<T> &append) {
+        while (length != 0) {
+            co_await wait();
+            drain_payload(value, length, append);
+            if (length != 0 && eof())
+                co_return status_code::incomplete;
+        }
         co_return status_code::success;
     }
 
-  private:
     template <typename T> resumable<status_code> retry(T &value) {
         for (;;) {
             co_await wait();
@@ -747,6 +760,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                     co_return status_code::malformed_structure;
                 if (chunk.size > maximum - count)
                     co_return status_code::size_limit_exceeded;
+                if constexpr (AppendReservable<T> && requires { append.template reserve_for_append<true>(value, chunk.size); }) {
+                    if (chunk.size != 0)
+                        append.template reserve_for_append<true>(value, chunk.size);
+                }
                 status = co_await payload(value, chunk.size, append);
                 count += chunk.size;
             } else {

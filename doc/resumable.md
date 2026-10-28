@@ -187,9 +187,12 @@ does not allocate its elements. Fixed destinations retain their extent checks.
 
 The caller owns allocation limits and can use `as_bounded_size<0, limit>(values)`
 or a bounded allocator. Allocation failure returns `status_code::out_of_memory`.
-Empty items and indefinite headers do not reserve, and containers without
-reservation support grow normally. One-shot decoding retains its existing
-availability checks.
+Empty items and indefinite outer headers do not reserve. For indefinite strings,
+each validated definite child can reserve its declared payload before it arrives;
+destinations exposing capacity retain geometric growth across small children.
+Payloads already available transfer synchronously without a child coroutine frame.
+Containers without reservation support grow normally. One-shot decoding retains
+its existing availability checks.
 
 With `codec::typed_array`, owning RFC 8746 arrays resume decoding directly into
 their numeric storage. Encoding supports owning arrays and borrowed range
