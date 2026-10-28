@@ -37,11 +37,14 @@ constexpr status_code decode_array_elements(Decoder &decoder, Container &value, 
 
 // A consumed break is distinct from a temporarily exhausted input window.
 // Header-context dispatch matches the ordinary indefinite container decoder.
+// Mutable count/break references cannot be swapped; bounds follow min/max order.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 template <bool CheckBounds = false, typename Decoder, typename Container, typename Appender, typename Completed = ignore_decoded_element,
           typename Available = decode_elements_available>
 constexpr status_code decode_indefinite_array_elements(Decoder &decoder, Container &value, Appender &append, std::uint64_t &count,
                                                        bool &ended, std::uint64_t minimum, std::uint64_t maximum, Completed completed = {},
                                                        Available available = {}) {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     while (available()) {
         const auto [major, info] = decoder.read_initial_byte();
         if (major == major_type::Simple && info == std::byte{31}) {
@@ -75,12 +78,15 @@ template <typename Container> using decoded_map_pair = std::pair<typename Contai
 
 // Keep the key when only the mapped value is incomplete. The same loop serves
 // ordinary decoding with no-op callbacks and resumable decoding with checkpoints.
+// Progress references are grouped by purpose; bounds follow min/max order.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 template <bool Indefinite, bool CheckBounds = false, typename Decoder, typename Container, typename Appender,
           typename Completed = ignore_decoded_element, typename Available = decode_elements_available>
 constexpr status_code decode_map_elements(Decoder &decoder, Container &value, Appender &append,
                                           std::optional<decoded_map_pair<Container>> &entry, bool &key_complete, std::uint64_t &count,
                                           bool &ended, std::uint64_t minimum, std::uint64_t maximum, Completed completed = {},
                                           Available available = {}) {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     while ((Indefinite || count != maximum) && available()) {
         if (!key_complete) {
             major_type major{};
