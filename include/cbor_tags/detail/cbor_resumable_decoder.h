@@ -507,16 +507,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         }
     }
 
+    template <typename Decode> static status_code attempt_decode(Decode &&decode) {
+        try {
+            return decode();
+        } catch (const decode_status_exception &error) { return error.status; } catch (const parse_incomplete_exception &) {
+            return status_code::incomplete;
+        } catch (...) { return resumable_exception_status(); }
+    }
+
     // Drain ordinary elements synchronously. A failed child leaves the logical
     // count and destination at the last complete element, even after an exception.
     template <typename T> status_code segmented_integer_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
-        auto        completed = ordinary_.reader_;
-        status_code status;
-        try {
-            status = decode_array_elements(ordinary_, value, append, remaining, [&] { completed = ordinary_.reader_; });
-        } catch (const decode_status_exception &error) { status = error.status; } catch (const parse_incomplete_exception &) {
-            status = status_code::incomplete;
-        } catch (...) { status = resumable_exception_status(); }
+        auto       completed = ordinary_.reader_;
+        const auto status    = attempt_decode(
+            [&] { return decode_array_elements(ordinary_, value, append, remaining, [&] { completed = ordinary_.reader_; }); });
 
         ordinary_.reader_ = completed;
         commit();
@@ -527,16 +531,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     status_code integer_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
         decoder<std::span<const std::byte>, Options> contiguous(window);
         std::size_t                                  completed{};
-        status_code                                  status;
-        try {
+        const auto                                   status = attempt_decode([&] {
             // Any native integer can occupy nine wire bytes, even a narrow
             // destination. Keep conversion and strictness policy in the core codec.
-            status = decode_array_elements(
+            return decode_array_elements(
                 contiguous, value, append, remaining, [&] { completed = contiguous.reader_.position_; },
                 [&] { return window.size() - contiguous.reader_.position_ >= 9; });
-        } catch (const decode_status_exception &error) { status = error.status; } catch (const parse_incomplete_exception &) {
-            status = status_code::incomplete;
-        } catch (...) { status = resumable_exception_status(); }
+        });
 
         source_.advance(ordinary_.reader_.position_, completed);
         ordinary_.reader_.current_offset_ += completed;
@@ -563,6 +564,39 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 if (status != status_code::success)
                     return status;
             }
+        }
+        return status_code::success;
+    }
+
+    template <typename T>
+    status_code indefinite_integer_elements(T &value, appender<T> &append, std::uint64_t &count, bool &ended, std::uint64_t minimum,
+                                            std::uint64_t maximum) {
+        while (!ended) {
+            const auto  window = source_.available_span(ordinary_.reader_.position_);
+            status_code status;
+            if (window && window->size() >= 9) {
+                decoder<std::span<const std::byte>, Options> contiguous(*window);
+                std::size_t                                  completed{};
+                status = attempt_decode([&] {
+                    return decode_indefinite_array_elements<true>(
+                        contiguous, value, append, count, ended, minimum, maximum, [&] { completed = contiguous.reader_.position_; },
+                        [&] { return window->size() - contiguous.reader_.position_ >= 9; });
+                });
+                source_.advance(ordinary_.reader_.position_, completed);
+                ordinary_.reader_.current_offset_ += completed;
+            } else {
+                auto       completed = ordinary_.reader_;
+                const auto start     = count;
+                status               = attempt_decode([&] {
+                    return decode_indefinite_array_elements<true>(
+                        ordinary_, value, append, count, ended, minimum, maximum, [&] { completed = ordinary_.reader_; },
+                        [&] { return !window || count == start; });
+                });
+                ordinary_.reader_    = completed;
+            }
+            commit();
+            if (status != status_code::success)
+                return status;
         }
         return status_code::success;
     }
@@ -606,6 +640,16 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 auto remaining = header.size;
                 while (remaining != 0) {
                     status = integer_elements(value, append, remaining);
+                    if (status != status_code::incomplete || eof())
+                        co_return status;
+                    co_await wait();
+                }
+                co_return status_code::success;
+            } else {
+                std::uint64_t count{};
+                bool          ended{};
+                while (!ended) {
+                    status = indefinite_integer_elements(value, append, count, ended, minimum, maximum);
                     if (status != status_code::incomplete || eof())
                         co_return status;
                     co_await wait();

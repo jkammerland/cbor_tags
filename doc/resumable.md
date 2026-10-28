@@ -168,6 +168,10 @@ retried as one item if incomplete. The container awaits only when it needs more
 input or output. Custom integer codecs and explicit hooks keep their normal
 dispatch.
 
+Indefinite integer arrays use the same approach, sharing ordinary header-context
+decoding and break handling. A break can finish an array at its configured size
+limit; reaching end of input without a break remains incomplete.
+
 For definite strings, arrays, and maps whose destination appender supports
 reservation, structural decoding reserves space for existing contents plus the
 declared size as soon as the complete header and configured size bounds are

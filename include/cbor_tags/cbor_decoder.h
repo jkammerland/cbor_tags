@@ -1552,34 +1552,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_array(T &value, decode_size_bounds bounds = {}) {
-        detail::appender<T>            appender_;
-        [[maybe_unused]] std::uint64_t size{};
-        while (true) {
-            auto [major, additionalInfo] = read_initial_byte();
-            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                if constexpr (CheckBounds) {
-                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                } else {
-                    return status_code::success;
-                }
-            }
-            if constexpr (CheckBounds) {
-                if (size == bounds.max_size) {
-                    return status_code::size_limit_exceeded;
-                }
-            }
-
-            using value_type = typename T::value_type;
-            auto result      = detail::make_decode_value_for<value_type>(value);
-            auto status      = decode(result, major, additionalInfo);
-            if (status != status_code::success) {
-                return status;
-            }
-            appender_(value, std::move(result));
-            if constexpr (CheckBounds) {
-                ++size;
-            }
-        }
+        detail::appender<T> append;
+        std::uint64_t       count{};
+        bool                ended{};
+        return detail::decode_indefinite_array_elements<CheckBounds>(*this, value, append, count, ended, bounds.min_size, bounds.max_size);
     }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_map(T &value, decode_size_bounds bounds = {}) {
