@@ -1409,6 +1409,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
+// Keep the scalar reader chain inline as more container codecs share it;
+// an out-of-line adapter adds a call for every integer in synchronous loops.
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
         if (additionalInfo < static_cast<byte>(24)) {
             return static_cast<uint64_t>(additionalInfo);
@@ -1565,6 +1570,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return needed;
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr uint64_t read_unsigned(byte additionalInfo) {
         const auto info = std::to_integer<std::uint8_t>(additionalInfo);
         if (!detail::is_valid_cbor_argument_info(info)) {
@@ -1671,6 +1679,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return std::bit_cast<double>(bits);
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
             throw parse_incomplete_exception("Unexpected end of input");
