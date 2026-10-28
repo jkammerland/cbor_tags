@@ -1079,6 +1079,8 @@ endif()
 # Coroutine semantic and literal-wire checks remain distinct.
 add_test(NAME resumable_wire COMMAND tests "--test-suite=cbor_wire/resumable")
 set_tests_properties(resumable_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME resumable_typed_array_wire COMMAND tests "--test-suite=cbor_wire/resumable_typed_array")
+set_tests_properties(resumable_typed_array_wire PROPERTIES LABELS "cbor-wire")
 add_executable(test_resumable_compile test_resumable_compile.cc)
 target_link_libraries(test_resumable_compile PRIVATE cbor::tags)
 add_test(NAME resumable_compile COMMAND test_resumable_compile)

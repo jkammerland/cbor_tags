@@ -186,6 +186,16 @@ Empty items and indefinite headers do not reserve, and containers without
 reservation support grow normally. One-shot decoding retains its existing
 availability checks.
 
+With `codec::typed_array`, owning RFC 8746 arrays resume decoding directly into
+their numeric storage. Encoding supports owning arrays and borrowed range
+wrappers. Both paths reuse ordinary tag/header handling and endian conversion;
+only one element crossing a transport boundary needs fixed scratch storage.
+The header and completed elements commit independently. An incomplete element
+remains uncommitted at EOF, and following items remain available as input tail.
+The codec continues to require a definite byte-string payload, which may arrive
+in any number of transport chunks. Borrowed decode views retain ordinary
+fallback behavior and their input-lifetime requirements.
+
 ## Validation
 
 ```cpp
