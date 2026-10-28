@@ -85,6 +85,39 @@ static_assert(!std::ranges::sized_range<unsized_source>);
 
 TEST_SUITE("resumable/source") {
 
+    TEST_CASE("unsized integer input reserves from the header and traverses payload once") {
+        const std::vector<std::int64_t> expected{1, 256, -65537};
+        std::vector<std::byte>          header_wire;
+        std::vector<std::byte>          payload_wire;
+        REQUIRE(ct::make_encoder(header_wire)(ct::as_array{expected.size()}));
+        auto encoder = ct::make_encoder(payload_wire);
+        for (const auto value : expected)
+            REQUIRE(encoder(value));
+
+        std::list<std::byte>      header(header_wire.begin(), header_wire.end());
+        std::list<std::byte>      payload(payload_wire.begin(), payload_wire.end());
+        std::size_t               increments{};
+        unsized_storage           storage;
+        auto                      source = ct::make_input_source(storage);
+        std::vector<std::int64_t> actual;
+        auto                      operation = ct::make_resumable_decoder(source)(actual);
+        operation(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+
+        REQUIRE_FALSE(operation.done());
+        CHECK(actual.empty());
+        CHECK(actual.capacity() >= expected.size());
+        CHECK(increments == header_wire.size());
+        const auto capacity = actual.capacity();
+
+        operation(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == header_wire.size() + payload_wire.size());
+        CHECK(actual == expected);
+        CHECK(actual.capacity() == capacity);
+        CHECK(increments == header_wire.size() + payload_wire.size());
+    }
+
     TEST_CASE("integer arrays traverse admitted unsized chunks once") {
         const std::vector<std::int64_t> expected{0, 24, -25, 256, -65537, 4294967296LL};
         std::vector<std::byte>          wire;

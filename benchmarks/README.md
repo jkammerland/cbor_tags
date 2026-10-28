@@ -286,9 +286,50 @@ fixture size, decoded content, completion after the last arrival, and that the
 publisher never admits bytes before their deadlines. They do not impose timing
 thresholds or run the full 1 GB experiment.
 
-### Measurements for the resumable implementation
+### Immediate reservation for definite integer arrays
 
-The integer-array optimization was compared against `d7e93fe3` on an AMD Ryzen
+Resumable decoding now reserves a built-in definite integer array's declared
+count immediately after validating its header and configured bounds. The caller
+owns allocation limits; payload availability no longer delays reservation.
+One-shot decoding is unchanged.
+
+Compared against `930a49bb` on the same AMD Ryzen 9 7950X, GCC 16.2.1,
+GNU C++20, `-O3 -DNDEBUG`, with CPU 2 pinned and frequency scaling/powersave
+unchanged. Three alternating executable pairs used the native throughput target
+with `--workload scalars --repetitions 1 --epochs 9`. All correctness checks
+passed. The fixture contains 5,592,405 uint32 values and 15,379,114 encoded bytes;
+each decode starts with a fresh destination, including allocation cost.
+
+| Resumable decode input | Before, MB/s | After, MB/s | Median paired speedup |
+|---|---:|---:|---:|
+| Whole buffer | 1888 [1887, 1888] | 1875 [1863, 1882] | 0.99x |
+| 1460-byte chunks | 649 [648, 657] | 1095 [1074, 1103] | 1.69x |
+| 4096-byte chunks | 770 [768, 773] | 1495 [1462, 1497] | 1.94x |
+| 64 KiB chunks | 865 [859, 871] | 1843 [1814, 1844] | 2.13x |
+
+Throughput entries are medians [minimum, maximum] across the three pairs.
+Paired speedup is baseline elapsed time divided by candidate elapsed time.
+For 64 KiB chunks, median time fell from **17.789 to 8.343 ms**; individual
+paired speedups were **2.083x, 2.148x, and 2.132x**. Whole-buffer time was
+8.148 to 8.202 ms, leaving chunked decoding within about 2% of whole-buffer
+decoding. At 1460/4096 bytes, times fell from 23.698/19.976 to 14.040/10.289 ms.
+
+A separate PMR allocation trace verified the complete decoded fixture in all
+four modes. Destination allocations fell from **24 to 1** for every chunk size;
+whole-buffer decoding stayed at one. Chunked final capacity fell from 8,388,608
+to 5,592,405 elements. These counts exclude source descriptors and coroutine
+frames.
+
+The same full benchmark executable's ordinary decode row measured 1325 to
+1302 MB/s (11.608 to 11.815 ms); encode and validation rows generally varied by
+roughly 1–3%. Those rows were not changed by this patch, and this comparison does
+not establish zero timing regression for every mode. No additional paced 1 GB
+latency run was performed.
+
+### Shared loops and contiguous windows
+
+The earlier optimization at `930a49bb`, before immediate reservation, was
+compared against `d7e93fe3` on an AMD Ryzen
 9 7950X with GCC 16.2.1, GNU C++20, `-O3 -DNDEBUG`. Throughput ran on one pinned
 logical CPU; frequency scaling and the `powersave` governor remained enabled.
 Three fresh alternating baseline/candidate pairs used nine epochs of at least

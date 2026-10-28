@@ -596,17 +596,15 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         }
         if constexpr (builtin_integer_array<T>()) {
             if (!header.indefinite) {
-                auto                  remaining = header.size;
-                [[maybe_unused]] bool reserved{};
+                // The caller owns allocation limits. Reserve after validating
+                // the header and bounds, before any payload chunks need arrive.
+                if constexpr (HasReserve<T>) {
+                    if (header.size != 0)
+                        append.reserve_for_append(value, header.size);
+                }
+
+                auto remaining = header.size;
                 while (remaining != 0) {
-                    if constexpr (HasReserve<T> && std::ranges::sized_range<const Source>) {
-                        // Reuse the ordinary one-byte-per-element lower bound.
-                        // Insufficient admitted bytes defer reservation, not decoding.
-                        if (!reserved && require_minimum_container_payload(ordinary_.reader_, source_, remaining) == status_code::success) {
-                            append.reserve_for_append(value, remaining);
-                            reserved = true;
-                        }
-                    }
                     status = integer_elements(value, append, remaining);
                     if (status != status_code::incomplete || eof())
                         co_return status;

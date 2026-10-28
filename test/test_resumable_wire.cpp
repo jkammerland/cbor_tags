@@ -13,6 +13,7 @@
 #include <list>
 #include <map>
 #include <memory_resource>
+#include <new>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -31,9 +32,14 @@ using output_chunks = std::list<std::span<std::byte>>;
 
 struct counting_resource : std::pmr::memory_resource {
     std::size_t allocations{};
+    std::size_t last_request{};
+    bool        refuse_allocation{};
 
     void *do_allocate(std::size_t bytes, std::size_t alignment) override {
         ++allocations;
+        last_request = bytes;
+        if (refuse_allocation)
+            throw std::bad_alloc{};
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
 
@@ -270,8 +276,8 @@ TEST_SUITE("cbor_wire/resumable") {
         }
     }
 
-    TEST_CASE("integer arrays do not reserve destination storage from a header alone") {
-        const auto                      bytes = to_bytes("9b0000000100000000");
+    TEST_CASE("complete integer array headers reserve without appending elements") {
+        const auto                      bytes = to_bytes("83");
         counting_resource               resource;
         std::pmr::vector<std::uint32_t> actual{&resource};
         input_chunks                    storage;
@@ -280,16 +286,19 @@ TEST_SUITE("cbor_wire/resumable") {
         operation(bytes);
         REQUIRE_FALSE(operation.done());
         CHECK(actual.empty());
-        CHECK(resource.allocations == 0U);
+        CHECK(actual.capacity() >= 3U);
+        CHECK(resource.allocations == 1U);
 
         operation.finish();
         REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == status_code::incomplete);
-        CHECK(resource.allocations == 0U);
+        CHECK(actual.empty());
+        CHECK(actual.capacity() >= 3U);
+        CHECK(resource.allocations == 1U);
     }
 
-    TEST_CASE("admitted integer arrays reserve once including an existing destination prefix") {
+    TEST_CASE("integer arrays reserve existing prefix and declared count before incremental payload") {
         const auto                      bytes = to_bytes("88000117181818ff19010019ffff1a00010000");
         counting_resource               resource;
         std::pmr::vector<std::uint32_t> actual{&resource};
@@ -301,7 +310,16 @@ TEST_SUITE("cbor_wire/resumable") {
         input_chunks storage;
         auto         source    = make_input_source(storage);
         auto         operation = make_resumable_decoder(source)(actual);
-        operation(bytes);
+        operation(std::span<const std::byte>{bytes}.first(1));
+        REQUIRE_FALSE(operation.done());
+        CHECK(std::vector<std::uint32_t>{actual.begin(), actual.end()} == std::vector<std::uint32_t>{91, 92});
+        CHECK(actual.capacity() >= 10U);
+        CHECK(resource.allocations == 1U);
+
+        for (const auto &byte : std::span<const std::byte>{bytes}.subspan(1)) {
+            operation(std::span{&byte, 1});
+            CHECK(resource.allocations == 1U);
+        }
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
@@ -309,6 +327,180 @@ TEST_SUITE("cbor_wire/resumable") {
               std::vector<std::uint32_t>{91, 92, 0, 1, 23, 24, 255, 256, 65535, 65536});
         CHECK(actual.get_allocator().resource() == &resource);
         CHECK(resource.allocations == 1U);
+    }
+
+    TEST_CASE("split integer array headers allocate only after the complete header") {
+        for (const auto hex : {"9803", "990003", "9a00000003", "9b0000000000000003"}) {
+            CAPTURE(hex);
+            const auto                       bytes = to_bytes(hex);
+            const std::span<const std::byte> header{bytes};
+            for (std::size_t cut = 0; cut < header.size(); ++cut) {
+                CAPTURE(cut);
+                for (const bool finish_header : {false, true}) {
+                    CAPTURE(finish_header);
+                    counting_resource               resource;
+                    std::pmr::vector<std::uint32_t> actual{&resource};
+                    input_chunks                    storage;
+                    auto                            source    = make_input_source(storage);
+                    auto                            operation = make_resumable_decoder(source)(actual);
+                    operation(header.first(cut));
+                    REQUIRE_FALSE(operation.done());
+                    CHECK(actual.empty());
+                    CHECK(actual.capacity() == 0U);
+                    CHECK(resource.allocations == 0U);
+
+                    if (finish_header) {
+                        operation(header.subspan(cut));
+                        REQUIRE_FALSE(operation.done());
+                        CHECK(actual.empty());
+                        CHECK(actual.capacity() >= 3U);
+                        CHECK(resource.allocations == 1U);
+                    }
+
+                    operation.finish();
+                    REQUIRE(operation.done());
+                    REQUIRE_FALSE(operation.result());
+                    CHECK(operation.result().error() == status_code::incomplete);
+                    CHECK(resource.allocations == (finish_header ? 1U : 0U));
+                }
+            }
+        }
+    }
+
+    TEST_CASE("malformed integer array headers do not reserve destination storage") {
+        for (const auto hex : {"9c", "9d", "9e"}) {
+            CAPTURE(hex);
+            const auto                      bytes = to_bytes(hex);
+            counting_resource               resource;
+            std::pmr::vector<std::uint32_t> actual{&resource};
+            input_chunks                    storage;
+            auto                            source    = make_input_source(storage);
+            auto                            operation = make_resumable_decoder(source)(actual);
+            operation(bytes);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::invalid_additional_info);
+            CHECK(actual.empty());
+            CHECK(resource.allocations == 0U);
+        }
+    }
+
+    TEST_CASE("bounded integer arrays reject excess counts before requesting allocation") {
+        const auto        bytes = to_bytes("83");
+        counting_resource resource;
+        resource.refuse_allocation = true;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        auto                            bounded = as_bounded_size<0, 2>(actual);
+        input_chunks                    storage;
+        auto                            source    = make_input_source(storage);
+        auto                            operation = make_resumable_decoder(source)(bounded);
+        operation(bytes);
+
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::size_limit_exceeded);
+        CHECK(actual.empty());
+        CHECK(resource.allocations == 0U);
+    }
+
+    TEST_CASE("integer array reservation failures report out of memory before payload") {
+        const auto        bytes = to_bytes("9a00010000");
+        counting_resource resource;
+        resource.refuse_allocation = true;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        input_chunks                    storage;
+        auto                            source    = make_input_source(storage);
+        auto                            operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::out_of_memory);
+        CHECK(actual.empty());
+        CHECK(actual.capacity() == 0U);
+        CHECK(resource.allocations == 1U);
+        CHECK(resource.last_request >= 65536U * sizeof(std::uint32_t));
+    }
+
+    TEST_CASE("empty integer arrays do not allocate destination storage") {
+        const auto        bytes = to_bytes("80");
+        counting_resource resource;
+        resource.refuse_allocation = true;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        input_chunks                    storage;
+        auto                            source    = make_input_source(storage);
+        auto                            operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == 1U);
+        CHECK(actual.empty());
+        CHECK(resource.allocations == 0U);
+    }
+
+    TEST_CASE("unrepresentable integer array reservation preserves prefix without calling allocator") {
+        const auto                      bytes = to_bytes("9bffffffffffffffff");
+        counting_resource               resource;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        actual.push_back(91);
+        const auto capacity        = actual.capacity();
+        resource.allocations       = 0;
+        resource.refuse_allocation = true;
+        input_chunks storage;
+        auto         source    = make_input_source(storage);
+        auto         operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::out_of_memory);
+        CHECK(std::vector<std::uint32_t>{actual.begin(), actual.end()} == std::vector<std::uint32_t>{91});
+        CHECK(actual.capacity() == capacity);
+        CHECK(resource.allocations == 0U);
+    }
+
+    TEST_CASE("truncated integer array payload retains prefix and reserved capacity") {
+        const auto                      bytes = to_bytes("83011901");
+        counting_resource               resource;
+        std::pmr::vector<std::uint32_t> actual{&resource};
+        input_chunks                    storage;
+        auto                            source    = make_input_source(storage);
+        auto                            operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+        REQUIRE_FALSE(operation.done());
+        CHECK(std::vector<std::uint32_t>{actual.begin(), actual.end()} == std::vector<std::uint32_t>{1});
+        CHECK(actual.capacity() >= 3U);
+        CHECK(resource.allocations == 1U);
+        const auto capacity = actual.capacity();
+
+        operation.finish();
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::incomplete);
+        CHECK(std::vector<std::uint32_t>{actual.begin(), actual.end()} == std::vector<std::uint32_t>{1});
+        CHECK(actual.capacity() == capacity);
+        CHECK(resource.allocations == 1U);
+    }
+
+    TEST_CASE("fixed integer array extents reject mismatched headers without changing storage") {
+        const auto                      bytes = to_bytes("83");
+        counting_resource               resource;
+        std::pmr::vector<std::uint32_t> backing{&resource};
+        backing.assign({91, 92});
+        resource.allocations = 0;
+        std::span<std::uint32_t, 2> actual{backing.data(), 2};
+        input_chunks                storage;
+        auto                        source    = make_input_source(storage);
+        auto                        operation = make_resumable_decoder(source)(actual);
+        operation(bytes);
+
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::unexpected_group_size);
+        CHECK(std::vector<std::uint32_t>{backing.begin(), backing.end()} == std::vector<std::uint32_t>{91, 92});
+        CHECK(resource.allocations == 0U);
     }
 
     TEST_CASE("variant alternatives do not instantiate bypassed ordinary customizations") {

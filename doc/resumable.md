@@ -166,9 +166,16 @@ with ordinary encoding and decoding. Contiguous chunks use the ordinary span
 codecs; an integer crossing a chunk boundary uses the chunk-aware codec and is
 retried as one item if incomplete. The container awaits only when it needs more
 input or output. Custom integer codecs and explicit hooks keep their normal
-dispatch. Definite-array decoding can reserve destination space once enough
-admitted bytes satisfy the ordinary minimum-payload guard; a length header alone
-does not trigger reservation, and unsized input is never prewalked.
+dispatch.
+
+For definite built-in integer arrays, a reservable destination reserves space
+for its existing elements plus the declared count as soon as the complete header
+and configured size bounds are validated. Payload bytes need not have arrived;
+this also applies to unsized input without prewalking it. The caller owns
+allocation limits and can use `as_bounded_size<0, limit>(values)` or a bounded
+allocator. Allocation failure returns `status_code::out_of_memory`. Empty arrays
+do not reserve, and containers without reservation support grow normally.
+One-shot decoding retains its existing availability checks.
 
 ## Validation
 
