@@ -334,6 +334,17 @@ struct static_tag_metadata_record : explicitly_resumable_record {
     static_tag_metadata_record(std::uint32_t number, std::string text) : explicitly_resumable_record{number, std::move(text)} {}
 };
 
+struct rvalue_numeric_tag {
+    constexpr operator std::uint64_t() && { return 45006; }
+};
+
+struct rvalue_numeric_metadata_record : explicitly_resumable_record {
+    rvalue_numeric_tag cbor_tag;
+
+    rvalue_numeric_metadata_record() = default;
+    rvalue_numeric_metadata_record(std::uint32_t number, std::string text) : explicitly_resumable_record{number, std::move(text)} {}
+};
+
 struct metadata_tag_calls {
     static inline int encoded{};
     static inline int decoded{};
@@ -755,6 +766,7 @@ TEST_SUITE("roundtrip/resumable") {
 
         check(adl_tagged_resumable_record{65536, "tagged adl continuation"});
         check(member_tagged_resumable_record{65536, "tagged member continuation"});
+        check(rvalue_numeric_metadata_record{65536, "rvalue numeric metadata"});
     }
 
     TEST_CASE("explicit hooks preserve rvalue codec dispatch for static tag metadata") {

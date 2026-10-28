@@ -5,6 +5,7 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/cbor_traversal.h>
+#include <cbor_tags/codec.h>
 #include <cstddef>
 #include <cstdint>
 #include <list>
@@ -14,6 +15,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <variant>
 #include <vector>
 
 using namespace cbor::tags;
@@ -37,6 +40,63 @@ struct two_group {
     int second{};
 };
 
+struct explicit_only_tagged {
+    static constexpr std::uint64_t cbor_tag = 100;
+    std::uint32_t                  value{};
+
+    template <typename Decoder> expected<void, status_code> decode(Decoder &) {
+        static_assert(sizeof(Decoder) == 0, "an explicit resumable hook must bypass ordinary decode");
+        return {};
+    }
+
+    template <typename Context> resumable<status_code> resumable_decode(Context &context) { co_return co_await context(value); }
+};
+
+template <typename Self> struct rejecting_optional_bool_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    status_code decode(std::optional<bool> &, major_type, std::byte) { return status_code::no_match_for_tag_simple_on_buffer; }
+};
+
+struct bool_hook_calls {
+    static inline int count{};
+};
+
+template <typename Self> struct resumable_bool_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_decode(bool &value) {
+        ++bool_hook_calls::count;
+        const auto status = co_await static_cast<Self &>(*this).ordinary(value);
+        if (status == status_code::success)
+            value = !value;
+        co_return status;
+    }
+};
+
+template <typename Self> struct rejecting_resumable_bool_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_decode(bool &) {
+        ++bool_hook_calls::count;
+        return status_code::no_match_for_tag_simple_on_buffer;
+    }
+};
+
+template <typename Self> struct committed_rejecting_bool_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_decode(bool &value) {
+        ++bool_hook_calls::count;
+        const auto status = co_await static_cast<Self &>(*this).ordinary(value);
+        co_return status == status_code::success ? status_code::no_match_for_tag_simple_on_buffer : status;
+    }
+};
+
 status_code validation_status(std::span<const std::byte> bytes, validation_options options = {}) {
     auto       decoder = make_decoder(bytes);
     const auto result  = validate_item(decoder, options);
@@ -48,6 +108,138 @@ status_code operation_status(const expected<std::size_t, status_code> &result) {
 } // namespace
 
 TEST_SUITE("cbor_wire/resumable") {
+
+    TEST_CASE("variant alternatives do not instantiate bypassed ordinary customizations") {
+        const auto bytes = to_bytes("d86401");
+        for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+            CAPTURE(cut);
+            input_chunks                             storage;
+            auto                                     source = make_input_source(storage);
+            std::variant<explicit_only_tagged, bool> actual{false};
+            auto                                     operation = make_resumable_decoder(source)(actual);
+            operation(std::span<const std::byte>{bytes}.first(cut));
+            if (!operation.done())
+                operation(std::span<const std::byte>{bytes}.subspan(cut), end_of_input);
+
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+            REQUIRE(std::holds_alternative<explicit_only_tagged>(actual));
+            CHECK(std::get<explicit_only_tagged>(actual).value == 1U);
+        }
+    }
+
+    TEST_CASE("variant mismatches retain ordinary status across every split") {
+        auto check = []<typename T>(std::type_identity<T>, std::string_view hex, status_code expected_status) {
+            const auto bytes = to_bytes(hex);
+            T          ordinary;
+            const auto reference = make_decoder_with_options<strict_integer_decoder_options>(bytes)(ordinary);
+            REQUIRE_FALSE(reference);
+            REQUIRE(reference.error() == expected_status);
+
+            for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+                CAPTURE(hex);
+                CAPTURE(cut);
+                input_chunks storage;
+                auto         source = make_input_source(storage);
+                T            actual;
+                auto         operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
+                operation(std::span<const std::byte>{bytes}.first(cut));
+                if (!operation.done())
+                    operation(std::span<const std::byte>{bytes}.subspan(cut), end_of_input);
+
+                REQUIRE(operation.done());
+                REQUIRE_FALSE(operation.result());
+                CHECK(operation.result().error() == expected_status);
+            }
+        };
+
+        using narrow_variant = std::variant<std::uint8_t, bool>;
+        using tagged_variant = std::variant<std::tuple<static_tag<100>, int>, bool>;
+        check(std::type_identity<narrow_variant>{}, "190100", status_code::no_match_in_variant_on_buffer);
+        check(std::type_identity<tagged_variant>{}, "d8646161", status_code::no_match_in_variant_on_buffer);
+        check(std::type_identity<narrow_variant>{}, "1901", status_code::incomplete);
+        check(std::type_identity<narrow_variant>{}, "1c", status_code::invalid_additional_info);
+    }
+
+    TEST_CASE("simple variant catchall preserves ordinary customization fallback") {
+        const auto bytes = to_bytes("f5");
+        auto       check = [&]<typename T>() {
+            T          ordinary;
+            const auto reference = make_decoder<rejecting_optional_bool_codec>(bytes)(ordinary);
+            REQUIRE(reference);
+            REQUIRE(std::holds_alternative<simple>(ordinary));
+            CHECK(std::get<simple>(ordinary) == simple{21});
+
+            input_chunks storage;
+            auto         source = make_input_source(storage);
+            T            actual;
+            auto         operation = make_resumable_decoder<rejecting_optional_bool_codec>(source)(actual);
+            operation(bytes, end_of_input);
+
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 1U);
+            CHECK(actual == ordinary);
+        };
+
+        check.template operator()<std::variant<std::optional<bool>, simple>>();
+        check.template operator()<std::variant<simple, std::optional<bool>>>();
+        check.template operator()<std::variant<std::variant<std::optional<bool>, int>, simple>>();
+    }
+
+    TEST_CASE("simple variant dispatch preserves nested and optional explicit hooks") {
+        const auto bytes = to_bytes("f5");
+        auto       check = [&]<typename T>(const T &expected) {
+            input_chunks storage;
+            auto         source = make_input_source(storage);
+            T            actual;
+            const auto   calls     = bool_hook_calls::count;
+            auto         operation = make_resumable_decoder<resumable_bool_codec>(source)(actual);
+            operation(bytes, end_of_input);
+
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 1U);
+            CHECK(actual == expected);
+            CHECK(bool_hook_calls::count == calls + 1);
+        };
+
+        check(std::variant<bool, simple>{false});
+        check(std::variant<std::variant<bool, int>, simple>{std::variant<bool, int>{false}});
+        check(std::variant<std::optional<bool>, simple>{std::optional<bool>{false}});
+    }
+
+    TEST_CASE("explicit variant rejection permits catchall only before committed progress") {
+        const auto bytes = to_bytes("f5");
+
+        SUBCASE("tentative rejection permits catchall") {
+            input_chunks               storage;
+            auto                       source = make_input_source(storage);
+            std::variant<bool, simple> actual;
+            const auto                 calls     = bool_hook_calls::count;
+            auto                       operation = make_resumable_decoder<rejecting_resumable_bool_codec>(source)(actual);
+            operation(bytes, end_of_input);
+
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 1U);
+            REQUIRE(std::holds_alternative<simple>(actual));
+            CHECK(std::get<simple>(actual) == simple{21});
+            CHECK(bool_hook_calls::count == calls + 1);
+        }
+
+        SUBCASE("committed rejection is terminal") {
+            input_chunks               storage;
+            auto                       source = make_input_source(storage);
+            std::variant<bool, simple> actual;
+            const auto                 calls     = bool_hook_calls::count;
+            auto                       operation = make_resumable_decoder<committed_rejecting_bool_codec>(source)(actual);
+            operation(bytes);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::no_match_in_variant_on_buffer);
+            CHECK(std::ranges::empty(operation.remaining_input()));
+            CHECK(bool_hook_calls::count == calls + 1);
+        }
+    }
 
     TEST_CASE("reflected message resumes inside text and integer arguments") {
         const auto   first  = to_bytes("826361");

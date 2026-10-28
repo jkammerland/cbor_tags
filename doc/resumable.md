@@ -151,6 +151,10 @@ Member/ADL hooks use the ordinary automatic metadata-tag convention. Mixin hooks
 own the complete wire shape, including tags. Explicit hooks take precedence over
 ordinary customizations; a generic ordinary `decode(auto&)` does not opt in.
 
+Within a variant, an explicit hook may reject an alternative before committing
+bytes and allow a simple-value catchall to run. Rejection after committed
+progress is terminal; committed input is never rewound to try another alternative.
+
 `make_resumable_decoder<Codec...>` and `make_resumable_encoder<Codec...>` install
 mixins. The corresponding `make_resumable_*_with_options<Options, Codec...>`
 factories preserve one-shot group wrapping and integer policy. Structural

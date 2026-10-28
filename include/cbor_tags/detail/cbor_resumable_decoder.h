@@ -264,7 +264,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 resume_tag_wrapper wrapper{tag};
                 status = co_await ordinary(wrapper);
             } else {
-                auto normalized = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(tag)};
+                auto normalized = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(std::move(tag))};
                 status          = co_await ordinary(normalized);
             }
             if (status != status_code::success)
@@ -431,6 +431,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else
             return false;
     }
+
     template <typename T> resumable<status_code> variant(T &value) {
         require_unambiguous_variant_dispatch<T>();
         auto status = co_await available();
@@ -444,9 +445,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if (status != status_code::success)
                 co_return status;
         }
-        status = co_await variant_alternative<false>(value, major, info, tag.tag);
-        if (status == status_code::no_match_in_variant_on_buffer && major == major_type::Simple)
+        const auto start = offset();
+        status           = co_await variant_alternative<false>(value, major, info, tag.tag);
+        if (status == status_code::no_match_in_variant_on_buffer && major == major_type::Simple && offset() == start) {
+            // A rejected tentative candidate may leave its header consumed.
+            // Explicitly committed progress is terminal and cannot be retried.
+            rollback();
             status = co_await variant_alternative<true>(value, major, info, tag.tag);
+        }
         co_return status;
     }
     template <bool CatchAll, typename T, std::size_t I = 0>
@@ -472,7 +478,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                     status = co_await header_item(decoded);
                 if (status == status_code::success)
                     variant_assign<I>(value, std::move(decoded));
-                co_return status;
+                co_return is_retriable_variant_mismatch(status) ? status_code::no_match_in_variant_on_buffer : status;
             }
             co_return co_await variant_alternative<CatchAll, T, I + 1>(value, major, info, tag);
         }
