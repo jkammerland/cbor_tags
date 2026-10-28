@@ -373,12 +373,12 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         co_return co_await payload(bytes);
     }
 
-    template <typename Range> static consteval bool has_builtin_integer_elements() {
-        using reference = std::ranges::range_reference_t<Range>;
+    template <typename Reference, typename Value> static consteval bool builtin_integer_reference() {
+        using reference = Reference;
         using element   = std::remove_reference_t<reference>;
         using value     = std::remove_cv_t<element>;
         if constexpr (!std::integral<value> || !(IsUnsigned<value> || IsSigned<value>) || sizeof(value) > 8 ||
-                      !std::is_lvalue_reference_v<reference> || !std::same_as<value, std::ranges::range_value_t<Range>>) {
+                      !std::is_lvalue_reference_v<reference> || !std::same_as<value, Value>) {
             return false;
         } else {
             if constexpr (explicit_hook_kind<element>() != 0 || has_mixin<element>()) {
@@ -391,6 +391,23 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                 constexpr bool ordinary_override = (requires(Codecs<ordinary_type> &codec, element &item) { codec.encode(item); } || ...);
                 return !ordinary_override && !codec_payload_has_customization<ordinary_type, value, payload_decode_context::direct>();
             }
+        }
+    }
+
+    template <typename Range> static consteval bool has_builtin_integer_elements() {
+        return builtin_integer_reference<std::ranges::range_reference_t<Range>, std::ranges::range_value_t<Range>>();
+    }
+
+    template <typename Range> static consteval bool has_builtin_integer_pairs() {
+        using reference = std::ranges::range_reference_t<Range>;
+        if constexpr (!std::is_lvalue_reference_v<reference> || !IsPairLike<reference> ||
+                      !std::same_as<std::remove_cvref_t<reference>, std::ranges::range_value_t<Range>>) {
+            return false;
+        } else {
+            using key    = decltype(pair_first(std::declval<reference>()));
+            using mapped = decltype(pair_second(std::declval<reference>()));
+            return builtin_integer_reference<key, std::remove_cvref_t<key>>() &&
+                   builtin_integer_reference<mapped, std::remove_cvref_t<mapped>>();
         }
     }
 
@@ -453,6 +470,43 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         return status_code::success;
     }
 
+    template <typename Iterator, typename Sentinel>
+    status_code integer_map_elements(Iterator &current, const Sentinel &last, bool &key_complete) {
+        constexpr auto maximum_size =
+            2 + sizeof(std::remove_cvref_t<decltype(pair_first(*current))>) + sizeof(std::remove_cvref_t<decltype(pair_second(*current))>);
+        while (current != last) {
+            const auto  window = source_.available_output_span();
+            status_code status = status_code::success;
+            if (window && window->size() >= maximum_size) {
+                auto                                   bytes = *window;
+                encoder<std::span<std::byte>, Options> contiguous(bytes);
+                std::size_t                            completed{};
+                try {
+                    encode_map_elements(
+                        contiguous, current, last, key_complete, [&] { completed = contiguous.appender_.head_; },
+                        [&] { return window->size() - contiguous.appender_.head_ >= maximum_size; });
+                } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
+                    status = resumable_exception_status();
+                }
+                source_.advance(completed);
+            } else {
+                auto completed = source_.position();
+                try {
+                    encode_map_elements(
+                        ordinary_, current, last, key_complete, [&] { completed = source_.position(); },
+                        [&, first = true]() mutable { return !window || std::exchange(first, false); });
+                } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
+                    status = resumable_exception_status();
+                }
+                source_.restore(completed);
+            }
+            commit();
+            if (status != status_code::success)
+                return status;
+        }
+        return status_code::success;
+    }
+
     template <bool Map, typename Range> resumable<status_code> container(Range &range, bool force_indefinite = false) {
         constexpr auto major      = Map ? std::byte{0xa0} : std::byte{0x80};
         const bool     indefinite = force_indefinite || !std::ranges::sized_range<Range>;
@@ -464,7 +518,20 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if (status != status_code::success)
             co_return status;
 
-        if constexpr (!Map && has_builtin_integer_elements<Range>()) {
+        if constexpr (Map && has_builtin_integer_pairs<Range>()) {
+            auto       current = std::ranges::begin(range);
+            const auto last    = std::ranges::end(range);
+            bool       key_complete{};
+            while (current != last) {
+                status = integer_map_elements(current, last, key_complete);
+                if (status != status_code::incomplete || eof()) {
+                    if (status != status_code::success)
+                        co_return status;
+                    break;
+                }
+                co_await wait();
+            }
+        } else if constexpr (!Map && has_builtin_integer_elements<Range>()) {
             auto       current = std::ranges::begin(range);
             const auto last    = std::ranges::end(range);
             while (current != last) {

@@ -580,32 +580,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         if constexpr (!IsMap<T>) {
             return detail::decode_array_elements(*this, value, appender_, length);
         } else {
-            for (auto i = length; i > 0; --i) {
-                using key_type    = typename T::key_type;
-                using mapped_type = typename T::mapped_type;
-                using value_type  = std::pair<key_type, mapped_type>;
-                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
-                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
-                    auto key          = detail::make_decode_value_for<key_type>(value);
-                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                    auto status       = decode(key);
-                    status            = status == status_code::success ? decode(mapped_value) : status;
-                    if (status != status_code::success) {
-                        return status;
-                    }
-                    value_type result{std::move(key), std::move(mapped_value)};
-                    appender_(value, std::move(result));
-                } else {
-                    value_type result;
-                    auto &[key, mapped_value] = result;
-                    auto status               = decode(key);
-                    status                    = status == status_code::success ? decode(mapped_value) : status;
-                    if (status != status_code::success) {
-                        return status;
-                    }
-                    appender_(value, std::move(result));
-                }
-            }
+            std::optional<detail::decoded_map_pair<T>> entry;
+            bool                                       key_complete{};
+            bool                                       ended{};
+            std::uint64_t                              count{};
+            return detail::decode_map_elements<false>(*this, value, appender_, entry, key_complete, count, ended, 0, length);
         }
 
         return status_code::success;
@@ -1559,65 +1538,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_map(T &value, decode_size_bounds bounds = {}) {
-        detail::appender<T>            appender_;
-        [[maybe_unused]] std::uint64_t size{};
-        while (true) {
-            auto [major, additionalInfo] = read_initial_byte();
-            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                if constexpr (CheckBounds) {
-                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                } else {
-                    return status_code::success;
-                }
-            }
-            if constexpr (CheckBounds) {
-                if (size == bounds.max_size) {
-                    return status_code::size_limit_exceeded;
-                }
-            }
-
-            using key_type    = typename T::key_type;
-            using mapped_type = typename T::mapped_type;
-            using value_type  = std::pair<key_type, mapped_type>;
-            if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
-                          detail::can_propagate_container_allocator_for<mapped_type, T>()) {
-                auto key          = detail::make_decode_value_for<key_type>(value);
-                auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                auto status       = decode(key, major, additionalInfo);
-                if (status == status_code::success) {
-                    auto [mapped_major, mapped_additional_info] = read_initial_byte();
-                    if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                        return status_code::malformed_structure;
-                    }
-                    status = decode(mapped_value, mapped_major, mapped_additional_info);
-                }
-                if (status != status_code::success) {
-                    return status;
-                }
-                value_type result{std::move(key), std::move(mapped_value)};
-                appender_(value, std::move(result));
-                if constexpr (CheckBounds) {
-                    ++size;
-                }
-            } else {
-                value_type result{};
-                auto       status = decode(result.first, major, additionalInfo);
-                if (status == status_code::success) {
-                    auto [mapped_major, mapped_additional_info] = read_initial_byte();
-                    if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                        return status_code::malformed_structure;
-                    }
-                    status = decode(result.second, mapped_major, mapped_additional_info);
-                }
-                if (status != status_code::success) {
-                    return status;
-                }
-                appender_(value, std::move(result));
-                if constexpr (CheckBounds) {
-                    ++size;
-                }
-            }
-        }
+        detail::appender<T>                        append;
+        std::optional<detail::decoded_map_pair<T>> entry;
+        bool                                       key_complete{};
+        bool                                       ended{};
+        std::uint64_t                              count{};
+        return detail::decode_map_elements<true, CheckBounds>(*this, value, append, entry, key_complete, count, ended, bounds.min_size,
+                                                              bounds.max_size);
     }
 
     constexpr size_type require_bytes(std::uint64_t length) {

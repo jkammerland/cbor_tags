@@ -172,6 +172,11 @@ Indefinite integer arrays use the same approach, sharing ordinary header-context
 decoding and break handling. A break can finish an array at its configured size
 limit; reaching end of input without a break remains incomplete.
 
+Integer-key/integer-value maps also share synchronous ordinary codec loops.
+Each completed key commits independently, so a value split across chunks resumes
+without decoding or encoding its key again. Definite and indefinite maps count
+wire pairs, including duplicate keys, and append only complete pairs.
+
 For definite strings, arrays, and maps whose destination appender supports
 reservation, structural decoding reserves space for existing contents plus the
 declared size as soon as the complete header and configured size bounds are

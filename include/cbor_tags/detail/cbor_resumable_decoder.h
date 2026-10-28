@@ -489,22 +489,29 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value, major_type{}, std::byte{}); } || ...);
     }
 
-    template <typename T> static consteval bool builtin_integer_array() {
-        if constexpr (!IsArray<T> || IsString<T>) {
+    template <typename T> static consteval bool builtin_integer() {
+        if constexpr (!std::integral<T> || !(IsUnsigned<T> || IsSigned<T>) || sizeof(T) > 8 || has_explicit_hook<T>() || has_mixin<T>()) {
+            // Explicit hooks own dispatch without instantiating ordinary probes.
             return false;
         } else {
-            using value_type = typename T::value_type;
-            if constexpr (!std::integral<value_type> || !(IsUnsigned<value_type> || IsSigned<value_type>) || sizeof(value_type) > 8 ||
-                          has_explicit_hook<value_type>() || has_mixin<value_type>()) {
-                // Discard ordinary probes entirely when an explicit hook owns
-                // the item, including overloads with deduced return types.
-                return false;
-            } else {
-                return !ordinary_integer_override<value_type>() &&
-                       !codec_payload_has_customization<ordinary_type, value_type, payload_decode_context::direct>() &&
-                       !codec_payload_has_customization<ordinary_type, value_type, payload_decode_context::header>();
-            }
+            return !ordinary_integer_override<T>() &&
+                   !codec_payload_has_customization<ordinary_type, T, payload_decode_context::direct>() &&
+                   !codec_payload_has_customization<ordinary_type, T, payload_decode_context::header>();
         }
+    }
+
+    template <typename T> static consteval bool builtin_integer_array() {
+        if constexpr (IsArray<T> && !IsString<T>)
+            return builtin_integer<typename T::value_type>();
+        else
+            return false;
+    }
+
+    template <typename T> static consteval bool builtin_integer_map() {
+        if constexpr (IsMap<T>)
+            return builtin_integer<typename T::key_type>() && builtin_integer<typename T::mapped_type>();
+        else
+            return false;
     }
 
     template <typename Decode> static status_code attempt_decode(Decode &&decode) {
@@ -601,6 +608,55 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return status_code::success;
     }
 
+    template <bool Indefinite, typename T>
+    status_code integer_map_elements(T &value, appender<T> &append, std::optional<decoded_map_pair<T>> &entry, bool &key_complete,
+                                     std::uint64_t &count, bool &ended, std::uint64_t minimum, std::uint64_t maximum) {
+        while (!ended && (Indefinite || count != maximum)) {
+            const auto  window = source_.available_span(ordinary_.reader_.position_);
+            status_code status;
+            if (window && window->size() >= 18) {
+                decoder<std::span<const std::byte>, Options> contiguous(*window);
+                std::size_t                                  completed{};
+                status = attempt_decode([&] {
+                    return decode_map_elements<Indefinite, true>(
+                        contiguous, value, append, entry, key_complete, count, ended, minimum, maximum,
+                        [&] { completed = contiguous.reader_.position_; },
+                        [&] { return window->size() - contiguous.reader_.position_ >= 18; });
+                });
+                source_.advance(ordinary_.reader_.position_, completed);
+                ordinary_.reader_.current_offset_ += completed;
+            } else {
+                auto       completed = ordinary_.reader_;
+                const auto start     = count;
+                status               = attempt_decode([&] {
+                    return decode_map_elements<Indefinite, true>(
+                        ordinary_, value, append, entry, key_complete, count, ended, minimum, maximum,
+                        [&] { completed = ordinary_.reader_; }, [&] { return !window || count == start; });
+                });
+                ordinary_.reader_    = completed;
+            }
+            commit();
+            if (status != status_code::success)
+                return status;
+        }
+        return status_code::success;
+    }
+
+    template <bool Indefinite, typename T>
+    resumable<status_code> integer_map(T &value, appender<T> &append, std::uint64_t minimum, std::uint64_t maximum) {
+        std::optional<decoded_map_pair<T>> entry;
+        bool                               key_complete{};
+        bool                               ended{};
+        std::uint64_t                      count{};
+        while (!ended && (Indefinite || count != maximum)) {
+            const auto status = integer_map_elements<Indefinite>(value, append, entry, key_complete, count, ended, minimum, maximum);
+            if (status != status_code::incomplete || eof())
+                co_return status;
+            co_await wait();
+        }
+        co_return status_code::success;
+    }
+
     template <typename T>
     resumable<status_code> container(T &value, std::uint64_t minimum = 0, std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max(),
                                      bool require_indefinite = false) {
@@ -634,6 +690,12 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         if constexpr (IsString<T>) {
             if (!header.indefinite)
                 co_return co_await payload(value, header.size, append);
+        }
+        if constexpr (builtin_integer_map<T>()) {
+            if (header.indefinite)
+                co_return co_await integer_map<true>(value, append, minimum, maximum);
+            else
+                co_return co_await integer_map<false>(value, append, 0, header.size);
         }
         if constexpr (builtin_integer_array<T>()) {
             if (!header.indefinite) {
