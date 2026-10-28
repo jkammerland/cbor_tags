@@ -285,3 +285,74 @@ Only the small `--self-test` cases are registered with CTest. They verify exact
 fixture size, decoded content, completion after the last arrival, and that the
 publisher never admits bytes before their deadlines. They do not impose timing
 thresholds or run the full 1 GB experiment.
+
+### Measurements for the resumable implementation
+
+Measured implementation `fc9c1704` against ordinary baseline `4e3fd952` on an
+AMD Ryzen 9 7950X with GCC 16.2.1, GNU C++20, `-O3 -DNDEBUG`. Throughput ran on
+one pinned logical CPU. Frequency scaling and the `powersave` governor remained
+enabled. The paced producer and consumer used unrestricted CPU affinity.
+Subsequent fixes affect variant/tag customizations absent from these fixtures;
+the subsequent precision change affects printed output only.
+
+Throughput below is encoded **MB/s**, median **[minimum, maximum]** across three
+rounds, each using nine epochs of at least 20 ms. Fixtures contain 16,777,216
+encoded bytes, except the scalar array with 15,379,114 bytes. All fixture and
+post-measurement content checks passed.
+
+| Workload / operation | Ordinary | Resumable, whole buffer | Resumable, 64 KiB chunks |
+|---|---:|---:|---:|
+| structured decode | 7658 [7618, 8194] | 3074 [3004, 3129] | 2829 [2343, 2927] |
+| structured encode | 15012 [14928, 15554] | 3277 [3256, 3433] | 3329 [3159, 3435] |
+| bstr decode | 32221 [31418, 32619] | 32395 [32167, 33009] | 12176 [11208, 12193] |
+| bstr encode | 31850 [29825, 32251] | 33176 [32148, 33272] | 32821 [28836, 33169] |
+| tstr decode | 29004 [28958, 31346] | 28550 [28517, 32272] | 7471 [7075, 7821] |
+| tstr encode | 27711 [27449, 31548] | 28392 [27278, 31649] | 24962 [24677, 25285] |
+| scalar decode | 1277 [1270, 1278] | 201 [200, 201] | 196 [195, 197] |
+| scalar encode | 3478 [3464, 3492] | 197 [190, 199] | 194 [194, 196] |
+| structured validation | 1465 [1411, 1568] | 656 [656, 746] | 738 [662, 739] |
+| tstr validation | 1748 [1740, 1756] | 860 [764, 861] | 863 [857, 865] |
+| scalar validation | 498 [496, 502] | 207 [179, 208] | 202 [187, 206] |
+
+Binary-string validation skips the declared payload, so its reported represented
+bytes/s is not memory-scanning throughput and is omitted from this table.
+Resumability has substantial costs for scalar arrays: about 6.5 times longer
+decode and 18 times longer encode with 64 KiB chunks. Ready scalar results avoid
+per-integer coroutine frames; chunk cursor handling and structural continuation
+still cost work. These results do not support replacing every ordinary call with
+a resumable call.
+
+The separate baseline comparison compiled **both** harnesses with
+`CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1`. An earlier comparison using a full candidate
+translation unit was discarded because its extra instantiations confounded the
+comparison. Three alternating matched pairs gave noisy results: structured
+decode was 0.1199 [0.1189, 0.1375] ns/B at baseline and 0.1341 [0.1146, 0.1412]
+ns/B in the candidate, while individual paired changes were -2.4%, +17.7%, and
+-3.6%. Scalar encode was initially 0.3321 [0.3290, 0.3726] versus
+0.3892 [0.3698, 0.4101] ns/B. Binary/text encode and decode medians improved
+roughly 3–5% in that run.
+
+A bounded scalar follow-up used the same binaries, three alternating pairs,
+and 21 epochs per row. Encode measured 0.3246 [0.3080, 0.3254] versus
+0.3336 [0.3292, 0.3345] ns/B, a 2.8% increase in median time; paired increases
+were 8.3%, 1.4%, and 2.8%. Decode medians differed by -0.4%. The optimized scalar
+encoding wrapper had the same 166 instructions, integer loop, register
+allocation, and alignment in both binaries, with a different code address.
+No snapshot or coroutine instructions were added to ordinary encoding.
+Timing equivalence is nevertheless **not established** by these measurements.
+
+All **12 full paced trials** passed, each admitting exactly 1 GB at 100 Mb/s in
+64 KiB chunks. Each table entry is a median [minimum, maximum] across three
+trials. Completion includes decoding but excludes the final equality check.
+
+| Workload | Ordinary total, s | Resumable total, s | Ordinary final-byte tail, ms | Resumable final-byte tail, µs |
+|---|---:|---:|---:|---:|
+| structured | 80.131417 [80.128212, 80.132646] | 80.000109 [80.000104, 80.000147] | 131.350 [128.145, 132.592] | 54.481 [49.411, 84.952] |
+| bstr | 80.378311 [80.374206, 80.400302] | 80.000102 [80.000083, 80.000103] | 378.251 [374.151, 400.248] | 46.621 [27.681, 48.161] |
+
+Actual final arrivals were 80.000054–80.000067 seconds after start. The largest
+publisher lateness across all trials was 0.536 ms. The roughly 80-second ingress
+interval dominates total completion: the median reduction was 0.164% for
+structured data and 0.471% for bstr, despite the much shorter final-byte tail.
+These are real scheduled arrivals over prebuilt in-process input, not measured
+network transport, and three samples do not characterize tail percentiles.

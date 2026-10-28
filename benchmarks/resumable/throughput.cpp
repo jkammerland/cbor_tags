@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
     try {
         const auto          options = parse_options(argc, argv);
         std::vector<sample> samples;
-        std::cout << std::fixed << std::setprecision(4);
+        std::cout << std::fixed << std::setprecision(9);
         if (!options.self_test) {
             std::cout << "workload,direction,mode,repetition,encoded_bytes,MB/s,ns/B,epoch_min_ns/B,epoch_max_ns/B,epochs,iterations\n";
         }
