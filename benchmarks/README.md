@@ -208,38 +208,70 @@ cmake -S . -B build/resumable-bench -G Ninja \
   -DCBOR_TAGS_BUILD_TESTS=OFF
 cmake --build build/resumable-bench \
   --target bench_resumable_throughput bench_resumable_latency --parallel
-ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency)' --output-on-failure
+ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency|allocation)' --output-on-failure
 ```
 
 `bench_resumable_throughput` compares ordinary encode/decode with resumable
 encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
 chunks. Separate validation rows compare `validate_item` with the resumable
-validator, without creating decoded values. Fixtures are deterministic nested
-records, scalar arrays, text, and binary strings. Nested records contain a
-4096-character string and 64 integers
-spanning CBOR integer widths. The default fixture budget is 16 MiB; scalar
-arrays use approximately that many encoded bytes and print the actual count.
+validator, without creating decoded values. Deterministic fixtures include
+nested records, definite/indefinite scalar arrays and ordered/hash maps of integer
+pairs, native/opposite-endian RFC 8746 uint32 arrays, and definite/indefinite
+text and binary strings. Nested records contain a 4096-character string and
+64 integers spanning CBOR integer widths. The default fixture budget is 16 MiB;
+array/map/typed-array wire sizes vary with their representation, and every row
+prints the actual encoded byte count. Typed decoding uses owning `typed_array`
+destinations; encoding borrows the same vector values through typed wrappers.
 
 ```bash
 build/resumable-bench/benchmarks/resumable/bench_resumable_throughput
 build/resumable-bench/benchmarks/resumable/bench_resumable_throughput \
   --bytes 16777216 --repetitions 3 --epochs 9 --workload structured
+
+# Change CBOR string chunks independently of transport chunks.
+build/resumable-bench/benchmarks/resumable/bench_resumable_throughput \
+  --workload bstr-indef --cbor-chunk 65536 --transport 1460 \
+  --storage both --direction decode --bytes 1048576
+
+# Count destination allocations outside timing, including a reserved comparison.
+build/resumable-bench/benchmarks/resumable/bench_resumable_throughput \
+  --workload unordered-map --allocations --bytes 65536
 ```
 
 Each round reverses mode order. Nanobench runs nine epochs of at least 20 ms
 per row by default. Output includes every row's encoded MB/s, ns/byte, epoch
 minimum/maximum, iteration count, and a median/range across the three rounds.
 Decode rows create fresh destinations, including allocation and destruction of
-the previous destination. Encode rows reuse equally sized caller-provided
+the previous destination. `--storage reserved|both` adds `decode-reserved` rows
+for containers with `reserve()`: capacity is supplied before timing, while
+clearing previous elements remains timed. For unordered maps this reserves
+buckets; node allocations remain. Ordered maps have no reserved row. Ordinary
+owning typed-array decode replaces its vector and discards the offered capacity,
+while resumable decode reuses it. Its reserved rows therefore compare the API
+with offered capacity, not equal allocation behavior; cold rows are the primary
+typed comparison. Encode
+rows reuse equally sized caller-provided
 output storage. Operation creation, source descriptors, and chunk feeding are
 included. Fixture construction, preflight comparisons, and full content checks
 are outside timing. `--self-test` checks all paths using small fixtures without
-running throughput measurements.
+running throughput measurements. `--direction` selects decode, encode,
+validation, or all rows; `--transport` selects full, 1460, 4096, 65536, or all.
+Indefinite strings are decode/validate workloads: their CBOR chunks are assembled
+outside timing through the ordinary encoder. `--cbor-chunk` defaults to 256;
+selftests also check one-byte and 17/4096-byte CBOR chunks against every
+transport mode. PMR allocation rows count only destination requests and their
+total requested bytes, excluding source descriptors and coroutine frames.
+Reserved allocation counts exclude the initial reserve. Owning typed arrays
+and nested structured allocations are not PMR-instrumented and report
+`allocation-unavailable`. No timing thresholds are used in selftests.
+PMR counters start after destination construction in both modes, so constructor
+allocations are excluded even in cold counts; cold timing includes construction.
 
 For an ordinary-code baseline, compile the same harness against the baseline
 checkout's headers with `CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1` (or the matching
-CMake option). This removes the resumable header dependency and retains the same
-ordinary rows and fixtures. Compare `--mode one-shot` from both builds with the
+CMake option). This excludes resumable operation instantiations and retains the
+same ordinary rows and fixtures; the typed-array codec still includes its
+shared resumable declarations. Compare `--mode one-shot` from both builds with the
 same compiler and flags, alternating whole executable runs. Run comparisons
 sequentially on otherwise idle hardware; a current ordinary/resumable comparison
 alone does not establish whether ordinary decoding regressed from the baseline.

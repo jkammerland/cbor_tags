@@ -8,11 +8,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <memory_resource>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace resumable_bench {
@@ -128,12 +131,68 @@ inline std::vector<std::uint32_t> make_scalars(std::size_t approximate_encoded_s
     return result;
 }
 
-template <typename T> bytes encode_fixture(const T &value, std::optional<std::size_t> exact_size = {}) {
+// Distinct keys preserve every pair and make ordered/hash maps comparable.
+template <typename Map> Map make_integer_map(std::size_t approximate_encoded_size) {
+    Map        result;
+    const auto count = std::max<std::size_t>(8, approximate_encoded_size / 12);
+    require(count <= std::numeric_limits<std::uint32_t>::max(), "map fixture exceeds uint32 keys");
+    if constexpr (requires { result.reserve(count); }) {
+        result.reserve(count);
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        result.emplace(static_cast<std::uint32_t>(i), integer_at(i));
+    }
+    return result;
+}
+
+// Build wire chunks through the ordinary encoder; transport splitting is independent.
+template <typename String> bytes encode_string_chunks(const String &value, std::size_t chunk_size) {
+    bytes encoded;
+    auto  encoder = ct::make_encoder(encoded);
+    if constexpr (ct::IsTextString<String>) {
+        encoded.push_back(std::byte{0x7f});
+    } else {
+        encoded.push_back(std::byte{0x5f});
+    }
+    std::size_t expected = 2;
+    for (std::size_t offset = 0; offset < value.size(); offset += chunk_size) {
+        const auto count = std::min(chunk_size, value.size() - offset);
+        expected += header_size(count) + count;
+        if constexpr (ct::IsTextString<String>) {
+            require(static_cast<bool>(encoder(std::string_view{value}.substr(offset, count))), "text chunk failed");
+        } else {
+            require(static_cast<bool>(encoder(std::span<const std::byte>{value}.subspan(offset, count))), "binary chunk failed");
+        }
+    }
+    encoded.push_back(std::byte{0xff});
+    require(encoded.size() == expected, "indefinite string byte count mismatch");
+    return encoded;
+}
+
+class allocation_counter : public std::pmr::memory_resource {
+  public:
+    std::size_t allocations{};
+    std::size_t allocated_bytes{};
+
+  private:
+    void *do_allocate(std::size_t size, std::size_t alignment) override {
+        ++allocations;
+        allocated_bytes += size;
+        return std::pmr::new_delete_resource()->allocate(size, alignment);
+    }
+    void do_deallocate(void *pointer, std::size_t size, std::size_t alignment) override {
+        std::pmr::new_delete_resource()->deallocate(pointer, size, alignment);
+    }
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override { return this == &other; }
+};
+
+template <template <typename> typename... Codecs, typename T>
+bytes encode_fixture(const T &value, std::optional<std::size_t> exact_size = {}) {
     bytes encoded;
     if (exact_size) {
         encoded.reserve(*exact_size);
     }
-    require(static_cast<bool>(ct::make_encoder(encoded)(value)), "fixture encoding failed");
+    require(static_cast<bool>(ct::make_encoder<Codecs...>(encoded)(value)), "fixture encoding failed");
     require(!exact_size || encoded.size() == *exact_size, "fixture encoded size does not match independent size calculation");
     return encoded;
 }

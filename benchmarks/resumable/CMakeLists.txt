@@ -16,3 +16,5 @@ endif()
 
 add_test(NAME resumable_throughput_fixtures COMMAND bench_resumable_throughput --self-test)
 add_test(NAME resumable_latency_self_test COMMAND bench_resumable_latency --self-test)
+
+add_test(NAME resumable_allocation_fixtures COMMAND bench_resumable_throughput --allocations --bytes 16384)
