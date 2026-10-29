@@ -23,11 +23,23 @@ struct validation_request {
 };
 
 template <typename Source> class resumable_validation_context : public resumable_decode_context<Source, default_options> {
-    using base = resumable_decode_context<Source, default_options>;
+    using base           = resumable_decode_context<Source, default_options>;
+    using window_decoder = decoder<std::span<const std::byte>, default_options, cbor_header_decoder, cbor_indefinite_decoder>;
+
+    std::span<const std::byte> window_;
+    std::size_t                pending_{};
+
+    // Publish complete tokens and consumed payload bytes on every exit,
+    // including allocation failure after decoding a nested item's header.
+    struct window_guard {
+        resumable_validation_context &context;
+        ~window_guard() { context.flush_window(); }
+    };
 
   public:
     using base::base;
     resumable<status_code> operator()(validation_request request) {
+        const window_guard guard{*this};
         for (std::size_t i = 0; request.until_eof || i < request.count; ++i) {
             while (this->empty()) {
                 if (this->eof())
@@ -42,9 +54,62 @@ template <typename Source> class resumable_validation_context : public resumable
     }
 
   private:
+    void flush_window() {
+        if (pending_ != 0) {
+            auto &reader = this->ordinary().reader_;
+            this->source().advance(reader.position_, pending_);
+            reader.current_offset_ += pending_;
+            this->commit();
+        }
+        window_  = {};
+        pending_ = 0;
+    }
+
+    bool empty() {
+        if (!window_.empty())
+            return false;
+
+        // An exhausted local window can precede the source's committed cursor.
+        flush_window();
+        return base::empty();
+    }
+
+    void refresh_window() {
+        flush_window();
+        if (const auto window = this->source().available_span(this->ordinary().reader_.position_))
+            window_ = *window;
+    }
+
+    void advance_window(std::size_t count) {
+        pending_ += count;
+        window_ = window_.subspan(count);
+    }
+
+    resumable<status_code> read_token(resumable_walk_token &token) {
+        if (window_.size() < 9)
+            refresh_window();
+
+        // Every traversal token fits in nine bytes. Decode through the normal
+        // codec and retain only successful progress; payloads remain separate.
+        if (window_.size() >= 9) {
+            window_decoder contiguous(window_);
+            const auto     result = contiguous(token);
+            if (!result)
+                return result.error();
+
+            advance_window(contiguous.reader_.position_);
+            return status_code::success;
+        }
+
+        // Only a boundary token needs the chunk-aware reader and retry path.
+        // Flush before it can suspend or traverse already admitted chunks.
+        flush_window();
+        return this->ordinary(token);
+    }
+
     resumable<status_code> read_item(std::size_t depth, validation_options options) {
         resumable_walk_token token;
-        const auto           status = co_await this->ordinary(token);
+        const auto           status = co_await read_token(token);
         if (status != status_code::success)
             co_return status;
         co_return co_await start_item(token.value, depth, options);
@@ -76,21 +141,28 @@ template <typename Source> class resumable_validation_context : public resumable
         bool       valid  = true;
         auto      &reader = this->ordinary().reader_;
         while (length != 0) {
-            if (this->empty()) {
-                if (this->eof())
-                    co_return status_code::incomplete;
-                co_await this->wait();
-                continue;
+            // A populated window already proves availability; consult the
+            // source end only when no contiguous bytes can be borrowed.
+            if (window_.empty()) {
+                refresh_window();
+                if (window_.empty() && base::empty()) {
+                    if (this->eof())
+                        co_return status_code::incomplete;
+                    co_await this->wait();
+                    continue;
+                }
             }
-            if (const auto span = this->source().available_span(reader.position_); span && !span->empty()) {
-                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
+
+            // Keep headers and payloads in the same window, including adjacent
+            // indefinite-string chunks. Only input boundaries publish progress.
+            if (!window_.empty()) {
+                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, window_.size()));
                 if constexpr (Text) {
-                    for (const auto value : span->first(count)) {
+                    for (const auto value : window_.first(count)) {
                         valid = utf8.consume(utf8_byte(value)) && valid;
                     }
                 }
-                this->source().advance(reader.position_, count);
-                reader.current_offset_ += count;
+                advance_window(count);
                 length -= count;
             } else {
                 const auto value = reader.read(this->source());
@@ -98,8 +170,8 @@ template <typename Source> class resumable_validation_context : public resumable
                     valid = utf8.consume(utf8_byte(value)) && valid;
                 }
                 --length;
+                this->commit();
             }
-            this->commit();
         }
         co_return Text && (!valid || !utf8.complete()) ? status_code::invalid_utf8_sequence : status_code::success;
     }
@@ -107,7 +179,7 @@ template <typename Source> class resumable_validation_context : public resumable
         auto remaining = header.size;
         while (header.indefinite || remaining != 0) {
             resumable_walk_token child;
-            auto                 status = co_await this->ordinary(child);
+            auto                 status = co_await read_token(child);
             if (status != status_code::success)
                 co_return status;
             if (std::holds_alternative<indefinite_break>(child.value)) {
