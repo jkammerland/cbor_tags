@@ -284,11 +284,6 @@ another object of the same pointer type at the same address before resetting
 the scope can produce a stale tag 29 reference. Reset the scope before pointer
 addresses can be reused.
 
-`scoped_shared_ptr<Pointer>` is also a supported pointer value.
-`as_scoped_shared_ptr(pointer)` copies an lvalue pointer or moves an rvalue
-pointer into that value. It uses the codec's current reference table like the
-underlying pointer.
-
 ## User-Owned Reference Tables
 
 Applications may supply their own storage and lookup policy:

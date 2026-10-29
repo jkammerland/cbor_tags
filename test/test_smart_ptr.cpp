@@ -947,24 +947,32 @@ TEST_CASE("shared pointer identity includes the exact pointer type") {
     CHECK_EQ(to_hex(bytes), "d81c07d81c07");
 }
 
-TEST_CASE("scoped shared pointer wrapper copies lvalues and moves rvalues") {
+TEST_CASE("shared pointer copies and moves use the codec reference table") {
     auto pointer = std::make_shared<std::uint64_t>(9U);
-    auto copied  = as_scoped_shared_ptr(pointer);
+    auto copied  = pointer;
     REQUIRE(pointer);
 
-    auto moved = as_scoped_shared_ptr(std::move(pointer));
+    auto moved = std::move(pointer);
     CHECK_FALSE(pointer);
 
-    std::vector<std::byte> bytes;
-    auto                   enc = make_encoder<codec::shared_ptr>(bytes);
+    shared_ptr_encode_scope encode_scope;
+    std::vector<std::byte>  bytes;
+    auto                    enc = make_encoder<codec::shared_ptr>(bytes);
+    enc.set_shared_ptr_scope(encode_scope);
     REQUIRE(enc(copied, moved));
     CHECK_EQ(to_hex(bytes), "d81c09d81d00");
+    CHECK_EQ(encode_scope.size(), 1U);
 
-    scoped_shared_ptr<std::shared_ptr<std::uint64_t>> decoded_first;
-    scoped_shared_ptr<std::shared_ptr<std::uint64_t>> decoded_second;
-    auto                                              dec = make_decoder<codec::shared_ptr>(bytes);
+    shared_ptr_decode_scope        decode_scope;
+    std::shared_ptr<std::uint64_t> decoded_first;
+    std::shared_ptr<std::uint64_t> decoded_second;
+    auto                           dec = make_decoder<codec::shared_ptr>(bytes);
+    dec.set_shared_ptr_scope(decode_scope);
     REQUIRE(dec(decoded_first, decoded_second));
-    CHECK(decoded_first.value() == decoded_second.value());
+    REQUIRE(decoded_first);
+    CHECK_EQ(*decoded_first, 9U);
+    CHECK(decoded_first == decoded_second);
+    CHECK_EQ(decode_scope.size(), 1U);
 }
 
 TEST_CASE("shared_ptr codec uses IANA reference tags") {

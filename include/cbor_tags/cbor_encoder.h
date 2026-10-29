@@ -8,6 +8,7 @@
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_argument.h"
+#include "cbor_tags/detail/cbor_encode_elements.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 
 #include <algorithm>
@@ -25,9 +26,17 @@
 
 namespace cbor::tags {
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_header_encoder;
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_indefinite_encoder;
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_optional_encoder;
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_variant_encoder;
 
 template <typename OutputBuffer, IsOptions Options, template <typename> typename... Encoders>
@@ -152,17 +161,17 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                 return;
             }
         }
-        for (const auto &item : value) {
-            encode(item);
-        }
+        auto       current = std::ranges::begin(value);
+        const auto last    = std::ranges::end(value);
+        detail::encode_array_elements(*this, current, last);
     }
 
     template <IsMap T> constexpr void encode(const T &value) {
         encode_major_and_size(value.size(), static_cast<byte_type>(0xA0));
-        for (const auto &[key, mapped_value] : value) {
-            encode(key);
-            encode(mapped_value);
-        }
+        auto       current = std::ranges::begin(value);
+        const auto last    = std::ranges::end(value);
+        bool       key_complete{};
+        detail::encode_map_elements(*this, current, last, key_complete);
     }
 
     template <typename U> constexpr void encode([[maybe_unused]] const as_named_map<U> &value) {
@@ -436,10 +445,10 @@ template <typename T> struct cbor_indefinite_encoder {
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
         } else if constexpr (IsMap<U> && !IsMapHeader<U>) {
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_map>()));
-            for (const auto &[key, mapped_value] : value.value_) {
-                enc.encode(key);
-                enc.encode(mapped_value);
-            }
+            auto       current = std::ranges::begin(value.value_);
+            const auto last    = std::ranges::end(value.value_);
+            bool       key_complete{};
+            detail::encode_map_elements(enc, current, last, key_complete);
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(0xFF));
         } else if constexpr (IsArray<U> && !IsArrayHeader<U>) {
             enc.appender_(enc.data_, static_cast<typename T::byte_type>(get_indefinite_start<as_indefinite_array>()));

@@ -66,7 +66,7 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 Work through the [numbered examples](examples/README.md) for a gradual introduction to values, receiver layouts, containers and codecs.
 
 ### Basic Encoding/Decoding Example
-Basic example of encoding and decoding a single cbor items:
+This example encodes and decodes three consecutive CBOR items:
 ```cpp
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_encoder.h"
@@ -113,7 +113,7 @@ int main() {
 }
 ```
 > [!IMPORTANT]
-> These values are not grouped in any way. For that they would have to be enclosed in a array, map or binary string. If it is a special sequence of items, you can define a tag for it and share that definition with the recipient(s).
+> The three values are separate top-level items. Use `wrap_as_array{...}` to group them into one array item, which can then carry an application tag. A byte string contains bytes: encode the values into a byte buffer first if you want to embed that encoded sequence in a byte string.
 
 ### Tagged Struct Example
 Here is how you could formulate a struct with a tag from the first example:
@@ -227,7 +227,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> The encoding is basically just a "tuple cast", that a fold expression apply encode(...) to, for each member. The definition of the struct is what sets the expectation when decoding the data. Any mismatch when decoding will result in a status_code, i.e result.error(). An incomplete decode will result in status_code "incomplete". The primary decoder is still a one-shot API: retry/resume after incomplete input is reserved for a future explicit resumable decoder entry point.
+> By default, a reflected struct with multiple payload members encodes those members as a CBOR array in declaration order. The decoder uses the receiver's member types and order; decode errors are reported through `result.error()`, including `status_code::incomplete` for missing input. The primary decoder is one-shot and a failed call is terminal. Use the explicit [resumable encoder and decoder](doc/resumable.md) when input or output arrives in chunks.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -324,7 +324,7 @@ int main() {
     // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
     enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}));
 
-    // Encode a 0 length binary string in the middle of the buffer
+    // Encode an empty byte string in the middle of the buffer
     enc(std::vector<std::byte>{});
 
     // Encode Api2 with a tag of 0x20
@@ -433,9 +433,9 @@ int main() {
 Use `walk_item` (below) to check legal break placement, map key/value pairing,
 string chunk types, and nesting limits. A header decode succeeds when the
 header is complete even if its children or payload are missing; later content
-decoding reports truncation. Text and byte-string headers now leave payloads
-unread, so consumers that relied on the former payload skip must explicitly
-read them. See the [header descriptor contract](doc/decoder_resource_limits.md#header-descriptors).
+decoding reports truncation. Text and byte-string headers leave payloads unread;
+decode the payload separately. See the
+[header descriptor contract](doc/decoder_resource_limits.md#header-descriptors).
 
 ### Item traversal and validation
 
@@ -908,9 +908,13 @@ cborctl annotate --input base64 -- -n-AAAA
 cborctl annotate --input hex 'bf 63 46756e # "Fun"
 f5 63 416d74 21 ff'
 
-# Validate text-string UTF-8 in diagnostic output
+# Mark invalid text-string UTF-8 in diagnostic output
 cborctl diagnostic --input hex --no-format-by-rows --check-tstr-utf8 62c328
 ```
+
+The last command prints `non-utf8(2)` and exits with status 0. The diagnostic
+option marks invalid text without rejecting it. Use `validate_item` or strict
+`walk_item` when invalid UTF-8 must fail validation.
 
 ## 🤝 CDDL Schema Generation
 Generate a CDDL schema with `cddl::schema_to<T>`, for example for struct `A`:
@@ -1024,7 +1028,7 @@ pattern.
 | C++26 STL-only | `CBOR_TAGS_STL_ONLY=ON` | None |
 
 The built-in expected header also works independently of the codec. See
-[Expected](doc/expected.md) for its C++23 API, examples, and migration notes.
+[Expected](doc/expected.md) for its C++23 API, examples, and backend selection.
 
 The C++26 STL-only mode uses `std::expected`, `std::format`, and `std::meta`.
 It currently requires GCC 16 with `-std=gnu++26 -freflection`; the CMake option
@@ -1185,9 +1189,6 @@ There are many types of cbor objects defined, the major types are:
 | 6          | tag of number N         | 1 data item           |
 | 7          | simple/float            | -                     |
 
-The core decoder preserves text-string bytes. Use `validate_item`, strict
-`walk_item`, or diagnostic UTF-8 checking when text validity is required.
-
 The library name cbor_tags refers to the focus on handling tagged types(6) in a user friendly way. 
 
 "A tagged data item ("tag") whose tag number, an integer in the range 0..2^64-1 inclusive, is the argument and whose enclosed data item (tag content) is the single encoded data item that follows the head. See [RFC8949#tags](https://www.rfc-editor.org/rfc/rfc8949.html#tags)"
@@ -1274,6 +1275,11 @@ CBOR_TAGS_TEST_LOGS=1 ./build/test/tests --reporter=console
 ```
 
 Leave the variable unset (default) to keep passing runs quiet while still capturing context on failures.
+
+## Resumable codecs
+
+For ordered input/output chunks, raw coroutine integration, generators, and validation,
+see [resumable encoding and decoding](doc/resumable.md).
 
 ## 📄 License
 

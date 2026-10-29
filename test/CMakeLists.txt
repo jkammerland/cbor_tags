@@ -314,6 +314,8 @@ endforeach()
 
 add_test(NAME encoded_item_views_wire COMMAND tests "--test-suite=cbor_wire/encoded_item_views")
 set_tests_properties(encoded_item_views_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME segments_wire COMMAND tests "--test-suite=cbor_wire/segments")
+set_tests_properties(segments_wire PROPERTIES LABELS "cbor-wire")
 
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
@@ -904,8 +906,8 @@ function(add_byte_count_compile_fail CASE DIAGNOSTIC)
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endfunction()
 
-add_byte_count_compile_fail(VIEW_CONFLICT "byte-count returns cannot be combined with return_encoded_item_view")
-add_byte_count_compile_fail(CUSTOM_VIEW_CONFLICT "byte-count returns cannot be combined with return_encoded_item_view")
+add_byte_count_compile_fail(VIEW_CONFLICT "byte-count returns cannot be combined with return_consumed_bytes")
+add_byte_count_compile_fail(CUSTOM_VIEW_CONFLICT "byte-count returns cannot be combined with return_consumed_bytes")
 add_byte_count_compile_fail(UNSIZED_OUTPUT "byte-count encoder results require sized byte output buffers")
 
 # Instantiate the public decoder call to verify readonly wrappers are encode-only.
@@ -1075,3 +1077,20 @@ endforeach()
 if(CBOR_TAGS_TEST_BOOST_ROOT)
   target_include_directories(tests SYSTEM PRIVATE "${CBOR_TAGS_TEST_BOOST_ROOT}")
 endif()
+
+# Coroutine semantic and literal-wire checks remain distinct.
+add_test(NAME resumable_wire COMMAND tests "--test-suite=cbor_wire/resumable")
+set_tests_properties(resumable_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME resumable_typed_array_wire COMMAND tests "--test-suite=cbor_wire/resumable_typed_array")
+set_tests_properties(resumable_typed_array_wire PROPERTIES LABELS "cbor-wire")
+add_executable(test_resumable_compile test_resumable_compile.cc)
+target_link_libraries(test_resumable_compile PRIVATE cbor::tags)
+add_test(NAME resumable_compile COMMAND test_resumable_compile)
+add_executable(resumable_zero_input_compile_fails EXCLUDE_FROM_ALL test_resumable_compile.cc)
+target_compile_definitions(resumable_zero_input_compile_fails PRIVATE CBOR_RESUMABLE_UNBOUNDED_ZERO_INPUT)
+target_link_libraries(resumable_zero_input_compile_fails PRIVATE cbor::tags)
+add_test(NAME resumable_zero_input_compile_fails COMMAND ${CMAKE_COMMAND}
+  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_zero_input_compile_fails" "-DCONFIG=$<CONFIG>"
+  "-DPASS_REGEX=Zero-byte container entries require an explicit count bound"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+set_tests_properties(resumable_zero_input_compile_fails PROPERTIES LABELS "compile-fail")

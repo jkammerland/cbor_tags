@@ -10,6 +10,8 @@
 
 namespace cbor::tags::detail {
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_raw_view_encoder {
     template <typename RawView>
         requires IsEncodedItemView<RawView>
