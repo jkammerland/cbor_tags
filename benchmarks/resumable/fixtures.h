@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <map>
 #include <memory_resource>
@@ -75,6 +76,16 @@ inline std::string make_text(std::size_t encoded_size) {
     return result;
 }
 
+inline std::string make_utf8_text(std::size_t encoded_size) {
+    auto result = make_text(encoded_size);
+    // One-, two-, three-, and four-byte code points; leave any short tail ASCII.
+    constexpr std::string_view pattern{"a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80"};
+    for (std::size_t offset = 0; result.size() - offset >= pattern.size(); offset += pattern.size()) {
+        std::copy(pattern.begin(), pattern.end(), result.begin() + static_cast<std::ptrdiff_t>(offset));
+    }
+    return result;
+}
+
 struct record {
     std::string                name;
     std::vector<std::uint32_t> values;
@@ -127,6 +138,36 @@ inline std::vector<std::uint32_t> make_scalars(std::size_t approximate_encoded_s
     std::vector<std::uint32_t> result(std::max<std::size_t>(8, approximate_encoded_size / 3));
     for (std::size_t i = 0; i < result.size(); ++i) {
         result[i] = integer_at(i);
+    }
+    return result;
+}
+
+// Binary fractions are exact in both widths; finite values keep equality and
+// map ordering independent of NaN handling or host rounding behavior.
+template <typename T> std::vector<T> make_floats(std::size_t approximate_encoded_size) {
+    std::vector<T> result(std::max<std::size_t>(8, approximate_encoded_size / (1 + sizeof(T))));
+    for (std::size_t i = 0; i < result.size(); ++i) {
+        result[i] = static_cast<T>(static_cast<int>(i % 8192U) - 4096) / T{8};
+    }
+    return result;
+}
+
+// deque provides real bool references so encoding measures the bounded leaf
+// path; packed vector<bool> proxies intentionally use ordinary item dispatch.
+inline std::deque<bool> make_bools(std::size_t approximate_encoded_size) {
+    std::deque<bool> result(std::max<std::size_t>(8, approximate_encoded_size));
+    for (std::size_t i = 0; i < result.size(); ++i) {
+        result[i] = i % 3U != 0;
+    }
+    return result;
+}
+
+inline std::map<float, bool> make_float_map(std::size_t approximate_encoded_size) {
+    const auto count = std::max<std::size_t>(8, approximate_encoded_size / 6);
+    require(count <= (1U << 24), "float map fixture exceeds exactly representable keys");
+    std::map<float, bool> result;
+    for (std::size_t i = 0; i < count; ++i) {
+        result.emplace(static_cast<float>(i), i % 3U != 0);
     }
     return result;
 }

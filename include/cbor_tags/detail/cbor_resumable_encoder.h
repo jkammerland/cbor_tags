@@ -3,6 +3,7 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/detail/cbor_item_shape.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
+#include "cbor_tags/detail/cbor_resumable_leaf.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
 
 #include <algorithm>
@@ -62,36 +63,89 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     // one output window. Contiguous ranges keep the source's bulk-write path.
     template <typename Range> resumable<status_code> payload(Range &value) {
         if constexpr (std::ranges::contiguous_range<Range> && std::ranges::sized_range<Range>) {
-            auto bytes = as_byte_span(value);
-            while (!bytes.empty()) {
-                const auto available = source_.available_output_span();
-                if (available && !available->empty()) {
-                    const auto count = std::min(bytes.size(), available->size());
-                    source_.write(bytes.first(count));
-                    commit();
-                    bytes = bytes.subspan(count);
-                } else if (available) {
-                    if (eof())
-                        co_return status_code::incomplete;
-                    co_await wait();
-                } else {
-                    const auto status = co_await byte(bytes.front());
-                    if (status != status_code::success)
-                        co_return status;
-                    bytes = bytes.subspan(1);
-                }
-            }
+            auto       bytes  = as_byte_span(value);
+            const auto status = drain_payload_bytes(bytes);
+            if (status != status_code::incomplete || eof())
+                return status;
+            return await_payload_bytes(bytes);
         } else {
-            for (auto &&value_byte : value) {
-                const auto status = co_await byte(static_cast<std::byte>(value_byte));
-                if (status != status_code::success)
-                    co_return status;
-            }
+            auto                     current = std::ranges::begin(value);
+            auto                     last    = std::ranges::end(value);
+            std::optional<std::byte> pending;
+            const auto               status = drain_payload_range(current, last, pending);
+            if (status != status_code::incomplete || eof())
+                return status;
+            return await_payload_range(std::move(current), std::move(last), pending);
         }
-        co_return status_code::success;
     }
 
   private:
+    status_code drain_payload_bytes(std::span<const std::byte> &bytes) {
+        while (!bytes.empty()) {
+            const auto available = resumable_source_access::borrow_window(source_);
+            if (available && !available->empty()) {
+                const auto count = std::min(bytes.size(), available->size());
+                std::copy_n(bytes.begin(), count, available->begin());
+                resumable_source_access::consume_window(source_, count);
+                commit();
+                bytes = bytes.subspan(count);
+            } else if (available) {
+                return status_code::incomplete;
+            } else {
+                auto write = [this, &bytes] {
+                    ordinary_.appender_(source_, bytes.front());
+                    return status_code::success;
+                };
+                const auto status = write_once(write);
+                if (status != status_code::success)
+                    return status;
+                bytes = bytes.subspan(1);
+            }
+        }
+        return status_code::success;
+    }
+
+    // The continuation owns its remaining span or iterators. Their underlying
+    // range and element lifetime requirements remain unchanged.
+    resumable<status_code> await_payload_bytes(std::span<const std::byte> bytes) {
+        for (;;) {
+            co_await wait();
+            const auto status = drain_payload_bytes(bytes);
+            if (status != status_code::incomplete || eof())
+                co_return status;
+        }
+    }
+
+    template <typename Iterator, typename Sentinel>
+    status_code drain_payload_range(Iterator &current, const Sentinel &last, std::optional<std::byte> &pending) {
+        while (current != last) {
+            // A single-pass proxy is observed once, including when its output
+            // byte needs another window before it can be committed.
+            if (!pending)
+                pending = static_cast<std::byte>(*current);
+            auto write = [this, &pending] {
+                ordinary_.appender_(source_, *pending);
+                return status_code::success;
+            };
+            const auto status = write_once(write);
+            if (status != status_code::success)
+                return status;
+            pending.reset();
+            ++current;
+        }
+        return status_code::success;
+    }
+
+    template <typename Iterator, typename Sentinel>
+    resumable<status_code> await_payload_range(Iterator current, Sentinel last, std::optional<std::byte> pending) {
+        for (;;) {
+            co_await wait();
+            const auto status = drain_payload_range(current, last, pending);
+            if (status != status_code::incomplete || eof())
+                co_return status;
+        }
+    }
+
     template <typename Write> status_code write_once(Write &write) {
         status_code status;
         try {
@@ -303,16 +357,28 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     }
 
     template <typename T> resumable<status_code> tuple(T &value) {
-        if constexpr (IsTaggedTuple<std::remove_cvref_t<T>>) {
-            const auto status = co_await ordinary(std::get<0>(value));
-            if (status != status_code::success)
-                co_return status;
-            co_return co_await group(tuple_tail(value));
-        } else
-            co_return co_await group(tuple_references(value));
+        if constexpr (IsTaggedTuple<std::remove_cvref_t<T>>)
+            return tagged_tuple(value);
+        else
+            return group(tuple_references(value));
+    }
+
+    template <typename T> resumable<status_code> tagged_tuple(T &value) {
+        const auto status = co_await ordinary(std::get<0>(value));
+        if (status != status_code::success)
+            co_return status;
+        co_return co_await group(tuple_tail(value));
     }
 
     template <typename T> resumable<status_code> aggregate(T &value) {
+        using U = std::remove_cvref_t<T>;
+        if constexpr (HasInlineTag<U> || IsTag<U>)
+            return tagged_aggregate(value);
+        else
+            return group(to_tuple(value));
+    }
+
+    template <typename T> resumable<status_code> tagged_aggregate(T &value) {
         using U     = std::remove_cvref_t<T>;
         auto values = to_tuple(value);
         if constexpr (HasInlineTag<U>) {
@@ -373,12 +439,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         co_return co_await payload(bytes);
     }
 
-    template <typename Reference, typename Value> static consteval bool builtin_integer_reference() {
+    template <typename Reference, typename Value> static consteval bool builtin_leaf_reference() {
         using reference = Reference;
         using element   = std::remove_reference_t<reference>;
         using value     = std::remove_cv_t<element>;
-        if constexpr (!std::integral<value> || !(IsUnsigned<value> || IsSigned<value>) || sizeof(value) > 8 ||
-                      !std::is_lvalue_reference_v<reference> || !std::same_as<value, Value>) {
+        if constexpr (!resumable_builtin_leaf<value> || !std::is_lvalue_reference_v<reference> || !std::same_as<value, Value>) {
             return false;
         } else {
             if constexpr (explicit_hook_kind<element>() != 0 || has_mixin<element>()) {
@@ -394,11 +459,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         }
     }
 
-    template <typename Range> static consteval bool has_builtin_integer_elements() {
-        return builtin_integer_reference<std::ranges::range_reference_t<Range>, std::ranges::range_value_t<Range>>();
+    template <typename Range> static consteval bool has_builtin_leaf_elements() {
+        return builtin_leaf_reference<std::ranges::range_reference_t<Range>, std::ranges::range_value_t<Range>>();
     }
 
-    template <typename Range> static consteval bool has_builtin_integer_pairs() {
+    template <typename Range> static consteval bool has_builtin_leaf_pairs() {
         using reference = std::ranges::range_reference_t<Range>;
         if constexpr (!std::is_lvalue_reference_v<reference> || !IsPairLike<reference> ||
                       !std::same_as<std::remove_cvref_t<reference>, std::ranges::range_value_t<Range>>) {
@@ -406,13 +471,12 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         } else {
             using key    = decltype(pair_first(std::declval<reference>()));
             using mapped = decltype(pair_second(std::declval<reference>()));
-            return builtin_integer_reference<key, std::remove_cvref_t<key>>() &&
-                   builtin_integer_reference<mapped, std::remove_cvref_t<mapped>>();
+            return builtin_leaf_reference<key, std::remove_cvref_t<key>>() && builtin_leaf_reference<mapped, std::remove_cvref_t<mapped>>();
         }
     }
 
     template <typename Iterator, typename Sentinel, typename Available = encode_elements_available>
-    status_code segmented_integer_elements(Iterator &current, const Sentinel &last, Available available = {}) {
+    status_code segmented_leaf_elements(Iterator &current, const Sentinel &last, Available available = {}) {
         auto        completed = source_.position();
         status_code status;
         try {
@@ -430,9 +494,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     }
 
     template <typename Iterator, typename Sentinel>
-    status_code integer_window(Iterator &current, const Sentinel &last, std::span<std::byte> window) {
+    status_code leaf_window(Iterator &current, const Sentinel &last, std::span<std::byte> window) {
         encoder<std::span<std::byte>, Options> contiguous(window);
-        constexpr auto                         maximum_size = 1 + sizeof(std::iter_value_t<Iterator>);
+        constexpr auto                         maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
         status_code                            status;
         try {
             // Capacity for the native type's largest representation guarantees
@@ -444,25 +508,25 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             status = resumable_exception_status();
         }
 
-        source_.advance(contiguous.appender_.head_);
+        resumable_source_access::consume_window(source_, contiguous.appender_.head_);
         commit();
         return status;
     }
 
-    template <typename Iterator, typename Sentinel> status_code integer_elements(Iterator &current, const Sentinel &last) {
-        constexpr auto maximum_size = 1 + sizeof(std::iter_value_t<Iterator>);
+    template <typename Iterator, typename Sentinel> status_code leaf_elements(Iterator &current, const Sentinel &last) {
+        constexpr auto maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
         while (current != last) {
-            const auto window = source_.available_output_span();
+            const auto window = resumable_source_access::borrow_window(source_);
             if (!window)
-                return segmented_integer_elements(current, last);
+                return segmented_leaf_elements(current, last);
 
             status_code status;
             if (window->size() >= maximum_size) {
-                status = integer_window(current, last, *window);
+                status = leaf_window(current, last, *window);
             } else {
                 // Only the boundary child needs the chunk-aware writer. It can
                 // cross already supplied chunks before returning to the span loop.
-                status = segmented_integer_elements(current, last, [first = true]() mutable { return std::exchange(first, false); });
+                status = segmented_leaf_elements(current, last, [first = true]() mutable { return std::exchange(first, false); });
             }
             if (status != status_code::success)
                 return status;
@@ -471,11 +535,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     }
 
     template <typename Iterator, typename Sentinel>
-    status_code integer_map_elements(Iterator &current, const Sentinel &last, bool &key_complete) {
-        constexpr auto maximum_size =
-            2 + sizeof(std::remove_cvref_t<decltype(pair_first(*current))>) + sizeof(std::remove_cvref_t<decltype(pair_second(*current))>);
+    status_code leaf_map_elements(Iterator &current, const Sentinel &last, bool &key_complete) {
+        constexpr auto maximum_size = resumable_leaf_encode_size<std::remove_cvref_t<decltype(pair_first(*current))>>() +
+                                      resumable_leaf_encode_size<std::remove_cvref_t<decltype(pair_second(*current))>>();
         while (current != last) {
-            const auto  window = source_.available_output_span();
+            const auto  window = resumable_source_access::borrow_window(source_);
             status_code status = status_code::success;
             if (window && window->size() >= maximum_size) {
                 auto                                   bytes = *window;
@@ -488,7 +552,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                 } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
                     status = resumable_exception_status();
                 }
-                source_.advance(completed);
+                resumable_source_access::consume_window(source_, completed);
             } else {
                 auto completed = source_.position();
                 try {
@@ -518,12 +582,12 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if (status != status_code::success)
             co_return status;
 
-        if constexpr (Map && has_builtin_integer_pairs<Range>()) {
+        if constexpr (Map && has_builtin_leaf_pairs<Range>()) {
             auto       current = std::ranges::begin(range);
             const auto last    = std::ranges::end(range);
             bool       key_complete{};
             while (current != last) {
-                status = integer_map_elements(current, last, key_complete);
+                status = leaf_map_elements(current, last, key_complete);
                 if (status != status_code::incomplete || eof()) {
                     if (status != status_code::success)
                         co_return status;
@@ -531,11 +595,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                 }
                 co_await wait();
             }
-        } else if constexpr (!Map && has_builtin_integer_elements<Range>()) {
+        } else if constexpr (!Map && has_builtin_leaf_elements<Range>()) {
             auto       current = std::ranges::begin(range);
             const auto last    = std::ranges::end(range);
             while (current != last) {
-                status = integer_elements(current, last);
+                status = leaf_elements(current, last);
                 if (status != status_code::incomplete || eof()) {
                     if (status != status_code::success)
                         co_return status;

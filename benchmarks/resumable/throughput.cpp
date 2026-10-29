@@ -138,6 +138,17 @@ template <wire_format Format = wire_format::ordinary, typename T> bool encode_va
     }
 }
 
+template <typename T> std::size_t scalar_wire_size(T value) {
+    if constexpr (std::same_as<T, bool>)
+        return 1;
+    else if constexpr (std::same_as<T, float>)
+        return 5;
+    else if constexpr (std::same_as<T, double>)
+        return 9;
+    else
+        return header_size(value);
+}
+
 template <wire_format Format, typename T>
 bytes fixture_bytes(const T &value, const throughput_options &options, std::optional<std::size_t> exact_size) {
     if constexpr (Format == wire_format::string_chunks) {
@@ -155,15 +166,16 @@ bytes fixture_bytes(const T &value, const throughput_options &options, std::opti
             if constexpr (ct::IsMap<T>) {
                 std::size_t expected = Format == wire_format::indefinite ? 2 : header_size(value.size());
                 for (const auto &[key, mapped] : value) {
-                    expected += header_size(key) + header_size(mapped);
+                    expected += scalar_wire_size(key) + scalar_wire_size(mapped);
                 }
                 require(encoded.size() == expected, "map byte count mismatch");
-            } else if constexpr (std::same_as<T, std::vector<std::uint32_t>>) {
+            } else if constexpr (std::same_as<T, std::vector<std::uint32_t>> || std::same_as<T, std::vector<float>> ||
+                                 std::same_as<T, std::vector<double>> || std::same_as<T, std::deque<bool>>) {
                 std::size_t expected = Format == wire_format::indefinite ? 2 : header_size(value.size());
                 for (const auto item : value) {
-                    expected += header_size(item);
+                    expected += scalar_wire_size(item);
                 }
-                require(encoded.size() == expected, "integer array byte count mismatch");
+                require(encoded.size() == expected, "scalar array byte count mismatch");
             }
             return encoded;
         }
@@ -178,6 +190,9 @@ concept reservable_destination = requires(T &value) {
 
 template <typename T> auto counted_destination(const std::vector<T> &, allocation_counter &resource) {
     return std::pmr::vector<T>{&resource};
+}
+template <typename T> auto counted_destination(const std::deque<T> &, allocation_counter &resource) {
+    return std::pmr::deque<T>{&resource};
 }
 inline auto counted_destination(const std::string &, allocation_counter &resource) { return std::pmr::string{&resource}; }
 
@@ -385,7 +400,8 @@ throughput_options parse_options(int argc, char **argv) {
         if (argument == "--help") {
             std::cout << "--bytes N --repetitions N --epochs N --workload "
                          "all|structured|bstr|tstr|scalars|scalars-indef|map|map-indef|unordered-map|unordered-map-indef|typed-native|"
-                         "typed-opposite|bstr-indef|tstr-indef\n"
+                         "typed-opposite|bstr-indef|tstr-indef|floats|floats-indef|doubles|doubles-indef|bools|bools-indef|float-map|float-"
+                         "map-indef|tstr-utf8\n"
                          "--mode all|one-shot|resumable --storage cold|reserved|both --direction all|encode|decode|validate\n"
                          "--transport all|full|1460|4096|65536 --cbor-chunk N --allocations --self-test\n";
             std::exit(0);
@@ -418,7 +434,10 @@ throughput_options parse_options(int argc, char **argv) {
                 options.workload == "scalars" || options.workload == "scalars-indef" || options.workload == "map" ||
                 options.workload == "map-indef" || options.workload == "unordered-map" || options.workload == "unordered-map-indef" ||
                 options.workload == "typed-native" || options.workload == "typed-opposite" || options.workload == "bstr-indef" ||
-                options.workload == "tstr-indef",
+                options.workload == "tstr-indef" || options.workload == "floats" || options.workload == "floats-indef" ||
+                options.workload == "doubles" || options.workload == "doubles-indef" || options.workload == "bools" ||
+                options.workload == "bools-indef" || options.workload == "float-map" || options.workload == "float-map-indef" ||
+                options.workload == "tstr-utf8",
             "unknown workload");
     require(options.mode == "all" || options.mode == "one-shot" || options.mode == "resumable", "unknown mode");
     require(options.storage == "cold" || options.storage == "reserved" || options.storage == "both", "unknown storage mode");
@@ -457,11 +476,38 @@ int main(int argc, char **argv) {
         if (options.workload == "all" || options.workload == "tstr") {
             run_workload(options, "tstr", make_text(options.bytes), options.bytes, samples);
         }
+        if (options.workload == "all" || options.workload == "tstr-utf8") {
+            run_workload(options, "tstr-utf8", make_utf8_text(options.bytes), options.bytes, samples);
+        }
         if (options.workload == "all" || options.workload == "scalars") {
             run_workload(options, "scalars", make_scalars(options.bytes), {}, samples);
         }
         if (options.workload == "all" || options.workload == "scalars-indef") {
             run_workload<wire_format::indefinite>(options, "scalars-indef", make_scalars(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "floats") {
+            run_workload(options, "floats", make_floats<float>(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "floats-indef") {
+            run_workload<wire_format::indefinite>(options, "floats-indef", make_floats<float>(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "doubles") {
+            run_workload(options, "doubles", make_floats<double>(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "doubles-indef") {
+            run_workload<wire_format::indefinite>(options, "doubles-indef", make_floats<double>(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "bools") {
+            run_workload(options, "bools", make_bools(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "bools-indef") {
+            run_workload<wire_format::indefinite>(options, "bools-indef", make_bools(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "float-map") {
+            run_workload(options, "float-map", make_float_map(options.bytes), {}, samples);
+        }
+        if (options.workload == "all" || options.workload == "float-map-indef") {
+            run_workload<wire_format::indefinite>(options, "float-map-indef", make_float_map(options.bytes), {}, samples);
         }
         if (options.workload == "all" || options.workload == "map") {
             run_workload(options, "map", make_integer_map<std::map<std::uint32_t, std::uint32_t>>(options.bytes), {}, samples);

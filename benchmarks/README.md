@@ -216,11 +216,15 @@ encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
 chunks. Separate validation rows compare `validate_item` with the resumable
 validator, without creating decoded values. Deterministic fixtures include
 nested records, definite/indefinite scalar arrays and ordered/hash maps of integer
-pairs, native/opposite-endian RFC 8746 uint32 arrays, and definite/indefinite
-text and binary strings. Nested records contain a 4096-character string and
-64 integers spanning CBOR integer widths. Text fixtures contain ASCII, while
-integer values repeat a fixed width-spanning pattern. These workloads do not
-characterize every UTF-8 or value distribution. The default fixture budget is
+pairs, `float`/`double`/`bool` arrays, float-key/bool-value maps,
+native/opposite-endian RFC 8746 uint32 arrays, and definite/indefinite
+text and binary strings. Boolean fixtures use `deque<bool>` to provide ordinary
+references rather than packed proxies. Floating fixtures use exact finite binary
+fractions. Nested records contain a 4096-character string and
+64 integers spanning CBOR integer widths. Text fixtures contain ASCII; the
+separate `tstr-utf8` workload alternates one-, two-, three-, and four-byte code
+points. Integer values repeat a fixed width-spanning pattern. These workloads
+do not characterize every UTF-8 or value distribution. The default fixture budget is
 16 MiB; array/map/typed-array wire sizes vary with their representation, and every row
 prints the actual encoded byte count. Typed decoding uses owning `typed_array`
 destinations; encoding borrows the same vector values through typed wrappers.

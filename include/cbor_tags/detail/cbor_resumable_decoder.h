@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
+#include "cbor_tags/detail/cbor_resumable_leaf.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
 
 #include <algorithm>
@@ -125,10 +126,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
   private:
     template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
-            if (const auto span = source_.available_span(ordinary_.reader_.position_); span && !span->empty()) {
+            if (const auto span = source_.borrow_window(ordinary_.reader_.position_); span && !span->empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
-                source_.advance(ordinary_.reader_.position_, count);
+                source_.consume_window(ordinary_.reader_.position_, count);
                 ordinary_.reader_.current_offset_ += count;
                 length -= count;
             } else {
@@ -368,15 +369,27 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return co_await arguments(std::move(values));
     }
     template <typename T> resumable<status_code> tuple(T &value) {
-        if constexpr (IsTaggedTuple<T>) {
-            const auto status = co_await ordinary(std::get<0>(value));
-            if (status != status_code::success)
-                co_return status;
-            co_return co_await group(tuple_tail(value));
-        } else
-            co_return co_await group(std::apply([](auto &...fields) { return std::tie(fields...); }, value));
+        if constexpr (IsTaggedTuple<T>)
+            return tagged_tuple(value);
+        else
+            return group(std::apply([](auto &...fields) { return std::tie(fields...); }, value));
     }
+
+    template <typename T> resumable<status_code> tagged_tuple(T &value) {
+        const auto status = co_await ordinary(std::get<0>(value));
+        if (status != status_code::success)
+            co_return status;
+        co_return co_await group(tuple_tail(value));
+    }
+
     template <typename T> resumable<status_code> aggregate(T &value) {
+        if constexpr (HasInlineTag<T> || IsTag<T>)
+            return tagged_aggregate(value);
+        else
+            return group(to_tuple(value));
+    }
+
+    template <typename T> resumable<status_code> tagged_aggregate(T &value) {
         auto values = to_tuple(value);
         if constexpr (HasInlineTag<T>) {
             auto       tag    = static_tag<T::cbor_tag>{};
@@ -395,12 +408,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     resumable<status_code> available() {
-        while (empty()) {
-            if (eof())
-                co_return status_code::incomplete;
+        if (!empty())
+            return status_code::success;
+        if (eof())
+            return status_code::incomplete;
+        return await_available();
+    }
+
+    resumable<status_code> await_available() {
+        do {
             co_await wait();
-        }
-        co_return status_code::success;
+            if (!empty())
+                co_return status_code::success;
+        } while (!eof());
+        co_return status_code::incomplete;
     }
     template <typename T> resumable<status_code> optional(T &value) {
         auto status = co_await available();
@@ -421,15 +442,25 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     // Lookahead uses the same ordinary decoder without committing the speculative header.
+    template <typename T> status_code peek_once(T &value) {
+        const auto result = ordinary_(value);
+        rollback();
+        return result ? status_code::success : result.error();
+    }
+
     template <typename T> resumable<status_code> peek(T &value) {
+        const auto status = peek_once(value);
+        if (status != status_code::incomplete || eof())
+            return status;
+        return await_peek(value);
+    }
+
+    template <typename T> resumable<status_code> await_peek(T &value) {
         for (;;) {
-            const auto result = ordinary_(value);
-            rollback();
-            if (result)
-                co_return status_code::success;
-            if (result.error() != status_code::incomplete || eof())
-                co_return result.error();
             co_await wait();
+            const auto status = peek_once(value);
+            if (status != status_code::incomplete || eof())
+                co_return status;
         }
     }
     template <typename T> static bool matches_tag(std::uint64_t tag) {
@@ -471,58 +502,63 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     template <bool CatchAll, typename T, std::size_t I = 0>
     resumable<status_code> variant_alternative(T &value, major_type major, std::byte info, std::uint64_t tag) {
         if constexpr (I == variant_size_v<T>)
-            co_return status_code::no_match_in_variant_on_buffer;
+            return status_code::no_match_in_variant_on_buffer;
         else {
             using U            = variant_alternative_t<I, T>;
             const bool matches = major == major_type::Simple ? matches_simple_dispatch<CatchAll, U>(info)
                                  : major == major_type::Tag  ? matches_tag<U>(tag)
                                                              : matches_major_dispatch<U>(major);
-            if (matches) {
-                U           decoded{};
-                status_code status;
-                if constexpr (has_explicit_hook<U>() || has_mixin<U>())
-                    status = co_await item(decoded);
-                else if constexpr (IsTag<U> && !IsVariant<U> && !IsOptional<U>) {
-                    if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::tag>())
-                        status = co_await contextual_ordinary<payload_decode_context::tag>(decoded);
-                    else
-                        status = co_await item(decoded);
-                } else
-                    status = co_await header_item(decoded);
-                if (status == status_code::success)
-                    variant_assign<I>(value, std::move(decoded));
-                co_return is_retriable_variant_mismatch(status) ? status_code::no_match_in_variant_on_buffer : status;
-            }
-            co_return co_await variant_alternative<CatchAll, T, I + 1>(value, major, info, tag);
+            if (matches)
+                return selected_alternative<I>(value);
+            return variant_alternative<CatchAll, T, I + 1>(value, major, info, tag);
         }
     }
 
-    template <typename T> static consteval bool ordinary_integer_override() {
+    // A selected alternative stays alive in its owning frame until decoding
+    // finishes. Only metadata-only candidate selection can return eagerly.
+    template <std::size_t I, typename T> resumable<status_code> selected_alternative(T &value) {
+        using U = variant_alternative_t<I, T>;
+        U           decoded{};
+        status_code status;
+        if constexpr (has_explicit_hook<U>() || has_mixin<U>())
+            status = co_await item(decoded);
+        else if constexpr (IsTag<U> && !IsVariant<U> && !IsOptional<U>) {
+            if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::tag>())
+                status = co_await contextual_ordinary<payload_decode_context::tag>(decoded);
+            else
+                status = co_await item(decoded);
+        } else
+            status = co_await header_item(decoded);
+        if (status == status_code::success)
+            variant_assign<I>(value, std::move(decoded));
+        co_return is_retriable_variant_mismatch(status) ? status_code::no_match_in_variant_on_buffer : status;
+    }
+
+    template <typename T> static consteval bool ordinary_leaf_override() {
         return (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value); } || ...) ||
                (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value, major_type{}, std::byte{}); } || ...);
     }
 
-    template <typename T> static consteval bool builtin_integer() {
-        if constexpr (!std::integral<T> || !(IsUnsigned<T> || IsSigned<T>) || sizeof(T) > 8 || has_explicit_hook<T>() || has_mixin<T>()) {
+    template <typename T> static consteval bool builtin_leaf() {
+        if constexpr (!resumable_builtin_leaf<T> || has_explicit_hook<T>() || has_mixin<T>()) {
             // Explicit hooks own dispatch without instantiating ordinary probes.
             return false;
         } else {
-            return !ordinary_integer_override<T>() &&
-                   !codec_payload_has_customization<ordinary_type, T, payload_decode_context::direct>() &&
+            return !ordinary_leaf_override<T>() && !codec_payload_has_customization<ordinary_type, T, payload_decode_context::direct>() &&
                    !codec_payload_has_customization<ordinary_type, T, payload_decode_context::header>();
         }
     }
 
-    template <typename T> static consteval bool builtin_integer_array() {
+    template <typename T> static consteval bool builtin_leaf_array() {
         if constexpr (IsArray<T> && !IsString<T>)
-            return builtin_integer<typename T::value_type>();
+            return builtin_leaf<typename T::value_type>();
         else
             return false;
     }
 
-    template <typename T> static consteval bool builtin_integer_map() {
+    template <typename T> static consteval bool builtin_leaf_map() {
         if constexpr (IsMap<T>)
-            return builtin_integer<typename T::key_type>() && builtin_integer<typename T::mapped_type>();
+            return builtin_leaf<typename T::key_type>() && builtin_leaf<typename T::mapped_type>();
         else
             return false;
     }
@@ -537,7 +573,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // Drain ordinary elements synchronously. A failed child leaves the logical
     // count and destination at the last complete element, even after an exception.
-    template <typename T> status_code segmented_integer_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
+    template <typename T> status_code segmented_leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
         auto       completed = ordinary_.reader_;
         const auto status    = attempt_decode(
             [&] { return decode_array_elements(ordinary_, value, append, remaining, [&] { completed = ordinary_.reader_; }); });
@@ -548,15 +584,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <typename T>
-    status_code integer_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
+    status_code leaf_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
         decoder<std::span<const std::byte>, Options> contiguous(window);
         std::size_t                                  completed{};
         const auto                                   status = attempt_decode([&] {
-            // Any native integer can occupy nine wire bytes, even a narrow
-            // destination. Keep conversion and strictness policy in the core codec.
+            // Keep conversion and strictness policy in the core scalar codec.
             return decode_array_elements(
                 contiguous, value, append, remaining, [&] { completed = contiguous.reader_.position_; },
-                [&] { return window.size() - contiguous.reader_.position_ >= 9; });
+                [&] { return window.size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>(); });
         });
 
         source_.advance(ordinary_.reader_.position_, completed);
@@ -565,21 +600,23 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return status;
     }
 
-    template <typename T> status_code integer_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
+    // Discover leaf spans through a cursor copy and publish the source position
+    // only after the shared scalar loop has finished.
+    template <typename T> status_code leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
         while (remaining != 0) {
             const auto window = source_.available_span(ordinary_.reader_.position_);
             if (!window)
-                return segmented_integer_elements(value, append, remaining);
+                return segmented_leaf_elements(value, append, remaining);
 
-            if (window->size() >= 9) {
-                const auto status = integer_window(value, append, remaining, *window);
+            if (window->size() >= resumable_leaf_decode_size<typename T::value_type>()) {
+                const auto status = leaf_window(value, append, remaining, *window);
                 if (status != status_code::success)
                     return status;
             } else {
                 // Only the boundary child needs the chunk-aware reader. It can
                 // cross already admitted chunks without suspending the container.
                 std::uint64_t one    = 1;
-                const auto    status = segmented_integer_elements(value, append, one);
+                const auto    status = segmented_leaf_elements(value, append, one);
                 remaining -= 1 - one;
                 if (status != status_code::success)
                     return status;
@@ -589,18 +626,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <typename T>
-    status_code indefinite_integer_elements(T &value, appender<T> &append, std::uint64_t &count, bool &ended, std::uint64_t minimum,
-                                            std::uint64_t maximum) {
+    status_code indefinite_leaf_elements(T &value, appender<T> &append, std::uint64_t &count, bool &ended, std::uint64_t minimum,
+                                         std::uint64_t maximum) {
         while (!ended) {
             const auto  window = source_.available_span(ordinary_.reader_.position_);
             status_code status;
-            if (window && window->size() >= 9) {
+            if (window && window->size() >= resumable_leaf_decode_size<typename T::value_type>()) {
                 decoder<std::span<const std::byte>, Options> contiguous(*window);
                 std::size_t                                  completed{};
                 status = attempt_decode([&] {
                     return decode_indefinite_array_elements<true>(
                         contiguous, value, append, count, ended, minimum, maximum, [&] { completed = contiguous.reader_.position_; },
-                        [&] { return window->size() - contiguous.reader_.position_ >= 9; });
+                        [&] {
+                            return window->size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>();
+                        });
                 });
                 source_.advance(ordinary_.reader_.position_, completed);
                 ordinary_.reader_.current_offset_ += completed;
@@ -622,19 +661,21 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <bool Indefinite, typename T>
-    status_code integer_map_elements(T &value, appender<T> &append, std::optional<decoded_map_pair<T>> &entry, bool &key_complete,
-                                     std::uint64_t &count, bool &ended, std::uint64_t minimum, std::uint64_t maximum) {
+    status_code leaf_map_elements(T &value, appender<T> &append, std::optional<decoded_map_pair<T>> &entry, bool &key_complete,
+                                  std::uint64_t &count, bool &ended, std::uint64_t minimum, std::uint64_t maximum) {
+        constexpr auto maximum_size =
+            resumable_leaf_decode_size<typename T::key_type>() + resumable_leaf_decode_size<typename T::mapped_type>();
         while (!ended && (Indefinite || count != maximum)) {
             const auto  window = source_.available_span(ordinary_.reader_.position_);
             status_code status;
-            if (window && window->size() >= 18) {
+            if (window && window->size() >= maximum_size) {
                 decoder<std::span<const std::byte>, Options> contiguous(*window);
                 std::size_t                                  completed{};
                 status = attempt_decode([&] {
                     return decode_map_elements<Indefinite, true>(
                         contiguous, value, append, entry, key_complete, count, ended, minimum, maximum,
                         [&] { completed = contiguous.reader_.position_; },
-                        [&] { return window->size() - contiguous.reader_.position_ >= 18; });
+                        [&] { return window->size() - contiguous.reader_.position_ >= maximum_size; });
                 });
                 source_.advance(ordinary_.reader_.position_, completed);
                 ordinary_.reader_.current_offset_ += completed;
@@ -656,13 +697,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <bool Indefinite, typename T>
-    resumable<status_code> integer_map(T &value, appender<T> &append, std::uint64_t minimum, std::uint64_t maximum) {
+    resumable<status_code> leaf_map(T &value, appender<T> &append, std::uint64_t minimum, std::uint64_t maximum) {
         std::optional<decoded_map_pair<T>> entry;
         bool                               key_complete{};
         bool                               ended{};
         std::uint64_t                      count{};
         while (!ended && (Indefinite || count != maximum)) {
-            const auto status = integer_map_elements<Indefinite>(value, append, entry, key_complete, count, ended, minimum, maximum);
+            const auto status = leaf_map_elements<Indefinite>(value, append, entry, key_complete, count, ended, minimum, maximum);
             if (status != status_code::incomplete || eof())
                 co_return status;
             co_await wait();
@@ -704,17 +745,17 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if (!header.indefinite)
                 co_return co_await payload(value, header.size, append);
         }
-        if constexpr (builtin_integer_map<T>()) {
+        if constexpr (builtin_leaf_map<T>()) {
             if (header.indefinite)
-                co_return co_await integer_map<true>(value, append, minimum, maximum);
+                co_return co_await leaf_map<true>(value, append, minimum, maximum);
             else
-                co_return co_await integer_map<false>(value, append, 0, header.size);
+                co_return co_await leaf_map<false>(value, append, 0, header.size);
         }
-        if constexpr (builtin_integer_array<T>()) {
+        if constexpr (builtin_leaf_array<T>()) {
             if (!header.indefinite) {
                 auto remaining = header.size;
                 while (remaining != 0) {
-                    status = integer_elements(value, append, remaining);
+                    status = leaf_elements(value, append, remaining);
                     if (status != status_code::incomplete || eof())
                         co_return status;
                     co_await wait();
@@ -724,7 +765,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 std::uint64_t count{};
                 bool          ended{};
                 while (!ended) {
-                    status = indefinite_integer_elements(value, append, count, ended, minimum, maximum);
+                    status = indefinite_leaf_elements(value, append, count, ended, minimum, maximum);
                     if (status != status_code::incomplete || eof())
                         co_return status;
                     co_await wait();
