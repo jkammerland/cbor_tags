@@ -75,22 +75,11 @@ build/benchmarks/benchmarks/decoder/bench_decoder \
   --test-case="decode preflight regression benchmarks" --no-skip
 ```
 
-The following directional results compare `dd71501`, which adds the real root
-preflight to parent `6617765`, with direct decoding at that parent/current
-implementation. Both builds used GCC 15.2.1, `-O3 -DNDEBUG`, one pinned CPU,
-15 epochs of at least 20 ms per row, and two interleaved runs:
-
-| Fixed payload | Preflight, ns/byte | Direct, ns/byte | Direct speedup |
-|---|---:|---:|---:|
-| definite uint array, 32 elements | 3.26-3.52 | 0.87 | 3.7-4.0x |
-| definite uint array, 4096 elements | 2.31 | 0.79-0.80 | 2.9x |
-| indefinite uint array, 4096 elements | 2.27 | 0.67 | 3.4x |
-| nested one-element arrays, depth 128 | 4.37-4.38 | 1.03-1.04 | 4.2x |
-
-The host reported CPU frequency scaling and the `powersave` governor, so these
-are regression-direction measurements rather than release claims. As a
-cross-check, the current emulated-preflight rows stayed close to the historical
-public-preflight rows.
+Compare nanoseconds per encoded byte with the same compiler, optimization flags,
+CPU affinity, fixture contents, and epoch settings. Record frequency scaling and
+governor settings alongside results; interleave baseline and candidate runs to
+make machine drift visible. These rows measure the cost of the structural pass,
+not a release-wide performance guarantee.
 
 ## Shared Pointer Encode Rows
 
@@ -280,6 +269,31 @@ same compiler and flags, alternating whole executable runs. Run comparisons
 sequentially on otherwise idle hardware; a current ordinary/resumable comparison
 alone does not establish whether ordinary decoding regressed from the baseline.
 
+For paired comparisons, build the same harness against both header revisions
+with identical flags. Run three baseline/candidate pairs sequentially, reversing
+executable order in the second pair. For example:
+
+```bash
+taskset -c 2 <executable> --workload scalars --bytes 16777216 \
+  --storage both --repetitions 1 --epochs 9
+taskset -c 2 <executable> --workload map-indef --bytes 1048576 \
+  --storage both --repetitions 1 --epochs 9
+taskset -c 2 <executable> --workload tstr-indef --cbor-chunk 65536 \
+  --bytes 1048576 --storage both --repetitions 1 --epochs 9
+```
+
+Repeat for the relevant workloads and CBOR child sizes. Add `--mode one-shot`
+for the ordinary-only controls. Record compiler and build flags, CPU affinity,
+frequency scaling, governor, and actual encoded sizes. Report each mode's
+median and range, and compute speedup for each pair before summarizing those
+ratios; a ratio of independently computed medians is a different statistic.
+
+Encoded MB/s uses decimal megabytes. Repeated fixtures may fit in cache, so
+these rates do not establish sustained large-buffer or network throughput.
+Validation throughput counts encoded bytes: a definite bstr validator may skip
+its admitted payload, so its rate does not measure reading every payload byte.
+Run fixture and allocation selftests and retain the timed content checks.
+
 `bench_resumable_latency` measures real elapsed completion time while an
 independent producer admits chunks on absolute `steady_clock` deadlines. It
 compares buffering until the final arrival followed by ordinary decode with
@@ -289,7 +303,7 @@ continues admitting bytes independently when the decoder falls behind; the
 consumer may then supply several already-arrived chunks together.
 
 ```bash
-# Full requested experiment: about 16 minutes plus fixture construction/decode.
+# Default experiment: about 16 minutes plus fixture construction/decode.
 build/resumable-bench/benchmarks/resumable/bench_resumable_latency
 
 # Shorter manual experiment with the same scheduling and correctness checks.
@@ -321,176 +335,3 @@ Only the small `--self-test` cases are registered with CTest. They verify exact
 fixture size, decoded content, completion after the last arrival, and that the
 publisher never admits bytes before their deadlines. They do not impose timing
 thresholds or run the full 1 GB experiment.
-
-### Measured container and typed-array changes
-
-The comparison uses baseline headers `cd3abb6b` and implementation `8e94b97f`,
-with the same expanded harness for both. Measurements used an AMD Ryzen 9 7950X,
-GCC 16.2.1, GNU C++20, `-O3 -DNDEBUG`, and no LTO. Throughput runs were pinned to
-CPU 2 and run sequentially, with three alternating baseline/candidate pairs and
-nine epochs per row. The reported governor was `powersave`; frequency scaling
-remained enabled. These are local measurements, not CI performance thresholds.
-
-Scalar fixtures used a 16 MiB input budget (15,379,114 encoded bytes for the
-definite array). Maps, typed arrays, and indefinite strings used a 1 MiB budget;
-their actual encoded sizes were approximately 0.55, 1.40, and 1.05–1.11 MB.
-These repeatedly reused fixtures can fit in cache. Encoded MB/s is decimal;
-large typed-array and string rates should not be extrapolated to sustained
-1 GB memory or network throughput.
-
-Cold resumable decoding with **65,536-byte transport chunks** measured the
-following. Entries are median [minimum, maximum] across three executable runs.
-Speedups are medians [minimum, maximum] of each candidate/baseline pair, not the
-ratio of the two displayed medians. An indefinite string's suffix is its CBOR
-child payload size, independently of the transport chunk size.
-
-| Workload | Baseline MB/s | Current MB/s | Paired speedup |
-|---|---:|---:|---:|
-| scalars | 1,820.1 [1,811.8, 1,821.2] | 1,979.0 [1,972.1, 1,981.2] | 1.088 [1.087, 1.089]x |
-| scalars-indef | 98.9 [98.8, 100.2] | 804.0 [802.0, 808.6] | 8.130 [8.000, 8.186]x |
-| map | 86.2 [84.9, 87.9] | 119.4 [113.3, 120.5] | 1.371 [1.315, 1.405]x |
-| map-indef | 62.8 [61.8, 63.3] | 123.2 [121.9, 124.0] | 1.963 [1.958, 1.973]x |
-| unordered-map | 142.3 [141.3, 142.9] | 268.8 [258.3, 270.0] | 1.898 [1.807, 1.902]x |
-| unordered-map-indef | 82.1 [65.5, 83.9] | 239.4 [234.8, 239.9] | 2.921 [2.853, 3.587]x |
-| typed-native | 511.9 [472.4, 516.9] | 40,832.1 [40,472.6, 41,281.3] | 79.773 [78.295, 87.393]x |
-| typed-opposite | 504.3 [501.3, 506.4] | 3,431.4 [3,411.4, 3,434.6] | 6.805 [6.783, 6.805]x |
-| bstr-indef-16 | 386.9 [384.5, 388.5] | 424.7 [423.5, 427.9] | 1.098 [1.090, 1.113]x |
-| bstr-indef-65536 | 30,407.8 [30,301.8, 30,413.0] | 32,147.6 [32,003.0, 32,280.8] | 1.057 [1.056, 1.061]x |
-| tstr-indef-16 | 368.2 [325.2, 369.9] | 417.0 [378.1, 420.8] | 1.143 [1.022, 1.282]x |
-| tstr-indef-65536 | 23,543.9 [23,495.4, 23,746.8] | 31,800.0 [31,617.8, 32,424.9] | 1.351 [1.346, 1.365]x |
-
-Current cold decode medians at the other tested transport sizes were:
-
-| Workload | Full buffer, MB/s | 1,460 bytes, MB/s | 4,096 bytes, MB/s |
-|---|---:|---:|---:|
-| scalars | 2,032.4 | 1,096.6 | 1,539.7 |
-| scalars-indef | 813.1 | 562.5 | 696.7 |
-| map | 94.9 | 134.5 | 139.9 |
-| map-indef | 97.7 | 135.9 | 143.3 |
-| unordered-map | 270.9 | 240.8 | 260.0 |
-| unordered-map-indef | 240.1 | 208.5 | 224.3 |
-| typed-native | 42,813.3 | 17,142.3 | 30,506.3 |
-| typed-opposite | 3,434.8 | 3,076.6 | 3,272.1 |
-| bstr-indef-16 | 428.1 | 419.0 | 424.7 |
-| bstr-indef-65536 | 32,670.7 | 16,789.7 | 24,704.4 |
-| tstr-indef-16 | 425.1 | 412.9 | 418.1 |
-| tstr-indef-65536 | 32,240.2 | 17,015.9 | 24,512.3 |
-
-Full-buffer definite scalar decode improved from 1,851.8 [1,851.2, 1,861.0] to
-2,032.4 [1,995.4, 2,034.0] MB/s. Long-child strings were nearly unchanged with a
-full buffer: paired speedups were 1.016x [1.009, 1.027] for bstr and 0.995x
-[0.985, 1.001] for tstr. Tiny text chunks showed more run-to-run variation than
-most rows; the complete ranges above retain it. Chunk-size effects are not
-uniform across these workloads.
-
-Capacity affects the indefinite integer case substantially: current
-`decode-reserved` reached 1,605.3 [1,604.2, 1,608.7] MB/s at 64 KiB, versus
-804.0 [802.0, 808.6] cold, with a paired baseline improvement of 15.218x
-[14.851, 15.275]. Definite arrays already reserve their declared count, so their
-cold and reserved medians were close (1,979.0 and 1,972.5 MB/s). Typed reserved
-rows have the offered-capacity caveat described above; they are not equivalent
-allocation controls.
-
-At 64 KiB, map encoding improved by 5.720–5.880x across the four map/wire-form
-combinations. Native and opposite-endian typed encoding improved by 11.029x
-[10.725, 11.350] and 25.995x [25.314, 26.093], respectively. The baseline typed
-codec uses the ordinary fallback; the current owning decode and encode hooks
-retain progress across fragments. Native-endian payload copies also benefit
-from this small, repeatedly reused fixture.
-
-Not every row improved. Definite scalar resumable encode fell from 3,386.0
-[3,385.9, 3,388.9] to 3,180.9 [3,135.9, 3,192.0] MB/s at 64 KiB: paired 0.939x
-[0.926, 0.942]. Its resumable validation fell from 206.5 [206.4, 209.3] to
-178.7 [175.6, 179.1] MB/s: paired 0.854x [0.851, 0.867]. These rows remain
-reported rather than being treated as evidence of universal improvement.
-
-### Ordinary-only controls and allocation counts
-
-Both control executables defined `CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1`; this
-avoids comparing an ordinary-only baseline with a current translation unit
-that additionally instantiates resumable operations. The same three-pair
-protocol measured the following ordinary decode results:
-
-| Workload | Baseline MB/s | Current MB/s | Paired speedup |
-|---|---:|---:|---:|
-| scalars | 1,014.6 [1,012.6, 1,015.7] | 1,015.9 [1,015.7, 1,050.2] | 1.001 [1.000, 1.037]x |
-| structured | 2,022.7 [2,015.9, 2,081.3] | 2,166.1 [2,068.7, 2,188.8] | 1.052 [1.023, 1.075]x |
-| bstr | 39,988.4 [39,003.6, 40,416.9] | 39,997.6 [39,161.1, 41,013.9] | 1.015 [0.979, 1.025]x |
-| tstr | 40,514.6 [39,845.8, 40,985.7] | 39,518.3 [38,177.5, 40,377.5] | 0.964 [0.958, 0.997]x |
-| map | 87.4 [86.7, 87.4] | 89.0 [88.7, 90.0] | 1.027 [1.014, 1.030]x |
-| map-indef | 88.0 [87.1, 88.2] | 92.3 [91.2, 92.6] | 1.049 [1.034, 1.063]x |
-| unordered-map | 261.1 [260.3, 267.2] | 265.0 [263.9, 265.7] | 1.014 [0.992, 1.017]x |
-| unordered-map-indef | 205.9 [196.3, 209.4] | 228.6 [221.9, 238.2] | 1.130 [1.110, 1.137]x |
-| scalars, reserved | 1,086.2 [1,083.4, 1,088.6] | 1,013.4 [976.7, 1,045.7] | 0.933 [0.897, 0.965]x |
-| tstr, reserved | 40,083.6 [39,766.1, 40,085.2] | 38,901.0 [37,173.4, 39,347.4] | 0.978 [0.927, 0.982]x |
-
-Thus the measurements do not establish zero ordinary-code regressions:
-reserved scalar decoding was lower in all three pairs, and ordinary tstr
-cold decoding was also lower. Ordinary scalar encode was 1.009x
-[0.977, 1.138]; ordered definite-map encode was 0.989x [0.979, 0.994], while
-hash-map encode improved to 1.792x [1.781, 1.800]. Reader inline hints keep the
-scalar bulk loop inline. This full benchmark executable's `.text` was 596,569
-bytes versus the baseline's 552,793 bytes (+7.9%). This is a whole-harness
-code-size observation, not a per-application guarantee.
-
-Separate PMR probes verified destination equality and the allocation effect of
-reserving from each definite child header inside an indefinite string. For one
-64 KiB CBOR child split into 1,460-byte transport chunks, bstr allocations fell
-from 8 to 1 and tstr from 7 to 1. For one 1 MiB child they fell from 12/11 to
-1/1. A 1 MiB payload made of 64 KiB children needed 5 allocations in either
-container after the change, independent of tested transport size. One-byte
-CBOR children retained the same geometric growth counts: 21 bstr and 17 tstr
-allocations for a 1 MiB payload, with unchanged total requested bytes.
-
-To reproduce, build this harness against each header revision with identical
-flags. For each of three pairs, run one executable then the other, reversing
-the order in pair two:
-
-```bash
-taskset -c 2 <executable> --workload scalars --bytes 16777216 \
-  --storage both --repetitions 1 --epochs 9
-taskset -c 2 <executable> --workload map-indef --bytes 1048576 \
-  --storage both --repetitions 1 --epochs 9
-taskset -c 2 <executable> --workload tstr-indef --cbor-chunk 65536 \
-  --bytes 1048576 --storage both --repetitions 1 --epochs 9
-```
-
-Repeat for the table's workloads and for both CBOR string child sizes. For the
-macro-matched ordinary controls add `--mode one-shot`; use the 16 MiB budget
-for scalar/structured/bstr/tstr and 1 MiB for maps. All fixture selftests,
-allocation selftests, and timed preflight/content checks passed. Validation
-throughput is encoded-byte accounting: a definite bstr validator may skip its
-admitted payload, so its rate is not a measurement of reading every payload byte.
-
-### Paced completion at 100 Mb/s
-
-The final implementation was also measured with **exactly 1,000,000,000 encoded
-bytes at 100,000,000 bits/s**, 65,536-byte transport chunks, and three alternating
-ordinary/resumable pairs for each workload. Both modes used the current native
-latency executable. Producer and consumer CPU affinity was unrestricted; all
-other benchmark/build jobs were stopped. All twelve trials passed exact byte
-count, full content, and arrival-order checks. Entries summarize all three
-samples per mode as median [minimum, maximum].
-
-| Workload | Ordinary completion, s | Resumable completion, s | Ordinary final-byte tail, ms | Resumable final-byte tail, µs |
-|---|---:|---:|---:|---:|
-| structured | 80.100828 [80.099227, 80.101610] | 80.000097 [80.000082, 80.000100] | 100.766 [99.173, 101.542] | 44.121 [20.940, 44.881] |
-| bstr | 80.369200 [80.368666, 80.369721] | 80.000084 [80.000079, 80.000107] | 369.145 [368.598, 369.668] | 28.661 [24.230, 39.141] |
-
-Actual final arrivals ranged from 80.000052272 to 80.000068288 seconds.
-Publisher scheduling measurements were:
-
-| Workload/mode | Final lateness, µs | Mean lateness, µs | Maximum lateness, ms |
-|---|---:|---:|---:|
-| structured, one-shot | 62.871 [53.709, 68.044] | 62.548 [60.563, 63.257] | 0.457 [0.428, 0.477] |
-| structured, resumable | 56.083 [52.272, 61.402] | 61.066 [60.864, 65.082] | 0.455 [0.453, 0.458] |
-| bstr, one-shot | 54.395 [53.344, 68.074] | 63.262 [61.271, 65.770] | 0.446 [0.420, 0.478] |
-| bstr, resumable | 55.772 [54.650, 68.288] | 62.753 [61.783, 63.334] | 0.454 [0.453, 0.454] |
-
-The nominal 80-second arrival interval dominates total completion: comparing
-mode medians, completion was 0.126% sooner for structured input and 0.459% sooner
-for bstr. The shorter final-byte tail reflects work completed during arrival.
-These are scheduled arrivals over prebuilt in-process input, without actual
-network transfer or ingress-copy costs; three samples do not establish tail
-percentiles. To reproduce, run the default native latency command above on
-otherwise idle hardware.

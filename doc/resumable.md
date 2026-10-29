@@ -227,4 +227,4 @@ input boundaries use the ordinary segmented reader. Completed progress is
 published before suspension or operation completion, including error exits.
 
 See the [benchmark instructions](../benchmarks/README.md) for throughput and
-actual paced-arrival measurements.
+paced-arrival commands, methodology, and measurement limitations.
