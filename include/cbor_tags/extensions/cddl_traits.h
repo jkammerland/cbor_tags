@@ -1,11 +1,5 @@
 #pragma once
 
-namespace cbor::tags::detail {
-
-enum class cddl_shared_pointer_mode { nullable, shared_graph };
-
-} // namespace cbor::tags::detail
-
 namespace cbor::tags::cddl {
 
 template <typename T> struct tagged_bstr_array_traits {};
