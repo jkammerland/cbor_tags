@@ -30,8 +30,14 @@ TEST_SUITE("cbor_wire/segments") {
             for (std::size_t split = 0; split <= bytes.size(); ++split) {
                 CAPTURE(split);
                 byte_segments segments;
-                segments.append_owned(bytes.first(split));
-                segments.append_owned(bytes.subspan(split));
+                segments.append_owned_segment(bytes.first(split));
+                segments.append_owned_segment(bytes.subspan(split));
+
+                // Keep two distinct descriptors, including empty boundary segments.
+                REQUIRE(segments.size() == 2);
+                REQUIRE(segments.front().size() == split);
+                REQUIRE(segments.back().size() == bytes.size() - split);
+
                 const auto item = check_item_segments_structure(std::move(segments));
                 REQUIRE(item);
                 CHECK(item->flatten() == input);
