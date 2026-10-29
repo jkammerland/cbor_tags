@@ -4,7 +4,11 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <memory>
 #include <ranges>
+#include <span>
 #include <type_traits>
 
 namespace cbor::tags::detail {
@@ -45,6 +49,13 @@ template <typename T> [[nodiscard]] constexpr std::uint8_t utf8_byte(T value) no
              (prefix.first == 0xF0U && prefix.second < 0x90U) || (prefix.first == 0xF4U && prefix.second > 0x8FU));
 }
 
+// Callers establish eight available bytes; memcpy permits unaligned input.
+inline bool utf8_ascii_word(const void *bytes) noexcept {
+    std::uint64_t word;
+    std::memcpy(&word, bytes, sizeof(word));
+    return (word & UINT64_C(0x8080808080808080)) == 0;
+}
+
 // Carries only a partial code point; payload ownership remains with the caller.
 struct utf8_state {
     std::uint8_t first{};
@@ -70,9 +81,42 @@ struct utf8_state {
         return true;
     }
     bool complete() const noexcept { return remaining == 0; }
+
+    bool consume_span(std::span<const std::byte> bytes) noexcept {
+        bool valid = true;
+        while (!bytes.empty()) {
+            // ASCII cannot complete a pending multibyte sequence. Word loads
+            // stay inside the supplied span and need no alignment guarantee.
+            if (complete() && bytes.size() >= sizeof(std::uint64_t)) {
+                if (utf8_ascii_word(bytes.data())) {
+                    bytes = bytes.subspan(sizeof(std::uint64_t));
+                    continue;
+                }
+            }
+
+            // Continue consuming after invalid input so streaming callers can
+            // distinguish an invalid full payload from a truncated payload.
+            valid = consume(utf8_byte(bytes.front())) && valid;
+            bytes = bytes.subspan(1);
+        }
+        return valid;
+    }
 };
 
 template <typename Iterator, typename Sentinel> [[nodiscard]] bool is_valid_utf8(Iterator begin, const Sentinel &end) {
+    if (begin == end)
+        return true;
+
+    // Scan an ASCII prefix in words. The remaining mixed text uses the
+    // ordinary code-point loop without a block probe for each code point.
+    if constexpr (std::contiguous_iterator<Iterator> && std::sized_sentinel_for<Sentinel, Iterator> &&
+                  sizeof(std::iter_value_t<Iterator>) == 1 &&
+                  !std::is_volatile_v<std::remove_reference_t<std::iter_reference_t<Iterator>>>) {
+        while (end - begin >= 8 && utf8_ascii_word(std::to_address(begin))) {
+            begin += 8;
+        }
+    }
+
     while (begin != end) {
         std::array<std::uint8_t, 4> sequence{};
         sequence[0] = utf8_byte(*begin);
