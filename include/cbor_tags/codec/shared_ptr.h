@@ -78,20 +78,10 @@ template <typename Self> struct shared_ptr : base<Self> {
 
     template <smart_ptr::IsSharedPointer Pointer> void encode(const Pointer &value) { encode_shared_pointer(value); }
 
-    template <smart_ptr::IsSharedPointer Pointer> void encode(const smart_ptr::scoped_shared_ptr<Pointer> &value) {
-        encode_shared_pointer(value.value());
-    }
-
     template <smart_ptr::IsSharedPointer Pointer>
         requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
     [[nodiscard]] status_code decode(Pointer &value, major_type major, std::byte additional_info) {
         return decode_shared_pointer(value, major, additional_info);
-    }
-
-    template <smart_ptr::IsSharedPointer Pointer>
-        requires std::default_initializable<typename std::remove_cvref_t<Pointer>::element_type>
-    [[nodiscard]] status_code decode(smart_ptr::scoped_shared_ptr<Pointer> &value, major_type major, std::byte additional_info) {
-        return decode_shared_pointer(value.value(), major, additional_info);
     }
 
     template <typename T>
