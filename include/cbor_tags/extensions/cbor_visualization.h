@@ -60,10 +60,11 @@ namespace text = detail::text_format;
 enum class AnnotationMode { no_annotation, smart };
 
 struct AnnotationOptions {
-    bool           diagnostic_data{false};
-    size_t         current_indent{0};
-    size_t         offset{0};
-    size_t         max_depth{std::numeric_limits<size_t>::max()};
+    bool   diagnostic_data{false};
+    size_t current_indent{0};
+    size_t offset{0};
+    // Maximum bytes per output line; max_structure_depth limits CBOR nesting.
+    size_t         max_bytes_per_line{std::numeric_limits<size_t>::max()};
     AnnotationMode mode{AnnotationMode::smart};
     size_t         annotation_column{61};
     size_t         indent_width{3};
@@ -259,9 +260,9 @@ template <typename Iterator> void format_bytes(auto &output_buffer, Iterator beg
     std::string indent(indent_size, ' ');
     std::string offset(options.offset, ' ');
 
-    const size_t bytes_per_line = options.max_depth == std::numeric_limits<size_t>::max()
-                                      ? std::distance(begin, end) // no wrapping if max_depth is max
-                                      : options.max_depth;
+    const size_t bytes_per_line = options.max_bytes_per_line == std::numeric_limits<size_t>::max()
+                                      ? std::distance(begin, end) // no wrapping if max_bytes_per_line is max
+                                      : options.max_bytes_per_line;
 
     size_t current_count = 0;
     bool   is_first_line = true;
@@ -1885,8 +1886,8 @@ template <typename OutputBuffer> struct smart_annotator {
             throw std::runtime_error("CBOR annotation column too narrow for payload");
         }
         auto max_bytes = (options.annotation_column - left_indent - 1U) / 2U;
-        if (options.max_depth != std::numeric_limits<std::size_t>::max()) {
-            max_bytes = std::min(max_bytes, options.max_depth);
+        if (options.max_bytes_per_line != std::numeric_limits<std::size_t>::max()) {
+            max_bytes = std::min(max_bytes, options.max_bytes_per_line);
         }
         if (max_bytes == 0U) {
             throw std::runtime_error("CBOR annotation payload wrap width too small");
@@ -2462,7 +2463,7 @@ auto make_diagnostic_visitor(OutputBuffer &output_buffer, Decoder &dec, Diagnost
     return diagnostic_visitor<OutputBuffer, Decoder>{output_buffer, dec, options};
 }
 
-template <ValidCborBuffer CborBuffer, typename OutputBuffer>
+template <CborInputBuffer CborBuffer, typename OutputBuffer>
 constexpr void buffer_diagnostic(const CborBuffer &buffer, OutputBuffer &output_buffer, DiagnosticOptions options = {}) {
     auto                                      dec = make_decoder(buffer);
     detail::diagnostic_renderer<OutputBuffer> renderer{.output_buffer = output_buffer, .options = options, .sequence = true};

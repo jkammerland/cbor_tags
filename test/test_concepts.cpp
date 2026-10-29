@@ -498,22 +498,22 @@ TEST_CASE_TEMPLATE("Test variants in any concept for major type", T, std::byte, 
     // CHECK(!wrapper(static_cast<T>(3), var1{}));
 }
 
-TEST_CASE_TEMPLATE("CBOR buffer concept", T, std::byte, std::uint8_t, char, signed char, unsigned char) {
+TEST_CASE_TEMPLATE("CBOR input buffer concept", T, std::byte, std::uint8_t, char, signed char, unsigned char) {
     CBOR_TAGS_TEST_LOG("Testing concept with T: {}\n", nameof::nameof_type<T>());
-    CHECK(ValidCborBuffer<std::array<T, 5>>);
-    CHECK(ValidCborBuffer<std::vector<T>>);
-    CHECK(ValidCborBuffer<std::list<T>>);
-    CHECK(ValidCborBuffer<std::deque<T>>);
-    CHECK(!ValidCborBuffer<std::forward_list<T>>);
+    CHECK(CborInputBuffer<std::array<T, 5>>);
+    CHECK(CborInputBuffer<std::vector<T>>);
+    CHECK(CborInputBuffer<std::list<T>>);
+    CHECK(CborInputBuffer<std::deque<T>>);
+    CHECK(!CborInputBuffer<std::forward_list<T>>);
 }
 
-TEST_CASE("CBOR buffer concept rejects non-byte storage") {
-    static_assert(!ValidCborBuffer<std::vector<int>>);
-    static_assert(!ValidCborBuffer<std::array<std::uint16_t, 5>>);
-    static_assert(!ValidCborBuffer<std::deque<float>>);
-    static_assert(!ValidCborBuffer<std::list<double>>);
-    static_assert(!ValidCborBuffer<std::vector<bool>>);
-    static_assert(!ValidCborBuffer<std::array<bool, 5>>);
+TEST_CASE("CBOR input buffer concept rejects non-byte storage") {
+    static_assert(!CborInputBuffer<std::vector<int>>);
+    static_assert(!CborInputBuffer<std::array<std::uint16_t, 5>>);
+    static_assert(!CborInputBuffer<std::deque<float>>);
+    static_assert(!CborInputBuffer<std::list<double>>);
+    static_assert(!CborInputBuffer<std::vector<bool>>);
+    static_assert(!CborInputBuffer<std::array<bool, 5>>);
 }
 
 namespace {

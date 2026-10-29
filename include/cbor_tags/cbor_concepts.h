@@ -97,9 +97,6 @@ concept CborInputBuffer =
     std::ranges::common_range<const std::remove_cvref_t<T>> && IsCborBufferByte<std::ranges::range_value_t<std::remove_cvref_t<T>>> &&
     (std::ranges::contiguous_range<const std::remove_cvref_t<T>> || std::ranges::bidirectional_range<const std::remove_cvref_t<T>>);
 
-template <typename T>
-concept ValidCborBuffer = CborInputBuffer<T>;
-
 template <typename T> constexpr auto cbor_tag(const T &obj);
 template <typename T> constexpr auto cbor_tag() {
     struct Anonymous {};
