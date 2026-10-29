@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/detail/cbor_item_shape.h"
+#include "cbor_tags/detail/cbor_resumable_concepts.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
 #include "cbor_tags/detail/cbor_resumable_leaf.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
@@ -218,13 +219,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     template <typename T, std::size_t I = 0> static consteval bool has_mixin() {
         if constexpr (I == sizeof...(Codecs))
             return false;
-        else if constexpr (
-            requires(std::tuple_element_t<I, mixins> &codec, T &value) {
-                { codec.resumable_encode(value) } -> std::same_as<resumable<status_code>>;
-            } ||
-            requires(std::tuple_element_t<I, mixins> &codec, T &value) {
-                { codec.resumable_transcode(value) } -> std::same_as<resumable<status_code>>;
-            })
+        else if constexpr (HasResumableEncodeMixin<std::tuple_element_t<I, mixins>, T> ||
+                           HasResumableTranscodeMixin<std::tuple_element_t<I, mixins>, T>)
             return true;
         else
             return has_mixin<T, I + 1>();
@@ -232,41 +228,30 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename T, std::size_t I = 0> resumable<status_code> mixin(T &value) {
         using codec = std::tuple_element_t<I, mixins>;
-        if constexpr (requires(codec &c) {
-                          { c.resumable_encode(value) } -> std::same_as<resumable<status_code>>;
-                      })
+        if constexpr (HasResumableEncodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_encode(value);
-        else if constexpr (requires(codec &c) {
-                               { c.resumable_transcode(value) } -> std::same_as<resumable<status_code>>;
-                           })
+        else if constexpr (HasResumableTranscodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_transcode(value);
         else
             return mixin<T, I + 1>(value);
     }
 
-    template <typename T> static consteval int explicit_hook_kind() {
-        using context = self_type;
-        if constexpr (requires(context &self, T &value) {
-                          { Access::resumable_encode(self, value) } -> std::same_as<resumable<status_code>>;
-                      })
-            return 1;
-        else if constexpr (requires(context &self, T &value) {
-                               { Access::resumable_transcode(self, value) } -> std::same_as<resumable<status_code>>;
-                           })
-            return 2;
-        else if constexpr (requires(context &self, T &value) {
-                               { resumable_encode(self, value) } -> std::same_as<resumable<status_code>>;
-                           })
-            return 3;
-        else if constexpr (requires(context &self, T &value) {
-                               { resumable_transcode(self, value) } -> std::same_as<resumable<status_code>>;
-                           })
-            return 4;
+    enum class explicit_hook_type { none, encode_method, transcode_method, encode_free_function, transcode_free_function };
+
+    template <typename T> static consteval explicit_hook_type explicit_hook_kind() {
+        if constexpr (HasResumableEncodeMethod<self_type, T>)
+            return explicit_hook_type::encode_method;
+        else if constexpr (HasResumableTranscodeMethod<self_type, T>)
+            return explicit_hook_type::transcode_method;
+        else if constexpr (HasResumableEncodeFreeFunction<self_type, T>)
+            return explicit_hook_type::encode_free_function;
+        else if constexpr (HasResumableTranscodeFreeFunction<self_type, T>)
+            return explicit_hook_type::transcode_free_function;
         else
-            return 0;
+            return explicit_hook_type::none;
     }
 
-    template <int Kind, typename T> resumable<status_code> explicit_hook(T &value) {
+    template <explicit_hook_type Kind, typename T> resumable<status_code> explicit_hook(T &value) {
         // Member and ADL hooks keep the ordinary class metadata tag convention.
         // Mixin hooks implement complete items and manage their own tags.
         if constexpr (IsClassWithTagOverload<std::remove_cvref_t<T>>) {
@@ -285,11 +270,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                 co_return status;
         }
 
-        if constexpr (Kind == 1)
+        if constexpr (Kind == explicit_hook_type::encode_method)
             co_return co_await Access::resumable_encode(*this, value);
-        else if constexpr (Kind == 2)
+        else if constexpr (Kind == explicit_hook_type::transcode_method)
             co_return co_await Access::resumable_transcode(*this, value);
-        else if constexpr (Kind == 3)
+        else if constexpr (Kind == explicit_hook_type::encode_free_function)
             co_return co_await resumable_encode(*this, value);
         else
             co_return co_await resumable_transcode(*this, value);
@@ -298,7 +283,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     template <typename T> resumable<status_code> item(T &value) {
         using U             = std::remove_cvref_t<T>;
         constexpr auto hook = explicit_hook_kind<T>();
-        if constexpr (hook != 0)
+        if constexpr (hook != explicit_hook_type::none)
             return explicit_hook<hook>(value);
         else if constexpr (has_mixin<T>())
             return mixin(value);
@@ -446,7 +431,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if constexpr (!resumable_builtin_leaf<value> || !std::is_lvalue_reference_v<reference> || !std::same_as<value, Value>) {
             return false;
         } else {
-            if constexpr (explicit_hook_kind<element>() != 0 || has_mixin<element>()) {
+            if constexpr (explicit_hook_kind<element>() != explicit_hook_type::none || has_mixin<element>()) {
                 // A bypassed ordinary overload may have a deduced return type whose
                 // body is intentionally invalid for this context. Do not probe it.
                 return false;

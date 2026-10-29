@@ -24,6 +24,70 @@ static_assert(std::is_move_constructible_v<decode_operation>);
 static_assert(std::is_move_constructible_v<encode_operation>);
 static_assert(std::is_same_v<decltype(std::declval<const decode_operation &>().result()), expected<std::size_t, status_code>>);
 
+namespace hook_contract {
+
+struct context {};
+
+// Member lookup must retain Access friendship and each hook's cv/ref contract.
+template <typename Result> class member_hooks {
+    friend struct cbor::tags::Access;
+
+    Result resumable_encode(context &) const &;
+    Result resumable_decode(context &) &;
+    Result resumable_transcode(context &) &;
+};
+
+using valid_member_hooks = member_hooks<resumable<status_code>>;
+static_assert(detail::HasResumableEncodeMethod<context, const valid_member_hooks>);
+static_assert(detail::HasResumableDecodeMethod<context, valid_member_hooks>);
+static_assert(detail::HasResumableTranscodeMethod<context, valid_member_hooks>);
+static_assert(!detail::HasResumableDecodeMethod<context, const valid_member_hooks>);
+static_assert(!detail::HasResumableTranscodeMethod<context, const valid_member_hooks>);
+static_assert(!detail::HasResumableEncodeMethod<context, member_hooks<status_code>>);
+static_assert(!detail::HasResumableDecodeMethod<context, member_hooks<status_code>>);
+static_assert(!detail::HasResumableTranscodeMethod<context, member_hooks<status_code>>);
+
+struct mutable_encode_member {
+    resumable<status_code> resumable_encode(context &) &;
+};
+static_assert(!detail::HasResumableEncodeMethod<context, mutable_encode_member>);
+
+// ADL and mixin results must be the exact resumable type, not merely convertible.
+template <typename Result> struct free_hooks {};
+template <typename Result> Result resumable_encode(context &, const free_hooks<Result> &);
+template <typename Result> Result resumable_decode(context &, free_hooks<Result> &);
+template <typename Result> Result resumable_transcode(context &, free_hooks<Result> &);
+
+using valid_free_hooks = free_hooks<resumable<status_code>>;
+static_assert(detail::HasResumableEncodeFreeFunction<context, const valid_free_hooks>);
+static_assert(detail::HasResumableDecodeFreeFunction<context, valid_free_hooks>);
+static_assert(detail::HasResumableTranscodeFreeFunction<context, valid_free_hooks>);
+static_assert(!detail::HasResumableDecodeFreeFunction<context, const valid_free_hooks>);
+static_assert(!detail::HasResumableTranscodeFreeFunction<context, const valid_free_hooks>);
+static_assert(!detail::HasResumableEncodeFreeFunction<context, free_hooks<status_code>>);
+static_assert(!detail::HasResumableDecodeFreeFunction<context, free_hooks<status_code>>);
+static_assert(!detail::HasResumableTranscodeFreeFunction<context, free_hooks<status_code>>);
+static_assert(!detail::HasResumableEncodeFreeFunction<context, free_hooks<resumable<status_code> &>>);
+
+template <typename Result> struct mixin_hooks {
+    Result resumable_encode(const int &) &;
+    Result resumable_decode(int &) &;
+    Result resumable_transcode(int &) &;
+};
+
+using valid_mixin_hooks = mixin_hooks<resumable<status_code>>;
+static_assert(detail::HasResumableEncodeMixin<valid_mixin_hooks, const int>);
+static_assert(detail::HasResumableDecodeMixin<valid_mixin_hooks, int>);
+static_assert(detail::HasResumableTranscodeMixin<valid_mixin_hooks, int>);
+static_assert(!detail::HasResumableDecodeMixin<valid_mixin_hooks, const int>);
+static_assert(!detail::HasResumableTranscodeMixin<valid_mixin_hooks, const int>);
+static_assert(!detail::HasResumableEncodeMixin<mixin_hooks<status_code>, int>);
+static_assert(!detail::HasResumableDecodeMixin<mixin_hooks<status_code>, int>);
+static_assert(!detail::HasResumableTranscodeMixin<mixin_hooks<status_code>, int>);
+static_assert(!detail::HasResumableEncodeMixin<mixin_hooks<resumable<status_code> &>, int>);
+
+} // namespace hook_contract
+
 int main() {
 #ifdef CBOR_RESUMABLE_UNBOUNDED_ZERO_INPUT
     struct empty {};

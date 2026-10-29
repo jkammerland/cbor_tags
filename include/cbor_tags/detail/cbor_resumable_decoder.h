@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor_decoder.h"
+#include "cbor_tags/detail/cbor_resumable_concepts.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
 #include "cbor_tags/detail/cbor_resumable_leaf.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
@@ -191,13 +192,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     template <typename T, std::size_t I = 0> static consteval bool has_mixin() {
         if constexpr (I == sizeof...(Codecs))
             return false;
-        else if constexpr (
-            requires(std::tuple_element_t<I, mixins> &codec, T &value) {
-                { codec.resumable_decode(value) } -> std::same_as<resumable<status_code>>;
-            } ||
-            requires(std::tuple_element_t<I, mixins> &codec, T &value) {
-                { codec.resumable_transcode(value) } -> std::same_as<resumable<status_code>>;
-            })
+        else if constexpr (HasResumableDecodeMixin<std::tuple_element_t<I, mixins>, T> ||
+                           HasResumableTranscodeMixin<std::tuple_element_t<I, mixins>, T>)
             return true;
         else
             return has_mixin<T, I + 1>();
@@ -205,28 +201,17 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     template <typename T, std::size_t I = 0> resumable<status_code> mixin(T &value) {
         using codec = std::tuple_element_t<I, mixins>;
-        if constexpr (requires(codec &c) {
-                          { c.resumable_decode(value) } -> std::same_as<resumable<status_code>>;
-                      })
+        if constexpr (HasResumableDecodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_decode(value);
-        else if constexpr (requires(codec &c) {
-                               { c.resumable_transcode(value) } -> std::same_as<resumable<status_code>>;
-                           })
+        else if constexpr (HasResumableTranscodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_transcode(value);
         else
             return mixin<T, I + 1>(value);
     }
 
     template <typename T> static consteval bool has_explicit_hook() {
-        return requires(self_type &self, T &value) {
-            { Access::resumable_decode(self, value) } -> std::same_as<resumable<status_code>>;
-        } || requires(self_type &self, T &value) {
-            { Access::resumable_transcode(self, value) } -> std::same_as<resumable<status_code>>;
-        } || requires(self_type &self, T &value) {
-            { resumable_decode(self, value) } -> std::same_as<resumable<status_code>>;
-        } || requires(self_type &self, T &value) {
-            { resumable_transcode(self, value) } -> std::same_as<resumable<status_code>>;
-        };
+        return HasResumableDecodeMethod<self_type, T> || HasResumableTranscodeMethod<self_type, T> ||
+               HasResumableDecodeFreeFunction<self_type, T> || HasResumableTranscodeFreeFunction<self_type, T>;
     }
 
     template <typename T> resumable<status_code> item(T &value) {
@@ -284,17 +269,11 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if (status != status_code::success)
                 co_return status;
         }
-        if constexpr (requires {
-                          { Access::resumable_decode(*this, value) } -> std::same_as<resumable<status_code>>;
-                      })
+        if constexpr (HasResumableDecodeMethod<self_type, T>)
             co_return co_await Access::resumable_decode(*this, value);
-        else if constexpr (requires {
-                               { Access::resumable_transcode(*this, value) } -> std::same_as<resumable<status_code>>;
-                           })
+        else if constexpr (HasResumableTranscodeMethod<self_type, T>)
             co_return co_await Access::resumable_transcode(*this, value);
-        else if constexpr (requires {
-                               { resumable_decode(*this, value) } -> std::same_as<resumable<status_code>>;
-                           })
+        else if constexpr (HasResumableDecodeFreeFunction<self_type, T>)
             co_return co_await resumable_decode(*this, value);
         else
             co_return co_await resumable_transcode(*this, value);
