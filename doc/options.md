@@ -227,14 +227,8 @@ return the usual error and remain terminal; no consumed-byte view is returned.
 
 The result is a byte range: iterate `*consumed` directly, or use `.span()` for
 contiguous input. Direct decoding into an `encoded_item_view`,
-`encoded_array_view`, or `encoded_map_view` still structurally scans one complete
-item to find its end; those views retain their `.bytes()` accessor.
-
-Migration: replace `encoded_item_view_decoder_options` with
-`consumed_bytes_decoder_options`, and `return_encoded_item_view` with
-`return_consumed_bytes` in option lists or custom option members. Replace
-`result->bytes()` with `*result` when accessing this return value. The result
-type is `encoded_byte_view_for<InputBuffer>`, not an encoded item view.
+`encoded_array_view`, or `encoded_map_view` structurally scans one complete
+item to find its end; those views provide a `.bytes()` accessor.
 
 ## Wrapping Groups
 

@@ -433,9 +433,9 @@ int main() {
 Use `walk_item` (below) to check legal break placement, map key/value pairing,
 string chunk types, and nesting limits. A header decode succeeds when the
 header is complete even if its children or payload are missing; later content
-decoding reports truncation. Text and byte-string headers now leave payloads
-unread, so consumers that relied on the former payload skip must explicitly
-read them. See the [header descriptor contract](doc/decoder_resource_limits.md#header-descriptors).
+decoding reports truncation. Text and byte-string headers leave payloads unread;
+decode the payload separately. See the
+[header descriptor contract](doc/decoder_resource_limits.md#header-descriptors).
 
 ### Item traversal and validation
 
@@ -883,11 +883,6 @@ narrow to show data without truncation throw `std::runtime_error`. Set
 `.mode = AnnotationMode::no_annotation` to request the plain hex view.
 Invalid UTF-8 text payloads render as `non-utf8(N)`, where `N` is byte length.
 
-`AnnotationOptions::max_bytes_per_line` replaces the former `max_depth` layout
-option. It limits bytes per line; nesting is controlled separately by
-`max_structure_depth`. The annotation CLI flag is now `--max-bytes-per-line`;
-`cborctl diagnostic --max-depth` still limits nesting.
-
 The same visualization helpers are available from the optional CLI tool. Build
 it with `-DCBOR_TAGS_BUILD_CLI=ON`:
 
@@ -1033,7 +1028,7 @@ pattern.
 | C++26 STL-only | `CBOR_TAGS_STL_ONLY=ON` | None |
 
 The built-in expected header also works independently of the codec. See
-[Expected](doc/expected.md) for its C++23 API, examples, and migration notes.
+[Expected](doc/expected.md) for its C++23 API, examples, and backend selection.
 
 The C++26 STL-only mode uses `std::expected`, `std::format`, and `std::meta`.
 It currently requires GCC 16 with `-std=gnu++26 -freflection`; the CMake option
@@ -1193,10 +1188,6 @@ There are many types of cbor objects defined, the major types are:
 | 5          | map 2N data items       | key/value pairs       |
 | 6          | tag of number N         | 1 data item           |
 | 7          | simple/float            | -                     |
-
-The core decoder preserves text-string bytes. Use `validate_item` or strict
-`walk_item` to reject invalid UTF-8. Diagnostic UTF-8 checking marks invalid
-text in the rendered output.
 
 The library name cbor_tags refers to the focus on handling tagged types(6) in a user friendly way. 
 

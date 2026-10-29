@@ -537,7 +537,7 @@ Creates annotated hex view of CBOR data
 - `max_bytes_per_line`: Plain/no_annotation mode wraps lines after N bytes; smart mode
   caps text/byte payload bytes per wrapped line
 - `mode`: `AnnotationMode::smart` by default; set
-  `AnnotationMode::no_annotation` for the old plain hex view
+  `AnnotationMode::no_annotation` for the plain hex view
 - `annotation_column`: Column where smart-mode `#` comments start
 - `indent_width`: Left-column indentation step in smart mode
 - `comment_indent_width`: Right-column nesting indentation step in smart mode

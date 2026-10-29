@@ -375,11 +375,8 @@ item prefix, and a call that consumes nothing returns an empty range. This
 option does not scan for an item boundary or validate trailing input.
 
 Iterate the returned byte view directly with `*result`; use `result->span()`
-only for contiguous input. It borrows the original input and has no `.bytes()`
-accessor. See [Return Consumed Bytes](options.md#return-consumed-bytes) for the
-option and return-type migration from `return_encoded_item_view` and
-`encoded_item_view_decoder_options`. Directly decoded item, array, and map views
-keep their existing APIs.
+only for contiguous input. Keep the original input alive and unchanged. See
+[Return Consumed Bytes](options.md#return-consumed-bytes) for a usage example.
 
 ## Lazy Tag Scanning
 
@@ -538,9 +535,7 @@ bytes fail this check.
 
 This is a permissive structural check: invalid UTF-8 and the core decoder's
 extended-simple encodings remain accepted. Use `validate_item` or strict
-`walk_item` on the encoded bytes when those forms must be rejected. The old
-`validate_item_segments` name has been replaced by
-`check_item_segments_structure` to make that boundary explicit.
+`walk_item` on the encoded bytes when those forms must be rejected.
 
 ## Which API Should I Use?
 

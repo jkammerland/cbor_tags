@@ -70,22 +70,17 @@ use the regular constructor path; the tests compare triviality against an
 independent language probe and still check successful construction and lifetime
 behavior.
 
-## Backend selection and migration
+## Backend selection
 
-The built-in implementation is the default in C++20 and newer. Existing
-`cbor::tags::expected<T, E>` and `cbor::tags::unexpected<E>` uses keep their names.
-`CBOR_TAGS_USE_STD_EXPECTED=ON` still selects `std::expected` with C++23, and
-`CBOR_TAGS_STL_ONLY=ON` still selects the standard backend with C++26 reflection.
+The built-in implementation is the default in C++20 and newer.
+`CBOR_TAGS_USE_STD_EXPECTED=ON` selects `std::expected` with C++23, and
+`CBOR_TAGS_STL_ONLY=ON` selects the standard backend with C++26 reflection.
+Use the public `cbor::tags::expected<T, E>` and `cbor::tags::unexpected<E>` names
+with either backend.
 Use one backend consistently across translation units, including library
 boundaries; these are distinct types with no promised binary compatibility.
 
-The `tl-expected` dependency and `CBOR_TAGS_USE_SYSTEM_EXPECTED` option have been
-removed. Code naming `tl::expected` directly must migrate to the public names or
-manage its own dependency. Nonstandard tl extensions such as `map`, `map_error`,
-and reference-valued expected are not provided; use `transform`,
-`transform_error`, and a suitable owning value or `std::reference_wrapper`.
-
-Installed CMake packages, Conan, and vcpkg no longer require an external expected
+Installed CMake packages, Conan, and vcpkg do not require an external expected
 package. The public standalone header can also be included using just the
 repository's `include` directory.
 

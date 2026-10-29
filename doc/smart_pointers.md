@@ -284,21 +284,6 @@ another object of the same pointer type at the same address before resetting
 the scope can produce a stale tag 29 reference. Reset the scope before pointer
 addresses can be reused.
 
-### Migrating from the removed pointer wrapper
-
-`scoped_shared_ptr` and `as_scoped_shared_ptr` have been removed. They used the
-codec's existing reference table and did not establish a new scope. Store a
-supported shared pointer directly; copy an lvalue or move an rvalue when the
-stored value should retain ownership:
-
-```cpp
-auto stored = pointer; // copies ownership, as the former lvalue wrapper did
-enc(stored);
-```
-
-Use `reset_shared_ptr_scope()` on both codec objects at the actual reference-table
-boundary. Copying or moving a pointer does not reset that table.
-
 ## User-Owned Reference Tables
 
 Applications may supply their own storage and lookup policy:

@@ -94,8 +94,8 @@ References: [C++26 draft N5050](https://www.open-std.org/jtc1/sc22/wg21/docs/pap
 [Boost 1.92 hub](https://github.com/boostorg/container/blob/boost-1.92.0/include/boost/container/hub.hpp),
 [Boost 1.92 segtor](https://github.com/boostorg/container/blob/boost-1.92.0/include/boost/container/segtor.hpp).
 
-## Input buffer concept name
+## Input buffers
 
-Use `CborInputBuffer<Buffer>` in constraints. The redundant `ValidCborBuffer`
-alias has been removed. This concept checks C++ byte-range capabilities, not
-whether the buffer contains valid CBOR; use `validate_item` for item validation.
+Use `CborInputBuffer<Buffer>` to constrain input byte ranges. This concept checks
+C++ byte-range capabilities, not whether the buffer contains valid CBOR; use
+`validate_item` for item validation.
