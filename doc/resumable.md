@@ -161,20 +161,21 @@ factories preserve one-shot group wrapping and integer policy. Structural
 traversal reuses reflection, allocators, appenders, header decoding, and variant
 mapping. Ordinary primitives are not byte-by-byte coroutine implementations.
 
-Built-in integer arrays drain available input/output in a synchronous loop shared
-with ordinary encoding and decoding. Contiguous chunks use the ordinary span
-codecs; an integer crossing a chunk boundary uses the chunk-aware codec and is
-retried as one item if incomplete. The container awaits only when it needs more
-input or output. Custom integer codecs and explicit hooks keep their normal
-dispatch.
+Arrays of built-in integers, `float`, `double`, and `bool` drain available
+input/output in a synchronous loop shared with ordinary encoding and decoding.
+Contiguous chunks use the ordinary span codecs with the supported wire-size
+bound for their element type. An element crossing a chunk boundary uses the
+chunk-aware codec and is retried as one item if incomplete. The container awaits
+only when it needs more input or output. Custom codecs and explicit hooks keep
+their normal dispatch; proxy references retain the generic encoding path.
 
-Indefinite integer arrays use the same approach, sharing ordinary header-context
-decoding and break handling. A break can finish an array at its configured size
-limit; reaching end of input without a break remains incomplete.
+Indefinite arrays of these types use the same approach, sharing ordinary
+header-context decoding and break handling. A break can finish an array at its
+configured size limit; reaching end of input without a break remains incomplete.
 
-Integer-key/integer-value maps also share synchronous ordinary codec loops.
-Each completed key commits independently, so a value split across chunks resumes
-without decoding or encoding its key again. Definite and indefinite maps count
+Maps whose keys and values use these built-in codecs also share synchronous
+ordinary codec loops. Each completed key commits independently, so a value split
+across chunks resumes without decoding or encoding its key again. Definite and indefinite maps count
 wire pairs, including duplicate keys, and append only complete pairs.
 
 For definite strings, arrays, and maps whose destination appender supports
@@ -219,6 +220,11 @@ constructing application values. `validation_options{.max_depth = 64}` is the
 default; pass options as the third factory argument. Incomplete declared payloads
 remain `incomplete` at EOF even when their available prefix contains invalid
 UTF-8. Indefinite text chunks must each contain complete UTF-8 sequences.
+
+Within a contiguous input window, scalar siblings share one ordinary decoder
+call. Nested items retain their structural continuations, and tokens crossing
+input boundaries use the ordinary segmented reader. Completed progress is
+published before suspension or operation completion, including error exits.
 
 See the [benchmark instructions](../benchmarks/README.md) for throughput and
 actual paced-arrival measurements.

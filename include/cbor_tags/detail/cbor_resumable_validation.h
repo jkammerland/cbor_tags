@@ -16,6 +16,52 @@ struct resumable_walk_token {
     }
 };
 
+// A batch stays inside one sibling sequence. Structural tokens are consumed
+// here but handed back to that sequence for depth, payload, and break handling.
+template <bool Map = false> struct resumable_scalar_batch {
+    resumable_walk_token token{};
+    std::uint64_t        remaining{};
+    std::size_t          accepted{};
+    bool                 indefinite{};
+    bool                 value_pending{};
+    bool                 deferred{};
+
+    bool finished() const { return !indefinite && remaining == 0; }
+
+    void complete_item() {
+        if constexpr (Map) {
+            value_pending = !value_pending;
+            if (value_pending)
+                return;
+        }
+        if (!indefinite)
+            --remaining;
+    }
+
+    template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
+        while (!finished() && !decoder.reader_.empty(decoder.data_, 8)) {
+            const auto status = read_walk_token(decoder, token.value, true);
+            if (status != status_code::success)
+                return unexpected<status_code>{status};
+
+            // A later malformed token must not discard preceding siblings or
+            // publish the malformed token's partially advanced local reader.
+            accepted = decoder.reader_.position_;
+            deferred = std::visit(
+                [](const auto &item) {
+                    using T = std::remove_cvref_t<decltype(item)>;
+                    return IsTextHeader<T> || IsBinaryHeader<T> || IsArrayHeader<T> || IsMapHeader<T> || IsTagHeader<T> ||
+                           std::same_as<T, indefinite_break>;
+                },
+                token.value);
+            if (deferred)
+                break;
+            complete_item();
+        }
+        return {};
+    }
+};
+
 struct validation_request {
     std::size_t        count{1};
     bool               until_eof{};
@@ -39,16 +85,27 @@ template <typename Source> class resumable_validation_context : public resumable
   public:
     using base::base;
     resumable<status_code> operator()(validation_request request) {
-        const window_guard guard{*this};
-        for (std::size_t i = 0; request.until_eof || i < request.count; ++i) {
+        const window_guard       guard{*this};
+        resumable_scalar_batch<> batch{.remaining = request.count, .indefinite = request.until_eof};
+        while (!batch.finished()) {
             while (this->empty()) {
                 if (this->eof())
                     co_return request.until_eof ? status_code::success : status_code::incomplete;
                 co_await this->wait();
             }
-            const auto status = co_await read_item(0, request.options);
+
+            auto status = read_scalars(batch);
             if (status != status_code::success)
                 co_return status;
+            if (batch.finished())
+                break;
+            if (batch.accepted != 0 && !batch.deferred && window_.empty())
+                continue;
+
+            status = batch.deferred ? co_await start_item(batch.token.value, 0, request.options) : co_await read_item(0, request.options);
+            if (status != status_code::success)
+                co_return status;
+            batch.complete_item();
         }
         co_return status_code::success;
     }
@@ -57,7 +114,7 @@ template <typename Source> class resumable_validation_context : public resumable
     void flush_window() {
         if (pending_ != 0) {
             auto &reader = this->ordinary().reader_;
-            this->source().advance(reader.position_, pending_);
+            this->source().consume_window(reader.position_, pending_);
             reader.current_offset_ += pending_;
             this->commit();
         }
@@ -76,13 +133,29 @@ template <typename Source> class resumable_validation_context : public resumable
 
     void refresh_window() {
         flush_window();
-        if (const auto window = this->source().available_span(this->ordinary().reader_.position_))
+        if (const auto window = this->source().borrow_window(this->ordinary().reader_.position_))
             window_ = *window;
     }
 
     void advance_window(std::size_t count) {
         pending_ += count;
         window_ = window_.subspan(count);
+    }
+
+    template <bool Map> status_code read_scalars(resumable_scalar_batch<Map> &batch) {
+        batch.accepted = 0;
+        batch.deferred = false;
+        if (window_.size() < 9)
+            refresh_window();
+        if (window_.size() < 9)
+            return status_code::success;
+
+        // One ordinary checked call covers all scalar siblings in this window.
+        // Publish its accepted checkpoint even if a later token failed.
+        window_decoder contiguous(window_);
+        const auto     result = contiguous(batch);
+        advance_window(batch.accepted);
+        return result ? status_code::success : result.error();
     }
 
     resumable<status_code> read_token(resumable_walk_token &token) {
@@ -137,6 +210,26 @@ template <typename Source> class resumable_validation_context : public resumable
             token);
     }
     template <bool Text> resumable<status_code> string_payload(std::uint64_t length) {
+        if (length == 0)
+            return status_code::success;
+        if (window_.empty())
+            refresh_window();
+
+        // An already available payload needs no suspended state. Retain the
+        // same window for its following siblings, including after invalid UTF-8.
+        if (length <= window_.size()) {
+            const auto count = static_cast<std::size_t>(length);
+            bool       valid = true;
+            if constexpr (Text) {
+                utf8_state utf8;
+                valid = utf8.consume_span(window_.first(count)) && utf8.complete();
+            }
+            advance_window(count);
+            return valid ? status_code::success : status_code::invalid_utf8_sequence;
+        }
+        return await_string_payload<Text>(length);
+    }
+    template <bool Text> resumable<status_code> await_string_payload(std::uint64_t length) {
         utf8_state utf8;
         bool       valid  = true;
         auto      &reader = this->ordinary().reader_;
@@ -158,9 +251,7 @@ template <typename Source> class resumable_validation_context : public resumable
             if (!window_.empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, window_.size()));
                 if constexpr (Text) {
-                    for (const auto value : window_.first(count)) {
-                        valid = utf8.consume(utf8_byte(value)) && valid;
-                    }
+                    valid = utf8.consume_span(window_.first(count)) && valid;
                 }
                 advance_window(count);
                 length -= count;
@@ -176,30 +267,33 @@ template <typename Source> class resumable_validation_context : public resumable
         co_return Text && (!valid || !utf8.complete()) ? status_code::invalid_utf8_sequence : status_code::success;
     }
     template <typename Header> resumable<status_code> sequence(Header header, std::size_t depth, validation_options options) {
-        auto remaining = header.size;
-        while (header.indefinite || remaining != 0) {
-            resumable_walk_token child;
-            auto                 status = co_await read_token(child);
+        resumable_scalar_batch<IsMapHeader<Header>> batch{.remaining = header.size, .indefinite = header.indefinite};
+        while (!batch.finished()) {
+            auto status = status_code::success;
+            if constexpr (IsArrayHeader<Header> || IsMapHeader<Header>) {
+                status = read_scalars(batch);
+                if (status != status_code::success)
+                    co_return status;
+                if (batch.finished())
+                    break;
+            }
+
+            if (!batch.deferred)
+                status = co_await read_token(batch.token);
             if (status != status_code::success)
                 co_return status;
-            if (std::holds_alternative<indefinite_break>(child.value)) {
-                co_return header.indefinite ? status_code::success : status_code::malformed_structure;
+            if (std::holds_alternative<indefinite_break>(batch.token.value)) {
+                co_return header.indefinite && !batch.value_pending ? status_code::success : status_code::malformed_structure;
             }
             if constexpr (IsTextHeader<Header> || IsBinaryHeader<Header>) {
-                const auto *chunk = std::get_if<Header>(&child.value);
+                const auto *chunk = std::get_if<Header>(&batch.token.value);
                 if (!chunk || chunk->indefinite)
                     co_return status_code::malformed_structure;
             }
-            status = co_await start_item(child.value, depth + 1, options);
+            status = co_await start_item(batch.token.value, depth + 1, options);
             if (status != status_code::success)
                 co_return status;
-            if constexpr (IsMapHeader<Header>) {
-                status = co_await read_item(depth + 1, options);
-                if (status != status_code::success)
-                    co_return status;
-            }
-            if (!header.indefinite)
-                --remaining;
+            batch.complete_item();
         }
         co_return status_code::success;
     }

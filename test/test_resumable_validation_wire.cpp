@@ -147,6 +147,58 @@ TEST_SUITE("cbor_wire/resumable") {
         }
     }
 
+    TEST_CASE("validation preserves scalar siblings before errors and tracks mixed map phases") {
+        struct failure {
+            std::string_view wire;
+            status_code      status;
+            std::size_t      committed;
+        };
+        constexpr std::array failures{
+            failure{"850001021c", status_code::invalid_additional_info, 4},
+            failure{"85000102f800", status_code::malformed_structure, 4},
+            failure{"85000102ff", status_code::malformed_structure, 5},
+            failure{"bf000101820203020304ff", status_code::malformed_structure, 11},
+            failure{"a4000101820203020304ff", status_code::malformed_structure, 11},
+            failure{"bf0001018202030203041c", status_code::invalid_additional_info, 10},
+            failure{"a40001018202030203041c", status_code::invalid_additional_info, 10},
+            failure{"bf000101820203020304c0ff", status_code::malformed_structure, 12},
+        };
+
+        // Earlier scalar siblings remain committed even when the same batch
+        // rejects a token. A break after a scalar key cannot close a map.
+        for (const auto &test : failures) {
+            CAPTURE(test.wire);
+            const auto                       bytes = to_bytes(std::string{test.wire} + "000102030405060708090a");
+            const std::span<const std::byte> input{bytes};
+            for (std::size_t cut = 0; cut <= input.size(); ++cut) {
+                CAPTURE(cut);
+                validation_chunks storage{input.first(cut), input.subspan(cut)};
+                check_validation_error(storage, test.status, test.committed, to_hex(input.subspan(test.committed)));
+            }
+        }
+
+        // Structured keys and values interrupt scalar runs on both map phases.
+        // The following break belongs to the caller after a complete map.
+        for (const auto wire : {"a4000182020302c003048005", "bf000182020302c003048005ff"}) {
+            CAPTURE(wire);
+            const auto                       bytes = to_bytes(std::string{wire} + "ff1c00010203040506070809");
+            const auto                       end   = std::string_view{wire}.size() / 2;
+            const std::span<const std::byte> input{bytes};
+            for (std::size_t cut = 0; cut <= end; ++cut) {
+                CAPTURE(cut);
+                validation_chunks storage{input.first(cut), input.subspan(cut)};
+                auto              source    = make_input_source(storage);
+                auto              operation = make_resumable_validator(source);
+
+                REQUIRE(operation.done());
+                REQUIRE(operation.result());
+                CHECK(*operation.result() == end);
+                CHECK(source.committed_position().offset() == end);
+                CHECK(to_hex(operation.remaining_input()) == "ff1c00010203040506070809");
+            }
+        }
+    }
+
     TEST_CASE("validation consumes invalid utf8 through the declared payload before failing") {
         const auto                       bytes = to_bytes("821b01020304050607086bc080616263646566676869ff1c00010203040506070809");
         const std::span<const std::byte> input{bytes};
@@ -214,6 +266,8 @@ TEST_SUITE("cbor_wire/resumable") {
         constexpr std::array cases{
             fixture{"840001810002ff1c00010203040506070809", 1, 4, 6, "0002ff1c00010203040506070809", "02ff1c00010203040506070809"},
             fixture{"82636162638100ff1c00010203040506070809", 2, 6, 7, "00ff1c00010203040506070809", "ff1c00010203040506070809"},
+            fixture{"a20001810002ff1c00010203040506070809", 1, 4, 6, "0002ff1c00010203040506070809", "02ff1c00010203040506070809"},
+            fixture{"a300010203048100ff1c00010203040506070809", 1, 7, 8, "00ff1c00010203040506070809", "ff1c00010203040506070809"},
         };
 
         for (const auto &test : cases) {
@@ -267,6 +321,50 @@ TEST_SUITE("cbor_wire/resumable") {
         }
     }
 
+    TEST_CASE("validation completes available string payloads without allocating suspended state") {
+        struct fixture {
+            std::string_view wire;
+            status_code      status;
+            std::size_t      committed;
+        };
+        constexpr std::array cases{
+            fixture{"850062c3a96042000140", status_code::success, 10},
+            fixture{"830062c3a962e282", status_code::invalid_utf8_sequence, 8},
+            fixture{"830062c3a964c0806162", status_code::invalid_utf8_sequence, 10},
+        };
+
+        for (const auto &test : cases) {
+            CAPTURE(test.wire);
+            const auto                       bytes = to_bytes(std::string{test.wire} + "ff1c00010203040506070809");
+            const std::span<const std::byte> input{bytes};
+            validation_chunks                storage;
+            auto                             source    = make_input_source(storage);
+            auto                             operation = make_resumable_validator(source);
+            operation(input.first(1));
+            REQUIRE_FALSE(operation.done());
+            CHECK(source.committed_position().offset() == 1U);
+
+            // Suspend on the first scalar before denying allocations. All
+            // following payloads fit inside the admitted contiguous window.
+            source.append(input.subspan(1));
+            {
+                cbor::tags::test::detail::allocation_failure_guard guard;
+                operation(end_of_input);
+            }
+
+            REQUIRE(operation.done());
+            if (test.status == status_code::success) {
+                REQUIRE(operation.result());
+                CHECK(*operation.result() == test.committed);
+            } else {
+                REQUIRE_FALSE(operation.result());
+                CHECK(operation.result().error() == test.status);
+            }
+            CHECK(source.committed_position().offset() == test.committed);
+            CHECK(to_hex(operation.remaining_input()) == "ff1c00010203040506070809");
+        }
+    }
+
     TEST_CASE("validation item counts stop at committed roots and permit a zero count") {
         const auto                       bytes = to_bytes("1b01020304050607081818ff1c00010203040506070809");
         const std::span<const std::byte> input{bytes};
@@ -299,6 +397,42 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(source.committed_position().offset() == 12U);
             CHECK(to_hex(operation.remaining_input()) == "1c00010203040506070809");
         }
+    }
+
+    TEST_CASE("validation scalar root batches stop at the requested count and exact eof") {
+        const auto                       bytes = to_bytes("000102030405060708090a0bff1c00010203040506070809");
+        const std::span<const std::byte> input{bytes};
+
+        for (std::size_t count = 1; count <= 12; ++count) {
+            CAPTURE(count);
+            validation_chunks storage{input};
+            auto              source    = make_input_source(storage);
+            auto              operation = make_resumable_validator(source, count);
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == count);
+            CHECK(source.committed_position().offset() == count);
+            CHECK(to_hex(operation.remaining_input()) == to_hex(input.subspan(count)));
+        }
+
+        // A nine-byte scalar can end exactly at the batch window boundary.
+        // Until-EOF validation must wait for closure without requesting an item.
+        const auto        scalar = to_bytes("1b0102030405060708");
+        validation_chunks storage;
+        auto              source    = make_input_source(storage);
+        auto              operation = make_resumable_validator(source, until_end_of_input);
+        operation(scalar);
+        REQUIRE_FALSE(operation.done());
+        CHECK(source.committed_position().offset() == scalar.size());
+        CHECK(to_hex(operation.remaining_input()).empty());
+
+        operation(end_of_input);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == scalar.size());
+        CHECK(source.committed_position().offset() == scalar.size());
+        CHECK(to_hex(operation.remaining_input()).empty());
     }
 
     TEST_CASE("validation until eof publishes completed roots while waiting for the next token") {
