@@ -534,9 +534,15 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return is_retriable_variant_mismatch(status) ? status_code::no_match_in_variant_on_buffer : status;
     }
 
+    // Probe one codec at a time so missing overloads remain substitution failures
+    // on MSVC instead of hard errors inside a pack-expanded requires expression.
+    template <typename Codec, typename T> static consteval bool ordinary_codec_leaf_override() {
+        return requires(Codec &codec, T &value) { codec.decode(value); } ||
+               requires(Codec &codec, T &value) { codec.decode(value, major_type{}, std::byte{}); };
+    }
+
     template <typename T> static consteval bool ordinary_leaf_override() {
-        return (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value); } || ...) ||
-               (requires(Codecs<ordinary_type> &codec, T &value) { codec.decode(value, major_type{}, std::byte{}); } || ...);
+        return (ordinary_codec_leaf_override<Codecs<ordinary_type>, T>() || ...);
     }
 
     template <typename T> static consteval bool builtin_leaf() {

@@ -350,20 +350,20 @@ struct retry_safe_record {
 
         as_array_any header;
         if (const auto result = dec(header); !result) {
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         }
         if (header.indefinite || header.size != 2) {
-            return unexpected<status_code>{status_code::unexpected_group_size};
+            return cbor::tags::unexpected<status_code>{status_code::unexpected_group_size};
         }
 
         std::uint32_t next_number{};
         if (const auto result = dec(next_number); !result) {
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         }
 
         std::string next_text;
         if (const auto result = dec(next_text); !result) {
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         }
 
         number = next_number;
@@ -381,13 +381,13 @@ struct retry_safe_encoder_record {
     template <typename Encoder> expected<void, status_code> encode(Encoder &enc) const {
         ++attempts;
         if (const auto result = enc(as_array{2}); !result) {
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         }
         if (const auto result = enc(number); !result) {
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         }
         if (const auto result = enc(text); !result) {
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         }
         return {};
     }
