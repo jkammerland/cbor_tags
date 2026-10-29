@@ -3,6 +3,7 @@
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_extension_encode.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
+#include "cbor_tags/detail/cbor_resumable_source.h"
 #include "cbor_tags/detail/cbor_typed_array_range.h"
 
 #include <algorithm>
@@ -70,7 +71,8 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
     std::array<std::byte, element_size> boundary{};
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
-        if (context.empty()) {
+        const auto available = context.source().borrow_window(reader.position_);
+        if (available ? available->empty() : context.empty()) {
             if (context.eof()) {
                 co_return status_code::incomplete;
             }
@@ -78,8 +80,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
             continue;
         }
 
-        const auto available = context.source().available_span(reader.position_);
-        if (available && !available->empty()) {
+        if (available) {
             // Complete elements go straight into their final destination storage.
             if (boundary_size == 0U && available->size() >= element_size) {
                 const auto count = std::min(element_count - values.size(), available->size() / element_size);
@@ -93,7 +94,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
                         values.push_back(convert(available->subspan(offset, element_size)));
                     }
                 }
-                context.source().advance(reader.position_, bytes);
+                context.source().consume_window(reader.position_, bytes);
                 reader.current_offset_ += bytes;
                 context.commit();
                 continue;
@@ -101,7 +102,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
 
             const auto count = std::min(element_size - boundary_size, available->size());
             std::memcpy(boundary.data() + boundary_size, available->data(), count);
-            context.source().advance(reader.position_, count);
+            context.source().consume_window(reader.position_, count);
             reader.current_offset_ += count;
             boundary_size += count;
         } else {
@@ -122,10 +123,11 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
 template <typename Context>
 resumable<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
     while (!bytes.empty()) {
-        const auto available = context.source().available_output_span();
+        const auto available = resumable_source_access::borrow_window(context.source());
         if (available && !available->empty()) {
             const auto count = std::min(bytes.size(), available->size());
-            context.source().write(bytes.first(count));
+            std::memcpy(available->data(), bytes.data(), count);
+            resumable_source_access::consume_window(context.source(), count);
             bytes = bytes.subspan(count);
             continue;
         }
@@ -173,12 +175,12 @@ resumable<status_code> resumable_encode_typed_array(Context &context, Range &val
     if constexpr (std::ranges::contiguous_range<Range> && std::ranges::sized_range<Range>) {
         auto remaining = std::span<const value_type>{std::ranges::data(values), std::ranges::size(values)};
         while (!remaining.empty()) {
-            const auto available = context.source().available_output_span();
+            const auto available = resumable_source_access::borrow_window(context.source());
             if (available && available->size() >= element_size) {
                 const auto elements = std::min(remaining.size(), available->size() / element_size);
                 const auto bytes    = elements * element_size;
                 fill(available->first(bytes), remaining.first(elements));
-                context.source().advance(bytes);
+                resumable_source_access::consume_window(context.source(), bytes);
                 context.commit();
                 remaining = remaining.subspan(elements);
                 continue;

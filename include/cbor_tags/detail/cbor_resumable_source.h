@@ -15,6 +15,12 @@ namespace cbor::tags {
 
 namespace detail {
 
+// Keep output window publication internal to the resumable implementation.
+struct resumable_source_access {
+    template <typename Source> static auto borrow_window(Source &source) { return source.borrow_window(); }
+    template <typename Source> static void consume_window(Source &source, std::size_t count) { source.consume_window(count); }
+};
+
 template <typename Chunk>
 concept ResumableByteChunk =
     std::ranges::bidirectional_range<Chunk> && std::ranges::common_range<Chunk> && IsCborBufferByte<std::ranges::range_value_t<Chunk>> &&
@@ -308,18 +314,38 @@ template <ResumableChunkStorage Storage> class chunk_source {
         return std::ranges::subrange(from, end());
     }
 
-    std::optional<std::span<const std::byte>> available_span(iterator from) const {
+    std::optional<std::span<const std::byte>> available_span(iterator from) const { return borrow_window(from); }
+
+    // Normalize the working cursor once, retaining its descriptor position.
+    std::optional<std::span<const std::byte>> borrow_window(iterator &from) const {
         assert(from.source_ == this && !from.end_marker_);
         if constexpr (std::ranges::contiguous_range<chunk_type>) {
             from.normalize();
-            if (from.at_end()) {
+            if (!from.current_) {
                 return std::span<const std::byte>{};
             }
-            assert(from.current_ && from.limit_);
+            assert(from.limit_);
+            if (*from.current_ == *from.limit_) {
+                return std::span<const std::byte>{};
+            }
             return std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::to_address(*from.current_)),
                                               static_cast<std::size_t>(*from.limit_ - *from.current_)};
         } else {
             return std::nullopt;
+        }
+    }
+
+    // The caller stays within the just-borrowed contiguous window. Leave an
+    // exhausted cursor on its descriptor so the next borrow can discover append.
+    void consume_window(iterator &from, std::size_t count) const {
+        assert(from.source_ == this && !from.end_marker_);
+        assert(from.current_ && from.limit_);
+        if constexpr (std::ranges::contiguous_range<chunk_type>) {
+            assert(count <= static_cast<std::size_t>(*from.limit_ - *from.current_));
+        }
+        std::ranges::advance(*from.current_, static_cast<std::iter_difference_t<inner_iterator>>(count));
+        if (from.offset_) {
+            *from.offset_ += count;
         }
     }
 
@@ -337,7 +363,10 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 }
                 advanced += amount;
             } else {
-                ++from;
+                ++*from.current_;
+                if (from.offset_) {
+                    ++*from.offset_;
+                }
                 ++advanced;
             }
         }
@@ -347,13 +376,22 @@ template <ResumableChunkStorage Storage> class chunk_source {
     std::optional<std::span<std::byte>> available_output_span(iterator from)
         requires std::indirectly_writable<inner_iterator, std::ranges::range_value_t<chunk_type>>
     {
+        return borrow_output_window(from);
+    }
+
+    std::optional<std::span<std::byte>> borrow_output_window(iterator &from)
+        requires std::indirectly_writable<inner_iterator, std::ranges::range_value_t<chunk_type>>
+    {
         assert(from.source_ == this && !from.end_marker_);
         if constexpr (std::ranges::contiguous_range<chunk_type>) {
             from.normalize();
-            if (from.at_end()) {
+            if (!from.current_) {
                 return std::span<std::byte>{};
             }
-            assert(from.current_ && from.limit_);
+            assert(from.limit_);
+            if (*from.current_ == *from.limit_) {
+                return std::span<std::byte>{};
+            }
             return std::span<std::byte>{reinterpret_cast<std::byte *>(std::to_address(*from.current_)),
                                         static_cast<std::size_t>(*from.limit_ - *from.current_)};
         } else {
@@ -370,7 +408,10 @@ template <ResumableChunkStorage Storage> class chunk_source {
         }
         assert(to.current_);
         **to.current_ = static_cast<std::ranges::range_value_t<chunk_type>>(value);
-        ++to;
+        ++*to.current_;
+        if (to.offset_) {
+            ++*to.offset_;
+        }
         return true;
     }
 
@@ -481,7 +522,7 @@ class output_source {
 
     auto produced(position_type from, position_type to) const { return std::ranges::subrange(from, to); }
     auto remaining_output() const { return chunks_.remaining(working_); }
-    auto available_output_span() { return chunks_.available_output_span(working_); }
+    auto available_output_span() { return borrow_window(); }
 
     // Publish bytes already written through the current contiguous window.
     void advance(std::size_t count) {
@@ -503,7 +544,7 @@ class output_source {
                 }
                 const auto amount = std::min(bytes.size(), available->size());
                 std::memcpy(available->data(), bytes.data(), amount);
-                chunks_.advance(working_, amount);
+                chunks_.consume_window(working_, amount);
                 bytes = bytes.subspan(amount);
             } else {
                 push_back(bytes.front());
@@ -529,6 +570,11 @@ class output_source {
     void insert(iterator at, std::initializer_list<std::byte> bytes) { insert(at, bytes.begin(), bytes.end()); }
 
   private:
+    friend struct detail::resumable_source_access;
+
+    auto borrow_window() { return chunks_.borrow_output_window(working_); }
+    void consume_window(std::size_t count) { chunks_.consume_window(working_, count); }
+
     detail::chunk_source<Storage> chunks_;
     iterator                      working_;
     iterator                      committed_;
