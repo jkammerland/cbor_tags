@@ -27,10 +27,10 @@ struct unsized_output {
 };
 
 struct custom_conflicting_options {
-    using is_options                               = void;
-    using return_type                              = expected<std::size_t, status_code>;
-    static constexpr bool wrap_groups              = true;
-    static constexpr bool return_encoded_item_view = true;
+    using is_options                            = void;
+    using return_type                           = expected<std::size_t, status_code>;
+    static constexpr bool wrap_groups           = true;
+    static constexpr bool return_consumed_bytes = true;
 };
 
 int main() {
@@ -44,7 +44,7 @@ int main() {
 #if defined(CBOR_BYTE_COUNT_CUSTOM_VIEW_CONFLICT)
     return make_decoder_with_options<custom_conflicting_options>(input)(value).has_value();
 #else
-    using conflicting_options = Options<Option<expected<std::size_t, status_code>>, default_wrapping, return_encoded_item_view>;
+    using conflicting_options = Options<Option<expected<std::size_t, status_code>>, default_wrapping, return_consumed_bytes>;
     return make_decoder_with_options<conflicting_options>(input)(value).has_value();
 #endif
 #endif

@@ -314,6 +314,8 @@ endforeach()
 
 add_test(NAME encoded_item_views_wire COMMAND tests "--test-suite=cbor_wire/encoded_item_views")
 set_tests_properties(encoded_item_views_wire PROPERTIES LABELS "cbor-wire")
+add_test(NAME segments_wire COMMAND tests "--test-suite=cbor_wire/segments")
+set_tests_properties(segments_wire PROPERTIES LABELS "cbor-wire")
 
 
 add_executable(test_smart_ptr_allocation_failure test_smart_ptr_allocation_failure.cc)
@@ -904,8 +906,8 @@ function(add_byte_count_compile_fail CASE DIAGNOSTIC)
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endfunction()
 
-add_byte_count_compile_fail(VIEW_CONFLICT "byte-count returns cannot be combined with return_encoded_item_view")
-add_byte_count_compile_fail(CUSTOM_VIEW_CONFLICT "byte-count returns cannot be combined with return_encoded_item_view")
+add_byte_count_compile_fail(VIEW_CONFLICT "byte-count returns cannot be combined with return_consumed_bytes")
+add_byte_count_compile_fail(CUSTOM_VIEW_CONFLICT "byte-count returns cannot be combined with return_consumed_bytes")
 add_byte_count_compile_fail(UNSIZED_OUTPUT "byte-count encoder results require sized byte output buffers")
 
 # Instantiate the public decoder call to verify readonly wrappers are encode-only.

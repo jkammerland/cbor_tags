@@ -150,6 +150,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using subrange           = std::ranges::subrange<iterator_t>;
     using bstr_view_t        = bstr_view<subrange>;
     using tstr_view_t        = tstr_view<subrange>;
+    using encoded_byte_view  = encoded_byte_view_for<InputBuffer>;
     using encoded_item_view  = encoded_item_view_for<InputBuffer>;
     using encoded_array_view = encoded_array_view_for<InputBuffer>;
     using encoded_map_view   = encoded_map_view_for<InputBuffer>;
@@ -162,8 +163,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            if constexpr (detail::return_encoded_item_view_option_v<Options>) {
-                return decode_with_encoded_item_view(std::forward<T>(args)...);
+            if constexpr (detail::return_consumed_bytes_option_v<Options>) {
+                return decode_with_consumed_bytes(std::forward<T>(args)...);
             } else {
                 // Local snapshots include nested customization calls without
                 // adding a second traversal of non-contiguous input.
@@ -1754,7 +1755,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return collect_status.result;
     }
 
-    template <typename... T> constexpr expected_type decode_with_encoded_item_view(T &&...args) {
+    template <typename... T> constexpr expected_type decode_with_consumed_bytes(T &&...args) {
         const auto start        = tell();
         const auto start_offset = current_offset();
 
@@ -1764,11 +1765,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return unexpected<decltype(collect_status.result)>(collect_status.result);
         }
 
-        const auto        cursor = tell();
-        const auto        size   = current_offset() - start_offset;
-        encoded_item_view encoded_item;
-        assign_encoded_view(encoded_item, start, cursor, size);
-        return expected_type{std::move(encoded_item)};
+        // A variadic call can consume a prefix, several items, or no bytes.
+        // Return that range directly without asserting a complete-item shape.
+        const auto cursor = tell();
+        const auto size   = current_offset() - start_offset;
+        using byte_range  = typename encoded_byte_view::range_type;
+        return expected_type{encoded_byte_view{byte_range{start, cursor, size}}};
     }
 
     constexpr auto tell() const noexcept {

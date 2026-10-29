@@ -342,16 +342,18 @@ class encoded_item_segments {
     [[nodiscard]] std::vector<std::byte> flatten() const { return segments_.flatten(); }
 
   private:
-    struct validated_t {};
+    struct structure_checked_t {};
 
-    explicit encoded_item_segments(byte_segments segments, validated_t) : segments_(std::move(segments)) {}
+    explicit encoded_item_segments(byte_segments segments, structure_checked_t) : segments_(std::move(segments)) {}
 
     byte_segments segments_{};
 
-    friend expected<encoded_item_segments, status_code> validate_item_segments(byte_segments segments);
+    friend expected<encoded_item_segments, status_code> check_item_segments_structure(byte_segments segments);
 };
 
-[[nodiscard]] inline expected<encoded_item_segments, status_code> validate_item_segments(byte_segments segments) {
+// Require exactly one item using the permissive structural scanner. UTF-8 and
+// strict simple-value checks belong to validate_item or strict walk_item.
+[[nodiscard]] inline expected<encoded_item_segments, status_code> check_item_segments_structure(byte_segments segments) {
     auto cursor = detail::byte_segment_byte_iterator<byte_segments>{segments.begin(), segments.end()};
     auto end    = detail::byte_segment_byte_iterator<byte_segments>{segments.end(), segments.end()};
 
@@ -363,7 +365,7 @@ class encoded_item_segments {
         return unexpected<status_code>{status_code::error};
     }
 
-    return encoded_item_segments{std::move(segments), encoded_item_segments::validated_t{}};
+    return encoded_item_segments{std::move(segments), encoded_item_segments::structure_checked_t{}};
 }
 
 class encoded_item_bstr {
@@ -744,7 +746,7 @@ template <typename T> [[nodiscard]] inline expected<encoded_item_segments, statu
     if (!result) {
         return unexpected<status_code>{result.error()};
     }
-    return validate_item_segments(std::move(segments));
+    return check_item_segments_structure(std::move(segments));
 }
 
 template <template <typename> typename... Extensions, typename T>
@@ -756,7 +758,7 @@ template <template <typename> typename... Extensions, typename T>
     if (!result) {
         return unexpected<status_code>{result.error()};
     }
-    return validate_item_segments(std::move(segments));
+    return check_item_segments_structure(std::move(segments));
 }
 
 } // namespace cbor::tags

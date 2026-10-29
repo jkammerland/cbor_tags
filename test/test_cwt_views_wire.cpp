@@ -5,7 +5,7 @@ TEST_SUITE("cbor_wire/cwt") {
     TEST_CASE("cwt claims views borrow exact payload ranges and consume one item") {
         const auto  bytes = to_bytes("a3016269640261750742010209");
         claims_view claims;
-        auto        dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(bytes);
+        auto        dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(bytes);
         const auto  result = dec(claims);
         REQUIRE(result);
         REQUIRE(claims.issuer);
@@ -16,7 +16,7 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK(claims.cwt_id->data() == bytes.data() + 10);
         CHECK(claims.issuer->size() == 2);
         CHECK(claims.cwt_id->size() == 2);
-        CHECK(to_hex(result->bytes()) == "a30162696402617507420102");
+        CHECK(to_hex(*result) == "a30162696402617507420102");
         const auto encoded = encode_to_bytes(claims);
         REQUIRE(encoded);
         CHECK(to_hex(*encoded) == "a30162696402617507420102");
@@ -138,13 +138,13 @@ TEST_SUITE("cbor_wire/cwt") {
     TEST_CASE("cwt views skip text claim labels and reject their duplicates") {
         const auto  bytes = to_bytes("bf7f637072696476617465ff9f0102ff0163696470ff09");
         claims_view view;
-        auto        dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(bytes);
+        auto        dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(bytes);
         const auto  result = dec(view);
         REQUIRE(result);
         REQUIRE(view.issuer);
         CHECK(*view.issuer == "idp");
         CHECK(view.issuer->data() == reinterpret_cast<const char *>(bytes.data() + 18));
-        CHECK(to_hex(result->bytes()) == "bf7f637072696476617465ff9f0102ff0163696470ff");
+        CHECK(to_hex(*result) == "bf7f637072696476617465ff9f0102ff0163696470ff");
         int following{};
         REQUIRE(dec(following));
         CHECK(following == 9);
@@ -164,7 +164,7 @@ TEST_SUITE("cbor_wire/cwt") {
     TEST_CASE("cwt audience views borrow array items with exact framing") {
         const auto  bytes = to_bytes("bf039f61616162ffff09");
         claims_view view;
-        auto        dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(bytes);
+        auto        dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(bytes);
         const auto  result = dec(view);
         REQUIRE(result);
         REQUIRE(view.audience);
@@ -174,7 +174,7 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK(audiences[1] == "b");
         CHECK(audiences[0].data() == reinterpret_cast<const char *>(bytes.data() + 4));
         CHECK(audiences[1].data() == reinterpret_cast<const char *>(bytes.data() + 6));
-        CHECK(to_hex(result->bytes()) == "bf039f61616162ffff");
+        CHECK(to_hex(*result) == "bf039f61616162ffff");
         const auto encoded = encode_to_bytes(view);
         REQUIRE(encoded);
         CHECK(to_hex(*encoded) == "a1038261616162");

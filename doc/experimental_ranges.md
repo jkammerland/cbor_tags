@@ -335,7 +335,11 @@ dec(text);
 
 ## Encoded Item Views
 
-An encoded item view refers to a complete CBOR item, including its header.
+A successfully decoded encoded item view refers to one complete CBOR item,
+including its header. Array and map views additionally require the corresponding
+outer container type. Decoding these views performs a structural scan using the
+library's permissive syntax profile; it does not validate UTF-8 or strict
+extended-simple-value rules.
 
 Use them when you want to copy, forward, or embed a complete CBOR item without
 decoding it into a C++ value and encoding it again.
@@ -356,6 +360,26 @@ out(encoded); // re-emits the same encoded array bytes
 
 The encoded view borrows from the decoder input. For contiguous input, `encoded.span()`
 is available. For all supported input buffers, `encoded.bytes()` can be iterated.
+
+Constructing an encoded item, array, or map view directly from a byte range is
+unchecked. The caller must supply a complete item of the stated kind; neither
+construction nor forwarding through the encoder validates that claim. Keep the
+borrowed bytes alive and unchanged.
+
+## Consumed Byte Views
+
+`consumed_bytes_decoder_options` returns an `encoded_byte_view_for<InputBuffer>`
+covering exactly the bytes consumed by a successful typed decode call. Variadic
+calls can consume several items, header-only calls can consume an incomplete
+item prefix, and a call that consumes nothing returns an empty range. This
+option does not scan for an item boundary or validate trailing input.
+
+Iterate the returned byte view directly with `*result`; use `result->span()`
+only for contiguous input. It borrows the original input and has no `.bytes()`
+accessor. See [Return Consumed Bytes](options.md#return-consumed-bytes) for the
+option and return-type migration from `return_encoded_item_view` and
+`encoded_item_view_decoder_options`. Directly decoded item, array, and map views
+keep their existing APIs.
 
 ## Lazy Tag Scanning
 
@@ -491,8 +515,8 @@ auto borrowed = borrow_segments(encoded);
 
 ## Wrap Encoded Items In Bstr
 
-Validated encoded item segments can be wrapped as a CBOR byte string without
-flattening first.
+Structurally checked encoded item segments can be wrapped as a CBOR byte string
+without flattening first.
 
 ```cpp
 std::vector<int> values{1, 2};
@@ -505,6 +529,18 @@ if (encoded) {
     enc(as_bstr(*encoded));
 }
 ```
+
+`encode_item_segments` checks that the result contains exactly one complete item.
+For an existing `byte_segments` value, use
+`check_item_segments_structure(std::move(segments))` to obtain the same
+`encoded_item_segments` wrapper. Empty input, incomplete items, and trailing
+bytes fail this check.
+
+This is a permissive structural check: invalid UTF-8 and the core decoder's
+extended-simple encodings remain accepted. Use `validate_item` or strict
+`walk_item` on the encoded bytes when those forms must be rejected. The old
+`validate_item_segments` name has been replaced by
+`check_item_segments_structure` to make that boundary explicit.
 
 ## Which API Should I Use?
 

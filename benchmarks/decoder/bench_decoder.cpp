@@ -782,9 +782,9 @@ template <std::size_t N> void run_encoded_view_benchmark() {
         ankerl::nanobench::doNotOptimizeAway(output);
     });
 
-    bench.run("Typed decode with encoded view", [&encoded] {
+    bench.run("Typed decode with consumed bytes", [&encoded] {
         std::array<std::uint32_t, N> output;
-        auto                         dec    = make_decoder_with_options<encoded_item_view_decoder_options>(encoded);
+        auto                         dec    = make_decoder_with_options<consumed_bytes_decoder_options>(encoded);
         auto                         result = dec(output);
         ankerl::nanobench::doNotOptimizeAway(result);
         ankerl::nanobench::doNotOptimizeAway(output);

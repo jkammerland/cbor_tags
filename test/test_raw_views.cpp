@@ -63,11 +63,11 @@ static_assert(!std::ranges::sized_range<const unsized_list_byte_range>);
 
 using default_decoder_type = decltype(make_decoder(std::declval<std::vector<std::byte> &>()));
 using returning_decoder_type =
-    decltype(make_decoder_with_options<encoded_item_view_decoder_options>(std::declval<std::vector<std::byte> &>()));
+    decltype(make_decoder_with_options<consumed_bytes_decoder_options>(std::declval<std::vector<std::byte> &>()));
 
 static_assert(std::same_as<decltype(std::declval<default_decoder_type &>()(std::declval<std::uint64_t &>())), expected<void, status_code>>);
 static_assert(std::same_as<decltype(std::declval<returning_decoder_type &>()(std::declval<std::uint64_t &>())),
-                           expected<typename returning_decoder_type::encoded_item_view, status_code>>);
+                           expected<typename returning_decoder_type::encoded_byte_view, status_code>>);
 
 struct zero_consumption_value {};
 
@@ -188,9 +188,9 @@ TEST_CASE("raw encoded item views decode one item and re-encode exact bytes") {
     CHECK(trailing);
 }
 
-TEST_CASE("encoded item view decoder option returns exact bytes for typed values") {
+TEST_CASE("consumed bytes decoder option returns exact bytes for typed values") {
     auto bytes = to_bytes("83010203f5");
-    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+    auto dec   = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
     std::vector<std::uint64_t> values;
     bool                       trailing{};
@@ -198,29 +198,29 @@ TEST_CASE("encoded item view decoder option returns exact bytes for typed values
     auto array_result = dec(values);
     REQUIRE(array_result);
     CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
-    CHECK_EQ(to_hex(array_result->bytes()), "83010203");
+    CHECK_EQ(to_hex(*array_result), "83010203");
 
     auto trailing_result = dec(trailing);
     REQUIRE(trailing_result);
     CHECK(trailing);
-    CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+    CHECK_EQ(to_hex(*trailing_result), "f5");
 }
 
-TEST_CASE("encoded item view decoder option returns the full tagged item for tag and payload targets") {
+TEST_CASE("consumed bytes decoder option returns the full tagged item for tag and payload targets") {
     auto bytes = to_bytes("c16c48656c6c6f20776f726c6421");
-    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+    auto dec   = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
     std::string payload;
     auto        result = dec(static_tag<1>{}, payload);
 
     REQUIRE(result);
     CHECK_EQ(payload, "Hello world!");
-    CHECK_EQ(to_hex(result->bytes()), "c16c48656c6c6f20776f726c6421");
+    CHECK_EQ(to_hex(*result), "c16c48656c6c6f20776f726c6421");
 }
 
-TEST_CASE("encoded item view decoder option returns all bytes consumed by a variadic call") {
+TEST_CASE("consumed bytes decoder option returns all bytes consumed by a variadic call") {
     auto bytes = to_bytes("01f5");
-    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+    auto dec   = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
     std::uint64_t value{};
     bool          flag{};
@@ -229,14 +229,14 @@ TEST_CASE("encoded item view decoder option returns all bytes consumed by a vari
     REQUIRE(result);
     CHECK_EQ(value, 1);
     CHECK(flag);
-    CHECK_EQ(to_hex(result->bytes()), "01f5");
+    CHECK_EQ(to_hex(*result), "01f5");
     CHECK_EQ(dec.tell(), bytes.end());
 }
 
-TEST_CASE("encoded item view decoder option returns an empty view without input consumption") {
+TEST_CASE("consumed bytes decoder option returns an empty view without input consumption") {
     {
         std::vector<std::byte> bytes;
-        auto                   dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+        auto                   dec = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
         auto result = dec();
 
@@ -247,7 +247,7 @@ TEST_CASE("encoded item view decoder option returns an empty view without input 
 
     {
         auto bytes = to_bytes("f5");
-        auto dec   = make_decoder_with_options<encoded_item_view_decoder_options, zero_consumption_decoder>(bytes);
+        auto dec   = make_decoder_with_options<consumed_bytes_decoder_options, zero_consumption_decoder>(bytes);
 
         zero_consumption_value value;
         auto                   result = dec(value);
@@ -261,68 +261,68 @@ TEST_CASE("encoded item view decoder option returns an empty view without input 
 
         REQUIRE(trailing_result);
         CHECK(trailing);
-        CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+        CHECK_EQ(to_hex(*trailing_result), "f5");
     }
 }
 
-TEST_CASE("encoded item view decoder option borrows non-contiguous input") {
+TEST_CASE("consumed bytes decoder option borrows non-contiguous input") {
     auto                 contiguous = to_bytes("83010203f5");
     std::list<std::byte> bytes(contiguous.begin(), contiguous.end());
-    auto                 dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+    auto                 dec = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
     std::vector<std::uint64_t> values;
     auto                       result = dec(values);
 
     REQUIRE(result);
     CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
-    CHECK_EQ(to_hex(result->bytes()), "83010203");
+    CHECK_EQ(to_hex(*result), "83010203");
 
     bool trailing{};
     auto trailing_result = dec(trailing);
     REQUIRE(trailing_result);
     CHECK(trailing);
-    CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+    CHECK_EQ(to_hex(*trailing_result), "f5");
     CHECK_EQ(dec.tell(), bytes.end());
 
     auto it = bytes.begin();
     ++it;
     *it = std::byte{0x0A};
 
-    CHECK_EQ(to_hex(result->bytes()), "830a0203");
+    CHECK_EQ(to_hex(*result), "830a0203");
 }
 
-TEST_CASE("encoded item view decoder option borrows unsized non-contiguous input") {
+TEST_CASE("consumed bytes decoder option borrows unsized non-contiguous input") {
     auto                    contiguous = to_bytes("83010203f5");
     std::list<std::byte>    storage(contiguous.begin(), contiguous.end());
     unsized_list_byte_range bytes{storage.cbegin(), storage.cend()};
-    auto                    dec = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+    auto                    dec = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
     std::vector<std::uint64_t> values;
     auto                       result = dec(values);
 
     REQUIRE(result);
     CHECK_EQ(values, std::vector<std::uint64_t>{1, 2, 3});
-    CHECK_EQ(to_hex(result->bytes()), "83010203");
+    CHECK_EQ(to_hex(*result), "83010203");
 
     bool trailing{};
     auto trailing_result = dec(trailing);
 
     REQUIRE(trailing_result);
     CHECK(trailing);
-    CHECK_EQ(to_hex(trailing_result->bytes()), "f5");
+    CHECK_EQ(to_hex(*trailing_result), "f5");
     CHECK_EQ(dec.tell(), bytes.end());
 
     auto it = storage.begin();
     ++it;
     *it = std::byte{0x0A};
 
-    CHECK_EQ(to_hex(result->bytes()), "830a0203");
+    CHECK_EQ(to_hex(*result), "830a0203");
 }
 
-TEST_CASE("encoded item view decoder option reports malformed input and typed decode errors") {
+TEST_CASE("consumed bytes decoder option reports malformed input and typed decode errors") {
     {
         auto bytes = to_bytes("830102");
-        auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+        auto dec   = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
         std::vector<std::uint64_t> values;
         auto                       result = dec(values);
@@ -333,7 +333,7 @@ TEST_CASE("encoded item view decoder option reports malformed input and typed de
 
     {
         auto bytes = to_bytes("83010203");
-        auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+        auto dec   = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
         std::map<int, int> value;
         auto               result = dec(value);
@@ -343,21 +343,21 @@ TEST_CASE("encoded item view decoder option reports malformed input and typed de
     }
 }
 
-TEST_CASE("encoded item view decoder option returns a consumed item prefix") {
+TEST_CASE("consumed bytes decoder option returns a consumed item prefix") {
     auto bytes = to_bytes("c101");
-    auto dec   = make_decoder_with_options<encoded_item_view_decoder_options>(bytes);
+    auto dec   = make_decoder_with_options<consumed_bytes_decoder_options>(bytes);
 
     auto result = dec(static_tag<1>{});
 
     REQUIRE(result);
-    CHECK_EQ(to_hex(result->bytes()), "c1");
+    CHECK_EQ(to_hex(*result), "c1");
 
     std::uint64_t payload{};
     auto          payload_result = dec(payload);
 
     REQUIRE(payload_result);
     CHECK_EQ(payload, 1);
-    CHECK_EQ(to_hex(payload_result->bytes()), "01");
+    CHECK_EQ(to_hex(*payload_result), "01");
     CHECK_EQ(dec.tell(), bytes.end());
 }
 
