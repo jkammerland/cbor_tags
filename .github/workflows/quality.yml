@@ -93,11 +93,12 @@ jobs:
           -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
           -DCBOR_TAGS_INSTALL=ON
 
-    - name: Build tests and benchmark target
+    - name: Build tests and benchmark targets
       shell: bash
       run: |
         cmake --build build/cmake-3.25 \
-          --target tests test_decode_stack_floor test_unsigned_char cborctl bench_encoder \
+          --target tests test_decode_stack_floor test_unsigned_char test_resumable_compile cborctl \
+          bench_encoder bench_resumable_throughput bench_resumable_latency \
           --parallel
 
     - name: Run tests

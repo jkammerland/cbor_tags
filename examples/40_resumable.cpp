@@ -1,8 +1,11 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_resumable.h"
+#include "example_support.h"
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <list>
 #include <span>
 #include <string>
@@ -21,14 +24,13 @@ message = [tstr, [* uint]]
 */
 int main() {
     // Encode a record and a separate sequence number as two top-level items.
-    const Message sent{"station", {1, 24, 1000}};
+    const Message sent{.name = "station", .values = {1, 24, 1000}};
     const std::uint32_t sequence = 42;
     std::vector<std::byte> buffer;
-    if (!ct::make_encoder(buffer)(sent, sequence)) {
-        return 1;
-    }
+    const auto encoded = ct::make_encoder(buffer)(sent, sequence);
+    assert(encoded);
 
-    // The bytes, descriptors, source and destinations all outlive the operation.
+    // Descriptors borrow the bytes; the source keeps the position across feeds.
     const auto bytes = std::span<const std::byte>{buffer};
     std::list<std::span<const std::byte>> chunks;
     auto source = ct::make_input_source(chunks);
@@ -36,24 +38,27 @@ int main() {
     std::uint32_t received_sequence{};
     auto operation = ct::make_resumable_decoder(source)(received, received_sequence);
 
-    // Supply several chunks in one call; the text payload still needs input.
-    if (operation(bytes.first(1), bytes.subspan(1, 1)) != ct::resume_state::need_input ||
-        operation.done()) {
-        return 2;
-    }
+    // This first chunk contains only headers, so the message still needs input.
+    const auto first_chunk = bytes.first(2);
+    const auto first_state = operation(first_chunk);
+    assert(first_state == ct::resume_state::need_input);
+    assert(chunks.size() == 1);
+    std::cout << "first input: " << example::to_hex(first_chunk) << '\n';
 
-    // A runtime batch is also accepted. Only the explicit token signals EOF.
-    std::vector<std::span<const std::byte>> batch{bytes.subspan(2, 2), bytes.subspan(4)};
-    if (operation(std::span{batch}, ct::end_of_input) != ct::resume_state::done) {
-        return 2;
-    }
+    // subspan(2) supplies every byte after the two already supplied.
+    const auto last_chunk = bytes.subspan(2);
+    const auto final_state = operation(last_chunk);
+    assert(final_state == ct::resume_state::done);
+    assert(chunks.size() == 2);
+    std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
-    // Check both destinations and the byte count, including item headers.
+    // Typed decoding finishes when all requested values are available, without EOF.
     const auto result = operation.result();
-    if (!result || *result != buffer.size() || received.name != sent.name ||
-        received.values != sent.values || received_sequence != sequence ||
-        !operation.remaining_input().empty()) {
-        return 3;
-    }
+    assert(result);
+    assert(*result == buffer.size());
+    assert(received.name == sent.name);
+    assert(received.values == sent.values);
+    assert(received_sequence == sequence);
+    assert(operation.remaining_input().empty());
     return 0;
 }

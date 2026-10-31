@@ -21,22 +21,42 @@ auto decoder = ct::make_resumable_decoder(source);
 message value;
 auto op = decoder(value);                 // variadic: decoder(value, checksum)
 
-op(chunk1, chunk2);                       // append the whole batch, then run inline
-op(std::span{more_chunks});               // runtime ranges of chunks also work
-op(last_chunk, ct::end_of_input);          // explicit EOF; empty chunks are not EOF
+const auto first = op(chunk1);           // append a descriptor, then run inline
+assert(first == ct::resume_state::need_input);
+const auto last = op(chunk2);             // enough bytes for the requested values
+assert(last == ct::resume_state::done);
 
 auto result = op.result();                // expected<size_t, status_code>
-auto tail = op.remaining_input();         // includes an incomplete ordinary item
+assert(result);                           // done also includes terminal errors
+assert(value.name == expected_name);
+auto tail = op.remaining_input();         // bytes after committed progress
+```
+
+Typed decoding finishes when its requested values are available. It does not
+need EOF to complete. Feed calls append borrowed chunk descriptors to `chunks`;
+they do not copy the payload. Keep calls outside `assert` so they still execute
+when assertions are disabled.
+
+`op(...)` returns `resume_state::need_input` or `done`. Inspect `result()` after
+completion to distinguish success from an error. The successful result counts
+committed bytes for this operation, including item headers. If no more bytes
+will arrive, call `op.finish()`: a pending truncated item then completes with
+`status_code::incomplete`. Empty chunks do not signal EOF. Cancellation completes
+with `status_code::cancelled`. A completed operation ignores further feeds.
+
+### Supply batches
+
+Several chunks can be supplied together, including runtime ranges of chunks:
+
+```cpp
+op(chunk1, chunk2);                       // append the whole batch, then run inline
+op(std::span{more_chunks});               // runtime ranges of chunks also work
+op(last_chunk, ct::end_of_input);          // supply bytes and signal EOF together
 ```
 
 All byte arguments are appended before an EOF token closes the source, regardless
-of the token's position in the batch.
-
-`op(...)` returns `resume_state::need_input` or `done`; `op.done()` distinguishes
-pending input from a terminal `incomplete` result at EOF. `op.finish()` supplies
-EOF without another chunk. The result counts committed bytes for this operation,
-including item headers. Cancellation completes with `status_code::cancelled`.
-A completed operation ignores further feeds.
+of the token's position in the batch. `end_of_input` is the batch form of the EOF
+signal; `finish()` supplies that signal without another chunk.
 
 Descriptors must be borrowed, common, bidirectional byte ranges: spans and
 `std::views::all` of lvalue deque/list byte buffers are examples. Descriptor
@@ -73,6 +93,11 @@ or move a completed operation during inline resumption. A pending operation must
 outlive its waiter. Cancel before destroying a pending operation when its waiter
 must receive a result. Destructive reentrancy from inside a running codec is not
 supported.
+
+[The coroutine example](../examples/43_resumable_coroutine.cpp) processes the
+decoded message after `co_await`. Its `example::consumer` return type and
+`succeeded()` method are example support, not CBOR API: `co_return true` records
+that the example's application work succeeded.
 
 For a sequence of top-level items, the generator owns the current operation:
 
@@ -214,6 +239,10 @@ auto op = ct::make_resumable_validator(source);       // one complete CBOR item
 op(chunk1, chunk2, ct::end_of_input);
 auto result = op.result();
 ```
+
+`until_end_of_input` selects validation of every top-level item in the incoming
+sequence. Even after the available items are complete, the operation waits for
+`finish()` or an `end_of_input` token because another item could arrive.
 
 Validation uses the ordinary traversal token decoder and UTF-8 rules, without
 constructing application values. `validation_options{.max_depth = 64}` is the
