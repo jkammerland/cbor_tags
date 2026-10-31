@@ -10,22 +10,59 @@ template <typename Context> struct resumable_factory {
     typename Context::source_type &source;
     template <typename... T> auto  operator()(T &&...values) const { return resume_operation<Context>{source, std::forward<T>(values)...}; }
 };
+
+// The adapter's cursors refer back to it. Keep it at the factory's address and
+// lend it only from a named factory that outlives its operations and views.
+template <typename Context> class storage_resumable_factory {
+    typename Context::source_type source_;
+
+  public:
+    template <typename Storage> explicit storage_resumable_factory(Storage &storage) : source_(storage) {}
+    storage_resumable_factory(const storage_resumable_factory &)            = delete;
+    storage_resumable_factory &operator=(const storage_resumable_factory &) = delete;
+    storage_resumable_factory(storage_resumable_factory &&)                 = delete;
+    storage_resumable_factory &operator=(storage_resumable_factory &&)      = delete;
+
+    template <typename... T> auto operator()(T &&...values) & { return resume_operation<Context>{source_, std::forward<T>(values)...}; }
+    template <typename... T> auto operator()(T &&...) && = delete;
+};
 } // namespace detail
 
-template <template <typename> typename... Codecs, typename Source> auto make_resumable_decoder(Source &source) {
+template <template <typename> typename... Codecs, typename Source>
+    requires(!detail::ResumableChunkStorage<Source>)
+auto make_resumable_decoder(Source &source) {
     return detail::resumable_factory<detail::resumable_decode_context<Source, default_options, Codecs...>>{source};
 }
+template <template <typename> typename... Codecs, detail::ResumableChunkStorage Storage> auto make_resumable_decoder(Storage &storage) {
+    return detail::storage_resumable_factory<detail::resumable_decode_context<input_source<Storage>, default_options, Codecs...>>{storage};
+}
 template <IsOptions Options, template <typename> typename... Codecs, typename Source>
+    requires(!detail::ResumableChunkStorage<Source>)
 auto make_resumable_decoder_with_options(Source &source) {
     return detail::resumable_factory<detail::resumable_decode_context<Source, Options, Codecs...>>{source};
 }
+template <IsOptions Options, template <typename> typename... Codecs, detail::ResumableChunkStorage Storage>
+auto make_resumable_decoder_with_options(Storage &storage) {
+    return detail::storage_resumable_factory<detail::resumable_decode_context<input_source<Storage>, Options, Codecs...>>{storage};
+}
 
-template <template <typename> typename... Codecs, typename Source> auto make_resumable_encoder(Source &source) {
+template <template <typename> typename... Codecs, typename Source>
+    requires(!detail::ResumableChunkStorage<Source>)
+auto make_resumable_encoder(Source &source) {
     return detail::resumable_factory<detail::resumable_encode_context<Source, default_options, Codecs...>>{source};
 }
+template <template <typename> typename... Codecs, detail::ResumableOutputChunkStorage Storage>
+auto make_resumable_encoder(Storage &storage) {
+    return detail::storage_resumable_factory<detail::resumable_encode_context<output_source<Storage>, default_options, Codecs...>>{storage};
+}
 template <IsOptions Options, template <typename> typename... Codecs, typename Source>
+    requires(!detail::ResumableChunkStorage<Source>)
 auto make_resumable_encoder_with_options(Source &source) {
     return detail::resumable_factory<detail::resumable_encode_context<Source, Options, Codecs...>>{source};
+}
+template <IsOptions Options, template <typename> typename... Codecs, detail::ResumableOutputChunkStorage Storage>
+auto make_resumable_encoder_with_options(Storage &storage) {
+    return detail::storage_resumable_factory<detail::resumable_encode_context<output_source<Storage>, Options, Codecs...>>{storage};
 }
 } // namespace cbor::tags
 

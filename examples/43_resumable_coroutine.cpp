@@ -38,9 +38,9 @@ int main() {
     // Declare the waiter last so its frame is destroyed before the operation.
     const auto bytes = std::span<const std::byte>{buffer};
     std::list<std::span<const std::byte>> chunks;
-    auto source = ct::make_input_source(chunks);
+    auto decoder = ct::make_resumable_decoder(chunks);
     std::string received;
-    auto operation = ct::make_resumable_decoder(source)(received);
+    auto operation = decoder(received);
     auto consumer = consume(operation, received);
     assert(!consumer.done());
 

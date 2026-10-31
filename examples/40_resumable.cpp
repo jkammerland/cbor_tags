@@ -30,13 +30,13 @@ int main() {
     const auto encoded = ct::make_encoder(buffer)(sent, sequence);
     assert(encoded);
 
-    // Descriptors borrow the bytes; the source keeps the position across feeds.
+    // Descriptors borrow the bytes; the decoder keeps the position across feeds.
     const auto bytes = std::span<const std::byte>{buffer};
     std::list<std::span<const std::byte>> chunks;
-    auto source = ct::make_input_source(chunks);
+    auto decoder = ct::make_resumable_decoder(chunks);
     Message received;
     std::uint32_t received_sequence{};
-    auto operation = ct::make_resumable_decoder(source)(received, received_sequence);
+    auto operation = decoder(received, received_sequence);
 
     // This first chunk contains only headers, so the message still needs input.
     const auto first_chunk = bytes.first(2);

@@ -200,6 +200,14 @@ cmake --build build/resumable-bench \
 ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency|allocation)' --output-on-failure
 ```
 
+The default uses explicit input/output sources. Configure with
+`-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure the named encoder and
+decoder factories that own their adapters. This changes only adapter setup;
+fixtures, feed loops and correctness checks remain identical. Validation continues
+to use an explicit source. Keep the switch off when compiling this harness against
+headers predating storage-based factories. Compare both candidate configurations
+with the baseline explicit-source configuration using the same harness and flags.
+
 `bench_resumable_throughput` compares ordinary encode/decode with resumable
 encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
 chunks. Separate validation rows compare `validate_item` with the resumable

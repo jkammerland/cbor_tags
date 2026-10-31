@@ -214,17 +214,18 @@ template <typename Context> class resume_operation {
     resume_state                       progress() const noexcept { return done() ? resume_state::done : Context::waiting_state; }
     expected<std::size_t, status_code> result() const { return state_->result; }
     auto                               remaining_input() const
-        requires requires(Context &ctx) { ctx.remaining_input(); }
+        requires(Context::waiting_state == resume_state::need_input)
     {
         return state_->context.remaining_input();
     }
+
     auto produced() const
-        requires requires(Context &ctx) { ctx.produced(); }
+        requires(Context::waiting_state == resume_state::need_output)
     {
         return state_->context.produced();
     }
     auto remaining_output() const
-        requires requires(Context &ctx) { ctx.remaining_output(); }
+        requires(Context::waiting_state == resume_state::need_output)
     {
         return state_->context.remaining_output();
     }

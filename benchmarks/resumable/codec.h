@@ -31,9 +31,13 @@ inline bool validate_one_shot(const bytes &encoded) {
 template <template <typename> typename... Codecs, typename T>
 bool decode_resumable(const bytes &encoded, T &destination, std::size_t chunk_size) {
     std::list<std::span<const std::byte>> descriptors;
-    auto                                  source    = ct::make_input_source(descriptors);
-    auto                                  decoder   = ct::make_resumable_decoder<Codecs...>(source);
-    auto                                  operation = decoder(destination);
+#ifdef CBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY
+    auto decoder = ct::make_resumable_decoder<Codecs...>(descriptors);
+#else
+    auto source  = ct::make_input_source(descriptors);
+    auto decoder = ct::make_resumable_decoder<Codecs...>(source);
+#endif
+    auto operation = decoder(destination);
     for (std::size_t offset = 0; offset < encoded.size(); offset += chunk_size) {
         operation(std::span<const std::byte>{encoded}.subspan(offset, std::min(chunk_size, encoded.size() - offset)));
     }
@@ -44,9 +48,13 @@ bool decode_resumable(const bytes &encoded, T &destination, std::size_t chunk_si
 template <template <typename> typename... Codecs, typename T>
 bool encode_resumable(const T &value, bytes &encoded, std::size_t chunk_size) {
     std::list<std::span<std::byte>> descriptors;
-    auto                            sink      = ct::make_output_source(descriptors);
-    auto                            encoder   = ct::make_resumable_encoder<Codecs...>(sink);
-    auto                            operation = encoder(value);
+#ifdef CBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY
+    auto encoder = ct::make_resumable_encoder<Codecs...>(descriptors);
+#else
+    auto sink    = ct::make_output_source(descriptors);
+    auto encoder = ct::make_resumable_encoder<Codecs...>(sink);
+#endif
+    auto operation = encoder(value);
     for (std::size_t offset = 0; offset < encoded.size(); offset += chunk_size) {
         operation(std::span<std::byte>{encoded}.subspan(offset, std::min(chunk_size, encoded.size() - offset)));
     }

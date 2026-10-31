@@ -6,7 +6,8 @@ have no coroutine mode or retry checkpoints.
 
 ## Supply ordered chunks
 
-The caller owns both chunk descriptors and their bytes. Bind that storage once:
+The caller owns both chunk descriptors and their bytes. A named decoder keeps
+the cursor and EOF state for that storage:
 
 ```cpp
 namespace ct = cbor::tags;
@@ -16,8 +17,7 @@ struct message {
 };
 
 std::list<std::span<const std::byte>> chunks;
-auto source = ct::make_input_source(chunks);
-auto decoder = ct::make_resumable_decoder(source);
+auto decoder = ct::make_resumable_decoder(chunks);
 message value;
 auto op = decoder(value);                 // variadic: decoder(value, checksum)
 
@@ -65,12 +65,39 @@ storage can be a vector, deque, list, or a prepopulated span. Dynamic feeds need
 Vector/deque descriptor growth preserves source cursors. Other descriptor
 containers must preserve node iterators when appending.
 
-Keep the source, descriptors, and bytes alive until all operations and borrowed
-views using them are destroyed. Do not erase descriptors, mutate supplied bytes,
-or append directly to descriptor storage after binding it. There is no hidden
-input copy or descriptor queue, and no prefix-reclamation API. Source objects are
-immovable and permit one active operation. Destroy that operation before starting
-the next; the source retains its committed position for subsequent items.
+Keep the named factory, descriptors, and bytes alive until all operations and
+borrowed views using them are destroyed. The factory stores its adapter directly,
+without an additional allocation or shared ownership. It is noncopyable and
+immovable because cursors refer back to that adapter. Only a named, non-const
+factory can start operations; `make_resumable_decoder(chunks)(value)` is rejected.
+Operations themselves remain movable.
+
+Do not erase descriptors, mutate supplied bytes, or append directly to descriptor
+storage after binding it. There is no hidden input copy or descriptor queue, and
+no prefix-reclamation API. Destroy one operation before starting the next; the
+factory retains its committed position, including buffered input after that item.
+For example, successive `decoder(first)` and `decoder(second)` operations must
+have separate scopes even if the first operation has already completed.
+
+### Explicit sources
+
+Use `make_input_source(chunks)` or `make_output_source(chunks)` when a source needs
+to outlive a factory or share its position across different kinds of operations.
+Validators and generators continue to take explicit input sources:
+
+```cpp
+auto source = ct::make_input_source(chunks);
+{
+    auto op = ct::make_resumable_decoder(source)(value);
+    // Feed or inspect op here; destroy it before starting the next operation.
+}
+auto validation = ct::make_resumable_validator(source);
+```
+
+Factories that take explicit sources borrow those sources, so their existing
+temporary-factory syntax remains valid. Keep the explicit source alive until its
+operations and views are destroyed. A new source over the same descriptors starts
+at the beginning; reuse the original source or named factory to continue a stream.
 
 ## Await from another coroutine
 
@@ -124,8 +151,7 @@ is immovable while its value and operation can be referenced by suspended code.
 
 ```cpp
 std::list<std::span<std::byte>> chunks;
-auto sink = ct::make_output_source(chunks);
-auto encoder = ct::make_resumable_encoder(sink);
+auto encoder = ct::make_resumable_encoder(chunks);
 auto op = encoder(value, checksum);
 
 op(output1, output2);                     // need_output or done
@@ -140,9 +166,14 @@ supplied. Do not publish or reuse tentative bytes. Explicitly resumable strings
 commit payload fragments; containers commit completed children. Keep supplied
 output storage alive and unmodified through completion, including space written
 by an incomplete ordinary item. `remaining_output()` exposes the unwritten range.
-`op.finish()` closes the sink and makes insufficient space terminal. Encoding a
+`op.finish()` closes the output and makes insufficient space terminal. Encoding a
 single-pass, unsized string range retains one bounded payload chunk so its CBOR
 chunk header can be emitted before the bytes.
+
+`op.produced()` returns only this operation's committed bytes. For explicit
+source users migrating from `output_source::produced(from, to)`, construct
+`std::ranges::subrange(from, to)` directly; that redundant source method has been
+removed. Its iterators still borrow the source.
 
 ## Codec opt-in
 
@@ -182,7 +213,8 @@ progress is terminal; committed input is never rewound to try another alternativ
 
 `make_resumable_decoder<Codec...>` and `make_resumable_encoder<Codec...>` install
 mixins. The corresponding `make_resumable_*_with_options<Options, Codec...>`
-factories preserve one-shot group wrapping and integer policy. Structural
+factories accept either chunk storage or an explicit source and preserve one-shot
+group wrapping and integer policy. Structural
 traversal reuses reflection, allocators, appenders, header decoding, and variant
 mapping. Ordinary primitives are not byte-by-byte coroutine implementations.
 

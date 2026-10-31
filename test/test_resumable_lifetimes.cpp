@@ -97,6 +97,61 @@ template <typename Context> resumable<status_code> resumable_decode(Context &con
 
 TEST_SUITE("roundtrip/resumable_lifetimes") {
 
+    TEST_CASE("named factory retains an awaiting operation through move and inline destruction") {
+        const std::string      expected = "factory-owned cursor";
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder(bytes)(expected));
+        input_chunks chunks;
+        auto         decoder = make_resumable_decoder(chunks);
+        std::string  actual;
+        auto         original = std::optional{decoder(actual)};
+        REQUIRE((*original)(std::span<const std::byte>{bytes}.first(2)) == resume_state::need_input);
+
+        std::optional<operation_result> result;
+        decltype(original)              moved;
+        auto                            consumer = await_result(*original, result, [&] { moved.reset(); });
+        moved.emplace(std::move(*original));
+        original.reset();
+        const auto state = (*moved)(std::span<const std::byte>{bytes}.subspan(2));
+
+        CHECK(state == resume_state::done);
+        CHECK_FALSE(moved);
+        REQUIRE(consumer.done());
+        CHECK_NOTHROW(consumer.rethrow());
+        REQUIRE(result);
+        REQUIRE(*result);
+        CHECK(**result == bytes.size());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("named factory cancellation completes its waiter and permits a subsequent operation") {
+        input_chunks chunks;
+        auto         decoder = make_resumable_decoder(chunks);
+        {
+            std::string                     pending;
+            auto                            operation = decoder(pending);
+            std::optional<operation_result> result;
+            bool                            resumed{};
+            auto                            consumer = await_result(operation, result, [&] { resumed = true; });
+            operation.cancel();
+            CHECK(resumed);
+            REQUIRE(consumer.done());
+            CHECK_NOTHROW(consumer.rethrow());
+            REQUIRE(result);
+            REQUIRE_FALSE(*result);
+            CHECK(result->error() == status_code::cancelled);
+        }
+
+        const int              expected = 65536;
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder(bytes)(expected));
+        int  actual{};
+        auto operation = decoder(actual);
+        REQUIRE(operation(bytes) == resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(actual == expected);
+    }
+
     TEST_CASE("ready resumable results do not allocate a coroutine frame") {
         bool        ready{};
         status_code status = status_code::error;

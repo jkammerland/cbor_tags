@@ -39,7 +39,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const { return source_.committed_position().offset(); }
-    auto           produced() const { return source_.produced(start_, source_.committed_position()); }
+    auto           produced() const { return std::ranges::subrange(start_, source_.committed_position()); }
     auto           remaining_output() const { return source_.remaining_output(); }
     ordinary_type &ordinary() noexcept { return ordinary_; }
     auto           wait() noexcept { return control_.wait(); }
