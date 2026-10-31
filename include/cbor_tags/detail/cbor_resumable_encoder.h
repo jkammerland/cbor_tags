@@ -24,22 +24,19 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         encoder<Source, Options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder, Codecs...>;
     using mixins = std::tuple<Codecs<self_type>...>;
 
-    Source                        &source_;
-    resume_control                &control_;
-    ordinary_type                  ordinary_;
-    typename Source::position_type start_;
+    Source         &source_;
+    resume_control &control_;
+    ordinary_type   ordinary_;
 
   public:
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_output;
 
-    resumable_encode_context(Source &source, resume_control &control)
-        : source_(source), control_(control), ordinary_(source), start_(source.committed_position()) {}
+    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {}
 
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const { return source_.committed_position().offset(); }
-    auto           produced() const { return std::ranges::subrange(start_, source_.committed_position()); }
     auto           remaining_output() const { return source_.remaining_output(); }
     ordinary_type &ordinary() noexcept { return ordinary_; }
     auto           wait() noexcept { return control_.wait(); }

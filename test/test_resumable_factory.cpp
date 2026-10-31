@@ -44,21 +44,24 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto                     decoder = make_resumable_decoder(chunks);
         std::vector<std::string> actual;
         auto                     operation = decoder(actual);
-        CHECK(operation(bytes.first(0)) == resume_state::need_input);
-        CHECK(chunks.empty());
+        chunks.emplace_back(bytes.first(0));
+        CHECK(operation.resume() == resume_state::need_input);
+        CHECK(chunks.size() == 1);
 
         const std::array batch{bytes.first(0), bytes.first(1), bytes.subspan(1, 1)};
-        CHECK(operation(std::span{batch}) == resume_state::need_input);
-        CHECK(chunks.size() == 2);
+        chunks.insert(chunks.end(), batch.begin(), batch.end());
+        CHECK(operation.resume() == resume_state::need_input);
+        CHECK(chunks.size() == 4);
         for (std::size_t offset = 2; offset < bytes.size(); ++offset) {
-            operation(bytes.subspan(offset, 1));
+            chunks.emplace_back(bytes.subspan(offset, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
         CHECK(actual == expected);
-        CHECK(chunks.size() == bytes.size());
+        CHECK(chunks.size() == bytes.size() + 2);
         CHECK(operation.remaining_input().empty());
     }
 
@@ -99,7 +102,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
         CHECK(operation.remaining_input().empty());
     }
 
-    TEST_CASE("named encoder preserves per-operation output views across sequential calls") {
+    TEST_CASE("named encoder reports per-operation committed bytes across sequential calls") {
         const std::uint32_t        first  = 65536;
         const std::string          second = "second";
         std::array<std::byte, 128> bytes{};
@@ -107,24 +110,25 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto                       storage = std::span{descriptors};
         auto                       encoder = make_resumable_encoder(storage);
 
-        auto first_view = [&] {
+        const auto first_size = [&] {
             auto operation = encoder(first);
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK_THROWS_AS(encoder(second), std::logic_error);
-            return operation.produced();
+            return operation.committed_bytes();
         }();
 
         auto operation = encoder(second);
         REQUIRE(operation.done());
         REQUIRE(operation.result());
-        auto second_view = operation.produced();
+        auto first_view  = std::span<const std::byte>{bytes}.first(first_size);
+        auto second_view = std::span<const std::byte>{bytes}.subspan(first_size, operation.committed_bytes());
         CHECK(first_view.end() == second_view.begin());
         CHECK(static_cast<std::size_t>(std::ranges::distance(first_view)) + *operation.result() +
                   static_cast<std::size_t>(std::ranges::distance(operation.remaining_output())) ==
               bytes.size());
 
-        // The views still borrow the named factory, even after the first operation died.
+        // Callers inspect their own retained storage using the committed counts.
         std::uint32_t first_actual{};
         std::string   second_actual;
         REQUIRE(make_decoder(first_view)(first_actual));
@@ -141,13 +145,17 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto                       encoder   = make_resumable_encoder(chunks);
         auto                       operation = encoder(expected);
 
-        CHECK(operation(first) == resume_state::need_output);
-        CHECK(operation.produced().empty());
-        CHECK(operation(std::span<std::byte>{}) == resume_state::need_output);
-        CHECK(chunks.size() == 1);
-        REQUIRE(operation(second) == resume_state::done);
+        chunks.emplace_back(first);
+        CHECK(operation.resume() == resume_state::need_output);
+        CHECK(operation.committed_bytes() == 0);
+        chunks.emplace_back(std::span<std::byte>{});
+        CHECK(operation.resume() == resume_state::need_output);
+        CHECK(chunks.size() == 2);
+        chunks.emplace_back(second);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
-        auto        produced = operation.produced();
+        auto        joined   = std::views::join(chunks);
+        auto        produced = std::ranges::subrange(joined.begin(), std::ranges::next(joined.begin(), operation.committed_bytes()));
         std::string actual;
         auto        decoder = make_decoder(produced);
         REQUIRE(decoder(actual));
@@ -168,7 +176,8 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto                   encoder  = make_resumable_encoder_with_options<unwrapped_options, codec::typed_array>(outputs);
         auto                   encoding = encoder(expected);
         for (auto &byte : bytes) {
-            encoding(std::span{&byte, 1});
+            outputs.emplace_back(std::span{&byte, 1});
+            encoding.resume();
         }
         REQUIRE(encoding.done());
         REQUIRE(encoding.result());
@@ -184,7 +193,8 @@ TEST_SUITE("roundtrip/resumable_factory") {
         typed_record actual;
         auto         decoding = decoder(actual);
         for (const auto &byte : reference) {
-            decoding(std::span{&byte, 1});
+            inputs.emplace_back(std::span{&byte, 1});
+            decoding.resume();
         }
         REQUIRE(decoding.done());
         REQUIRE(decoding.result());
@@ -201,7 +211,8 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto         decoder = make_resumable_decoder(chunks);
         std::string  actual;
         auto         operation = decoder(actual);
-        REQUIRE(operation(std::span<const std::byte>{bytes}.first(bytes.size() - 1)) == resume_state::need_input);
+        chunks.emplace_back(std::span<const std::byte>{bytes}.first(bytes.size() - 1));
+        REQUIRE(operation.resume() == resume_state::need_input);
         CHECK_THROWS_AS(decoder(actual), std::logic_error);
         CHECK(operation.finish() == resume_state::done);
         REQUIRE_FALSE(operation.result());

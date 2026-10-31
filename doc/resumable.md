@@ -1,179 +1,211 @@
 # Resumable encoding and decoding
 
-Include `<cbor_tags/cbor_resumable.h>` for C++20 coroutine support. The ordinary
-`make_encoder` and `make_decoder` remain synchronous, terminal operations. They
-have no coroutine mode or retry checkpoints.
+Include `<cbor_tags/cbor_resumable.h>` for C++20 resumable operations. Bind the
+caller-owned storage once, modify its availability while the codec is suspended,
+and call `resume()` without arguments. Encoding, decoding, validation and
+sequence generation share this contract.
 
-## Supply ordered chunks
+The ordinary `make_encoder` and `make_decoder` remain synchronous, terminal
+operations. They have no coroutine mode or retry checkpoints.
 
-The caller owns both chunk descriptors and their bytes. A named decoder keeps
-the cursor and EOF state for that storage:
+## Decode an ordinary container
 
 ```cpp
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <cassert>
+#include <cstddef>
+#include <deque>
+#include <string>
+#include <vector>
+
 namespace ct = cbor::tags;
-struct message {
-    std::string name;
-    std::vector<std::uint32_t> values;
-};
 
-std::list<std::span<const std::byte>> chunks;
-auto decoder = ct::make_resumable_decoder(chunks);
-message value;
-auto op = decoder(value);                 // variadic: decoder(value, checksum)
+int main() {
+    const std::string expected = "ready";
+    std::vector<std::byte> wire;
+    const auto encoded = ct::make_encoder(wire)(expected);
+    assert(encoded);
 
-const auto first = op(chunk1);           // append a descriptor, then run inline
-assert(first == ct::resume_state::need_input);
-const auto last = op(chunk2);             // enough bytes for the requested values
-assert(last == ct::resume_state::done);
+    // The decoder borrows the container and retains its logical position.
+    std::deque<std::byte> input;
+    auto decoder = ct::make_resumable_decoder(input);
+    std::string actual;
+    auto operation = decoder(actual);
 
-auto result = op.result();                // expected<size_t, status_code>
-assert(result);                           // done also includes terminal errors
-assert(value.name == expected_name);
-auto tail = op.remaining_input();         // bytes after committed progress
-```
+    input.insert(input.end(), wire.begin(), wire.begin() + 2);
+    const auto pending = operation.resume();
+    assert(pending == ct::resume_state::need_input);
 
-Typed decoding finishes when its requested values are available. It does not
-need EOF to complete. Feed calls append borrowed chunk descriptors to `chunks`;
-they do not copy the payload. Keep calls outside `assert` so they still execute
-when assertions are disabled.
-
-`op(...)` returns `resume_state::need_input` or `done`. Inspect `result()` after
-completion to distinguish success from an error. The successful result counts
-committed bytes for this operation, including item headers. If no more bytes
-will arrive, call `op.finish()`: a pending truncated item then completes with
-`status_code::incomplete`. Empty chunks do not signal EOF. Cancellation completes
-with `status_code::cancelled`. A completed operation ignores further feeds.
-
-### Supply batches
-
-Several chunks can be supplied together, including runtime ranges of chunks:
-
-```cpp
-op(chunk1, chunk2);                       // append the whole batch, then run inline
-op(std::span{more_chunks});               // runtime ranges of chunks also work
-op(last_chunk, ct::end_of_input);          // supply bytes and signal EOF together
-```
-
-All byte arguments are appended before an EOF token closes the source, regardless
-of the token's position in the batch. `end_of_input` is the batch form of the EOF
-signal; `finish()` supplies that signal without another chunk.
-
-Descriptors must be borrowed, common, bidirectional byte ranges: spans and
-`std::views::all` of lvalue deque/list byte buffers are examples. Descriptor
-storage can be a vector, deque, list, or a prepopulated span. Dynamic feeds need
-`push_back`; fixed descriptor storage is supplied before operation construction.
-Vector/deque descriptor growth preserves source cursors. Other descriptor
-containers must preserve node iterators when appending.
-
-Keep the named factory, descriptors, and bytes alive until all operations and
-borrowed views using them are destroyed. The factory stores its adapter directly,
-without an additional allocation or shared ownership. It is noncopyable and
-immovable because cursors refer back to that adapter. Only a named, non-const
-factory can start operations; `make_resumable_decoder(chunks)(value)` is rejected.
-Operations themselves remain movable.
-
-Do not erase descriptors, mutate supplied bytes, or append directly to descriptor
-storage after binding it. There is no hidden input copy or descriptor queue, and
-no prefix-reclamation API. Destroy one operation before starting the next; the
-factory retains its committed position, including buffered input after that item.
-For example, successive `decoder(first)` and `decoder(second)` operations must
-have separate scopes even if the first operation has already completed.
-
-### Explicit sources
-
-Use `make_input_source(chunks)` or `make_output_source(chunks)` when a source needs
-to outlive a factory or share its position across different kinds of operations.
-Validators and generators continue to take explicit input sources:
-
-```cpp
-auto source = ct::make_input_source(chunks);
-{
-    auto op = ct::make_resumable_decoder(source)(value);
-    // Feed or inspect op here; destroy it before starting the next operation.
-}
-auto validation = ct::make_resumable_validator(source);
-```
-
-Factories that take explicit sources borrow those sources, so their existing
-temporary-factory syntax remains valid. Keep the explicit source alive until its
-operations and views are destroyed. A new source over the same descriptors starts
-at the beginning; reuse the original source or named factory to continue a stream.
-
-## Await from another coroutine
-
-```cpp
-auto op = decoder(value, checksum);
-auto result = co_await op;
-if (!result) {
-    // Handle result.error().
+    input.insert(input.end(), wire.begin() + 2, wire.end());
+    const auto completed = operation.resume();
+    assert(completed == ct::resume_state::done);
+    const auto result = operation.result();
+    assert(result);
+    assert(*result == wire.size());
+    assert(actual == expected);
 }
 ```
 
-A producer holds access to `op` and feeds it from the same serialized execution
-context. Feeding resumes internal coroutines and the completed consumer inline.
-An executor can post the entire feed call when deferred execution is desired.
-There is no scheduler dependency or concurrent-access synchronization.
+Operation creation runs eagerly using currently available storage. A pending
+operation reports `need_input` or `need_output`; `resume()` continues it and
+returns that state or `done`. Repeated resumption without new availability is
+safe, but a driver should wait for a storage change instead of busy-looping.
+Calls stay outside assertions so they also execute with assertions disabled.
 
-The operation uniquely owns suspended frames. Moving it preserves a waiting
-consumer; destroying the consumer detaches its waiter. A consumer may destroy
-or move a completed operation during inline resumption. A pending operation must
-outlive its waiter. Cancel before destroying a pending operation when its waiter
-must receive a result. Destructive reentrancy from inside a running codec is not
-supported.
+Typed decoding completes when its requested values are available, without EOF.
+`finish()` closes the source and resumes the codec: a truncated item completes
+with `status_code::incomplete`. Empty storage does not signal EOF. A completed
+operation stays complete on further `resume()` calls. Inspect `result()` to
+distinguish successful completion from a terminal error.
 
-[The coroutine example](../examples/43_resumable_coroutine.cpp) processes the
-decoded message after `co_await`. Its `example::consumer` return type and
-`succeeded()` method are example support, not CBOR API: `co_return true` records
-that the example's application work succeeded.
-
-For a sequence of top-level items, the generator owns the current operation:
+## Encode into a growable container
 
 ```cpp
-std::list<std::span<const std::byte>> chunks;
-auto source = ct::make_input_source(chunks);
-auto items = ct::make_resumable_generator<message>(source);
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <cassert>
+#include <cstddef>
+#include <deque>
+#include <ranges>
+#include <string>
 
-// Consumer coroutine:
-for (;;) {
-    auto result = co_await items.next();
-    if (!result) { /* handle error */ break; }
-    if (items.done()) break;               // clean EOF, zero-byte result
-    consume(items.value());               // valid until the next next() call
+namespace ct = cbor::tags;
+
+int main() {
+    const std::string expected = "ready for transport";
+    std::deque<std::byte> output;
+    auto encoder = ct::make_resumable_encoder(output);
+    auto operation = encoder(expected);
+    assert(operation.done());
+
+    // A growable container appends normally; no output buffers are passed to resume.
+    const auto result = operation.result();
+    assert(result);
+    auto committed = output | std::views::take(operation.committed_bytes());
+    std::string actual;
+    const auto decoded = ct::make_decoder(committed)(actual);
+    assert(decoded);
+    assert(actual == expected);
 }
-// Producer: items(chunk1, chunk2); items(ct::end_of_input);
 ```
 
-`next()` returns a reference to the generator-owned operation; use `auto &next`
-when storing it. There is one consumer and one outstanding `next()`. The generator
-is immovable while its value and operation can be referenced by suspended code.
+Growable vector/deque output appends after existing contents. Fixed byte storage
+and nested writable ranges provide bounded capacity; exhaustion suspends the
+operation with `need_output`. The caller makes additional storage available
+through the bound container or adapter, then calls `resume()`.
 
-## Encode into supplied space
+`committed_bytes()` counts this operation's committed bytes, including headers.
+It remains available while pending and after success, errors or cancellation.
+Only committed bytes may be published. Storage size alone is not a general
+encoded-length indicator: fixed storage contains spare capacity and an
+incomplete ordinary codec can leave tentative writes.
 
-```cpp
-std::list<std::span<std::byte>> chunks;
-auto encoder = ct::make_resumable_encoder(chunks);
-auto op = encoder(value, checksum);
+## Storage and mutation
 
-op(output1, output2);                     // need_output or done
-op(more_output);
-auto result = op.result();
-auto bytes = op.produced();               // committed prefix only
-```
+Default adapters support ordinary byte ranges and nested byte ranges, including
+containers of owning containers. For flat vector/deque input, append bytes without changing the existing prefix.
+For nested storage, append descriptors or grow the final inner range while
+preserving earlier contents and order. Final-range growth is supported for sized
+ranges or unsized ranges whose end boundary changes. An unsized node view with
+an unchanged end sentinel needs a custom source to expose growth without a
+second traversal. The adapter reacquires access after permitted mutations, including vector reallocation. Unsized input is not
+prewalked to calculate a byte extent.
 
-Ordinary codec output is tentative until the complete item succeeds. Exhausting
-space resets the working write position and retries that item when more space is
-supplied. Do not publish or reuse tentative bytes. Explicitly resumable strings
-commit payload fragments; containers commit completed children. Keep supplied
-output storage alive and unmodified through completion, including space written
-by an incomplete ordinary item. `remaining_output()` exposes the unwritten range.
-`op.finish()` closes the output and makes insufficient space terminal. Encoding a
-single-pass, unsized string range retains one bounded payload chunk so its CBOR
-chunk header can be emitted before the bytes.
+Inner ranges may own their bytes, as in `vector<vector<byte>>`, or borrow them
+through spans and views. The outer container can be a vector, deque, list or
+prepopulated span. Empty inner ranges are allowed. All containers and backing
+bytes remain caller-owned. Prefix removal, replacement of earlier ranges and recycling require a custom source.
 
-`op.produced()` returns only this operation's committed bytes. For explicit
-source users migrating from `output_source::produced(from, to)`, construct
-`std::ranges::subrange(from, to)` directly; that redundant source method has been
-removed. Its iterators still borrow the source.
+Keep the named factory, storage and encoded values alive through every operation
+that borrows them. A storage-bound factory owns its adapter inline, is immovable,
+and starts operations only as an lvalue. Destroy an operation before starting
+another on the same source; completion alone does not release the source.
+Successive operations retain the committed stream position and buffered tail.
+
+Use `make_input_source(storage)` or `make_output_source(storage)` when a source
+must outlive a factory or share its position between operation kinds. Factories
+borrow explicit sources, so temporary-factory construction remains valid.
+Validators and generators take explicit input sources.
+
+## Public custom sources and reclamation
+
+`<cbor_tags/cbor_resumable_source.h>` exposes `ResumableInputSource` and
+`ResumableOutputSource`. Custom sources implement public members, without
+specializing implementation details. The ordinary reader/appender bridge stays
+inside the library. Custom sources expose noncontiguous logical traversal, even
+when their backing allocation is contiguous; optional windows provide bulk
+access. Default adapters still accept ordinary contiguous containers. Declaring
+`position_type` identifies a custom source: it must satisfy the public source
+contract and cannot fall back to being adapted as an ordinary container.
+
+The source contract includes:
+
+- Copyable durable positions exposing monotonic absolute byte offsets as exactly
+  `std::size_t`. Source byte counts, sized input range sizes and any `size_type`
+  also use `std::size_t`; output sources expose `value_type = std::byte`.
+  Positions at and after commitment survive the source's documented mutations.
+- Working and committed positions, with rollback restricted to uncommitted work.
+  Input supplies byte traversal, `commit(position)` and `remaining(position)`;
+  output supplies `position()`, `commit()`, `restore(position)` and
+  `remaining_output()`.
+- Nonthrowing `committed_position()`, `release()` and output `restore(position)`
+  so abandoning an operation can safely discard tentative work.
+- `refresh()` before codec driving, `eof()`/`close()` for terminal availability,
+  and `acquire()`/`release()` for one active operation.
+- Output `write(span<const byte>)` returning the number of bytes written. A short
+  write denotes temporary exhaustion, not successful completion of the request.
+- Optional contiguous borrow/consume windows for bulk transfer. Byte traversal
+  remains available for noncontiguous containers.
+
+A sized range must report its actual retained byte count. Sized sources provide
+`remaining_size(position)` for exact availability at that position, including a
+nonzero retained base; absolute stream offsets must not be compared directly
+against a retained range's size. Unsized sources need no total extent.
+
+The codec retains no cumulative output view. An output adapter uses
+`committed_position()` to publish newly committed ranges exactly once. Input
+and output may reclaim bytes strictly before commitment only when all external
+borrows permit it. Publication, pending I/O ownership and final reclamation are
+separate adapter/application responsibilities.
+
+Mutation and codec driving are serialized. Temporary codec windows end before
+suspension; adapter positions must reacquire access after refresh. A decoded
+`span` or `string_view` has a longer application borrow and requires its backing
+allocation to remain stable. Such views cannot represent bytes crossing separate
+allocations; use an owning result, an appropriate segmented value or the normal
+view decoder's unsupported-input outcome.
+
+Bounded storage must accommodate an ordinary codec's entire retry unit. Use an
+explicit resumable customization for larger values, or reject them under the
+application's capacity policy. Waiting cannot free tentative bytes required by
+the current retry.
+
+## Awaiting, cancellation and sequences
+
+`co_await operation` observes terminal completion; it does not supply storage or
+drive the codec. A producer modifies the bound storage and calls `resume()` from
+the same serialized execution context. Completion resumes its waiter inline.
+An executor may post the whole resumption when deferred execution is desired.
+
+The operation uniquely owns suspended frames and remains movable. Moving it
+preserves a waiting consumer; destroying the consumer detaches its waiter. A
+consumer may destroy or move a completed operation during inline resumption.
+A pending operation must outlive its waiter. `cancel()` rolls back tentative
+cursor progress and completes with `status_code::cancelled`, waking the waiter
+inline. Cancel before destroying a pending operation when its waiter needs a
+result. Destructive reentrancy from inside a running codec is unsupported.
+
+`make_resumable_generator<T>(source)` retains a current value and operation.
+`next()` returns a reference to that operation; copy the value before requesting
+another. The producer calls argument-free `resume()` or `finish()` after changing
+storage. Call `next()` first, keep one outstanding request, and keep the generator
+alive while its operation/value is borrowed. Clean EOF returns a successful
+zero-byte result and sets `done()`.
+
+See the complete [coroutine example](../examples/43_resumable_coroutine.cpp) and
+[generator example](../examples/44_resumable_generator.cpp). Their small coroutine
+owner is example support, not part of the CBOR API.
 
 ## Codec opt-in
 
@@ -188,6 +220,19 @@ is not automatically safe to retry.
 Use a named hook to retain progress through long values:
 
 ```cpp
+#include <cbor_tags/cbor_resumable.h>
+#include <cassert>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace ct = cbor::tags;
+
+struct message {
+    std::string name;
+    std::vector<int> values;
+};
+
 template <class Decoder>
 ct::resumable<ct::status_code> resumable_decode(Decoder &dec, message &value) {
     co_return co_await dec(ct::wrap_as_array{value.name, value.values});
@@ -196,6 +241,23 @@ ct::resumable<ct::status_code> resumable_decode(Decoder &dec, message &value) {
 template <class Encoder>
 ct::resumable<ct::status_code> resumable_encode(Encoder &enc, const message &value) {
     co_return co_await enc(ct::wrap_as_array{value.name, value.values});
+}
+
+int main() {
+    const message expected{"station", {1, 24, 1000}};
+    std::vector<std::byte> storage;
+    auto encoder = ct::make_resumable_encoder(storage);
+    auto encoding = encoder(expected);
+    assert(encoding.done());
+    assert(encoding.result());
+
+    message actual;
+    auto decoder = ct::make_resumable_decoder(storage);
+    auto decoding = decoder(actual);
+    assert(decoding.done());
+    assert(decoding.result());
+    assert(actual.name == expected.name);
+    assert(actual.values == expected.values);
 }
 ```
 
@@ -213,7 +275,7 @@ progress is terminal; committed input is never rewound to try another alternativ
 
 `make_resumable_decoder<Codec...>` and `make_resumable_encoder<Codec...>` install
 mixins. The corresponding `make_resumable_*_with_options<Options, Codec...>`
-factories accept either chunk storage or an explicit source and preserve one-shot
+factories accept either supported byte storage or an explicit source and preserve one-shot
 group wrapping and integer policy. Structural
 traversal reuses reflection, allocators, appenders, header decoding, and variant
 mapping. Ordinary primitives are not byte-by-byte coroutine implementations.
@@ -264,17 +326,11 @@ fallback behavior and their input-lifetime requirements.
 
 ## Validation
 
-```cpp
-auto op = ct::make_resumable_validator(source);       // one complete CBOR item
-// Or: make_resumable_validator(source, 3)
-// Or: make_resumable_validator(source, ct::until_end_of_input)
-op(chunk1, chunk2, ct::end_of_input);
-auto result = op.result();
-```
-
-`until_end_of_input` selects validation of every top-level item in the incoming
-sequence. Even after the available items are complete, the operation waits for
-`finish()` or an `end_of_input` token because another item could arrive.
+Validators use an explicit input source and the same `resume()`/`finish()`
+contract. `make_resumable_validator(source)` validates one item; a numeric
+second argument selects a fixed number of items. `ct::until_end_of_input`
+selects every top-level item until explicit closure. It keeps waiting after the
+available items are complete because another item could arrive.
 
 Validation uses the ordinary traversal token decoder and UTF-8 rules, without
 constructing application values. `validation_options{.max_depth = 64}` is the
@@ -287,5 +343,6 @@ call. Nested items retain their structural continuations, and tokens crossing
 input boundaries use the ordinary segmented reader. Completed progress is
 published before suspension or operation completion, including error exits.
 
-See the [benchmark instructions](../benchmarks/README.md) for throughput and
-paced-arrival commands, methodology, and measurement limitations.
+See the [validation example](../examples/42_resumable_validation.cpp) and the
+[benchmark instructions](../benchmarks/README.md) for executable usage and
+measurement commands.

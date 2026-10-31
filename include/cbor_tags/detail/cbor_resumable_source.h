@@ -1,9 +1,11 @@
 #pragma once
 
 #include "cbor_tags/cbor_detail.h"
+#include "cbor_tags/cbor_resumable_source.h"
 #include "cbor_tags/detail/cbor_encode_error.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstring>
 #include <initializer_list>
@@ -15,10 +17,49 @@ namespace cbor::tags {
 
 namespace detail {
 
-// Keep output window publication internal to the resumable implementation.
+template <typename Source>
+concept HasOutputWindow = requires(Source &source, std::size_t count) {
+    { source.borrow_window() } -> std::convertible_to<std::optional<std::span<std::byte>>>;
+    { source.consume_window(count) } -> std::same_as<void>;
+};
+
+template <typename Source, typename Position>
+concept HasInputWindow = requires(const Source &source, Position &position) {
+    { source.borrow_window(position) } -> std::convertible_to<std::optional<std::span<const std::byte>>>;
+};
+
+template <typename Source, typename Position>
+concept HasInputWindowConsumption = requires(const Source &source, Position &position, std::size_t count) {
+    { source.consume_window(position, count) } -> std::same_as<void>;
+};
+
+// Adapters can omit bulk windows. Byte traversal remains the baseline contract.
 struct resumable_source_access {
-    template <typename Source> static auto borrow_window(Source &source) { return source.borrow_window(); }
-    template <typename Source> static void consume_window(Source &source, std::size_t count) { source.consume_window(count); }
+    template <typename Source> static std::optional<std::span<std::byte>> borrow_window(Source &source) {
+        if constexpr (HasOutputWindow<Source>)
+            return source.borrow_window();
+        else
+            return std::nullopt;
+    }
+    template <typename Source> static void consume_window(Source &source, std::size_t count) {
+        if constexpr (HasOutputWindow<Source>)
+            source.consume_window(count);
+        else if (count != 0)
+            throw std::logic_error("CBOR output source has no writable window");
+    }
+    template <typename Source, typename Position>
+    static std::optional<std::span<const std::byte>> borrow_window(const Source &source, Position &position) {
+        if constexpr (HasInputWindow<Source, Position>)
+            return source.borrow_window(position);
+        else
+            return std::nullopt;
+    }
+    template <typename Source, typename Position> static void consume_window(const Source &source, Position &position, std::size_t count) {
+        if constexpr (HasInputWindowConsumption<Source, Position>)
+            source.consume_window(position, count);
+        else
+            std::ranges::advance(position, static_cast<std::iter_difference_t<Position>>(count));
+    }
 };
 
 template <typename Chunk>
@@ -30,26 +71,29 @@ concept ResumableByteChunk =
 template <typename Storage>
 concept ResumableChunkStorage =
     std::ranges::bidirectional_range<Storage> && std::ranges::common_range<Storage> &&
-    std::is_lvalue_reference_v<std::ranges::range_reference_t<Storage>> && ResumableByteChunk<std::ranges::range_value_t<Storage>> &&
-    std::ranges::borrowed_range<std::ranges::range_value_t<Storage>>;
+    std::is_lvalue_reference_v<std::ranges::range_reference_t<Storage>> && ResumableByteChunk<std::ranges::range_value_t<Storage>>;
 
 template <typename Storage>
 concept ResumableOutputChunkStorage =
     ResumableChunkStorage<Storage> && std::indirectly_writable<std::ranges::iterator_t<std::ranges::range_value_t<Storage>>,
                                                                std::ranges::range_value_t<std::ranges::range_value_t<Storage>>>;
 
-template <typename Storage, typename Chunk>
-concept ResumableChunkArgument = ResumableByteChunk<Chunk> && (std::is_lvalue_reference_v<Chunk> || std::ranges::borrowed_range<Chunk>) &&
-                                 std::constructible_from<std::ranges::range_value_t<Storage>, Chunk>;
+template <typename Storage>
+concept HasResumablePositionType = requires { typename Storage::position_type; };
 
-template <typename Storage, typename Batch>
-concept ResumableChunkBatch =
-    std::ranges::input_range<Batch> && (std::is_lvalue_reference_v<Batch> || std::ranges::borrowed_range<Batch>) &&
-    ResumableChunkArgument<Storage, std::ranges::range_reference_t<Batch>>;
+// A declared source must satisfy its public protocol; do not silently wrap an
+// invalid adapter as ordinary storage and discard its commitment semantics.
+template <typename Storage>
+concept ResumableStorage = (!HasResumablePositionType<Storage>) && (ResumableByteChunk<Storage> || ResumableChunkStorage<Storage>);
 
-// The caller owns both descriptors and bytes. Append through this adapter, and
-// retain descriptors until every cursor that refers to them has been discarded.
-// Non-random-access descriptor storage must preserve iterators on push_back.
+template <typename Storage>
+concept ResumableOutputStorage =
+    (!HasResumablePositionType<Storage>) &&
+    (ResumableOutputChunkStorage<Storage> ||
+     (ResumableByteChunk<Storage> && std::indirectly_writable<std::ranges::iterator_t<Storage>, std::ranges::range_value_t<Storage>>));
+
+// The caller owns descriptors and bytes. Only append and final-chunk growth are
+// permitted. Node-based ranges preserve their existing element iterators.
 template <ResumableChunkStorage Storage> class chunk_source {
     using chunk_type     = std::ranges::range_value_t<Storage>;
     using outer_iterator = std::ranges::iterator_t<Storage>;
@@ -82,9 +126,14 @@ template <ResumableChunkStorage Storage> class chunk_source {
             normalize();
             assert(!end_marker_ && current_ && limit_);
             assert(*current_ != *limit_);
+            previous_ = *current_;
             ++*current_;
+            exhausted_ = *current_ == *limit_;
+            if (inner_offset_) {
+                increment(*inner_offset_);
+            }
             if (offset_) {
-                ++*offset_;
+                increment(*offset_);
             }
             return *this;
         }
@@ -112,12 +161,16 @@ template <ResumableChunkStorage Storage> class chunk_source {
             while (current_ && *current_ == std::ranges::begin(chunk())) {
                 assert(!first_chunk());
                 previous_chunk();
-                current_ = std::ranges::end(chunk());
-                limit_   = *current_;
+                set_chunk_end();
             }
 
             assert(current_);
             --*current_;
+            exhausted_ = false;
+            if (inner_offset_) {
+                assert(*inner_offset_ != 0);
+                --*inner_offset_;
+            }
             if (offset_) {
                 assert(*offset_ != 0);
                 --*offset_;
@@ -177,6 +230,12 @@ template <ResumableChunkStorage Storage> class chunk_source {
             }
         }
 
+        static void increment(std::size_t &value) {
+            if (value == std::numeric_limits<std::size_t>::max())
+                throw std::length_error("CBOR source byte offset overflow");
+            ++value;
+        }
+
         decltype(auto) chunk() const {
             if constexpr (indexed) {
                 return *(std::ranges::begin(*source_->storage_) + static_cast<std::ranges::range_difference_t<Storage>>(outer_));
@@ -202,14 +261,61 @@ template <ResumableChunkStorage Storage> class chunk_source {
             } else {
                 outer_ = std::prev(std::ranges::end(*source_->storage_));
             }
-            current_ = std::ranges::end(chunk());
-            limit_   = *current_;
+            set_chunk_end();
+            observed_generation_ = source_->generation_;
+        }
+
+        void set_chunk_end() {
+            current_   = std::ranges::end(chunk());
+            limit_     = *current_;
+            exhausted_ = true;
+            if constexpr (sized)
+                inner_offset_ = std::ranges::size(chunk());
+            else
+                inner_offset_.reset();
+            previous_.reset();
+            if (*current_ != std::ranges::begin(chunk()))
+                previous_ = std::prev(*current_);
+        }
+
+        // Reacquire random-access iterators after allocation changes. Stable
+        // node iterators only need their end refreshed; an exhausted cursor
+        // retains the preceding element to discover appended nodes.
+        void refresh_current() const {
+            if (observed_generation_ == source_->generation_)
+                return;
+            observed_generation_ = source_->generation_;
+            if (!current_)
+                return;
+            if constexpr (std::ranges::random_access_range<chunk_type>) {
+                assert(inner_offset_);
+                current_ = std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(*inner_offset_);
+            } else if (inner_offset_ && *inner_offset_ == 0) {
+                current_ = std::ranges::begin(chunk());
+            } else if (exhausted_ && previous_) {
+                // Reusing an unchanged end must not traverse the last byte a
+                // second time. Sized node ranges detect growth by their extent;
+                // unsized subranges expose it through their changed boundary.
+                const bool grew = [&] {
+                    if constexpr (sized)
+                        return inner_offset_ && *inner_offset_ != std::ranges::size(chunk());
+                    else
+                        return *limit_ != std::ranges::end(chunk());
+                }();
+                if (grew)
+                    current_ = std::next(*previous_);
+                else
+                    current_ = std::ranges::end(chunk());
+            }
+            limit_     = std::ranges::end(chunk());
+            exhausted_ = *current_ == *limit_;
         }
 
         void normalize() const {
             if (end_marker_ || source_ == nullptr) {
                 return;
             }
+            refresh_current();
             if (!current_) {
                 if (std::ranges::begin(*source_->storage_) == std::ranges::end(*source_->storage_)) {
                     return;
@@ -219,8 +325,10 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 } else {
                     outer_ = std::ranges::begin(*source_->storage_);
                 }
-                current_ = std::ranges::begin(chunk());
-                limit_   = std::ranges::end(chunk());
+                current_      = std::ranges::begin(chunk());
+                limit_        = std::ranges::end(chunk());
+                inner_offset_ = 0;
+                exhausted_    = *current_ == *limit_;
             }
 
             // Keep the last descriptor at exhaustion: its successor can be
@@ -238,9 +346,12 @@ template <ResumableChunkStorage Storage> class chunk_source {
                         return;
                     }
                 }
-                outer_   = next;
-                current_ = std::ranges::begin(chunk());
-                limit_   = std::ranges::end(chunk());
+                outer_        = next;
+                current_      = std::ranges::begin(chunk());
+                limit_        = std::ranges::end(chunk());
+                inner_offset_ = 0;
+                previous_.reset();
+                exhausted_ = *current_ == *limit_;
             }
         }
 
@@ -257,16 +368,15 @@ template <ResumableChunkStorage Storage> class chunk_source {
         mutable outer_position                outer_{};
         mutable std::optional<inner_iterator> current_;
         mutable std::optional<inner_iterator> limit_;
+        mutable std::optional<inner_iterator> previous_;
+        mutable std::optional<std::size_t>    inner_offset_{0};
+        mutable std::size_t                   observed_generation_{};
+        mutable bool                          exhausted_{};
         std::optional<std::size_t>            offset_{0};
         bool                                  end_marker_{};
     };
 
-    explicit chunk_source(Storage &storage) : storage_(&storage) {
-        for (auto &&chunk : storage) {
-            add_extent(chunk);
-            ++chunk_count_;
-        }
-    }
+    explicit chunk_source(Storage &storage) : storage_(&storage) { refresh(); }
 
     chunk_source(const chunk_source &)            = delete;
     chunk_source &operator=(const chunk_source &) = delete;
@@ -282,21 +392,82 @@ template <ResumableChunkStorage Storage> class chunk_source {
         return extent_;
     }
 
-    template <typename... Chunks>
-        requires((ResumableChunkArgument<Storage, Chunks> || ResumableChunkBatch<Storage, Chunks>) && ...) &&
-                requires(Storage &storage, chunk_type chunk) { storage.push_back(std::move(chunk)); }
-    std::size_t append(Chunks &&...chunks) {
-        if (closed_) {
-            throw std::logic_error("cannot append to a closed CBOR source");
+    iterator position_at_end() const
+        requires sized
+    {
+        auto position = begin();
+        if (chunk_count_ != 0)
+            position.set_last_chunk();
+        position.offset_ = extent_;
+        return position;
+    }
+
+    std::size_t remaining_size(iterator from) const
+        requires sized
+    {
+        assert(owns(from) && from.offset() <= extent_);
+        return extent_ - from.offset();
+    }
+
+    // Observe only the previous tail and newly appended descriptors. Unsized
+    // byte ranges are never walked to calculate an extent.
+    void refresh() {
+        if (generation_ == std::numeric_limits<std::size_t>::max())
+            throw std::length_error("CBOR source refresh generation overflow");
+        if constexpr (std::ranges::sized_range<Storage>) {
+            if (std::ranges::size(*storage_) < chunk_count_)
+                throw std::logic_error("CBOR source descriptors cannot be removed");
         }
-        const auto previous_count = chunk_count_;
-        (append_argument(std::forward<Chunks>(chunks)), ...);
-        return chunk_count_ - previous_count;
+
+        if (last_chunk_) {
+            if constexpr (sized) {
+                auto      &tail  = chunk_at(*last_chunk_);
+                const auto count = checked_size(tail);
+                if (count < tail_extent_)
+                    throw std::logic_error("CBOR source tail cannot shrink");
+                add_available(count - tail_extent_);
+                tail_extent_ = count;
+            }
+        }
+
+        auto next = [&] {
+            if constexpr (indexed)
+                return last_chunk_ ? *last_chunk_ + 1 : std::size_t{};
+            else
+                return last_chunk_ ? std::next(*last_chunk_) : std::ranges::begin(*storage_);
+        }();
+        const auto at_end = [&] {
+            if constexpr (indexed)
+                return next == static_cast<std::size_t>(std::ranges::end(*storage_) - std::ranges::begin(*storage_));
+            else
+                return next == std::ranges::end(*storage_);
+        };
+        while (!at_end()) {
+            if (closed_)
+                throw std::logic_error("cannot grow a closed CBOR source");
+            if (chunk_count_ == std::numeric_limits<std::size_t>::max())
+                throw std::length_error("CBOR source descriptor count overflow");
+            if constexpr (sized) {
+                tail_extent_ = checked_size(chunk_at(next));
+                add_available(tail_extent_);
+            }
+            last_chunk_ = next;
+            ++chunk_count_;
+            ++next;
+        }
+        ++generation_;
     }
 
     std::size_t generation() const { return generation_; }
     bool        eof() const { return closed_; }
     bool        owns(iterator position) const { return position.source_ == this; }
+
+    // Cleanup only restores known progress positions; an unsized end sentinel
+    // is never a retry checkpoint and has no offset to inspect here.
+    bool can_restore(const iterator &position, const iterator &committed, const iterator &working) const noexcept {
+        return position.source_ == this && position.offset_ && committed.offset_ && working.offset_ &&
+               *position.offset_ >= *committed.offset_ && *position.offset_ <= *working.offset_;
+    }
 
     void acquire() {
         if (active_) {
@@ -309,8 +480,8 @@ template <ResumableChunkStorage Storage> class chunk_source {
 
     void close() {
         if (!closed_) {
+            refresh();
             closed_ = true;
-            ++generation_;
         }
     }
 
@@ -348,7 +519,12 @@ template <ResumableChunkStorage Storage> class chunk_source {
         if constexpr (std::ranges::contiguous_range<chunk_type>) {
             assert(count <= static_cast<std::size_t>(*from.limit_ - *from.current_));
         }
+        if (from.offset_ && count > std::numeric_limits<std::size_t>::max() - *from.offset_)
+            throw std::length_error("CBOR source byte offset overflow");
         std::ranges::advance(*from.current_, static_cast<std::iter_difference_t<inner_iterator>>(count));
+        if (from.inner_offset_)
+            *from.inner_offset_ += count;
+        from.exhausted_ = *from.current_ == *from.limit_;
         if (from.offset_) {
             *from.offset_ += count;
         }
@@ -362,16 +538,10 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 assert(from.current_ && from.limit_);
                 const auto available = static_cast<std::size_t>(*from.limit_ - *from.current_);
                 const auto amount    = std::min(available, count - advanced);
-                *from.current_ += static_cast<std::iter_difference_t<inner_iterator>>(amount);
-                if (from.offset_) {
-                    *from.offset_ += amount;
-                }
+                consume_window(from, amount);
                 advanced += amount;
             } else {
-                ++*from.current_;
-                if (from.offset_) {
-                    ++*from.offset_;
-                }
+                ++from;
                 ++advanced;
             }
         }
@@ -413,97 +583,139 @@ template <ResumableChunkStorage Storage> class chunk_source {
         }
         assert(to.current_);
         **to.current_ = static_cast<std::ranges::range_value_t<chunk_type>>(value);
-        ++*to.current_;
-        if (to.offset_) {
-            ++*to.offset_;
-        }
+        ++to;
         return true;
     }
 
   private:
-    template <typename Chunk> void add_extent(Chunk &chunk) {
-        if constexpr (sized) {
-            const auto amount = static_cast<std::size_t>(std::ranges::size(chunk));
-            if (amount > std::numeric_limits<std::size_t>::max() - extent_) {
-                throw std::length_error("CBOR source byte extent overflow");
-            }
-            extent_ += amount;
-        }
+    decltype(auto) chunk_at(outer_position position) const {
+        if constexpr (indexed)
+            return *(std::ranges::begin(*storage_) + static_cast<std::ranges::range_difference_t<Storage>>(position));
+        else
+            return *position;
     }
 
-    template <typename Chunk> void append_chunk(Chunk &&chunk) {
-        chunk_type descriptor(std::forward<Chunk>(chunk));
-        if (std::ranges::empty(descriptor)) {
-            return;
-        }
-
-        const auto previous_extent = extent_;
-        add_extent(descriptor);
-        try {
-            storage_->push_back(std::move(descriptor));
-        } catch (...) {
-            extent_ = previous_extent;
-            throw;
-        }
-        ++chunk_count_;
-        ++generation_;
+    template <typename Chunk> static std::size_t checked_size(Chunk &chunk) {
+        const auto count = std::ranges::size(chunk);
+        if (std::cmp_greater(count, std::numeric_limits<std::size_t>::max()))
+            throw std::length_error("CBOR source byte extent overflow");
+        return static_cast<std::size_t>(count);
     }
 
-    template <typename Arg> void append_argument(Arg &&arg) {
-        if constexpr (ResumableChunkArgument<Storage, Arg>) {
-            append_chunk(std::forward<Arg>(arg));
-        } else {
-            for (auto &&chunk : arg) {
-                append_chunk(std::forward<decltype(chunk)>(chunk));
-            }
-        }
+    void add_available(std::size_t amount) {
+        if (closed_ && amount != 0)
+            throw std::logic_error("cannot grow a closed CBOR source");
+        if (amount > std::numeric_limits<std::size_t>::max() - extent_)
+            throw std::length_error("CBOR source byte extent overflow");
+        extent_ += amount;
     }
 
-    Storage    *storage_;
-    std::size_t chunk_count_{};
-    std::size_t extent_{};
-    std::size_t generation_{};
-    bool        closed_{};
-    bool        active_{};
+    Storage                      *storage_;
+    std::size_t                   chunk_count_{};
+    std::size_t                   extent_{};
+    std::size_t                   generation_{};
+    std::optional<outer_position> last_chunk_;
+    std::size_t                   tail_extent_{};
+    bool                          closed_{};
+    bool                          active_{};
 };
+
+// A flat byte container is one borrowed range; no descriptor allocation is
+// needed. Nested storage remains referenced directly.
+template <typename Storage, bool Flat = ResumableByteChunk<Storage>> struct source_storage {
+    explicit source_storage(Storage &storage) : storage_(&storage) {}
+    Storage &get() { return *storage_; }
+    Storage *storage_;
+};
+
+template <typename Storage> struct source_storage<Storage, true> {
+    explicit source_storage(Storage &storage) : storage_{std::ranges::ref_view<Storage>{storage}} {}
+    auto                                         &get() { return storage_; }
+    std::array<std::ranges::ref_view<Storage>, 1> storage_;
+};
+
+template <typename Storage> using source_chunks = std::remove_reference_t<decltype(std::declval<source_storage<Storage> &>().get())>;
 
 } // namespace detail
 
-template <detail::ResumableChunkStorage Storage> class input_source : public detail::chunk_source<Storage> {
+template <detail::ResumableStorage Storage> class input_source {
+    using chunks_type = detail::chunk_source<detail::source_chunks<Storage>>;
+
   public:
-    using iterator      = typename detail::chunk_source<Storage>::iterator;
+    using iterator      = typename chunks_type::iterator;
     using position_type = iterator;
 
-    explicit input_source(Storage &storage) : detail::chunk_source<Storage>(storage), committed_(this->begin()) {}
+    explicit input_source(Storage &storage) : storage_(storage), chunks_(storage_.get()), committed_(chunks_.begin()) {}
+    input_source(const input_source &)            = delete;
+    input_source &operator=(const input_source &) = delete;
+    input_source(input_source &&)                 = delete;
+    input_source &operator=(input_source &&)      = delete;
 
-    iterator committed_position() const { return committed_; }
+    iterator    begin() const { return chunks_.begin(); }
+    iterator    end() const { return chunks_.end(); }
+    iterator    committed_position() const noexcept { return committed_; }
+    auto        remaining(iterator from) const { return chunks_.remaining(from); }
+    std::size_t size() const
+        requires std::ranges::sized_range<const chunks_type>
+    {
+        return chunks_.size();
+    }
+    std::size_t remaining_size(iterator from) const
+        requires std::ranges::sized_range<const chunks_type>
+    {
+        return chunks_.remaining_size(from);
+    }
+
+    void        refresh() { chunks_.refresh(); }
+    void        acquire() { chunks_.acquire(); }
+    void        release() noexcept { chunks_.release(); }
+    void        close() { chunks_.close(); }
+    bool        eof() const { return chunks_.eof(); }
+    std::size_t generation() const { return chunks_.generation(); }
 
     void commit(iterator position) {
-        assert(this->owns(position) && position.offset() >= committed_.offset());
+        assert(chunks_.owns(position) && position.offset() >= committed_.offset());
         committed_ = position;
     }
 
+    auto        available_span(iterator from) const { return chunks_.available_span(from); }
+    auto        borrow_window(iterator &from) const { return chunks_.borrow_window(from); }
+    void        consume_window(iterator &from, std::size_t count) const { chunks_.consume_window(from, count); }
+    std::size_t advance(iterator &from, std::size_t count) const { return chunks_.advance(from, count); }
+
   private:
-    iterator committed_;
+    detail::source_storage<Storage> storage_;
+    chunks_type                     chunks_;
+    iterator                        committed_;
 };
 
-template <detail::ResumableChunkStorage Storage> auto make_input_source(Storage &storage) { return input_source<Storage>(storage); }
+template <detail::ResumableStorage Storage> auto make_input_source(Storage &storage) { return input_source<Storage>(storage); }
 
-template <detail::ResumableOutputChunkStorage Storage> class output_source {
+template <detail::ResumableOutputStorage Storage> class output_source {
+    using chunks_type = detail::chunk_source<detail::source_chunks<Storage>>;
+    static constexpr bool growable =
+        detail::ResumableByteChunk<Storage> && CborAppendOutputBuffer<Storage> && std::ranges::sized_range<Storage>;
+
   public:
     using value_type    = std::byte;
     using size_type     = std::size_t;
-    using iterator      = typename detail::chunk_source<Storage>::iterator;
+    using iterator      = typename chunks_type::iterator;
     using position_type = iterator;
 
-    explicit output_source(Storage &storage) : chunks_(storage), working_(chunks_.begin()), committed_(working_) {}
+    explicit output_source(Storage &storage)
+        : storage_(&storage), views_(storage), chunks_(views_.get()), working_([&] {
+              if constexpr (growable)
+                  return chunks_.position_at_end();
+              else
+                  return chunks_.begin();
+          }()),
+          committed_(working_) {}
+    output_source(const output_source &)            = delete;
+    output_source &operator=(const output_source &) = delete;
+    output_source(output_source &&)                 = delete;
+    output_source &operator=(output_source &&)      = delete;
 
-    template <typename... Chunks>
-        requires requires(detail::chunk_source<Storage> &source, Chunks &&...chunks) { source.append(std::forward<Chunks>(chunks)...); }
-    std::size_t append(Chunks &&...chunks) {
-        return chunks_.append(std::forward<Chunks>(chunks)...);
-    }
-
+    void        refresh() { chunks_.refresh(); }
     std::size_t generation() const { return chunks_.generation(); }
     bool        eof() const { return chunks_.eof(); }
     void        close() { chunks_.close(); }
@@ -514,88 +726,96 @@ template <detail::ResumableOutputChunkStorage Storage> class output_source {
     iterator      end() const { return working_; }
     size_type     size() const { return working_.offset(); }
     position_type position() const { return working_; }
-    position_type committed_position() const { return committed_; }
+    position_type committed_position() const noexcept { return committed_; }
     void          commit() { committed_ = working_; }
 
-    void restore(position_type position) {
-        assert(chunks_.owns(position) && position.offset() >= committed_.offset() && position.offset() <= working_.offset());
+    void restore(position_type position) noexcept {
+        assert(chunks_.can_restore(position, committed_, working_));
         working_ = position;
     }
 
     auto remaining_output() const { return chunks_.remaining(working_); }
     auto available_output_span() { return borrow_window(); }
 
-    // Publish bytes already written through the current contiguous window.
+    // Growable containers construct bytes through append, never by exposing
+    // reserved but unconstructed capacity as a writable span.
+    std::optional<std::span<std::byte>> borrow_window() {
+        auto window = chunks_.borrow_output_window(working_);
+        if constexpr (growable) {
+            if (window && window->empty())
+                return std::nullopt;
+        }
+        return window;
+    }
+    void consume_window(std::size_t count) { chunks_.consume_window(working_, count); }
     void advance(std::size_t count) {
         [[maybe_unused]] const auto advanced = chunks_.advance(working_, count);
         assert(advanced == count);
     }
 
-    void push_back(std::byte value) {
-        if (!chunks_.write_byte(working_, value)) {
-            throw detail::encode_status_exception{status_code::incomplete};
-        }
-    }
-
-    void write(std::span<const std::byte> bytes) {
-        while (!bytes.empty()) {
-            if (auto available = available_output_span()) {
-                if (available->empty()) {
-                    throw detail::encode_status_exception{status_code::incomplete};
-                }
+    std::size_t write(std::span<const std::byte> bytes) {
+        const auto requested = bytes.size();
+        while (!bytes.empty() && working_ != chunks_.end()) {
+            if (const auto available = chunks_.borrow_output_window(working_)) {
                 const auto amount = std::min(bytes.size(), available->size());
                 std::memcpy(available->data(), bytes.data(), amount);
                 chunks_.consume_window(working_, amount);
                 bytes = bytes.subspan(amount);
             } else {
-                push_back(bytes.front());
+                [[maybe_unused]] const auto written = chunks_.write_byte(working_, bytes.front());
+                assert(written);
                 bytes = bytes.subspan(1);
             }
         }
-    }
-
-    template <std::input_iterator It, std::sentinel_for<It> Sentinel> void insert(iterator at, It first, Sentinel last) {
-        assert(at == end());
-        if (first == last) {
-            return;
-        }
-        if constexpr (std::contiguous_iterator<It> && std::sized_sentinel_for<Sentinel, It> && IsCborBufferByte<std::iter_value_t<It>>) {
-            write({reinterpret_cast<const std::byte *>(std::to_address(first)), static_cast<std::size_t>(last - first)});
-        } else {
-            for (; first != last; ++first) {
-                push_back(static_cast<std::byte>(*first));
+        if constexpr (growable) {
+            if (!bytes.empty() && !eof()) {
+                if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
+                    throw std::length_error("CBOR output byte offset overflow");
+                using byte_type = std::ranges::range_value_t<Storage>;
+                if constexpr (std::same_as<byte_type, std::byte>) {
+                    storage_->insert(std::ranges::end(*storage_), bytes.begin(), bytes.end());
+                } else {
+                    for (const auto byte : bytes)
+                        storage_->push_back(static_cast<byte_type>(byte));
+                }
+                chunks_.refresh();
+                working_ = chunks_.position_at_end();
+                return requested;
             }
         }
+        return requested - bytes.size();
     }
 
-    void insert(iterator at, std::initializer_list<std::byte> bytes) { insert(at, bytes.begin(), bytes.end()); }
-
   private:
-    friend struct detail::resumable_source_access;
-
-    auto borrow_window() { return chunks_.borrow_output_window(working_); }
-    void consume_window(std::size_t count) { chunks_.consume_window(working_, count); }
-
-    detail::chunk_source<Storage> chunks_;
-    iterator                      working_;
-    iterator                      committed_;
+    Storage                        *storage_;
+    detail::source_storage<Storage> views_;
+    chunks_type                     chunks_;
+    iterator                        working_;
+    iterator                        committed_;
 };
 
-template <detail::ResumableOutputChunkStorage Storage> auto make_output_source(Storage &storage) { return output_source<Storage>(storage); }
+template <detail::ResumableOutputStorage Storage> auto make_output_source(Storage &storage) { return output_source<Storage>(storage); }
 
 namespace detail {
 
-template <typename Storage> struct appender<output_source<Storage>, false> {
-    void reserve_for_append(output_source<Storage> &, std::uint64_t) const {}
-    void operator()(output_source<Storage> &source, std::byte value) { source.push_back(value); }
-    void operator()(output_source<Storage> &source, std::span<const std::byte> values) { source.write(values); }
-    void operator()(output_source<Storage> &source, std::string_view value) {
-        source.write({reinterpret_cast<const std::byte *>(value.data()), value.size()});
+// Ordinary encoders use this library-owned bridge for every public adapter.
+// A consumer only implements the source protocol and reports partial writes.
+template <ResumableOutputSource Source> struct is_segment_output_buffer<Source> : std::true_type {};
+
+template <ResumableOutputSource Source> struct appender<Source, false> {
+    void reserve_for_append(Source &, std::uint64_t) const {}
+    void operator()(Source &source, std::byte value) { (*this)(source, std::span<const std::byte>{&value, 1}); }
+    void operator()(Source &source, std::span<const std::byte> values) {
+        if (source.write(values) != values.size())
+            throw encode_status_exception{status_code::incomplete};
+    }
+    void operator()(Source &source, std::string_view value) {
+        (*this)(source, {reinterpret_cast<const std::byte *>(value.data()), value.size()});
     }
 
-    template <typename... Values> void multi_append(output_source<Storage> &source, Values... values) {
+    template <typename... Values> void multi_append(Source &source, Values... values) {
         const std::byte bytes[]{static_cast<std::byte>(values)...};
-        source.write(bytes);
+        (*this)(source, std::span<const std::byte>{bytes});
     }
 };
 

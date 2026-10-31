@@ -329,6 +329,26 @@ template <typename T> struct reader_size_type<T, false, true> {
     using type = std::ranges::range_size_t<const std::remove_cvref_t<T>>;
 };
 
+template <typename T, typename Position>
+concept HasRemainingInputSize = requires(const T &input, const Position &position) {
+    { input.remaining_size(position) } -> std::convertible_to<std::size_t>;
+};
+
+template <typename T>
+concept HasOutputPositionOffset = requires(const T &output) {
+    { output.position().offset() } -> std::integral;
+};
+
+template <typename T>
+concept HasOutputTotalSize = requires(const T &output) {
+    { output.total_size() } -> std::integral;
+};
+
+template <typename T>
+concept OutputByteSegmentRange = std::ranges::forward_range<const T> && requires(std::ranges::range_reference_t<const T> segment) {
+    { segment.bytes() } -> std::same_as<std::span<const std::byte>>;
+};
+
 [[nodiscard]] constexpr auto negative_seek_magnitude(std::ptrdiff_t value) noexcept {
     using magnitude_type = std::make_unsigned_t<std::ptrdiff_t>;
     if (value == std::numeric_limits<std::ptrdiff_t>::min()) {
@@ -389,9 +409,12 @@ template <typename T> struct reader<T, false> {
     constexpr reader(const T &container) : position_(std::ranges::begin(container)) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool empty(const T &container) const noexcept { return position_ == std::ranges::end(container); }
-    constexpr bool empty(const T &container, size_type offset) const noexcept {
-        if constexpr (std::ranges::sized_range<const T>) {
+    constexpr bool empty(const T &container) const { return position_ == std::ranges::end(container); }
+    constexpr bool empty(const T &container, size_type offset) const {
+        if constexpr (HasRemainingInputSize<T, iterator>) {
+            // A retained range may start after an already reclaimed prefix.
+            return offset >= container.remaining_size(position_);
+        } else if constexpr (std::ranges::sized_range<const T>) {
             const auto range_size = static_cast<size_type>(std::ranges::size(container));
             return current_offset_ >= range_size || offset >= (range_size - current_offset_);
         }
@@ -405,14 +428,14 @@ template <typename T> struct reader<T, false> {
         }
         return false;
     }
-    constexpr value_type read(const T &) noexcept {
+    constexpr value_type read(const T &) {
         auto result = static_cast<value_type>(*position_);
         ++position_;
         ++current_offset_;
         return result;
     }
 
-    constexpr value_type read(const T &, size_type offset) noexcept {
+    constexpr value_type read(const T &, size_type offset) {
         auto it = position_;
         std::advance(it, static_cast<std::ptrdiff_t>(offset));
         return static_cast<value_type>(*it);

@@ -105,14 +105,16 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto         decoder = make_resumable_decoder(chunks);
         std::string  actual;
         auto         original = std::optional{decoder(actual)};
-        REQUIRE((*original)(std::span<const std::byte>{bytes}.first(2)) == resume_state::need_input);
+        chunks.emplace_back(std::span<const std::byte>{bytes}.first(2));
+        REQUIRE(original->resume() == resume_state::need_input);
 
         std::optional<operation_result> result;
         decltype(original)              moved;
         auto                            consumer = await_result(*original, result, [&] { moved.reset(); });
         moved.emplace(std::move(*original));
         original.reset();
-        const auto state = (*moved)(std::span<const std::byte>{bytes}.subspan(2));
+        chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(2));
+        const auto state = moved->resume();
 
         CHECK(state == resume_state::done);
         CHECK_FALSE(moved);
@@ -147,7 +149,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         REQUIRE(make_encoder(bytes)(expected));
         int  actual{};
         auto operation = decoder(actual);
-        REQUIRE(operation(bytes) == resume_state::done);
+        chunks.emplace_back(bytes);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         CHECK(actual == expected);
     }
@@ -180,9 +183,11 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto                            consumer = await_result(operation, result, [&] { resumed = true; });
 
         REQUIRE_FALSE(consumer.done());
-        operation(std::span<const std::byte>{bytes}.first(1));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(1));
+        operation.resume();
         CHECK_FALSE(resumed);
-        operation(std::span<const std::byte>{bytes}.subspan(1));
+        storage.emplace_back(std::span<const std::byte>{bytes}.subspan(1));
+        operation.resume();
 
         CHECK(resumed);
         REQUIRE(consumer.done());
@@ -217,7 +222,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         std::optional<operation_result> result;
         auto                            consumer = await_result(*operation, result, std::move(on_complete));
         REQUIRE_FALSE(consumer.done());
-        (*operation)(bytes);
+        storage.emplace_back(bytes);
+        operation->resume();
 
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -245,7 +251,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto                            consumer = await_result(*operation, result, [&] { operation.reset(); });
 
         REQUIRE_FALSE(consumer.done());
-        (*operation)(bytes);
+        storage.emplace_back(bytes);
+        operation->resume();
 
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -276,7 +283,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         std::optional<operation_result> result;
         auto                            replacement = await_result(operation, result, [] {});
         REQUIRE_FALSE(replacement.done());
-        operation(bytes);
+        storage.emplace_back(bytes);
+        operation.resume();
 
         REQUIRE(replacement.done());
         CHECK_NOTHROW(replacement.rethrow());
@@ -294,14 +302,16 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto         source = make_input_source(storage);
         std::string  actual;
         auto         original = std::optional{make_resumable_decoder(source)(actual)};
-        original->operator()(std::span<const std::byte>{bytes}.first(3));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(3));
+        original->resume();
         std::optional<operation_result> result;
         auto                            consumer = await_result(*original, result, [] {});
         REQUIRE_FALSE(consumer.done());
 
         auto moved = std::move(*original);
         original.reset();
-        moved(std::span<const std::byte>{bytes}.subspan(3));
+        storage.emplace_back(std::span<const std::byte>{bytes}.subspan(3));
+        moved.resume();
 
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -320,7 +330,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         int           frames_destroyed{};
         hook_lifetime actual{{}, &frames_destroyed};
         auto          operation = make_resumable_decoder(source)(actual);
-        operation(std::span<const std::byte>{bytes}.first(2));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(2));
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(frames_destroyed == 0);
 
@@ -371,13 +382,17 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto                       consumer = collect_values(generator, actual, consumed, failure);
         REQUIRE_FALSE(consumer.done());
 
-        SUBCASE("whole batch") { generator(bytes, end_of_input); }
+        SUBCASE("whole batch") {
+            storage.emplace_back(bytes);
+            generator.finish();
+        }
         SUBCASE("one byte at a time") {
             for (std::size_t index = 0; index < bytes.size(); ++index) {
-                generator(std::span<const std::byte>{bytes}.subspan(index, 1));
+                storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+                generator.resume();
             }
             CHECK_FALSE(consumer.done());
-            generator(end_of_input);
+            generator.finish();
         }
 
         REQUIRE(consumer.done());

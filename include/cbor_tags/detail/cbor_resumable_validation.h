@@ -84,6 +84,8 @@ template <typename Source> class resumable_validation_context : public resumable
 
   public:
     using base::base;
+    void suspend() { flush_window(); }
+
     resumable<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
         resumable_scalar_batch<> batch{.remaining = request.count, .indefinite = request.until_eof};
@@ -114,7 +116,7 @@ template <typename Source> class resumable_validation_context : public resumable
     void flush_window() {
         if (pending_ != 0) {
             auto &reader = this->ordinary().reader_;
-            this->source().consume_window(reader.position_, pending_);
+            resumable_source_access::consume_window(this->source(), reader.position_, pending_);
             reader.current_offset_ += pending_;
             this->commit();
         }
@@ -133,7 +135,7 @@ template <typename Source> class resumable_validation_context : public resumable
 
     void refresh_window() {
         flush_window();
-        if (const auto window = this->source().borrow_window(this->ordinary().reader_.position_))
+        if (const auto window = resumable_source_access::borrow_window(this->source(), this->ordinary().reader_.position_))
             window_ = *window;
     }
 

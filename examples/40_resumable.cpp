@@ -5,8 +5,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <iostream>
-#include <list>
 #include <span>
 #include <string>
 #include <vector>
@@ -30,26 +30,28 @@ int main() {
     const auto encoded = ct::make_encoder(buffer)(sent, sequence);
     assert(encoded);
 
-    // Descriptors borrow the bytes; the decoder keeps the position across feeds.
+    // The decoder borrows an ordinary container and keeps its logical position.
     const auto bytes = std::span<const std::byte>{buffer};
-    std::list<std::span<const std::byte>> chunks;
-    auto decoder = ct::make_resumable_decoder(chunks);
+    std::deque<std::byte> input;
+    auto decoder = ct::make_resumable_decoder(input);
     Message received;
     std::uint32_t received_sequence{};
     auto operation = decoder(received, received_sequence);
 
     // This first chunk contains only headers, so the message still needs input.
     const auto first_chunk = bytes.first(2);
-    const auto first_state = operation(first_chunk);
+    input.insert(input.end(), first_chunk.begin(), first_chunk.end());
+    const auto first_state = operation.resume();
     assert(first_state == ct::resume_state::need_input);
-    assert(chunks.size() == 1);
+    assert(input.size() == first_chunk.size());
     std::cout << "first input: " << example::to_hex(first_chunk) << '\n';
 
     // subspan(2) supplies every byte after the two already supplied.
     const auto last_chunk = bytes.subspan(2);
-    const auto final_state = operation(last_chunk);
+    input.insert(input.end(), last_chunk.begin(), last_chunk.end());
+    const auto final_state = operation.resume();
     assert(final_state == ct::resume_state::done);
-    assert(chunks.size() == 2);
+    assert(input.size() == buffer.size());
     std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
     // Typed decoding finishes when all requested values are available, without EOF.

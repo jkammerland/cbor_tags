@@ -122,10 +122,13 @@ template <template <typename> typename Codec> void check_indefinite_integer_over
         override_calls::decoded = 0;
         auto operation          = make_resumable_decoder<Codec>(source)(actual);
         if (bytewise) {
-            for (const auto &byte : bytes)
-                operation(std::span{&byte, 1});
+            for (const auto &byte : bytes) {
+                storage.emplace_back(std::span{&byte, 1});
+                operation.resume();
+            }
         } else {
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -150,10 +153,13 @@ template <template <typename> typename Codec> void check_integer_map_override(st
             override_calls::decoded = 0;
             auto decoder            = make_resumable_decoder<Codec>(source)(actual);
             if (bytewise) {
-                for (const auto &byte : wire)
-                    decoder(std::span{&byte, 1});
+                for (const auto &byte : wire) {
+                    input_storage.emplace_back(std::span{&byte, 1});
+                    decoder.resume();
+                }
             } else {
-                decoder(wire);
+                input_storage.emplace_back(wire);
+                decoder.resume();
             }
             REQUIRE(decoder.done());
             REQUIRE(decoder.result());
@@ -167,10 +173,13 @@ template <template <typename> typename Codec> void check_integer_map_override(st
             override_calls::encoded     = 0;
             auto encoder                = make_resumable_encoder<Codec>(sink)(value);
             if (bytewise) {
-                for (auto &byte : bytes)
-                    encoder(std::span{&byte, 1});
+                for (auto &byte : bytes) {
+                    output_storage.emplace_back(std::span{&byte, 1});
+                    encoder.resume();
+                }
             } else {
-                encoder(bytes);
+                output_storage.emplace_back(bytes);
+                encoder.resume();
             }
             REQUIRE(encoder.done());
             REQUIRE(encoder.result());
@@ -213,14 +222,17 @@ TEST_SUITE("roundtrip/resumable") {
         auto             source = make_input_source(storage);
         T                actual;
         auto             operation = make_resumable_decoder(source)(actual);
-        operation(chunk{counted_byte_iterator{header.begin(), &increments}, counted_byte_iterator{header.end(), &increments}});
+        storage.emplace_back(chunk{counted_byte_iterator{header.begin(), &increments}, counted_byte_iterator{header.end(), &increments}});
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(actual.empty());
         CHECK(actual.capacity() >= expected.size());
         CHECK(increments == header.size());
         const auto capacity = actual.capacity();
 
-        operation(chunk{counted_byte_iterator{payload.begin(), &increments}, counted_byte_iterator{payload.end(), &increments}});
+        storage.emplace_back(chunk{counted_byte_iterator{payload.begin(), &increments}, counted_byte_iterator{payload.end(), &increments}});
+
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == wire.size());
@@ -241,9 +253,12 @@ TEST_SUITE("roundtrip/resumable") {
                 auto         source = make_input_source(input_storage);
                 Map          actual;
                 auto         decoder = make_resumable_decoder(source)(actual);
-                decoder(input.first(cut));
-                if (!decoder.done())
-                    decoder(input.subspan(cut), end_of_input);
+                input_storage.emplace_back(input.first(cut));
+                decoder.resume();
+                if (!decoder.done()) {
+                    input_storage.emplace_back(input.subspan(cut));
+                    decoder.finish();
+                }
                 REQUIRE(decoder.done());
                 REQUIRE(decoder.result());
                 CHECK(*decoder.result() == wire.size());
@@ -253,9 +268,12 @@ TEST_SUITE("roundtrip/resumable") {
                 output_chunks          output_storage;
                 auto                   sink    = make_output_source(output_storage);
                 auto                   encoder = make_resumable_encoder(sink)(value);
-                encoder(std::span{bytes}.first(cut));
-                if (!encoder.done())
-                    encoder(std::span{bytes}.subspan(cut));
+                output_storage.emplace_back(std::span{bytes}.first(cut));
+                encoder.resume();
+                if (!encoder.done()) {
+                    output_storage.emplace_back(std::span{bytes}.subspan(cut));
+                    encoder.resume();
+                }
                 REQUIRE(encoder.done());
                 REQUIRE(encoder.result());
                 CHECK(*encoder.result() == bytes.size());
@@ -285,9 +303,12 @@ TEST_SUITE("roundtrip/resumable") {
             input_chunks                                           storage;
             auto                                                   source    = make_input_source(storage);
             auto                                                   operation = make_resumable_decoder(source)(actual);
-            operation(std::span<const std::byte>{wire}.first(cut));
-            if (!operation.done())
-                operation(std::span<const std::byte>{wire}.subspan(cut), end_of_input);
+            storage.emplace_back(std::span<const std::byte>{wire}.first(cut));
+            operation.resume();
+            if (!operation.done()) {
+                storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
+                operation.finish();
+            }
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == wire.size());
@@ -315,7 +336,9 @@ TEST_SUITE("roundtrip/resumable") {
         auto               source = make_input_source(storage);
         signed_ordered_map actual;
         auto               operation = make_resumable_decoder(source)(actual);
-        operation(chunk{bytes.begin(), middle}, chunk{middle, bytes.end()});
+        storage.emplace_back(chunk{bytes.begin(), middle});
+        storage.emplace_back(chunk{middle, bytes.end()});
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == wire.size());
@@ -340,9 +363,12 @@ TEST_SUITE("roundtrip/resumable") {
             std::deque<T> actual;
             auto          indefinite = as_indefinite{actual};
             auto          operation  = make_resumable_decoder(source)(indefinite);
-            operation(input.first(cut));
-            if (!operation.done())
-                operation(input.subspan(cut), end_of_input);
+            storage.emplace_back(input.first(cut));
+            operation.resume();
+            if (!operation.done()) {
+                storage.emplace_back(input.subspan(cut));
+                operation.finish();
+            }
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
@@ -367,7 +393,9 @@ TEST_SUITE("roundtrip/resumable") {
         auto                      source = make_input_source(storage);
         std::vector<std::int64_t> actual{99};
         auto                      operation = make_resumable_decoder(source)(actual);
-        operation(chunk{bytes.begin(), middle}, chunk{middle, bytes.end()});
+        storage.emplace_back(chunk{bytes.begin(), middle});
+        storage.emplace_back(chunk{middle, bytes.end()});
+        operation.resume();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());

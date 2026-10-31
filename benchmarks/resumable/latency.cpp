@@ -132,7 +132,9 @@ latency_sample run_trial(const latency_options &options, const std::string &work
         input.start(start);
         for (std::size_t consumed = 0; consumed < input.chunks.size();) {
             const auto available = input.wait_after(consumed);
-            operation(std::span{input.chunks}.subspan(consumed, available - consumed));
+            descriptors.insert(descriptors.end(), input.chunks.begin() + static_cast<std::ptrdiff_t>(consumed),
+                               input.chunks.begin() + static_cast<std::ptrdiff_t>(available));
+            operation.resume();
             consumed = available;
         }
         completed         = clock_type::now();

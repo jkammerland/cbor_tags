@@ -1,0 +1,378 @@
+#include "resumable_ring_fixture.h"
+
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <cbor_tags/cbor_resumable_source.h>
+#include <cbor_tags/codec/typed_array.h>
+#include <cstddef>
+#include <deque>
+#include <doctest/doctest.h>
+#include <list>
+#include <ranges>
+#include <span>
+#include <string>
+#include <vector>
+
+using namespace cbor::tags;
+
+namespace {
+struct ordinary_item {
+    std::string                      value;
+    template <typename Encoder> auto encode(Encoder &encoder) const { return encoder(value); }
+};
+
+template <typename Storage>
+concept ReservableStorage = requires(Storage &storage) { storage.reserve(std::size_t{}); };
+
+struct counted_customization {
+    int *calls;
+
+    template <typename Encoder> auto encode(Encoder &encoder) const {
+        ++*calls;
+        return encoder(65536);
+    }
+};
+} // namespace
+
+TEST_SUITE("roundtrip/resumable_storage") {
+    TEST_CASE_TEMPLATE("flat input growth preserves every split position", Storage, std::vector<std::byte>, std::deque<std::byte>) {
+        const std::vector<std::string> expected{"first", std::string(48, 'x'), "last"};
+        std::vector<std::byte>         wire;
+        REQUIRE(make_encoder(wire)(expected));
+
+        for (std::size_t cut = 0; cut != wire.size(); ++cut) {
+            CAPTURE(cut);
+            Storage                  input(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto                     decoder = make_resumable_decoder(input);
+            std::vector<std::string> actual;
+            auto                     operation = decoder(actual);
+            REQUIRE_FALSE(operation.done());
+            const auto committed = operation.committed_bytes();
+            CHECK(operation.resume() == resume_state::need_input);
+            CHECK(operation.committed_bytes() == committed);
+
+            // Force relocation for vector, while exercising ordinary deque growth too.
+            if constexpr (ReservableStorage<Storage>) {
+                input.reserve(input.capacity() + wire.size());
+            }
+            input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(operation.committed_bytes() == wire.size());
+            CHECK(actual == expected);
+            CHECK(operation.resume() == resume_state::done);
+        }
+    }
+
+    TEST_CASE_TEMPLATE("growable output appends after existing bytes", Storage, std::vector<std::byte>, std::deque<std::byte>) {
+        const std::string expected = "a growable destination";
+        Storage           output;
+        REQUIRE(make_encoder(output)(24));
+        const auto prefix_size = output.size();
+        auto       encoder     = make_resumable_encoder(output);
+        auto       operation   = encoder(expected);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == output.size() - prefix_size);
+        CHECK(*operation.result() == operation.committed_bytes());
+
+        int         prefix{};
+        std::string actual;
+        REQUIRE(make_decoder(output)(prefix, actual));
+        CHECK(prefix == 24);
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("validator refreshes relocated contiguous input after every split") {
+        const std::vector<std::string> expected{"first", std::string(48, 'v'), "last"};
+        std::vector<std::byte>         wire;
+        REQUIRE(make_encoder(wire)(expected));
+
+        for (std::size_t cut = 0; cut != wire.size(); ++cut) {
+            CAPTURE(cut);
+            std::vector<std::byte> input(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto                   source    = make_input_source(input);
+            auto                   operation = make_resumable_validator(source);
+            REQUIRE_FALSE(operation.done());
+
+            input.reserve(input.capacity() + wire.size());
+            input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
+            REQUIRE(operation.finish() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(operation.committed_bytes() == wire.size());
+        }
+    }
+
+    TEST_CASE("nested tail growth refreshes relocated inner bytes") {
+        const std::string      expected(96, 't');
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(expected));
+        std::vector<std::byte>                                   tail(wire.begin(), wire.begin() + 7);
+        std::list<std::ranges::ref_view<std::vector<std::byte>>> chunks;
+        chunks.emplace_back(tail);
+        auto        decoder = make_resumable_decoder(chunks);
+        std::string actual;
+        auto        operation = decoder(actual);
+        REQUIRE_FALSE(operation.done());
+        CHECK(operation.committed_bytes() == tail.size());
+
+        tail.reserve(tail.capacity() + wire.size());
+        tail.insert(tail.end(), wire.begin() + 7, wire.end());
+        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(actual == expected);
+        CHECK(operation.committed_bytes() == wire.size());
+    }
+
+    TEST_CASE("owning nested vectors survive outer and inner relocation") {
+        const std::string      expected(96, 'n');
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(expected));
+        std::vector<std::vector<std::byte>> chunks;
+        chunks.reserve(1);
+        chunks.emplace_back(wire.begin(), wire.begin() + 3);
+        auto        decoder = make_resumable_decoder(chunks);
+        std::string actual;
+        auto        operation = decoder(actual);
+        REQUIRE_FALSE(operation.done());
+
+        chunks.reserve(chunks.capacity() + 2);
+        chunks.emplace_back(wire.begin() + 3, wire.begin() + 7);
+        CHECK(operation.resume() == resume_state::need_input);
+        CHECK(operation.committed_bytes() == 7);
+
+        auto &tail = chunks.back();
+        tail.reserve(tail.capacity() + wire.size());
+        tail.insert(tail.end(), wire.begin() + 7, wire.end());
+        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(actual == expected);
+        CHECK(operation.committed_bytes() == wire.size());
+    }
+
+    TEST_CASE("moving an exhausted owning list rebinds its end boundary") {
+        const std::string      expected(32, 'l');
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(expected));
+        for (const std::size_t cut : {std::size_t{0}, std::size_t{3}}) {
+            CAPTURE(cut);
+            std::vector<std::list<std::byte>> chunks;
+            chunks.reserve(1);
+            chunks.emplace_back(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto        decoder = make_resumable_decoder(chunks);
+            std::string actual;
+            auto        operation = decoder(actual);
+            REQUIRE_FALSE(operation.done());
+
+            chunks.reserve(chunks.capacity() + 2);
+            chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(actual == expected);
+            CHECK(operation.committed_bytes() == wire.size());
+        }
+    }
+
+    TEST_CASE("nested output tail growth preserves tentative ordinary writes") {
+        std::vector<std::byte>                                   tail(1);
+        std::list<std::ranges::ref_view<std::vector<std::byte>>> chunks;
+        chunks.emplace_back(tail);
+        auto encoder   = make_resumable_encoder(chunks);
+        auto operation = encoder(65536);
+        REQUIRE_FALSE(operation.done());
+        CHECK(operation.committed_bytes() == 0);
+
+        tail.resize(16);
+        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.result());
+        auto committed = std::span<const std::byte>{tail}.first(operation.committed_bytes());
+        int  actual{};
+        REQUIRE(make_decoder(committed)(actual));
+        CHECK(actual == 65536);
+    }
+
+    TEST_CASE("committed byte counts survive cancellation and terminal truncation") {
+        const std::string      expected(32, 'c');
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(expected));
+
+        for (const bool cancel : {false, true}) {
+            std::vector<std::byte> input(wire.begin(), wire.begin() + 5);
+            auto                   decoder = make_resumable_decoder(input);
+            std::string            actual;
+            auto                   operation = decoder(actual);
+            REQUIRE_FALSE(operation.done());
+            REQUIRE(operation.committed_bytes() == input.size());
+
+            if (cancel) {
+                operation.cancel();
+            } else {
+                operation.finish();
+            }
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == (cancel ? status_code::cancelled : status_code::incomplete));
+            CHECK(operation.committed_bytes() == input.size());
+        }
+    }
+
+    TEST_CASE("exclusive acquisition precedes eager customization work") {
+        std::list<std::span<std::byte>> chunks;
+        auto                            encoder = make_resumable_encoder(chunks);
+        int                             calls{};
+        const counted_customization     value{&calls};
+        auto                            operation = encoder(value);
+        REQUIRE_FALSE(operation.done());
+        const auto before = calls;
+
+        CHECK_THROWS_AS(encoder(value), std::logic_error);
+        CHECK(calls == before);
+        CHECK(operation.committed_bytes() == 0);
+    }
+
+    TEST_CASE("finishing a completed generator item closes its following request") {
+        std::vector<std::byte> input;
+        REQUIRE(make_encoder(input)(42));
+        auto  source = make_input_source(input);
+        auto  items  = make_resumable_generator<int>(source);
+        auto &first  = items.next();
+        REQUIRE(first.done());
+        REQUIRE(first.result());
+        CHECK(items.value() == 42);
+
+        CHECK(items.finish() == resume_state::done);
+        auto &end = items.next();
+        REQUIRE(end.done());
+        REQUIRE(end.result());
+        CHECK(*end.result() == 0);
+        CHECK(end.committed_bytes() == 0);
+        CHECK(items.done());
+    }
+}
+
+TEST_SUITE("roundtrip/resumable_storage") {
+    TEST_CASE("public sized source reclaims a nonzero prefix during decoding") {
+        const std::vector<std::string> expected{"first", std::string(96, 'r'), "last"};
+        std::vector<std::byte>         wire;
+        REQUIRE(make_encoder(wire)(expected));
+        resumable_test::ring_source<false, 11> source;
+        std::vector<std::string>               actual;
+        auto                                   operation = make_resumable_decoder(source)(actual);
+
+        for (std::size_t supplied = 0; supplied != wire.size();) {
+            const auto count =
+                source.append(std::span<const std::byte>{wire}.subspan(supplied, std::min(std::size_t{3}, wire.size() - supplied)));
+            REQUIRE(count != 0);
+            supplied += count;
+            operation.resume();
+            CHECK(source.committed_position().offset() == 100 + operation.committed_bytes());
+            source.reclaim(source.committed_position().offset());
+            CHECK(source.size() <= 11);
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == wire.size());
+        CHECK(actual == expected);
+        CHECK(source.size() == 0);
+    }
+
+    TEST_CASE("public sized source preserves a partial typed element across reclamation") {
+        const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
+        std::vector<std::byte>                    wire;
+        REQUIRE(make_encoder<codec::typed_array>(wire)(expected));
+        resumable_test::ring_source<false, 11> source;
+        rfc8746::typed_array<std::uint32_t>    actual;
+        auto                                   operation = make_resumable_decoder<codec::typed_array>(source)(actual);
+
+        for (const auto &byte : wire) {
+            REQUIRE(source.append(std::span{&byte, 1}) == 1);
+            operation.resume();
+            source.reclaim(source.committed_position().offset());
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == wire.size());
+        CHECK(actual.values() == expected.values());
+    }
+
+    TEST_CASE("public output source publishes each byte once through partial drains") {
+        const std::vector<std::string>        expected{"first", std::string(96, 'w'), "last"};
+        resumable_test::ring_source<true, 11> sink;
+        auto                                  operation = make_resumable_encoder(sink)(expected);
+        std::vector<std::byte>                delivered;
+        auto                                  published = sink.begin().offset();
+
+        // A partial drain leaves an unsent committed tail while encoding can continue.
+        while (!operation.done() || published != sink.committed_position().offset()) {
+            const auto count = std::min(std::size_t{3}, sink.committed_position().offset() - published);
+            REQUIRE(count != 0);
+            auto cursor = sink.begin();
+            for (std::size_t index = 0; index != count; ++index, ++cursor) {
+                delivered.push_back(*cursor);
+            }
+            published += count;
+            sink.reclaim(published);
+            operation.resume();
+        }
+
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == delivered.size());
+        CHECK(sink.size() == 0);
+        std::vector<std::string> actual;
+        auto                     decoder = make_decoder(delivered);
+        REQUIRE(decoder(actual));
+        CHECK(actual == expected);
+        CHECK(decoder.tell() == delivered.end());
+    }
+
+    TEST_CASE("public output source retains a partially written typed element") {
+        const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
+        resumable_test::ring_source<true, 7>      sink;
+        auto                                      operation = make_resumable_encoder<codec::typed_array>(sink)(expected);
+        std::vector<std::byte>                    delivered;
+        auto                                      published = sink.begin().offset();
+        bool                                      observed_tentative{};
+
+        while (!operation.done() || published != sink.committed_position().offset()) {
+            observed_tentative = observed_tentative || sink.position().offset() > sink.committed_position().offset();
+            const auto count   = std::min(std::size_t{2}, sink.committed_position().offset() - published);
+            REQUIRE(count != 0);
+            auto cursor = sink.begin();
+            for (std::size_t index = 0; index != count; ++index, ++cursor) {
+                delivered.push_back(*cursor);
+            }
+            published += count;
+            sink.reclaim(published);
+            operation.resume();
+        }
+
+        REQUIRE(operation.result());
+        CHECK(observed_tentative);
+        CHECK(operation.committed_bytes() == delivered.size());
+        rfc8746::typed_array<std::uint32_t> actual;
+        auto                                decoder = make_decoder<codec::typed_array>(delivered);
+        REQUIRE(decoder(actual));
+        CHECK(actual.values() == expected.values());
+        CHECK(decoder.tell() == delivered.end());
+    }
+
+    TEST_CASE("bounded ordinary retry units require explicit admission handling") {
+        const ordinary_item                   expected{std::string(96, 'x')};
+        resumable_test::ring_source<true, 11> sink;
+        auto                                  operation = make_resumable_encoder(sink)(expected);
+        REQUIRE_FALSE(operation.done());
+        CHECK(operation.committed_bytes() == 0);
+        CHECK(operation.resume() == resume_state::need_output);
+        CHECK(operation.committed_bytes() == 0);
+
+        // The caller rejects an indivisible item beyond its retention budget.
+        operation.cancel();
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::cancelled);
+        CHECK(sink.position() == sink.committed_position());
+    }
+}

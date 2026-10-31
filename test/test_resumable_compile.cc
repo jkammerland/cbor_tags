@@ -1,5 +1,7 @@
 #include <cbor_tags/cbor_resumable.h>
 #include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <list>
 #include <span>
 #include <type_traits>
@@ -57,6 +59,15 @@ static_assert(!accepts_encoder_storage<input_storage &>);
 static_assert(!accepts_encoder_storage<output_storage>);
 static_assert(accepts_decoder_storage<input_storage &>);
 static_assert(!accepts_decoder_storage<input_storage>);
+static_assert(accepts_decoder_storage<std::vector<std::byte> &>);
+static_assert(accepts_decoder_storage<std::deque<std::byte> &>);
+static_assert(accepts_encoder_storage<std::vector<std::byte> &>);
+static_assert(accepts_encoder_storage<std::deque<std::byte> &>);
+static_assert(accepts_decoder_storage<std::vector<std::vector<std::byte>> &>);
+static_assert(accepts_encoder_storage<std::vector<std::vector<std::byte>> &>);
+struct invalid_source {};
+static_assert(!accepts_decoder_storage<invalid_source &>);
+static_assert(!accepts_encoder_storage<invalid_source &>);
 
 template <typename Operation>
 concept has_produced = requires(const Operation &op) { op.produced(); };
@@ -64,12 +75,43 @@ template <typename Operation>
 concept has_remaining_input = requires(const Operation &op) { op.remaining_input(); };
 template <typename Operation>
 concept has_remaining_output = requires(const Operation &op) { op.remaining_output(); };
-static_assert(has_produced<encode_operation>);
+static_assert(!has_produced<encode_operation>);
+static_assert(std::is_same_v<decltype(std::declval<const encode_operation &>().committed_bytes()), std::size_t>);
+static_assert(std::is_same_v<decltype(std::declval<decode_operation &>().resume()), resume_state>);
+static_assert(!std::is_invocable_v<decode_operation &, std::span<const std::byte>>);
 static_assert(!has_produced<decode_operation>);
 static_assert(has_remaining_input<decode_operation>);
 static_assert(!has_remaining_input<encode_operation>);
 static_assert(has_remaining_output<encode_operation>);
 static_assert(!has_remaining_output<decode_operation>);
+
+// Adapter counts are exact size_t values rather than implicitly narrowed integers.
+struct narrow_size_type_source : input_source_type {
+    using size_type = std::uint8_t;
+};
+struct narrow_range_size_source : input_source_type {
+    std::uint8_t size() const;
+};
+struct converted_offset {
+    operator std::size_t() const;
+};
+struct converted_position {
+    converted_offset offset() const;
+};
+struct exact_position {
+    std::size_t offset() const;
+};
+static_assert(ResumableInputSource<input_source_type>);
+static_assert(!ResumableSource<narrow_size_type_source>);
+static_assert(!ResumableInputSource<narrow_size_type_source>);
+static_assert(!accepts_decoder_storage<narrow_size_type_source &>);
+static_assert(std::ranges::sized_range<const narrow_range_size_source>);
+static_assert(std::same_as<std::ranges::range_size_t<const narrow_range_size_source>, std::uint8_t>);
+static_assert(!ResumableInputSource<narrow_range_size_source>);
+static_assert(!accepts_decoder_storage<narrow_range_size_source &>);
+static_assert(std::convertible_to<converted_offset, std::size_t>);
+static_assert(!ResumablePosition<converted_position>);
+static_assert(ResumablePosition<exact_position>);
 
 namespace hook_contract {
 

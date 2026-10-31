@@ -127,10 +127,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
   private:
     template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
-            if (const auto span = source_.borrow_window(ordinary_.reader_.position_); span && !span->empty()) {
+            if (const auto span = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_); span && !span->empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
-                source_.consume_window(ordinary_.reader_.position_, count);
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, count);
                 ordinary_.reader_.current_offset_ += count;
                 length -= count;
             } else {
@@ -579,7 +579,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 [&] { return window.size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>(); });
         });
 
-        source_.advance(ordinary_.reader_.position_, completed);
+        resumable_source_access::consume_window(source_, ordinary_.reader_.position_, completed);
         ordinary_.reader_.current_offset_ += completed;
         commit();
         return status;
@@ -589,7 +589,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // only after the shared scalar loop has finished.
     template <typename T> status_code leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
         while (remaining != 0) {
-            const auto window = source_.available_span(ordinary_.reader_.position_);
+            const auto window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             if (!window)
                 return segmented_leaf_elements(value, append, remaining);
 
@@ -614,7 +614,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     status_code indefinite_leaf_elements(T &value, appender<T> &append, std::uint64_t &count, bool &ended, std::uint64_t minimum,
                                          std::uint64_t maximum) {
         while (!ended) {
-            const auto  window = source_.available_span(ordinary_.reader_.position_);
+            const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             status_code status;
             if (window && window->size() >= resumable_leaf_decode_size<typename T::value_type>()) {
                 decoder<std::span<const std::byte>, Options> contiguous(*window);
@@ -626,7 +626,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                             return window->size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>();
                         });
                 });
-                source_.advance(ordinary_.reader_.position_, completed);
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, completed);
                 ordinary_.reader_.current_offset_ += completed;
             } else {
                 auto       completed = ordinary_.reader_;
@@ -651,7 +651,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         constexpr auto maximum_size =
             resumable_leaf_decode_size<typename T::key_type>() + resumable_leaf_decode_size<typename T::mapped_type>();
         while (!ended && (Indefinite || count != maximum)) {
-            const auto  window = source_.available_span(ordinary_.reader_.position_);
+            const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             status_code status;
             if (window && window->size() >= maximum_size) {
                 decoder<std::span<const std::byte>, Options> contiguous(*window);
@@ -662,7 +662,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                         [&] { completed = contiguous.reader_.position_; },
                         [&] { return window->size() - contiguous.reader_.position_ >= maximum_size; });
                 });
-                source_.advance(ordinary_.reader_.position_, completed);
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, completed);
                 ordinary_.reader_.current_offset_ += completed;
             } else {
                 auto       completed = ordinary_.reader_;

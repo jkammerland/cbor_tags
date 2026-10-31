@@ -2,7 +2,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
-#include <cbor_tags/detail/cbor_resumable_source.h>
+#include <cbor_tags/cbor_resumable_source.h>
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
@@ -30,12 +30,8 @@ static_assert(!std::ranges::contiguous_range<input_type>);
 static_assert(ct::CborOutputBuffer<output_type>);
 static_assert(std::ranges::sized_range<const output_type>);
 
-template <typename Source, typename Chunk>
-concept source_accepts = requires(Source &source, Chunk &&chunk) { source.append(std::forward<Chunk>(chunk)); };
-
-static_assert(source_accepts<input_type, std::vector<std::byte> &>);
-static_assert(!source_accepts<input_type, std::vector<std::byte>>);
-static_assert(source_accepts<input_type, std::span<const std::byte>>);
+static_assert(ct::ResumableInputSource<input_type>);
+static_assert(ct::ResumableOutputSource<output_type>);
 
 template <typename Range> auto bytes_of(Range &&range) {
     return std::vector<std::byte>(std::ranges::begin(range), std::ranges::end(range));
@@ -120,23 +116,23 @@ template <typename Storage> void check_output_windows(Storage &storage, std::spa
 
     std::size_t offset{};
     while (offset != expected.size()) {
-        const auto window = ct::detail::resumable_source_access::borrow_window(source);
+        const auto window = source.borrow_window();
         REQUIRE(window.has_value());
         REQUIRE_FALSE(window->empty());
         CHECK(source.available_output_span()->data() == window->data());
 
         // Publication advances only through the span that received these bytes.
-        ct::detail::resumable_source_access::consume_window(source, 0);
+        source.consume_window(0);
         const auto count = std::min(std::size_t{2}, window->size());
         std::copy_n(expected.begin() + static_cast<std::ptrdiff_t>(offset), count, window->begin());
-        ct::detail::resumable_source_access::consume_window(source, count);
+        source.consume_window(count);
         offset += count;
         CHECK(source.position().offset() == offset);
         CHECK(bytes_of(source) == bytes_of(expected.first(offset)));
     }
 
-    REQUIRE(ct::detail::resumable_source_access::borrow_window(source).has_value());
-    CHECK(ct::detail::resumable_source_access::borrow_window(source)->empty());
+    REQUIRE(source.borrow_window().has_value());
+    CHECK(source.borrow_window()->empty());
     CHECK(std::ranges::empty(source.remaining_output()));
     source.commit();
     CHECK(source.committed_position().offset() == expected.size());
@@ -169,7 +165,8 @@ TEST_SUITE("resumable/source") {
         const auto checkpoint = cursor;
         const auto window     = source.borrow_window(cursor);
         for (int i = 0; i != 256; ++i) {
-            source.append(second);
+            storage.emplace_back(second);
+            source.refresh();
         }
 
         // Growing vector/deque descriptors must not invalidate the borrowed bytes.
@@ -184,9 +181,11 @@ TEST_SUITE("resumable/source") {
         REQUIRE(source.advance(cursor, 256 * second.size()) == 256 * second.size());
         REQUIRE(source.borrow_window(cursor)->empty());
         const auto exhausted_offset = cursor.offset();
-        CHECK(source.append(std::span<const std::byte>{}) == 0);
+        storage.emplace_back(std::span<const std::byte>{});
+        source.refresh();
         CHECK(source.borrow_window(cursor)->empty());
-        source.append(first);
+        storage.emplace_back(first);
+        source.refresh();
         REQUIRE(source.borrow_window(cursor)->size() == first.size());
         CHECK(source.borrow_window(cursor)->data() == first.data());
         source.consume_window(cursor, first.size());
@@ -210,35 +209,38 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 1> last{};
         Storage                  storage{{}, std::span(first), {}};
         auto                     source = ct::make_output_source(storage);
-        auto                     window = ct::detail::resumable_source_access::borrow_window(source);
+        auto                     window = source.borrow_window();
         REQUIRE(window->size() == first.size());
         (*window)[0] = std::byte{1};
-        ct::detail::resumable_source_access::consume_window(source, 1);
-        window = ct::detail::resumable_source_access::borrow_window(source);
+        source.consume_window(1);
+        window = source.borrow_window();
         for (int i = 0; i != 256; ++i) {
-            source.append(second);
+            storage.emplace_back(second);
+            source.refresh();
         }
 
         CHECK(window->data() == first.data() + 1);
         (*window)[0] = std::byte{2};
         (*window)[1] = std::byte{3};
-        ct::detail::resumable_source_access::consume_window(source, window->size());
+        source.consume_window(window->size());
         CHECK(source.position().offset() == first.size());
         CHECK(bytes_of(source) == bytes_of(first));
 
         source.write(std::vector<std::byte>(256 * second.size(), std::byte{7}));
-        REQUIRE(ct::detail::resumable_source_access::borrow_window(source)->empty());
+        REQUIRE(source.borrow_window()->empty());
         const auto exhausted_offset = source.position().offset();
-        CHECK(source.append(std::span<std::byte>{}) == 0);
-        CHECK(ct::detail::resumable_source_access::borrow_window(source)->empty());
-        source.append(last);
-        window = ct::detail::resumable_source_access::borrow_window(source);
+        storage.emplace_back(std::span<std::byte>{});
+        source.refresh();
+        CHECK(source.borrow_window()->empty());
+        storage.emplace_back(last);
+        source.refresh();
+        window = source.borrow_window();
         REQUIRE(window->size() == last.size());
         CHECK(window->data() == last.data());
         (*window)[0] = std::byte{9};
-        ct::detail::resumable_source_access::consume_window(source, last.size());
+        source.consume_window(last.size());
         CHECK(source.position().offset() == exhausted_offset + last.size());
-        CHECK(ct::detail::resumable_source_access::borrow_window(source)->empty());
+        CHECK(source.borrow_window()->empty());
     }
 
     TEST_CASE("fixed descriptor spans support repeated input and output windows") {
@@ -282,7 +284,8 @@ TEST_SUITE("resumable/source") {
         auto                 source = ct::make_input_source(storage);
         T                    actual;
         auto                 operation = ct::make_resumable_decoder(source)(actual);
-        operation(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        operation.resume();
 
         REQUIRE_FALSE(operation.done());
         CHECK(actual.empty());
@@ -291,7 +294,9 @@ TEST_SUITE("resumable/source") {
         const auto capacity = actual.capacity();
 
         // Admit the complete payload so only a prewalk, not retries, can add traversal.
-        operation(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == wire.size());
@@ -316,7 +321,8 @@ TEST_SUITE("resumable/source") {
         auto                      source = ct::make_input_source(storage);
         std::vector<std::int64_t> actual;
         auto                      operation = ct::make_resumable_decoder(source)(actual);
-        operation(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        operation.resume();
 
         REQUIRE_FALSE(operation.done());
         CHECK(actual.empty());
@@ -324,7 +330,9 @@ TEST_SUITE("resumable/source") {
         CHECK(increments == header_wire.size());
         const auto capacity = actual.capacity();
 
-        operation(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == header_wire.size() + payload_wire.size());
@@ -344,8 +352,9 @@ TEST_SUITE("resumable/source") {
         auto                 source = ct::make_input_source(storage);
 
         // Admit the complete item before decoding, so retries cannot add legitimate traversal.
-        source.append(unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}},
-                      unsized_chunk{counted_iterator{middle, &increments}, counted_iterator{bytes.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{middle, &increments}, counted_iterator{bytes.end(), &increments}});
+        source.refresh();
         CHECK(increments == 0U);
         std::vector<std::int64_t> actual;
         auto                      operation = ct::make_resumable_decoder(source)(actual);
@@ -365,11 +374,14 @@ TEST_SUITE("resumable/source") {
         CHECK(cursor == source.end());
 
         const auto empty_generation = source.generation();
-        CHECK(source.append(std::span<const std::byte>{}) == 0);
-        CHECK(source.generation() == empty_generation);
-        CHECK(storage.empty());
+        storage.emplace_back(std::span<const std::byte>{});
+        source.refresh();
+        CHECK(source.generation() > empty_generation);
+        CHECK(storage.size() == 1);
 
-        source.append(std::span<const std::byte>{}, first);
+        storage.emplace_back(std::span<const std::byte>{});
+        storage.emplace_back(first);
+        source.refresh();
         CHECK(source.size() == 2);
         CHECK(*cursor == std::byte{1});
         CHECK(source.advance(cursor, 2) == 2);
@@ -378,7 +390,8 @@ TEST_SUITE("resumable/source") {
         source.commit(cursor);
 
         std::array batch{std::span<const std::byte>{}, std::span<const std::byte>(second), std::span<const std::byte>{}};
-        source.append(batch);
+        storage.insert(storage.end(), batch.begin(), batch.end());
+        source.refresh();
         CHECK(*cursor == std::byte{3});
         CHECK(source.committed_position().offset() == 2);
         CHECK(bytes_of(source.remaining(cursor)) == std::vector<std::byte>(second.begin(), second.end()));
@@ -401,7 +414,8 @@ TEST_SUITE("resumable/source") {
         source.close();
         CHECK(source.eof());
         CHECK(source.generation() > generation);
-        CHECK_THROWS_AS(source.append(first), std::logic_error);
+        source.close();
+        CHECK(source.eof());
     }
 
     TEST_CASE_TEMPLATE("input descriptors can relocate without invalidating checkpoints", Storage, std::vector<std::span<const std::byte>>,
@@ -409,7 +423,8 @@ TEST_SUITE("resumable/source") {
         std::array bytes{std::byte{5}, std::byte{6}, std::byte{7}};
         Storage    storage;
         auto       source = ct::make_input_source(storage);
-        source.append(bytes);
+        storage.emplace_back(bytes);
+        source.refresh();
 
         auto cursor = source.begin();
         ++cursor;
@@ -418,7 +433,8 @@ TEST_SUITE("resumable/source") {
         REQUIRE(cursor == source.end());
 
         for (int i = 0; i != 256; ++i) {
-            source.append(bytes);
+            storage.emplace_back(bytes);
+            source.refresh();
         }
         CHECK(*checkpoint == std::byte{6});
         CHECK(*cursor == std::byte{5});
@@ -433,8 +449,10 @@ TEST_SUITE("resumable/source") {
         std::size_t          increments{};
         unsized_storage      storage;
         auto                 source = ct::make_input_source(storage);
-        source.append(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
-        source.append(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
+        source.refresh();
+        storage.emplace_back(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
+        source.refresh();
         CHECK(increments == 0);
 
         auto cursor = source.begin();
@@ -481,18 +499,20 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 3> second{};
         output_storage           storage;
         auto                     source = ct::make_output_source(storage);
-        source.append(first);
+        storage.emplace_back(first);
+        source.refresh();
         auto checkpoint = source.position();
 
         const std::array values{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
-        CHECK_THROWS_AS(source.write(values), ct::detail::encode_status_exception);
+        CHECK(source.write(values) == first.size());
         CHECK(source.size() == 2);
         CHECK(source.committed_position().offset() == 0);
 
         source.restore(checkpoint);
         CHECK(source.size() == 0);
         CHECK(source.begin() == source.end());
-        source.append(second);
+        storage.emplace_back(second);
+        source.refresh();
         source.write(values);
         source.commit();
         CHECK(source.size() == values.size());
@@ -507,8 +527,10 @@ TEST_SUITE("resumable/source") {
         std::deque<unsigned char>                                   second(32);
         std::list<std::ranges::ref_view<std::deque<unsigned char>>> storage;
         auto                                                        output = ct::make_output_source(storage);
-        output.append(first, second);
-        CHECK_FALSE(ct::detail::resumable_source_access::borrow_window(output).has_value());
+        storage.emplace_back(first);
+        storage.emplace_back(second);
+        output.refresh();
+        CHECK_FALSE(output.borrow_window().has_value());
 
         const std::vector<std::uint32_t> values{1, 24, 1024};
         auto                             encoder = ct::make_encoder(output);
@@ -530,9 +552,10 @@ TEST_SUITE("resumable/source") {
         std::size_t          increments{};
         unsized_storage      storage;
         auto                 source = ct::make_output_source(storage);
-        source.append(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}},
-                      unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
-        CHECK_FALSE(ct::detail::resumable_source_access::borrow_window(source).has_value());
+        storage.emplace_back(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
+        source.refresh();
+        CHECK_FALSE(source.borrow_window().has_value());
         CHECK(increments == 0);
 
         const std::array expected{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}};
@@ -542,7 +565,8 @@ TEST_SUITE("resumable/source") {
         CHECK(bytes_of(first) == bytes_of(std::span(expected).first(3)));
         CHECK(bytes_of(second) == bytes_of(std::span(expected).subspan(3)));
 
-        CHECK_THROWS_AS(source.push_back(std::byte{6}), ct::detail::encode_status_exception);
+        const std::array extra{std::byte{6}};
+        CHECK(source.write(extra) == 0);
         CHECK(increments == expected.size());
         CHECK(source.position().offset() == expected.size());
     }
@@ -552,7 +576,8 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 16>         second{};
         std::vector<std::span<std::byte>> storage;
         auto                              output = ct::make_output_source(storage);
-        output.append(first);
+        storage.emplace_back(first);
+        output.refresh();
         const auto checkpoint = output.position();
 
         auto       encoder      = ct::make_encoder(output);
@@ -563,7 +588,8 @@ TEST_SUITE("resumable/source") {
         CHECK(output.size() == first.size());
 
         output.restore(checkpoint);
-        output.append(second);
+        storage.emplace_back(second);
+        output.refresh();
         REQUIRE(encoder(value));
         output.commit();
 

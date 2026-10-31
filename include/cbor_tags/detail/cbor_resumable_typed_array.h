@@ -71,7 +71,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
     std::array<std::byte, element_size> boundary{};
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
-        const auto available = context.source().borrow_window(reader.position_);
+        const auto available = resumable_source_access::borrow_window(context.source(), reader.position_);
         if (available ? available->empty() : context.empty()) {
             if (context.eof()) {
                 co_return status_code::incomplete;
@@ -94,7 +94,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
                         values.push_back(convert(available->subspan(offset, element_size)));
                     }
                 }
-                context.source().consume_window(reader.position_, bytes);
+                resumable_source_access::consume_window(context.source(), reader.position_, bytes);
                 reader.current_offset_ += bytes;
                 context.commit();
                 continue;
@@ -102,7 +102,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
 
             const auto count = std::min(element_size - boundary_size, available->size());
             std::memcpy(boundary.data() + boundary_size, available->data(), count);
-            context.source().consume_window(reader.position_, count);
+            resumable_source_access::consume_window(context.source(), reader.position_, count);
             reader.current_offset_ += count;
             boundary_size += count;
         } else {
@@ -132,17 +132,9 @@ resumable<status_code> resumable_encode_typed_array_boundary(Context &context, s
             continue;
         }
         if (!available) {
-            bool written{};
-            try {
-                context.source().push_back(bytes.front());
-                written = true;
-            } catch (const encode_status_exception &error) {
-                if (error.status != status_code::incomplete) {
-                    co_return error.status;
-                }
-            }
-            if (written) {
-                bytes = bytes.subspan(1);
+            const auto count = context.source().write(bytes);
+            if (count != 0) {
+                bytes = bytes.subspan(count);
                 continue;
             }
         }

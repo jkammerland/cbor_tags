@@ -62,8 +62,10 @@ template <typename T> void check_ready_and_missing(const T &expected) {
         T                                actual;
         auto                             decoder = make_resumable_decoder(source)(actual);
         CHECK(decoder.done() == (cut == wire.size()));
-        if (!decoder.done())
-            decoder(input.subspan(cut));
+        if (!decoder.done()) {
+            storage.emplace_back(input.subspan(cut));
+            decoder.resume();
+        }
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
         CHECK(actual == expected);
@@ -76,8 +78,10 @@ template <typename T> void check_ready_and_missing(const T &expected) {
         // nested temporary tuples forwarded through metadata-only entrypoints.
         auto encoder = make_resumable_encoder(sink)(T{expected});
         CHECK(encoder.done() == (cut == wire.size()));
-        if (!encoder.done())
-            encoder(std::span{output}.subspan(cut));
+        if (!encoder.done()) {
+            chunks.emplace_back(std::span{output}.subspan(cut));
+            encoder.resume();
+        }
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
         T independently_decoded;
@@ -110,7 +114,8 @@ TEST_SUITE("roundtrip/resumable") {
             if (!operation.done()) {
                 REQUIRE(std::holds_alternative<int>(actual));
                 CHECK(std::get<int>(actual) == 17);
-                operation(std::span<const std::byte>{wire}.subspan(cut));
+                storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
+                operation.resume();
             }
             REQUIRE(operation.done());
             REQUIRE(operation.result());
@@ -157,7 +162,8 @@ TEST_SUITE("roundtrip/resumable") {
         std::exchange(control.leaf, {}).resume();
         CHECK(reads == 1U);
         for (auto &byte : output) {
-            sink.append(std::span{&byte, 1});
+            storage.emplace_back(std::span{&byte, 1});
+            sink.refresh();
             REQUIRE(control.leaf);
             std::exchange(control.leaf, {}).resume();
         }

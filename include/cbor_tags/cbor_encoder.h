@@ -298,11 +298,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     [[nodiscard]] constexpr auto current_offset() const {
         if constexpr (IsFixedArray<OutputBuffer>) {
             return appender_.head_;
+        } else if constexpr (CborSegmentOutputBuffer<OutputBuffer> && detail::HasOutputPositionOffset<OutputBuffer>) {
+            return std::as_const(data_).position().offset();
         } else if constexpr (CborSegmentOutputBuffer<OutputBuffer>) {
-            if constexpr (std::ranges::forward_range<const OutputBuffer> &&
-                          requires(std::ranges::range_reference_t<const OutputBuffer> segment) {
-                              { segment.bytes() } -> std::same_as<std::span<const std::byte>>;
-                          }) {
+            if constexpr (detail::OutputByteSegmentRange<OutputBuffer>) {
                 // Borrowed segments can represent more bytes than native size_t.
                 // Measure their payload extents before narrowing the call's delta.
                 std::uintmax_t total{};
@@ -314,9 +313,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                     total += size;
                 }
                 return total;
-            } else if constexpr (requires {
-                                     { std::as_const(data_).total_size() } -> std::integral;
-                                 }) {
+            } else if constexpr (detail::HasOutputTotalSize<OutputBuffer>) {
                 return std::as_const(data_).total_size();
             } else {
                 static_assert(always_false<OutputBuffer>::value,
