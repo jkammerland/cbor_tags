@@ -1,7 +1,9 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_resumable.h"
 
+#include <cassert>
 #include <cstddef>
+#include <iostream>
 #include <list>
 #include <span>
 #include <string>
@@ -13,34 +15,38 @@ namespace ct = cbor::tags;
 items = ([* tstr], bool)
 */
 int main() {
-    // Prepare two items; the receiver will validate their CBOR without destinations.
+    // Prepare two items; validate their CBOR without constructing decoded values.
     const std::vector<std::string> stations{"north", "south"};
     std::vector<std::byte> buffer;
-    if (!ct::make_encoder(buffer)(stations, true)) {
-        return 1;
-    }
+    const auto encoded = ct::make_encoder(buffer)(stations, true);
+    assert(encoded);
 
-    // Borrow the immutable bytes and validate every item up to explicit EOF.
+    // until_end_of_input selects validation of the entire incoming sequence.
     const auto bytes = std::span<const std::byte>{buffer};
     std::list<std::span<const std::byte>> chunks;
     auto source = ct::make_input_source(chunks);
     auto operation = ct::make_resumable_validator(source, ct::until_end_of_input);
-    if (operation(bytes.first(3)) != ct::resume_state::need_input) {
-        return 2;
-    }
 
-    // Complete items alone do not end a sequence: another item could still arrive.
-    if (operation(bytes.subspan(3)) != ct::resume_state::need_input || operation.done()) {
-        return 2;
-    }
+    // Feeding appends a borrowed descriptor to chunks before resuming validation.
+    const auto first_state = operation(bytes.first(3));
+    assert(first_state == ct::resume_state::need_input);
+    assert(chunks.size() == 1);
+    std::cout << "input chunks: " << chunks.size() << '\n';
 
-    // Validation checks CBOR structure and UTF-8, not the application CDDL schema.
-    if (operation.finish() != ct::resume_state::done) {
-        return 2;
-    }
+    // Both items are now complete, but another item could still arrive.
+    const auto second_state = operation(bytes.subspan(3));
+    assert(second_state == ct::resume_state::need_input);
+    assert(chunks.size() == 2);
+    std::cout << "input chunks: " << chunks.size() << '\n';
+
+    // finish() announces EOF. Empty chunks do not end the sequence.
+    const auto final_state = operation.finish();
+    assert(final_state == ct::resume_state::done);
+
+    // Success checks CBOR structure and UTF-8, not the application CDDL schema.
     const auto result = operation.result();
-    if (!result || *result != buffer.size() || !operation.remaining_input().empty()) {
-        return 3;
-    }
+    assert(result);
+    assert(*result == buffer.size());
+    assert(operation.remaining_input().empty());
     return 0;
 }

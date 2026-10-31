@@ -23,6 +23,14 @@ foreach(EXAMPLE_SOURCE IN LISTS EXAMPLE_SOURCES)
   set(EXAMPLE_TARGET "cbor_tags_example_${EXAMPLE_NAME}")
   add_executable(${EXAMPLE_TARGET} "${EXAMPLE_SOURCE}")
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE cbor::tags)
+
+  # Examples are executable checks: keep their assertions active in Release too.
+  if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(${EXAMPLE_TARGET} PRIVATE /UNDEBUG)
+  else()
+    target_compile_options(${EXAMPLE_TARGET} PRIVATE -UNDEBUG)
+  endif()
+
   if(EXAMPLE_NAME IN_LIST OPENSSL_EXAMPLES)
     target_link_libraries(${EXAMPLE_TARGET} PRIVATE cbor::cwt_openssl)
   endif()

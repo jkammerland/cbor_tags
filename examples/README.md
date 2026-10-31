@@ -57,7 +57,7 @@ frame owner in `resumable_consumer.h`.
 | [37_experimental_cwt_confirmation.cpp](37_experimental_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 | [38_experimental_cwt_key_thumbprint.cpp](38_experimental_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
 | [39_experimental_cwt_confirmation_token.cpp](39_experimental_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
-| [40_resumable.cpp](40_resumable.cpp) | Decode items across input chunks | A variadic operation accepts multiple chunks or a runtime batch and completes when its requested items are available. |
+| [40_resumable.cpp](40_resumable.cpp) | Decode items across input chunks | Supply two chunks, observe suspension, and inspect the completed values. |
 | [41_resumable_encoding.cpp](41_resumable_encoding.cpp) | Resume when output space runs out | Add output buffers and read only the committed bytes after completion. |
 | [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until explicit EOF. |
 | [43_resumable_coroutine.cpp](43_resumable_coroutine.cpp) | Await an operation from a coroutine | A serialized producer feed resumes the waiting consumer inline. |
@@ -90,6 +90,10 @@ cmake -S . -B build/examples -G Ninja \
 cmake --build build/examples --parallel
 ctest --test-dir build/examples -L examples --output-on-failure --no-tests=error
 ```
+
+Example targets keep standard `assert` checks enabled in every build configuration.
+When compiling an example manually, leave `NDEBUG` undefined. Encoding, decoding,
+and feeding calls execute separately from their assertions.
 
 Run one example directly:
 
