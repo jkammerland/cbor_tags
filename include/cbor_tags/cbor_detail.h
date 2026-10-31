@@ -409,7 +409,13 @@ template <typename T> struct reader<T, false> {
     constexpr reader(const T &container) : position_(std::ranges::begin(container)) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool empty(const T &container) const { return position_ == std::ranges::end(container); }
+    constexpr bool empty(const T &container) const {
+        // Logical sources can answer availability without rebinding an iterator.
+        if constexpr (HasRemainingInputSize<T, iterator>)
+            return container.remaining_size(position_) == 0;
+        else
+            return position_ == std::ranges::end(container);
+    }
     constexpr bool empty(const T &container, size_type offset) const {
         if constexpr (HasRemainingInputSize<T, iterator>) {
             // A retained range may start after an already reclaimed prefix.

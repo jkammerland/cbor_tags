@@ -1634,7 +1634,13 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return static_cast<uint8_t>(reader_.read(data_));
     }
 
-    template <typename UInt> constexpr UInt read_fixed_uint() {
+    // Keep fixed-width floating-point payload reads in the scalar loop, as with
+    // integer arguments; an outlined read would add a call for every element.
+    template <typename UInt>
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
+    constexpr UInt read_fixed_uint() {
         constexpr auto byte_count = sizeof(UInt);
         if constexpr (IsContiguous<InputBuffer> || std::ranges::sized_range<const InputBuffer>) {
             if (reader_.empty(data_, byte_count - 1U)) {

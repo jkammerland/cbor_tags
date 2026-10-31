@@ -3,6 +3,9 @@
 #include "cbor_tags/cbor_traversal.h"
 #include "cbor_tags/detail/cbor_resumable_decoder.h"
 
+#include <utility>
+#include <variant>
+
 namespace cbor::tags::detail {
 
 // Reuse the ordinary traversal token decoder, including strict simple encodings.
@@ -15,6 +18,21 @@ struct resumable_walk_token {
         return {};
     }
 };
+
+template <typename Token>
+concept StructuralWalkToken = IsTextHeader<Token> || IsBinaryHeader<Token> || IsArrayHeader<Token> || IsMapHeader<Token> ||
+                              IsTagHeader<Token> || std::same_as<Token, indefinite_break>;
+
+// Classification depends only on the active alternative, not its payload.
+// Derive the indices from the variant so this needs no visit dispatch per token.
+inline bool resumable_structural_token(const catch_all_variant &token) {
+    if (token.valueless_by_exception())
+        throw std::bad_variant_access{};
+
+    return [&]<std::size_t... I>(std::index_sequence<I...>) {
+        return ((token.index() == I && StructuralWalkToken<std::variant_alternative_t<I, catch_all_variant>>) || ...);
+    }(std::make_index_sequence<std::variant_size_v<catch_all_variant>>{});
+}
 
 // A batch stays inside one sibling sequence. Structural tokens are consumed
 // here but handed back to that sequence for depth, payload, and break handling.
@@ -47,13 +65,7 @@ template <bool Map = false> struct resumable_scalar_batch {
             // A later malformed token must not discard preceding siblings or
             // publish the malformed token's partially advanced local reader.
             accepted = decoder.reader_.position_;
-            deferred = std::visit(
-                [](const auto &item) {
-                    using T = std::remove_cvref_t<decltype(item)>;
-                    return IsTextHeader<T> || IsBinaryHeader<T> || IsArrayHeader<T> || IsMapHeader<T> || IsTagHeader<T> ||
-                           std::same_as<T, indefinite_break>;
-                },
-                token.value);
+            deferred = resumable_structural_token(token.value);
             if (deferred)
                 break;
             complete_item();

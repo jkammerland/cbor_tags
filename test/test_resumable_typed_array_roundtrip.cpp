@@ -12,10 +12,33 @@
 #include <list>
 #include <ranges>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 using namespace cbor::tags;
+
+namespace {
+
+// A typed-array trait can describe a value without a default constructor.
+struct non_default_typed_word {
+    std::uint32_t value;
+
+    non_default_typed_word() = delete;
+    explicit constexpr non_default_typed_word(std::uint32_t initial) noexcept : value(initial) {}
+};
+
+static_assert(std::is_trivially_copyable_v<non_default_typed_word>);
+static_assert(!std::is_default_constructible_v<non_default_typed_word>);
+
+} // namespace
+
+namespace cbor::tags::rfc8746 {
+
+template <typed_array_byte_order Order>
+struct typed_array_traits<non_default_typed_word, Order> : typed_array_traits<std::uint32_t, Order> {};
+
+} // namespace cbor::tags::rfc8746
 
 namespace {
 
@@ -152,6 +175,30 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_typed_array") {
+    TEST_CASE("opposite endian typed arrays preserve non default constructible elements at every split") {
+        constexpr auto order =
+            std::endian::native == std::endian::little ? rfc8746::typed_array_byte_order::big : rfc8746::typed_array_byte_order::little;
+        const rfc8746::typed_array<std::uint32_t, order> expected{0, 0x12345678, 0xffffffff};
+        const auto                                       bytes = typed_array_bytes(expected);
+
+        for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+            CAPTURE(cut);
+            std::vector<std::byte>                              input(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto                                                decoder = make_resumable_decoder<codec::typed_array>(input);
+            rfc8746::typed_array<non_default_typed_word, order> actual;
+            auto                                                operation = decoder(actual);
+
+            input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
+            const auto state = operation.finish();
+            REQUIRE(state == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+            REQUIRE(actual.values().size() == expected.values().size());
+            for (std::size_t index = 0; index != expected.values().size(); ++index)
+                CHECK(actual.values()[index].value == expected.values()[index]);
+        }
+    }
+
     TEST_CASE("owning typed arrays preserve integer and floating representations at every transport split") {
         check_typed_array_splits(rfc8746::typed_array<std::uint8_t>{0, 1, 127, 255});
         check_typed_array_splits(rfc8746::typed_array<std::int8_t>{-128, -1, 0, 127});

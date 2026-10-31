@@ -15,6 +15,17 @@ namespace cbor::tags::detail {
 template <typename T> inline constexpr bool    resumable_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_wrap_array<wrap_as_array<T...>> = true;
 
+// Keep capability detection separate from the dispatch that uses it.
+template <typename Decoder, typename T>
+concept HasRvalueTagDecode = requires(Decoder &decoder, T &tag) { decoder.decode(std::move(tag)); };
+
+template <typename Appender, typename T>
+concept HasAppendReservation = requires(Appender &append, T &value, std::uint64_t size) { append.reserve_for_append(value, size); };
+
+template <typename Appender, typename T>
+concept HasGeometricAppendReservation =
+    requires(Appender &append, T &value, std::uint64_t size) { append.template reserve_for_append<true>(value, size); };
+
 // Preserve the normal entrypoint selected by optional/variant/indefinite dispatch.
 // The enclosing ordinary call still owns the complete retry boundary.
 template <typename T, payload_decode_context Context> struct resume_context_value {
@@ -50,7 +61,7 @@ template <typename T> struct resume_tag_wrapper {
     T                                                      &tag;
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
         const auto status = [&] {
-            if constexpr (requires { decoder.decode(std::move(tag)); })
+            if constexpr (HasRvalueTagDecode<Decoder, T>)
                 return decoder.decode(std::move(tag));
             else
                 return decoder.decode(tag);
@@ -66,34 +77,37 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     using self_type     = resumable_decode_context;
     using ordinary_type = decoder<Source, Options, cbor_header_decoder, cbor_indefinite_decoder, Codecs...>;
     using mixins        = std::tuple<Codecs<self_type>...>;
-    Source                     &source_;
-    resume_control             &control_;
-    ordinary_type               ordinary_;
-    decltype(ordinary_.reader_) committed_;
+    Source         &source_;
+    resume_control &control_;
+    ordinary_type   ordinary_;
+    std::size_t     committed_offset_;
 
   public:
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_input;
 
-    resumable_decode_context(Source &source, resume_control &control)
-        : source_(source), control_(control), ordinary_(source), committed_(ordinary_.reader_) {
+    resumable_decode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {
         ordinary_.reader_.position_       = source.committed_position();
         ordinary_.reader_.current_offset_ = ordinary_.reader_.position_.offset();
-        committed_                        = ordinary_.reader_;
+        committed_offset_                 = ordinary_.reader_.current_offset_;
     }
     Source        &source() noexcept { return source_; }
-    std::size_t    offset() const noexcept { return committed_.current_offset_; }
-    auto           remaining_input() const { return source_.remaining(committed_.position_); }
+    std::size_t    offset() const noexcept { return committed_offset_; }
+    auto           remaining_input() const { return source_.remaining(source_.committed_position()); }
     ordinary_type &ordinary() noexcept { return ordinary_; }
     auto           wait() noexcept { return control_.wait(); }
     bool           empty() const { return ordinary_.reader_.empty(source_); }
     bool           eof() const { return source_.eof(); }
     void           commit() {
-        committed_ = ordinary_.reader_;
-        source_.commit(committed_.position_);
+        // The source owns the checkpoint; retain only its scalar progress here.
+        source_.commit(ordinary_.reader_.position_);
+        committed_offset_ = ordinary_.reader_.current_offset_;
     }
-    void rollback() { ordinary_.reader_ = committed_; }
+    void rollback() {
+        ordinary_.reader_.position_       = source_.committed_position();
+        ordinary_.reader_.current_offset_ = committed_offset_;
+    }
 
     // A complete normal call is the sole retry boundary, including its nested calls.
     template <typename T> resumable<status_code> ordinary(T &value) {
@@ -585,8 +599,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return status;
     }
 
-    // Discover leaf spans through a cursor copy and publish the source position
-    // only after the shared scalar loop has finished.
+    // Borrow through the working cursor and publish the source position only
+    // after the shared scalar loop has finished.
     template <typename T> status_code leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
         while (remaining != 0) {
             const auto window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
@@ -721,7 +735,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         appender<T> append;
         // The caller owns allocation limits. Appenders opt into element-count
         // reservation; some containers reserve descriptors rather than elements.
-        if constexpr (AppendReservable<T> && requires { append.reserve_for_append(value, header.size); }) {
+        if constexpr (AppendReservable<T> && HasAppendReservation<appender<T>, T>) {
             if (!header.indefinite && header.size != 0)
                 append.reserve_for_append(value, header.size);
         }
@@ -786,7 +800,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                     co_return status_code::malformed_structure;
                 if (chunk.size > maximum - count)
                     co_return status_code::size_limit_exceeded;
-                if constexpr (AppendReservable<T> && requires { append.template reserve_for_append<true>(value, chunk.size); }) {
+                if constexpr (AppendReservable<T> && HasGeometricAppendReservation<appender<T>, T>) {
                     if (chunk.size != 0)
                         append.template reserve_for_append<true>(value, chunk.size);
                 }

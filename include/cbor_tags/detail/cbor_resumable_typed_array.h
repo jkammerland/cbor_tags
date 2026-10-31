@@ -14,6 +14,7 @@
 #include <limits>
 #include <ranges>
 #include <span>
+#include <type_traits>
 
 namespace cbor::tags::detail {
 
@@ -89,6 +90,15 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
                     const auto start = values.size();
                     values.resize(start + count);
                     std::memcpy(values.data() + start, available->data(), bytes);
+                } else if constexpr (std::is_nothrow_default_constructible_v<value_type> && std::is_nothrow_move_assignable_v<value_type>) {
+                    // Capacity was admitted above; fill this complete window
+                    // without repeating vector append bookkeeping per element.
+                    const auto start = values.size();
+                    values.resize(start + count);
+                    auto *destination = values.data() + start;
+                    for (std::size_t index = 0; index != count; ++index) {
+                        destination[index] = convert(available->subspan(index * element_size, element_size));
+                    }
                 } else {
                     for (std::size_t offset = 0; offset != bytes; offset += element_size) {
                         values.push_back(convert(available->subspan(offset, element_size)));
