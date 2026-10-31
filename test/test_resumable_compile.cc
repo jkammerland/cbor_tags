@@ -24,6 +24,53 @@ static_assert(std::is_move_constructible_v<decode_operation>);
 static_assert(std::is_move_constructible_v<encode_operation>);
 static_assert(std::is_same_v<decltype(std::declval<const decode_operation &>().result()), expected<std::size_t, status_code>>);
 
+// Storage-based factories own an immovable adapter and only lend it from lvalues.
+using storage_decoder = decltype(make_resumable_decoder(std::declval<input_storage &>()));
+using storage_encoder = decltype(make_resumable_encoder(std::declval<output_storage &>()));
+static_assert(!std::is_copy_constructible_v<storage_decoder>);
+static_assert(!std::is_move_constructible_v<storage_decoder>);
+static_assert(!std::is_copy_assignable_v<storage_decoder>);
+static_assert(!std::is_move_assignable_v<storage_decoder>);
+static_assert(!std::is_copy_constructible_v<storage_encoder>);
+static_assert(!std::is_move_constructible_v<storage_encoder>);
+static_assert(!std::is_copy_assignable_v<storage_encoder>);
+static_assert(!std::is_move_assignable_v<storage_encoder>);
+static_assert(std::is_invocable_v<storage_decoder &, int &>);
+static_assert(std::is_invocable_v<storage_encoder &, const int &>);
+static_assert(!std::is_invocable_v<storage_decoder &&, int &>);
+static_assert(!std::is_invocable_v<storage_encoder &&, const int &>);
+static_assert(!std::is_invocable_v<const storage_decoder &, int &>);
+static_assert(!std::is_invocable_v<const storage_encoder &, const int &>);
+
+// Explicit-source factories retain safe chained construction.
+using source_decoder = decltype(make_resumable_decoder(std::declval<input_source_type &>()));
+using source_encoder = decltype(make_resumable_encoder(std::declval<output_source_type &>()));
+static_assert(std::is_invocable_v<source_decoder &&, int &>);
+static_assert(std::is_invocable_v<source_encoder &&, const int &>);
+
+template <typename Storage>
+concept accepts_encoder_storage = requires(Storage &&storage) { make_resumable_encoder(std::forward<Storage>(storage)); };
+template <typename Storage>
+concept accepts_decoder_storage = requires(Storage &&storage) { make_resumable_decoder(std::forward<Storage>(storage)); };
+static_assert(accepts_encoder_storage<output_storage &>);
+static_assert(!accepts_encoder_storage<input_storage &>);
+static_assert(!accepts_encoder_storage<output_storage>);
+static_assert(accepts_decoder_storage<input_storage &>);
+static_assert(!accepts_decoder_storage<input_storage>);
+
+template <typename Operation>
+concept has_produced = requires(const Operation &op) { op.produced(); };
+template <typename Operation>
+concept has_remaining_input = requires(const Operation &op) { op.remaining_input(); };
+template <typename Operation>
+concept has_remaining_output = requires(const Operation &op) { op.remaining_output(); };
+static_assert(has_produced<encode_operation>);
+static_assert(!has_produced<decode_operation>);
+static_assert(has_remaining_input<decode_operation>);
+static_assert(!has_remaining_input<encode_operation>);
+static_assert(has_remaining_output<encode_operation>);
+static_assert(!has_remaining_output<decode_operation>);
+
 namespace hook_contract {
 
 struct context {};

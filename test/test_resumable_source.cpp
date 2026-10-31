@@ -497,7 +497,7 @@ TEST_SUITE("resumable/source") {
         source.commit();
         CHECK(source.size() == values.size());
         CHECK(source.committed_position().offset() == values.size());
-        CHECK(bytes_of(source.produced(checkpoint, source.position())) == std::vector<std::byte>(values.begin(), values.end()));
+        CHECK(bytes_of(std::ranges::subrange(checkpoint, source.position())) == std::vector<std::byte>(values.begin(), values.end()));
         CHECK(bytes_of(source) == std::vector<std::byte>(values.begin(), values.end()));
         CHECK(std::ranges::distance(source.remaining_output()) == 1);
     }
@@ -515,8 +515,8 @@ TEST_SUITE("resumable/source") {
         REQUIRE(encoder(values));
         output.commit();
 
-        std::list<decltype(output.produced(output.begin(), output.position()))> input_descriptors;
-        input_descriptors.push_back(output.produced(output.begin(), output.position()));
+        std::list<decltype(std::ranges::subrange(output.begin(), output.position()))> input_descriptors;
+        input_descriptors.push_back(std::ranges::subrange(output.begin(), output.position()));
         auto                       input   = ct::make_input_source(input_descriptors);
         auto                       decoder = ct::make_decoder(input);
         std::vector<std::uint32_t> decoded;

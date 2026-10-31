@@ -22,10 +22,10 @@ int main() {
     std::array<std::byte, 2> first{};
     std::array<std::byte, 64> second{};
 
-    // The sink tracks written and committed positions across borrowed buffers.
+    // The named encoder owns its cursor state and borrows the output buffers.
     std::list<std::span<std::byte>> chunks;
-    auto sink = ct::make_output_source(chunks);
-    auto operation = ct::make_resumable_encoder(sink)(sent);
+    auto encoder = ct::make_resumable_encoder(chunks);
+    auto operation = encoder(sent);
 
     // Supply writable space, then observe that the encoder needs more.
     const auto first_state = operation(first);
@@ -47,7 +47,7 @@ int main() {
     assert(*result == written);
     assert(written + unused == first.size() + second.size());
 
-    // Decode the committed bytes while both backing buffers and the sink are alive.
+    // Decode the committed bytes while both backing buffers and the encoder are alive.
     std::string received;
     auto decoder = ct::make_decoder(produced);
     const auto decoded = decoder(received);

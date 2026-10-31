@@ -33,6 +33,11 @@ concept ResumableChunkStorage =
     std::is_lvalue_reference_v<std::ranges::range_reference_t<Storage>> && ResumableByteChunk<std::ranges::range_value_t<Storage>> &&
     std::ranges::borrowed_range<std::ranges::range_value_t<Storage>>;
 
+template <typename Storage>
+concept ResumableOutputChunkStorage =
+    ResumableChunkStorage<Storage> && std::indirectly_writable<std::ranges::iterator_t<std::ranges::range_value_t<Storage>>,
+                                                               std::ranges::range_value_t<std::ranges::range_value_t<Storage>>>;
+
 template <typename Storage, typename Chunk>
 concept ResumableChunkArgument = ResumableByteChunk<Chunk> && (std::is_lvalue_reference_v<Chunk> || std::ranges::borrowed_range<Chunk>) &&
                                  std::constructible_from<std::ranges::range_value_t<Storage>, Chunk>;
@@ -484,10 +489,7 @@ template <detail::ResumableChunkStorage Storage> class input_source : public det
 
 template <detail::ResumableChunkStorage Storage> auto make_input_source(Storage &storage) { return input_source<Storage>(storage); }
 
-template <detail::ResumableChunkStorage Storage>
-    requires std::indirectly_writable<std::ranges::iterator_t<std::ranges::range_value_t<Storage>>,
-                                      std::ranges::range_value_t<std::ranges::range_value_t<Storage>>>
-class output_source {
+template <detail::ResumableOutputChunkStorage Storage> class output_source {
   public:
     using value_type    = std::byte;
     using size_type     = std::size_t;
@@ -520,7 +522,6 @@ class output_source {
         working_ = position;
     }
 
-    auto produced(position_type from, position_type to) const { return std::ranges::subrange(from, to); }
     auto remaining_output() const { return chunks_.remaining(working_); }
     auto available_output_span() { return borrow_window(); }
 
@@ -580,11 +581,7 @@ class output_source {
     iterator                      committed_;
 };
 
-template <detail::ResumableChunkStorage Storage>
-    requires requires(Storage &storage) { output_source<Storage>(storage); }
-auto make_output_source(Storage &storage) {
-    return output_source<Storage>(storage);
-}
+template <detail::ResumableOutputChunkStorage Storage> auto make_output_source(Storage &storage) { return output_source<Storage>(storage); }
 
 namespace detail {
 

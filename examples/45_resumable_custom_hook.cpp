@@ -40,8 +40,8 @@ int main() {
     std::array<std::byte, 2> first{};
     std::array<std::byte, 64> second{};
     std::list<std::span<std::byte>> output_chunks;
-    auto sink = ct::make_output_source(output_chunks);
-    auto encoding = ct::make_resumable_encoder(sink)(sent);
+    auto encoder = ct::make_resumable_encoder(output_chunks);
+    auto encoding = encoder(sent);
     const auto first_output_state = encoding(first);
     assert(first_output_state == ct::resume_state::need_output);
 
@@ -65,9 +65,9 @@ int main() {
 
     // Supply only written bytes; both backing buffers remain alive during decoding.
     std::list<std::span<const std::byte>> input_chunks;
-    auto source = ct::make_input_source(input_chunks);
+    auto resumable_decoder = ct::make_resumable_decoder(input_chunks);
     app::Report received;
-    auto decoding = ct::make_resumable_decoder(source)(received);
+    auto decoding = resumable_decoder(received);
     const auto first_input_state = decoding(std::span<const std::byte>{first});
     assert(first_input_state == ct::resume_state::need_input);
 
