@@ -154,6 +154,10 @@ struct lazy_tag_distinct_const_iterator_view : std::ranges::view_interface<lazy_
 
 } // namespace
 
+namespace cbor::tags::test::detail {
+void set_test_allocation_failure(bool enabled) noexcept { fail_test_allocations = enabled; }
+} // namespace cbor::tags::test::detail
+
 void *operator new(std::size_t size) {
     if (fail_test_allocations) {
         throw std::bad_alloc{};
