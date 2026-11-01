@@ -83,8 +83,9 @@ int main() {
     const auto result = operation.result();
     assert(result);
     auto committed = output | std::views::take(operation.committed_bytes());
+    auto decoder = ct::make_decoder(committed);
     std::string actual;
-    const auto decoded = ct::make_decoder(committed)(actual);
+    const auto decoded = decoder(actual);
     assert(decoded);
     assert(actual == expected);
 }
@@ -104,18 +105,32 @@ incomplete ordinary codec can leave tentative writes.
 ## Storage and mutation
 
 Default adapters support ordinary byte ranges and nested byte ranges, including
-containers of owning containers. For flat vector/deque input, append bytes without changing the existing prefix.
-For nested storage, append descriptors or grow the final inner range while
-preserving earlier contents and order. Final-range growth is supported for sized
-ranges or unsized ranges whose end boundary changes. An unsized node view with
-an unchanged end sentinel needs a custom source to expose growth without a
-second traversal. The adapter reacquires access after permitted mutations, including vector reallocation. Unsized input is not
+containers of owning containers. For flat vector/deque input, append bytes while
+preserving the existing prefix. For nested storage, append descriptors or grow
+the final inner range while preserving earlier contents and order. Final-range
+growth is supported for sized ranges or unsized ranges whose end boundary
+changes. An unsized node view with an unchanged end sentinel needs a custom
+source to expose growth without a second traversal. Unsized input is not
 prewalked to calculate a byte extent.
+
+Indexable storage permits reallocation between resumptions: the adapter retains
+logical positions instead of persistent raw iterators. Node-based storage must
+preserve existing element iterators. Unsized inner ranges must also keep a
+previously observed end iterator valid for comparison after permitted mutations.
+Use a custom source when an unsized range cannot preserve that boundary.
+
+Removing descriptors, shrinking the tail, replacing an earlier range, or adding
+storage after closure violates the default adapter's caller
+preconditions. Debug builds assert locally detectable violations; applications
+must satisfy the contract in every build. Malformed CBOR, arithmetic overflow
+and attempts to start a second operation on an acquired source remain checked
+errors.
 
 Inner ranges may own their bytes, as in `vector<vector<byte>>`, or borrow them
 through spans and views. The outer container can be a vector, deque, list or
 prepopulated span. Empty inner ranges are allowed. All containers and backing
-bytes remain caller-owned. Prefix removal, replacement of earlier ranges and recycling require a custom source.
+bytes remain caller-owned. Prefix removal and recycling require a custom source
+with an explicit reclamation policy.
 
 Keep the named factory, storage and encoded values alive through every operation
 that borrows them. A storage-bound factory owns its adapter inline, is immovable,
@@ -151,8 +166,9 @@ The source contract includes:
   `remaining_output()`.
 - Nonthrowing `committed_position()`, `release()` and output `restore(position)`
   so abandoning an operation can safely discard tentative work.
-- `refresh()` before codec driving, `eof()`/`close()` for terminal availability,
-  and `acquire()`/`release()` for one active operation.
+- A required `refresh()` method, called before codec driving. It may do nothing
+  when durable positions already reflect availability. `eof()`/`close()` mark
+  terminal availability; `acquire()`/`release()` enforce one active operation.
 - Output `write(span<const byte>)` returning the number of bytes written. A short
   write denotes temporary exhaustion, not successful completion of the request.
 - Optional contiguous borrow/consume windows for bulk transfer. Byte traversal
@@ -170,8 +186,9 @@ borrows permit it. Publication, pending I/O ownership and final reclamation are
 separate adapter/application responsibilities.
 
 Mutation and codec driving are serialized. Temporary codec windows end before
-suspension; adapter positions must reacquire access after refresh. A decoded
-`span` or `string_view` has a longer application borrow and requires its backing
+suspension; positions must remain valid through permitted mutations, either
+directly or by reacquiring access when needed. A decoded `span` or `string_view`
+has a longer application borrow and requires its backing
 allocation to remain stable. Such views cannot represent bytes crossing separate
 allocations; use an owning result, an appropriate segmented value or the normal
 view decoder's unsupported-input outcome.
@@ -180,6 +197,13 @@ Bounded storage must accommodate an ordinary codec's entire retry unit. Use an
 explicit resumable customization for larger values, or reject them under the
 application's capacity policy. Waiting cannot free tentative bytes required by
 the current retry.
+
+The complete [ring source example](../examples/46_resumable_ring.cpp) implements
+both public source concepts using only standard-library storage and logical
+absolute positions. It copies committed output to a transport buffer before
+reclaiming it, feeds input in bounded chunks, and wraps the same fixed storage
+throughout each operation. Its `refresh()` is empty because availability is
+read directly from the source.
 
 ## Awaiting, cancellation and sequences
 
@@ -251,8 +275,8 @@ int main() {
     assert(encoding.done());
     assert(encoding.result());
 
-    message actual;
     auto decoder = ct::make_resumable_decoder(storage);
+    message actual;
     auto decoding = decoder(actual);
     assert(decoding.done());
     assert(decoding.result());

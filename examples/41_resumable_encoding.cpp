@@ -29,8 +29,8 @@ int main() {
     auto committed = output | std::views::take(operation.committed_bytes());
 
     // Decode the committed prefix directly from the caller-owned container.
-    std::string received;
     auto decoder = ct::make_decoder(committed);
+    std::string received;
     const auto decoded = decoder(received);
     assert(decoded);
     assert(received == sent);

@@ -45,9 +45,9 @@ int main() {
     assert(encoded);
     assert(*encoded == encoding.committed_bytes());
     auto produced = std::span<const std::byte>{output}.first(*encoded);
+    auto decoder = ct::make_decoder(produced);
     std::string station;
     std::vector<int> samples;
-    auto decoder = ct::make_decoder(produced);
     const auto fields = decoder(ct::wrap_as_array{station, samples});
     assert(fields);
     assert(station == sent.station);

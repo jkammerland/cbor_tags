@@ -1086,6 +1086,30 @@ set_tests_properties(resumable_typed_array_wire PROPERTIES LABELS "cbor-wire")
 add_executable(test_resumable_compile test_resumable_compile.cc)
 target_link_libraries(test_resumable_compile PRIVATE cbor::tags)
 add_test(NAME resumable_compile COMMAND test_resumable_compile)
+
+# Exercise debug-only caller preconditions in isolated processes, including in
+# Release test builds. Other source tests continue using the build's normal mode.
+add_executable(test_resumable_source_preconditions resumable_source_preconditions.cc)
+target_link_libraries(test_resumable_source_preconditions PRIVATE cbor::tags)
+if(MSVC)
+  target_compile_options(test_resumable_source_preconditions PRIVATE /UNDEBUG)
+else()
+  target_compile_options(test_resumable_source_preconditions PRIVATE -UNDEBUG)
+endif()
+foreach(CASE descriptor-removal tail-shrink closed-tail-growth closed-descriptor-growth)
+  if(CASE STREQUAL "descriptor-removal")
+    set(DIAGNOSTIC "CBOR source descriptors cannot be removed")
+  elseif(CASE STREQUAL "tail-shrink")
+    set(DIAGNOSTIC "CBOR source tail cannot shrink")
+  else()
+    set(DIAGNOSTIC "cannot grow a closed CBOR source")
+  endif()
+  add_test(NAME resumable_precondition_${CASE} COMMAND ${CMAKE_COMMAND}
+    "-DPROGRAM=$<TARGET_FILE:test_resumable_source_preconditions>" "-DCASE=${CASE}"
+    "-DDIAGNOSTIC=${DIAGNOSTIC}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/resumable_source_preconditions.cmake")
+endforeach()
+
 add_executable(resumable_zero_input_compile_fails EXCLUDE_FROM_ALL test_resumable_compile.cc)
 target_compile_definitions(resumable_zero_input_compile_fails PRIVATE CBOR_RESUMABLE_UNBOUNDED_ZERO_INPUT)
 target_link_libraries(resumable_zero_input_compile_fails PRIVATE cbor::tags)

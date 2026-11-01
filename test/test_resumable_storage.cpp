@@ -36,6 +36,83 @@ struct counted_customization {
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_storage") {
+    TEST_CASE_TEMPLATE("owning mixed byte chunks preserve input retries through tail growth and append", Storage,
+                       std::vector<std::deque<std::byte>>, std::list<std::deque<std::byte>>, std::vector<std::list<std::byte>>,
+                       std::deque<std::list<std::byte>>) {
+        const auto             expected = std::numeric_limits<std::uint64_t>::max();
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(expected));
+        REQUIRE(wire.size() > 4);
+
+        for (const std::size_t cut : {std::size_t{0}, std::size_t{3}}) {
+            CAPTURE(cut);
+            Storage chunks;
+            chunks.emplace_back(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto          decoder = make_resumable_decoder(chunks);
+            std::uint64_t actual{};
+            auto          operation = decoder(actual);
+            REQUIRE_FALSE(operation.done());
+            CHECK(operation.committed_bytes() == 0);
+
+            // Repeated retries must preserve the same incomplete scalar and
+            // its checkpoint while owning descriptors can relocate.
+            if constexpr (ReservableStorage<Storage>)
+                chunks.reserve(chunks.capacity() + 2);
+            for (int retry = 0; retry != 3; ++retry) {
+                CHECK(operation.resume() == resume_state::need_input);
+                CHECK(actual == 0);
+                CHECK(operation.committed_bytes() == 0);
+            }
+
+            chunks.back().push_back(wire[cut]);
+            chunks.emplace_back();
+            chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut + 1), wire.end());
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(actual == expected);
+            CHECK(operation.committed_bytes() == wire.size());
+        }
+    }
+
+    TEST_CASE_TEMPLATE("owning mixed byte chunks preserve output retries through tail growth and append", Storage,
+                       std::vector<std::deque<std::byte>>, std::list<std::deque<std::byte>>, std::vector<std::list<std::byte>>,
+                       std::deque<std::list<std::byte>>) {
+        const auto             expected = std::numeric_limits<std::uint64_t>::max();
+        std::vector<std::byte> encoded;
+        REQUIRE(make_encoder(encoded)(expected));
+        REQUIRE(encoded.size() > 4);
+
+        for (const std::size_t capacity : {std::size_t{0}, std::size_t{3}}) {
+            CAPTURE(capacity);
+            Storage chunks;
+            chunks.emplace_back(capacity);
+            auto source    = make_output_source(chunks);
+            auto encoder   = make_resumable_encoder(source);
+            auto operation = encoder(expected);
+            REQUIRE_FALSE(operation.done());
+            CHECK(operation.committed_bytes() == 0);
+
+            if constexpr (ReservableStorage<Storage>)
+                chunks.reserve(chunks.capacity() + 2);
+            for (int retry = 0; retry != 3; ++retry) {
+                CHECK(operation.resume() == resume_state::need_output);
+                CHECK(operation.committed_bytes() == 0);
+                CHECK(source.committed_position().offset() == 0);
+            }
+
+            chunks.back().push_back(std::byte{});
+            chunks.emplace_back();
+            chunks.emplace_back(encoded.size() - capacity - 1);
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(operation.committed_bytes() == encoded.size());
+            CHECK(source.committed_position().offset() == encoded.size());
+            std::uint64_t actual{};
+            REQUIRE(make_decoder(source)(actual));
+            CHECK(actual == expected);
+        }
+    }
+
     TEST_CASE("pending scalar retries rebind after reserve without input growth") {
         const std::uint64_t    expected = std::uint64_t{1} << 40;
         std::vector<std::byte> wire;

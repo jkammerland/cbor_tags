@@ -10,9 +10,10 @@ Example 25 builds a complete signed token with external AAD and receiver validat
 example 26 requires signatures from two independent keys.
 Example 27 chooses application layouts; examples 28–29 keep payload bytes borrowed
 through signing, token encoding, decoding and verification.
-Examples 40–45 introduce resumable operations, from bound containers to coroutine
-consumers and custom hooks. The two consumer examples share a minimal coroutine
-frame owner in `resumable_consumer.h`.
+Examples 40–46 introduce resumable operations, from bound containers to coroutine
+consumers, custom hooks and a public ring source. The two consumer examples share
+a minimal coroutine frame owner in `resumable_consumer.h`. The ring example is
+standalone and uses standard-library storage.
 
 ## Learning order
 
@@ -63,6 +64,7 @@ frame owner in `resumable_consumer.h`.
 | [43_resumable_coroutine.cpp](43_resumable_coroutine.cpp) | Await an operation from a coroutine | A serialized codec resume completes the waiting consumer inline. |
 | [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; distinguish clean EOF from an item. |
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
+| [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a public source | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows. |
 
 ## CDDL
 

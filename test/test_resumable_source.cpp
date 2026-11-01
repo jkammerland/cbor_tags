@@ -70,11 +70,23 @@ struct counted_iterator {
     friend bool operator==(const counted_iterator &left, const counted_iterator &right) { return left.position == right.position; }
 };
 
+// Owning node chunks expose a constant-time size while counting every byte
+// increment, including predecessor recovery after actual tail growth.
+struct counted_sized_chunk {
+    std::list<std::byte> bytes;
+    std::size_t         *increments{};
+
+    counted_iterator begin() { return {bytes.begin(), increments}; }
+    counted_iterator end() { return {bytes.end(), increments}; }
+    std::size_t      size() const { return bytes.size(); }
+};
+
 using unsized_chunk   = std::ranges::subrange<counted_iterator>;
 using unsized_storage = std::list<unsized_chunk>;
 using unsized_source  = decltype(ct::make_input_source(std::declval<unsized_storage &>()));
 
 static_assert(std::bidirectional_iterator<counted_iterator>);
+static_assert(std::ranges::sized_range<counted_sized_chunk>);
 static_assert(!std::ranges::sized_range<unsized_chunk>);
 static_assert(ct::CborInputBuffer<unsized_source>);
 static_assert(!std::ranges::sized_range<unsized_source>);
@@ -142,6 +154,171 @@ template <typename Storage> void check_output_windows(Storage &storage, std::spa
 
 TEST_SUITE("resumable/source") {
 
+    TEST_CASE("zero consumption preserves uninitialized empty input and output cursors") {
+        std::vector<std::span<std::byte>> storage;
+        auto                              input      = ct::make_input_source(storage);
+        auto                              output     = ct::make_output_source(storage);
+        auto                              cursor     = input.begin();
+        const auto                        checkpoint = output.position();
+        input.consume_window(cursor, 0);
+        output.consume_window(0);
+        CHECK(cursor == input.end());
+        CHECK(cursor.offset() == 0);
+        CHECK(output.position() == checkpoint);
+
+        std::array<std::byte, 2> bytes{};
+        storage.emplace_back(bytes);
+        input.refresh();
+        output.refresh();
+        input.consume_window(cursor, 0);
+        output.consume_window(0);
+        REQUIRE(output.write(std::array{std::byte{7}}) == 1);
+        CHECK(*cursor == std::byte{7});
+        CHECK(cursor.offset() == 0);
+        CHECK(output.position().offset() == 1);
+    }
+
+    TEST_CASE_TEMPLATE("indexed deque bytes retain checkpoints across growth in mixed outer ranges", Storage,
+                       std::vector<std::deque<std::byte>>, std::deque<std::deque<std::byte>>, std::list<std::deque<std::byte>>) {
+        Storage storage;
+        storage.emplace_back();
+        storage.emplace_back(std::initializer_list<std::byte>{std::byte{1}, std::byte{2}});
+        auto source = ct::make_input_source(storage);
+        auto cursor = source.begin();
+        REQUIRE(*cursor == std::byte{1});
+        ++cursor;
+        auto checkpoint = cursor;
+        ++cursor;
+        REQUIRE(cursor == source.end());
+        auto saved_end   = cursor;
+        auto dynamic_end = source.end();
+
+        // Growing a deque's map invalidates its byte iterators. The old tail
+        // must be read before the descriptors appended in this same refresh.
+        storage.back().resize(2048, std::byte{3});
+        storage.emplace_back();
+        storage.emplace_back(std::initializer_list<std::byte>{std::byte{4}, std::byte{5}});
+        source.refresh();
+        CHECK(checkpoint.offset() == 1);
+        CHECK(*checkpoint == std::byte{2});
+        CHECK(cursor.offset() == 2);
+        CHECK(*cursor == std::byte{3});
+        CHECK_FALSE(source.borrow_window(cursor).has_value());
+        REQUIRE(source.advance(cursor, 2046) == 2046);
+        CHECK(*cursor == std::byte{4});
+        CHECK(cursor.offset() == 2048);
+
+        // A saved exhausted position stays at its original absolute offset;
+        // the end marker instead tracks the complete refreshed extent.
+        --saved_end;
+        CHECK(*saved_end == std::byte{2});
+        CHECK(saved_end.offset() == 1);
+        --dynamic_end;
+        CHECK(*dynamic_end == std::byte{5});
+        CHECK(dynamic_end.offset() == 2049);
+        --cursor;
+        CHECK(*cursor == std::byte{3});
+        CHECK(cursor.offset() == 2047);
+    }
+
+    TEST_CASE("owning node relocation preserves active empty and exhausted cursor states") {
+        for (const std::size_t initial_size : {std::size_t{0}, std::size_t{2}}) {
+            for (const bool exhausted : {false, true}) {
+                CAPTURE(initial_size);
+                CAPTURE(exhausted);
+                std::size_t                      increments{};
+                std::vector<counted_sized_chunk> storage;
+                storage.reserve(1);
+                storage.push_back({std::list<std::byte>(initial_size, std::byte{2}), &increments});
+                auto       source   = ct::make_input_source(storage);
+                auto       cursor   = source.begin();
+                const auto consumed = exhausted ? initial_size : initial_size / 2;
+                REQUIRE(source.advance(cursor, consumed) == consumed);
+                CHECK((cursor == source.end()) == (consumed == initial_size));
+                auto       checkpoint = cursor;
+                const auto traversed  = increments;
+
+                // reserve moves each owning list, invalidating the former end
+                // while preserving its element iterators and byte count.
+                storage.reserve(storage.capacity() + 2);
+                for (int probe = 0; probe != 5; ++probe) {
+                    source.refresh();
+                    CHECK((cursor == source.end()) == (consumed == initial_size));
+                    CHECK((checkpoint == source.end()) == (consumed == initial_size));
+                    CHECK(increments == traversed);
+                }
+
+                storage.front().bytes.push_back(std::byte{3});
+                storage.push_back({{std::byte{4}}, &increments});
+                source.refresh();
+                if (consumed != initial_size) {
+                    CHECK(*cursor == std::byte{2});
+                    ++cursor;
+                }
+                REQUIRE(*cursor == std::byte{3});
+                ++cursor;
+                REQUIRE(*cursor == std::byte{4});
+                ++cursor;
+                REQUIRE(cursor == source.end());
+                const auto recovery = initial_size != 0 && exhausted ? 1u : 0u;
+                CHECK(increments == initial_size + 2 + recovery);
+                CHECK(cursor.offset() == initial_size + 2);
+
+                const auto completed = increments;
+                for (int probe = 0; probe != 5; ++probe) {
+                    source.refresh();
+                    CHECK(cursor == source.end());
+                    CHECK(increments == completed);
+                }
+                CHECK(checkpoint.offset() == consumed);
+                CHECK(*checkpoint == (consumed == initial_size ? std::byte{3} : std::byte{2}));
+            }
+        }
+    }
+
+    TEST_CASE("unsized node growth changes the boundary without prewalking or unchanged retries") {
+        std::list<std::byte> bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+        std::list<std::byte> appended{std::byte{5}};
+        std::size_t          increments{};
+        const auto           middle = std::next(bytes.begin(), 2);
+        unsized_storage      storage{{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}}};
+        auto                 source = ct::make_input_source(storage);
+        auto                 cursor = source.begin();
+        REQUIRE(source.advance(cursor, 2) == 2);
+        REQUIRE(cursor == source.end());
+        auto saved_end   = cursor;
+        auto dynamic_end = source.end();
+        CHECK(increments == 2);
+        for (int probe = 0; probe != 5; ++probe) {
+            source.refresh();
+            CHECK(cursor == source.end());
+            CHECK(increments == 2);
+        }
+
+        storage.back() = unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{bytes.end(), &increments}};
+        storage.emplace_back(counted_iterator{appended.begin(), &increments}, counted_iterator{appended.end(), &increments});
+        source.refresh();
+        CHECK(increments == 2);
+        REQUIRE(*cursor == std::byte{3});
+        CHECK(increments == 3);
+        REQUIRE(source.advance(cursor, 3) == 3);
+        CHECK(cursor == source.end());
+        CHECK(cursor.offset() == 5);
+        CHECK(increments == 6);
+        for (int probe = 0; probe != 5; ++probe) {
+            source.refresh();
+            CHECK(cursor == source.end());
+            CHECK(increments == 6);
+        }
+
+        --saved_end;
+        CHECK(*saved_end == std::byte{2});
+        CHECK(saved_end.offset() == 1);
+        --dynamic_end;
+        CHECK(*dynamic_end == std::byte{5});
+        CHECK_THROWS_AS(dynamic_end.offset(), std::logic_error);
+    }
+
     TEST_CASE("input windows rebind after reserve without changing the extent") {
         const std::vector<std::byte> expected{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
         auto                         bytes = expected;
@@ -152,12 +329,10 @@ TEST_SUITE("resumable/source") {
             auto checkpoint = cursor;
 
             const auto *previous_data = bytes.data();
-            const auto  generation    = source.generation();
             bytes.reserve(bytes.capacity() + bytes.size());
             REQUIRE(bytes.data() != previous_data);
             source.refresh();
 
-            CHECK(source.generation() == generation + 1);
             CHECK(source.size() == expected.size());
             REQUIRE(source.borrow_window(cursor)->data() == bytes.data() + 1);
             CHECK(source.borrow_window(cursor)->size() == expected.size() - 1);
@@ -188,13 +363,11 @@ TEST_SUITE("resumable/source") {
         const auto checkpoint = source.position();
 
         const auto *previous_data = bytes.data();
-        const auto  generation    = source.generation();
         bytes.reserve(bytes.capacity() + bytes.size());
         REQUIRE(bytes.data() != previous_data);
         source.refresh();
         source.restore(checkpoint);
 
-        CHECK(source.generation() == generation + 1);
         REQUIRE(source.borrow_window()->data() == bytes.data() + 1);
         const std::array tail{std::byte{2}, std::byte{3}, std::byte{4}};
         REQUIRE(source.write(tail) == tail.size());
@@ -218,23 +391,17 @@ TEST_SUITE("resumable/source") {
             REQUIRE(source.advance(cursor, consumed) == consumed);
             auto checkpoint = cursor;
 
-            const auto unchanged_generation = source.generation();
             source.refresh();
-            CHECK(source.generation() == unchanged_generation + 1);
 
             // Growth must expose the old tail's new bytes even at exhaustion.
-            auto generation = source.generation();
-            storage.back()  = original;
+            storage.back() = original;
             source.refresh();
-            CHECK(source.generation() == generation + 1);
             REQUIRE(source.borrow_window(cursor)->data() == original.data() + consumed);
             CHECK(source.borrow_window(cursor)->size() == original.size() - consumed);
 
             // A same-size descriptor can move its backing bytes independently.
-            generation     = source.generation();
             storage.back() = replacement;
             source.refresh();
-            CHECK(source.generation() == generation + 1);
             REQUIRE(source.borrow_window(cursor)->data() == replacement.data() + consumed);
             REQUIRE(source.borrow_window(checkpoint)->data() == replacement.data() + consumed);
             REQUIRE(source.advance(cursor, original.size() - consumed) == original.size() - consumed);
@@ -244,9 +411,7 @@ TEST_SUITE("resumable/source") {
             storage.reserve(storage.capacity() + 3);
             storage.emplace_back();
             storage.emplace_back(appended);
-            generation = source.generation();
             source.refresh();
-            CHECK(source.generation() == generation + 1);
             CHECK(cursor.offset() == original.size());
             REQUIRE(source.borrow_window(cursor)->data() == appended.data());
             CHECK(bytes_of(source.remaining(cursor)) == bytes_of(appended));
@@ -292,11 +457,9 @@ TEST_SUITE("resumable/source") {
         REQUIRE(source.borrow_window()->data() == original.data() + 1);
         REQUIRE(source.borrow_window()->size() == original.size() - 1);
 
-        replacement           = original;
-        storage.back()        = replacement;
-        const auto generation = source.generation();
+        replacement    = original;
+        storage.back() = replacement;
         source.refresh();
-        CHECK(source.generation() == generation + 1);
         REQUIRE(source.borrow_window()->data() == replacement.data() + 1);
         const std::array tail{std::byte{2}, std::byte{3}, std::byte{4}};
         REQUIRE(source.write(tail) == tail.size());
@@ -536,10 +699,8 @@ TEST_SUITE("resumable/source") {
         auto          cursor = source.begin();
         CHECK(cursor == source.end());
 
-        const auto empty_generation = source.generation();
         storage.emplace_back(std::span<const std::byte>{});
         source.refresh();
-        CHECK(source.generation() > empty_generation);
         CHECK(storage.size() == 1);
 
         storage.emplace_back(std::span<const std::byte>{});
@@ -573,10 +734,8 @@ TEST_SUITE("resumable/source") {
         CHECK_NOTHROW(source.acquire());
         source.release();
 
-        const auto generation = source.generation();
         source.close();
         CHECK(source.eof());
-        CHECK(source.generation() > generation);
         source.close();
         CHECK(source.eof());
     }

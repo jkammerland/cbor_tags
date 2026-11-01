@@ -107,17 +107,22 @@ template <ResumableChunkStorage Storage> class chunk_source {
 
   public:
     class iterator {
-        // Random-access chunks rebind directly from a known inner offset.
-        // Only node ranges need a predecessor to rediscover an appended tail.
         struct indexed_bookmark {
             std::size_t offset{};
         };
+        struct no_boundary {};
         struct node_bookmark {
+            std::optional<inner_iterator> current;
             std::optional<inner_iterator> previous;
             std::optional<std::size_t>    offset{0};
             bool                          exhausted{};
+
+            // Sized chunks detect growth from their offset. Only unsized
+            // chunks need the boundary observed when they became exhausted.
+            [[no_unique_address]] std::conditional_t<sized, no_boundary, std::optional<inner_iterator>> boundary;
         };
         using inner_bookmark = std::conditional_t<indexed_byte, indexed_bookmark, node_bookmark>;
+        using outer_bookmark = std::conditional_t<indexed, std::size_t, std::optional<outer_iterator>>;
 
       public:
         using value_type        = std::ranges::range_value_t<chunk_type>;
@@ -131,25 +136,30 @@ template <ResumableChunkStorage Storage> class chunk_source {
 
         reference operator*() const {
             normalize();
-            assert(!end_marker_ && current_ && limit_);
-            assert(*current_ != *limit_);
-            return **current_;
+            assert(!end_marker_ && has_chunk());
+            if constexpr (indexed_byte) {
+                assert(inner_.offset < std::ranges::size(chunk()));
+                return *(std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(inner_.offset));
+            } else {
+                assert(inner_.current && !inner_.exhausted);
+                return **inner_.current;
+            }
         }
 
         iterator &operator++() {
             normalize();
-            assert(!end_marker_ && current_ && limit_);
-            assert(*current_ != *limit_);
-            if constexpr (!indexed_byte)
-                inner_.previous = *current_;
-            ++*current_;
+            assert(!end_marker_ && has_chunk());
             if constexpr (indexed_byte) {
-                if constexpr (sized)
-                    ++inner_.offset;
-                else
-                    increment(inner_.offset);
+                assert(inner_.offset < std::ranges::size(chunk()));
+                ++inner_.offset;
             } else {
-                inner_.exhausted = *current_ == *limit_;
+                assert(inner_.current && !inner_.exhausted);
+                inner_.previous = *inner_.current;
+                ++*inner_.current;
+
+                // Owning node chunks can move with their outer container.
+                // Their elements stay valid, but their old end need not.
+                observe_boundary(std::ranges::end(chunk()));
                 if (inner_.offset) {
                     if constexpr (sized)
                         ++*inner_.offset;
@@ -157,6 +167,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
                         increment(*inner_.offset);
                 }
             }
+
             // Admission checks the complete extent of sized chunks. Valid
             // traversal within that extent cannot overflow its known offset.
             if constexpr (sized) {
@@ -187,24 +198,28 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 normalize();
             }
 
-            while (current_ && *current_ == std::ranges::begin(chunk())) {
-                assert(!first_chunk());
-                previous_chunk();
-                set_chunk_end();
-            }
-
-            assert(current_);
-            --*current_;
             if constexpr (indexed_byte) {
-                assert(inner_.offset != 0);
+                while (inner_.offset == 0) {
+                    assert(!first_chunk());
+                    previous_chunk();
+                    set_chunk_end();
+                }
                 --inner_.offset;
             } else {
+                while (inner_.current && *inner_.current == std::ranges::begin(chunk())) {
+                    assert(!first_chunk());
+                    previous_chunk();
+                    set_chunk_end();
+                }
+                assert(inner_.current);
+                --*inner_.current;
                 inner_.exhausted = false;
                 if (inner_.offset) {
                     assert(*inner_.offset != 0);
                     --*inner_.offset;
                 }
             }
+
             if constexpr (sized) {
                 assert(offset_ != 0);
                 --offset_;
@@ -240,8 +255,10 @@ template <ResumableChunkStorage Storage> class chunk_source {
             if (left_end || right_end) {
                 return left_end && right_end;
             }
-            assert(left.current_ && right.current_);
-            return left.outer_ == right.outer_ && *left.current_ == *right.current_;
+            if constexpr (indexed_byte)
+                return left.outer_ == right.outer_ && left.inner_.offset == right.inner_.offset;
+            else
+                return left.outer_ == right.outer_ && *left.inner_.current == *right.inner_.current;
         }
 
         // Begin-derived cursors always know their offset. For unsized chunks a
@@ -273,11 +290,19 @@ template <ResumableChunkStorage Storage> class chunk_source {
             ++value;
         }
 
+        bool has_chunk() const {
+            if constexpr (indexed)
+                return outer_ < source_->chunk_count_;
+            else
+                return outer_.has_value();
+        }
+
         decltype(auto) chunk() const {
             if constexpr (indexed) {
                 return *(std::ranges::begin(*source_->storage_) + static_cast<std::ranges::range_difference_t<Storage>>(outer_));
             } else {
-                return *outer_;
+                assert(outer_.has_value());
+                return **outer_;
             }
         }
 
@@ -285,76 +310,90 @@ template <ResumableChunkStorage Storage> class chunk_source {
             if constexpr (indexed) {
                 return outer_ == 0;
             } else {
-                return outer_ == std::ranges::begin(*source_->storage_);
+                return *outer_ == std::ranges::begin(*source_->storage_);
             }
         }
 
-        void previous_chunk() { --outer_; }
+        void previous_chunk() {
+            if constexpr (indexed)
+                --outer_;
+            else
+                --*outer_;
+        }
 
         void set_last_chunk() {
-            assert(std::ranges::begin(*source_->storage_) != std::ranges::end(*source_->storage_));
+            assert(source_->chunk_count_ != 0);
             if constexpr (indexed) {
                 outer_ = source_->chunk_count_ - 1;
             } else {
                 outer_ = std::prev(std::ranges::end(*source_->storage_));
             }
             set_chunk_end();
-            observed_generation_ = source_->generation_;
+        }
+
+        void observe_boundary(inner_iterator boundary) const
+            requires(!indexed_byte)
+        {
+            inner_.exhausted = *inner_.current == boundary;
+            if constexpr (!sized) {
+                if (inner_.exhausted)
+                    inner_.boundary = boundary;
+                else
+                    inner_.boundary.reset();
+            }
+        }
+
+        void set_chunk_begin() const {
+            inner_.offset = 0;
+            if constexpr (!indexed_byte) {
+                inner_.current = std::ranges::begin(chunk());
+                inner_.previous.reset();
+                observe_boundary(std::ranges::end(chunk()));
+            }
         }
 
         void set_chunk_end() {
-            current_ = std::ranges::end(chunk());
-            limit_   = *current_;
             if constexpr (indexed_byte) {
-                if constexpr (sized)
-                    inner_.offset = std::ranges::size(chunk());
-                else
-                    inner_.offset = static_cast<std::size_t>(*current_ - std::ranges::begin(chunk()));
+                inner_.offset = std::ranges::size(chunk());
             } else {
-                inner_.exhausted = true;
+                inner_.current = std::ranges::end(chunk());
+                observe_boundary(*inner_.current);
                 if constexpr (sized)
                     inner_.offset = std::ranges::size(chunk());
                 else
                     inner_.offset.reset();
                 inner_.previous.reset();
-                if (*current_ != std::ranges::begin(chunk()))
-                    inner_.previous = std::prev(*current_);
+                if (*inner_.current != std::ranges::begin(chunk()))
+                    inner_.previous = std::prev(*inner_.current);
             }
         }
 
-        // Reacquire random-access iterators after allocation changes. Stable
-        // node iterators only need their end refreshed; an exhausted cursor
-        // retains the preceding element to discover appended nodes.
-        void refresh_current() const {
-            if (observed_generation_ == source_->generation_)
-                return;
-            observed_generation_ = source_->generation_;
-            if (!current_)
-                return;
-            if constexpr (indexed_byte) {
-                current_ = std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(inner_.offset);
+        // Only exhaustion needs recovery. An active node iterator remains
+        // valid even when its owning descriptor moves to a new address.
+        void refresh_exhausted() const
+            requires(!indexed_byte)
+        {
+            const auto boundary = std::ranges::end(chunk());
+            if (inner_.offset && *inner_.offset == 0) {
+                inner_.current = std::ranges::begin(chunk());
             } else {
-                if (inner_.offset && *inner_.offset == 0) {
-                    current_ = std::ranges::begin(chunk());
-                } else if (inner_.exhausted && inner_.previous) {
-                    // Reusing an unchanged end must not traverse the last byte a
-                    // second time. Sized node ranges detect growth by their extent;
-                    // unsized subranges expose it through their changed boundary.
-                    const bool grew = [&] {
-                        if constexpr (sized)
-                            return inner_.offset && *inner_.offset != std::ranges::size(chunk());
-                        else
-                            return *limit_ != std::ranges::end(chunk());
-                    }();
-                    if (grew)
-                        current_ = std::next(*inner_.previous);
-                    else
-                        current_ = std::ranges::end(chunk());
-                }
+                const bool grew = [&] {
+                    if constexpr (sized) {
+                        assert(inner_.offset && *inner_.offset <= std::ranges::size(chunk()));
+                        return *inner_.offset < std::ranges::size(chunk());
+                    } else {
+                        assert(inner_.boundary);
+                        return *inner_.boundary != boundary;
+                    }
+                }();
+                // Do not revisit the preceding element on unchanged refresh
+                // or end probes. Unsized chunks need a changed boundary.
+                if (grew && inner_.previous)
+                    inner_.current = std::next(*inner_.previous);
+                else
+                    inner_.current = boundary;
             }
-            limit_ = std::ranges::end(chunk());
-            if constexpr (!indexed_byte)
-                inner_.exhausted = *current_ == *limit_;
+            observe_boundary(boundary);
         }
 
         void normalize() const {
@@ -362,76 +401,69 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 return;
             }
 
-            // Reusing an available window needs no descriptor traversal. Keep
-            // that path separate from mutation recovery and exhausted chunks.
-            assert(!current_ || limit_);
-            if (observed_generation_ == source_->generation_ && current_ && *current_ != *limit_) {
-                return;
+            if constexpr (indexed_byte) {
+                if (has_chunk() && inner_.offset < std::ranges::size(chunk()))
+                    return;
+            } else {
+                if (inner_.current && !inner_.exhausted)
+                    return;
             }
             normalize_chunks();
         }
 
         void normalize_chunks() const {
-            refresh_current();
-            if (!current_) {
-                if (std::ranges::begin(*source_->storage_) == std::ranges::end(*source_->storage_)) {
+            if (!has_chunk()) {
+                if (source_->chunk_count_ == 0)
                     return;
-                }
-                if constexpr (indexed) {
+                if constexpr (indexed)
                     outer_ = 0;
-                } else {
+                else
                     outer_ = std::ranges::begin(*source_->storage_);
-                }
-                current_      = std::ranges::begin(chunk());
-                limit_        = std::ranges::end(chunk());
-                inner_.offset = 0;
-                if constexpr (!indexed_byte)
-                    inner_.exhausted = *current_ == *limit_;
+                set_chunk_begin();
+            } else if constexpr (!indexed_byte) {
+                if (inner_.current)
+                    refresh_exhausted();
+                else
+                    set_chunk_begin();
             }
 
-            // Keep the last descriptor at exhaustion: its successor can be
-            // discovered after append without retaining an invalidated end.
-            assert(current_ && limit_);
-            while (*current_ == *limit_) {
-                auto next = outer_;
-                ++next;
+            // Keep the last descriptor at exhaustion. Its growth must be
+            // considered before a successor appended in the same refresh.
+            while (chunk_exhausted()) {
                 if constexpr (indexed) {
-                    if (next == source_->chunk_count_) {
+                    if (outer_ + 1 == source_->chunk_count_)
                         return;
-                    }
+                    ++outer_;
                 } else {
-                    if (next == std::ranges::end(*source_->storage_)) {
+                    assert(outer_.has_value());
+                    const auto next = std::next(*outer_);
+                    if (next == std::ranges::end(*source_->storage_))
                         return;
-                    }
+                    outer_ = next;
                 }
-                outer_        = next;
-                current_      = std::ranges::begin(chunk());
-                limit_        = std::ranges::end(chunk());
-                inner_.offset = 0;
-                if constexpr (!indexed_byte) {
-                    inner_.previous.reset();
-                    inner_.exhausted = *current_ == *limit_;
-                }
+                set_chunk_begin();
+            }
+        }
+
+        bool chunk_exhausted() const {
+            if constexpr (indexed_byte) {
+                assert(inner_.offset <= std::ranges::size(chunk()));
+                return inner_.offset == std::ranges::size(chunk());
+            } else {
+                return inner_.exhausted;
             }
         }
 
         bool at_end() const {
             normalize();
-            if (!current_) {
-                return true;
-            }
-            assert(limit_);
-            return *current_ == *limit_;
+            return !has_chunk() || chunk_exhausted();
         }
 
-        const chunk_source                   *source_{};
-        mutable outer_position                outer_{};
-        mutable std::optional<inner_iterator> current_;
-        mutable std::optional<inner_iterator> limit_;
-        mutable inner_bookmark                inner_;
-        mutable std::size_t                   observed_generation_{};
-        byte_offset                           offset_{0};
-        bool                                  end_marker_{};
+        const chunk_source    *source_{};
+        mutable outer_bookmark outer_{};
+        mutable inner_bookmark inner_;
+        byte_offset            offset_{0};
+        bool                   end_marker_{};
     };
 
     explicit chunk_source(Storage &storage) : storage_(&storage) { refresh(); }
@@ -470,11 +502,8 @@ template <ResumableChunkStorage Storage> class chunk_source {
     // Observe only the previous tail and newly appended descriptors. Unsized
     // byte ranges are never walked to calculate an extent.
     void refresh() {
-        if (generation_ == std::numeric_limits<std::size_t>::max())
-            throw std::length_error("CBOR source refresh generation overflow");
         if constexpr (std::ranges::sized_range<Storage>) {
-            if (std::ranges::size(*storage_) < chunk_count_)
-                throw std::logic_error("CBOR source descriptors cannot be removed");
+            assert(std::ranges::size(*storage_) >= chunk_count_ && "CBOR source descriptors cannot be removed");
         }
 
         if (last_chunk_) {
@@ -483,8 +512,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 const auto count = checked_size(tail);
                 // Unchanged tails need neither extent updates nor publication.
                 if (count != tail_extent_) {
-                    if (count < tail_extent_)
-                        throw std::logic_error("CBOR source tail cannot shrink");
+                    assert(count >= tail_extent_ && "CBOR source tail cannot shrink");
                     add_available(count - tail_extent_);
                     tail_extent_ = count;
                 }
@@ -504,8 +532,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 return next == std::ranges::end(*storage_);
         };
         while (!at_end()) {
-            if (closed_)
-                throw std::logic_error("cannot grow a closed CBOR source");
+            assert(!closed_ && "cannot grow a closed CBOR source");
             if (chunk_count_ == std::numeric_limits<std::size_t>::max())
                 throw std::length_error("CBOR source descriptor count overflow");
             if constexpr (sized) {
@@ -516,12 +543,10 @@ template <ResumableChunkStorage Storage> class chunk_source {
             ++chunk_count_;
             ++next;
         }
-        ++generation_;
     }
 
-    std::size_t generation() const { return generation_; }
-    bool        eof() const { return closed_; }
-    bool        owns(const iterator &position) const { return position.source_ == this; }
+    bool eof() const { return closed_; }
+    bool owns(const iterator &position) const { return position.source_ == this; }
 
     // Cleanup only restores known progress positions; an unsized end sentinel
     // is never a retry checkpoint and has no offset to inspect here.
@@ -558,50 +583,39 @@ template <ResumableChunkStorage Storage> class chunk_source {
 
     std::optional<std::span<const std::byte>> available_span(iterator from) const { return borrow_window(from); }
 
-    // Normalize the working cursor once, retaining its descriptor position.
+    // Reconstruct contiguous access from the descriptor and byte offset so no
+    // byte iterator survives a backing allocation or descriptor relocation.
     std::optional<std::span<const std::byte>> borrow_window(iterator &from) const {
         assert(from.source_ == this && !from.end_marker_);
         if constexpr (std::ranges::contiguous_range<chunk_type>) {
             from.normalize();
-            if (!from.current_) {
+            if (!from.has_chunk() || from.chunk_exhausted())
                 return std::span<const std::byte>{};
-            }
-            assert(from.limit_);
-            if (*from.current_ == *from.limit_) {
-                return std::span<const std::byte>{};
-            }
-            return std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::to_address(*from.current_)),
-                                              static_cast<std::size_t>(*from.limit_ - *from.current_)};
+            const auto current = std::ranges::begin(from.chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(from.inner_.offset);
+            return std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::to_address(current)),
+                                              std::ranges::size(from.chunk()) - from.inner_.offset};
         } else {
             return std::nullopt;
         }
     }
 
-    // The caller stays within the just-borrowed contiguous window. Leave an
-    // exhausted cursor on its descriptor so the next borrow can discover append.
+    // Leave an exhausted cursor on its descriptor so its next access can
+    // discover tail growth before proceeding to newly appended descriptors.
     void consume_window(iterator &from, std::size_t count) const {
         assert(from.source_ == this && !from.end_marker_);
-        assert(from.current_ && from.limit_);
-        if constexpr (std::ranges::contiguous_range<chunk_type>) {
-            assert(count <= static_cast<std::size_t>(*from.limit_ - *from.current_));
-        }
-        if constexpr (sized) {
-            assert(from.offset_ <= extent_ && count <= extent_ - from.offset_);
-        } else if (from.offset_ && count > std::numeric_limits<std::size_t>::max() - *from.offset_) {
-            throw std::length_error("CBOR source byte offset overflow");
-        }
-        std::ranges::advance(*from.current_, static_cast<std::iter_difference_t<inner_iterator>>(count));
+        if (count == 0)
+            return;
+
         if constexpr (indexed_byte) {
+            assert(from.has_chunk());
+            assert(from.inner_.offset <= std::ranges::size(from.chunk()));
+            assert(count <= std::ranges::size(from.chunk()) - from.inner_.offset);
+            assert(from.offset_ <= extent_ && count <= extent_ - from.offset_);
             from.inner_.offset += count;
-        } else {
-            if (from.inner_.offset)
-                *from.inner_.offset += count;
-            from.inner_.exhausted = *from.current_ == *from.limit_;
-        }
-        if constexpr (sized) {
             from.offset_ += count;
-        } else if (from.offset_) {
-            *from.offset_ += count;
+        } else {
+            for (std::size_t consumed = 0; consumed != count; ++consumed)
+                ++from;
         }
     }
 
@@ -609,9 +623,8 @@ template <ResumableChunkStorage Storage> class chunk_source {
         assert(from.source_ == this && !from.end_marker_);
         std::size_t advanced = 0;
         while (advanced != count && !from.at_end()) {
-            if constexpr (std::ranges::random_access_range<chunk_type>) {
-                assert(from.current_ && from.limit_);
-                const auto available = static_cast<std::size_t>(*from.limit_ - *from.current_);
+            if constexpr (indexed_byte) {
+                const auto available = std::ranges::size(from.chunk()) - from.inner_.offset;
                 const auto amount    = std::min(available, count - advanced);
                 consume_window(from, amount);
                 advanced += amount;
@@ -635,15 +648,11 @@ template <ResumableChunkStorage Storage> class chunk_source {
         assert(from.source_ == this && !from.end_marker_);
         if constexpr (std::ranges::contiguous_range<chunk_type>) {
             from.normalize();
-            if (!from.current_) {
+            if (!from.has_chunk() || from.chunk_exhausted())
                 return std::span<std::byte>{};
-            }
-            assert(from.limit_);
-            if (*from.current_ == *from.limit_) {
-                return std::span<std::byte>{};
-            }
-            return std::span<std::byte>{reinterpret_cast<std::byte *>(std::to_address(*from.current_)),
-                                        static_cast<std::size_t>(*from.limit_ - *from.current_)};
+            const auto current = std::ranges::begin(from.chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(from.inner_.offset);
+            return std::span<std::byte>{reinterpret_cast<std::byte *>(std::to_address(current)),
+                                        std::ranges::size(from.chunk()) - from.inner_.offset};
         } else {
             return std::nullopt;
         }
@@ -656,8 +665,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
         if (to.at_end()) {
             return false;
         }
-        assert(to.current_);
-        **to.current_ = static_cast<std::ranges::range_value_t<chunk_type>>(value);
+        *to = static_cast<std::ranges::range_value_t<chunk_type>>(value);
         ++to;
         return true;
     }
@@ -678,8 +686,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
     }
 
     void add_available(std::size_t amount) {
-        if (closed_ && amount != 0)
-            throw std::logic_error("cannot grow a closed CBOR source");
+        assert((!closed_ || amount == 0) && "cannot grow a closed CBOR source");
         if (amount > std::numeric_limits<std::size_t>::max() - extent_)
             throw std::length_error("CBOR source byte extent overflow");
         extent_ += amount;
@@ -688,7 +695,6 @@ template <ResumableChunkStorage Storage> class chunk_source {
     Storage                      *storage_;
     std::size_t                   chunk_count_{};
     std::size_t                   extent_{};
-    std::size_t                   generation_{};
     std::optional<outer_position> last_chunk_;
     std::size_t                   tail_extent_{};
     bool                          closed_{};
@@ -741,12 +747,11 @@ template <detail::ResumableStorage Storage> class input_source {
         return chunks_.remaining_size(from);
     }
 
-    void        refresh() { chunks_.refresh(); }
-    void        acquire() { chunks_.acquire(); }
-    void        release() noexcept { chunks_.release(); }
-    void        close() { chunks_.close(); }
-    bool        eof() const { return chunks_.eof(); }
-    std::size_t generation() const { return chunks_.generation(); }
+    void refresh() { chunks_.refresh(); }
+    void acquire() { chunks_.acquire(); }
+    void release() noexcept { chunks_.release(); }
+    void close() { chunks_.close(); }
+    bool eof() const { return chunks_.eof(); }
 
     void commit(const iterator &position) {
         assert(chunks_.owns(position) && position.offset() >= committed_.offset());
@@ -790,12 +795,11 @@ template <detail::ResumableOutputStorage Storage> class output_source {
     output_source(output_source &&)                 = delete;
     output_source &operator=(output_source &&)      = delete;
 
-    void        refresh() { chunks_.refresh(); }
-    std::size_t generation() const { return chunks_.generation(); }
-    bool        eof() const { return chunks_.eof(); }
-    void        close() { chunks_.close(); }
-    void        acquire() { chunks_.acquire(); }
-    void        release() noexcept { chunks_.release(); }
+    void refresh() { chunks_.refresh(); }
+    bool eof() const { return chunks_.eof(); }
+    void close() { chunks_.close(); }
+    void acquire() { chunks_.acquire(); }
+    void release() noexcept { chunks_.release(); }
 
     iterator      begin() const { return chunks_.begin(); }
     iterator      end() const { return working_; }
