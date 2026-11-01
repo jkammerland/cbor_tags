@@ -12,17 +12,18 @@
 namespace resumable_bench {
 
 struct throughput_options {
-    std::size_t bytes       = 16 * 1024 * 1024;
-    std::size_t repetitions = 3;
-    std::size_t epochs      = 9;
-    std::string workload    = "all";
-    std::string mode        = "all";
-    std::string storage     = "cold";
-    std::string direction   = "all";
-    std::string transport   = "all";
-    std::size_t cbor_chunk  = 256;
-    bool        allocations = false;
-    bool        self_test   = false;
+    std::size_t bytes              = 16 * 1024 * 1024;
+    std::size_t repetitions        = 3;
+    std::size_t epochs             = 9;
+    std::size_t profile_iterations = 0;
+    std::string workload           = "all";
+    std::string mode               = "all";
+    std::string storage            = "cold";
+    std::string direction          = "all";
+    std::string transport          = "all";
+    std::size_t cbor_chunk         = 256;
+    bool        allocations        = false;
+    bool        self_test          = false;
 };
 
 struct variant {
@@ -309,6 +310,11 @@ void run_workload(const throughput_options &options, const std::string &name, co
             bench.output(nullptr).unit("byte").batch(encoded.size()).performanceCounters(false);
             bench.epochs(options.epochs).minEpochTime(std::chrono::milliseconds{20}).minEpochIterations(1);
 
+            // Fixed work bypasses nanobench's warmup and adaptive iteration selection for profiling.
+            if (options.profile_iterations != 0) {
+                bench.epochs(1).warmup(0).epochIterations(options.profile_iterations);
+            }
+
             if (options.direction == "all" || options.direction == "decode") {
                 if (options.storage != "reserved") {
                     std::optional<Destination> decoded;
@@ -406,7 +412,8 @@ throughput_options parse_options(int argc, char **argv) {
                          "typed-opposite|bstr-indef|tstr-indef|floats|floats-indef|doubles|doubles-indef|bools|bools-indef|float-map|float-"
                          "map-indef|tstr-utf8\n"
                          "--mode all|one-shot|resumable --storage cold|reserved|both --direction all|encode|decode|validate\n"
-                         "--transport all|full|1460|4096|65536 --cbor-chunk N --allocations --self-test\n";
+                         "--transport all|full|1460|4096|65536 --cbor-chunk N --allocations --self-test\n"
+                         "--profile-iterations N (positive N; one epoch of N callbacks per measurement, no warmup)\n";
             std::exit(0);
         }
         require(i + 1 < argc, "missing option value");
@@ -417,6 +424,8 @@ throughput_options parse_options(int argc, char **argv) {
             options.repetitions = parse_size(value);
         } else if (argument == "--epochs") {
             options.epochs = parse_size(value);
+        } else if (argument == "--profile-iterations") {
+            options.profile_iterations = parse_size(value);
         } else if (argument == "--workload") {
             options.workload = value;
         } else if (argument == "--storage") {
