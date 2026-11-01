@@ -172,6 +172,13 @@ template <template <typename> typename Codec> void check_integer_map_override(st
             auto                   sink = make_output_source(output_storage);
             override_calls::encoded     = 0;
             auto encoder                = make_resumable_encoder<Codec>(sink)(value);
+
+            // Construction must suspend cleanly while the header has no output.
+            REQUIRE_FALSE(encoder.done());
+            CHECK(encoder.progress() == resume_state::need_output);
+            REQUIRE_FALSE(encoder.result());
+            CHECK(encoder.result().error() == status_code::incomplete);
+
             if (bytewise) {
                 for (auto &byte : bytes) {
                     output_storage.emplace_back(std::span{&byte, 1});
