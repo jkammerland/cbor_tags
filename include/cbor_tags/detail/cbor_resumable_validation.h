@@ -242,6 +242,16 @@ template <typename Source> class resumable_validation_context : public resumable
         }
         return await_string_payload<Text>(length);
     }
+
+    static bool consume_utf8_window(utf8_state &state, std::span<const std::byte> bytes) noexcept {
+        // Keep byte reads independent of the suspended frame's scalar state.
+        // Publish the partial code point after consuming the complete window.
+        auto       local = state;
+        const auto valid = local.consume_span(bytes);
+        state            = local;
+        return valid;
+    }
+
     template <bool Text> resumable<status_code> await_string_payload(std::uint64_t length) {
         utf8_state utf8;
         bool       valid  = true;
@@ -264,7 +274,7 @@ template <typename Source> class resumable_validation_context : public resumable
             if (!window_.empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, window_.size()));
                 if constexpr (Text) {
-                    valid = utf8.consume_span(window_.first(count)) && valid;
+                    valid = consume_utf8_window(utf8, window_.first(count)) && valid;
                 }
                 advance_window(count);
                 length -= count;
