@@ -959,6 +959,12 @@ template <detail::ResumableOutputStorage Storage> class output_source {
 
     std::size_t write(std::span<const std::byte> bytes) {
         const auto requested = bytes.size();
+        if constexpr (growable) {
+            // Mutation is admitted before driving; at the known end there
+            // are no existing bytes to overwrite.
+            if (working_.offset() == chunks_.size())
+                return append_at_end(bytes);
+        }
         if constexpr (detail::HasBulkChunkWrite<chunks_type, iterator>) {
             bytes = bytes.subspan(chunks_.write_bytes(working_, bytes));
         } else {
@@ -976,25 +982,34 @@ template <detail::ResumableOutputStorage Storage> class output_source {
             }
         }
         if constexpr (growable) {
-            if (!bytes.empty() && !eof()) {
-                if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
-                    throw std::length_error("CBOR output byte offset overflow");
-                using byte_type = std::ranges::range_value_t<Storage>;
-                if constexpr (std::same_as<byte_type, std::byte>) {
-                    storage_->insert(std::ranges::end(*storage_), bytes.begin(), bytes.end());
-                } else {
-                    for (const auto byte : bytes)
-                        storage_->push_back(static_cast<byte_type>(byte));
-                }
-                chunks_.refresh();
-                working_ = chunks_.position_at_end();
-                return requested;
-            }
+            const auto appended = append_at_end(bytes);
+            return requested - bytes.size() + appended;
         }
         return requested - bytes.size();
     }
 
   private:
+    std::size_t append_at_end(std::span<const std::byte> bytes)
+        requires growable
+    {
+        if (bytes.empty() || eof())
+            return 0;
+        if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
+            throw std::length_error("CBOR output byte offset overflow");
+
+        using byte_type = std::ranges::range_value_t<Storage>;
+        if constexpr (std::same_as<byte_type, std::byte>) {
+            storage_->insert(std::ranges::end(*storage_), bytes.begin(), bytes.end());
+        } else {
+            for (const auto byte : bytes)
+                storage_->push_back(static_cast<byte_type>(byte));
+        }
+
+        chunks_.refresh();
+        working_ = chunks_.position_at_end();
+        return bytes.size();
+    }
+
     Storage                        *storage_;
     detail::source_storage<Storage> views_;
     chunks_type                     chunks_;
