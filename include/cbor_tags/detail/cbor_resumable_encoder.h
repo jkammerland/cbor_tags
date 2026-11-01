@@ -153,7 +153,13 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         }
     }
 
-    template <typename Write> status_code write_once(Write &write) {
+    // Keep this exception boundary out of coroutine resume functions: Windows
+    // Clang 22.1.3 /O2 can miscompile the inlined caught exception reference.
+    template <typename Write>
+#if defined(__clang__) && defined(_MSC_VER)
+    __declspec(noinline)
+#endif
+    status_code write_once(Write &write) {
         status_code status;
         try {
             status = write();
