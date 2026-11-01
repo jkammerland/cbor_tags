@@ -174,6 +174,7 @@ done
 reset_fixture
 printf 'extra\n' >"${package_dir}/unexpected.sig"
 expect_failure 'extra file' 'exact signed release asset set' verify_fixture
+GLOBIGNORE=unexpected.sig expect_failure 'ignored extra file' 'exact signed release asset set' verify_fixture
 reset_fixture
 mkdir "${package_dir}/extra-directory"
 expect_failure 'extra directory' 'regular non-symlink files' verify_fixture

@@ -14,8 +14,7 @@ For version `X.Y.Z`, the workflow publishes exactly 12 assets:
 - `cbor_tags-X.Y.Z.release-manifest` and its detached `.sig`.
 
 One signed manifest binds all assets to the repository, version, signed tag, and
-commit. Verification requires the expected
-release identity; a downloaded manifest cannot choose it.
+commit. Verification requires the expected release identity; a downloaded manifest cannot choose it.
 
 The archives contain the exact tracked source snapshot for the signed release
 commit. They do not contain a pre-installed CMake tree. The workflow extracts

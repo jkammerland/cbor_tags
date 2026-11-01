@@ -68,6 +68,8 @@ expected_signed_assets() {
 # serializing them so newlines cannot disguise extra or missing assets.
 list_release_assets() (
     local package_dir="$1" asset asset_name
+    local LC_ALL=C
+    unset GLOBIGNORE
     shopt -s nullglob dotglob
     for asset in "${package_dir}"/*; do
         [[ -f "${asset}" && ! -L "${asset}" ]] || die "release assets must be regular non-symlink files"
