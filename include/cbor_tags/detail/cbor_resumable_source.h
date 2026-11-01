@@ -489,6 +489,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
                         return nullptr;
                     ++outer_;
                 } else {
+                    assert(outer_.has_value());
                     const auto next = std::next(*outer_);
                     if (next == std::ranges::end(*source_->storage_))
                         return nullptr;
