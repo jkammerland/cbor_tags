@@ -186,49 +186,32 @@ factories preserve one-shot group wrapping and integer policy. Structural
 traversal reuses reflection, allocators, appenders, header decoding, and variant
 mapping. Ordinary primitives are not byte-by-byte coroutine implementations.
 
-Arrays of built-in integers, `float`, `double`, and `bool` drain available
-input/output in a synchronous loop shared with ordinary encoding and decoding.
-Contiguous chunks use the ordinary span codecs with the supported wire-size
-bound for their element type. An element crossing a chunk boundary uses the
-chunk-aware codec and is retried as one item if incomplete. The container awaits
-only when it needs more input or output. Custom codecs and explicit hooks keep
-their normal dispatch; proxy references retain the generic encoding path.
+## Bound decoded containers
 
-Indefinite arrays of these types use the same approach, sharing ordinary
-header-context decoding and break handling. A break can finish an array at its
-configured size limit; reaching end of input without a break remains incomplete.
+Use a bounded view when the application limits the number of decoded elements:
 
-Maps whose keys and values use these built-in codecs also share synchronous
-ordinary codec loops. Each completed key commits independently, so a value split
-across chunks resumes without decoding or encoding its key again. Definite and indefinite maps count
-wire pairs, including duplicate keys, and append only complete pairs.
+```cpp
+std::list<std::span<const std::byte>> chunks;
+auto source = ct::make_input_source(chunks);
+auto decoder = ct::make_resumable_decoder(source);
+std::vector<std::uint32_t> values;
+auto bounded_values = ct::as_bounded_size<0, 128>(values);
+auto operation = decoder(bounded_values);
+```
 
-For definite strings, arrays, and maps whose destination appender supports
-reservation, structural decoding reserves space for existing contents plus the
-declared size as soon as the complete header and configured size bounds are
-validated. Payload bytes need not have arrived; this also applies to unsized
-input without prewalking it. For maps, the declared size counts key/value pairs,
-including duplicate keys; reserving an unordered map prepares its buckets but
-does not allocate its elements. Fixed destinations retain their extent checks.
+After validating a definite header and the configured bounds, structural decoding
+may reserve its declared size before payload bytes arrive. A bounded allocator
+can impose an allocation limit; allocation failure reports
+`status_code::out_of_memory`. The ordinary one-shot decoder keeps its own
+availability checks.
 
-The caller owns allocation limits and can use `as_bounded_size<0, limit>(values)`
-or a bounded allocator. Allocation failure returns `status_code::out_of_memory`.
-Empty items and indefinite outer headers do not reserve. For indefinite strings,
-each validated definite child can reserve its declared payload before it arrives;
-destinations exposing capacity retain geometric growth across small children.
-Payloads already available transfer synchronously without a child coroutine frame.
-Containers without reservation support grow normally. One-shot decoding retains
-its existing availability checks.
+Completed headers, fields, and elements commit independently. An incomplete
+ordinary child retains its retry boundary. Maps commit a completed key before
+waiting for its value, and count encoded pairs even when keys repeat.
 
-With `codec::typed_array`, owning RFC 8746 arrays resume decoding directly into
-their numeric storage. Encoding supports owning arrays and borrowed range
-wrappers. Both paths reuse ordinary tag/header handling and endian conversion;
-only one element crossing a transport boundary needs fixed scratch storage.
-The header and completed elements commit independently. An incomplete element
-remains uncommitted at EOF, and following items remain available as input tail.
-The codec continues to require a definite byte-string payload, which may arrive
-in any number of transport chunks. Borrowed decode views retain ordinary
-fallback behavior and their input-lifetime requirements.
+Owning values decoded with `codec::typed_array` retain completed numeric elements
+when the byte-string payload spans input chunks. Borrowed views keep their
+ordinary backing-lifetime requirements.
 
 ## Validation
 
