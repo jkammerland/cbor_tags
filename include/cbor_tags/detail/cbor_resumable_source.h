@@ -924,7 +924,7 @@ template <detail::ResumableStorage Storage> class input_source {
 template <detail::ResumableStorage Storage> auto make_input_source(Storage &storage) { return input_source<Storage>(storage); }
 
 template <detail::ResumableOutputStorage Storage> class output_source {
-    using chunks_type = detail::chunk_source<detail::source_chunks<Storage>>;
+    using chunks_type              = detail::chunk_source<detail::source_chunks<Storage>>;
     static constexpr bool growable = detail::GrowableOutputStorage<Storage>;
 
   public:
