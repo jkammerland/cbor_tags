@@ -196,17 +196,19 @@ cmake -S . -B build/resumable-bench -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
   -DCBOR_TAGS_BUILD_TESTS=OFF
 cmake --build build/resumable-bench \
-  --target bench_resumable_throughput bench_resumable_latency --parallel
-ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency|allocation)' --output-on-failure
+  --target bench_resumable_throughput bench_resumable_latency bench_resumable_storage --parallel
+ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency|allocation|storage)' --output-on-failure
 ```
 
 The default uses explicit input/output sources. Configure with
 `-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure the named encoder and
 decoder factories that own their adapters. This changes only adapter setup;
 fixtures, feed loops and correctness checks remain identical. Validation continues
-to use an explicit source. Keep the switch off when compiling this harness against
-headers predating storage-based factories. Compare both candidate configurations
-with the baseline explicit-source configuration using the same harness and flags.
+to use an explicit source. For a baseline/candidate comparison, compile the same
+final harness against both header revisions with the same value for this option,
+the same compiler, and identical build flags. A comparison across different
+factory settings also changes the measured API setup and cannot isolate a source
+adapter change. The separate storage target always uses the named factories.
 
 `bench_resumable_throughput` compares ordinary encode/decode with resumable
 encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
@@ -268,6 +270,88 @@ and nested structured allocations are not PMR-instrumented and report
 PMR counters start after destination construction in both modes, so constructor
 allocations are excluded even in cold counts; cold timing includes construction.
 
+### Storage adapter cases
+
+`bench_resumable_storage` is a separate, compact matrix for definite bstr and
+width-varying unsigned scalar arrays. Its ten `--case` values are:
+
+| Case | Caller-owned storage |
+| --- | --- |
+| `vector` | `vector<byte>` |
+| `deque` | `deque<byte>` |
+| `span` | `span<byte>` |
+| `vector-vector` | `vector<vector<byte>>` |
+| `deque-span` | `deque<span<byte>>` |
+| `list-span` | `list<span<byte>>` |
+| `list-deque` | `list<deque<byte>>` |
+| `vector-list` | `vector<list<byte>>` |
+| `list-list` | `list<list<byte>>` |
+| `ring` | Custom source implementing the public resumable protocol |
+
+Input spans view const bytes. Nested storage uses 1460-byte packets. `complete`
+admits all storage before creating the operation; `staged1460` admits storage
+between calls to `resume()`. Both modes include admission in the measured work.
+Flat growable outputs use ordinary append and have only a `complete` row. Fixed
+output spans grow their admitted prefix without reallocating their backing
+storage. The ring control has a 1460-byte capacity, starts at a nonzero absolute
+offset, wraps, and reclaims only committed bytes. It has bounded admission rows
+only and bypasses the built-in storage adapters.
+
+Every row includes factory and operation construction, storage reset, admission,
+completion checks, and calls to `resume()` when needed. Value destination reservation, fixed output
+backing, and supported outer-container reservation happen outside timing.
+`timed_storage_scope` identifies owning-packet copying/allocation, descriptor
+allocation, deque allocation, and ring publication copying. These scopes differ
+between storage types; use matched rows across header revisions to assess a code
+change. Canonical fixture encoding, typed-value equality, and complete wire-byte
+comparisons run outside timing. Every operation checks successful completion and
+the exact committed byte count. The self-test covers small fixtures and admission
+sizes 1, 17, and 1460, including empty descriptors, split headers, and ring
+wraparound with committed reclamation.
+
+```bash
+build/resumable-bench/benchmarks/resumable/bench_resumable_storage --self-test
+build/resumable-bench/benchmarks/resumable/bench_resumable_storage \
+  --bytes 65536 --workload scalars --case vector-list \
+  --direction decode --admission 1460 --repetitions 3 --epochs 9
+```
+
+`--bytes` is the exact bstr encoded length and an approximate scalar-array
+budget; each row prints its actual encoded length. The default is 65536 bytes.
+`--case`, `--workload`, `--direction`, and `--admission` accept `all`. Normal rows
+use nine nanobench epochs of at least 20 ms and three repetitions, with raw rows
+and median/range summaries. For fixed-work profiling, a positive
+`--profile-iterations N` selects one epoch of exactly N measured callbacks per
+row, without warmup or adaptive iteration selection. Preflight fixture checks
+still run once before measurement; process-level profiler captures include them.
+
+```bash
+perf stat -r 3 -e cycles:u -- taskset -c 2 \
+  build/resumable-bench/benchmarks/resumable/bench_resumable_storage \
+  --workload scalars --case list-list --direction decode --admission 1460 \
+  --bytes 65536 --repetitions 1 --profile-iterations 100
+
+valgrind --tool=cachegrind --cache-sim=yes --branch-sim=yes \
+  --cachegrind-out-file=/tmp/cbor-storage.cg \
+  build/resumable-bench/benchmarks/resumable/bench_resumable_storage \
+  --workload scalars --case vector-vector --direction decode --admission 1460 \
+  --bytes 16384 --repetitions 1 --profile-iterations 20
+```
+
+Collect one hardware event per pass and check its running percentage; harness
+counters can otherwise cause multiplexing. Repeat with `instructions:u` or other
+events as needed.
+
+Build the same final `storage.cpp`, fixture headers, and nanobench version against
+both header revisions with identical configuration. Run both self-tests before
+profiling. Alternate baseline/candidate execution order on otherwise idle hardware;
+keep native timing, hardware counter collection, and Cachegrind runs sequential.
+Cachegrind instruction counts and simulated cache/branch events do not measure
+native elapsed time. Remove temporary profiler captures after analysis unless
+they are needed for an ongoing investigation.
+
+### Comparing revisions
+
 For an ordinary-code baseline, compile the same harness against the baseline
 checkout's headers with `CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1` (or the matching
 CMake option). This excludes resumable operation instantiations and retains the
@@ -301,6 +385,8 @@ these rates do not establish sustained large-buffer or network throughput.
 Validation throughput counts encoded bytes: a definite bstr validator may skip
 its admitted payload, so its rate does not measure reading every payload byte.
 Run fixture and allocation selftests and retain the timed content checks.
+
+### Completion latency
 
 `bench_resumable_latency` measures real elapsed completion time while an
 independent producer admits chunks on absolute `steady_clock` deadlines. It

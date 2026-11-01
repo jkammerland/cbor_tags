@@ -172,12 +172,15 @@ inline std::map<float, bool> make_float_map(std::size_t approximate_encoded_size
     return result;
 }
 
+template <typename T>
+concept reservable_fixture = requires(T &value, std::size_t count) { value.reserve(count); };
+
 // Distinct keys preserve every pair and make ordered/hash maps comparable.
 template <typename Map> Map make_integer_map(std::size_t approximate_encoded_size) {
     Map        result;
     const auto count = std::max<std::size_t>(8, approximate_encoded_size / 12);
     require(count <= std::numeric_limits<std::uint32_t>::max(), "map fixture exceeds uint32 keys");
-    if constexpr (requires { result.reserve(count); }) {
+    if constexpr (reservable_fixture<Map>) {
         result.reserve(count);
     }
     for (std::size_t i = 0; i < count; ++i) {

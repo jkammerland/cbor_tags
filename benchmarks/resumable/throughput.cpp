@@ -57,13 +57,16 @@ enum class wire_format { ordinary, indefinite, typed_native, typed_opposite, str
 template <wire_format Format>
 inline constexpr bool typed_format = Format == wire_format::typed_native || Format == wire_format::typed_opposite;
 
+template <typename T>
+concept has_value_storage = requires(T &value) { value.values(); };
+
 template <wire_format Format, typename T> decltype(auto) codec_value(T &value) {
     if constexpr (Format == wire_format::indefinite) {
         return ct::as_indefinite{value};
     } else if constexpr (typed_format<Format>) {
         constexpr bool native_little = std::endian::native == std::endian::little;
         constexpr bool little        = Format == wire_format::typed_native ? native_little : !native_little;
-        if constexpr (requires { value.values(); }) {
+        if constexpr (has_value_storage<T>) {
             return (value);
         } else if constexpr (little) {
             return ct::rfc8746::as_typed_array(value);
@@ -87,7 +90,7 @@ template <wire_format Format, typename T> auto make_destination() {
 }
 
 template <typename T> decltype(auto) destination_storage(T &value) {
-    if constexpr (requires { value.values(); }) {
+    if constexpr (has_value_storage<T>) {
         return value.values();
     } else {
         return (value);
@@ -205,8 +208,14 @@ template <typename K, typename V> auto counted_destination(const std::unordered_
     return std::pmr::unordered_map<K, V>{&resource};
 }
 
+template <typename T>
+concept has_counted_destination = requires(const T &value, allocation_counter &resource) { counted_destination(value, resource); };
+
+template <typename T>
+concept mapped_destination = requires { typename T::mapped_type; };
+
 template <typename A, typename B> bool same_values(const A &expected, const B &actual) {
-    if constexpr (requires { typename A::mapped_type; }) {
+    if constexpr (mapped_destination<A>) {
         return expected.size() == actual.size() && std::ranges::all_of(expected, [&](const auto &entry) {
                    const auto found = actual.find(entry.first);
                    return found != actual.end() && found->second == entry.second;
@@ -274,7 +283,7 @@ void run_workload(const throughput_options &options, const std::string &name, co
         return;
     }
     if (options.allocations) {
-        if constexpr (!typed_format<Format> && requires(allocation_counter &resource) { counted_destination(value, resource); }) {
+        if constexpr (!typed_format<Format> && has_counted_destination<T>) {
             for (const auto &mode : modes) {
                 for (const bool reserve : {false, true}) {
                     if (reserve && !reservable_destination<T>) {
