@@ -14,6 +14,21 @@
 
 namespace cbor::tags::detail {
 
+#if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
+// Call only while handling an active exception. Keep exception-object access
+// outside callers that affected Windows Clang versions inline into a coroutine.
+__declspec(noinline)
+inline status_code resumable_encode_exception_status() noexcept {
+    try {
+        throw;
+    } catch (const encode_status_exception &error) {
+        return error.status;
+    } catch (...) {
+        return resumable_exception_status();
+    }
+}
+#endif
+
 template <typename T> inline constexpr bool    resumable_encode_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_encode_wrap_array<wrap_as_array<T...>> = true;
 
@@ -147,18 +162,17 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         }
     }
 
-    // Keep this exception boundary out of coroutine resume functions: Windows
-    // Clang 22.1.3 /O2 can miscompile the inlined caught exception reference.
-    template <typename Write>
-#if defined(__clang__) && defined(_MSC_VER)
-    __declspec(noinline)
-#endif
-    status_code write_once(Write &write) {
+    template <typename Write> status_code write_once(Write &write) {
         status_code status;
         try {
             status = write();
+#if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
+        } catch (...) {
+            status = resumable_encode_exception_status();
+#else
         } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
             status = resumable_exception_status();
+#endif
         }
 
         if (status == status_code::success)
@@ -473,8 +487,13 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         try {
             encode_array_elements(ordinary_, current, last, [&] { completed = source_.position(); }, available);
             status = status_code::success;
+#if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
+        } catch (...) {
+            status = resumable_encode_exception_status();
+#else
         } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
             status = resumable_exception_status();
+#endif
         }
 
         // Keep successfully encoded children, and retry only the unfinished
