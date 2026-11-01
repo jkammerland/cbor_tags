@@ -17,13 +17,10 @@ namespace cbor::tags::detail {
 #if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
 // Call only while handling an active exception. Keep exception-object access
 // outside callers that affected Windows Clang versions inline into a coroutine.
-__declspec(noinline)
-inline status_code resumable_encode_exception_status() noexcept {
+__declspec(noinline) inline status_code resumable_encode_exception_status() noexcept {
     try {
         throw;
-    } catch (const encode_status_exception &error) {
-        return error.status;
-    } catch (...) {
+    } catch (const encode_status_exception &error) { return error.status; } catch (...) {
         return resumable_exception_status();
     }
 }
@@ -110,12 +107,18 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                 std::size_t count;
                 try {
                     count = source_.write(bytes);
+#if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
+                } catch (...) {
+                    rollback();
+                    return resumable_encode_exception_status();
+#else
                 } catch (const encode_status_exception &error) {
                     rollback();
                     return error.status;
                 } catch (...) {
                     rollback();
                     return resumable_exception_status();
+#endif
                 }
                 assert(count <= bytes.size());
                 if (count == 0)
