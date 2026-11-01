@@ -207,12 +207,19 @@ template <typename Context> class resume_operation {
             return;
         if (s.control.driving)
             throw std::logic_error("cannot cancel a running codec");
-        s.work = resumable<status_code>{status_code::cancelled};
-        s.context.rollback();
+
+        // Retire every suspended handle before destroying its owning frames.
+        // Input retains its committed source position; the dead reader needs no reset.
         s.control.leaf = {};
-        s.result       = unexpected<status_code>{status_code::cancelled};
-        s.finished     = true;
-        auto waiter    = std::exchange(s.control.waiter, {});
+        s.work         = resumable<status_code>{status_code::cancelled};
+        if constexpr (Context::waiting_state == resume_state::need_output)
+            s.context.rollback();
+
+        s.result   = unexpected<status_code>{status_code::cancelled};
+        s.finished = true;
+
+        // The waiter may destroy this operation during inline resumption.
+        auto waiter = std::exchange(s.control.waiter, {});
         if (waiter)
             waiter.resume();
     }

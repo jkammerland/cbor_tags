@@ -7,9 +7,12 @@
 #include <cstddef>
 #include <exception>
 #include <functional>
+#include <iterator>
 #include <list>
 #include <optional>
+#include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -84,6 +87,85 @@ struct hook_lifetime {
     int        *frames_destroyed{};
 };
 
+// Copyable source positions need not have nonthrowing assignment. Arm the
+// assignment failure only after ordinary decoding has reached its retry point.
+class throwing_position_input {
+  public:
+    struct position_type {
+        using value_type        = std::byte;
+        using difference_type   = std::ptrdiff_t;
+        using iterator_category = std::bidirectional_iterator_tag;
+        using iterator_concept  = std::bidirectional_iterator_tag;
+
+        const std::vector<std::byte> *bytes{};
+        const bool                   *throw_assignment{};
+        std::size_t                   absolute{};
+
+        position_type() = default;
+        position_type(const std::vector<std::byte> &storage, const bool &armed, std::size_t offset)
+            : bytes(&storage), throw_assignment(&armed), absolute(offset) {}
+        position_type(const position_type &) = default;
+        position_type &operator=(const position_type &other) {
+            if (other.throw_assignment && *other.throw_assignment)
+                throw std::runtime_error("position assignment is armed");
+            bytes            = other.bytes;
+            throw_assignment = other.throw_assignment;
+            absolute         = other.absolute;
+            return *this;
+        }
+
+        const std::byte &operator*() const { return (*bytes)[absolute]; }
+        position_type   &operator++() {
+            ++absolute;
+            return *this;
+        }
+        position_type operator++(int) {
+            auto previous = *this;
+            ++*this;
+            return previous;
+        }
+        position_type &operator--() {
+            --absolute;
+            return *this;
+        }
+        position_type operator--(int) {
+            auto previous = *this;
+            --*this;
+            return previous;
+        }
+        std::size_t offset() const { return absolute; }
+        friend bool operator==(const position_type &, const position_type &) = default;
+    };
+
+    explicit throwing_position_input(std::vector<std::byte> &storage) : storage_(storage) {}
+
+    position_type begin() const { return {storage_, throw_assignment, 0}; }
+    position_type end() const { return {storage_, throw_assignment, storage_.size()}; }
+    position_type committed_position() const noexcept { return {storage_, throw_assignment, committed_}; }
+    void          commit(position_type position) { committed_ = position.offset(); }
+    auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
+    bool          eof() const { return closed_; }
+    void          close() { closed_ = true; }
+    void          refresh() {}
+
+    void acquire() {
+        if (acquired)
+            throw std::logic_error("source already has an active operation");
+        acquired = true;
+    }
+    void release() noexcept { acquired = false; }
+
+    bool throw_assignment{};
+    bool acquired{};
+
+  private:
+    std::vector<std::byte> &storage_;
+    std::size_t             committed_{};
+    bool                    closed_{};
+};
+
+static_assert(ResumableInputSource<throwing_position_input>);
+
 template <typename Context> resumable<status_code> resumable_decode(Context &context, hook_lifetime &value) {
     struct frame_guard {
         int *destroyed;
@@ -153,6 +235,69 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         CHECK(actual == expected);
+    }
+
+    TEST_CASE("input cancellation keeps committed progress without assigning a retired reader position") {
+        const int              first_expected  = 7;
+        const int              second_expected = 1000;
+        std::vector<std::byte> first_bytes;
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder(first_bytes)(first_expected));
+        REQUIRE(make_encoder(bytes)(first_expected, second_expected));
+        std::vector<std::byte>  storage(bytes.begin(), bytes.end() - 1);
+        throwing_position_input source(storage);
+        auto                    decoder = make_resumable_decoder(source);
+
+        {
+            int  first{};
+            int  second{};
+            auto operation = decoder(first, second);
+            REQUIRE_FALSE(operation.done());
+            CHECK(first == first_expected);
+            const auto committed = operation.committed_bytes();
+            REQUIRE(committed == first_bytes.size());
+            REQUIRE(source.committed_position().offset() == committed);
+
+            std::size_t                     notifications{};
+            std::optional<operation_result> result;
+            auto                            consumer = await_result(operation, result, [&] { ++notifications; });
+            source.throw_assignment                  = true;
+
+            // Cancellation destroys the reader instead of resetting its position.
+            CHECK_NOTHROW(operation.cancel());
+            REQUIRE(operation.done());
+            REQUIRE(consumer.done());
+            CHECK_NOTHROW(consumer.rethrow());
+            REQUIRE(result);
+            REQUIRE_FALSE(*result);
+            CHECK(result->error() == status_code::cancelled);
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::cancelled);
+            CHECK(operation.committed_bytes() == committed);
+            CHECK(source.committed_position().offset() == committed);
+            CHECK(notifications == 1);
+
+            // Completion is terminal, but acquisition lasts until destruction.
+            CHECK_NOTHROW(operation.cancel());
+            CHECK(operation.resume() == resume_state::done);
+            CHECK(notifications == 1);
+            CHECK(source.acquired);
+            int rejected{};
+            CHECK_THROWS_AS(decoder(rejected), std::logic_error);
+        }
+
+        CHECK_FALSE(source.acquired);
+        source.throw_assignment = false;
+        storage.push_back(bytes.back());
+
+        // The same factory starts at the retained second integer, not the first.
+        int  second{};
+        auto next = decoder(second);
+        REQUIRE(next.done());
+        REQUIRE(next.result());
+        CHECK(*next.result() == bytes.size() - first_bytes.size());
+        CHECK(second == second_expected);
+        CHECK(source.committed_position().offset() == bytes.size());
     }
 
     TEST_CASE("ready resumable results do not allocate a coroutine frame") {
