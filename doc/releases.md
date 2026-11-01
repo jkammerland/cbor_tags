@@ -43,6 +43,29 @@ relationship before signing it as a standalone asset.
 - Publication requires immutable releases to be enabled and verifies the
   published assets and GitHub release attestation.
 
+To verify a download, run the release notes' verification commands with Bash in
+the directory containing all release assets. They require the fingerprint above;
+the downloaded public key is not itself a source of trust.
+
+## One-Time Repository Setup
+
+Before publishing:
+
+1. Enable immutable releases under **Settings > General > Releases**.
+2. Create an environment named `release` under **Settings > Environments**.
+3. Require the release owner as a reviewer, allow self-review, disable
+   administrator bypass, and allow deployments only from the selected `master`
+   branch.
+4. Add `GPG_PRIVATE_KEY`, `GPG_SIGNING_KEY`, and `GPG_PASSPHRASE` as environment
+   secrets. Do not keep repository-level duplicates.
+5. Create an active tag ruleset for `v*` that restricts tag creation, update,
+   and deletion. Give repository administrators an explicit bypass for the
+   controlled signed-tag operation.
+
+`GPG_PRIVATE_KEY` is the armored private key, `GPG_SIGNING_KEY` is the fingerprint
+above, and `GPG_PASSPHRASE` is its passphrase. Enter secrets through GitHub settings
+or `gh secret set` prompts, not shell command arguments.
+
 ## Publishing A Release
 
 1. Update the version in `CMakeLists.txt`, `vcpkg.json`, and `conanfile.py`.

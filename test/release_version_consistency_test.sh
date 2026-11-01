@@ -13,6 +13,7 @@ trap 'rm -rf -- "${test_root}"' EXIT
 fixture="${test_root}/repo"
 mkdir -p -- "${fixture}/scripts"
 cp -- "${repo_root}/scripts/release.sh" "${fixture}/scripts/release.sh"
+cp -- "${repo_root}/scripts/release-verification.sh" "${fixture}/scripts/release-verification.sh"
 
 write_metadata() {
     local cmake_version="$1"

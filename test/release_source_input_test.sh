@@ -10,7 +10,7 @@ tools_root="${test_root}/tools"
 source_root="${tools_root}/build/source"
 consumer_root="${tools_root}/test/consumer/source_archive"
 mkdir -p -- "${tools_root}/scripts" "${source_root}" "${consumer_root}"
-cp -- "${repo_root}/scripts/release.sh" "${tools_root}/scripts/"
+cp -- "${repo_root}/scripts/release.sh" "${repo_root}/scripts/release-verification.sh" "${tools_root}/scripts/"
 cp -- "${repo_root}/CMakeLists.txt" "${repo_root}/vcpkg.json" "${repo_root}/conanfile.py" "${tools_root}/"
 cp -- "${repo_root}/test/consumer/source_archive/CMakeLists.txt" "${consumer_root}/"
 

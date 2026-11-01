@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "${repo_root}/scripts/release-verification.sh"
 readonly dependency_version="7.1.0"
 readonly dependency_archive="target_install_package-${dependency_version}-cmake.tar.gz"
 readonly dependency_sha256="e248e05d4b0c1ce8e9649fc83331a548487fa0be86aab2e331f27a2cd6609e31"
@@ -56,18 +57,11 @@ printf '%s  %s\n' "${dependency_sha256}" "${dependency_archive}" |
     [[ "${actual_checksum}" == "${dependency_sha256}  ${dependency_archive}" ]] || die "dependency archive digest mismatch"
 )
 
-GNUPGHOME="${gnupg_home}" gpg --batch --quiet --no-autostart --import "${public_key}"
-imported_fingerprint="$({
-    GNUPGHOME="${gnupg_home}" gpg --batch --no-autostart --with-colons --fingerprint
-} | awk -F: '/^fpr:/ { print toupper($10); exit }')"
-[[ "${imported_fingerprint}" == "${dependency_fingerprint}" ]] ||
-    die "release public key fingerprint is ${imported_fingerprint:-missing}, expected ${dependency_fingerprint}"
+authenticate_release_key "${gnupg_home}" "${public_key}" "${dependency_fingerprint}"
 
 verification_output=""
 if ! verification_output="$(
-    GNUPGHOME="${gnupg_home}" gpg \
-        --batch \
-        --no-autostart \
+    release_gpg "${gnupg_home}" \
         --status-fd 1 \
         --verify \
         "${verify_dir}/${dependency_archive}.sig" \
@@ -76,9 +70,7 @@ if ! verification_output="$(
     printf '%s\n' "${verification_output}" >&2
     die "dependency archive does not have a valid signature"
 fi
-signature_fingerprint="$(awk '/^\[GNUPG:\] VALIDSIG / { print toupper($3); exit }' <<<"${verification_output}")"
-[[ "${signature_fingerprint}" == "${dependency_fingerprint}" ]] ||
-    die "dependency archive was signed by ${signature_fingerprint:-unknown}, expected ${dependency_fingerprint}"
+authenticate_release_signature "${verification_output}" "${dependency_fingerprint}" 'dependency archive'
 
 required_member="target_install_package-${dependency_version}-cmake/usr/share/cmake/target_install_package/target_install_packageConfig.cmake"
 tar -tzf "${verify_dir}/${dependency_archive}" | grep -Fx -- "${required_member}" >/dev/null ||
