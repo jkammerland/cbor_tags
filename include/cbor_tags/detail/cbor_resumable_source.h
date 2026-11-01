@@ -985,57 +985,50 @@ template <detail::ResumableOutputStorage Storage> class output_source {
 
     std::size_t write(std::span<const std::byte> bytes) {
         const auto requested = bytes.size();
-        if constexpr (growable) {
-            // Mutation is admitted before driving; at the known end there
-            // are no existing bytes to overwrite.
-            if (working_.offset() == chunks_.size())
-                return append_at_end(bytes);
-        }
-        if constexpr (detail::HasBulkChunkWrite<chunks_type, iterator>) {
-            bytes = bytes.subspan(chunks_.write_bytes(working_, bytes));
-        } else {
-            while (!bytes.empty() && working_ != chunks_.end()) {
-                if (const auto available = chunks_.borrow_output_window(working_)) {
-                    const auto amount = std::min(bytes.size(), available->size());
-                    std::memcpy(available->data(), bytes.data(), amount);
-                    chunks_.consume_window(working_, amount);
-                    bytes = bytes.subspan(amount);
-                } else {
-                    [[maybe_unused]] const auto written = chunks_.write_byte(working_, bytes.front());
-                    assert(written);
-                    bytes = bytes.subspan(1);
+
+        // A refreshed growable source at its admitted end has no bytes to overwrite.
+        bool write_existing = true;
+        if constexpr (growable)
+            write_existing = working_.offset() != chunks_.size();
+
+        if (write_existing) {
+            if constexpr (detail::HasBulkChunkWrite<chunks_type, iterator>) {
+                bytes = bytes.subspan(chunks_.write_bytes(working_, bytes));
+            } else {
+                while (!bytes.empty() && working_ != chunks_.end()) {
+                    if (const auto available = chunks_.borrow_output_window(working_)) {
+                        const auto amount = std::min(bytes.size(), available->size());
+                        std::memcpy(available->data(), bytes.data(), amount);
+                        chunks_.consume_window(working_, amount);
+                        bytes = bytes.subspan(amount);
+                    } else {
+                        [[maybe_unused]] const auto written = chunks_.write_byte(working_, bytes.front());
+                        assert(written);
+                        bytes = bytes.subspan(1);
+                    }
                 }
             }
         }
         if constexpr (growable) {
-            const auto appended = append_at_end(bytes);
-            return requested - bytes.size() + appended;
+            if (!bytes.empty() && !eof()) {
+                if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
+                    throw std::length_error("CBOR output byte offset overflow");
+                using byte_type = std::ranges::range_value_t<Storage>;
+                if constexpr (std::same_as<byte_type, std::byte>) {
+                    storage_->insert(std::ranges::end(*storage_), bytes.begin(), bytes.end());
+                } else {
+                    for (const auto byte : bytes)
+                        storage_->push_back(static_cast<byte_type>(byte));
+                }
+                chunks_.refresh();
+                working_ = chunks_.position_at_end();
+                return requested;
+            }
         }
         return requested - bytes.size();
     }
 
   private:
-    std::size_t append_at_end(std::span<const std::byte> bytes)
-        requires growable
-    {
-        if (bytes.empty() || eof())
-            return 0;
-        if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
-            throw std::length_error("CBOR output byte offset overflow");
-
-        using byte_type = std::ranges::range_value_t<Storage>;
-        if constexpr (std::same_as<byte_type, std::byte>) {
-            storage_->insert(std::ranges::end(*storage_), bytes.begin(), bytes.end());
-        } else {
-            for (const auto byte : bytes)
-                storage_->push_back(static_cast<byte_type>(byte));
-        }
-
-        chunks_.refresh();
-        working_ = chunks_.position_at_end();
-        return bytes.size();
-    }
-
     Storage                        *storage_;
     detail::source_storage<Storage> views_;
     chunks_type                     chunks_;
