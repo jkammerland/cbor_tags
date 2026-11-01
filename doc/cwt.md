@@ -137,6 +137,15 @@ it into a temporary byte buffer. They may still allocate parsed header metadata
 and segment descriptors. A key ID can select a candidate trusted key; parsing it
 does not authenticate the message.
 
+Verification requires a protected `alg` equal to the selected backend's algorithm.
+For COSE_Sign, each verified signer must carry it; the shared body must not.
+An application that independently authenticates its algorithm choice can use
+`implicit_algorithm_profile`, which requires `alg` to be absent:
+
+```cpp
+auto result = cwt::verify_sign1<Backend>(key, message, cwt::implicit_algorithm_profile);
+```
+
 [Example 27](../examples/27_experimental_cwt_custom_types.cpp) defines ordinary
 application `encode` and `decode` functions. The sender owns its text; the
 receiver chooses different field names and `std::string_view`. Its decoder

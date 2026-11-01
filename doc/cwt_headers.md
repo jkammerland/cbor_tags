@@ -1,19 +1,153 @@
-# Experimental typed COSE headers
+# Experimental COSE headers
 
-`basic_header_map<Borrowed, Extra>` adds application-selected fields to the common algorithm, key ID, critical-label list, and type fields. Define `cwt_fields(Extra&)` and `cwt_fields(const Extra&)` using the [field bindings](cwt_fields.md). Extra fields cannot redefine the common labels.
+Put an issuer in both the protected header and payload, then verify and compare them ([example 32](../examples/32_experimental_cwt_header_claims.cpp)); build with `CBOR_TAGS_ENABLE_CWT_OPENSSL=ON`.
 
-Decoded headers retain all received labels for duplicate checking, including labels whose values the application discards. Re-encoding emits only selected values. COSE messages retain the original protected byte string, which is the input used for signature verification.
+```cpp
+// Experimental: CWT header APIs may change.
+#include <array>
+#include <cbor_tags/cwt/openssl_crypto.h>
+#include <memory>
+#include <openssl/ec.h>
+#include <openssl/obj_mac.h>
+#include <optional>
+#include <string>
+#include <vector>
 
-[Example 31](../examples/31_experimental_cwt_type.cpp) introduces RFC 9596 `typ`: an unsigned content-format number or text media type describing the complete COSE object. It belongs in protected headers. Parsing a type does not authenticate it; the receiving application checks its expected type after signature verification.
+using namespace cbor::tags;
 
-[Example 32](../examples/32_experimental_cwt_header_claims.cpp) binds a custom claims map under header 15, signs it with optional OpenSSL, verifies it, and compares its issuer with the payload issuer. This implements the RFC 9597 requirement to compare overlapping claims semantically unless an application profile explicitly specifies different processing.
+struct identity {
+    std::string issuer;
+};
 
-## Authenticated parsing
+template <typename Encoder> auto encode(Encoder &encoder, const identity &value) {
+    auto fields = cwt::fields(cwt::field<1>(value.issuer));
+    return encoder(fields);
+}
 
-Pass a typed destination and critical-parameter processor to `verify_sign1<Backend, ExtraCodecs...>(key, message, authenticated, process, aad, detached)`. The verifier parses the message's original protected bytes with that codec pack, checks header placement and duplicates, verifies the signature, and invokes `process(scope, label, parsed_headers)` for each critical extension. It assigns the destination only after all steps succeed.
+template <typename Decoder> auto decode(Decoder &decoder, identity &&value) {
+    auto fields = cwt::fields(cwt::field<1>(value.issuer));
+    return decoder(fields);
+}
 
-The processor returns `expected<void, status_code>`. Unknown or unsupported critical extensions must fail. Merely decoding a field does not process its semantics. COSE_Sign verification accepts separate body and signer destinations and identifies their scope to the processor.
+struct application_headers {
+    std::optional<identity> claims;
+};
 
-Borrowed destinations refer to the message's protected bytes; retain the message and its backing storage. Optional external AAD and detached payload bytes are supplied by the application and must match what the signer used. Critical processing and ordinary application policy remain separate: the application still checks the expected type, issuer, audience, expiry, and any profile-specific relationships it requires.
+auto cwt_fields(application_headers &value) {
+    return cwt::fields(cwt::field<15>(value.claims));
+}
 
-Keep parsed output objects separate from objects that own the input bytes. Caller-owned signature output must not overlap signed input; input storage stays stable throughout the operation.
+auto cwt_fields(const application_headers &value) {
+    return cwt::fields(cwt::field<15>(value.claims));
+}
+
+// Generate a temporary P-256 key for this executable example.
+std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> make_example_key() {
+    std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> context{
+        EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free};
+    if (!context || EVP_PKEY_keygen_init(context.get()) != 1 ||
+        EVP_PKEY_CTX_set_ec_paramgen_curve_nid(context.get(), NID_X9_62_prime256v1) != 1) {
+        return {nullptr, EVP_PKEY_free};
+    }
+
+    EVP_PKEY *generated = nullptr;
+    const auto result = EVP_PKEY_keygen(context.get(), &generated);
+    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{generated, EVP_PKEY_free};
+    if (result != 1) {
+        return {nullptr, EVP_PKEY_free};
+    }
+    return key;
+}
+
+/**
+message = [
+    protected: bstr .cbor protected-header,
+    unprotected: {},
+    payload: bstr .cbor claims,
+    signature: bstr .size 64
+]
+protected-header = { 1 => -9, 15 => claims, 16 => "application/example+cwt" }
+claims = { 1 => tstr }
+*/
+int main() {
+    // This profile repeats the issuer in the protected header and payload.
+    identity source{"issuer.example"};
+    cwt::basic_header_map<false, application_headers> headers;
+    headers.alg = cwt::algorithm::esp256;
+    headers.typ = std::string{"application/example+cwt"};
+    headers.extra.claims = source;
+
+    std::vector<std::byte> payload;
+
+    auto encoder = make_encoder<codec::cwt>(payload);
+    if (!encoder(source)) {
+        return 1;
+    }
+
+    auto protected_bytes = cwt::encode_protected_header(headers);
+    if (!protected_bytes) {
+        return 1;
+    }
+
+    auto key = make_example_key();
+    if (!key) {
+        return 1;
+    }
+
+    // Sign the protected claims using caller-owned signature storage.
+    cwt::cose_sign1 message;
+    message.protected_header = std::move(*protected_bytes);
+    message.payload = std::move(payload);
+
+    std::array<std::byte, 64> signature;
+    cwt::basic_header_map<false, application_headers> signing_headers;
+    auto written =
+        cwt::sign1<cwt::openssl_esp256_backend>(key.get(), message, signing_headers, signature);
+    if (!written) {
+        return 1;
+    }
+    message.signature.assign(signature.begin(), signature.begin() + *written);
+
+    // Verification commits parsed headers only after the signature and critical processing succeed.
+    cwt::basic_header_map<false, application_headers> authenticated;
+    const auto unsupported_critical = [](auto, auto, const auto &) -> expected<void, status_code> {
+        return cbor::tags::unexpected<status_code>{status_code::error};
+    };
+    if (!cwt::verify_sign1<cwt::openssl_esp256_backend>(key.get(), message, authenticated,
+            unsupported_critical)) {
+        return 2;
+    }
+
+    // The application requires its media type and compares overlapping claims semantically.
+    if (!authenticated.typ ||
+        *authenticated.typ !=
+            std::variant<std::uint64_t, std::string>{std::string{"application/example+cwt"}} ||
+        !authenticated.extra.claims || !message.payload) {
+        return 2;
+    }
+
+    identity received;
+    auto decoder = make_decoder<codec::cwt>(*message.payload);
+    if (!decoder(received) || decoder.tell() != message.payload->end()) {
+        return 2;
+    }
+
+    return received.issuer == authenticated.extra.claims->issuer ? 0 : 2;
+}
+```
+
+## Verification rules
+
+| Step | Contract |
+|---|---|
+| Parse | Use original protected bytes and the selected codecs; reject misplaced or duplicate labels. |
+| Verify | Check the signature before processing critical extensions. |
+| Process critical labels | The callback must reject extensions it does not understand. |
+| Assign output | Parsed headers are assigned only after verification and critical processing succeed. |
+| Check application policy | Check type, issuer, audience, expiry, and overlapping claims as required by the application profile. |
+| Borrow headers | Keep the message and backing bytes alive; output objects must not own the input bytes. |
+| Write a signature | Caller output must not overlap signed input. |
+
+Unknown values are discarded, but their labels remain available for duplicate checks; re-encoding emits only selected values.
+
+Start with [type headers](../examples/31_experimental_cwt_type.cpp) for a smaller example; use [field bindings](cwt_fields.md) for additional labels. COSE_Sign supplies separate body and signer outputs and identifies their scope to the critical-label callback.

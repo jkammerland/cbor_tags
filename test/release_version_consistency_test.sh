@@ -111,6 +111,10 @@ for metadata_file in CMakeLists.txt vcpkg.json conanfile.py; do
     write_metadata 0.24.0 0.24.0 0.24.0
     printf 'invalid metadata !\n' >"${fixture}/${metadata_file}"
     expect_parser_failure "malformed ${metadata_file}"
+
+    write_metadata 0.24.0 0.24.0 0.24.0
+    : >"${fixture}/${metadata_file}"
+    expect_parser_failure "empty ${metadata_file}"
 done
 
 # The real repository must agree as-is; this is the check CI relies on.

@@ -10,6 +10,17 @@
 using namespace cbor::tags;
 
 TEST_SUITE("cbor_wire/headers_visualization") {
+    TEST_CASE("smart input has no default byte cap and explicit output limits remain active") {
+        // A 16 MiB byte string plus its header exceeds the former input default.
+        constexpr auto         payload_size = std::size_t{16U} * 1024U * 1024U;
+        std::vector<std::byte> buffer{std::byte{0x5A}, std::byte{0x01}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+        buffer.resize(payload_size + 5U, std::byte{0xAB});
+
+        std::string output{"sentinel"};
+        CHECK_THROWS_WITH_AS(buffer_annotate(buffer, output, {.max_output_size = 1U}), "CBOR annotation output size limit exceeded",
+                             std::runtime_error);
+        CHECK_EQ(output, "sentinel");
+    }
 
     TEST_CASE("reserved arguments retain the runtime error presentation boundary") {
         for (const auto *hex : {"1c", "5c", "dc", "1f", "3f", "df"}) {

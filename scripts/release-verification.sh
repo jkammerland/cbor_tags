@@ -11,7 +11,8 @@ release_gpg() {
 authenticate_release_key() {
     local verification_home="$1"
     local verification_key_file="$2"
-    local expected_fingerprint="${3^^}"
+    local expected_fingerprint
+    expected_fingerprint="$(printf '%s' "$3" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     [[ -f "${verification_key_file}" && ! -L "${verification_key_file}" ]] || die "release public key must be a regular non-symlink file"
 
     local key_listing primary_fingerprints
@@ -29,7 +30,8 @@ authenticate_release_key() {
 
 authenticate_release_signature() {
     local verification_output="$1"
-    local expected_fingerprint="${2^^}"
+    local expected_fingerprint
+    expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     local description="$3"
     local primary_fingerprints
     # VALIDSIG identifies the signing subkey first and its primary key last.

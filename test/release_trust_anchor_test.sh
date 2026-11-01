@@ -54,7 +54,8 @@ done
 # A global attacker keyring and options cannot participate in verification.
 export GNUPGHOME="${attacker_home}"
 printf 'auto-key-retrieve\nkeyserver hkp://127.0.0.1:1\n' >"${attacker_home}/gpg.conf"
-verify_signed_assets "${package_dir}" 0.28.0 "${fixture_fingerprint}"
+lowercase_fingerprint="$(printf '%s' "${fixture_fingerprint}" | tr '[:upper:]' '[:lower:]')"
+verify_signed_assets "${package_dir}" 0.28.0 "${lowercase_fingerprint}"
 echo 'trusted signing subkey with hostile global keyring: OK'
 
 write_release_verification_commands 0.28.0 >"${test_root}/generated.sh"
@@ -79,6 +80,7 @@ payload="${package_dir}/cbor_tags-0.28.0.tar.gz"
 cp -- "${payload}.sig" "${test_root}/trusted.sig"
 cat "${test_root}/trusted.sig" >>"${payload}.sig"
 expect_failure 'multiple valid signatures' verify_signed_assets "${package_dir}" 0.28.0 "${fixture_fingerprint}"
+expect_failure 'consumer multiple valid signatures' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
 
 GNUPGHOME="${attacker_home}" gpg --no-options --batch --yes --pinentry-mode loopback --passphrase '' \
     --local-user "${attacker_fingerprint}" --output "${payload}.sig" --detach-sign "${payload}"
