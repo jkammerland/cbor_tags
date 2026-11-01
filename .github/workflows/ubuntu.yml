@@ -308,7 +308,8 @@ jobs:
               diffutils \
               gcc-c++ \
               git \
-              ninja-build
+              ninja-build \
+              perl-Digest-SHA
             cmake --preset=release-std-reflection -B /tmp/build \
               -DCMAKE_C_COMPILER_LAUNCHER= \
               -DCMAKE_CXX_COMPILER_LAUNCHER=

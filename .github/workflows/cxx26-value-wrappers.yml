@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Install compiler and build dependencies
         run: |
-          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build python3
+          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build perl-Digest-SHA python3
       - uses: actions/checkout@v6.0.2
       - name: Configure
         run: |
