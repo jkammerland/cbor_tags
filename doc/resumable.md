@@ -55,7 +55,41 @@ directly. Typed decoding finishes once the requested values are complete;
 `finish()` closes input and makes a truncated item return `status_code::incomplete`.
 See the [record example](../examples/40_resumable.cpp).
 
-## Expose output capacity
+## Encode to a growable container
+
+A `vector<byte>` or `deque<byte>` grows through ordinary append. No writable
+chunks are needed, and encoding completes immediately when storage can grow.
+
+```cpp
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <cassert>
+#include <cstddef>
+#include <deque>
+#include <string>
+
+namespace ct = cbor::tags;
+
+int main() {
+    std::deque<std::byte> output;
+    auto encoder = ct::make_resumable_encoder(output);
+    const std::string sent = "ready";
+    auto operation = encoder(sent);
+    assert(operation.done());
+    assert(operation.result());
+
+    auto decoder = ct::make_decoder(output);
+    std::string received;
+    const auto decoded = decoder(received);
+    assert(decoded);
+    assert(received == sent);
+}
+```
+
+## Expose bounded output capacity
+
+Fixed storage and writable chunks suspend when capacity runs out. The caller
+exposes more constructed bytes in the bound container, then resumes encoding:
 
 ```cpp
 #include <cbor_tags/cbor_decoder.h>
@@ -102,9 +136,9 @@ encoded length. These default chunk descriptors stay append-only even after
 publication; the [ring example](../examples/46_resumable_ring.cpp) shows explicit
 publication and reclamation ownership.
 
-Binding a growable `vector<byte>` or `deque<byte>` instead makes encoding append
-after its existing contents. Fixed storage and writable chunks suspend when
-capacity runs out; see the [encoding example](../examples/41_resumable_encoding.cpp).
+Growable encoding appends after existing contents. See the
+[bounded encoding example](../examples/41_resumable_encoding.cpp) for a complete
+program that exposes writable chunks in two steps.
 
 ## Keep owners alive
 
