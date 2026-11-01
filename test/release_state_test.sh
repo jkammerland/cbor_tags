@@ -22,16 +22,15 @@ asset_names=(
     "${stem}.spdx.json"
     "${stem}.spdx.json.sha256"
     "${stem}.spdx.json.sha512"
-    "${stem}.spdx.json.sig"
     "${stem}.tar.gz"
     "${stem}.tar.gz.sha256"
     "${stem}.tar.gz.sha512"
-    "${stem}.tar.gz.sig"
     "${stem}.zip"
     "${stem}.zip.sha256"
     "${stem}.zip.sha512"
-    "${stem}.zip.sig"
     cbor_tags-release-public-key.asc
+    "${stem}.release-manifest"
+    "${stem}.release-manifest.sig"
 )
 for asset_name in "${asset_names[@]}"; do
     printf 'fixture:%s\n' "${asset_name}" >"${package_dir}/${asset_name}"
@@ -47,6 +46,23 @@ if [[ "$1" == verify-tag ]]; then
     printf 'release_tag_object=%s\n' "${FAKE_TAG_OBJECT}"
     printf 'release_commit=%s\n' "${FAKE_TAG_COMMIT}"
     printf 'release_version=%s\n' "${FAKE_VERSION}"
+elif [[ "$1" == verify-assets ]]; then
+    shift
+    repository="" version="" tag="" tag_object="" commit=""
+    while (($#)); do
+        case "$1" in
+            --repository) repository="$2" ;;
+            --version) version="$2" ;;
+            --tag) tag="$2" ;;
+            --tag-object) tag_object="$2" ;;
+            --commit) commit="$2" ;;
+            --package-dir) ;;
+            *) exit 2 ;;
+        esac
+        shift 2
+    done
+    [[ "${repository}" == "${GITHUB_REPOSITORY}" && "${version}" == "${FAKE_VERSION}" &&
+       "${tag}" == "${FAKE_TAG}" && "${tag_object}" == "${FAKE_TAG_OBJECT}" && "${commit}" == "${FAKE_TAG_COMMIT}" ]]
 fi
 EOF
 
@@ -54,13 +70,28 @@ cat >"${fake_bin}/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == -C ]]; then
+    checkout="$2"
     shift 2
     case "$1" in
         rev-parse)
-            printf '%s\n' "${FAKE_HEAD:-${FAKE_TAG_COMMIT}}"
+            if [[ "${2:-}" == --show-toplevel ]]; then
+                if [[ "${checkout}" == "${FAKE_SOURCE_DIR:-}" ]]; then
+                    printf '%s\n' "${FAKE_SOURCE_TOPLEVEL:-${checkout}}"
+                else
+                    printf '%s\n' "${checkout}"
+                fi
+            elif [[ "${checkout}" == "${FAKE_SOURCE_DIR:-}" ]]; then
+                printf '%s\n' "${FAKE_SOURCE_HEAD:-${FAKE_TAG_COMMIT}}"
+            else
+                printf '%s\n' "${FAKE_HEAD:-${FAKE_TAG_COMMIT}}"
+            fi
             ;;
         status)
-            [[ "${FAKE_DIRTY:-0}" != 1 ]] || printf ' M scripts/publish-release.sh\n'
+            if [[ "${checkout}" == "${FAKE_SOURCE_DIR:-}" ]]; then
+                [[ "${FAKE_SOURCE_DIRTY:-0}" != 1 ]] || printf ' M CMakeLists.txt\n'
+            else
+                [[ "${FAKE_DIRTY:-0}" != 1 ]] || printf ' M scripts/publish-release.sh\n'
+            fi
             ;;
         *)
             exit 2
@@ -285,6 +316,7 @@ audit_args=(
 generated_notes="$(
     bash "${repo_root}/scripts/publish-release.sh" notes \
         --tag "${tag}" \
+        --tag-object "${tag_object}" \
         --commit "${commit}" \
         --version "${version}" \
         --output "${generated_root}/notes.md"
@@ -292,6 +324,12 @@ generated_notes="$(
 [[ "${generated_notes}" == "${generated_root}/notes.md" ]]
 grep -F 'Signed cbor_tags v0.22.0 source archives.' "${generated_root}/notes.md" >/dev/null
 grep -F 'Generated fixture notes' "${generated_root}/notes.md" >/dev/null
+awk '/^```sh$/ {in_commands=1; next} /^```$/ && in_commands {exit} in_commands {print}' \
+    "${generated_root}/notes.md" >"${generated_root}/consumer-commands.sh"
+bash -n "${generated_root}/consumer-commands.sh"
+grep -Fx 'expected_fingerprint=7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D' "${generated_root}/consumer-commands.sh" >/dev/null
+grep -Fx "verify_signed_assets . ${version} \"\${expected_fingerprint}\" '' ${GITHUB_REPOSITORY} ${tag} ${tag_object} ${commit}" \
+    "${generated_root}/consumer-commands.sh" >/dev/null
 echo 'release-notes: OK'
 
 reset_state() {
@@ -304,7 +342,7 @@ reset_state() {
     rm -rf -- "${state_dir}/remote-assets" "${download_dir}"
     mkdir -p -- "${state_dir}/remote-assets"
     unset FAKE_DIGEST_MISMATCH
-    unset FAKE_DIRTY FAKE_HEAD
+    unset FAKE_DIRTY FAKE_HEAD FAKE_SOURCE_DIR FAKE_SOURCE_HEAD FAKE_SOURCE_DIRTY FAKE_SOURCE_TOPLEVEL
     unset FAKE_IMMUTABLE_DISABLE_AFTER_FIRST
     unset FAKE_DUPLICATE_RELEASES FAKE_RELEASE_API_FAILURE FAKE_STALE_RELEASE_LIST
     export FAKE_IMMUTABLE_RELEASES_ENABLED=true
@@ -382,6 +420,47 @@ if grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/n
     exit 1
 fi
 echo 'published-rerun-audit: OK'
+
+# Current reviewed tooling can publish a different, exact historical source.
+reset_state
+export FAKE_HEAD=5555555555555555555555555555555555555555
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+mkdir -p -- "${FAKE_SOURCE_DIR}"
+bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}" >/dev/null
+grep -Fx 'published' "${state_dir}/release-state" >/dev/null
+echo 'historical-source-current-tooling: OK'
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_TAG_OBJECT=3333333333333333333333333333333333333333
+expect_failure wrong-historical-tag-object bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source/nested"
+export FAKE_SOURCE_TOPLEVEL="${generated_root}/release-source"
+mkdir -p -- "${FAKE_SOURCE_DIR}"
+expect_failure nested-historical-source bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_HEAD=5555555555555555555555555555555555555555
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_SOURCE_HEAD=3333333333333333333333333333333333333333
+expect_failure wrong-historical-source bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_SOURCE_DIRTY=1
+expect_failure dirty-historical-source bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_DIRTY=1
+expect_failure dirty-current-tooling bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
 
 reset_state
 export FAKE_TAG_OBJECT=3333333333333333333333333333333333333333

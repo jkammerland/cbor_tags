@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Install compiler and test dependencies
         run: |
-          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build curl-minimal bzip2 python3 tar
+          dnf -y install ca-certificates cmake diffutils gcc-c++ git ninja-build curl-minimal bzip2 perl-Digest-SHA python3 tar
       - uses: actions/checkout@v6.0.2
       - name: Fetch pinned Boost headers
         run: |

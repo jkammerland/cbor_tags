@@ -5,12 +5,16 @@ publishes the verified candidate with `scripts/publish-release.sh`.
 
 ## Release Assets
 
-For version `X.Y.Z`, the workflow publishes exactly 13 assets:
+For version `X.Y.Z`, the workflow publishes exactly 12 assets:
 
 - `cbor_tags-X.Y.Z.tar.gz` and `.zip` reproducible source trees;
-- detached `.sig`, `.sha256`, and `.sha512` files for both archives;
-- `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
-- `cbor_tags-release-public-key.asc` for offline signature verification.
+- `.sha256` and `.sha512` files for both archives;
+- `cbor_tags-X.Y.Z.spdx.json`, with both checksum files;
+- `cbor_tags-release-public-key.asc` for offline signature verification;
+- `cbor_tags-X.Y.Z.release-manifest` and its detached `.sig`.
+
+One signed manifest binds all assets to the repository, version, signed tag, and
+commit. Verification requires the expected release identity; a downloaded manifest cannot choose it.
 
 The archives contain the exact tracked source snapshot for the signed release
 commit. They do not contain a pre-installed CMake tree. The workflow extracts
@@ -20,7 +24,9 @@ It separately stages one internal install and builds `test_package` against it
 to keep the CMake package metadata covered without publishing that install tree.
 
 The build uses workflow-commit tooling and a separate, clean checkout of the
-verified release commit. Archive validation is independent of example names.
+verified release commit. Signing and candidate audits also use workflow-commit
+tooling; signing reads project versions from the verified release commit.
+Archive validation is independent of example names.
 
 The release driver normalizes ZIP metadata to UTC so the unsigned packages are
 byte-reproducible regardless of the operator's local timezone.
@@ -28,7 +34,7 @@ byte-reproducible regardless of the operator's local timezone.
 The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
 driver checks its document name, CC0-1.0 data license, MIT project license,
 root package, direct dependency packages, dependency versions, and `dependsOn`
-relationship before signing it as a standalone asset.
+relationship before including its digest in the signed manifest.
 
 ## Trust Model
 
@@ -43,9 +49,12 @@ relationship before signing it as a standalone asset.
 - Publication requires immutable releases to be enabled and verifies the
   published assets and GitHub release attestation.
 
-To verify a download, run the release notes' verification commands with Bash in
-the directory containing all release assets. They require the fingerprint above;
-the downloaded public key is not itself a source of trust.
+To verify a download, run the release notes' verification commands with Bash
+3.2 or newer, GPG, and either GNU `sha256sum`/`sha512sum` or `shasum` (included
+with macOS). Run them in the directory containing all 12 release assets. They
+require the fingerprint above; the downloaded public key is not itself a source
+of trust. Verification rejects altered, missing, or unexpected assets, including
+symlinks and noncanonical checksum records.
 
 ## One-Time Repository Setup
 
@@ -110,8 +119,9 @@ or `gh secret set` prompts, not shell command arguments.
      -f tag=vX.Y.Z
    ```
 
-6. Publish the signed candidate from a clean detached worktree at the release
-   commit, using an administrator's authenticated GitHub CLI. Run this on Linux
+6. Publish the signed candidate using current reviewed release tooling and a
+   separate clean detached worktree at the release commit. Use an
+   administrator's authenticated GitHub CLI. Run this on Linux
    with Bash 4 or newer and GNU `sha256sum`:
 
    ```bash
@@ -120,9 +130,11 @@ or `gh secret set` prompts, not shell command arguments.
      "+refs/tags/vX.Y.Z:refs/tags/vX.Y.Z"
    tag_object="$(git rev-parse refs/tags/vX.Y.Z)"
    commit="$(git rev-list -n 1 refs/tags/vX.Y.Z)"
-   release_worktree="$(mktemp -d /tmp/cbor-tags-release.XXXXXX)"
-   git worktree add --detach "${release_worktree}" "${commit}"
-   cd "${release_worktree}"
+   tooling_worktree="$(mktemp -d /tmp/cbor-tags-release-tools.XXXXXX)"
+   git worktree add --detach "${tooling_worktree}" origin/master
+   cd "${tooling_worktree}"
+   source_worktree="$(mktemp -d /tmp/cbor-tags-release-source.XXXXXX)"
+   git worktree add --detach "${source_worktree}" "${commit}"
 
    bash scripts/release.sh verify-tag \
      --tag vX.Y.Z \
@@ -136,6 +148,7 @@ or `gh secret set` prompts, not shell command arguments.
    GH_REPO=jkammerland/cbor_tags \
      bash scripts/publish-release.sh notes \
        --tag vX.Y.Z \
+       --tag-object "${tag_object}" \
        --commit "${commit}" \
        --version X.Y.Z \
        --output build/release-publish/release-notes.md
@@ -147,7 +160,8 @@ or `gh secret set` prompts, not shell command arguments.
        --commit "${commit}" \
        --version X.Y.Z \
        --package-dir build/release-publish/release-packages \
-       --notes-file build/release-publish/release-notes.md
+       --notes-file build/release-publish/release-notes.md \
+       --source-dir "${source_worktree}"
    ```
 
 Use the publisher script, not ad-hoc `gh release create` commands. If a failed
@@ -162,8 +176,15 @@ baseline available:
 
 ```bash
 VCPKG_ROOT=/path/to/vcpkg bash scripts/release.sh build
-bash scripts/release.sh sign
+bash scripts/release.sh sign \
+  --repository jkammerland/cbor_tags \
+  --version X.Y.Z \
+  --tag vX.Y.Z \
+  --tag-object FULL_ANNOTATED_TAG_OBJECT_ID \
+  --commit FULL_PEELED_COMMIT_ID
 ```
 
 Without `GPG_SIGNING_KEY`, local signing uses an ephemeral test key. Such assets
 are for testing only; production signing requires the release key.
+
+Use the verified tag's full object and commit IDs for the identity placeholders.

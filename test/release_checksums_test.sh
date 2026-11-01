@@ -27,7 +27,7 @@ for algorithm in sha256 sha512; do
         write_checksums "${payload}"
         # Give the hostile filename the correct payload digest. Only canonical
         # record comparison, rather than digest-only admission, rejects it.
-        digest="$("${algorithm}sum" -- "${payload}" | awk '{print $1}')"
+        read -r digest _ <"${payload}.${algorithm}"
         printf '%s  %s\n' "${digest}" "${filename}" >"${payload}.${algorithm}"
         expect_rejected "${algorithm} filename ${filename}"
     done
@@ -38,7 +38,7 @@ for algorithm in sha256 sha512; do
     expect_rejected "${algorithm} multiple records"
 
     write_checksums "${payload}"
-    digest="$("${algorithm}sum" -- "${payload}" | awk '{print $1}')"
+    read -r digest _ <"${payload}.${algorithm}"
     printf '%s *%s\n' "${digest}" "$(basename -- "${payload}")" >"${payload}.${algorithm}"
     expect_rejected "${algorithm} GNU binary record"
 

@@ -45,11 +45,15 @@ Commands:
       Build and validate unsigned reproducible source archives and an SPDX SBOM.
       Source defaults to this checkout and must be a clean Git checkout.
 
-  sign [--package-dir <dir>] [--require-release-key]
-      Sign validated release payloads and export the public verification key.
+  sign --repository <owner/name> --version <version> --tag <tag>
+       --tag-object <object> --commit <commit> [--package-dir <dir>]
+       [--require-release-key]
+      Sign an identity-bound release manifest and export the verification key.
+      Validate the version against metadata at the specified release commit.
 
-  verify-assets [--package-dir <dir>] [--version <version>]
-      Verify the exact signed release asset set, checksums, key, and signatures.
+  verify-assets --repository <owner/name> --version <version> --tag <tag>
+                --tag-object <object> --commit <commit> [--package-dir <dir>]
+      Verify the exact asset set, trusted key, signed manifest, and checksums.
 
   check-versions
       Verify CMakeLists.txt, vcpkg.json, and conanfile.py declare the same
@@ -424,6 +428,21 @@ metadata_version() {
     printf '%s\n' "${cmake_version}"
 }
 
+# Signing may use newer workflow tooling than the verified release source.
+# Read metadata from the exact commit in the signed identity, never tooling HEAD.
+metadata_version_at_commit() (
+    local commit="$1" metadata_dir metadata_file
+    [[ "$(git -C "${repo_root}" cat-file -t "${commit}" 2>/dev/null)" == commit ]] ||
+        die "release metadata commit does not resolve to a commit: ${commit}"
+    metadata_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${metadata_dir}"' EXIT
+    for metadata_file in CMakeLists.txt vcpkg.json conanfile.py; do
+        git -C "${repo_root}" show "${commit}:${metadata_file}" >"${metadata_dir}/${metadata_file}" ||
+            die "could not read ${metadata_file} from release commit ${commit}"
+    done
+    metadata_version "${metadata_dir}"
+)
+
 check_versions() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -439,53 +458,6 @@ check_versions() {
     log "Project versions agree: ${version}"
 }
 
-expected_unsigned_assets() {
-    local version="$1"
-    local stem="cbor_tags-${version}"
-    printf '%s\n' \
-        "${stem}.spdx.json" \
-        "${stem}.spdx.json.sha256" \
-        "${stem}.spdx.json.sha512" \
-        "${stem}.tar.gz" \
-        "${stem}.tar.gz.sha256" \
-        "${stem}.tar.gz.sha512" \
-        "${stem}.zip" \
-        "${stem}.zip.sha256" \
-        "${stem}.zip.sha512"
-}
-
-expected_signed_assets() {
-    local version="$1"
-    local stem="cbor_tags-${version}"
-    expected_unsigned_assets "${version}"
-    printf '%s\n' \
-        "${stem}.spdx.json.sig" \
-        "${stem}.tar.gz.sig" \
-        "${stem}.zip.sig" \
-        "cbor_tags-release-public-key.asc"
-}
-
-require_exact_assets() {
-    local package_dir="$1"
-    local version="$2"
-    local asset_kind="$3"
-    local expected_assets actual_assets
-
-    case "${asset_kind}" in
-        unsigned) expected_assets="$(expected_unsigned_assets "${version}" | sort)" ;;
-        signed) expected_assets="$(expected_signed_assets "${version}" | sort)" ;;
-        *) die "unknown asset set: ${asset_kind}" ;;
-    esac
-    [[ -d "${package_dir}" && ! -L "${package_dir}" ]] || die "release asset directory must be a non-symlink directory"
-    [[ -z "$(find "${package_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
-        die "release assets must be regular non-symlink files"
-    actual_assets="$(find "${package_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
-    if [[ "${expected_assets}" != "${actual_assets}" ]]; then
-        diff -u <(printf '%s\n' "${expected_assets}") <(printf '%s\n' "${actual_assets}") || true
-        die "${package_dir} does not contain the exact ${asset_kind} release asset set"
-    fi
-}
-
 write_checksums() {
     local payload="$1"
     local package_dir payload_name
@@ -493,31 +465,8 @@ write_checksums() {
     payload_name="$(basename -- "${payload}")"
     (
         cd -- "${package_dir}"
-        sha256sum "${payload_name}" >"${payload_name}.sha256"
-        sha512sum "${payload_name}" >"${payload_name}.sha512"
-    )
-}
-
-verify_checksums() {
-    local payload="$1"
-    local package_dir payload_name
-    package_dir="$(dirname -- "${payload}")"
-    payload_name="$(basename -- "${payload}")"
-    local asset
-    for asset in "${payload}" "${payload}.sha256" "${payload}.sha512"; do
-        [[ -f "${asset}" && ! -L "${asset}" ]] || die "checksum assets must be regular non-symlink files: ${asset}"
-    done
-
-    # Only hash the expected payload. A downloaded sidecar cannot select files
-    # outside the release directory or add extra checksum records.
-    (
-        cd -- "${package_dir}"
-        local algorithm digest
-        for algorithm in sha256 sha512; do
-            digest="$("${algorithm}sum" -- "${payload_name}")" || die "failed to hash ${payload_name}"
-            printf '%s\n' "${digest}" | cmp -s - "${payload_name}.${algorithm}" ||
-                die "noncanonical or incorrect ${algorithm} checksum for ${payload_name}"
-        done
+        write_release_checksum sha256 "${payload_name}" >"${payload_name}.sha256"
+        write_release_checksum sha512 "${payload_name}" >"${payload_name}.sha512"
     )
 }
 
@@ -528,41 +477,6 @@ sign_payload() {
         gpg_args+=(--passphrase-file "${GPG_PASSPHRASE_FILE}")
     fi
     gpg "${gpg_args[@]}" --output "${payload}.sig" --detach-sign "${payload}"
-}
-
-verify_signed_assets() {
-    local package_dir="$1"
-    local version="$2"
-    local expected_fingerprint="$3"
-    local canonical_public_key="${4:-}"
-    require_exact_assets "${package_dir}" "${version}" signed
-
-    (
-        local gnupg_home
-        gnupg_home="$(mktemp -d)"
-        chmod 700 "${gnupg_home}"
-        trap 'rm -rf -- "${gnupg_home}"' EXIT
-        if [[ -n "${canonical_public_key}" ]]; then
-            [[ -f "${canonical_public_key}" ]] || die "canonical release public key not found: ${canonical_public_key}"
-            cmp "${canonical_public_key}" "${package_dir}/cbor_tags-release-public-key.asc" ||
-                die "release asset public key differs from the canonical committed key"
-        fi
-        authenticate_release_key "${gnupg_home}" "${package_dir}/cbor_tags-release-public-key.asc" "${expected_fingerprint}"
-
-        local stem="cbor_tags-${version}"
-        local payload verification_output
-        for payload in "${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json"; do
-            verify_checksums "${package_dir}/${payload}"
-            if ! verification_output="$(
-                release_gpg "${gnupg_home}" --status-fd 1 --verify \
-                    "${package_dir}/${payload}.sig" "${package_dir}/${payload}" 2>&1
-            )"; then
-                printf '%s\n' "${verification_output}" >&2
-                die "release asset ${payload} does not have a valid signature"
-            fi
-            authenticate_release_signature "${verification_output}" "${expected_fingerprint}" "release asset ${payload}"
-        done
-    )
 }
 
 locate_install_prefix() {
@@ -937,6 +851,7 @@ build_release() {
 sign_release() {
     local package_dir="${repo_root}/build/release-packages"
     local require_release_key=false
+    local version="" repository="" tag="" tag_object="" commit=""
     while (($#)); do
         case "$1" in
             --package-dir)
@@ -948,6 +863,17 @@ sign_release() {
                 require_release_key=true
                 shift
                 ;;
+            --repository|--version|--tag|--tag-object|--commit)
+                [[ $# -ge 2 ]] || die "$1 requires a value"
+                case "$1" in
+                    --repository) repository="$2" ;;
+                    --version) version="$2" ;;
+                    --tag) tag="$2" ;;
+                    --tag-object) tag_object="$2" ;;
+                    --commit) commit="$2" ;;
+                esac
+                shift 2
+                ;;
             -h | --help)
                 usage
                 return 0
@@ -956,12 +882,15 @@ sign_release() {
         esac
     done
 
+    require_command git
     require_command gpg
     require_command sha256sum
     require_command sha512sum
     package_dir="$(canonical_build_path "${package_dir}")"
-    local version
-    version="$(metadata_version)"
+    validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
+    local source_version
+    source_version="$(metadata_version_at_commit "${commit}")" || die "could not read signing commit metadata"
+    [[ "${version}" == "${source_version}" ]] || die "signing version does not match release commit metadata"
     require_exact_assets "${package_dir}" "${version}" unsigned
 
     local test_gnupg_home=""
@@ -984,18 +913,20 @@ sign_release() {
     local stem="cbor_tags-${version}"
     local payload
     for payload in "${stem}.tar.gz" "${stem}.zip" "${stem}.spdx.json"; do
-        verify_checksums "${package_dir}/${payload}"
-        sign_payload "${package_dir}/${payload}"
+        verify_checksums "${package_dir}/${payload}" || die "release asset checksum verification failed"
     done
     gpg --armor --export "${signing_fingerprint}" >"${package_dir}/cbor_tags-release-public-key.asc"
     [[ -s "${package_dir}/cbor_tags-release-public-key.asc" ]] || die "failed to export release public key"
-    verify_signed_assets "${package_dir}" "${version}" "${signing_fingerprint}"
+    write_release_manifest "${package_dir}" "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}" >"${package_dir}/${stem}.release-manifest"
+    sign_payload "${package_dir}/${stem}.release-manifest"
+    verify_signed_assets "${package_dir}" "${version}" "${signing_fingerprint}" '' "${repository}" "${tag}" "${tag_object}" "${commit}"
     log "Signed release assets validated"
 }
 
 verify_assets() {
     local package_dir="${repo_root}/build/release-packages"
     local version=""
+    local repository="" tag="" tag_object="" commit=""
     while (($#)); do
         case "$1" in
             --package-dir)
@@ -1008,6 +939,16 @@ verify_assets() {
                 version="$2"
                 shift 2
                 ;;
+            --repository|--tag|--tag-object|--commit)
+                [[ $# -ge 2 ]] || die "$1 requires a value"
+                case "$1" in
+                    --repository) repository="$2" ;;
+                    --tag) tag="$2" ;;
+                    --tag-object) tag_object="$2" ;;
+                    --commit) commit="$2" ;;
+                esac
+                shift 2
+                ;;
             -h | --help)
                 usage
                 return 0
@@ -1017,15 +958,14 @@ verify_assets() {
     done
     require_command gpg
     require_command cmp
-    require_command sha256sum
-    require_command sha512sum
     package_dir="$(canonical_build_path "${package_dir}")"
-    [[ -n "${version}" ]] || version="$(metadata_version)"
+    validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
     verify_signed_assets \
         "${package_dir}" \
         "${version}" \
         "${release_signing_fingerprint}" \
-        "${repo_root}/.github/release-signing-key.asc"
+        "${repo_root}/.github/release-signing-key.asc" \
+        "${repository}" "${tag}" "${tag_object}" "${commit}"
     log "Published release assets validated"
 }
 
