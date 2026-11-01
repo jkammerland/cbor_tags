@@ -19,11 +19,8 @@ class encode_scope_ref {
   public:
     template <SharedPtrEncodeScope Scope>
     explicit encode_scope_ref(Scope &scope)
-        : scope_(std::addressof(scope)),
-          observe_([](void *raw, const shared_ptr_encode_key &key) { return static_cast<Scope *>(raw)->observe(key); }),
-          observe_untracked_([](void *raw) { return static_cast<Scope *>(raw)->observe_untracked(); }),
-          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
-          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+        : scope_(std::addressof(scope)), observe_(&observe_thunk<Scope>), observe_untracked_(&observe_untracked_thunk<Scope>),
+          mark_complete_(&mark_complete_thunk<Scope>), reset_(&reset_thunk<Scope>) {}
 
     [[nodiscard]] expected<shared_ptr_observation, status_code> observe(const shared_ptr_encode_key &key) const {
         return observe_(scope_, key);
@@ -33,6 +30,22 @@ class encode_scope_ref {
     void                                      reset() const { reset_(scope_); }
 
   private:
+    // Named operations avoid MSVC lambda invoker symbol collisions across translation units.
+    template <typename Scope>
+    static expected<shared_ptr_observation, status_code> observe_thunk(void *raw, const shared_ptr_encode_key &key) {
+        return static_cast<Scope *>(raw)->observe(key);
+    }
+
+    template <typename Scope> static expected<void, status_code> observe_untracked_thunk(void *raw) {
+        return static_cast<Scope *>(raw)->observe_untracked();
+    }
+
+    template <typename Scope> static void mark_complete_thunk(void *raw, std::size_t index) {
+        static_cast<Scope *>(raw)->mark_complete(index);
+    }
+
+    template <typename Scope> static void reset_thunk(void *raw) { static_cast<Scope *>(raw)->reset(); }
+
     void *scope_{};
     expected<shared_ptr_observation, status_code> (*observe_)(void *, const shared_ptr_encode_key &){};
     expected<void, status_code> (*observe_untracked_)(void *){};
@@ -44,12 +57,8 @@ class decode_scope_ref {
   public:
     template <SharedPtrDecodeScope Scope>
     explicit decode_scope_ref(Scope &scope)
-        : scope_(std::addressof(scope)),
-          insert_([](void *raw, const shared_ptr_decode_entry &entry) { return static_cast<Scope *>(raw)->insert(entry); }),
-          insert_untracked_([](void *raw) { return static_cast<Scope *>(raw)->insert_untracked(); }),
-          resolve_([](void *raw, std::size_t index) { return static_cast<Scope *>(raw)->resolve(index); }),
-          mark_complete_([](void *raw, std::size_t index) { static_cast<Scope *>(raw)->mark_complete(index); }),
-          reset_([](void *raw) { static_cast<Scope *>(raw)->reset(); }) {}
+        : scope_(std::addressof(scope)), insert_(&insert_thunk<Scope>), insert_untracked_(&insert_untracked_thunk<Scope>),
+          resolve_(&resolve_thunk<Scope>), mark_complete_(&mark_complete_thunk<Scope>), reset_(&reset_thunk<Scope>) {}
 
     [[nodiscard]] expected<std::size_t, status_code> insert(const shared_ptr_decode_entry &entry) const { return insert_(scope_, entry); }
     [[nodiscard]] expected<void, status_code>        insert_untracked() const { return insert_untracked_(scope_); }
@@ -58,6 +67,25 @@ class decode_scope_ref {
     void                                                         reset() const { reset_(scope_); }
 
   private:
+    // Keep each operation's name and return type distinct, including resolve versus mark_complete.
+    template <typename Scope> static expected<std::size_t, status_code> insert_thunk(void *raw, const shared_ptr_decode_entry &entry) {
+        return static_cast<Scope *>(raw)->insert(entry);
+    }
+
+    template <typename Scope> static expected<void, status_code> insert_untracked_thunk(void *raw) {
+        return static_cast<Scope *>(raw)->insert_untracked();
+    }
+
+    template <typename Scope> static expected<shared_ptr_decode_entry, status_code> resolve_thunk(void *raw, std::size_t index) {
+        return static_cast<Scope *>(raw)->resolve(index);
+    }
+
+    template <typename Scope> static void mark_complete_thunk(void *raw, std::size_t index) {
+        static_cast<Scope *>(raw)->mark_complete(index);
+    }
+
+    template <typename Scope> static void reset_thunk(void *raw) { static_cast<Scope *>(raw)->reset(); }
+
     void *scope_{};
     expected<std::size_t, status_code> (*insert_)(void *, const shared_ptr_decode_entry &){};
     expected<void, status_code> (*insert_untracked_)(void *){};
