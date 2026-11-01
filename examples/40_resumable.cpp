@@ -30,9 +30,9 @@ int main() {
     const auto encoded = ct::make_encoder(buffer)(sent, sequence);
     assert(encoded);
 
-    // The decoder borrows an ordinary container and keeps its logical position.
+    // The buffer owns every byte; the deque holds append-only borrowed chunks.
     const auto bytes = std::span<const std::byte>{buffer};
-    std::deque<std::byte> input;
+    std::deque<std::span<const std::byte>> input;
     auto decoder = ct::make_resumable_decoder(input);
     Message received;
     std::uint32_t received_sequence{};
@@ -40,18 +40,16 @@ int main() {
 
     // This first chunk contains only headers, so the message still needs input.
     const auto first_chunk = bytes.first(2);
-    input.insert(input.end(), first_chunk.begin(), first_chunk.end());
+    input.push_back(first_chunk);
     const auto first_state = operation.resume();
     assert(first_state == ct::resume_state::need_input);
-    assert(input.size() == first_chunk.size());
     std::cout << "first input: " << example::to_hex(first_chunk) << '\n';
 
     // subspan(2) supplies every byte after the two already supplied.
     const auto last_chunk = bytes.subspan(2);
-    input.insert(input.end(), last_chunk.begin(), last_chunk.end());
+    input.push_back(last_chunk);
     const auto final_state = operation.resume();
     assert(final_state == ct::resume_state::done);
-    assert(input.size() == buffer.size());
     std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
     // Typed decoding finishes when all requested values are available, without EOF.
@@ -62,5 +60,8 @@ int main() {
     assert(received.values == sent.values);
     assert(received_sequence == sequence);
     assert(operation.remaining_input().empty());
+
+    // Keep descriptors and their owner until destruction. Reclaiming consumed
+    // chunks during an operation requires a custom source, as in example 46.
     return 0;
 }

@@ -34,9 +34,9 @@ report = [station: tstr, samples: [* int]]
 */
 int main() {
     // The application value and output storage outlive the suspended encode hook.
-    const app::Report sent{{-1, 24, 1000}, "north"};
     std::vector<std::byte> output;
     auto encoder = ct::make_resumable_encoder(output);
+    const app::Report sent{{-1, 24, 1000}, "north"};
     auto encoding = encoder(sent);
     assert(encoding.done());
 

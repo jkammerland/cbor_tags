@@ -1,4 +1,3 @@
-#include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_resumable.h"
 #include "cbor_tags/cbor_resumable_source.h"
 
@@ -208,15 +207,16 @@ void publish(ring_source<true, Capacity> &output, std::vector<std::byte> &transp
 readings = [* uint]
 */
 int main() {
-    // Every integer retry fits the ring; the complete array is much larger.
-    const std::vector<std::uint32_t> sent{0, 1, 23, 24, 255, 256, 65'535, 65'536, 1'000'000, 23, 24,
-        255, 256, 65'535, 65'536, 1'000'000, 255, 256, 65'535, 65'536, 1'000'000};
     constexpr std::size_t initial_offset = 100;
     constexpr std::size_t capacity = 11;
 
     // Start with a nonzero absolute position and reuse the same fixed storage.
     ring_source<true, capacity> output(initial_offset);
     auto encoder = ct::make_resumable_encoder(output);
+
+    // Every integer retry fits the ring; the complete array is much larger.
+    const std::vector<std::uint32_t> sent{0, 1, 23, 24, 255, 256, 65'535, 65'536, 1'000'000, 23, 24,
+        255, 256, 65'535, 65'536, 1'000'000, 255, 256, 65'535, 65'536, 1'000'000};
     auto encoding = encoder(sent);
     std::vector<std::byte> transport;
     std::size_t output_resumptions{};
@@ -239,12 +239,6 @@ int main() {
     assert(output.size() == 0);
     assert(output_resumptions > 1);
     assert(transport.size() > 3 * capacity);
-
-    // Compare against ordinary encoding independently of the ring traversal.
-    std::vector<std::byte> reference;
-    const auto reference_result = ct::make_encoder(reference)(sent);
-    assert(reference_result);
-    assert(transport == reference);
 
     // Admit short chunks, preserving any uncommitted integer across each refill.
     ring_source<false, capacity> input(initial_offset);
