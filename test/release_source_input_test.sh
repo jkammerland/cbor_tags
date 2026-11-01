@@ -60,6 +60,16 @@ invoke() {
 
 # Version selection must follow the source argument rather than the tooling checkout.
 [[ "$(invoke metadata_version "${source_root}")" == 1.2.3 ]]
+
+# A failed parser in the selected source must not fall back to tooling metadata.
+cp -- "${source_root}/vcpkg.json" "${test_root}/source-vcpkg.json"
+: >"${source_root}/vcpkg.json"
+if invoke metadata_version "${source_root}" >"${test_root}/metadata.log" 2>&1; then
+    echo "empty source metadata unexpectedly accepted" >&2
+    exit 1
+fi
+grep -F "could not read project versions" "${test_root}/metadata.log"
+cp -- "${test_root}/source-vcpkg.json" "${source_root}/vcpkg.json"
 if ! invoke run_source_consumer "${source_root}" "${test_root}/toolchain.cmake" \
         "${test_root}/consumer-build" >"${test_root}/success.log" 2>&1; then
     cat "${test_root}/success.log" >&2

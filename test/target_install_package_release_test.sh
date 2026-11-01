@@ -26,7 +26,10 @@ case "${output}" in
     *.sha256)
         printf '%s  %s\n' \
             "${FAKE_PUBLISHED_SHA:-e248e05d4b0c1ce8e9649fc83331a548487fa0be86aab2e331f27a2cd6609e31}" \
-            'target_install_package-7.1.0-cmake.tar.gz' >"${output}"
+            "${FAKE_CHECKSUM_NAME:-target_install_package-7.1.0-cmake.tar.gz}" >"${output}"
+        if [[ "${FAKE_EXTRA_CHECKSUM:-0}" == 1 ]]; then
+            printf '%s  another.tar.gz\n' '0000000000000000000000000000000000000000000000000000000000000000' >>"${output}"
+        fi
         ;;
     *) : >"${output}" ;;
 esac
@@ -60,11 +63,10 @@ EOF
 cat >"${fake_bin}/sha256sum" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${FAKE_CHECKSUM_FAIL:-0}" == 1 ]]; then
-    echo 'target_install_package-7.1.0-cmake.tar.gz: FAILED'
-    exit 1
-fi
-echo 'target_install_package-7.1.0-cmake.tar.gz: OK'
+[[ "$*" == '-- target_install_package-7.1.0-cmake.tar.gz' ]] || exit 2
+digest=e248e05d4b0c1ce8e9649fc83331a548487fa0be86aab2e331f27a2cd6609e31
+[[ "${FAKE_CHECKSUM_FAIL:-0}" != 1 ]] || digest=0000000000000000000000000000000000000000000000000000000000000000
+printf '%s  target_install_package-7.1.0-cmake.tar.gz\n' "${digest}"
 EOF
 
 cat >"${fake_bin}/tar" <<'EOF'
@@ -106,7 +108,10 @@ expect_failure \
     "published-digest-mismatch" \
     "published checksum is" \
     FAKE_PUBLISHED_SHA=1111222233334444555566667777888899990000111122223333444455556666
-expect_failure "archive-digest-mismatch" "FAILED" FAKE_CHECKSUM_FAIL=1
+expect_failure "archive-digest-mismatch" "dependency archive digest mismatch" FAKE_CHECKSUM_FAIL=1
+expect_failure "checksum-traversal" "published checksum is noncanonical" FAKE_CHECKSUM_NAME=../outside
+expect_failure "checksum-absolute" "published checksum is noncanonical" FAKE_CHECKSUM_NAME=/tmp/outside
+expect_failure "checksum-extra-record" "published checksum is noncanonical" FAKE_EXTRA_CHECKSUM=1
 expect_failure \
     "wrong-public-key" \
     "release public key fingerprint is" \
