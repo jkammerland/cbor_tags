@@ -4,7 +4,7 @@ if(POLICY CMP0206)
 endif()
 project(
   cbor_tags
-  VERSION 0.28.0
+  VERSION 0.29.0
   DESCRIPTION "RFC 8949 CBOR implementation with automatic C++ reflection"
   HOMEPAGE_URL "https://github.com/jkammerland/cbor_tags")
 set(cbor_tags_SPDX_LICENSE "MIT")
@@ -354,6 +354,11 @@ if(CBOR_TAGS_BUILD_TESTS)
       NAME release_version_consistency
       COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_version_consistency_test.sh)
     add_test(NAME release_checksums COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_checksums_test.sh)
+    add_test(
+      NAME release_source_input
+      COMMAND ${CBOR_TAGS_BASH_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test/release_source_input_test.sh)
+    # The nested consumer configure must use this build's selected compiler.
+    set_tests_properties(release_source_input PROPERTIES ENVIRONMENT "CXX=${CMAKE_CXX_COMPILER}")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       find_program(CBOR_TAGS_GPG_EXECUTABLE gpg)
       find_program(CBOR_TAGS_JQ_EXECUTABLE jq)

@@ -435,6 +435,10 @@ template <typename T> inline constexpr auto get_major_6_tag_from_tuple(const T &
     }
 }
 
+// Explicit tag wrappers retain their dispatch; other admitted metadata names a tag number.
+template <typename T> inline constexpr bool   is_customization_tag_wrapper_v                 = is_static_tag_t<T>::value;
+template <IsUnsigned T> inline constexpr bool is_customization_tag_wrapper_v<dynamic_tag<T>> = true;
+
 template <typename T> static constexpr auto get_major_6_tag_from_class(const T &t) {
     // static_assert(IsClassWithTagOverload<T>, "T must be a class with tag overload");
 

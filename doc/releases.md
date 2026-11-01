@@ -12,9 +12,23 @@ For version `X.Y.Z`, the workflow publishes exactly 13 assets:
 - `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
 - `cbor_tags-release-public-key.asc` for offline signature verification.
 
-The archives reproduce the tracked source at the signed release commit, not a
-pre-installed CMake tree. The SPDX 3 JSON-LD SBOM describes the project and its
-direct dependencies. Verification rejects altered, missing, or unexpected assets.
+The archives contain the exact tracked source snapshot for the signed release
+commit. They do not contain a pre-installed CMake tree. The workflow extracts
+both archives, compares every file digest and executable bit against the
+canonical Git snapshot, and runs a round-trip consumer against each archive.
+It separately stages one internal install and builds `test_package` against it
+to keep the CMake package metadata covered without publishing that install tree.
+
+The build uses workflow-commit tooling and a separate, clean checkout of the
+verified release commit. Archive validation is independent of example names.
+
+The release driver normalizes ZIP metadata to UTC so the unsigned packages are
+byte-reproducible regardless of the operator's local timezone.
+
+The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
+driver checks its document name, CC0-1.0 data license, MIT project license,
+root package, direct dependency packages, dependency versions, and `dependsOn`
+relationship before signing it as a standalone asset.
 
 ## Trust Model
 
@@ -120,7 +134,8 @@ an immutable release require a new version, even if the release was deleted.
 
 ## Local Package Validation
 
-With CMake 4.4.x, Ninja, GPG, and the project's vcpkg baseline available:
+From a clean checkout, with CMake 4.4.x, Ninja, GPG, and the manifest's vcpkg
+baseline available:
 
 ```bash
 VCPKG_ROOT=/path/to/vcpkg bash scripts/release.sh build

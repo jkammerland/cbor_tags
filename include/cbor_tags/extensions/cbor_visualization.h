@@ -69,8 +69,8 @@ struct AnnotationOptions {
     size_t         indent_width{3};
     size_t         comment_indent_width{2};
     size_t         max_structure_depth{64};
-    size_t         max_input_size{std::size_t{16U} * 1024U * 1024U};
-    size_t         max_output_size{std::size_t{16U} * 1024U * 1024U};
+    size_t         max_input_size{std::numeric_limits<size_t>::max()};
+    size_t         max_output_size{std::numeric_limits<size_t>::max()};
 };
 
 namespace cddl {
@@ -230,8 +230,34 @@ struct CDDLContext {
     }
 };
 
+[[nodiscard]] inline std::size_t visualization_size_add(std::size_t lhs, std::size_t rhs) {
+    if (rhs > std::numeric_limits<std::size_t>::max() - lhs) {
+        throw std::runtime_error("CBOR visualization size overflow");
+    }
+    return lhs + rhs;
+}
+
+[[nodiscard]] inline std::size_t visualization_size_mul(std::size_t lhs, std::size_t rhs) {
+    if (lhs != 0U && rhs > std::numeric_limits<std::size_t>::max() / lhs) {
+        throw std::runtime_error("CBOR visualization size overflow");
+    }
+    return lhs * rhs;
+}
+
+template <typename OutputBuffer> void ensure_visualization_capacity(const OutputBuffer &output_buffer, std::size_t additional) {
+    // Bounded sinks can reject padding before an intermediate string is allocated.
+    if constexpr (requires { output_buffer.check_visualization_append(additional); }) {
+        output_buffer.check_visualization_append(additional);
+    }
+}
+
 template <typename Iterator> void format_bytes(auto &output_buffer, Iterator begin, Iterator end, AnnotationOptions options = {}) {
-    std::string indent(options.current_indent * 2, ' ');
+    if (begin == end) {
+        return;
+    }
+    const auto indent_size = visualization_size_mul(options.current_indent, 2U);
+    ensure_visualization_capacity(output_buffer, visualization_size_add(visualization_size_add(indent_size, options.offset), 2U));
+    std::string indent(indent_size, ' ');
     std::string offset(options.offset, ' ');
 
     const size_t bytes_per_line = options.max_depth == std::numeric_limits<size_t>::max()
@@ -1627,12 +1653,12 @@ auto buffer_annotate(const CborBuffer &cbor_buffer, OutputBuffer &output_buffer,
         if constexpr (!std::ranges::input_range<T>) {
             check_depth(depth);
         }
-        auto item_options = options;
-        item_options.current_indent += depth;
-        item_options.offset += depth;
+        auto item_options           = options;
+        item_options.current_indent = detail::visualization_size_add(item_options.current_indent, depth);
+        item_options.offset         = detail::visualization_size_add(item_options.offset, depth);
         if constexpr (std::ranges::input_range<T>) {
-            ++item_options.current_indent;
-            ++item_options.offset;
+            item_options.current_indent = detail::visualization_size_add(item_options.current_indent, 1U);
+            item_options.offset         = detail::visualization_size_add(item_options.offset, 1U);
             detail::format_bytes(output_buffer, context.source.begin(), context.source.end(), item_options);
         } else {
             const auto after_initial = std::next(context.source.begin());
@@ -1858,10 +1884,9 @@ template <typename OutputBuffer> struct smart_annotator {
         return result;
     }
 
-    [[nodiscard]] std::string indent(std::size_t depth) const {
-        const auto  levels = checked_add(options.current_indent, depth);
-        std::string result(checked_add(checked_mul(levels, options.indent_width), options.offset), ' ');
-        return result;
+    [[nodiscard]] std::size_t indent_size(std::size_t depth) const {
+        const auto levels = checked_add(options.current_indent, depth);
+        return checked_add(checked_mul(levels, options.indent_width), options.offset);
     }
 
     void ensure_output_capacity(std::size_t additional) const {
@@ -1871,25 +1896,29 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     void emit_annotated_line(std::size_t depth, std::string left, std::string_view comment) {
-        left.insert(0, indent(depth));
-        if (left.size() >= options.annotation_column) {
+        const auto indentation = indent_size(depth);
+        const auto left_size   = checked_add(left.size(), indentation);
+        if (left_size >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
-        const auto padding        = options.annotation_column - left.size();
+        const auto padding        = options.annotation_column - left_size;
         const auto comment_indent = checked_mul(depth, options.comment_indent_width);
         const auto output_size =
-            checked_add(checked_add(checked_add(checked_add(left.size(), padding), 2U), comment_indent), checked_add(comment.size(), 1U));
+            checked_add(checked_add(checked_add(checked_add(left_size, padding), 2U), comment_indent), checked_add(comment.size(), 1U));
         ensure_output_capacity(output_size);
+        left.insert(0, indentation, ' ');
         text::format_to(std::back_inserter(output_buffer), "{}{}# {}{}\n", left, std::string(padding, ' '),
                         std::string(comment_indent, ' '), comment);
     }
 
     void emit_plain_line(std::size_t depth, std::string left) {
-        left.insert(0, indent(depth));
-        if (left.size() >= options.annotation_column) {
+        const auto indentation = indent_size(depth);
+        const auto left_size   = checked_add(left.size(), indentation);
+        if (left_size >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow");
         }
-        ensure_output_capacity(left.size() + 1U);
+        ensure_output_capacity(checked_add(left_size, 1U));
+        left.insert(0, indentation, ' ');
         text::format_to(std::back_inserter(output_buffer), "{}\n", left);
     }
 
@@ -1898,8 +1927,8 @@ template <typename OutputBuffer> struct smart_annotator {
     }
 
     [[nodiscard]] std::size_t payload_bytes_per_line(std::size_t depth) const {
-        const auto left_indent = indent(depth).size();
-        if (left_indent + 2U >= options.annotation_column) {
+        const auto left_indent = indent_size(depth);
+        if (checked_add(left_indent, 2U) >= options.annotation_column) {
             throw std::runtime_error("CBOR annotation column too narrow for payload");
         }
         auto max_bytes = (options.annotation_column - left_indent - 1U) / 2U;
@@ -1921,7 +1950,8 @@ template <typename OutputBuffer> struct smart_annotator {
         auto       offset         = std::size_t{};
         while (offset < length) {
             const auto chunk = std::min(bytes_per_line, length - offset);
-            auto       left  = hex_range(begin + offset, begin + offset + chunk, false);
+            ensure_output_capacity(checked_add(checked_add(indent_size(depth), checked_mul(chunk, 2U)), 1U));
+            auto left = hex_range(begin + offset, begin + offset + chunk, false);
             if (offset == 0U) {
                 emit_annotated_line(depth, std::move(left), comment);
             } else {
@@ -2246,6 +2276,13 @@ template <typename OutputBuffer> struct diagnostic_renderer {
         }
     }
 
+    [[nodiscard]] std::string indent(std::size_t levels) const {
+        const auto size = visualization_size_mul(options.row_options.offset, levels);
+        ensure_visualization_capacity(output_buffer, size);
+        std::string result(size, ' ');
+        return result;
+    }
+
     void before_item() {
         if (frames.empty()) {
             if (sequence && emitted) {
@@ -2262,8 +2299,7 @@ template <typename OutputBuffer> struct diagnostic_renderer {
                 append_diagnostic_separator(output_buffer, parent.rows);
             }
             if (parent.rows) {
-                text::format_to(std::back_inserter(output_buffer), "{}",
-                                std::string(options.row_options.offset * (parent.indent + 1U), ' '));
+                text::format_to(std::back_inserter(output_buffer), "{}", indent(visualization_size_add(parent.indent, 1U)));
             }
         } else if (parent.kind == item_kind::text || parent.kind == item_kind::binary) {
             if (parent.children != 0U) {
@@ -2319,7 +2355,7 @@ template <typename OutputBuffer> struct diagnostic_renderer {
     template <typename T> void begin(const T &arg, std::size_t depth) {
         before_item();
         check_depth(depth);
-        frame item{.kind = item_kind::tag, .indent = options.row_options.current_indent + row_depth};
+        frame item{.kind = item_kind::tag, .indent = visualization_size_add(options.row_options.current_indent, row_depth)};
         if constexpr (IsArrayHeader<T> || IsMapHeader<T>) {
             item.kind       = IsArrayHeader<T> ? item_kind::array : item_kind::map;
             item.indefinite = arg.indefinite;
@@ -2359,7 +2395,10 @@ template <typename OutputBuffer> struct diagnostic_renderer {
         if (item.kind == item_kind::array || item.kind == item_kind::map) {
             --row_depth;
             if (item.rows && item.children != 0U) {
-                text::format_to(std::back_inserter(output_buffer), "\n{}", std::string(options.row_options.offset * item.indent, ' '));
+                // Bound the leading newline and padding together before allocating.
+                const auto padding = visualization_size_mul(options.row_options.offset, item.indent);
+                ensure_visualization_capacity(output_buffer, visualization_size_add(padding, 1U));
+                text::format_to(std::back_inserter(output_buffer), "\n{}", std::string(padding, ' '));
             }
             text::format_to(std::back_inserter(output_buffer), "{}", item.kind == item_kind::array ? "]" : "}");
         } else if (item.kind == item_kind::tag) {
