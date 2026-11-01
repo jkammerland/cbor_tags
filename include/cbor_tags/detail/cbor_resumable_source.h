@@ -764,22 +764,26 @@ template <ResumableChunkStorage Storage> class chunk_source {
         return true;
     }
 
-    // Deques have no contiguous window, but a bounded write can still advance
-    // a native iterator once per chunk instead of indexing once per byte.
+    // Resolve each available chunk once. Contiguous chunks copy directly;
+    // deques advance a native iterator within the same synchronous call.
     std::size_t write_bytes(iterator &to, std::span<const std::byte> bytes)
-        requires(indexed_byte && sized && !std::ranges::contiguous_range<chunk_type> &&
-                 std::indirectly_writable<inner_iterator, std::ranges::range_value_t<chunk_type>>)
+        requires(indexed_byte && sized && std::indirectly_writable<inner_iterator, std::ranges::range_value_t<chunk_type>>)
     {
         const auto requested = bytes.size();
         while (!bytes.empty()) {
-            to.normalize();
-            if (!to.has_chunk() || to.chunk_exhausted())
+            std::size_t extent{};
+            auto       *descriptor = to.normalized_indexed_chunk(extent);
+            if (descriptor == nullptr)
                 break;
-            const auto amount  = std::min(bytes.size(), std::ranges::size(to.chunk()) - to.inner_.offset);
-            auto       current = std::ranges::begin(to.chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(to.inner_.offset);
-            for (const auto byte : bytes.first(amount)) {
-                *current = static_cast<std::ranges::range_value_t<chunk_type>>(byte);
-                ++current;
+            const auto amount = std::min(bytes.size(), extent - to.inner_.offset);
+            if constexpr (std::ranges::contiguous_range<chunk_type>) {
+                std::memcpy(std::ranges::data(*descriptor) + to.inner_.offset, bytes.data(), amount);
+            } else {
+                auto current = std::ranges::begin(*descriptor) + static_cast<std::iter_difference_t<inner_iterator>>(to.inner_.offset);
+                for (const auto byte : bytes.first(amount)) {
+                    *current = static_cast<std::ranges::range_value_t<chunk_type>>(byte);
+                    ++current;
+                }
             }
             to.inner_.offset += amount;
             to.offset_ += amount;

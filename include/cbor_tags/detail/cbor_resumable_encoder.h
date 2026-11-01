@@ -91,43 +91,33 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
   private:
     status_code drain_payload_bytes(std::span<const std::byte> &bytes) {
-        while (!bytes.empty()) {
-            const auto available = resumable_source_access::borrow_window(source_);
-            if (available && !available->empty()) {
-                const auto count = std::min(bytes.size(), available->size());
-                std::copy_n(bytes.begin(), count, available->begin());
-                resumable_source_access::consume_window(source_, count);
-                commit();
-                bytes = bytes.subspan(count);
-            } else if (available) {
-                return status_code::incomplete;
-            } else {
-                // Payload prefixes commit independently. Let the source copy
-                // the largest available prefix even without a direct window.
-                std::size_t count;
-                try {
-                    count = source_.write(bytes);
+        if (bytes.empty())
+            return status_code::success;
+
+        // The source owns traversal across its available chunks. A short
+        // write commits that payload prefix and requests the next resumption.
+        std::size_t count;
+        try {
+            count = source_.write(bytes);
 #if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
-                } catch (...) {
-                    rollback();
-                    return resumable_encode_exception_status();
+        } catch (...) {
+            rollback();
+            return resumable_encode_exception_status();
 #else
-                } catch (const encode_status_exception &error) {
-                    rollback();
-                    return error.status;
-                } catch (...) {
-                    rollback();
-                    return resumable_exception_status();
+        } catch (const encode_status_exception &error) {
+            rollback();
+            return error.status;
+        } catch (...) {
+            rollback();
+            return resumable_exception_status();
 #endif
-                }
-                assert(count <= bytes.size());
-                if (count == 0)
-                    return status_code::incomplete;
-                commit();
-                bytes = bytes.subspan(count);
-            }
         }
-        return status_code::success;
+        assert(count <= bytes.size());
+        if (count != 0) {
+            commit();
+            bytes = bytes.subspan(count);
+        }
+        return bytes.empty() ? status_code::success : status_code::incomplete;
     }
 
     // The continuation owns its remaining span or iterators. Their underlying

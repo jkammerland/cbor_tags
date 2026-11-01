@@ -86,9 +86,50 @@ class named_helper_source {
 
 static_assert(ct::ResumableInputSource<named_helper_source>);
 
+// A transport may accept a prefix even when its backing container can grow.
+class bounded_write_source : public ct::output_source<std::vector<std::byte>> {
+  public:
+    using output_source::output_source;
+
+    std::optional<std::span<std::byte>> borrow_window() { return std::nullopt; }
+    std::size_t                         write(std::span<const std::byte> bytes) {
+        if (allowance == 0)
+            ++writes_after_exhaustion;
+        const auto count = output_source::write(bytes.first(std::min(bytes.size(), allowance)));
+        allowance -= count;
+        return count;
+    }
+
+    std::size_t allowance{};
+    std::size_t writes_after_exhaustion{};
+};
+
+static_assert(ct::ResumableOutputSource<bounded_write_source>);
+
 } // namespace
 
 TEST_SUITE("cbor_wire/resumable_bulk") {
+    TEST_CASE("a short payload write suspends without probing the exhausted source again") {
+        std::vector<std::byte> storage;
+        bounded_write_source   source(storage);
+        auto                   encoder = ct::make_resumable_encoder(source);
+        const std::array       value{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}};
+        source.allowance = 3;
+        auto operation   = encoder(value);
+
+        REQUIRE(operation.progress() == ct::resume_state::need_output);
+        CHECK(operation.committed_bytes() == 3);
+        CHECK(source.writes_after_exhaustion == 0);
+        CHECK(storage == std::vector<std::byte>{std::byte{0x45}, std::byte{1}, std::byte{2}});
+
+        source.allowance = 3;
+        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == 6);
+        CHECK(source.writes_after_exhaustion == 0);
+        CHECK(storage == std::vector<std::byte>{std::byte{0x45}, std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
+    }
+
     TEST_CASE("user iterator helper names do not opt into private bulk reads") {
         const std::array wire{std::byte{0x19}, std::byte{0x01}, std::byte{0x02}, std::byte{0x43}, std::byte{7}, std::byte{8}, std::byte{9}};
         named_helper_source    source(wire);
