@@ -70,13 +70,28 @@ cat >"${fake_bin}/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == -C ]]; then
+    checkout="$2"
     shift 2
     case "$1" in
         rev-parse)
-            printf '%s\n' "${FAKE_HEAD:-${FAKE_TAG_COMMIT}}"
+            if [[ "${2:-}" == --show-toplevel ]]; then
+                if [[ "${checkout}" == "${FAKE_SOURCE_DIR:-}" ]]; then
+                    printf '%s\n' "${FAKE_SOURCE_TOPLEVEL:-${checkout}}"
+                else
+                    printf '%s\n' "${checkout}"
+                fi
+            elif [[ "${checkout}" == "${FAKE_SOURCE_DIR:-}" ]]; then
+                printf '%s\n' "${FAKE_SOURCE_HEAD:-${FAKE_TAG_COMMIT}}"
+            else
+                printf '%s\n' "${FAKE_HEAD:-${FAKE_TAG_COMMIT}}"
+            fi
             ;;
         status)
-            [[ "${FAKE_DIRTY:-0}" != 1 ]] || printf ' M scripts/publish-release.sh\n'
+            if [[ "${checkout}" == "${FAKE_SOURCE_DIR:-}" ]]; then
+                [[ "${FAKE_SOURCE_DIRTY:-0}" != 1 ]] || printf ' M CMakeLists.txt\n'
+            else
+                [[ "${FAKE_DIRTY:-0}" != 1 ]] || printf ' M scripts/publish-release.sh\n'
+            fi
             ;;
         *)
             exit 2
@@ -327,7 +342,7 @@ reset_state() {
     rm -rf -- "${state_dir}/remote-assets" "${download_dir}"
     mkdir -p -- "${state_dir}/remote-assets"
     unset FAKE_DIGEST_MISMATCH
-    unset FAKE_DIRTY FAKE_HEAD
+    unset FAKE_DIRTY FAKE_HEAD FAKE_SOURCE_DIR FAKE_SOURCE_HEAD FAKE_SOURCE_DIRTY FAKE_SOURCE_TOPLEVEL
     unset FAKE_IMMUTABLE_DISABLE_AFTER_FIRST
     unset FAKE_DUPLICATE_RELEASES FAKE_RELEASE_API_FAILURE FAKE_STALE_RELEASE_LIST
     export FAKE_IMMUTABLE_RELEASES_ENABLED=true
@@ -405,6 +420,47 @@ if grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/n
     exit 1
 fi
 echo 'published-rerun-audit: OK'
+
+# Current reviewed tooling can publish a different, exact historical source.
+reset_state
+export FAKE_HEAD=5555555555555555555555555555555555555555
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+mkdir -p -- "${FAKE_SOURCE_DIR}"
+bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}" >/dev/null
+grep -Fx 'published' "${state_dir}/release-state" >/dev/null
+echo 'historical-source-current-tooling: OK'
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_TAG_OBJECT=3333333333333333333333333333333333333333
+expect_failure wrong-historical-tag-object bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source/nested"
+export FAKE_SOURCE_TOPLEVEL="${generated_root}/release-source"
+mkdir -p -- "${FAKE_SOURCE_DIR}"
+expect_failure nested-historical-source bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_HEAD=5555555555555555555555555555555555555555
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_SOURCE_HEAD=3333333333333333333333333333333333333333
+expect_failure wrong-historical-source bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_SOURCE_DIRTY=1
+expect_failure dirty-historical-source bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
+
+reset_state
+export FAKE_SOURCE_DIR="${generated_root}/release-source"
+export FAKE_DIRTY=1
+expect_failure dirty-current-tooling bash "${repo_root}/scripts/publish-release.sh" "${publish_args[@]}" --source-dir "${FAKE_SOURCE_DIR}"
+[[ ! -f "${state_dir}/release-state" ]]
 
 reset_state
 export FAKE_TAG_OBJECT=3333333333333333333333333333333333333333

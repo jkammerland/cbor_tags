@@ -49,6 +49,7 @@ Commands:
        --tag-object <object> --commit <commit> [--package-dir <dir>]
        [--require-release-key]
       Sign an identity-bound release manifest and export the verification key.
+      Validate the version against metadata at the specified release commit.
 
   verify-assets --repository <owner/name> --version <version> --tag <tag>
                 --tag-object <object> --commit <commit> [--package-dir <dir>]
@@ -426,6 +427,21 @@ metadata_version() {
         die "project versions disagree: CMake=${cmake_version}, vcpkg=${vcpkg_version}, Conan=${conan_version}"
     printf '%s\n' "${cmake_version}"
 }
+
+# Signing may use newer workflow tooling than the verified release source.
+# Read metadata from the exact commit in the signed identity, never tooling HEAD.
+metadata_version_at_commit() (
+    local commit="$1" metadata_dir metadata_file
+    [[ "$(git -C "${repo_root}" cat-file -t "${commit}" 2>/dev/null)" == commit ]] ||
+        die "release metadata commit does not resolve to a commit: ${commit}"
+    metadata_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${metadata_dir}"' EXIT
+    for metadata_file in CMakeLists.txt vcpkg.json conanfile.py; do
+        git -C "${repo_root}" show "${commit}:${metadata_file}" >"${metadata_dir}/${metadata_file}" ||
+            die "could not read ${metadata_file} from release commit ${commit}"
+    done
+    metadata_version "${metadata_dir}"
+)
 
 check_versions() {
     while [[ $# -gt 0 ]]; do
@@ -866,12 +882,15 @@ sign_release() {
         esac
     done
 
+    require_command git
     require_command gpg
     require_command sha256sum
     require_command sha512sum
     package_dir="$(canonical_build_path "${package_dir}")"
     validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
-    [[ "${version}" == "$(metadata_version)" ]] || die "signing version does not match project metadata"
+    local source_version
+    source_version="$(metadata_version_at_commit "${commit}")" || die "could not read signing commit metadata"
+    [[ "${version}" == "${source_version}" ]] || die "signing version does not match release commit metadata"
     require_exact_assets "${package_dir}" "${version}" unsigned
 
     local test_gnupg_home=""

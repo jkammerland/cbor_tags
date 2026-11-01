@@ -24,7 +24,9 @@ It separately stages one internal install and builds `test_package` against it
 to keep the CMake package metadata covered without publishing that install tree.
 
 The build uses workflow-commit tooling and a separate, clean checkout of the
-verified release commit. Archive validation is independent of example names.
+verified release commit. Signing and candidate audits also use workflow-commit
+tooling; signing reads project versions from the verified release commit.
+Archive validation is independent of example names.
 
 The release driver normalizes ZIP metadata to UTC so the unsigned packages are
 byte-reproducible regardless of the operator's local timezone.
@@ -117,8 +119,9 @@ or `gh secret set` prompts, not shell command arguments.
      -f tag=vX.Y.Z
    ```
 
-6. Publish the signed candidate from a clean detached worktree at the release
-   commit, using an administrator's authenticated GitHub CLI. Run this on Linux
+6. Publish the signed candidate using current reviewed release tooling and a
+   separate clean detached worktree at the release commit. Use an
+   administrator's authenticated GitHub CLI. Run this on Linux
    with Bash 4 or newer and GNU `sha256sum`:
 
    ```bash
@@ -127,9 +130,11 @@ or `gh secret set` prompts, not shell command arguments.
      "+refs/tags/vX.Y.Z:refs/tags/vX.Y.Z"
    tag_object="$(git rev-parse refs/tags/vX.Y.Z)"
    commit="$(git rev-list -n 1 refs/tags/vX.Y.Z)"
-   release_worktree="$(mktemp -d /tmp/cbor-tags-release.XXXXXX)"
-   git worktree add --detach "${release_worktree}" "${commit}"
-   cd "${release_worktree}"
+   tooling_worktree="$(mktemp -d /tmp/cbor-tags-release-tools.XXXXXX)"
+   git worktree add --detach "${tooling_worktree}" origin/master
+   cd "${tooling_worktree}"
+   source_worktree="$(mktemp -d /tmp/cbor-tags-release-source.XXXXXX)"
+   git worktree add --detach "${source_worktree}" "${commit}"
 
    bash scripts/release.sh verify-tag \
      --tag vX.Y.Z \
@@ -155,7 +160,8 @@ or `gh secret set` prompts, not shell command arguments.
        --commit "${commit}" \
        --version X.Y.Z \
        --package-dir build/release-publish/release-packages \
-       --notes-file build/release-publish/release-notes.md
+       --notes-file build/release-publish/release-notes.md \
+       --source-dir "${source_worktree}"
    ```
 
 Use the publisher script, not ad-hoc `gh release create` commands. If a failed

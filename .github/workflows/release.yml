@@ -184,11 +184,12 @@ jobs:
       RELEASE_TAG_OBJECT: ${{ needs.verify.outputs.release_tag_object }}
       RELEASE_VERSION: ${{ needs.verify.outputs.release_version }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Checkout workflow tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.verify.outputs.release_commit }}
+          ref: ${{ github.sha }}
 
       - name: Install signing and verification tools
         shell: bash

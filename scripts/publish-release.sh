@@ -19,8 +19,9 @@ Commands:
       Print missing, draft, or published for a release targeting the commit.
 
   publish --tag <tag> --tag-object <object> --commit <commit> --version <version>
-          --package-dir <dir> --notes-file <path>
-      Refuse existing releases, verify one newly created draft by ID, and publish it.
+          --package-dir <dir> --notes-file <path> [--source-dir <dir>]
+      Verify clean release source and tooling, then publish one new draft by ID.
+      Source defaults to the tooling checkout.
 
   notes --tag <tag> --tag-object <object> --commit <commit> --version <version> --output <path>
       Generate release notes below build/ with the authenticated GitHub CLI.
@@ -152,16 +153,22 @@ verify_local_release_context() {
     local expected_object="$2"
     local expected_commit="$3"
     local expected_version="$4"
-    local actual_head status verification_output
+    local source_dir="$5" actual_head status source_root verification_output
 
-    actual_head="$(git -C "${repo_root}" rev-parse HEAD)"
-    [[ "${actual_head}" == "${expected_commit}" ]] ||
-        die "publisher checkout is at ${actual_head}, expected release commit ${expected_commit}"
-    status="$(git -C "${repo_root}" status --porcelain --untracked-files=normal)"
+    # Keep reviewed tooling clean while admitting a separate historical source.
+    status="$(git -C "${repo_root}" status --porcelain --untracked-files=normal)" || die "could not inspect publisher checkout"
     [[ -z "${status}" ]] || die "publisher checkout must be clean"
+    source_dir="$(cd -- "${source_dir}" && pwd -P)" || die "release source directory not found"
+    source_root="$(git -C "${source_dir}" rev-parse --show-toplevel)" || die "release source must be a Git checkout root"
+    [[ "${source_root}" == "${source_dir}" ]] || die "release source must be a Git checkout root"
+    actual_head="$(git -C "${source_dir}" rev-parse HEAD)" || die "could not read release source commit"
+    [[ "${actual_head}" == "${expected_commit}" ]] ||
+        die "release source checkout is at ${actual_head}, expected release commit ${expected_commit}"
+    status="$(git -C "${source_dir}" status --porcelain --untracked-files=normal)" || die "could not inspect release source checkout"
+    [[ -z "${status}" ]] || die "release source checkout must be clean"
 
     verification_output="$(
-        cd -- "${repo_root}"
+        cd -- "${source_dir}"
         bash "${release_driver}" verify-tag --tag "${tag}" --trusted-ref HEAD
     )"
     grep -Fx "release_tag=${tag}" <<<"${verification_output}" >/dev/null ||
@@ -363,6 +370,7 @@ publish_release() {
     local version=""
     local package_dir=""
     local notes_file=""
+    local source_dir="${repo_root}"
     while (($#)); do
         case "$1" in
             --tag) tag="${2:-}"; shift 2 ;;
@@ -371,13 +379,14 @@ publish_release() {
             --version) version="${2:-}"; shift 2 ;;
             --package-dir) package_dir="${2:-}"; shift 2 ;;
             --notes-file) notes_file="${2:-}"; shift 2 ;;
+            --source-dir) source_dir="${2:-}"; shift 2 ;;
             *) die "unknown publish option: $1" ;;
         esac
     done
     [[ -n "${tag}" && -n "${tag_object}" && -n "${commit}" && -n "${version}" && -n "${package_dir}" && -n "${notes_file}" ]] ||
         die "publish requires --tag, --tag-object, --commit, --version, --package-dir, and --notes-file"
     [[ -f "${notes_file}" ]] || die "release notes not found: ${notes_file}"
-    verify_local_release_context "${tag}" "${tag_object}" "${commit}" "${version}"
+    verify_local_release_context "${tag}" "${tag_object}" "${commit}" "${version}" "${source_dir}"
     bash "${release_driver}" verify-assets --package-dir "${package_dir}" --version "${version}" \
         --repository "${GITHUB_REPOSITORY}" --tag "${tag}" --tag-object "${tag_object}" --commit "${commit}"
     verify_immutable_releases_enabled
