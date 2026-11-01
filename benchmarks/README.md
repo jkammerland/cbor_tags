@@ -196,8 +196,9 @@ cmake -S . -B build/resumable-bench -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCBOR_TAGS_BUILD_BENCHMARKS=ON \
   -DCBOR_TAGS_BUILD_TESTS=OFF
 cmake --build build/resumable-bench \
-  --target bench_resumable_throughput bench_resumable_latency bench_resumable_storage --parallel
-ctest --test-dir build/resumable-bench -R 'resumable_(throughput|latency|allocation|storage)' --output-on-failure
+  --target bench_resumable_throughput bench_resumable_throughput_one_shot \
+           bench_resumable_latency bench_resumable_storage --parallel
+ctest --test-dir build/resumable-bench -R 'resumable_(ordinary_throughput|throughput|latency|allocation|storage)' --output-on-failure
 ```
 
 The default uses explicit input/output sources. Configure with
@@ -209,6 +210,13 @@ final harness against both header revisions with the same value for this option,
 the same compiler, and identical build flags. A comparison across different
 factory settings also changes the measured API setup and cannot isolate a source
 adapter change. The separate storage target always uses the named factories.
+
+`bench_resumable_throughput_one_shot` runs only the ordinary rows. Both throughput
+drivers automatically build and load the same private ordinary-runner shared
+library, keeping its timed code independent of the resumable runner. Module
+loading and runner dispatch occur outside timing. Run these targets from the
+build tree; the private library is not included in the `cbor_tags` install.
+Windows builds using the MSVC ABI require a shared runtime.
 
 `bench_resumable_throughput` compares ordinary encode/decode with resumable
 encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
@@ -352,14 +360,16 @@ they are needed for an ongoing investigation.
 
 ### Comparing revisions
 
-For an ordinary-code baseline, compile the same harness against the baseline
-checkout's headers with `CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1` (or the matching
-CMake option). This excludes resumable operation instantiations and retains the
-same ordinary rows and fixtures; the typed-array codec still includes its
-shared resumable declarations. Compare `--mode one-shot` from both builds with the
-same compiler and flags, alternating whole executable runs. Run comparisons
-sequentially on otherwise idle hardware; a current ordinary/resumable comparison
-alone does not establish whether ordinary decoding regressed from the baseline.
+Build the same benchmark sources against both header revisions. Use
+`bench_resumable_throughput_one_shot` for ordinary rows, or
+`bench_resumable_throughput` for the combined ordinary/resumable matrix. The
+private ordinary runner is shared by both drivers in each build. For a build
+containing only ordinary benchmarks, configure
+`-DCBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=ON` and run `bench_resumable_throughput`.
+Compare matching rows with the same compiler and flags, alternating whole
+executable runs. Run comparisons sequentially on otherwise idle hardware; an
+ordinary/resumable comparison within one revision does not establish whether
+ordinary decoding regressed from the baseline.
 
 For paired comparisons, build the same harness against both header revisions
 with identical flags. Run three baseline/candidate pairs sequentially, reversing
