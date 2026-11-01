@@ -29,6 +29,10 @@ __declspec(noinline) inline status_code resumable_encode_exception_status() noex
 template <typename T> inline constexpr bool    resumable_encode_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_encode_wrap_array<wrap_as_array<T...>> = true;
 
+// Only exact bounded built-in adapters need the empty-header preflight.
+template <typename Source> inline constexpr bool  resumable_bounded_output_source                         = false;
+template <typename Storage> inline constexpr bool resumable_bounded_output_source<output_source<Storage>> = !GrowableOutputStorage<Storage>;
+
 // The bounded leaf loop shares the ordinary encoder's cursor. Only its unsigned
 // primitive path needs forced inlining and one completed-position publication.
 template <typename Options> struct resumable_leaf_encoder : encoder<std::span<std::byte>, Options> {
@@ -235,6 +239,13 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     resumable<status_code> header(std::uint64_t size, std::byte major) {
         return attempt([this, size, major] {
+            // A bounded empty adapter cannot write even the first header byte.
+            // Growable and custom sources retain their ordinary write path.
+            if constexpr (resumable_bounded_output_source<Source>) {
+                if (const auto window = source_.borrow_window(); window && window->empty())
+                    return status_code::incomplete;
+            }
+
             ordinary_.encode_major_and_size(size, major);
             return status_code::success;
         });

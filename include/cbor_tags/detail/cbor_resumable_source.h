@@ -74,6 +74,9 @@ concept ResumableByteChunk =
     (!std::is_volatile_v<std::remove_reference_t<std::ranges::range_reference_t<Chunk>>>);
 
 template <typename Storage>
+concept GrowableOutputStorage = ResumableByteChunk<Storage> && CborAppendOutputBuffer<Storage> && std::ranges::sized_range<Storage>;
+
+template <typename Storage>
 concept ResumableChunkStorage =
     std::ranges::bidirectional_range<Storage> && std::ranges::common_range<Storage> &&
     std::is_lvalue_reference_v<std::ranges::range_reference_t<Storage>> && ResumableByteChunk<std::ranges::range_value_t<Storage>>;
@@ -896,8 +899,7 @@ template <detail::ResumableStorage Storage> auto make_input_source(Storage &stor
 
 template <detail::ResumableOutputStorage Storage> class output_source {
     using chunks_type = detail::chunk_source<detail::source_chunks<Storage>>;
-    static constexpr bool growable =
-        detail::ResumableByteChunk<Storage> && CborAppendOutputBuffer<Storage> && std::ranges::sized_range<Storage>;
+    static constexpr bool growable = detail::GrowableOutputStorage<Storage>;
 
   public:
     using value_type    = std::byte;

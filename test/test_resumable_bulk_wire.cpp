@@ -106,9 +106,140 @@ class bounded_write_source : public ct::output_source<std::vector<std::byte>> {
 
 static_assert(ct::ResumableOutputSource<bounded_write_source>);
 
+// Optional windows do not replace a custom source's write contract.
+class custom_empty_window_source {
+    ct::output_source<std::vector<std::byte>> source_;
+
+  public:
+    using value_type    = std::byte;
+    using size_type     = std::size_t;
+    using position_type = ct::output_source<std::vector<std::byte>>::position_type;
+
+    explicit custom_empty_window_source(std::vector<std::byte> &storage) : source_(storage) {}
+    auto begin() const { return source_.begin(); }
+    auto end() const { return source_.end(); }
+    auto size() const { return source_.size(); }
+    auto position() const { return source_.position(); }
+    auto committed_position() const noexcept { return source_.committed_position(); }
+    auto remaining_output() const { return source_.remaining_output(); }
+    void commit() { source_.commit(); }
+    void restore(position_type position) noexcept { source_.restore(position); }
+    void refresh() { source_.refresh(); }
+    bool eof() const { return source_.eof(); }
+    void close() { source_.close(); }
+    void acquire() { source_.acquire(); }
+    void release() noexcept { source_.release(); }
+
+    std::optional<std::span<std::byte>> borrow_window() { return std::span<std::byte>{}; }
+    std::size_t                         write(std::span<const std::byte> bytes) {
+        ++writes;
+        return source_.write(bytes);
+    }
+
+    std::size_t writes{};
+};
+
+class derived_empty_window_source : public ct::output_source<std::vector<std::byte>> {
+  public:
+    using output_source::output_source;
+
+    std::optional<std::span<std::byte>> borrow_window() { return std::span<std::byte>{}; }
+    std::size_t                         write(std::span<const std::byte> bytes) {
+        ++writes;
+        return output_source::write(bytes);
+    }
+
+    std::size_t writes{};
+};
+
+static_assert(ct::ResumableOutputSource<custom_empty_window_source>);
+static_assert(ct::ResumableOutputSource<derived_empty_window_source>);
+
 } // namespace
 
 TEST_SUITE("cbor_wire/resumable_bulk") {
+    TEST_CASE("bounded empty headers suspend and partial headers remain atomic") {
+        std::array<std::byte, 24> value;
+        value.fill(std::byte{0x2a});
+        std::array<std::byte, 26> output;
+        output.fill(std::byte{0xcc});
+        std::deque<std::span<std::byte>> chunks;
+        auto                             source    = ct::make_output_source(chunks);
+        auto                             encoder   = ct::make_resumable_encoder(source);
+        auto                             operation = encoder(value);
+
+        REQUIRE(operation.progress() == ct::resume_state::need_output);
+        CHECK(operation.committed_bytes() == 0);
+        CHECK(source.position().offset() == 0);
+        chunks.emplace_back();
+        REQUIRE(operation.resume() == ct::resume_state::need_output);
+        CHECK(operation.committed_bytes() == 0);
+
+        // One byte cannot commit the two-byte length header.
+        chunks.emplace_back(std::span{output}.first(1));
+        REQUIRE(operation.resume() == ct::resume_state::need_output);
+        CHECK(operation.committed_bytes() == 0);
+        CHECK(source.position().offset() == 0);
+
+        chunks.emplace_back(std::span{output}.subspan(1));
+        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == output.size());
+        CHECK(output[0] == std::byte{0x58});
+        CHECK(output[1] == std::byte{0x18});
+        CHECK(std::ranges::equal(std::span{output}.subspan(2), value));
+    }
+
+    TEST_CASE("growable empty headers retain the append path") {
+        std::vector<std::byte> output{std::byte{0xf6}};
+        auto                   encoder = ct::make_resumable_encoder(output);
+        const std::array       value{std::byte{1}, std::byte{2}};
+        auto                   operation = encoder(value);
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == 3);
+        CHECK(output == std::vector<std::byte>{std::byte{0xf6}, std::byte{0x42}, std::byte{1}, std::byte{2}});
+    }
+
+    TEST_CASE_TEMPLATE("custom empty windows do not suppress header writes", Source, custom_empty_window_source,
+                       derived_empty_window_source) {
+        std::vector<std::byte> output;
+        Source                 source(output);
+        auto                   encoder = ct::make_resumable_encoder(source);
+        const std::array       value{std::byte{1}, std::byte{2}};
+        auto                   operation = encoder(value);
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(source.writes > 0);
+        CHECK(operation.committed_bytes() == 3);
+        CHECK(output == std::vector<std::byte>{std::byte{0x42}, std::byte{1}, std::byte{2}});
+    }
+
+    TEST_CASE("closed empty output retains the incomplete header status") {
+        for (const bool close_before_start : {false, true}) {
+            CAPTURE(close_before_start);
+            std::deque<std::span<std::byte>> chunks;
+            auto                             source = ct::make_output_source(chunks);
+            if (close_before_start)
+                source.close();
+            auto             encoder = ct::make_resumable_encoder(source);
+            const std::array value{std::byte{1}};
+            auto             operation = encoder(value);
+
+            if (!close_before_start) {
+                REQUIRE(operation.progress() == ct::resume_state::need_output);
+                REQUIRE(operation.finish() == ct::resume_state::done);
+            }
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == ct::status_code::incomplete);
+            CHECK(operation.committed_bytes() == 0);
+            CHECK(source.position().offset() == 0);
+        }
+    }
+
     TEST_CASE("a short payload write suspends without probing the exhausted source again") {
         std::vector<std::byte> storage;
         bounded_write_source   source(storage);
