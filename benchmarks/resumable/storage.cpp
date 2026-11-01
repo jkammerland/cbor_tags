@@ -78,7 +78,8 @@ template <storage_case Case, bool Encode> struct storage_fixture {
 
     storage_fixture(std::size_t size, std::size_t chunk) {
         if constexpr (reservable_storage<storage_t>) {
-            storage.reserve(flat_storage<Case> ? size : 2 * (size / chunk + 1) + 1);
+            // Self-tests admit two empty descriptors and one data descriptor per packet.
+            storage.reserve(flat_storage<Case> ? size : 3 * (size / chunk + 1) + 1);
         }
         if constexpr (Encode && (Case == storage_case::span || borrowed_packets<Case>)) {
             backing.resize(size);

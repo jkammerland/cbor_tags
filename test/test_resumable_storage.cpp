@@ -25,6 +25,25 @@ struct ordinary_item {
 template <typename Storage>
 concept ReservableStorage = requires(Storage &storage) { storage.reserve(std::size_t{}); };
 
+// Force vector relocation to move nodes on libraries whose list move can throw.
+struct movable_node_chunk {
+    std::list<std::byte> bytes;
+
+    movable_node_chunk() = default;
+    explicit movable_node_chunk(std::size_t size) : bytes(size) {}
+    template <typename Iterator> movable_node_chunk(Iterator first, Iterator last) : bytes(first, last) {}
+
+    movable_node_chunk(const movable_node_chunk &)            = delete;
+    movable_node_chunk &operator=(const movable_node_chunk &) = delete;
+    movable_node_chunk(movable_node_chunk &&)                 = default;
+    movable_node_chunk &operator=(movable_node_chunk &&)      = default;
+
+    auto        begin() { return bytes.begin(); }
+    auto        end() { return bytes.end(); }
+    std::size_t size() const { return bytes.size(); }
+    void        push_back(std::byte value) { bytes.push_back(value); }
+};
+
 struct counted_customization {
     int *calls;
 
@@ -38,7 +57,7 @@ struct counted_customization {
 TEST_SUITE("roundtrip/resumable_storage") {
     TEST_CASE_TEMPLATE("owning mixed byte chunks preserve input retries through tail growth and append", Storage,
                        std::vector<std::deque<std::byte>>, std::list<std::deque<std::byte>>, std::vector<std::list<std::byte>>,
-                       std::deque<std::list<std::byte>>) {
+                       std::deque<std::list<std::byte>>, std::vector<movable_node_chunk>) {
         const auto             expected = std::numeric_limits<std::uint64_t>::max();
         std::vector<std::byte> wire;
         REQUIRE(make_encoder(wire)(expected));
@@ -47,6 +66,11 @@ TEST_SUITE("roundtrip/resumable_storage") {
         for (const std::size_t cut : {std::size_t{0}, std::size_t{3}}) {
             CAPTURE(cut);
             Storage chunks;
+
+            // A vector may copy lists during relocation, invalidating live node iterators.
+            if constexpr (std::same_as<Storage, std::vector<std::list<std::byte>>>)
+                chunks.reserve(3);
+
             chunks.emplace_back(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
             auto          decoder = make_resumable_decoder(chunks);
             std::uint64_t actual{};
@@ -56,7 +80,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
             // Repeated retries must preserve the same incomplete scalar and
             // its checkpoint while owning descriptors can relocate.
-            if constexpr (ReservableStorage<Storage>)
+            if constexpr (ReservableStorage<Storage> && !std::same_as<Storage, std::vector<std::list<std::byte>>>)
                 chunks.reserve(chunks.capacity() + 2);
             for (int retry = 0; retry != 3; ++retry) {
                 CHECK(operation.resume() == resume_state::need_input);
@@ -76,7 +100,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
     TEST_CASE_TEMPLATE("owning mixed byte chunks preserve output retries through tail growth and append", Storage,
                        std::vector<std::deque<std::byte>>, std::list<std::deque<std::byte>>, std::vector<std::list<std::byte>>,
-                       std::deque<std::list<std::byte>>) {
+                       std::deque<std::list<std::byte>>, std::vector<movable_node_chunk>) {
         const auto             expected = std::numeric_limits<std::uint64_t>::max();
         std::vector<std::byte> encoded;
         REQUIRE(make_encoder(encoded)(expected));
@@ -85,6 +109,11 @@ TEST_SUITE("roundtrip/resumable_storage") {
         for (const std::size_t capacity : {std::size_t{0}, std::size_t{3}}) {
             CAPTURE(capacity);
             Storage chunks;
+
+            // A vector may copy lists during relocation, invalidating live node iterators.
+            if constexpr (std::same_as<Storage, std::vector<std::list<std::byte>>>)
+                chunks.reserve(3);
+
             chunks.emplace_back(capacity);
             auto source    = make_output_source(chunks);
             auto encoder   = make_resumable_encoder(source);
@@ -92,7 +121,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             REQUIRE_FALSE(operation.done());
             CHECK(operation.committed_bytes() == 0);
 
-            if constexpr (ReservableStorage<Storage>)
+            if constexpr (ReservableStorage<Storage> && !std::same_as<Storage, std::vector<std::list<std::byte>>>)
                 chunks.reserve(chunks.capacity() + 2);
             for (int retry = 0; retry != 3; ++retry) {
                 CHECK(operation.resume() == resume_state::need_output);
@@ -270,7 +299,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE(make_encoder(wire)(expected));
         for (const std::size_t cut : {std::size_t{0}, std::size_t{3}}) {
             CAPTURE(cut);
-            std::vector<std::list<std::byte>> chunks;
+            std::vector<movable_node_chunk> chunks;
             chunks.reserve(1);
             chunks.emplace_back(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
             auto        decoder = make_resumable_decoder(chunks);
@@ -278,7 +307,9 @@ TEST_SUITE("roundtrip/resumable_storage") {
             auto        operation = decoder(actual);
             REQUIRE_FALSE(operation.done());
 
+            const auto *previous_data = chunks.data();
             chunks.reserve(chunks.capacity() + 2);
+            REQUIRE(chunks.data() != previous_data);
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
             REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());

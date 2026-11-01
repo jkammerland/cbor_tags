@@ -115,8 +115,11 @@ prewalked to calculate a byte extent.
 
 Indexable storage permits reallocation between resumptions: the adapter retains
 logical positions instead of persistent raw iterators. Node-based storage must
-preserve existing element iterators. Unsized inner ranges must also keep a
-previously observed end iterator valid for comparison after permitted mutations.
+preserve existing element iterators. An indexed outer container must also
+preserve iterators into node-based inner ranges when it relocates them. Reserve
+descriptor capacity before binding the source if relocation copies owning node
+ranges, as can happen with `vector<list<byte>>`. Unsized inner ranges must also
+keep a previously observed end iterator valid for comparison after permitted mutations.
 Use a custom source when an unsized range cannot preserve that boundary.
 
 Removing descriptors, shrinking the tail, replacing an earlier range, or adding

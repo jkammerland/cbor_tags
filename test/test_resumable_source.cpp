@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace ct = cbor::tags;
@@ -75,6 +76,14 @@ struct counted_iterator {
 struct counted_sized_chunk {
     std::list<std::byte> bytes;
     std::size_t         *increments{};
+
+    counted_sized_chunk(std::list<std::byte> value, std::size_t *counter) : bytes(std::move(value)), increments(counter) {}
+
+    // Relocation must move nodes even when the library's list move can throw.
+    counted_sized_chunk(const counted_sized_chunk &)            = delete;
+    counted_sized_chunk &operator=(const counted_sized_chunk &) = delete;
+    counted_sized_chunk(counted_sized_chunk &&)                 = default;
+    counted_sized_chunk &operator=(counted_sized_chunk &&)      = default;
 
     counted_iterator begin() { return {bytes.begin(), increments}; }
     counted_iterator end() { return {bytes.end(), increments}; }
@@ -229,7 +238,7 @@ TEST_SUITE("resumable/source") {
                 std::size_t                      increments{};
                 std::vector<counted_sized_chunk> storage;
                 storage.reserve(1);
-                storage.push_back({std::list<std::byte>(initial_size, std::byte{2}), &increments});
+                storage.emplace_back(std::list<std::byte>(initial_size, std::byte{2}), &increments);
                 auto       source   = ct::make_input_source(storage);
                 auto       cursor   = source.begin();
                 const auto consumed = exhausted ? initial_size : initial_size / 2;
@@ -240,7 +249,9 @@ TEST_SUITE("resumable/source") {
 
                 // reserve moves each owning list, invalidating the former end
                 // while preserving its element iterators and byte count.
+                const auto *previous_data = storage.data();
                 storage.reserve(storage.capacity() + 2);
+                REQUIRE(storage.data() != previous_data);
                 for (int probe = 0; probe != 5; ++probe) {
                     source.refresh();
                     CHECK((cursor == source.end()) == (consumed == initial_size));
@@ -249,7 +260,7 @@ TEST_SUITE("resumable/source") {
                 }
 
                 storage.front().bytes.push_back(std::byte{3});
-                storage.push_back({{std::byte{4}}, &increments});
+                storage.emplace_back(std::list<std::byte>{std::byte{4}}, &increments);
                 source.refresh();
                 if (consumed != initial_size) {
                     CHECK(*cursor == std::byte{2});

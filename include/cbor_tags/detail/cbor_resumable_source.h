@@ -255,7 +255,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
             if (left_end || right_end) {
                 return left_end && right_end;
             }
-            if constexpr (indexed_byte)
+            if constexpr (std::same_as<inner_bookmark, indexed_bookmark>)
                 return left.outer_ == right.outer_ && left.inner_.offset == right.inner_.offset;
             else
                 return left.outer_ == right.outer_ && *left.inner_.current == *right.inner_.current;
