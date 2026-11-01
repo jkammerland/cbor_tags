@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <limits>
+#include <list>
+#include <new>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -155,6 +158,98 @@ class derived_empty_window_source : public ct::output_source<std::vector<std::by
 static_assert(ct::ResumableOutputSource<custom_empty_window_source>);
 static_assert(ct::ResumableOutputSource<derived_empty_window_source>);
 
+// Count native traversal separately from the adapter's offsets and boundaries.
+struct node_read_counts {
+    std::size_t increments{};
+    std::size_t dereferences{};
+    std::size_t ends{};
+    std::size_t throw_at = std::numeric_limits<std::size_t>::max();
+};
+
+struct node_read_iterator {
+    using value_type        = std::byte;
+    using difference_type   = std::ptrdiff_t;
+    using iterator_category = std::bidirectional_iterator_tag;
+    using iterator_concept  = std::bidirectional_iterator_tag;
+
+    std::list<std::byte>::iterator position;
+    node_read_counts              *counts{};
+
+    std::byte &operator*() const {
+        if (counts->dereferences == counts->throw_at)
+            throw std::bad_alloc{};
+        ++counts->dereferences;
+        return *position;
+    }
+    node_read_iterator &operator++() {
+        ++counts->increments;
+        ++position;
+        return *this;
+    }
+    node_read_iterator operator++(int) {
+        auto old = *this;
+        ++*this;
+        return old;
+    }
+    node_read_iterator &operator--() {
+        --position;
+        return *this;
+    }
+    node_read_iterator operator--(int) {
+        auto old = *this;
+        --*this;
+        return old;
+    }
+    friend bool operator==(const node_read_iterator &left, const node_read_iterator &right) { return left.position == right.position; }
+};
+
+struct counted_node_chunk {
+    std::list<std::byte> bytes;
+    node_read_counts    *counts;
+
+    node_read_iterator begin() { return {bytes.begin(), counts}; }
+    node_read_iterator end() {
+        ++counts->ends;
+        return {bytes.end(), counts};
+    }
+    std::size_t size() const { return bytes.size(); }
+};
+
+static_assert(std::ranges::bidirectional_range<counted_node_chunk>);
+static_assert(std::ranges::sized_range<counted_node_chunk>);
+static_assert(!std::ranges::random_access_range<counted_node_chunk>);
+
+// Relocation must move nodes even when the library's list move may throw.
+struct movable_bulk_chunk {
+    std::list<std::byte> bytes;
+
+    movable_bulk_chunk() = default;
+    template <typename Iterator> movable_bulk_chunk(Iterator first, Iterator last) : bytes(first, last) {}
+    movable_bulk_chunk(const movable_bulk_chunk &)            = delete;
+    movable_bulk_chunk &operator=(const movable_bulk_chunk &) = delete;
+    movable_bulk_chunk(movable_bulk_chunk &&)                 = default;
+    movable_bulk_chunk &operator=(movable_bulk_chunk &&)      = default;
+
+    auto        begin() { return bytes.begin(); }
+    auto        end() { return bytes.end(); }
+    std::size_t size() const { return bytes.size(); }
+};
+
+std::vector<std::byte> node_payload() {
+    std::vector<std::byte> value(600);
+    for (std::size_t index = 0; index != value.size(); ++index)
+        value[index] = static_cast<std::byte>(index * 17 + 3);
+    return value;
+}
+
+std::vector<std::byte> node_payload_wire(const std::vector<std::byte> &value) {
+    // Definite byte string length 600 followed by a distinct unconsumed null.
+    std::vector<std::byte> wire{std::byte{0x59}, std::byte{0x02}, std::byte{0x58}};
+    wire.insert(wire.end(), value.begin(), value.end());
+    wire.push_back(std::byte{0xf6});
+    return wire;
+}
+
 } // namespace
 
 TEST_SUITE("cbor_wire/resumable_bulk") {
@@ -275,7 +370,9 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         CHECK(source.unrelated_calls == 0);
     }
 
-    TEST_CASE("byte string bulk reads cross scratch and chunk boundaries without consuming the suffix") {
+    TEST_CASE_TEMPLATE("byte string bulk reads cross scratch and chunk boundaries without consuming the suffix", Storage,
+                       std::deque<std::deque<std::byte>>, std::deque<std::list<std::byte>>, std::list<std::list<std::byte>>,
+                       std::vector<std::list<std::byte>>) {
         std::vector<std::byte> expected(300);
         for (std::size_t index = 0; index != expected.size(); ++index)
             expected[index] = static_cast<std::byte>(index);
@@ -285,7 +382,11 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
 
         for (const auto cut : {0U, 1U, 2U, 3U, 127U, 255U, 259U, 300U, 303U}) {
             CAPTURE(cut);
-            std::deque<std::deque<std::byte>> chunks;
+            Storage chunks;
+            // A raw vector of lists may copy on reallocation. Its node
+            // iterators must remain valid for the active source.
+            if constexpr (std::same_as<Storage, std::vector<std::list<std::byte>>>)
+                chunks.reserve(3);
             chunks.emplace_back(wire.begin(), wire.begin() + cut);
             auto                   source  = ct::make_input_source(chunks);
             auto                   decoder = ct::make_resumable_decoder(source);
@@ -302,6 +403,130 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             REQUIRE(std::ranges::distance(tail) == 1);
             CHECK(*tail.begin() == std::byte{0xf6});
         }
+    }
+
+    TEST_CASE("node payload reads recover a grown tail before appended chunks") {
+        const auto expected = node_payload();
+        const auto wire     = node_payload_wire(expected);
+        for (const std::size_t cut : {0U, 3U, 259U, 515U}) {
+            CAPTURE(cut);
+            std::list<std::list<std::byte>> chunks;
+            chunks.emplace_back(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto                 source  = ct::make_input_source(chunks);
+            auto                 decoder = ct::make_resumable_decoder(source);
+            std::list<std::byte> actual;
+            auto                 operation = decoder(actual);
+            REQUIRE(operation.progress() == ct::resume_state::need_input);
+            CHECK(operation.committed_bytes() == (cut < 3 ? 0 : cut));
+
+            const auto grown = cut + 31;
+            chunks.back().insert(chunks.back().end(), wire.begin() + static_cast<std::ptrdiff_t>(cut),
+                                 wire.begin() + static_cast<std::ptrdiff_t>(grown));
+            chunks.emplace_back();
+            chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(grown), wire.end());
+            source.refresh();
+            REQUIRE(operation.resume() == ct::resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(std::ranges::equal(actual, expected));
+            CHECK(operation.committed_bytes() == 603);
+            const auto tail = operation.remaining_input();
+            REQUIRE(std::ranges::distance(tail) == 1);
+            CHECK(*tail.begin() == std::byte{0xf6});
+        }
+    }
+
+    TEST_CASE("node bulk bookmarks recover after owning descriptors relocate") {
+        const auto                      expected = node_payload();
+        const auto                      wire     = node_payload_wire(expected);
+        std::vector<movable_bulk_chunk> chunks;
+        chunks.reserve(1);
+        chunks.emplace_back(wire.begin(), wire.begin() + 259);
+        auto                 source  = ct::make_input_source(chunks);
+        auto                 decoder = ct::make_resumable_decoder(source);
+        std::list<std::byte> actual;
+        auto                 operation = decoder(actual);
+        REQUIRE(operation.progress() == ct::resume_state::need_input);
+        REQUIRE(operation.committed_bytes() == 259);
+
+        // Move the exhausted list to a new descriptor address without copying
+        // its nodes. An unchanged refresh must not reuse its old end iterator.
+        const auto *old_data = chunks.data();
+        chunks.reserve(chunks.capacity() + 2);
+        REQUIRE(chunks.data() != old_data);
+        source.refresh();
+        REQUIRE(operation.resume() == ct::resume_state::need_input);
+        CHECK(operation.committed_bytes() == 259);
+        CHECK(std::ranges::equal(actual, std::span{expected}.first(256)));
+
+        chunks.front().bytes.insert(chunks.front().bytes.end(), wire.begin() + 259, wire.begin() + 290);
+        chunks.emplace_back();
+        chunks.emplace_back(wire.begin() + 290, wire.end());
+        source.refresh();
+        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(operation.committed_bytes() == 603);
+        CHECK(std::ranges::equal(actual, expected));
+        const auto tail = operation.remaining_input();
+        REQUIRE(std::ranges::distance(tail) == 1);
+        CHECK(*tail.begin() == std::byte{0xf6});
+    }
+
+    TEST_CASE("node bulk reads traverse once and do not probe a boundary per byte") {
+        const auto                 expected = node_payload();
+        std::array<std::size_t, 2> boundary_calls{};
+        for (const std::size_t length : {1U, 600U}) {
+            node_read_counts              counts;
+            std::list<counted_node_chunk> chunks{{{expected.begin(), expected.begin() + static_cast<std::ptrdiff_t>(length)}, &counts}};
+            auto                          source   = ct::make_input_source(chunks);
+            auto                          position = source.begin();
+            counts                                 = {};
+            std::vector<std::byte> actual(length);
+            REQUIRE(position.read_bytes(actual) == length);
+            CHECK(position.offset() == length);
+            CHECK(counts.increments == length);
+            CHECK(counts.dereferences == length);
+            CHECK(std::ranges::equal(actual, std::span{expected}.first(length)));
+            boundary_calls[length == 1 ? 0 : 1] = counts.ends;
+
+            // An exhausted unchanged node chunk does not revisit its last byte.
+            REQUIRE(position.read_bytes(actual) == 0);
+            CHECK(counts.increments == length);
+            CHECK(counts.dereferences == length);
+        }
+        CHECK(boundary_calls[0] != 0);
+        CHECK(boundary_calls[1] == boundary_calls[0]);
+    }
+
+    TEST_CASE("node payload read failures preserve the committed prefix") {
+        const auto                    expected = node_payload();
+        const auto                    wire     = node_payload_wire(expected);
+        node_read_counts              counts;
+        std::list<counted_node_chunk> chunks{{{wire.begin(), wire.begin() + 211}, &counts}};
+        auto                          source  = ct::make_input_source(chunks);
+        auto                          decoder = ct::make_resumable_decoder(source);
+        std::list<std::byte>          actual;
+        auto                          operation = decoder(actual);
+        REQUIRE(operation.progress() == ct::resume_state::need_input);
+        REQUIRE(operation.committed_bytes() == 211);
+        REQUIRE(std::ranges::equal(actual, std::span{expected}.first(208)));
+
+        // Establish progress through public admission, then fail inside a
+        // later read without requiring any particular internal batch size.
+        chunks.push_back({{wire.begin() + 211, wire.end()}, &counts});
+        source.refresh();
+        counts.throw_at = counts.dereferences + 44;
+        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == ct::status_code::out_of_memory);
+        REQUIRE(actual.size() >= 208);
+        REQUIRE(actual.size() < expected.size());
+        CHECK(std::ranges::equal(actual, std::span{expected}.first(actual.size())));
+        CHECK(operation.committed_bytes() == 3 + actual.size());
+        CHECK(source.committed_position().offset() == 3 + actual.size());
+        counts.throw_at      = std::numeric_limits<std::size_t>::max();
+        const auto remaining = operation.remaining_input();
+        CHECK(*remaining.begin() == expected[actual.size()]);
+        CHECK(std::ranges::distance(remaining) == wire.size() - 3 - actual.size());
     }
 
     TEST_CASE("byte string output commits each available prefix across deque growth") {

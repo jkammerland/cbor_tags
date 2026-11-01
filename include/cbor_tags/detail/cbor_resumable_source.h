@@ -178,22 +178,48 @@ template <ResumableChunkStorage Storage> class chunk_source {
         }
 
         std::size_t read_bytes(std::span<std::byte> bytes)
-            requires(indexed_byte && sized && !std::ranges::contiguous_range<chunk_type>)
+            requires(sized && !std::ranges::contiguous_range<chunk_type>)
         {
             const auto requested = bytes.size();
-            while (!bytes.empty()) {
-                normalize();
-                if (!has_chunk() || chunk_exhausted())
-                    break;
-                const auto amount  = std::min(bytes.size(), std::ranges::size(chunk()) - inner_.offset);
-                auto       current = std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(inner_.offset);
-                for (auto &byte : bytes.first(amount)) {
-                    byte = static_cast<std::byte>(*current);
-                    ++current;
+            if constexpr (indexed_byte) {
+                while (!bytes.empty()) {
+                    normalize();
+                    if (!has_chunk() || chunk_exhausted())
+                        break;
+                    const auto amount  = std::min(bytes.size(), std::ranges::size(chunk()) - inner_.offset);
+                    auto       current = std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(inner_.offset);
+                    for (auto &byte : bytes.first(amount)) {
+                        byte = static_cast<std::byte>(*current);
+                        ++current;
+                    }
+                    inner_.offset += amount;
+                    offset_ += amount;
+                    bytes = bytes.subspan(amount);
                 }
-                inner_.offset += amount;
-                offset_ += amount;
-                bytes = bytes.subspan(amount);
+            } else {
+                while (!bytes.empty()) {
+                    normalize();
+                    if (!has_chunk() || chunk_exhausted())
+                        break;
+                    assert(inner_.offset && inner_.current);
+                    const auto amount   = std::min(bytes.size(), std::ranges::size(chunk()) - *inner_.offset);
+                    auto       current  = *inner_.current;
+                    auto       previous = current;
+
+                    // Keep traversal local; publish the existing bookmark once
+                    // the bounded copy finishes, including its tail-growth anchor.
+                    for (auto &byte : bytes.first(amount)) {
+                        byte     = static_cast<std::byte>(*current);
+                        previous = current;
+                        ++current;
+                    }
+                    inner_.current  = current;
+                    inner_.previous = previous;
+                    *inner_.offset += amount;
+                    offset_ += amount;
+                    observe_boundary(std::ranges::end(chunk()));
+                    bytes = bytes.subspan(amount);
+                }
             }
             return requested - bytes.size();
         }
