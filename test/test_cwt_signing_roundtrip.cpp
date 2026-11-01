@@ -31,8 +31,10 @@ TEST_SUITE("roundtrip/cwt") {
     }
 
     TEST_CASE("COSE detached payload APIs distinguish empty from missing") {
+        auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256});
+        REQUIRE(protected_header);
         cose_sign1 sign1_message{
-            .protected_header = {},
+            .protected_header = *protected_header,
             .unprotected      = {},
             .payload          = std::nullopt,
             .signature        = {},
@@ -55,7 +57,7 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(embedded_sign1);
         CHECK_EQ(embedded_sign1->payload, embedded);
 
-        cose_signature signature{};
+        cose_signature signature{.protected_header = *protected_header, .unprotected = {}, .signature = {}};
         cose_sign      sign_message{
             .protected_header = {},
             .unprotected      = {},

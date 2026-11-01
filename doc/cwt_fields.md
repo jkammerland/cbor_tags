@@ -1,11 +1,60 @@
-# Experimental application-selected CWT fields
+# Experimental CWT fields
 
-Include `<cbor_tags/codec/cwt.h>` and opt into `codec::cwt`. `cwt::field<label>(value)` binds a named object to an integer or text map label; `cwt::fields(...)` forms one complete map. Nested `fields(...)` groups flatten into the same map, and duplicate schema labels are rejected at compile time.
+Send an issuer and an optional role; receive only the issuer as a borrowed string ([example 30](../examples/30_experimental_cwt_fields.cpp)).
 
-[Example 30](../examples/30_experimental_cwt_fields.cpp) sends an issuer and optional role, then receives only the issuer as a view. Re-encoding that receiver layout includes only its selected fields. These are experimental APIs.
+```cpp
+#include <cassert>
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/codec/cwt.h>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
-A nonoptional destination is required. An optional destination may be absent; successful decoding clears absent optionals. A present optional decodes its underlying type, so `optional<int>` does not accept CBOR null. Use an explicitly nullable underlying type when the schema permits null.
+/**
+ * claims = { 1: tstr, ? "role": tstr }
+ */
+int main() {
+    using namespace cbor::tags;
 
-Unknown values are skipped, but all input labels participate in duplicate detection. Malformed or incomplete maps fail. Decoding is terminal: fields decoded before a failure may remain modified and the reader is not rolled back.
+    // Experimental: the sender selects the fields it wants to transmit.
+    std::string issuer = "device.example";
+    std::optional<std::string> role = "reader";
+    auto source = cwt::fields(cwt::field<1>(issuer), cwt::field<"role">(role));
 
-The proxy owns only field descriptors. Keep referenced objects alive while using it; views decoded into them borrow the input buffer. Owning destinations support noncontiguous input. Values use the active codec pack and ordinary ADL customization, so application-defined fields can compose other supported types.
+    std::vector<std::byte> buffer;
+
+    auto encoder = make_encoder<codec::cwt>(buffer);
+    if (!encoder(source)) {
+        return 1;
+    }
+
+    // The receiver selects its layout and borrows the text from the buffer.
+    std::string_view received_issuer;
+    auto destination = cwt::fields(cwt::field<1>(received_issuer));
+
+    auto decoder = make_decoder<codec::cwt>(buffer);
+    if (!decoder(destination)) {
+        return 1;
+    }
+
+    assert(received_issuer == issuer);
+}
+```
+
+## Field rules
+
+| Choice | Behavior |
+|---|---|
+| Plain destination | Its label must be present. |
+| Optional destination | Missing labels clear it after successful decoding; a present value decodes the underlying type. |
+| Unknown label | Its value is skipped and omitted on re-encoding. |
+| Duplicate label | Rejected, including unknown input labels; duplicate schema labels fail compilation. |
+| Nested field groups | Flatten into one map. |
+| Decode failure | Terminal; the reader and already-decoded fields are not rolled back. |
+| Borrowed text | Keep the input buffer alive and unchanged. |
+
+The field group references its variables; keep them alive too. Owning destinations support noncontiguous input.
+
+Values use the selected codecs and ordinary encode/decode customizations; see [custom headers](cwt_headers.md) for a complete application type.

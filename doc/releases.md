@@ -14,17 +14,26 @@ For version `X.Y.Z`, the workflow publishes exactly 12 assets:
 - `cbor_tags-X.Y.Z.release-manifest` and its detached `.sig`.
 
 One signed manifest binds all assets to the repository, version, signed tag, and
-commit. It replaces per-payload signatures. Verification requires the expected
+commit. Verification requires the expected
 release identity; a downloaded manifest cannot choose it.
 
-The archives reproduce the tracked source at the signed release commit, not a
-pre-installed CMake tree. The SPDX 3 JSON-LD SBOM describes the project and its
-direct dependencies. Verification rejects altered, missing, or unexpected assets.
+The archives contain the exact tracked source snapshot for the signed release
+commit. They do not contain a pre-installed CMake tree. The workflow extracts
+both archives, compares every file digest and executable bit against the
+canonical Git snapshot, and runs a round-trip consumer against each archive.
+It separately stages one internal install and builds `test_package` against it
+to keep the CMake package metadata covered without publishing that install tree.
 
-Historical releases keep their original formats. Releases through `v0.22.0` use
-lightweight tags and GitHub source archives; install-package assets through
-`v0.24.0` use the `-cmake` filename suffix. The current verifier accepts only the
-manifest-based format.
+The build uses workflow-commit tooling and a separate, clean checkout of the
+verified release commit. Archive validation is independent of example names.
+
+The release driver normalizes ZIP metadata to UTC so the unsigned packages are
+byte-reproducible regardless of the operator's local timezone.
+
+The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
+driver checks its document name, CC0-1.0 data license, MIT project license,
+root package, direct dependency packages, dependency versions, and `dependsOn`
+relationship before including its digest in the signed manifest.
 
 ## Trust Model
 
@@ -39,9 +48,12 @@ manifest-based format.
 - Publication requires immutable releases to be enabled and verifies the
   published assets and GitHub release attestation.
 
-To verify a download, run the release notes' verification commands with Bash in
-the directory containing all release assets. They require the fingerprint above;
-the downloaded public key is not itself a source of trust.
+To verify a download, run the release notes' verification commands with Bash
+3.2 or newer, GPG, and either GNU `sha256sum`/`sha512sum` or `shasum` (included
+with macOS). Run them in the directory containing all 12 release assets. They
+require the fingerprint above; the downloaded public key is not itself a source
+of trust. Verification rejects altered, missing, or unexpected assets, including
+symlinks and noncanonical checksum records.
 
 ## One-Time Repository Setup
 
@@ -154,7 +166,8 @@ an immutable release require a new version, even if the release was deleted.
 
 ## Local Package Validation
 
-With CMake 4.4.x, Ninja, GPG, and the project's vcpkg baseline available:
+From a clean checkout, with CMake 4.4.x, Ninja, GPG, and the manifest's vcpkg
+baseline available:
 
 ```bash
 VCPKG_ROOT=/path/to/vcpkg bash scripts/release.sh build

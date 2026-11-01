@@ -66,6 +66,24 @@ endif()
 
 # add tests for ctest
 add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,roundtrip/aggregate_decode,roundtrip/std_expected,roundtrip/container_interoperability,roundtrip/std_value_wrappers,roundtrip/fixed_text_spans,roundtrip/any_headers,roundtrip/headers_visualization,roundtrip/traversal,roundtrip/cwt*")
+
+add_test(NAME container_item_shape_wire COMMAND tests "--test-suite=cbor_wire/container_item_shape")
+set_tests_properties(container_item_shape_wire PROPERTIES LABELS "cbor-wire")
+
+# Reject only unbounded zero-input iterations, including nested count loops.
+foreach(SHAPE ARRAY_EMPTY ARRAY_NESTED_EMPTY ARRAY_TUPLE_EMPTY ARRAY_UNWRAPPED_EMPTY MAP_EMPTY
+    OPTIONAL_ARRAY_EMPTY VARIANT_ARRAY_EMPTY)
+  string(TOLOWER "container_zero_input_${SHAPE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL container_item_shape_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_CONTAINER_${SHAPE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=Zero-byte container entries require an explicit count bound"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+
 # Expected is a standalone value/error abstraction; keep its tests separate from
 # codec roundtrips and CBOR wire fixtures.
 add_test(NAME expected_contract COMMAND tests "--test-suite=expected/contract")
@@ -285,7 +303,8 @@ foreach(CASE IN ITEMS DUPLICATE TEMPORARY BOOLEAN MISSING_ENCODER MISSING_DECODE
   elseif(CASE MATCHES "MISSING")
     set(DIAGNOSTIC "CWT fields require codec::cwt")
   else()
-    set(DIAGNOSTIC "no matching function")
+    # MSVC inserts "overloaded" in the no-matching-function diagnostic.
+    set(DIAGNOSTIC "no matching (overloaded )?function")
   endif()
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
@@ -865,6 +884,43 @@ add_typed_array_variant_compile_fail_test(typed_array_variant_static_tag_compile
 add_typed_array_variant_compile_fail_test(typed_array_variant_any_tag_compile_fails typed_array_variant_any_tag_compile_fail.cc)
 add_typed_array_variant_compile_fail_test(typed_array_variant_duplicate_tag_compile_fails typed_array_variant_duplicate_tag_compile_fail.cc)
 
+add_test(NAME typed_array_destinations_wire COMMAND tests "--test-suite=cbor_wire/typed_array_destinations")
+set_tests_properties(typed_array_destinations_wire PROPERTIES LABELS "cbor-wire")
+
+add_test(NAME transcoder_byte_counts_wire COMMAND tests "--test-suite=cbor_wire/transcoder_byte_counts")
+set_tests_properties(transcoder_byte_counts_wire PROPERTIES LABELS "cbor-wire")
+
+add_test(NAME custom_class_tags_wire COMMAND tests "--test-suite=cbor_wire/custom_class_tags")
+set_tests_properties(custom_class_tags_wire PROPERTIES LABELS "cbor-wire")
+
+function(add_byte_count_compile_fail CASE DIAGNOSTIC)
+  string(TOLOWER "transcoder_byte_count_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL transcoder_byte_count_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_BYTE_COUNT_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endfunction()
+
+add_byte_count_compile_fail(VIEW_CONFLICT "byte-count returns cannot be combined with return_encoded_item_view")
+add_byte_count_compile_fail(CUSTOM_VIEW_CONFLICT "byte-count returns cannot be combined with return_encoded_item_view")
+add_byte_count_compile_fail(UNSIZED_OUTPUT "byte-count encoder results require sized byte output buffers")
+
+# Instantiate the public decoder call to verify readonly wrappers are encode-only.
+foreach(CASE CONST_VECTOR CONST_SPAN CONST_VECTOR_BE CONST_SPAN_BE CONST_LIST CONST_LIST_BE CONST_VIEW)
+  string(TOLOWER "typed_array_destination_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL typed_array_destination_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TYPED_DEST_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=deleted|encode-only|no matching|no member named"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+
 function(add_bounded_fixed_string_compile_fail_test TEST_NAME COMPILE_DEFINITION)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL cddl_bounded_fixed_string_compile_fail.cc)
   target_compile_definitions(${TEST_NAME} PRIVATE ${COMPILE_DEFINITION})
@@ -981,6 +1037,7 @@ if(TARGET cborctl)
     COMMAND
       ${CMAKE_COMMAND}
       "-DCLI=$<TARGET_FILE:cborctl>"
+      "-DCLI_SIZEOF_SIZE_T=${CMAKE_SIZEOF_VOID_P}"
       "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cborctl"
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/test_cli.cmake")

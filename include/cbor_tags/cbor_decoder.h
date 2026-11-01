@@ -9,6 +9,7 @@
 #include "cbor_tags/cbor_simple.h"
 #include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
+#include "cbor_tags/detail/cbor_item_shape.h"
 #include "cbor_tags/detail/cbor_raw_view_decode.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/float16_ieee754.h"
@@ -163,6 +164,16 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (detail::return_encoded_item_view_option_v<Options>) {
                 return decode_with_encoded_item_view(std::forward<T>(args)...);
             } else {
+                // Local snapshots include nested customization calls without
+                // adding a second traversal of non-contiguous input.
+                [[maybe_unused]] const auto start = [&] {
+                    if constexpr (detail::returns_byte_count_v<expected_type>) {
+                        return current_offset();
+                    } else {
+                        return std::size_t{};
+                    }
+                }();
+
                 status_collector<self_t> collect_status{*this};
 
                 auto success = (collect_status(std::forward<T>(args)) && ...);
@@ -170,7 +181,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (!success) {
                     return unexpected<decltype(collect_status.result)>(collect_status.result);
                 }
-                return expected_type{};
+                if constexpr (detail::returns_byte_count_v<expected_type>) {
+                    return detail::make_byte_count_result<expected_type>(current_offset() - start);
+                } else {
+                    return expected_type{};
+                }
             }
         } catch (const std::bad_alloc &) { return unexpected<status_code>(status_code::out_of_memory); } catch (const std::length_error &) {
             return unexpected<status_code>(status_code::out_of_memory);
@@ -491,6 +506,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <IsRangeOfCborValues T> constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
+        // Only the unbounded count-driven route needs this guard. Fixed targets
+        // and bounded_size routes already have an application-selected count cap.
+        if constexpr (IsMap<T>) {
+            static_assert(!detail::builtin_decode_consumes_zero_bytes<self_t, typename T::key_type>() ||
+                              !detail::builtin_decode_consumes_zero_bytes<self_t, typename T::mapped_type>(),
+                          "Zero-byte container entries require an explicit count bound");
+        } else if constexpr (!IsFixedArray<T>) {
+            static_assert(!detail::builtin_decode_consumes_zero_bytes<self_t, typename T::value_type>(),
+                          "Zero-byte container entries require an explicit count bound");
+        }
+
         if constexpr (IsMap<T>) {
             if (major != major_type::Map) {
                 return status_code::no_match_for_map_on_buffer;
@@ -1147,7 +1173,22 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // a variant can hold multiple tags, and the tag is decoded once, then we find a matching type among the variant
         // alternatives. If we are here, then we have already checked that this is the right tag.
         if constexpr (DecodeTag && IsClassWithTagOverload<C>) {
-            auto tag_status = this->decode(detail::get_major_6_tag_from_class(value));
+            auto        tag = detail::get_major_6_tag_from_class(value);
+            status_code tag_status;
+
+            // Numeric metadata must validate both the tag major type and its value.
+            if constexpr (detail::is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
+                if constexpr (requires { this->decode(std::move(tag)); }) {
+                    tag_status = this->decode(std::move(tag));
+                } else {
+                    // Core dynamic-tag decoding takes a mutable expected-tag wrapper.
+                    tag_status = this->decode(tag);
+                }
+            } else {
+                auto expected_tag = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(std::move(tag))};
+                tag_status        = this->decode(expected_tag);
+            }
+
             if (tag_status != status_code::success) {
                 return tag_status;
             }

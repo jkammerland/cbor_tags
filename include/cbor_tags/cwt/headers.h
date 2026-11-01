@@ -68,16 +68,20 @@ expected<void, status_code> read_sign_headers(const Message &message, const Sign
     return {};
 }
 
-} // namespace detail
-
 // Parsed views are published only after crypto and critical processing succeed.
 template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class Extra, bool HeaderBorrowed,
           class HeaderExtra, class Processor>
-[[nodiscard]] expected<void, status_code>
-verify_sign1(Key &&key, const basic_cose_sign1<Borrowed, Extra> &message, basic_header_map<HeaderBorrowed, HeaderExtra> &authenticated,
-             Processor &&process, std::span<const std::byte> aad = {}, std::optional<std::span<const std::byte>> detached = std::nullopt) {
+[[nodiscard]] expected<void, status_code> verify_sign1_with_headers(Key &&key, const basic_cose_sign1<Borrowed, Extra> &message,
+                                                                    basic_header_map<HeaderBorrowed, HeaderExtra> &authenticated,
+                                                                    Processor &&process, verification_algorithm_policy policy,
+                                                                    std::span<const std::byte>                aad,
+                                                                    std::optional<std::span<const std::byte>> detached) {
     basic_header_map<HeaderBorrowed, HeaderExtra> parsed;
     auto                                          status = detail::read_sign1_headers<Codecs...>(message, parsed, Backend::algorithm_id);
+    if (!status) {
+        return unexpected<status_code>{status.error()};
+    }
+    status = validate_verification_algorithm(parsed.alg, Backend::algorithm_id, policy);
     if (!status) {
         return unexpected<status_code>{status.error()};
     }
@@ -95,6 +99,28 @@ verify_sign1(Key &&key, const basic_cose_sign1<Borrowed, Extra> &message, basic_
     }
     authenticated = std::move(parsed);
     return {};
+}
+} // namespace detail
+
+template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class Extra, bool HeaderBorrowed,
+          class HeaderExtra, class Processor>
+[[nodiscard]] expected<void, status_code>
+verify_sign1(Key &&key, const basic_cose_sign1<Borrowed, Extra> &message, basic_header_map<HeaderBorrowed, HeaderExtra> &authenticated,
+             Processor &&process, std::span<const std::byte> aad = {}, std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_sign1_with_headers<Backend, Codecs...>(std::forward<Key>(key), message, authenticated,
+                                                                 std::forward<Processor>(process),
+                                                                 detail::verification_algorithm_policy::explicit_algorithm, aad, detached);
+}
+
+template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class Extra, bool HeaderBorrowed,
+          class HeaderExtra, class Processor>
+[[nodiscard]] expected<void, status_code>
+verify_sign1(Key &&key, const basic_cose_sign1<Borrowed, Extra> &message, implicit_algorithm_profile_t,
+             basic_header_map<HeaderBorrowed, HeaderExtra> &authenticated, Processor &&process, std::span<const std::byte> aad = {},
+             std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_sign1_with_headers<Backend, Codecs...>(std::forward<Key>(key), message, authenticated,
+                                                                 std::forward<Processor>(process),
+                                                                 detail::verification_algorithm_policy::implicit_algorithm, aad, detached);
 }
 
 template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class Extra, bool HeaderBorrowed,
@@ -122,16 +148,21 @@ sign1(Key &&key, const basic_cose_sign1<Borrowed, Extra> &message, basic_header_
     return *written;
 }
 
+namespace detail {
 template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class BodyExtra, class SignerExtra,
           bool SignatureBorrowed, class SignatureExtra, class Body, class Signer, class Processor>
-[[nodiscard]] expected<void, status_code> verify_signature(Key &&key, const basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &message,
-                                                           const basic_cose_signature<SignatureBorrowed, SignatureExtra> &signature,
-                                                           Body &authenticated_body, Signer &authenticated_signer, Processor &&process,
-                                                           std::span<const std::byte>                aad      = {},
-                                                           std::optional<std::span<const std::byte>> detached = std::nullopt) {
+[[nodiscard]] expected<void, status_code>
+verify_signature_with_headers(Key &&key, const basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &message,
+                              const basic_cose_signature<SignatureBorrowed, SignatureExtra> &signature, Body &authenticated_body,
+                              Signer &authenticated_signer, Processor &&process, verification_algorithm_policy policy,
+                              std::span<const std::byte> aad, std::optional<std::span<const std::byte>> detached) {
     Body   body;
     Signer signer;
     auto   status = detail::read_sign_headers<Codecs...>(message, signature, body, signer, Backend::algorithm_id);
+    if (!status) {
+        return unexpected<status_code>{status.error()};
+    }
+    status = validate_verification_algorithm(signer.alg, Backend::algorithm_id, policy);
     if (!status) {
         return unexpected<status_code>{status.error()};
     }
@@ -154,6 +185,31 @@ template <typename Backend, template <class> class... Codecs, typename Key, bool
     authenticated_body   = std::move(body);
     authenticated_signer = std::move(signer);
     return {};
+}
+} // namespace detail
+
+template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class BodyExtra, class SignerExtra,
+          bool SignatureBorrowed, class SignatureExtra, class Body, class Signer, class Processor>
+[[nodiscard]] expected<void, status_code> verify_signature(Key &&key, const basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &message,
+                                                           const basic_cose_signature<SignatureBorrowed, SignatureExtra> &signature,
+                                                           Body &authenticated_body, Signer &authenticated_signer, Processor &&process,
+                                                           std::span<const std::byte>                aad      = {},
+                                                           std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_signature_with_headers<Backend, Codecs...>(
+        std::forward<Key>(key), message, signature, authenticated_body, authenticated_signer, std::forward<Processor>(process),
+        detail::verification_algorithm_policy::explicit_algorithm, aad, detached);
+}
+
+template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class BodyExtra, class SignerExtra,
+          bool SignatureBorrowed, class SignatureExtra, class Body, class Signer, class Processor>
+[[nodiscard]] expected<void, status_code>
+verify_signature(Key &&key, const basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &message,
+                 const basic_cose_signature<SignatureBorrowed, SignatureExtra> &signature, implicit_algorithm_profile_t,
+                 Body &authenticated_body, Signer &authenticated_signer, Processor &&process, std::span<const std::byte> aad = {},
+                 std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    return detail::verify_signature_with_headers<Backend, Codecs...>(
+        std::forward<Key>(key), message, signature, authenticated_body, authenticated_signer, std::forward<Processor>(process),
+        detail::verification_algorithm_policy::implicit_algorithm, aad, detached);
 }
 
 template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class BodyExtra, class SignerExtra,
@@ -195,6 +251,19 @@ verify_sign(Key &&key, const basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &
     }
     return verify_signature<Backend, Codecs...>(std::forward<Key>(key), message, message.signatures[index], body, signer,
                                                 std::forward<Processor>(process), aad, detached);
+}
+
+template <typename Backend, template <class> class... Codecs, typename Key, bool Borrowed, class BodyExtra, class SignerExtra, class Body,
+          class Signer, class Processor>
+[[nodiscard]] expected<void, status_code> verify_sign(Key &&key, const basic_cose_sign<Borrowed, BodyExtra, SignerExtra> &message,
+                                                      std::size_t index, implicit_algorithm_profile_t, Body &body, Signer &signer,
+                                                      Processor &&process, std::span<const std::byte> aad = {},
+                                                      std::optional<std::span<const std::byte>> detached = std::nullopt) {
+    if (index >= message.signatures.size()) {
+        return unexpected<status_code>{status_code::error};
+    }
+    return verify_signature<Backend, Codecs...>(std::forward<Key>(key), message, message.signatures[index], implicit_algorithm_profile,
+                                                body, signer, std::forward<Processor>(process), aad, detached);
 }
 
 // These overloads return parsed views; named owners are required even for crypto calls.

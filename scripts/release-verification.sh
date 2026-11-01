@@ -11,7 +11,8 @@ release_gpg() {
 authenticate_release_key() {
     local verification_home="$1"
     local verification_key_file="$2"
-    local expected_fingerprint="${3^^}"
+    local expected_fingerprint
+    expected_fingerprint="$(printf '%s' "$3" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     [[ -f "${verification_key_file}" && ! -L "${verification_key_file}" ]] || die "release public key must be a regular non-symlink file"
 
     local key_listing primary_fingerprints
@@ -29,7 +30,8 @@ authenticate_release_key() {
 
 authenticate_release_signature() {
     local verification_output="$1"
-    local expected_fingerprint="${2^^}"
+    local expected_fingerprint
+    expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     local description="$3"
     local primary_fingerprints
     # VALIDSIG identifies the signing subkey first and its primary key last.
@@ -62,6 +64,51 @@ expected_signed_assets() {
     printf '%s\n' cbor_tags-release-public-key.asc "cbor_tags-$1.release-manifest" "cbor_tags-$1.release-manifest.sig"
 }
 
+# Inspect one directory level without GNU find options. Check names before
+# serializing them so newlines cannot disguise extra or missing assets.
+list_release_assets() (
+    local package_dir="$1" asset asset_name
+    shopt -s nullglob dotglob
+    for asset in "${package_dir}"/*; do
+        [[ -f "${asset}" && ! -L "${asset}" ]] || die "release assets must be regular non-symlink files"
+        asset_name="${asset##*/}"
+        case "${asset_name}" in
+            *[!A-Za-z0-9._-]*) die "release asset has an invalid filename" ;;
+        esac
+        printf '%s\n' "${asset_name}"
+    done
+)
+
+# Read the selected file through stdin, then format the record ourselves.
+# GNU coreutils and macOS shasum therefore produce identical canonical bytes.
+release_digest() {
+    local algorithm="$1" asset="$2" output digest length
+    case "${algorithm}" in
+        sha256) length=64 ;;
+        sha512) length=128 ;;
+        *) die "unsupported release checksum algorithm: ${algorithm}" ;;
+    esac
+    if command -v "${algorithm}sum" >/dev/null 2>&1; then
+        output="$("${algorithm}sum" <"${asset}")" || die "failed to hash ${asset}"
+    elif command -v shasum >/dev/null 2>&1; then
+        output="$(shasum -a "${algorithm#sha}" <"${asset}")" || die "failed to hash ${asset}"
+    else
+        die "release verification requires ${algorithm}sum or shasum"
+    fi
+    digest="${output%% *}"
+    [[ ${#digest} -eq ${length} ]] || die "invalid ${algorithm} output"
+    case "${digest}" in
+        *[!0-9a-f]*) die "invalid ${algorithm} output" ;;
+    esac
+    printf '%s\n' "${digest}"
+}
+
+write_release_checksum() {
+    local algorithm="$1" asset="$2" digest
+    digest="$(release_digest "${algorithm}" "${asset}")" || return
+    printf '%s  %s\n' "${digest}" "${asset##*/}"
+}
+
 require_exact_assets() {
     local package_dir="$1" version="$2" asset_kind="$3"
     local expected_assets actual_assets
@@ -71,9 +118,7 @@ require_exact_assets() {
         *) die "unknown asset set: ${asset_kind}" ;;
     esac
     [[ -d "${package_dir}" && ! -L "${package_dir}" ]] || die "release asset directory must be a non-symlink directory"
-    [[ -z "$(find "${package_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
-        die "release assets must be regular non-symlink files"
-    actual_assets="$(find "${package_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+    actual_assets="$(list_release_assets "${package_dir}" | LC_ALL=C sort)" || die "could not enumerate release assets"
     if [[ "${expected_assets}" != "${actual_assets}" ]]; then
         diff -u <(printf '%s\n' "${expected_assets}") <(printf '%s\n' "${actual_assets}") || true
         die "${package_dir} does not contain the exact ${asset_kind} release asset set"
@@ -93,7 +138,7 @@ verify_checksums() {
         cd -- "${package_dir}"
         local algorithm digest
         for algorithm in sha256 sha512; do
-            digest="$("${algorithm}sum" -- "${payload_name}")" || die "failed to hash ${payload_name}"
+            digest="$(write_release_checksum "${algorithm}" "${payload_name}")" || die "failed to hash ${payload_name}"
             printf '%s\n' "${digest}" | cmp -s - "${payload_name}.${algorithm}" ||
                 die "noncanonical or incorrect ${algorithm} checksum for ${payload_name}"
         done
@@ -110,7 +155,7 @@ write_release_manifest() {
         local asset
         while IFS= read -r asset; do
             [[ -f "${asset}" && ! -L "${asset}" ]] || die "manifest assets must be regular non-symlink files: ${asset}"
-            sha256sum -- "${asset}" || die "failed to hash manifest asset ${asset}"
+            write_release_checksum sha256 "${asset}" || die "failed to hash manifest asset ${asset}"
         done < <({ expected_unsigned_assets "${version}"; printf '%s\n' cbor_tags-release-public-key.asc; } | LC_ALL=C sort)
     )
 }
@@ -162,6 +207,7 @@ write_release_verification_commands() {
     # the same canonical format without maintaining a second shell program.
     declare -f die release_gpg authenticate_release_key authenticate_release_signature \
         validate_release_identity expected_unsigned_assets expected_signed_assets \
+        list_release_assets release_digest write_release_checksum \
         require_exact_assets verify_checksums write_release_manifest verify_signed_assets
     printf 'verify_signed_assets . %q "${expected_fingerprint}" %q %q %q %q %q\n' \
         "${version}" '' "${repository}" "${tag}" "${tag_object}" "${commit}"

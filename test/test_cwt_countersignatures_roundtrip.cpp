@@ -36,6 +36,20 @@ concept can_verify_legacy_with_parsed_headers = requires(cose_sign1 &target, Cou
     verify_legacy_countersignature<backend>(nullptr, target, std::forward<Countersignature>(countersignature), parsed, processor{});
 };
 
+template <typename Countersignature>
+concept can_verify_implicit_with_parsed_headers =
+    requires(cose_sign1 &target, Countersignature &&countersignature, header_map_view &parsed) {
+        verify_countersignature<backend>(nullptr, target, std::forward<Countersignature>(countersignature), implicit_algorithm_profile,
+                                         parsed, processor{});
+    };
+
+template <typename Countersignature>
+concept can_verify_implicit_legacy_with_parsed_headers =
+    requires(cose_sign1 &target, Countersignature &&countersignature, header_map_view &parsed) {
+        verify_legacy_countersignature<backend>(nullptr, target, std::forward<Countersignature>(countersignature),
+                                                implicit_algorithm_profile, parsed, processor{});
+    };
+
 static_assert(can_sign_with_parsed_headers<cose_signature &>);
 static_assert(can_sign_with_parsed_headers<const cose_signature &>);
 static_assert(!can_sign_with_parsed_headers<cose_signature>);
@@ -48,6 +62,14 @@ static_assert(can_verify_legacy_with_parsed_headers<cose_signature &>);
 static_assert(can_verify_legacy_with_parsed_headers<const cose_signature &>);
 static_assert(!can_verify_legacy_with_parsed_headers<cose_signature>);
 static_assert(!can_verify_legacy_with_parsed_headers<const cose_signature>);
+static_assert(can_verify_implicit_with_parsed_headers<cose_signature &>);
+static_assert(can_verify_implicit_with_parsed_headers<const cose_signature_view &>);
+static_assert(!can_verify_implicit_with_parsed_headers<cose_signature>);
+static_assert(!can_verify_implicit_with_parsed_headers<const cose_signature_view>);
+static_assert(can_verify_implicit_legacy_with_parsed_headers<cose_signature &>);
+static_assert(can_verify_implicit_legacy_with_parsed_headers<const cose_signature_view &>);
+static_assert(!can_verify_implicit_legacy_with_parsed_headers<cose_signature>);
+static_assert(!can_verify_implicit_legacy_with_parsed_headers<const cose_signature_view>);
 } // namespace countersignature_lifetimes
 
 TEST_SUITE("roundtrip/cwt/countersignatures") {
