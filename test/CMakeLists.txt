@@ -1080,6 +1080,7 @@ endif()
 
 # Coroutine semantic and literal-wire checks remain distinct.
 add_test(NAME resumable_wire COMMAND tests "--test-suite=cbor_wire/resumable")
+add_test(NAME resumable_bulk_wire COMMAND tests "--test-suite=cbor_wire/resumable_bulk")
 set_tests_properties(resumable_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME resumable_typed_array_wire COMMAND tests "--test-suite=cbor_wire/resumable_typed_array")
 set_tests_properties(resumable_typed_array_wire PROPERTIES LABELS "cbor-wire")

@@ -336,6 +336,24 @@ concept HasRemainingInputSize = requires(const T &input, const Position &positio
     { input.remaining_size(position) } -> std::convertible_to<std::size_t>;
 };
 
+// Only library-owned positions opt into these internal fast paths. User
+// iterators may have unrelated members with the same operation names.
+struct bulk_input_position_tag {};
+
+template <typename Position>
+concept BuiltinBulkInputPosition =
+    requires { typename Position::bulk_input_tag; } && std::same_as<typename Position::bulk_input_tag, bulk_input_position_tag>;
+
+template <typename Position>
+concept HasBulkUnsignedRead = BuiltinBulkInputPosition<Position> && requires(Position &position, std::size_t count) {
+    { position.read_unsigned(count) } -> std::same_as<std::uint64_t>;
+};
+
+template <typename Position>
+concept HasBulkByteRead = BuiltinBulkInputPosition<Position> && requires(Position &position, std::span<std::byte> bytes) {
+    { position.read_bytes(bytes) } -> std::same_as<std::size_t>;
+};
+
 template <typename T>
 concept HasOutputPositionOffset = requires(const T &output) {
     { output.position().offset() } -> std::integral;
@@ -441,6 +459,16 @@ template <typename T> struct reader<T, false> {
         ++position_;
         ++current_offset_;
         return result;
+    }
+
+    // Built-in segmented sources can traverse a scalar payload without
+    // reconstructing an indexed inner iterator for every byte.
+    constexpr std::uint64_t read_unsigned(const T &, std::size_t count)
+        requires HasBulkUnsignedRead<iterator>
+    {
+        const auto value = position_.read_unsigned(count);
+        current_offset_ += count;
+        return value;
     }
 
     constexpr value_type read(const T &, size_type offset) {

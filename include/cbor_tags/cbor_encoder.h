@@ -96,7 +96,15 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         encode_major_and_size(value, static_cast<byte_type>(0xC0));
     }
 
-    template <IsUnsigned T> constexpr void encode(T value) { encode_major_and_size(value, static_cast<byte_type>(0x00)); }
+    // Keep the primitive wrapper inline as well as its shared byte writer;
+    // otherwise bulk loops repeatedly reload the encoder's span and position.
+    template <IsUnsigned T>
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
+    constexpr void encode(T value) {
+        encode_major_and_size(value, static_cast<byte_type>(0x00));
+    }
 
     template <IsSigned T> constexpr void encode(T value) {
         if (value >= 0) {

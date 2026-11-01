@@ -33,6 +33,11 @@ concept HasInputWindowConsumption = requires(const Source &source, Position &pos
     { source.consume_window(position, count) } -> std::same_as<void>;
 };
 
+template <typename Chunks, typename Position>
+concept HasBulkChunkWrite = requires(Chunks &chunks, Position &position, std::span<const std::byte> bytes) {
+    { chunks.write_bytes(position, bytes) } -> std::same_as<std::size_t>;
+};
+
 // Adapters can omit bulk windows. Byte traversal remains the baseline contract.
 struct resumable_source_access {
     template <typename Source> static std::optional<std::span<std::byte>> borrow_window(Source &source) {
@@ -131,6 +136,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
         using pointer           = void;
         using iterator_category = std::bidirectional_iterator_tag;
         using iterator_concept  = std::bidirectional_iterator_tag;
+        using bulk_input_tag    = bulk_input_position_tag;
 
         iterator() = default;
 
@@ -144,6 +150,48 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 assert(inner_.current && !inner_.exhausted);
                 return **inner_.current;
             }
+        }
+
+        // The caller has already checked the complete scalar payload. Native
+        // iterators remain local to this call; suspension retains only offsets.
+        std::uint64_t read_unsigned(std::size_t count)
+            requires(indexed_byte && sized)
+        {
+            assert(count <= sizeof(std::uint64_t));
+            std::uint64_t value{};
+            while (count != 0) {
+                normalize();
+                assert(!end_marker_ && has_chunk() && !chunk_exhausted());
+                const auto amount  = std::min(count, std::ranges::size(chunk()) - inner_.offset);
+                auto       current = std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(inner_.offset);
+                for (std::size_t index = 0; index != amount; ++index, ++current)
+                    value = (value << 8U) | static_cast<std::uint8_t>(*current);
+                inner_.offset += amount;
+                offset_ += amount;
+                count -= amount;
+            }
+            return value;
+        }
+
+        std::size_t read_bytes(std::span<std::byte> bytes)
+            requires(indexed_byte && sized && !std::ranges::contiguous_range<chunk_type>)
+        {
+            const auto requested = bytes.size();
+            while (!bytes.empty()) {
+                normalize();
+                if (!has_chunk() || chunk_exhausted())
+                    break;
+                const auto amount  = std::min(bytes.size(), std::ranges::size(chunk()) - inner_.offset);
+                auto       current = std::ranges::begin(chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(inner_.offset);
+                for (auto &byte : bytes.first(amount)) {
+                    byte = static_cast<std::byte>(*current);
+                    ++current;
+                }
+                inner_.offset += amount;
+                offset_ += amount;
+                bytes = bytes.subspan(amount);
+            }
+            return requested - bytes.size();
         }
 
         iterator &operator++() {
@@ -670,6 +718,30 @@ template <ResumableChunkStorage Storage> class chunk_source {
         return true;
     }
 
+    // Deques have no contiguous window, but a bounded write can still advance
+    // a native iterator once per chunk instead of indexing once per byte.
+    std::size_t write_bytes(iterator &to, std::span<const std::byte> bytes)
+        requires(indexed_byte && sized && !std::ranges::contiguous_range<chunk_type> &&
+                 std::indirectly_writable<inner_iterator, std::ranges::range_value_t<chunk_type>>)
+    {
+        const auto requested = bytes.size();
+        while (!bytes.empty()) {
+            to.normalize();
+            if (!to.has_chunk() || to.chunk_exhausted())
+                break;
+            const auto amount  = std::min(bytes.size(), std::ranges::size(to.chunk()) - to.inner_.offset);
+            auto       current = std::ranges::begin(to.chunk()) + static_cast<std::iter_difference_t<inner_iterator>>(to.inner_.offset);
+            for (const auto byte : bytes.first(amount)) {
+                *current = static_cast<std::ranges::range_value_t<chunk_type>>(byte);
+                ++current;
+            }
+            to.inner_.offset += amount;
+            to.offset_ += amount;
+            bytes = bytes.subspan(amount);
+        }
+        return requested - bytes.size();
+    }
+
   private:
     decltype(auto) chunk_at(outer_position position) const {
         if constexpr (indexed)
@@ -834,16 +906,20 @@ template <detail::ResumableOutputStorage Storage> class output_source {
 
     std::size_t write(std::span<const std::byte> bytes) {
         const auto requested = bytes.size();
-        while (!bytes.empty() && working_ != chunks_.end()) {
-            if (const auto available = chunks_.borrow_output_window(working_)) {
-                const auto amount = std::min(bytes.size(), available->size());
-                std::memcpy(available->data(), bytes.data(), amount);
-                chunks_.consume_window(working_, amount);
-                bytes = bytes.subspan(amount);
-            } else {
-                [[maybe_unused]] const auto written = chunks_.write_byte(working_, bytes.front());
-                assert(written);
-                bytes = bytes.subspan(1);
+        if constexpr (detail::HasBulkChunkWrite<chunks_type, iterator>) {
+            bytes = bytes.subspan(chunks_.write_bytes(working_, bytes));
+        } else {
+            while (!bytes.empty() && working_ != chunks_.end()) {
+                if (const auto available = chunks_.borrow_output_window(working_)) {
+                    const auto amount = std::min(bytes.size(), available->size());
+                    std::memcpy(available->data(), bytes.data(), amount);
+                    chunks_.consume_window(working_, amount);
+                    bytes = bytes.subspan(amount);
+                } else {
+                    [[maybe_unused]] const auto written = chunks_.write_byte(working_, bytes.front());
+                    assert(written);
+                    bytes = bytes.subspan(1);
+                }
             }
         }
         if constexpr (growable) {

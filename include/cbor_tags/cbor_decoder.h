@@ -1610,6 +1610,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return value;
         }
 
+        if constexpr (detail::HasBulkUnsignedRead<decltype(reader_.position_)>) {
+            if (payload_size == 0U)
+                return info;
+            return reader_.read_unsigned(data_, payload_size);
+        }
+
         std::uint64_t value{};
         auto          status = status_code::success;
         const auto    ok     = detail::read_cbor_argument(info, value, status, [this](std::uint8_t &byte_value) {
@@ -1647,6 +1653,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 throw parse_incomplete_exception("Unexpected end of input");
             }
         }
+
+        if constexpr (detail::HasBulkUnsignedRead<decltype(reader_.position_)>)
+            return static_cast<UInt>(reader_.read_unsigned(data_, byte_count));
 
         UInt value{};
         for (std::size_t index = 0; index < byte_count; ++index) {

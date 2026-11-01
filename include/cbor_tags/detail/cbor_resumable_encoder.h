@@ -90,14 +90,23 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             } else if (available) {
                 return status_code::incomplete;
             } else {
-                auto write = [this, &bytes] {
-                    ordinary_.appender_(source_, bytes.front());
-                    return status_code::success;
-                };
-                const auto status = write_once(write);
-                if (status != status_code::success)
-                    return status;
-                bytes = bytes.subspan(1);
+                // Payload prefixes commit independently. Let the source copy
+                // the largest available prefix even without a direct window.
+                std::size_t count;
+                try {
+                    count = source_.write(bytes);
+                } catch (const encode_status_exception &error) {
+                    rollback();
+                    return error.status;
+                } catch (...) {
+                    rollback();
+                    return resumable_exception_status();
+                }
+                assert(count <= bytes.size());
+                if (count == 0)
+                    return status_code::incomplete;
+                commit();
+                bytes = bytes.subspan(count);
             }
         }
         return status_code::success;
@@ -480,16 +489,30 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         encoder<std::span<std::byte>, Options> contiguous(window);
         constexpr auto                         maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
         // A local boundary cannot be changed by writes through the output span.
-        const auto  window_last = last;
+        const auto window_last = last;
+        assert(window.size() >= maximum_size);
+        const auto  last_start = window.size() - maximum_size;
         status_code status;
-        try {
-            // Capacity for the native type's largest representation guarantees
-            // that the ordinary primitive finishes without a partial write.
-            encode_array_elements(contiguous, current, window_last, encoded_element_complete{},
-                                  [&] { return window.size() - contiguous.appender_.head_ >= maximum_size; });
-            status = status_code::success;
-        } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
-            status = resumable_exception_status();
+        auto        encode_window = [&](Iterator &position) {
+            try {
+                // Capacity for the native type's largest representation guarantees
+                // that the ordinary primitive finishes without a partial write.
+                encode_array_elements(contiguous, position, window_last, encoded_element_complete{},
+                                      [&] { return contiguous.appender_.head_ <= last_start; });
+                return status_code::success;
+            } catch (const encode_status_exception &error) { return error.status; } catch (...) {
+                return resumable_exception_status();
+            }
+        };
+
+        // Keep the inner loop's iterator local so output stores cannot force
+        // repeated reloads of a caller-owned cursor. Publish progress once.
+        if constexpr (std::is_nothrow_copy_constructible_v<Iterator> && std::is_nothrow_copy_assignable_v<Iterator>) {
+            auto position = current;
+            status        = encode_window(position);
+            current       = position;
+        } else {
+            status = encode_window(current);
         }
 
         resumable_source_access::consume_window(source_, contiguous.appender_.head_);

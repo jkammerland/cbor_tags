@@ -147,6 +147,16 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 resumable_source_access::consume_window(source_, ordinary_.reader_.position_, count);
                 ordinary_.reader_.current_offset_ += count;
                 length -= count;
+            } else if constexpr (HasBulkByteRead<decltype(ordinary_.reader_.position_)>) {
+                // This scratch range and every native iterator die before a
+                // suspension; only copied bytes reach the destination.
+                std::array<std::byte, 256> bytes;
+                const auto                 requested = static_cast<std::size_t>(std::min<std::uint64_t>(length, bytes.size()));
+                const auto                 count     = ordinary_.reader_.position_.read_bytes(std::span(bytes).first(requested));
+                assert(count != 0);
+                append(value, std::span<const std::byte>{bytes}.first(count));
+                ordinary_.reader_.current_offset_ += count;
+                length -= count;
             } else {
                 append(value, static_cast<typename T::value_type>(ordinary_.reader_.read(source_)));
                 --length;
@@ -572,10 +582,24 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // Drain ordinary elements synchronously. A failed child leaves the logical
     // count and destination at the last complete element, even after an exception.
-    template <typename T> status_code segmented_leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
-        auto       completed = ordinary_.reader_;
-        const auto status    = attempt_decode(
-            [&] { return decode_array_elements(ordinary_, value, append, remaining, [&] { completed = ordinary_.reader_; }); });
+    template <typename T>
+#if defined(__GNUC__) && !defined(__clang__)
+    // The cursor and byte counter form a scalar dependency chain. Packing their
+    // updates into SIMD registers adds transfers on every decoded byte.
+    [[gnu::optimize("no-tree-slp-vectorize")]]
+#endif
+    status_code segmented_leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
+        auto completed = ordinary_.reader_;
+        // Standard arithmetic vectors have identical copy/move semantics. A
+        // const scalar keeps the simple push_back path in this segmented loop.
+        auto append_element = [&append](T &output, typename T::value_type &&element) {
+            if constexpr (std::is_arithmetic_v<typename T::value_type> && std::same_as<T, std::vector<typename T::value_type>>)
+                append(output, std::as_const(element));
+            else
+                append(output, std::move(element));
+        };
+        const auto status = attempt_decode(
+            [&] { return decode_array_elements(ordinary_, value, append_element, remaining, [&] { completed = ordinary_.reader_; }); });
 
         ordinary_.reader_ = completed;
         commit();
