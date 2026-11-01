@@ -251,13 +251,7 @@ template <typename T> struct appender<T, true> {
         constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
         static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
         ensure_capacity(container, static_cast<size_type>(sizeof...(Ts)));
-
-        // Keep the span pointer and offset independent of stores through its
-        // bytes. Publish the completed primitive's position once.
-        auto *const output = std::ranges::data(container) + head_;
-        size_type   index{};
-        ((output[index++] = values), ...);
-        head_ += static_cast<size_type>(sizeof...(Ts));
+        ((container[head_++] = values), ...);
     }
 
     constexpr void operator()(T &container, value_type value) {

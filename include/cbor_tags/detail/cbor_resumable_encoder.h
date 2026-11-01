@@ -29,6 +29,41 @@ __declspec(noinline) inline status_code resumable_encode_exception_status() noex
 template <typename T> inline constexpr bool    resumable_encode_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_encode_wrap_array<wrap_as_array<T...>> = true;
 
+// The bounded leaf loop shares the ordinary encoder's cursor. Only its unsigned
+// primitive path needs forced inlining and one completed-position publication.
+template <typename Options> struct resumable_leaf_encoder : encoder<std::span<std::byte>, Options> {
+    using base_type = encoder<std::span<std::byte>, Options>;
+    using base_type::base_type;
+    using base_type::encode;
+
+  private:
+    struct unsigned_appender {
+        appender<std::span<std::byte>> &ordinary;
+
+        constexpr void operator()(std::span<std::byte> &output, std::byte value) { ordinary(output, value); }
+
+        template <typename... Bytes> constexpr void multi_append(std::span<std::byte> &output, Bytes... values) {
+            static_assert(sizeof...(Bytes) > 1 && ((sizeof(Bytes) == 1) && ...));
+            ordinary.ensure_capacity(output, sizeof...(Bytes));
+
+            auto *const destination = output.data() + ordinary.head_;
+            std::size_t index{};
+            ((destination[index++] = values), ...);
+            ordinary.head_ += sizeof...(Bytes);
+        }
+    };
+
+  public:
+    template <IsUnsigned T>
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
+    constexpr void encode(T value) {
+        unsigned_appender output{this->appender_};
+        append_cbor_major_argument(output, this->data_, value, std::byte{});
+    }
+};
+
 template <typename Source, typename Options, template <typename> typename... Codecs>
 class resumable_encode_context : public Codecs<resumable_encode_context<Source, Options, Codecs...>>... {
     using self_type = resumable_encode_context;
@@ -504,8 +539,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename Iterator, typename Sentinel>
     status_code leaf_window(Iterator &current, const Sentinel &last, std::span<std::byte> window) {
-        encoder<std::span<std::byte>, Options> contiguous(window);
-        constexpr auto                         maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
+        resumable_leaf_encoder<Options> contiguous(window);
+        constexpr auto                  maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
         // A local boundary cannot be changed by writes through the output span.
         const auto window_last = last;
         assert(window.size() >= maximum_size);
@@ -567,9 +602,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             const auto  window = resumable_source_access::borrow_window(source_);
             status_code status = status_code::success;
             if (window && window->size() >= maximum_size) {
-                auto                                   bytes = *window;
-                encoder<std::span<std::byte>, Options> contiguous(bytes);
-                std::size_t                            completed{};
+                auto                            bytes = *window;
+                resumable_leaf_encoder<Options> contiguous(bytes);
+                std::size_t                     completed{};
                 try {
                     encode_map_elements(
                         contiguous, current, last, key_complete, [&] { completed = contiguous.appender_.head_; },
