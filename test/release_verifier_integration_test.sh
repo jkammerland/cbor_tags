@@ -42,7 +42,7 @@ verification_output="$(
         --tag v0.22.0 \
         --trusted-ref refs/heads/master \
         --public-key "${test_root}/public-key.asc" \
-        --expected-fingerprint "${fingerprint}"
+        --expected-fingerprint "$(printf '%s' "${fingerprint}" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
 )"
 
 tag_object="$(git -C "${fixture_repo}" rev-parse refs/tags/v0.22.0)"

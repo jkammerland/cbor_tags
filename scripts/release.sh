@@ -137,7 +137,7 @@ verify_tag() {
                 ;;
             --expected-fingerprint)
                 [[ $# -ge 2 ]] || die "--expected-fingerprint requires a value"
-                expected_fingerprint="${2^^}"
+                expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
                 shift 2
                 ;;
             -h | --help)
