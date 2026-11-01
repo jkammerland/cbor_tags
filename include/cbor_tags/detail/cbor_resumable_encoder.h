@@ -479,11 +479,13 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     status_code leaf_window(Iterator &current, const Sentinel &last, std::span<std::byte> window) {
         encoder<std::span<std::byte>, Options> contiguous(window);
         constexpr auto                         maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
-        status_code                            status;
+        // A local boundary cannot be changed by writes through the output span.
+        const auto  window_last = last;
+        status_code status;
         try {
             // Capacity for the native type's largest representation guarantees
             // that the ordinary primitive finishes without a partial write.
-            encode_array_elements(contiguous, current, last, encoded_element_complete{},
+            encode_array_elements(contiguous, current, window_last, encoded_element_complete{},
                                   [&] { return window.size() - contiguous.appender_.head_ >= maximum_size; });
             status = status_code::success;
         } catch (const encode_status_exception &error) { status = error.status; } catch (...) {

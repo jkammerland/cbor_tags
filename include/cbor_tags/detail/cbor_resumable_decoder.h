@@ -582,21 +582,37 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return status;
     }
 
+    struct window_decode_result {
+        status_code status;
+        std::size_t completed;
+    };
+
+    // Keep the bounded scalar loop independent of source rebinding and retry
+    // state. Only complete children contribute to the published byte count.
+    template <std::size_t MinimumSize, typename Decode>
+    static window_decode_result decode_leaf_window(std::span<const std::byte> window, Decode &&decode) {
+        decoder<std::span<const std::byte>, Options> contiguous(window);
+        window_decode_result                         result{status_code::success, 0};
+        result.status = attempt_decode([&] {
+            return decode(
+                contiguous, [&] { result.completed = contiguous.reader_.position_; },
+                [&] { return window.size() - contiguous.reader_.position_ >= MinimumSize; });
+        });
+        return result;
+    }
+
     template <typename T>
     status_code leaf_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
-        decoder<std::span<const std::byte>, Options> contiguous(window);
-        std::size_t                                  completed{};
-        const auto                                   status = attempt_decode([&] {
-            // Keep conversion and strictness policy in the core scalar codec.
-            return decode_array_elements(
-                contiguous, value, append, remaining, [&] { completed = contiguous.reader_.position_; },
-                [&] { return window.size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>(); });
-        });
+        const auto result = decode_leaf_window<resumable_leaf_decode_size<typename T::value_type>()>(
+            window, [&](auto &contiguous, auto completed, auto available) {
+                // Keep conversion and strictness policy in the core scalar codec.
+                return decode_array_elements(contiguous, value, append, remaining, completed, available);
+            });
 
-        resumable_source_access::consume_window(source_, ordinary_.reader_.position_, completed);
-        ordinary_.reader_.current_offset_ += completed;
+        resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
+        ordinary_.reader_.current_offset_ += result.completed;
         commit();
-        return status;
+        return result.status;
     }
 
     // Borrow through the working cursor and publish the source position only
@@ -631,17 +647,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             status_code status;
             if (window && window->size() >= resumable_leaf_decode_size<typename T::value_type>()) {
-                decoder<std::span<const std::byte>, Options> contiguous(*window);
-                std::size_t                                  completed{};
-                status = attempt_decode([&] {
-                    return decode_indefinite_array_elements<true>(
-                        contiguous, value, append, count, ended, minimum, maximum, [&] { completed = contiguous.reader_.position_; },
-                        [&] {
-                            return window->size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>();
-                        });
-                });
-                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, completed);
-                ordinary_.reader_.current_offset_ += completed;
+                const auto result = decode_leaf_window<resumable_leaf_decode_size<typename T::value_type>()>(
+                    *window, [&](auto &contiguous, auto completed, auto available) {
+                        return decode_indefinite_array_elements<true>(contiguous, value, append, count, ended, minimum, maximum, completed,
+                                                                      available);
+                    });
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
+                ordinary_.reader_.current_offset_ += result.completed;
+                status = result.status;
             } else {
                 auto       completed = ordinary_.reader_;
                 const auto start     = count;
@@ -668,16 +681,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             status_code status;
             if (window && window->size() >= maximum_size) {
-                decoder<std::span<const std::byte>, Options> contiguous(*window);
-                std::size_t                                  completed{};
-                status = attempt_decode([&] {
-                    return decode_map_elements<Indefinite, true>(
-                        contiguous, value, append, entry, key_complete, count, ended, minimum, maximum,
-                        [&] { completed = contiguous.reader_.position_; },
-                        [&] { return window->size() - contiguous.reader_.position_ >= maximum_size; });
+                const auto result = decode_leaf_window<maximum_size>(*window, [&](auto &contiguous, auto completed, auto available) {
+                    return decode_map_elements<Indefinite, true>(contiguous, value, append, entry, key_complete, count, ended, minimum,
+                                                                 maximum, completed, available);
                 });
-                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, completed);
-                ordinary_.reader_.current_offset_ += completed;
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
+                ordinary_.reader_.current_offset_ += result.completed;
+                status = result.status;
             } else {
                 auto       completed = ordinary_.reader_;
                 const auto start     = count;

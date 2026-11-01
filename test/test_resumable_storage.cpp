@@ -36,6 +36,42 @@ struct counted_customization {
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_storage") {
+    TEST_CASE("pending scalar retries rebind after reserve without input growth") {
+        const std::uint64_t    expected = std::uint64_t{1} << 40;
+        std::vector<std::byte> wire;
+        REQUIRE(make_encoder(wire)(expected));
+        REQUIRE(wire.size() > 3);
+        std::vector<std::byte> input(wire.begin(), wire.begin() + 3);
+
+        const auto check = [&](auto &storage) {
+            auto          decoder = make_resumable_decoder(storage);
+            std::uint64_t actual{};
+            auto          operation = decoder(actual);
+            REQUIRE_FALSE(operation.done());
+            CHECK(operation.committed_bytes() == 0);
+
+            // The retry must reread the same incomplete representation at its new address.
+            const auto *previous_data = input.data();
+            input.reserve(input.capacity() + wire.size());
+            REQUIRE(input.data() != previous_data);
+            REQUIRE(operation.resume() == resume_state::need_input);
+            CHECK(operation.committed_bytes() == 0);
+            CHECK(actual == 0);
+
+            input.insert(input.end(), wire.begin() + 3, wire.end());
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(actual == expected);
+            CHECK(operation.committed_bytes() == wire.size());
+        };
+
+        SUBCASE("flat vector") { check(input); }
+        SUBCASE("borrowed view of a vector") {
+            std::vector<std::ranges::ref_view<std::vector<std::byte>>> chunks{std::views::all(input)};
+            check(chunks);
+        }
+    }
+
     TEST_CASE_TEMPLATE("flat input growth preserves every split position", Storage, std::vector<std::byte>, std::deque<std::byte>) {
         const std::vector<std::string> expected{"first", std::string(48, 'x'), "last"};
         std::vector<std::byte>         wire;

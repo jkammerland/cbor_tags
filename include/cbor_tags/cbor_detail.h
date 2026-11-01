@@ -244,12 +244,14 @@ template <typename T> struct appender<T, true> {
         }
     }
 
-    template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+    // Byte operands need no reference identity. Values avoid addressable
+    // temporaries when a scalar writer is emitted as a separate function.
+    template <typename... Ts> constexpr void multi_append(T &container, Ts... values) {
         static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
         constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
         static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
         ensure_capacity(container, static_cast<size_type>(sizeof...(Ts)));
-        ((container[head_++] = std::forward<Ts>(values)), ...);
+        ((container[head_++] = values), ...);
     }
 
     constexpr void operator()(T &container, value_type value) {

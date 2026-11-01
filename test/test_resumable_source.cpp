@@ -142,6 +142,169 @@ template <typename Storage> void check_output_windows(Storage &storage, std::spa
 
 TEST_SUITE("resumable/source") {
 
+    TEST_CASE("input windows rebind after reserve without changing the extent") {
+        const std::vector<std::byte> expected{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+        auto                         bytes = expected;
+        const auto                   check = [&](auto &source) {
+            auto cursor = source.begin();
+            REQUIRE(source.borrow_window(cursor)->data() == bytes.data());
+            source.consume_window(cursor, 1);
+            auto checkpoint = cursor;
+
+            const auto *previous_data = bytes.data();
+            const auto  generation    = source.generation();
+            bytes.reserve(bytes.capacity() + bytes.size());
+            REQUIRE(bytes.data() != previous_data);
+            source.refresh();
+
+            CHECK(source.generation() == generation + 1);
+            CHECK(source.size() == expected.size());
+            REQUIRE(source.borrow_window(cursor)->data() == bytes.data() + 1);
+            CHECK(source.borrow_window(cursor)->size() == expected.size() - 1);
+            REQUIRE(source.borrow_window(checkpoint)->data() == bytes.data() + 1);
+            CHECK(bytes_of(source.remaining(cursor)) == bytes_of(std::span(expected).subspan(1)));
+        };
+
+        SUBCASE("flat vector") {
+            auto source = ct::make_input_source(bytes);
+            check(source);
+        }
+        SUBCASE("borrowed view of a vector") {
+            std::vector<std::ranges::ref_view<std::vector<std::byte>>> storage{std::views::all(bytes)};
+            auto                                                       source = ct::make_input_source(storage);
+            check(source);
+        }
+    }
+
+    TEST_CASE("output windows rebind a borrowed vector after reserve only") {
+        std::vector<std::byte>                                     bytes(4);
+        std::vector<std::ranges::ref_view<std::vector<std::byte>>> storage{std::views::all(bytes)};
+        auto                                                       source = ct::make_output_source(storage);
+        auto                                                       window = source.borrow_window();
+        REQUIRE(window->data() == bytes.data());
+        window->front() = std::byte{1};
+        source.consume_window(1);
+        source.commit();
+        const auto checkpoint = source.position();
+
+        const auto *previous_data = bytes.data();
+        const auto  generation    = source.generation();
+        bytes.reserve(bytes.capacity() + bytes.size());
+        REQUIRE(bytes.data() != previous_data);
+        source.refresh();
+        source.restore(checkpoint);
+
+        CHECK(source.generation() == generation + 1);
+        REQUIRE(source.borrow_window()->data() == bytes.data() + 1);
+        const std::array tail{std::byte{2}, std::byte{3}, std::byte{4}};
+        REQUIRE(source.write(tail) == tail.size());
+        CHECK(bytes == std::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}});
+        CHECK(source.position().offset() == bytes.size());
+    }
+
+    TEST_CASE("span input tails grow and reseat before outer descriptors relocate") {
+        const std::array original{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+        const auto       replacement = original;
+        const std::array appended{std::byte{5}, std::byte{6}};
+        REQUIRE(replacement.data() != original.data());
+
+        for (const std::size_t initial_size : {std::size_t{0}, std::size_t{2}}) {
+            CAPTURE(initial_size);
+            std::vector<std::span<const std::byte>> storage{std::span(original).first(initial_size)};
+            auto                                    source = ct::make_input_source(storage);
+            auto                                    cursor = source.begin();
+            REQUIRE(source.borrow_window(cursor)->size() == initial_size);
+            const auto consumed = initial_size / 2;
+            REQUIRE(source.advance(cursor, consumed) == consumed);
+            auto checkpoint = cursor;
+
+            const auto unchanged_generation = source.generation();
+            source.refresh();
+            CHECK(source.generation() == unchanged_generation + 1);
+
+            // Growth must expose the old tail's new bytes even at exhaustion.
+            auto generation = source.generation();
+            storage.back()  = original;
+            source.refresh();
+            CHECK(source.generation() == generation + 1);
+            REQUIRE(source.borrow_window(cursor)->data() == original.data() + consumed);
+            CHECK(source.borrow_window(cursor)->size() == original.size() - consumed);
+
+            // A same-size descriptor can move its backing bytes independently.
+            generation     = source.generation();
+            storage.back() = replacement;
+            source.refresh();
+            CHECK(source.generation() == generation + 1);
+            REQUIRE(source.borrow_window(cursor)->data() == replacement.data() + consumed);
+            REQUIRE(source.borrow_window(checkpoint)->data() == replacement.data() + consumed);
+            REQUIRE(source.advance(cursor, original.size() - consumed) == original.size() - consumed);
+            REQUIRE(cursor == source.end());
+
+            // Moving descriptors and adding empty spans must retain the old offset.
+            storage.reserve(storage.capacity() + 3);
+            storage.emplace_back();
+            storage.emplace_back(appended);
+            generation = source.generation();
+            source.refresh();
+            CHECK(source.generation() == generation + 1);
+            CHECK(cursor.offset() == original.size());
+            REQUIRE(source.borrow_window(cursor)->data() == appended.data());
+            CHECK(bytes_of(source.remaining(cursor)) == bytes_of(appended));
+            std::vector<std::byte> expected_remaining(std::next(replacement.begin(), static_cast<std::ptrdiff_t>(consumed)),
+                                                      replacement.end());
+            expected_remaining.insert(expected_remaining.end(), appended.begin(), appended.end());
+            CHECK(bytes_of(source.remaining(checkpoint)) == expected_remaining);
+        }
+    }
+
+    TEST_CASE("span tail growth precedes descriptors appended in the same refresh") {
+        const std::array                        bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}, std::byte{6}};
+        const auto                              all = std::span(bytes);
+        std::vector<std::span<const std::byte>> storage{all.first(2)};
+        auto                                    source = ct::make_input_source(storage);
+        auto                                    cursor = source.begin();
+        REQUIRE(source.advance(cursor, 2) == 2);
+        REQUIRE(cursor == source.end());
+
+        storage.back() = all.first(4);
+        storage.reserve(storage.capacity() + 3);
+        storage.emplace_back();
+        storage.emplace_back(all.subspan(4));
+        source.refresh();
+
+        CHECK(cursor.offset() == 2);
+        CHECK(source.size() == bytes.size());
+        CHECK(bytes_of(source.remaining(cursor)) == bytes_of(all.subspan(2)));
+    }
+
+    TEST_CASE("span output tails grow and reseat without changing the write offset") {
+        std::array<std::byte, 4>          original{};
+        std::array<std::byte, 4>          replacement{};
+        std::vector<std::span<std::byte>> storage{std::span(original).first(2)};
+        auto                              source = ct::make_output_source(storage);
+        auto                              window = source.borrow_window();
+        window->front()                          = std::byte{1};
+        source.consume_window(1);
+        source.commit();
+
+        storage.back() = original;
+        source.refresh();
+        REQUIRE(source.borrow_window()->data() == original.data() + 1);
+        REQUIRE(source.borrow_window()->size() == original.size() - 1);
+
+        replacement           = original;
+        storage.back()        = replacement;
+        const auto generation = source.generation();
+        source.refresh();
+        CHECK(source.generation() == generation + 1);
+        REQUIRE(source.borrow_window()->data() == replacement.data() + 1);
+        const std::array tail{std::byte{2}, std::byte{3}, std::byte{4}};
+        REQUIRE(source.write(tail) == tail.size());
+        CHECK(bytes_of(replacement) == std::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}});
+        CHECK(original[1] == std::byte{});
+        CHECK(source.position().offset() == replacement.size());
+    }
+
     TEST_CASE_TEMPLATE("input windows preserve tails across partial and exact consumption", Storage,
                        std::vector<std::span<const std::byte>>, std::deque<std::span<const std::byte>>,
                        std::list<std::span<const std::byte>>) {

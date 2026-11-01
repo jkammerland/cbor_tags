@@ -80,6 +80,11 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
     }
 
+    // Preserve the caller's constant major type through the shared writer.
+    // Otherwise bulk loops can pay a generic helper call for every element.
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
         detail::append_cbor_major_argument(appender_, data_, value, majorType);
     }

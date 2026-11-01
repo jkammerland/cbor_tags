@@ -235,8 +235,7 @@ template <typename Source> class resumable_validation_context : public resumable
             const auto count = static_cast<std::size_t>(length);
             bool       valid = true;
             if constexpr (Text) {
-                utf8_state utf8;
-                valid = utf8.consume_span(window_.first(count)) && utf8.complete();
+                valid = is_valid_utf8(window_.first(count));
             }
             advance_window(count);
             return valid ? status_code::success : status_code::invalid_utf8_sequence;

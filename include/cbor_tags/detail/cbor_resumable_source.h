@@ -361,6 +361,17 @@ template <ResumableChunkStorage Storage> class chunk_source {
             if (end_marker_ || source_ == nullptr) {
                 return;
             }
+
+            // Reusing an available window needs no descriptor traversal. Keep
+            // that path separate from mutation recovery and exhausted chunks.
+            assert(!current_ || limit_);
+            if (observed_generation_ == source_->generation_ && current_ && *current_ != *limit_) {
+                return;
+            }
+            normalize_chunks();
+        }
+
+        void normalize_chunks() const {
             refresh_current();
             if (!current_) {
                 if (std::ranges::begin(*source_->storage_) == std::ranges::end(*source_->storage_)) {
@@ -470,10 +481,13 @@ template <ResumableChunkStorage Storage> class chunk_source {
             if constexpr (sized) {
                 auto      &tail  = chunk_at(*last_chunk_);
                 const auto count = checked_size(tail);
-                if (count < tail_extent_)
-                    throw std::logic_error("CBOR source tail cannot shrink");
-                add_available(count - tail_extent_);
-                tail_extent_ = count;
+                // Unchanged tails need neither extent updates nor publication.
+                if (count != tail_extent_) {
+                    if (count < tail_extent_)
+                        throw std::logic_error("CBOR source tail cannot shrink");
+                    add_available(count - tail_extent_);
+                    tail_extent_ = count;
+                }
             }
         }
 
