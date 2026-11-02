@@ -47,13 +47,15 @@ template <typename Bytes, typename Storage> void check_noncontiguous_validation(
     // Admit multiple borrowed chunks together, including empty descriptors and
     // a UTF-8 chunk boundary. The reader must cross them in the same resume.
     const std::array initial{chunk{bytes.cbegin(), first}, chunk{first, first}, chunk{first, last}};
-    operation(initial);
+    storage.insert(storage.end(), initial.begin(), initial.end());
+    operation.resume();
     REQUIRE_FALSE(operation.done());
     CHECK(source.committed_position().offset() == 33U);
     CHECK(to_hex(operation.remaining_input()).empty());
 
     const std::array final{chunk{last, last}, chunk{last, bytes.cend()}};
-    operation(final, end_of_input);
+    storage.insert(storage.end(), final.begin(), final.end());
+    operation.finish();
     REQUIRE(operation.done());
     REQUIRE(operation.result());
     CHECK(*operation.result() == 35U);
@@ -86,12 +88,15 @@ TEST_SUITE("cbor_wire/resumable") {
             validation_chunks storage;
             auto              source    = make_input_source(storage);
             auto              operation = make_resumable_validator(source);
-            operation(input.first(cut));
+            storage.emplace_back(input.first(cut));
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(source.committed_position().offset() == committed);
             CHECK(to_hex(operation.remaining_input()) == to_hex(input.subspan(committed, cut - committed)));
 
-            operation(input.subspan(cut), end_of_input);
+            storage.emplace_back(input.subspan(cut));
+
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == 59U);
@@ -103,7 +108,8 @@ TEST_SUITE("cbor_wire/resumable") {
             validation_chunks truncated_storage;
             auto              truncated_source = make_input_source(truncated_storage);
             auto              truncated        = make_resumable_validator(truncated_source);
-            truncated(input.first(cut), end_of_input);
+            truncated_storage.emplace_back(input.first(cut));
+            truncated.finish();
             REQUIRE(truncated.done());
             REQUIRE_FALSE(truncated.result());
             CHECK(truncated.result().error() == status_code::incomplete);
@@ -208,13 +214,16 @@ TEST_SUITE("cbor_wire/resumable") {
             validation_chunks storage;
             auto              source    = make_input_source(storage);
             auto              operation = make_resumable_validator(source);
-            operation(input.first(cut));
+            storage.emplace_back(input.first(cut));
+            operation.resume();
 
             REQUIRE_FALSE(operation.done());
             CHECK(source.committed_position().offset() == cut);
             CHECK(to_hex(operation.remaining_input()).empty());
 
-            operation(input.subspan(cut), end_of_input);
+            storage.emplace_back(input.subspan(cut));
+
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::invalid_utf8_sequence);
@@ -279,7 +288,8 @@ TEST_SUITE("cbor_wire/resumable") {
 
             {
                 auto operation = make_resumable_validator(source);
-                operation(input.first(test.initial));
+                storage.emplace_back(input.first(test.initial));
+                operation.resume();
                 REQUIRE_FALSE(operation.done());
                 CHECK(source.committed_position().offset() == test.initial);
 
@@ -287,10 +297,11 @@ TEST_SUITE("cbor_wire/resumable") {
                 // or payload reader so its frame already exists. A scalar or
                 // payload and the following array header must survive failure
                 // to allocate that array's nested sequence frame.
-                source.append(input.subspan(test.initial));
+                storage.emplace_back(input.subspan(test.initial));
+                source.refresh();
                 {
                     cbor::tags::test::detail::allocation_failure_guard guard;
-                    operation(end_of_input);
+                    operation.finish();
                 }
 
                 REQUIRE(operation.done());
@@ -340,16 +351,18 @@ TEST_SUITE("cbor_wire/resumable") {
             validation_chunks                storage;
             auto                             source    = make_input_source(storage);
             auto                             operation = make_resumable_validator(source);
-            operation(input.first(1));
+            storage.emplace_back(input.first(1));
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(source.committed_position().offset() == 1U);
 
             // Suspend on the first scalar before denying allocations. All
             // following payloads fit inside the admitted contiguous window.
-            source.append(input.subspan(1));
+            storage.emplace_back(input.subspan(1));
+            source.refresh();
             {
                 cbor::tags::test::detail::allocation_failure_guard guard;
-                operation(end_of_input);
+                operation.finish();
             }
 
             REQUIRE(operation.done());
@@ -422,12 +435,13 @@ TEST_SUITE("cbor_wire/resumable") {
         validation_chunks storage;
         auto              source    = make_input_source(storage);
         auto              operation = make_resumable_validator(source, until_end_of_input);
-        operation(scalar);
+        storage.emplace_back(scalar);
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(source.committed_position().offset() == scalar.size());
         CHECK(to_hex(operation.remaining_input()).empty());
 
-        operation(end_of_input);
+        operation.finish();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == scalar.size());
@@ -442,19 +456,22 @@ TEST_SUITE("cbor_wire/resumable") {
         auto                             source    = make_input_source(storage);
         auto                             operation = make_resumable_validator(source, until_end_of_input);
 
-        operation(input.first(10));
+        storage.emplace_back(input.first(10));
+
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(source.committed_position().offset() == 9U);
         CHECK(to_hex(operation.remaining_input()) == "18");
 
         const std::array chunks{input.subspan(10, 2), input.subspan(12, 0), input.subspan(12)};
-        operation(chunks);
+        storage.insert(storage.end(), chunks.begin(), chunks.end());
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(source.committed_position().offset() == 17U);
         CHECK(to_hex(operation.remaining_input()).empty());
 
         SUBCASE("clean eof completes the admitted sequence") {
-            operation(end_of_input);
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == 17U);
@@ -463,7 +480,8 @@ TEST_SUITE("cbor_wire/resumable") {
         }
         SUBCASE("truncated next token remains unread at eof") {
             const auto truncated = to_bytes("1a0001");
-            operation(truncated, end_of_input);
+            storage.emplace_back(truncated);
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);

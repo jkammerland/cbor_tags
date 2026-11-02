@@ -83,12 +83,15 @@ template <typename T> class [[nodiscard]] resumable {
 };
 
 enum class resume_state { need_input, need_output, done };
-struct end_of_input_t {};
-inline constexpr end_of_input_t end_of_input{};
 struct until_end_of_input_t {};
 inline constexpr until_end_of_input_t until_end_of_input{};
 
 namespace detail {
+template <typename Context>
+concept HasResumableSuspendHook = requires(Context &context) {
+    { context.suspend() } -> std::same_as<void>;
+};
+
 struct resume_control {
     std::coroutine_handle<> leaf{};
     std::coroutine_handle<> waiter{};
@@ -135,6 +138,9 @@ template <typename Context> class resume_operation {
         s.control.driving = true;
         if (auto handle = std::exchange(s.control.leaf, {}))
             handle.resume();
+        // A caller may relocate or reclaim storage after this drive returns.
+        if constexpr (HasResumableSuspendHook<Context>)
+            s.context.suspend();
         if (s.work.done()) {
             status_code status;
             try {
@@ -153,11 +159,19 @@ template <typename Context> class resume_operation {
     }
 
   public:
-    template <typename... Args>
-    resume_operation(typename Context::source_type &source, Args &&...args)
-        : state_(std::make_unique<state>(source, std::forward<Args>(args)...)) {
+    template <typename... Args> resume_operation(typename Context::source_type &source, Args &&...args) {
+        // Acquire before constructing a context: an ordinary codec can finish
+        // eagerly while the operation state is being constructed.
         source.acquire();
-        drive(*state_);
+        try {
+            source.refresh();
+            state_ = std::make_unique<state>(source, std::forward<Args>(args)...);
+            drive(*state_);
+        } catch (...) {
+            state_.reset();
+            source.release();
+            throw;
+        }
     }
     resume_operation(resume_operation &&) noexcept = default;
     resume_operation &operator=(resume_operation &&other) noexcept {
@@ -170,30 +184,22 @@ template <typename Context> class resume_operation {
     resume_operation(const resume_operation &) = delete;
     ~resume_operation() { release(); }
 
-    template <typename... Chunks> resume_state operator()(Chunks &&...chunks) {
+    resume_state resume() {
         auto &s = *state_;
         if (s.finished)
             return resume_state::done;
-        bool changed{};
-        bool close{};
-        auto append = [&](auto &&chunk) {
-            if constexpr (std::same_as<std::remove_cvref_t<decltype(chunk)>, end_of_input_t>) {
-                close = true;
-            } else {
-                changed = s.context.source().append(std::forward<decltype(chunk)>(chunk)) != 0 || changed;
-            }
-        };
-        (append(std::forward<Chunks>(chunks)), ...);
-        if (close) {
-            s.context.source().close();
-            changed = true;
-        }
-        return changed ? drive(s) : Context::waiting_state;
+        if (s.control.driving)
+            throw std::logic_error("cannot resume a running codec");
+
+        s.context.source().refresh();
+        return drive(s);
     }
     resume_state finish() {
         auto &s = *state_;
+        if (s.control.driving)
+            throw std::logic_error("cannot finish a running codec");
         s.context.source().close();
-        return drive(s);
+        return resume();
     }
     void cancel() {
         auto &s = *state_;
@@ -201,30 +207,34 @@ template <typename Context> class resume_operation {
             return;
         if (s.control.driving)
             throw std::logic_error("cannot cancel a running codec");
-        s.work = resumable<status_code>{status_code::cancelled};
-        s.context.rollback();
+
+        // Retire every suspended handle before destroying its owning frames.
+        // Input retains its committed source position; the dead reader needs no reset.
         s.control.leaf = {};
-        s.result       = unexpected<status_code>{status_code::cancelled};
-        s.finished     = true;
-        auto waiter    = std::exchange(s.control.waiter, {});
+        s.work         = resumable<status_code>{status_code::cancelled};
+        if constexpr (Context::waiting_state == resume_state::need_output)
+            s.context.rollback();
+
+        s.result   = unexpected<status_code>{status_code::cancelled};
+        s.finished = true;
+
+        // The waiter may destroy this operation during inline resumption.
+        auto waiter = std::exchange(s.control.waiter, {});
         if (waiter)
             waiter.resume();
     }
     bool                               done() const noexcept { return state_ && state_->finished; }
     resume_state                       progress() const noexcept { return done() ? resume_state::done : Context::waiting_state; }
     expected<std::size_t, status_code> result() const { return state_->result; }
+    std::size_t                        committed_bytes() const { return state_ ? state_->context.offset() - state_->start : 0; }
     auto                               remaining_input() const
-        requires requires(Context &ctx) { ctx.remaining_input(); }
+        requires(Context::waiting_state == resume_state::need_input)
     {
         return state_->context.remaining_input();
     }
-    auto produced() const
-        requires requires(Context &ctx) { ctx.produced(); }
-    {
-        return state_->context.produced();
-    }
+
     auto remaining_output() const
-        requires requires(Context &ctx) { ctx.remaining_output(); }
+        requires(Context::waiting_state == resume_state::need_output)
     {
         return state_->context.remaining_output();
     }
@@ -253,8 +263,14 @@ template <typename Context> class resume_operation {
   private:
     void release() noexcept {
         if (state_) {
-            state_->context.source().release();
+            auto &source = state_->context.source();
+            // Abandoned partial output must not become part of the next item.
+            // Destroy suspended frames before restoring their retry boundary.
+            state_->work = resumable<status_code>{status_code::cancelled};
+            if constexpr (Context::waiting_state == resume_state::need_output)
+                state_->context.rollback();
             state_.reset();
+            source.release();
         }
     }
 };

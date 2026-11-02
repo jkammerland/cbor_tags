@@ -3,6 +3,9 @@
 #include "cbor_tags/cbor_traversal.h"
 #include "cbor_tags/detail/cbor_resumable_decoder.h"
 
+#include <utility>
+#include <variant>
+
 namespace cbor::tags::detail {
 
 // Reuse the ordinary traversal token decoder, including strict simple encodings.
@@ -15,6 +18,21 @@ struct resumable_walk_token {
         return {};
     }
 };
+
+template <typename Token>
+concept StructuralWalkToken = IsTextHeader<Token> || IsBinaryHeader<Token> || IsArrayHeader<Token> || IsMapHeader<Token> ||
+                              IsTagHeader<Token> || std::same_as<Token, indefinite_break>;
+
+// Classification depends only on the active alternative, not its payload.
+// Derive the indices from the variant so this needs no visit dispatch per token.
+inline bool resumable_structural_token(const catch_all_variant &token) {
+    if (token.valueless_by_exception())
+        throw std::bad_variant_access{};
+
+    return [&]<std::size_t... I>(std::index_sequence<I...>) {
+        return ((token.index() == I && StructuralWalkToken<std::variant_alternative_t<I, catch_all_variant>>) || ...);
+    }(std::make_index_sequence<std::variant_size_v<catch_all_variant>>{});
+}
 
 // A batch stays inside one sibling sequence. Structural tokens are consumed
 // here but handed back to that sequence for depth, payload, and break handling.
@@ -47,13 +65,7 @@ template <bool Map = false> struct resumable_scalar_batch {
             // A later malformed token must not discard preceding siblings or
             // publish the malformed token's partially advanced local reader.
             accepted = decoder.reader_.position_;
-            deferred = std::visit(
-                [](const auto &item) {
-                    using T = std::remove_cvref_t<decltype(item)>;
-                    return IsTextHeader<T> || IsBinaryHeader<T> || IsArrayHeader<T> || IsMapHeader<T> || IsTagHeader<T> ||
-                           std::same_as<T, indefinite_break>;
-                },
-                token.value);
+            deferred = resumable_structural_token(token.value);
             if (deferred)
                 break;
             complete_item();
@@ -84,6 +96,8 @@ template <typename Source> class resumable_validation_context : public resumable
 
   public:
     using base::base;
+    void suspend() { flush_window(); }
+
     resumable<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
         resumable_scalar_batch<> batch{.remaining = request.count, .indefinite = request.until_eof};
@@ -114,7 +128,7 @@ template <typename Source> class resumable_validation_context : public resumable
     void flush_window() {
         if (pending_ != 0) {
             auto &reader = this->ordinary().reader_;
-            this->source().consume_window(reader.position_, pending_);
+            resumable_source_access::consume_window(this->source(), reader.position_, pending_);
             reader.current_offset_ += pending_;
             this->commit();
         }
@@ -133,7 +147,7 @@ template <typename Source> class resumable_validation_context : public resumable
 
     void refresh_window() {
         flush_window();
-        if (const auto window = this->source().borrow_window(this->ordinary().reader_.position_))
+        if (const auto window = resumable_source_access::borrow_window(this->source(), this->ordinary().reader_.position_))
             window_ = *window;
     }
 
@@ -221,14 +235,23 @@ template <typename Source> class resumable_validation_context : public resumable
             const auto count = static_cast<std::size_t>(length);
             bool       valid = true;
             if constexpr (Text) {
-                utf8_state utf8;
-                valid = utf8.consume_span(window_.first(count)) && utf8.complete();
+                valid = is_valid_utf8(window_.first(count));
             }
             advance_window(count);
             return valid ? status_code::success : status_code::invalid_utf8_sequence;
         }
         return await_string_payload<Text>(length);
     }
+
+    static bool consume_utf8_window(utf8_state &state, std::span<const std::byte> bytes) noexcept {
+        // Keep byte reads independent of the suspended frame's scalar state.
+        // Publish the partial code point after consuming the complete window.
+        auto       local = state;
+        const auto valid = local.consume_span(bytes);
+        state            = local;
+        return valid;
+    }
+
     template <bool Text> resumable<status_code> await_string_payload(std::uint64_t length) {
         utf8_state utf8;
         bool       valid  = true;
@@ -251,7 +274,7 @@ template <typename Source> class resumable_validation_context : public resumable
             if (!window_.empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, window_.size()));
                 if constexpr (Text) {
-                    valid = utf8.consume_span(window_.first(count)) && valid;
+                    valid = consume_utf8_window(utf8, window_.first(count)) && valid;
                 }
                 advance_window(count);
                 length -= count;

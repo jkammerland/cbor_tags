@@ -120,15 +120,21 @@ latency_sample run_trial(const latency_options &options, const std::string &work
 #ifndef CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY
     if (resumable) {
         std::list<std::span<const std::byte>> descriptors;
-        auto                                  source    = ct::make_input_source(descriptors);
-        auto                                  decoder   = ct::make_resumable_decoder(source);
-        auto                                  operation = decoder(destination);
+#ifdef CBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY
+        auto decoder = ct::make_resumable_decoder(descriptors);
+#else
+        auto source  = ct::make_input_source(descriptors);
+        auto decoder = ct::make_resumable_decoder(source);
+#endif
+        auto operation = decoder(destination);
 
         start = clock_type::now();
         input.start(start);
         for (std::size_t consumed = 0; consumed < input.chunks.size();) {
             const auto available = input.wait_after(consumed);
-            operation(std::span{input.chunks}.subspan(consumed, available - consumed));
+            descriptors.insert(descriptors.end(), input.chunks.begin() + static_cast<std::ptrdiff_t>(consumed),
+                               input.chunks.begin() + static_cast<std::ptrdiff_t>(available));
+            operation.resume();
             consumed = available;
         }
         completed         = clock_type::now();

@@ -28,9 +28,12 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
         auto         source = make_input_source(storage);
         Value        actual;
         auto         decoder = make_resumable_decoder(source)(actual);
-        decoder(std::span<const std::byte>{wire}.first(cut));
-        if (!decoder.done())
-            decoder(std::span<const std::byte>{wire}.subspan(cut), end_of_input);
+        storage.emplace_back(std::span<const std::byte>{wire}.first(cut));
+        decoder.resume();
+        if (!decoder.done()) {
+            storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
+            decoder.finish();
+        }
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == wire.size());
@@ -40,9 +43,12 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
         output_chunks          output;
         auto                   sink    = make_output_source(output);
         auto                   encoder = make_resumable_encoder(sink)(wrapped);
-        encoder(std::span{encoded}.first(cut));
-        if (!encoder.done())
-            encoder(std::span{encoded}.subspan(cut));
+        output.emplace_back(std::span{encoded}.first(cut));
+        encoder.resume();
+        if (!encoder.done()) {
+            output.emplace_back(std::span{encoded}.subspan(cut));
+            encoder.resume();
+        }
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
         CHECK(*encoder.result() == encoded.size());
@@ -150,10 +156,13 @@ void check_float_override(const Value &expected, const WireValue &shifted, std::
             Value        actual;
             auto         decoder = make_resumable_decoder<Codec>(source)(actual);
             if (bytewise) {
-                for (const auto &byte : wire)
-                    decoder(std::span{&byte, 1});
+                for (const auto &byte : wire) {
+                    storage.emplace_back(std::span{&byte, 1});
+                    decoder.resume();
+                }
             } else {
-                decoder(wire);
+                storage.emplace_back(wire);
+                decoder.resume();
             }
             REQUIRE(decoder.done());
             REQUIRE(decoder.result());
@@ -167,10 +176,13 @@ void check_float_override(const Value &expected, const WireValue &shifted, std::
             auto                   run_encoder = [&](auto &value) {
                 auto encoder = make_resumable_encoder<Codec>(sink)(value);
                 if (bytewise) {
-                    for (auto &byte : encoded)
-                        encoder(std::span{&byte, 1});
+                    for (auto &byte : encoded) {
+                        output.emplace_back(std::span{&byte, 1});
+                        encoder.resume();
+                    }
                 } else {
-                    encoder(encoded);
+                    output.emplace_back(encoded);
+                    encoder.resume();
                 }
                 REQUIRE(encoder.done());
                 REQUIRE(encoder.result());
@@ -251,8 +263,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto           source = make_input_source(storage);
         std::vector<T> actual;
         auto           decoder = make_resumable_decoder(source)(actual);
-        for (const auto &byte : wire)
-            decoder(std::span{&byte, 1});
+        for (const auto &byte : wire) {
+            storage.emplace_back(std::span{&byte, 1});
+            decoder.resume();
+        }
         REQUIRE(decoder.result());
         REQUIRE(actual.size() == expected.size());
         for (std::size_t i = 0; i != expected.size(); ++i)
@@ -263,8 +277,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto                   sink    = make_output_source(output);
         auto                   wrapped = as_indefinite{expected};
         auto                   encoder = make_resumable_encoder(sink)(wrapped);
-        for (auto &byte : encoded)
-            encoder(std::span{&byte, 1});
+        for (auto &byte : encoded) {
+            output.emplace_back(std::span{&byte, 1});
+            encoder.resume();
+        }
         REQUIRE(encoder.result());
         std::vector<T> independently_decoded;
         REQUIRE(make_decoder(encoded)(independently_decoded));
@@ -286,10 +302,13 @@ TEST_SUITE("roundtrip/resumable") {
             std::deque<bool> actual;
             auto             decoder = make_resumable_decoder<bool_codec>(source)(actual);
             if (bytewise) {
-                for (const auto &byte : wire)
-                    decoder(std::span{&byte, 1});
+                for (const auto &byte : wire) {
+                    storage.emplace_back(std::span{&byte, 1});
+                    decoder.resume();
+                }
             } else {
-                decoder(wire);
+                storage.emplace_back(wire);
+                decoder.resume();
             }
             REQUIRE(decoder.result());
             CHECK(actual == expected);
@@ -302,10 +321,13 @@ TEST_SUITE("roundtrip/resumable") {
             auto                   wrapped = as_indefinite{expected};
             auto                   encoder = make_resumable_encoder<bool_codec>(sink)(wrapped);
             if (bytewise) {
-                for (auto &byte : encoded)
-                    encoder(std::span{&byte, 1});
+                for (auto &byte : encoded) {
+                    output.emplace_back(std::span{&byte, 1});
+                    encoder.resume();
+                }
             } else {
-                encoder(encoded);
+                output.emplace_back(encoded);
+                encoder.resume();
             }
             REQUIRE(encoder.result());
             CHECK(leaf_calls::encoded == expected.size());
@@ -348,7 +370,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                   source = make_input_source(storage);
         std::vector<double>    actual;
         auto                   decoder = make_resumable_decoder(source)(actual);
-        decoder(input_chunk{input.cbegin(), input.cend()}, end_of_input);
+        storage.emplace_back(input_chunk{input.cbegin(), input.cend()});
+        decoder.finish();
         REQUIRE(decoder.result());
         CHECK(actual == expected);
 
@@ -358,7 +381,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                    sink    = make_output_source(output_storage);
         auto                    wrapped = as_indefinite{expected};
         auto                    encoder = make_resumable_encoder(sink)(wrapped);
-        encoder(output_chunk{output.begin(), output.end()});
+        output_storage.emplace_back(output_chunk{output.begin(), output.end()});
+        encoder.resume();
         REQUIRE(encoder.result());
         std::vector<double> independently_decoded;
         REQUIRE(make_decoder(output)(independently_decoded));

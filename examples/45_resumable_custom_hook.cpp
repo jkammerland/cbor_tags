@@ -1,10 +1,8 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_resumable.h"
 
-#include <array>
 #include <cassert>
 #include <cstddef>
-#include <list>
 #include <span>
 #include <string>
 #include <vector>
@@ -36,43 +34,37 @@ report = [station: tstr, samples: [* int]]
 */
 int main() {
     // The application value and output storage outlive the suspended encode hook.
+    std::vector<std::byte> output;
+    auto encoder = ct::make_resumable_encoder(output);
     const app::Report sent{{-1, 24, 1000}, "north"};
-    std::array<std::byte, 2> first{};
-    std::array<std::byte, 64> second{};
-    std::list<std::span<std::byte>> output_chunks;
-    auto sink = ct::make_output_source(output_chunks);
-    auto encoding = ct::make_resumable_encoder(sink)(sent);
-    const auto first_output_state = encoding(first);
-    assert(first_output_state == ct::resume_state::need_output);
-
-    const auto final_output_state = encoding(second);
-    assert(final_output_state == ct::resume_state::done);
+    auto encoding = encoder(sent);
+    assert(encoding.done());
 
     // Check the selected field order independently through the ordinary array decoder.
     const auto encoded = encoding.result();
     assert(encoded);
-    assert(*encoded > first.size());
-    assert(*encoded <= first.size() + second.size());
-    auto produced = encoding.produced();
+    assert(*encoded == encoding.committed_bytes());
+    auto produced = std::span<const std::byte>{output}.first(*encoded);
+    auto decoder = ct::make_decoder(produced);
     std::string station;
     std::vector<int> samples;
-    auto decoder = ct::make_decoder(produced);
     const auto fields = decoder(ct::wrap_as_array{station, samples});
     assert(fields);
     assert(station == sent.station);
     assert(samples == sent.samples);
     assert(decoder.tell() == produced.end());
 
-    // Supply only written bytes; both backing buffers remain alive during decoding.
-    std::list<std::span<const std::byte>> input_chunks;
-    auto source = ct::make_input_source(input_chunks);
+    // Append received bytes to an ordinary container, then resume the hook.
+    std::vector<std::byte> input;
+    auto resumable_decoder = ct::make_resumable_decoder(input);
     app::Report received;
-    auto decoding = ct::make_resumable_decoder(source)(received);
-    const auto first_input_state = decoding(std::span<const std::byte>{first});
+    auto decoding = resumable_decoder(received);
+    input.insert(input.end(), produced.begin(), produced.begin() + 2);
+    const auto first_input_state = decoding.resume();
     assert(first_input_state == ct::resume_state::need_input);
 
-    const auto final_input_state =
-        decoding(std::span<const std::byte>{second}.first(*encoded - first.size()));
+    input.insert(input.end(), produced.begin() + 2, produced.end());
+    const auto final_input_state = decoding.resume();
     assert(final_input_state == ct::resume_state::done);
 
     // The hook resumes inside its fields, then reconstructs the application layout.

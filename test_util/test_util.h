@@ -71,6 +71,9 @@ inline std::vector<byte> to_bytes(std::string_view hex) {
 namespace cbor::tags::test::detail {
 inline bool fail_test_allocations = false;
 
+// Require the translation unit that installs the allocation overrides.
+void set_test_allocation_failure(bool enabled) noexcept;
+
 // MSVC's Debug STL may allocate container proxy state in operations that are
 // allocation-free in Release and in the other STL implementations under test.
 // Keep the global allocation hook enabled where it is a reliable signal.
@@ -84,10 +87,14 @@ inline constexpr bool allocation_failure_guard_enabled =
 struct allocation_failure_guard {
     allocation_failure_guard() {
         if constexpr (allocation_failure_guard_enabled) {
-            fail_test_allocations = true;
+            set_test_allocation_failure(true);
         }
     }
-    ~allocation_failure_guard() { fail_test_allocations = false; }
+    ~allocation_failure_guard() {
+        if constexpr (allocation_failure_guard_enabled) {
+            set_test_allocation_failure(false);
+        }
+    }
 };
 
 inline bool logs_always_enabled() {

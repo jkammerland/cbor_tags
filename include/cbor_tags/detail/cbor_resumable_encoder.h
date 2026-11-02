@@ -29,6 +29,45 @@ __declspec(noinline) inline status_code resumable_encode_exception_status() noex
 template <typename T> inline constexpr bool    resumable_encode_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_encode_wrap_array<wrap_as_array<T...>> = true;
 
+// Only exact bounded built-in adapters need the empty-header preflight.
+template <typename Source> inline constexpr bool  resumable_bounded_output_source                         = false;
+template <typename Storage> inline constexpr bool resumable_bounded_output_source<output_source<Storage>> = !GrowableOutputStorage<Storage>;
+
+// The bounded leaf loop shares the ordinary encoder's cursor. Only its unsigned
+// primitive path needs forced inlining and one completed-position publication.
+template <typename Options> struct resumable_leaf_encoder : encoder<std::span<std::byte>, Options> {
+    using base_type = encoder<std::span<std::byte>, Options>;
+    using base_type::base_type;
+    using base_type::encode;
+
+  private:
+    struct unsigned_appender {
+        appender<std::span<std::byte>> &ordinary;
+
+        constexpr void operator()(std::span<std::byte> &output, std::byte value) { ordinary(output, value); }
+
+        template <typename... Bytes> constexpr void multi_append(std::span<std::byte> &output, Bytes... values) {
+            static_assert(sizeof...(Bytes) > 1 && ((sizeof(Bytes) == 1) && ...));
+            ordinary.ensure_capacity(output, sizeof...(Bytes));
+
+            auto *const destination = output.data() + ordinary.head_;
+            std::size_t index{};
+            ((destination[index++] = values), ...);
+            ordinary.head_ += sizeof...(Bytes);
+        }
+    };
+
+  public:
+    template <IsUnsigned T>
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
+    constexpr void encode(T value) {
+        unsigned_appender output{this->appender_};
+        append_cbor_major_argument(output, this->data_, value, std::byte{});
+    }
+};
+
 template <typename Source, typename Options, template <typename> typename... Codecs>
 class resumable_encode_context : public Codecs<resumable_encode_context<Source, Options, Codecs...>>... {
     using self_type = resumable_encode_context;
@@ -36,22 +75,19 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         encoder<Source, Options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder, Codecs...>;
     using mixins = std::tuple<Codecs<self_type>...>;
 
-    Source                        &source_;
-    resume_control                &control_;
-    ordinary_type                  ordinary_;
-    typename Source::position_type start_;
+    Source         &source_;
+    resume_control &control_;
+    ordinary_type   ordinary_;
 
   public:
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_output;
 
-    resumable_encode_context(Source &source, resume_control &control)
-        : source_(source), control_(control), ordinary_(source), start_(source.committed_position()) {}
+    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {}
 
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const { return source_.committed_position().offset(); }
-    auto           produced() const { return source_.produced(start_, source_.committed_position()); }
     auto           remaining_output() const { return source_.remaining_output(); }
     ordinary_type &ordinary() noexcept { return ordinary_; }
     auto           wait() noexcept { return control_.wait(); }
@@ -94,28 +130,33 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
   private:
     status_code drain_payload_bytes(std::span<const std::byte> &bytes) {
-        while (!bytes.empty()) {
-            const auto available = resumable_source_access::borrow_window(source_);
-            if (available && !available->empty()) {
-                const auto count = std::min(bytes.size(), available->size());
-                std::copy_n(bytes.begin(), count, available->begin());
-                resumable_source_access::consume_window(source_, count);
-                commit();
-                bytes = bytes.subspan(count);
-            } else if (available) {
-                return status_code::incomplete;
-            } else {
-                auto write = [this, &bytes] {
-                    ordinary_.appender_(source_, bytes.front());
-                    return status_code::success;
-                };
-                const auto status = write_once(write);
-                if (status != status_code::success)
-                    return status;
-                bytes = bytes.subspan(1);
-            }
+        if (bytes.empty())
+            return status_code::success;
+
+        // The source owns traversal across its available chunks. A short
+        // write commits that payload prefix and requests the next resumption.
+        std::size_t count;
+        try {
+            count = source_.write(bytes);
+#if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
+        } catch (...) {
+            rollback();
+            return resumable_encode_exception_status();
+#else
+        } catch (const encode_status_exception &error) {
+            rollback();
+            return error.status;
+        } catch (...) {
+            rollback();
+            return resumable_exception_status();
+#endif
         }
-        return status_code::success;
+        assert(count <= bytes.size());
+        if (count != 0) {
+            commit();
+            bytes = bytes.subspan(count);
+        }
+        return bytes.empty() ? status_code::success : status_code::incomplete;
     }
 
     // The continuation owns its remaining span or iterators. Their underlying
@@ -198,6 +239,13 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     resumable<status_code> header(std::uint64_t size, std::byte major) {
         return attempt([this, size, major] {
+            // A bounded empty adapter cannot write even the first header byte.
+            // Growable and custom sources retain their ordinary write path.
+            if constexpr (resumable_bounded_output_source<Source>) {
+                if (const auto window = source_.borrow_window(); window && window->empty())
+                    return status_code::incomplete;
+            }
+
             ordinary_.encode_major_and_size(size, major);
             return status_code::success;
         });
@@ -502,17 +550,33 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename Iterator, typename Sentinel>
     status_code leaf_window(Iterator &current, const Sentinel &last, std::span<std::byte> window) {
-        encoder<std::span<std::byte>, Options> contiguous(window);
-        constexpr auto                         maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
-        status_code                            status;
-        try {
-            // Capacity for the native type's largest representation guarantees
-            // that the ordinary primitive finishes without a partial write.
-            encode_array_elements(contiguous, current, last, encoded_element_complete{},
-                                  [&] { return window.size() - contiguous.appender_.head_ >= maximum_size; });
-            status = status_code::success;
-        } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
-            status = resumable_exception_status();
+        resumable_leaf_encoder<Options> contiguous(window);
+        constexpr auto                  maximum_size = resumable_leaf_encode_size<std::iter_value_t<Iterator>>();
+        // A local boundary cannot be changed by writes through the output span.
+        const auto window_last = last;
+        assert(window.size() >= maximum_size);
+        const auto  last_start = window.size() - maximum_size;
+        status_code status;
+        auto        encode_window = [&](Iterator &position) {
+            try {
+                // Capacity for the native type's largest representation guarantees
+                // that the ordinary primitive finishes without a partial write.
+                encode_array_elements(contiguous, position, window_last, encoded_element_complete{},
+                                      [&] { return contiguous.appender_.head_ <= last_start; });
+                return status_code::success;
+            } catch (const encode_status_exception &error) { return error.status; } catch (...) {
+                return resumable_exception_status();
+            }
+        };
+
+        // Keep the inner loop's iterator local so output stores cannot force
+        // repeated reloads of a caller-owned cursor. Publish progress once.
+        if constexpr (std::is_nothrow_copy_constructible_v<Iterator> && std::is_nothrow_copy_assignable_v<Iterator>) {
+            auto position = current;
+            status        = encode_window(position);
+            current       = position;
+        } else {
+            status = encode_window(current);
         }
 
         resumable_source_access::consume_window(source_, contiguous.appender_.head_);
@@ -549,9 +613,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             const auto  window = resumable_source_access::borrow_window(source_);
             status_code status = status_code::success;
             if (window && window->size() >= maximum_size) {
-                auto                                   bytes = *window;
-                encoder<std::span<std::byte>, Options> contiguous(bytes);
-                std::size_t                            completed{};
+                auto                            bytes = *window;
+                resumable_leaf_encoder<Options> contiguous(bytes);
+                std::size_t                     completed{};
                 try {
                     encode_map_elements(
                         contiguous, current, last, key_complete, [&] { completed = contiguous.appender_.head_; },

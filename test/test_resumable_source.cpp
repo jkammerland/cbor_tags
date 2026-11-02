@@ -2,7 +2,7 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
-#include <cbor_tags/detail/cbor_resumable_source.h>
+#include <cbor_tags/cbor_resumable_source.h>
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace ct = cbor::tags;
@@ -30,12 +31,8 @@ static_assert(!std::ranges::contiguous_range<input_type>);
 static_assert(ct::CborOutputBuffer<output_type>);
 static_assert(std::ranges::sized_range<const output_type>);
 
-template <typename Source, typename Chunk>
-concept source_accepts = requires(Source &source, Chunk &&chunk) { source.append(std::forward<Chunk>(chunk)); };
-
-static_assert(source_accepts<input_type, std::vector<std::byte> &>);
-static_assert(!source_accepts<input_type, std::vector<std::byte>>);
-static_assert(source_accepts<input_type, std::span<const std::byte>>);
+static_assert(ct::ResumableInputSource<input_type>);
+static_assert(ct::ResumableOutputSource<output_type>);
 
 template <typename Range> auto bytes_of(Range &&range) {
     return std::vector<std::byte>(std::ranges::begin(range), std::ranges::end(range));
@@ -74,11 +71,31 @@ struct counted_iterator {
     friend bool operator==(const counted_iterator &left, const counted_iterator &right) { return left.position == right.position; }
 };
 
+// Owning node chunks expose a constant-time size while counting every byte
+// increment, including predecessor recovery after actual tail growth.
+struct counted_sized_chunk {
+    std::list<std::byte> bytes;
+    std::size_t         *increments{};
+
+    counted_sized_chunk(std::list<std::byte> value, std::size_t *counter) : bytes(std::move(value)), increments(counter) {}
+
+    // Relocation must move nodes even when the library's list move can throw.
+    counted_sized_chunk(const counted_sized_chunk &)            = delete;
+    counted_sized_chunk &operator=(const counted_sized_chunk &) = delete;
+    counted_sized_chunk(counted_sized_chunk &&)                 = default;
+    counted_sized_chunk &operator=(counted_sized_chunk &&)      = default;
+
+    counted_iterator begin() { return {bytes.begin(), increments}; }
+    counted_iterator end() { return {bytes.end(), increments}; }
+    std::size_t      size() const { return bytes.size(); }
+};
+
 using unsized_chunk   = std::ranges::subrange<counted_iterator>;
 using unsized_storage = std::list<unsized_chunk>;
 using unsized_source  = decltype(ct::make_input_source(std::declval<unsized_storage &>()));
 
 static_assert(std::bidirectional_iterator<counted_iterator>);
+static_assert(std::ranges::sized_range<counted_sized_chunk>);
 static_assert(!std::ranges::sized_range<unsized_chunk>);
 static_assert(ct::CborInputBuffer<unsized_source>);
 static_assert(!std::ranges::sized_range<unsized_source>);
@@ -120,23 +137,23 @@ template <typename Storage> void check_output_windows(Storage &storage, std::spa
 
     std::size_t offset{};
     while (offset != expected.size()) {
-        const auto window = ct::detail::resumable_source_access::borrow_window(source);
+        const auto window = source.borrow_window();
         REQUIRE(window.has_value());
         REQUIRE_FALSE(window->empty());
         CHECK(source.available_output_span()->data() == window->data());
 
         // Publication advances only through the span that received these bytes.
-        ct::detail::resumable_source_access::consume_window(source, 0);
+        source.consume_window(0);
         const auto count = std::min(std::size_t{2}, window->size());
         std::copy_n(expected.begin() + static_cast<std::ptrdiff_t>(offset), count, window->begin());
-        ct::detail::resumable_source_access::consume_window(source, count);
+        source.consume_window(count);
         offset += count;
         CHECK(source.position().offset() == offset);
         CHECK(bytes_of(source) == bytes_of(expected.first(offset)));
     }
 
-    REQUIRE(ct::detail::resumable_source_access::borrow_window(source).has_value());
-    CHECK(ct::detail::resumable_source_access::borrow_window(source)->empty());
+    REQUIRE(source.borrow_window().has_value());
+    CHECK(source.borrow_window()->empty());
     CHECK(std::ranges::empty(source.remaining_output()));
     source.commit();
     CHECK(source.committed_position().offset() == expected.size());
@@ -145,6 +162,322 @@ template <typename Storage> void check_output_windows(Storage &storage, std::spa
 } // namespace
 
 TEST_SUITE("resumable/source") {
+
+    TEST_CASE("zero consumption preserves uninitialized empty input and output cursors") {
+        std::vector<std::span<std::byte>> storage;
+        auto                              input      = ct::make_input_source(storage);
+        auto                              output     = ct::make_output_source(storage);
+        auto                              cursor     = input.begin();
+        const auto                        checkpoint = output.position();
+        input.consume_window(cursor, 0);
+        output.consume_window(0);
+        CHECK(cursor == input.end());
+        CHECK(cursor.offset() == 0);
+        CHECK(output.position() == checkpoint);
+
+        std::array<std::byte, 2> bytes{};
+        storage.emplace_back(bytes);
+        input.refresh();
+        output.refresh();
+        input.consume_window(cursor, 0);
+        output.consume_window(0);
+        REQUIRE(output.write(std::array{std::byte{7}}) == 1);
+        CHECK(*cursor == std::byte{7});
+        CHECK(cursor.offset() == 0);
+        CHECK(output.position().offset() == 1);
+    }
+
+    TEST_CASE_TEMPLATE("indexed deque bytes retain checkpoints across growth in mixed outer ranges", Storage,
+                       std::vector<std::deque<std::byte>>, std::deque<std::deque<std::byte>>, std::list<std::deque<std::byte>>) {
+        Storage storage;
+        storage.emplace_back();
+        storage.emplace_back(std::initializer_list<std::byte>{std::byte{1}, std::byte{2}});
+        auto source = ct::make_input_source(storage);
+        auto cursor = source.begin();
+        REQUIRE(*cursor == std::byte{1});
+        ++cursor;
+        auto checkpoint = cursor;
+        ++cursor;
+        REQUIRE(cursor == source.end());
+        auto saved_end   = cursor;
+        auto dynamic_end = source.end();
+
+        // Growing a deque's map invalidates its byte iterators. The old tail
+        // must be read before the descriptors appended in this same refresh.
+        storage.back().resize(2048, std::byte{3});
+        storage.emplace_back();
+        storage.emplace_back(std::initializer_list<std::byte>{std::byte{4}, std::byte{5}});
+        source.refresh();
+        CHECK(checkpoint.offset() == 1);
+        CHECK(*checkpoint == std::byte{2});
+        CHECK(cursor.offset() == 2);
+        CHECK(*cursor == std::byte{3});
+        CHECK_FALSE(source.borrow_window(cursor).has_value());
+        REQUIRE(source.advance(cursor, 2046) == 2046);
+        CHECK(*cursor == std::byte{4});
+        CHECK(cursor.offset() == 2048);
+
+        // A saved exhausted position stays at its original absolute offset;
+        // the end marker instead tracks the complete refreshed extent.
+        --saved_end;
+        CHECK(*saved_end == std::byte{2});
+        CHECK(saved_end.offset() == 1);
+        --dynamic_end;
+        CHECK(*dynamic_end == std::byte{5});
+        CHECK(dynamic_end.offset() == 2049);
+        --cursor;
+        CHECK(*cursor == std::byte{3});
+        CHECK(cursor.offset() == 2047);
+    }
+
+    TEST_CASE("owning node relocation preserves active empty and exhausted cursor states") {
+        for (const std::size_t initial_size : {std::size_t{0}, std::size_t{2}}) {
+            for (const bool exhausted : {false, true}) {
+                CAPTURE(initial_size);
+                CAPTURE(exhausted);
+                std::size_t                      increments{};
+                std::vector<counted_sized_chunk> storage;
+                storage.reserve(1);
+                storage.emplace_back(std::list<std::byte>(initial_size, std::byte{2}), &increments);
+                auto       source   = ct::make_input_source(storage);
+                auto       cursor   = source.begin();
+                const auto consumed = exhausted ? initial_size : initial_size / 2;
+                REQUIRE(source.advance(cursor, consumed) == consumed);
+                CHECK((cursor == source.end()) == (consumed == initial_size));
+                auto       checkpoint = cursor;
+                const auto traversed  = increments;
+
+                // reserve moves each owning list, invalidating the former end
+                // while preserving its element iterators and byte count.
+                const auto *previous_data = storage.data();
+                storage.reserve(storage.capacity() + 2);
+                REQUIRE(storage.data() != previous_data);
+                for (int probe = 0; probe != 5; ++probe) {
+                    source.refresh();
+                    CHECK((cursor == source.end()) == (consumed == initial_size));
+                    CHECK((checkpoint == source.end()) == (consumed == initial_size));
+                    CHECK(increments == traversed);
+                }
+
+                storage.front().bytes.push_back(std::byte{3});
+                storage.emplace_back(std::list<std::byte>{std::byte{4}}, &increments);
+                source.refresh();
+                if (consumed != initial_size) {
+                    CHECK(*cursor == std::byte{2});
+                    ++cursor;
+                }
+                REQUIRE(*cursor == std::byte{3});
+                ++cursor;
+                REQUIRE(*cursor == std::byte{4});
+                ++cursor;
+                REQUIRE(cursor == source.end());
+                const auto recovery = initial_size != 0 && exhausted ? 1u : 0u;
+                CHECK(increments == initial_size + 2 + recovery);
+                CHECK(cursor.offset() == initial_size + 2);
+
+                const auto completed = increments;
+                for (int probe = 0; probe != 5; ++probe) {
+                    source.refresh();
+                    CHECK(cursor == source.end());
+                    CHECK(increments == completed);
+                }
+                CHECK(checkpoint.offset() == consumed);
+                CHECK(*checkpoint == (consumed == initial_size ? std::byte{3} : std::byte{2}));
+            }
+        }
+    }
+
+    TEST_CASE("unsized node growth changes the boundary without prewalking or unchanged retries") {
+        std::list<std::byte> bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+        std::list<std::byte> appended{std::byte{5}};
+        std::size_t          increments{};
+        const auto           middle = std::next(bytes.begin(), 2);
+        unsized_storage      storage{{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}}};
+        auto                 source = ct::make_input_source(storage);
+        auto                 cursor = source.begin();
+        REQUIRE(source.advance(cursor, 2) == 2);
+        REQUIRE(cursor == source.end());
+        auto saved_end   = cursor;
+        auto dynamic_end = source.end();
+        CHECK(increments == 2);
+        for (int probe = 0; probe != 5; ++probe) {
+            source.refresh();
+            CHECK(cursor == source.end());
+            CHECK(increments == 2);
+        }
+
+        storage.back() = unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{bytes.end(), &increments}};
+        storage.emplace_back(counted_iterator{appended.begin(), &increments}, counted_iterator{appended.end(), &increments});
+        source.refresh();
+        CHECK(increments == 2);
+        REQUIRE(*cursor == std::byte{3});
+        CHECK(increments == 3);
+        REQUIRE(source.advance(cursor, 3) == 3);
+        CHECK(cursor == source.end());
+        CHECK(cursor.offset() == 5);
+        CHECK(increments == 6);
+        for (int probe = 0; probe != 5; ++probe) {
+            source.refresh();
+            CHECK(cursor == source.end());
+            CHECK(increments == 6);
+        }
+
+        --saved_end;
+        CHECK(*saved_end == std::byte{2});
+        CHECK(saved_end.offset() == 1);
+        --dynamic_end;
+        CHECK(*dynamic_end == std::byte{5});
+        CHECK_THROWS_AS(dynamic_end.offset(), std::logic_error);
+    }
+
+    TEST_CASE("input windows rebind after reserve without changing the extent") {
+        const std::vector<std::byte> expected{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+        auto                         bytes = expected;
+        const auto                   check = [&](auto &source) {
+            auto cursor = source.begin();
+            REQUIRE(source.borrow_window(cursor)->data() == bytes.data());
+            source.consume_window(cursor, 1);
+            auto checkpoint = cursor;
+
+            const auto *previous_data = bytes.data();
+            bytes.reserve(bytes.capacity() + bytes.size());
+            REQUIRE(bytes.data() != previous_data);
+            source.refresh();
+
+            CHECK(source.size() == expected.size());
+            REQUIRE(source.borrow_window(cursor)->data() == bytes.data() + 1);
+            CHECK(source.borrow_window(cursor)->size() == expected.size() - 1);
+            REQUIRE(source.borrow_window(checkpoint)->data() == bytes.data() + 1);
+            CHECK(bytes_of(source.remaining(cursor)) == bytes_of(std::span(expected).subspan(1)));
+        };
+
+        SUBCASE("flat vector") {
+            auto source = ct::make_input_source(bytes);
+            check(source);
+        }
+        SUBCASE("borrowed view of a vector") {
+            std::vector<std::ranges::ref_view<std::vector<std::byte>>> storage{std::views::all(bytes)};
+            auto                                                       source = ct::make_input_source(storage);
+            check(source);
+        }
+    }
+
+    TEST_CASE("output windows rebind a borrowed vector after reserve only") {
+        std::vector<std::byte>                                     bytes(4);
+        std::vector<std::ranges::ref_view<std::vector<std::byte>>> storage{std::views::all(bytes)};
+        auto                                                       source = ct::make_output_source(storage);
+        auto                                                       window = source.borrow_window();
+        REQUIRE(window->data() == bytes.data());
+        window->front() = std::byte{1};
+        source.consume_window(1);
+        source.commit();
+        const auto checkpoint = source.position();
+
+        const auto *previous_data = bytes.data();
+        bytes.reserve(bytes.capacity() + bytes.size());
+        REQUIRE(bytes.data() != previous_data);
+        source.refresh();
+        source.restore(checkpoint);
+
+        REQUIRE(source.borrow_window()->data() == bytes.data() + 1);
+        const std::array tail{std::byte{2}, std::byte{3}, std::byte{4}};
+        REQUIRE(source.write(tail) == tail.size());
+        CHECK(bytes == std::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}});
+        CHECK(source.position().offset() == bytes.size());
+    }
+
+    TEST_CASE("span input tails grow and reseat before outer descriptors relocate") {
+        const std::array original{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+        const auto       replacement = original;
+        const std::array appended{std::byte{5}, std::byte{6}};
+        REQUIRE(replacement.data() != original.data());
+
+        for (const std::size_t initial_size : {std::size_t{0}, std::size_t{2}}) {
+            CAPTURE(initial_size);
+            std::vector<std::span<const std::byte>> storage{std::span(original).first(initial_size)};
+            auto                                    source = ct::make_input_source(storage);
+            auto                                    cursor = source.begin();
+            REQUIRE(source.borrow_window(cursor)->size() == initial_size);
+            const auto consumed = initial_size / 2;
+            REQUIRE(source.advance(cursor, consumed) == consumed);
+            auto checkpoint = cursor;
+
+            source.refresh();
+
+            // Growth must expose the old tail's new bytes even at exhaustion.
+            storage.back() = original;
+            source.refresh();
+            REQUIRE(source.borrow_window(cursor)->data() == original.data() + consumed);
+            CHECK(source.borrow_window(cursor)->size() == original.size() - consumed);
+
+            // A same-size descriptor can move its backing bytes independently.
+            storage.back() = replacement;
+            source.refresh();
+            REQUIRE(source.borrow_window(cursor)->data() == replacement.data() + consumed);
+            REQUIRE(source.borrow_window(checkpoint)->data() == replacement.data() + consumed);
+            REQUIRE(source.advance(cursor, original.size() - consumed) == original.size() - consumed);
+            REQUIRE(cursor == source.end());
+
+            // Moving descriptors and adding empty spans must retain the old offset.
+            storage.reserve(storage.capacity() + 3);
+            storage.emplace_back();
+            storage.emplace_back(appended);
+            source.refresh();
+            CHECK(cursor.offset() == original.size());
+            REQUIRE(source.borrow_window(cursor)->data() == appended.data());
+            CHECK(bytes_of(source.remaining(cursor)) == bytes_of(appended));
+            std::vector<std::byte> expected_remaining(std::next(replacement.begin(), static_cast<std::ptrdiff_t>(consumed)),
+                                                      replacement.end());
+            expected_remaining.insert(expected_remaining.end(), appended.begin(), appended.end());
+            CHECK(bytes_of(source.remaining(checkpoint)) == expected_remaining);
+        }
+    }
+
+    TEST_CASE("span tail growth precedes descriptors appended in the same refresh") {
+        const std::array                        bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}, std::byte{6}};
+        const auto                              all = std::span(bytes);
+        std::vector<std::span<const std::byte>> storage{all.first(2)};
+        auto                                    source = ct::make_input_source(storage);
+        auto                                    cursor = source.begin();
+        REQUIRE(source.advance(cursor, 2) == 2);
+        REQUIRE(cursor == source.end());
+
+        storage.back() = all.first(4);
+        storage.reserve(storage.capacity() + 3);
+        storage.emplace_back();
+        storage.emplace_back(all.subspan(4));
+        source.refresh();
+
+        CHECK(cursor.offset() == 2);
+        CHECK(source.size() == bytes.size());
+        CHECK(bytes_of(source.remaining(cursor)) == bytes_of(all.subspan(2)));
+    }
+
+    TEST_CASE("span output tails grow and reseat without changing the write offset") {
+        std::array<std::byte, 4>          original{};
+        std::array<std::byte, 4>          replacement{};
+        std::vector<std::span<std::byte>> storage{std::span(original).first(2)};
+        auto                              source = ct::make_output_source(storage);
+        auto                              window = source.borrow_window();
+        window->front()                          = std::byte{1};
+        source.consume_window(1);
+        source.commit();
+
+        storage.back() = original;
+        source.refresh();
+        REQUIRE(source.borrow_window()->data() == original.data() + 1);
+        REQUIRE(source.borrow_window()->size() == original.size() - 1);
+
+        replacement    = original;
+        storage.back() = replacement;
+        source.refresh();
+        REQUIRE(source.borrow_window()->data() == replacement.data() + 1);
+        const std::array tail{std::byte{2}, std::byte{3}, std::byte{4}};
+        REQUIRE(source.write(tail) == tail.size());
+        CHECK(bytes_of(replacement) == std::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}});
+        CHECK(original[1] == std::byte{});
+        CHECK(source.position().offset() == replacement.size());
+    }
 
     TEST_CASE_TEMPLATE("input windows preserve tails across partial and exact consumption", Storage,
                        std::vector<std::span<const std::byte>>, std::deque<std::span<const std::byte>>,
@@ -169,7 +502,8 @@ TEST_SUITE("resumable/source") {
         const auto checkpoint = cursor;
         const auto window     = source.borrow_window(cursor);
         for (int i = 0; i != 256; ++i) {
-            source.append(second);
+            storage.emplace_back(second);
+            source.refresh();
         }
 
         // Growing vector/deque descriptors must not invalidate the borrowed bytes.
@@ -184,9 +518,11 @@ TEST_SUITE("resumable/source") {
         REQUIRE(source.advance(cursor, 256 * second.size()) == 256 * second.size());
         REQUIRE(source.borrow_window(cursor)->empty());
         const auto exhausted_offset = cursor.offset();
-        CHECK(source.append(std::span<const std::byte>{}) == 0);
+        storage.emplace_back(std::span<const std::byte>{});
+        source.refresh();
         CHECK(source.borrow_window(cursor)->empty());
-        source.append(first);
+        storage.emplace_back(first);
+        source.refresh();
         REQUIRE(source.borrow_window(cursor)->size() == first.size());
         CHECK(source.borrow_window(cursor)->data() == first.data());
         source.consume_window(cursor, first.size());
@@ -210,35 +546,38 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 1> last{};
         Storage                  storage{{}, std::span(first), {}};
         auto                     source = ct::make_output_source(storage);
-        auto                     window = ct::detail::resumable_source_access::borrow_window(source);
+        auto                     window = source.borrow_window();
         REQUIRE(window->size() == first.size());
         (*window)[0] = std::byte{1};
-        ct::detail::resumable_source_access::consume_window(source, 1);
-        window = ct::detail::resumable_source_access::borrow_window(source);
+        source.consume_window(1);
+        window = source.borrow_window();
         for (int i = 0; i != 256; ++i) {
-            source.append(second);
+            storage.emplace_back(second);
+            source.refresh();
         }
 
         CHECK(window->data() == first.data() + 1);
         (*window)[0] = std::byte{2};
         (*window)[1] = std::byte{3};
-        ct::detail::resumable_source_access::consume_window(source, window->size());
+        source.consume_window(window->size());
         CHECK(source.position().offset() == first.size());
         CHECK(bytes_of(source) == bytes_of(first));
 
         source.write(std::vector<std::byte>(256 * second.size(), std::byte{7}));
-        REQUIRE(ct::detail::resumable_source_access::borrow_window(source)->empty());
+        REQUIRE(source.borrow_window()->empty());
         const auto exhausted_offset = source.position().offset();
-        CHECK(source.append(std::span<std::byte>{}) == 0);
-        CHECK(ct::detail::resumable_source_access::borrow_window(source)->empty());
-        source.append(last);
-        window = ct::detail::resumable_source_access::borrow_window(source);
+        storage.emplace_back(std::span<std::byte>{});
+        source.refresh();
+        CHECK(source.borrow_window()->empty());
+        storage.emplace_back(last);
+        source.refresh();
+        window = source.borrow_window();
         REQUIRE(window->size() == last.size());
         CHECK(window->data() == last.data());
         (*window)[0] = std::byte{9};
-        ct::detail::resumable_source_access::consume_window(source, last.size());
+        source.consume_window(last.size());
         CHECK(source.position().offset() == exhausted_offset + last.size());
-        CHECK(ct::detail::resumable_source_access::borrow_window(source)->empty());
+        CHECK(source.borrow_window()->empty());
     }
 
     TEST_CASE("fixed descriptor spans support repeated input and output windows") {
@@ -282,7 +621,8 @@ TEST_SUITE("resumable/source") {
         auto                 source = ct::make_input_source(storage);
         T                    actual;
         auto                 operation = ct::make_resumable_decoder(source)(actual);
-        operation(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        operation.resume();
 
         REQUIRE_FALSE(operation.done());
         CHECK(actual.empty());
@@ -291,7 +631,9 @@ TEST_SUITE("resumable/source") {
         const auto capacity = actual.capacity();
 
         // Admit the complete payload so only a prewalk, not retries, can add traversal.
-        operation(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == wire.size());
@@ -316,7 +658,8 @@ TEST_SUITE("resumable/source") {
         auto                      source = ct::make_input_source(storage);
         std::vector<std::int64_t> actual;
         auto                      operation = ct::make_resumable_decoder(source)(actual);
-        operation(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{header.begin(), &increments}, counted_iterator{header.end(), &increments}});
+        operation.resume();
 
         REQUIRE_FALSE(operation.done());
         CHECK(actual.empty());
@@ -324,7 +667,9 @@ TEST_SUITE("resumable/source") {
         CHECK(increments == header_wire.size());
         const auto capacity = actual.capacity();
 
-        operation(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{payload.begin(), &increments}, counted_iterator{payload.end(), &increments}});
+
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == header_wire.size() + payload_wire.size());
@@ -344,8 +689,9 @@ TEST_SUITE("resumable/source") {
         auto                 source = ct::make_input_source(storage);
 
         // Admit the complete item before decoding, so retries cannot add legitimate traversal.
-        source.append(unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}},
-                      unsized_chunk{counted_iterator{middle, &increments}, counted_iterator{bytes.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{bytes.begin(), &increments}, counted_iterator{middle, &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{middle, &increments}, counted_iterator{bytes.end(), &increments}});
+        source.refresh();
         CHECK(increments == 0U);
         std::vector<std::int64_t> actual;
         auto                      operation = ct::make_resumable_decoder(source)(actual);
@@ -364,12 +710,13 @@ TEST_SUITE("resumable/source") {
         auto          cursor = source.begin();
         CHECK(cursor == source.end());
 
-        const auto empty_generation = source.generation();
-        CHECK(source.append(std::span<const std::byte>{}) == 0);
-        CHECK(source.generation() == empty_generation);
-        CHECK(storage.empty());
+        storage.emplace_back(std::span<const std::byte>{});
+        source.refresh();
+        CHECK(storage.size() == 1);
 
-        source.append(std::span<const std::byte>{}, first);
+        storage.emplace_back(std::span<const std::byte>{});
+        storage.emplace_back(first);
+        source.refresh();
         CHECK(source.size() == 2);
         CHECK(*cursor == std::byte{1});
         CHECK(source.advance(cursor, 2) == 2);
@@ -378,7 +725,8 @@ TEST_SUITE("resumable/source") {
         source.commit(cursor);
 
         std::array batch{std::span<const std::byte>{}, std::span<const std::byte>(second), std::span<const std::byte>{}};
-        source.append(batch);
+        storage.insert(storage.end(), batch.begin(), batch.end());
+        source.refresh();
         CHECK(*cursor == std::byte{3});
         CHECK(source.committed_position().offset() == 2);
         CHECK(bytes_of(source.remaining(cursor)) == std::vector<std::byte>(second.begin(), second.end()));
@@ -397,11 +745,10 @@ TEST_SUITE("resumable/source") {
         CHECK_NOTHROW(source.acquire());
         source.release();
 
-        const auto generation = source.generation();
         source.close();
         CHECK(source.eof());
-        CHECK(source.generation() > generation);
-        CHECK_THROWS_AS(source.append(first), std::logic_error);
+        source.close();
+        CHECK(source.eof());
     }
 
     TEST_CASE_TEMPLATE("input descriptors can relocate without invalidating checkpoints", Storage, std::vector<std::span<const std::byte>>,
@@ -409,7 +756,8 @@ TEST_SUITE("resumable/source") {
         std::array bytes{std::byte{5}, std::byte{6}, std::byte{7}};
         Storage    storage;
         auto       source = ct::make_input_source(storage);
-        source.append(bytes);
+        storage.emplace_back(bytes);
+        source.refresh();
 
         auto cursor = source.begin();
         ++cursor;
@@ -418,7 +766,8 @@ TEST_SUITE("resumable/source") {
         REQUIRE(cursor == source.end());
 
         for (int i = 0; i != 256; ++i) {
-            source.append(bytes);
+            storage.emplace_back(bytes);
+            source.refresh();
         }
         CHECK(*checkpoint == std::byte{6});
         CHECK(*cursor == std::byte{5});
@@ -433,8 +782,10 @@ TEST_SUITE("resumable/source") {
         std::size_t          increments{};
         unsized_storage      storage;
         auto                 source = ct::make_input_source(storage);
-        source.append(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
-        source.append(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
+        source.refresh();
+        storage.emplace_back(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
+        source.refresh();
         CHECK(increments == 0);
 
         auto cursor = source.begin();
@@ -481,23 +832,25 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 3> second{};
         output_storage           storage;
         auto                     source = ct::make_output_source(storage);
-        source.append(first);
+        storage.emplace_back(first);
+        source.refresh();
         auto checkpoint = source.position();
 
         const std::array values{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
-        CHECK_THROWS_AS(source.write(values), ct::detail::encode_status_exception);
+        CHECK(source.write(values) == first.size());
         CHECK(source.size() == 2);
         CHECK(source.committed_position().offset() == 0);
 
         source.restore(checkpoint);
         CHECK(source.size() == 0);
         CHECK(source.begin() == source.end());
-        source.append(second);
+        storage.emplace_back(second);
+        source.refresh();
         source.write(values);
         source.commit();
         CHECK(source.size() == values.size());
         CHECK(source.committed_position().offset() == values.size());
-        CHECK(bytes_of(source.produced(checkpoint, source.position())) == std::vector<std::byte>(values.begin(), values.end()));
+        CHECK(bytes_of(std::ranges::subrange(checkpoint, source.position())) == std::vector<std::byte>(values.begin(), values.end()));
         CHECK(bytes_of(source) == std::vector<std::byte>(values.begin(), values.end()));
         CHECK(std::ranges::distance(source.remaining_output()) == 1);
     }
@@ -507,16 +860,18 @@ TEST_SUITE("resumable/source") {
         std::deque<unsigned char>                                   second(32);
         std::list<std::ranges::ref_view<std::deque<unsigned char>>> storage;
         auto                                                        output = ct::make_output_source(storage);
-        output.append(first, second);
-        CHECK_FALSE(ct::detail::resumable_source_access::borrow_window(output).has_value());
+        storage.emplace_back(first);
+        storage.emplace_back(second);
+        output.refresh();
+        CHECK_FALSE(output.borrow_window().has_value());
 
         const std::vector<std::uint32_t> values{1, 24, 1024};
         auto                             encoder = ct::make_encoder(output);
         REQUIRE(encoder(values));
         output.commit();
 
-        std::list<decltype(output.produced(output.begin(), output.position()))> input_descriptors;
-        input_descriptors.push_back(output.produced(output.begin(), output.position()));
+        std::list<decltype(std::ranges::subrange(output.begin(), output.position()))> input_descriptors;
+        input_descriptors.push_back(std::ranges::subrange(output.begin(), output.position()));
         auto                       input   = ct::make_input_source(input_descriptors);
         auto                       decoder = ct::make_decoder(input);
         std::vector<std::uint32_t> decoded;
@@ -530,9 +885,10 @@ TEST_SUITE("resumable/source") {
         std::size_t          increments{};
         unsized_storage      storage;
         auto                 source = ct::make_output_source(storage);
-        source.append(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}},
-                      unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
-        CHECK_FALSE(ct::detail::resumable_source_access::borrow_window(source).has_value());
+        storage.emplace_back(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
+        storage.emplace_back(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
+        source.refresh();
+        CHECK_FALSE(source.borrow_window().has_value());
         CHECK(increments == 0);
 
         const std::array expected{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}};
@@ -542,7 +898,8 @@ TEST_SUITE("resumable/source") {
         CHECK(bytes_of(first) == bytes_of(std::span(expected).first(3)));
         CHECK(bytes_of(second) == bytes_of(std::span(expected).subspan(3)));
 
-        CHECK_THROWS_AS(source.push_back(std::byte{6}), ct::detail::encode_status_exception);
+        const std::array extra{std::byte{6}};
+        CHECK(source.write(extra) == 0);
         CHECK(increments == expected.size());
         CHECK(source.position().offset() == expected.size());
     }
@@ -552,7 +909,8 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 16>         second{};
         std::vector<std::span<std::byte>> storage;
         auto                              output = ct::make_output_source(storage);
-        output.append(first);
+        storage.emplace_back(first);
+        output.refresh();
         const auto checkpoint = output.position();
 
         auto       encoder      = ct::make_encoder(output);
@@ -563,7 +921,8 @@ TEST_SUITE("resumable/source") {
         CHECK(output.size() == first.size());
 
         output.restore(checkpoint);
-        output.append(second);
+        storage.emplace_back(second);
+        output.refresh();
         REQUIRE(encoder(value));
         output.commit();
 

@@ -15,6 +15,10 @@ if(DEFINED CONFIG AND NOT CONFIG STREQUAL "")
   list(APPEND build_command --config "${CONFIG}")
 endif()
 
+# Parallel compile-fail tests share the build system's log and dependency state.
+# Serialize their build invocations so separate Ninja processes cannot race.
+file(LOCK "${BUILD_DIR}/.compile-failure-build.lock" GUARD PROCESS)
+
 execute_process(
   COMMAND ${build_command}
   WORKING_DIRECTORY "${BUILD_DIR}"

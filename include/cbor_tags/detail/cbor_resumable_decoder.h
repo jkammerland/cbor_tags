@@ -15,6 +15,17 @@ namespace cbor::tags::detail {
 template <typename T> inline constexpr bool    resumable_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_wrap_array<wrap_as_array<T...>> = true;
 
+// Keep capability detection separate from the dispatch that uses it.
+template <typename Decoder, typename T>
+concept HasRvalueTagDecode = requires(Decoder &decoder, T &tag) { decoder.decode(std::move(tag)); };
+
+template <typename Appender, typename T>
+concept HasAppendReservation = requires(Appender &append, T &value, std::uint64_t size) { append.reserve_for_append(value, size); };
+
+template <typename Appender, typename T>
+concept HasGeometricAppendReservation =
+    requires(Appender &append, T &value, std::uint64_t size) { append.template reserve_for_append<true>(value, size); };
+
 // Preserve the normal entrypoint selected by optional/variant/indefinite dispatch.
 // The enclosing ordinary call still owns the complete retry boundary.
 template <typename T, payload_decode_context Context> struct resume_context_value {
@@ -50,7 +61,7 @@ template <typename T> struct resume_tag_wrapper {
     T                                                      &tag;
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
         const auto status = [&] {
-            if constexpr (requires { decoder.decode(std::move(tag)); })
+            if constexpr (HasRvalueTagDecode<Decoder, T>)
                 return decoder.decode(std::move(tag));
             else
                 return decoder.decode(tag);
@@ -66,34 +77,37 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     using self_type     = resumable_decode_context;
     using ordinary_type = decoder<Source, Options, cbor_header_decoder, cbor_indefinite_decoder, Codecs...>;
     using mixins        = std::tuple<Codecs<self_type>...>;
-    Source                     &source_;
-    resume_control             &control_;
-    ordinary_type               ordinary_;
-    decltype(ordinary_.reader_) committed_;
+    Source         &source_;
+    resume_control &control_;
+    ordinary_type   ordinary_;
+    std::size_t     committed_offset_;
 
   public:
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_input;
 
-    resumable_decode_context(Source &source, resume_control &control)
-        : source_(source), control_(control), ordinary_(source), committed_(ordinary_.reader_) {
+    resumable_decode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {
         ordinary_.reader_.position_       = source.committed_position();
         ordinary_.reader_.current_offset_ = ordinary_.reader_.position_.offset();
-        committed_                        = ordinary_.reader_;
+        committed_offset_                 = ordinary_.reader_.current_offset_;
     }
     Source        &source() noexcept { return source_; }
-    std::size_t    offset() const noexcept { return committed_.current_offset_; }
-    auto           remaining_input() const { return source_.remaining(committed_.position_); }
+    std::size_t    offset() const noexcept { return committed_offset_; }
+    auto           remaining_input() const { return source_.remaining(source_.committed_position()); }
     ordinary_type &ordinary() noexcept { return ordinary_; }
     auto           wait() noexcept { return control_.wait(); }
     bool           empty() const { return ordinary_.reader_.empty(source_); }
     bool           eof() const { return source_.eof(); }
     void           commit() {
-        committed_ = ordinary_.reader_;
-        source_.commit(committed_.position_);
+        // The source owns the checkpoint; retain only its scalar progress here.
+        source_.commit(ordinary_.reader_.position_);
+        committed_offset_ = ordinary_.reader_.current_offset_;
     }
-    void rollback() { ordinary_.reader_ = committed_; }
+    void rollback() {
+        ordinary_.reader_.position_       = source_.committed_position();
+        ordinary_.reader_.current_offset_ = committed_offset_;
+    }
 
     // A complete normal call is the sole retry boundary, including its nested calls.
     template <typename T> resumable<status_code> ordinary(T &value) {
@@ -127,10 +141,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
   private:
     template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
-            if (const auto span = source_.borrow_window(ordinary_.reader_.position_); span && !span->empty()) {
+            if (const auto span = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_); span && !span->empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
-                source_.consume_window(ordinary_.reader_.position_, count);
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, count);
+                ordinary_.reader_.current_offset_ += count;
+                length -= count;
+            } else if constexpr (HasBulkByteRead<decltype(ordinary_.reader_.position_)>) {
+                // This scratch range and every native iterator die before a
+                // suspension; only copied bytes reach the destination.
+                std::array<std::byte, 256> bytes;
+                const auto                 requested = static_cast<std::size_t>(std::min<std::uint64_t>(length, bytes.size()));
+                const auto                 count     = ordinary_.reader_.position_.read_bytes(std::span(bytes).first(requested));
+                assert(count != 0);
+                append(value, std::span<const std::byte>{bytes}.first(count));
                 ordinary_.reader_.current_offset_ += count;
                 length -= count;
             } else {
@@ -558,38 +582,68 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // Drain ordinary elements synchronously. A failed child leaves the logical
     // count and destination at the last complete element, even after an exception.
-    template <typename T> status_code segmented_leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
-        auto       completed = ordinary_.reader_;
-        const auto status    = attempt_decode(
-            [&] { return decode_array_elements(ordinary_, value, append, remaining, [&] { completed = ordinary_.reader_; }); });
+    template <typename T>
+#if defined(__GNUC__) && !defined(__clang__)
+    // The cursor and byte counter form a scalar dependency chain. Packing their
+    // updates into SIMD registers adds transfers on every decoded byte.
+    [[gnu::optimize("no-tree-slp-vectorize")]]
+#endif
+    status_code segmented_leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
+        auto completed = ordinary_.reader_;
+        // Standard arithmetic vectors have identical copy/move semantics. A
+        // const scalar keeps the simple push_back path in this segmented loop.
+        auto append_element = [&append](T &output, typename T::value_type &&element) {
+            if constexpr (std::is_arithmetic_v<typename T::value_type> && std::same_as<T, std::vector<typename T::value_type>>)
+                append(output, std::as_const(element));
+            else
+                append(output, std::move(element));
+        };
+        const auto status = attempt_decode(
+            [&] { return decode_array_elements(ordinary_, value, append_element, remaining, [&] { completed = ordinary_.reader_; }); });
 
         ordinary_.reader_ = completed;
         commit();
         return status;
     }
 
-    template <typename T>
-    status_code leaf_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
-        decoder<std::span<const std::byte>, Options> contiguous(window);
-        std::size_t                                  completed{};
-        const auto                                   status = attempt_decode([&] {
-            // Keep conversion and strictness policy in the core scalar codec.
-            return decode_array_elements(
-                contiguous, value, append, remaining, [&] { completed = contiguous.reader_.position_; },
-                [&] { return window.size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>(); });
-        });
+    struct window_decode_result {
+        status_code status;
+        std::size_t completed;
+    };
 
-        source_.advance(ordinary_.reader_.position_, completed);
-        ordinary_.reader_.current_offset_ += completed;
-        commit();
-        return status;
+    // Keep the bounded scalar loop independent of source rebinding and retry
+    // state. Only complete children contribute to the published byte count.
+    template <std::size_t MinimumSize, typename Decode>
+    static window_decode_result decode_leaf_window(std::span<const std::byte> window, Decode &&decode) {
+        decoder<std::span<const std::byte>, Options> contiguous(window);
+        window_decode_result                         result{status_code::success, 0};
+        result.status = attempt_decode([&] {
+            return decode(
+                contiguous, [&] { result.completed = contiguous.reader_.position_; },
+                [&] { return window.size() - contiguous.reader_.position_ >= MinimumSize; });
+        });
+        return result;
     }
 
-    // Discover leaf spans through a cursor copy and publish the source position
-    // only after the shared scalar loop has finished.
+    template <typename T>
+    status_code leaf_window(T &value, appender<T> &append, std::uint64_t &remaining, std::span<const std::byte> window) {
+        const auto result = decode_leaf_window<resumable_leaf_decode_size<typename T::value_type>()>(
+            window, [&](auto &contiguous, auto completed, auto available) {
+                // Keep conversion and strictness policy in the core scalar codec.
+                return decode_array_elements(contiguous, value, append, remaining, completed, available);
+            });
+
+        resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
+        ordinary_.reader_.current_offset_ += result.completed;
+        commit();
+        return result.status;
+    }
+
+    // Borrow through the working cursor and publish the source position only
+    // after the shared scalar loop has finished.
     template <typename T> status_code leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
         while (remaining != 0) {
-            const auto window = source_.available_span(ordinary_.reader_.position_);
+            const auto window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             if (!window)
                 return segmented_leaf_elements(value, append, remaining);
 
@@ -614,20 +668,17 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     status_code indefinite_leaf_elements(T &value, appender<T> &append, std::uint64_t &count, bool &ended, std::uint64_t minimum,
                                          std::uint64_t maximum) {
         while (!ended) {
-            const auto  window = source_.available_span(ordinary_.reader_.position_);
+            const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             status_code status;
             if (window && window->size() >= resumable_leaf_decode_size<typename T::value_type>()) {
-                decoder<std::span<const std::byte>, Options> contiguous(*window);
-                std::size_t                                  completed{};
-                status = attempt_decode([&] {
-                    return decode_indefinite_array_elements<true>(
-                        contiguous, value, append, count, ended, minimum, maximum, [&] { completed = contiguous.reader_.position_; },
-                        [&] {
-                            return window->size() - contiguous.reader_.position_ >= resumable_leaf_decode_size<typename T::value_type>();
-                        });
-                });
-                source_.advance(ordinary_.reader_.position_, completed);
-                ordinary_.reader_.current_offset_ += completed;
+                const auto result = decode_leaf_window<resumable_leaf_decode_size<typename T::value_type>()>(
+                    *window, [&](auto &contiguous, auto completed, auto available) {
+                        return decode_indefinite_array_elements<true>(contiguous, value, append, count, ended, minimum, maximum, completed,
+                                                                      available);
+                    });
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
+                ordinary_.reader_.current_offset_ += result.completed;
+                status = result.status;
             } else {
                 auto       completed = ordinary_.reader_;
                 const auto start     = count;
@@ -651,19 +702,16 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         constexpr auto maximum_size =
             resumable_leaf_decode_size<typename T::key_type>() + resumable_leaf_decode_size<typename T::mapped_type>();
         while (!ended && (Indefinite || count != maximum)) {
-            const auto  window = source_.available_span(ordinary_.reader_.position_);
+            const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
             status_code status;
             if (window && window->size() >= maximum_size) {
-                decoder<std::span<const std::byte>, Options> contiguous(*window);
-                std::size_t                                  completed{};
-                status = attempt_decode([&] {
-                    return decode_map_elements<Indefinite, true>(
-                        contiguous, value, append, entry, key_complete, count, ended, minimum, maximum,
-                        [&] { completed = contiguous.reader_.position_; },
-                        [&] { return window->size() - contiguous.reader_.position_ >= maximum_size; });
+                const auto result = decode_leaf_window<maximum_size>(*window, [&](auto &contiguous, auto completed, auto available) {
+                    return decode_map_elements<Indefinite, true>(contiguous, value, append, entry, key_complete, count, ended, minimum,
+                                                                 maximum, completed, available);
                 });
-                source_.advance(ordinary_.reader_.position_, completed);
-                ordinary_.reader_.current_offset_ += completed;
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
+                ordinary_.reader_.current_offset_ += result.completed;
+                status = result.status;
             } else {
                 auto       completed = ordinary_.reader_;
                 const auto start     = count;
@@ -721,7 +769,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         appender<T> append;
         // The caller owns allocation limits. Appenders opt into element-count
         // reservation; some containers reserve descriptors rather than elements.
-        if constexpr (AppendReservable<T> && requires { append.reserve_for_append(value, header.size); }) {
+        if constexpr (AppendReservable<T> && HasAppendReservation<appender<T>, T>) {
             if (!header.indefinite && header.size != 0)
                 append.reserve_for_append(value, header.size);
         }
@@ -786,7 +834,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                     co_return status_code::malformed_structure;
                 if (chunk.size > maximum - count)
                     co_return status_code::size_limit_exceeded;
-                if constexpr (AppendReservable<T> && requires { append.template reserve_for_append<true>(value, chunk.size); }) {
+                if constexpr (AppendReservable<T> && HasGeometricAppendReservation<appender<T>, T>) {
                     if (chunk.size != 0)
                         append.template reserve_for_append<true>(value, chunk.size);
                 }

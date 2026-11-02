@@ -227,7 +227,7 @@ int main() {
 }
 ```
 > [!NOTE]
-> By default, a reflected struct with multiple payload members encodes those members as a CBOR array in declaration order. The decoder uses the receiver's member types and order; decode errors are reported through `result.error()`, including `status_code::incomplete` for missing input. The primary decoder is one-shot and a failed call is terminal. Use the explicit [resumable encoder and decoder](doc/resumable.md) when input or output arrives in chunks.
+> By default, a reflected struct with multiple payload members encodes those members as a CBOR array in declaration order. The decoder uses the receiver's member types and order; decode errors are reported through `result.error()`, including `status_code::incomplete` for missing input. The primary decoder is one-shot and a failed call is terminal. The [resumable encoder and decoder](doc/resumable.md) bind caller-owned storage once and continue with argument-free `resume()` as more input or output capacity becomes available.
 
 ### Version Handling with Variants
 The example below show how cbor tags can be utilized for version handling. There is no explicit version handling in the protocol, instead a tag can represent a new object, which *you* the application developer can, by your definition, decide to be a new version of an object.
@@ -1278,8 +1278,12 @@ Leave the variable unset (default) to keep passing runs quiet while still captur
 
 ## Resumable codecs
 
-For ordered input/output chunks, raw coroutine integration, generators, and validation,
-see [resumable encoding and decoding](doc/resumable.md).
+Bind caller-owned storage once, append input or provide output capacity while
+the codec is suspended, then call `resume()` without arguments. See
+[resumable encoding and decoding](doc/resumable.md) for the storage contract,
+coroutine consumers, generators, validation and public custom sources. The
+[standalone ring example](examples/46_resumable_ring.cpp) demonstrates encoding
+and decoding with bounded storage, wraparound and committed-prefix reclamation.
 
 ## 📄 License
 

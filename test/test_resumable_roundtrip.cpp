@@ -292,9 +292,12 @@ template <typename T> void check_every_decode_split(const T &expected) {
         T            actual{};
         auto         operation = make_resumable_decoder(source)(actual);
 
-        operation(input.first(cut));
+        storage.emplace_back(input.first(cut));
+
+        operation.resume();
         if (!operation.done()) {
-            operation(input.subspan(cut), end_of_input);
+            storage.emplace_back(input.subspan(cut));
+            operation.finish();
         }
 
         REQUIRE(operation.done());
@@ -315,9 +318,12 @@ template <typename T> void check_every_encode_split(const T &expected) {
         auto                   sink      = make_output_source(storage);
         auto                   operation = make_resumable_encoder(sink)(expected);
 
-        operation(std::span{bytes}.first(cut));
+        storage.emplace_back(std::span{bytes}.first(cut));
+
+        operation.resume();
         if (!operation.done()) {
-            operation(std::span{bytes}.subspan(cut));
+            storage.emplace_back(std::span{bytes}.subspan(cut));
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -545,8 +551,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto                             sink = make_output_source(output_storage);
         integer_codec_calls::encoded          = 0;
         auto encoder                          = make_resumable_encoder<ordinary_uint32_codec>(sink)(expected);
-        for (auto &byte : bytes)
-            encoder(std::span{&byte, 1});
+        for (auto &byte : bytes) {
+            output_storage.emplace_back(std::span{&byte, 1});
+            encoder.resume();
+        }
 
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
@@ -561,8 +569,10 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<std::uint32_t> actual;
         integer_codec_calls::decoded = 0;
         auto decoder                 = make_resumable_decoder<ordinary_uint32_codec>(source)(actual);
-        for (const auto &byte : reference)
-            decoder(std::span{&byte, 1});
+        for (const auto &byte : reference) {
+            input_storage.emplace_back(std::span{&byte, 1});
+            decoder.resume();
+        }
 
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
@@ -581,7 +591,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                   sink  = make_output_source(output_storage);
         integer_codec_calls::encoded = 0;
         auto encoder                 = make_resumable_encoder<ordinary_uint32_codec>(sink)(expected);
-        encoder(bytes);
+        output_storage.emplace_back(bytes);
+        encoder.resume();
 
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
@@ -596,7 +607,8 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<std::uint32_t> actual;
         integer_codec_calls::decoded = 0;
         auto decoder                 = make_resumable_decoder<ordinary_uint32_codec>(source)(actual);
-        decoder(reference);
+        input_storage.emplace_back(reference);
+        decoder.resume();
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
@@ -614,7 +626,8 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<std::uint32_t> actual;
         integer_codec_calls::decoded = 0;
         auto operation               = make_resumable_decoder<plain_uint32_codec>(source)(actual);
-        operation(reference);
+        storage.emplace_back(reference);
+        operation.resume();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
@@ -632,8 +645,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto                             sink = make_output_source(output_storage);
         integer_codec_calls::encoded          = 0;
         auto encoder                          = make_resumable_encoder<explicit_uint32_codec>(sink)(expected);
-        for (auto &byte : bytes)
-            encoder(std::span{&byte, 1});
+        for (auto &byte : bytes) {
+            output_storage.emplace_back(std::span{&byte, 1});
+            encoder.resume();
+        }
 
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
@@ -647,8 +662,10 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<std::uint32_t> actual;
         integer_codec_calls::decoded = 0;
         auto decoder                 = make_resumable_decoder<explicit_uint32_codec>(source)(actual);
-        for (const auto &byte : reference)
-            decoder(std::span{&byte, 1});
+        for (const auto &byte : reference) {
+            input_storage.emplace_back(std::span{&byte, 1});
+            decoder.resume();
+        }
 
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
@@ -669,10 +686,13 @@ TEST_SUITE("roundtrip/resumable") {
             integer_codec_calls::encoded = 0;
             auto encoder                 = make_resumable_encoder<explicit_only_uint32_codec>(sink)(expected);
             if (bytewise) {
-                for (auto &byte : bytes)
-                    encoder(std::span{&byte, 1});
+                for (auto &byte : bytes) {
+                    output_storage.emplace_back(std::span{&byte, 1});
+                    encoder.resume();
+                }
             } else {
-                encoder(bytes);
+                output_storage.emplace_back(bytes);
+                encoder.resume();
             }
 
             REQUIRE(encoder.done());
@@ -689,10 +709,13 @@ TEST_SUITE("roundtrip/resumable") {
             integer_codec_calls::decoded = 0;
             auto decoder                 = make_resumable_decoder<explicit_only_uint32_codec>(source)(actual);
             if (bytewise) {
-                for (const auto &byte : reference)
-                    decoder(std::span{&byte, 1});
+                for (const auto &byte : reference) {
+                    input_storage.emplace_back(std::span{&byte, 1});
+                    decoder.resume();
+                }
             } else {
-                decoder(reference);
+                input_storage.emplace_back(reference);
+                decoder.resume();
             }
 
             REQUIRE(decoder.done());
@@ -714,7 +737,8 @@ TEST_SUITE("roundtrip/resumable") {
         std::list<chunk> output_storage;
         auto             sink    = make_output_source(output_storage);
         auto             encoder = make_resumable_encoder(sink)(expected);
-        encoder(chunks);
+        output_storage.insert(output_storage.end(), chunks.begin(), chunks.end());
+        encoder.resume();
 
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
@@ -727,7 +751,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                        source = make_input_source(input_storage);
         std::array<std::int64_t, 5> actual{};
         auto                        decoder = make_resumable_decoder(source)(actual);
-        decoder(chunks);
+        input_storage.insert(input_storage.end(), chunks.begin(), chunks.end());
+        decoder.resume();
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
@@ -748,12 +773,16 @@ TEST_SUITE("roundtrip/resumable") {
                 resumable_message actual;
                 auto              operation = make_resumable_decoder(source)(actual);
 
-                operation(input.first(first));
+                storage.emplace_back(input.first(first));
+
+                operation.resume();
                 if (!operation.done()) {
-                    operation(input.subspan(first, second - first));
+                    storage.emplace_back(input.subspan(first, second - first));
+                    operation.resume();
                 }
                 if (!operation.done()) {
-                    operation(input.subspan(second), end_of_input);
+                    storage.emplace_back(input.subspan(second));
+                    operation.finish();
                 }
 
                 REQUIRE(operation.done());
@@ -799,9 +828,11 @@ TEST_SUITE("roundtrip/resumable") {
             auto         source = make_input_source(storage);
             value_type   actual;
             auto         operation = make_resumable_decoder<ordinary_tagged_codec>(source)(actual);
-            operation(input.first(cut));
+            storage.emplace_back(input.first(cut));
+            operation.resume();
             if (!operation.done()) {
-                operation(input.subspan(cut), end_of_input);
+                storage.emplace_back(input.subspan(cut));
+                operation.finish();
             }
 
             REQUIRE(operation.result());
@@ -833,9 +864,11 @@ TEST_SUITE("roundtrip/resumable") {
                 auto         source = make_input_source(storage);
                 variant_type actual;
                 auto         operation = make_resumable_decoder<contextual_variant_codec>(source)(actual);
-                operation(std::span<const std::byte>{bytes}.first(cut));
+                storage.emplace_back(std::span<const std::byte>{bytes}.first(cut));
+                operation.resume();
                 if (!operation.done()) {
-                    operation(std::span<const std::byte>{bytes}.subspan(cut), end_of_input);
+                    storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
+                    operation.finish();
                 }
 
                 REQUIRE(operation.result());
@@ -867,9 +900,11 @@ TEST_SUITE("roundtrip/resumable") {
                 auto         source = make_input_source(storage);
                 T            actual;
                 auto         operation = make_resumable_decoder<contextual_variant_codec>(source)(actual);
-                operation(std::span<const std::byte>{bytes}.first(cut));
+                storage.emplace_back(std::span<const std::byte>{bytes}.first(cut));
+                operation.resume();
                 if (!operation.done()) {
-                    operation(std::span<const std::byte>{bytes}.subspan(cut), end_of_input);
+                    storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
+                    operation.finish();
                 }
 
                 REQUIRE(operation.result());
@@ -900,7 +935,8 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<int> values;
         auto             operation = make_resumable_decoder(source)(number, text, values);
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
             CHECK(operation.done() == (index + 1 == bytes.size()));
         }
 
@@ -921,7 +957,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto              source = make_input_source(storage);
         resumable_message actual;
         auto              operation = make_resumable_decoder(source)(actual);
-        operation(std::span{chunks}, end_of_input);
+        storage.insert(storage.end(), chunks.begin(), chunks.end());
+        operation.finish();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
@@ -938,23 +975,31 @@ TEST_SUITE("roundtrip/resumable") {
         auto                    operation = make_resumable_decoder(source)(actual);
 
         // Nested normal decoder calls succeed before the final string is complete.
-        operation(std::span<const std::byte>{bytes}.first(bytes.size() - 1));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(bytes.size() - 1));
+
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(actual.completed.empty());
         CHECK(actual.text.empty());
         CHECK(std::ranges::distance(operation.remaining_input()) == static_cast<std::ptrdiff_t>(bytes.size() - 1));
         const auto attempts = actual.attempts;
 
-        operation(std::span<const std::byte>{});
-        CHECK(actual.attempts == attempts);
-        operation(std::span<const std::byte>{bytes}.last(1), end_of_input);
+        storage.emplace_back(std::span<const std::byte>{});
+
+        operation.resume();
+        // Explicit resumption retries the ordinary call even without new bytes.
+        CHECK(actual.attempts == attempts + 1);
+        CHECK(actual.completed.empty());
+        CHECK(operation.committed_bytes() == 0);
+        storage.emplace_back(std::span<const std::byte>{bytes}.last(1));
+        operation.finish();
 
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
         CHECK(actual.number == expected.number);
         CHECK(actual.text == expected.text);
         CHECK(actual.completed == std::vector<std::uint32_t>{expected.number});
-        CHECK(actual.attempts == attempts + 1);
+        CHECK(actual.attempts == attempts + 2);
     }
 
     TEST_CASE("a supplied batch invokes an ordinary codec only after all chunks are visible") {
@@ -970,7 +1015,8 @@ TEST_SUITE("roundtrip/resumable") {
         retry_safe_record actual;
         auto              operation = make_resumable_decoder(source)(actual);
         const auto        attempts  = actual.attempts;
-        operation(chunks, end_of_input);
+        storage.insert(storage.end(), chunks.begin(), chunks.end());
+        operation.finish();
 
         REQUIRE(operation.result());
         CHECK(actual.attempts == attempts + 1);
@@ -986,18 +1032,24 @@ TEST_SUITE("roundtrip/resumable") {
         auto                            sink      = make_output_source(storage);
         auto                            operation = make_resumable_encoder(sink)(expected);
 
-        operation(std::span{bytes}.first(bytes.size() - 1));
+        storage.emplace_back(std::span{bytes}.first(bytes.size() - 1));
+
+        operation.resume();
         REQUIRE_FALSE(operation.done());
-        CHECK(std::ranges::empty(operation.produced()));
+        CHECK(operation.committed_bytes() == 0);
         const auto attempts = expected.attempts;
-        operation(std::span<std::byte>{});
-        CHECK(expected.attempts == attempts);
-        operation(std::span{bytes}.last(1));
+        storage.emplace_back(std::span<std::byte>{});
+        operation.resume();
+        // Explicit resumption retries but still cannot publish tentative writes.
+        CHECK(expected.attempts == attempts + 1);
+        CHECK(operation.committed_bytes() == 0);
+        storage.emplace_back(std::span{bytes}.last(1));
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
-        CHECK(expected.attempts == attempts + 1);
-        CHECK(std::ranges::distance(operation.produced()) == static_cast<std::ptrdiff_t>(bytes.size()));
+        CHECK(expected.attempts == attempts + 2);
+        CHECK(static_cast<std::ptrdiff_t>(operation.committed_bytes()) == static_cast<std::ptrdiff_t>(bytes.size()));
         std::tuple<std::uint32_t, std::string> actual;
         REQUIRE(make_decoder(bytes)(actual));
         CHECK(std::get<0>(actual) == expected.number);
@@ -1013,7 +1065,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                              operation = make_resumable_decoder(source)(actual);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.result());
@@ -1033,7 +1086,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                                           encoder = make_resumable_encoder(sink)(expected);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            encoder(std::span{bytes}.subspan(index, 1));
+            outputs.emplace_back(std::span{bytes}.subspan(index, 1));
+            encoder.resume();
         }
 
         REQUIRE(encoder.result());
@@ -1045,7 +1099,8 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<explicitly_resumable_record> actual;
         auto                                     decoder = make_resumable_decoder(source)(actual);
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            decoder(std::span<const std::byte>{bytes}.subspan(index, 1));
+            inputs.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            decoder.resume();
         }
 
         REQUIRE(decoder.result());
@@ -1067,9 +1122,11 @@ TEST_SUITE("roundtrip/resumable") {
                 auto         source = make_input_source(inputs);
                 T            actual;
                 auto         decoder = make_resumable_decoder(source)(actual);
-                decoder(std::span<const std::byte>{reference}.first(cut));
+                inputs.emplace_back(std::span<const std::byte>{reference}.first(cut));
+                decoder.resume();
                 if (!decoder.done()) {
-                    decoder(std::span<const std::byte>{reference}.subspan(cut), end_of_input);
+                    inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
+                    decoder.finish();
                 }
 
                 REQUIRE(decoder.result());
@@ -1084,9 +1141,11 @@ TEST_SUITE("roundtrip/resumable") {
                 auto                   sink              = make_output_source(outputs);
                 const auto             resumable_encodes = expected.resumable_encode_calls;
                 auto                   encoder           = make_resumable_encoder(sink)(expected);
-                encoder(std::span{bytes}.first(cut));
+                outputs.emplace_back(std::span{bytes}.first(cut));
+                encoder.resume();
                 if (!encoder.done()) {
-                    encoder(std::span{bytes}.subspan(cut));
+                    outputs.emplace_back(std::span{bytes}.subspan(cut));
+                    encoder.resume();
                 }
 
                 REQUIRE(encoder.result());
@@ -1117,9 +1176,11 @@ TEST_SUITE("roundtrip/resumable") {
             static_tag_metadata_record actual;
             const auto                 initial_decodes = metadata_tag_calls::decoded;
             auto                       decoder         = make_resumable_decoder<rvalue_metadata_tag_codec>(source)(actual);
-            decoder(std::span<const std::byte>{reference}.first(cut));
+            inputs.emplace_back(std::span<const std::byte>{reference}.first(cut));
+            decoder.resume();
             if (!decoder.done()) {
-                decoder(std::span<const std::byte>{reference}.subspan(cut), end_of_input);
+                inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
+                decoder.finish();
             }
 
             REQUIRE(decoder.result());
@@ -1135,9 +1196,11 @@ TEST_SUITE("roundtrip/resumable") {
             const auto             initial_encodes = metadata_tag_calls::encoded;
             const auto             initial_hooks   = expected.resumable_encode_calls;
             auto                   encoder         = make_resumable_encoder<rvalue_metadata_tag_codec>(sink)(expected);
-            encoder(std::span{bytes}.first(cut));
+            outputs.emplace_back(std::span{bytes}.first(cut));
+            encoder.resume();
             if (!encoder.done()) {
-                encoder(std::span{bytes}.subspan(cut));
+                outputs.emplace_back(std::span{bytes}.subspan(cut));
+                encoder.resume();
             }
 
             REQUIRE(encoder.result());
@@ -1159,8 +1222,10 @@ TEST_SUITE("roundtrip/resumable") {
         output_chunks                      outputs;
         auto                               sink    = make_output_source(outputs);
         auto                               encoder = make_resumable_encoder(sink)(expected);
-        encoder(std::span{bytes}.first(2));
-        encoder(std::span{bytes}.subspan(2));
+        outputs.emplace_back(std::span{bytes}.first(2));
+        encoder.resume();
+        outputs.emplace_back(std::span{bytes}.subspan(2));
+        encoder.resume();
 
         REQUIRE(encoder.result());
         CHECK(expected.ordinary_calls == ordinary_encodes);
@@ -1170,8 +1235,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto                         source = make_input_source(inputs);
         explicitly_transcoded_record actual;
         auto                         decoder = make_resumable_decoder(source)(actual);
-        decoder(std::span<const std::byte>{bytes}.first(3));
-        decoder(std::span<const std::byte>{bytes}.subspan(3));
+        inputs.emplace_back(std::span<const std::byte>{bytes}.first(3));
+        decoder.resume();
+        inputs.emplace_back(std::span<const std::byte>{bytes}.subspan(3));
+        decoder.resume();
 
         REQUIRE(decoder.result());
         CHECK(actual.number == expected.number);
@@ -1190,7 +1257,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                   operation = make_resumable_decoder(source)(bounded);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.result());
@@ -1208,7 +1276,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                   operation = make_resumable_decoder(source)(bounded);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.result());
@@ -1227,7 +1296,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto              operation = make_resumable_decoder_with_options<unwrapped_options>(source)(actual);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.result());
@@ -1247,7 +1317,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                                                   operation = make_resumable_decoder(source)(actual);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.result());
@@ -1273,7 +1344,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto                                   operation    = make_resumable_decoder(source)(bounded_text, actual_bytes);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
-            operation(std::span<const std::byte>{bytes}.subspan(index, 1));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+            operation.resume();
         }
 
         REQUIRE(operation.result());
@@ -1290,7 +1362,8 @@ TEST_SUITE("roundtrip/resumable") {
         auto         source    = make_input_source(storage);
         auto         generator = make_resumable_generator<int>(source);
         auto        &first     = generator.next();
-        generator(bytes, end_of_input);
+        storage.emplace_back(bytes);
+        generator.finish();
 
         REQUIRE(first.done());
         REQUIRE(first.result());

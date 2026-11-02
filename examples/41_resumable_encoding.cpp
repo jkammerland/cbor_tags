@@ -5,9 +5,8 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <deque>
 #include <iostream>
-#include <list>
-#include <ranges>
 #include <span>
 #include <string>
 
@@ -17,46 +16,40 @@ namespace ct = cbor::tags;
 message = tstr
 */
 int main() {
-    // This text needs 20 encoded bytes. Two bytes deliberately force suspension.
+    // Storage owns the bytes; append-only spans expose its available capacity.
+    std::array<std::byte, 64> storage;
+    std::deque<std::span<std::byte>> output;
+    auto encoder = ct::make_resumable_encoder(output);
     const std::string sent = "ready for transport";
-    std::array<std::byte, 2> first{};
-    std::array<std::byte, 64> second{};
+    auto operation = encoder(sent);
 
-    // The sink tracks written and committed positions across borrowed buffers.
-    std::list<std::span<std::byte>> chunks;
-    auto sink = ct::make_output_source(chunks);
-    auto operation = ct::make_resumable_encoder(sink)(sent);
-
-    // Supply writable space, then observe that the encoder needs more.
-    const auto first_state = operation(first);
+    output.push_back(std::span{storage}.first(4));
+    const auto first_state = operation.resume();
     assert(first_state == ct::resume_state::need_output);
-    assert(chunks.size() == 1);
 
-    const auto final_state = operation(second);
+    output.push_back(std::span{storage}.subspan(4));
+    const auto final_state = operation.resume();
     assert(final_state == ct::resume_state::done);
-    assert(chunks.size() == 2);
 
-    // produced() excludes unused capacity and any uncommitted writes.
+    // Progress counts committed bytes, independently of the storage's capacity.
     const auto result = operation.result();
     assert(result);
-    auto produced = operation.produced();
-    const auto written = static_cast<std::size_t>(std::ranges::distance(produced));
-    const auto unused =
-        static_cast<std::size_t>(std::ranges::distance(operation.remaining_output()));
-    assert(*result > first.size());
-    assert(*result == written);
-    assert(written + unused == first.size() + second.size());
+    assert(*result == operation.committed_bytes());
+    auto committed = std::span<const std::byte>{storage}.first(operation.committed_bytes());
 
-    // Decode the committed bytes while both backing buffers and the sink are alive.
+    // Decode the committed prefix directly from the caller-owned container.
+    auto decoder = ct::make_decoder(committed);
     std::string received;
-    auto decoder = ct::make_decoder(produced);
     const auto decoded = decoder(received);
     assert(decoded);
     assert(received == sent);
-    assert(decoder.tell() == produced.end());
+    assert(decoder.tell() == committed.end());
+
+    // Keep the descriptors and storage alive. Publishing does not authorize
+    // pop_front(); reclaiming capacity needs a custom source (example 46).
 
     std::cout << "received: " << received << '\n';
-    std::cout << "encoded bytes: " << written << '\n';
-    std::cout << "encoded: " << example::to_hex(produced) << '\n';
+    std::cout << "encoded bytes: " << operation.committed_bytes() << '\n';
+    std::cout << "encoded: " << example::to_hex(committed) << '\n';
     return 0;
 }

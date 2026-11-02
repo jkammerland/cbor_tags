@@ -68,9 +68,13 @@ template <typename T> void check_integer_array_splits(std::string_view hex, cons
         auto           source = make_input_source(storage);
         std::vector<T> actual;
         auto           operation = make_resumable_decoder(source)(actual);
-        operation(std::span<const std::byte>{}, input.first(cut));
+        storage.emplace_back(std::span<const std::byte>{});
+        storage.emplace_back(input.first(cut));
+        operation.resume();
         REQUIRE_FALSE(operation.done());
-        operation(std::span<const std::byte>{}, input.subspan(cut));
+        storage.emplace_back(std::span<const std::byte>{});
+        storage.emplace_back(input.subspan(cut));
+        operation.resume();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
@@ -96,12 +100,14 @@ TEST_SUITE("cbor_wire/resumable") {
             input_chunks storage;
             auto         source    = make_input_source(storage);
             auto         operation = make_resumable_decoder(source)(actual);
-            operation(std::span<const std::byte>{bytes}.first(2));
+            storage.emplace_back(std::span<const std::byte>{bytes}.first(2));
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual.size() == previous_capacity);
             CHECK(actual.requested == std::min<std::size_t>(2 * previous_capacity, actual.max_size()));
             const auto capacity = actual.capacity();
-            operation(std::span<const std::byte>{bytes}.subspan(2));
+            storage.emplace_back(std::span<const std::byte>{bytes}.subspan(2));
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
@@ -126,7 +132,8 @@ TEST_SUITE("cbor_wire/resumable") {
             input_chunks storage;
             auto         source    = make_input_source(storage);
             auto         operation = make_resumable_decoder(source)(actual);
-            operation(header);
+            storage.emplace_back(header);
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual == prefix);
             CHECK(actual.capacity() >= prefix.size() + payload.size());
@@ -134,7 +141,8 @@ TEST_SUITE("cbor_wire/resumable") {
             const auto capacity     = actual.capacity();
             const auto payload_size = truncated ? 3U : payload.size();
             for (const auto &byte : std::span{payload}.first(payload_size)) {
-                operation(std::span{&byte, 1});
+                storage.emplace_back(std::span{&byte, 1});
+                operation.resume();
                 CHECK(resource.allocations == 1U);
                 CHECK(actual.capacity() == capacity);
             }
@@ -148,7 +156,8 @@ TEST_SUITE("cbor_wire/resumable") {
                 REQUIRE_FALSE(operation.result());
                 CHECK(operation.result().error() == status_code::incomplete);
             } else {
-                operation(end);
+                storage.emplace_back(end);
+                operation.resume();
                 REQUIRE(operation.done());
                 REQUIRE(operation.result());
                 CHECK(*operation.result() == header.size() + payload.size() + 1);
@@ -175,13 +184,15 @@ TEST_SUITE("cbor_wire/resumable") {
         input_chunks storage;
         auto         source    = make_input_source(storage);
         auto         operation = make_resumable_decoder(source)(actual);
-        operation(input.first(1));
+        storage.emplace_back(input.first(1));
+        operation.resume();
 
         for (std::size_t index = 0; index < count; ++index) {
             CAPTURE(index);
             const auto capacity    = actual.capacity();
             const auto allocations = resource.allocations;
-            operation(input.subspan(1 + 2 * index, 1));
+            storage.emplace_back(input.subspan(1 + 2 * index, 1));
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual.size() == index);
             CHECK(actual.capacity() >= index + 1);
@@ -192,10 +203,12 @@ TEST_SUITE("cbor_wire/resumable") {
                 CHECK(actual.capacity() >= 2 * capacity);
             }
             const auto reserved_allocations = resource.allocations;
-            operation(input.subspan(2 + 2 * index, 1));
+            storage.emplace_back(input.subspan(2 + 2 * index, 1));
+            operation.resume();
             CHECK(resource.allocations == reserved_allocations);
         }
-        operation(input.subspan(1 + 2 * count));
+        storage.emplace_back(input.subspan(1 + 2 * count));
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == 2 * count + 2);
@@ -216,7 +229,8 @@ TEST_SUITE("cbor_wire/resumable") {
         SUBCASE("incomplete child header") {
             const auto bytes     = to_bytes(outer + major + "8");
             auto       operation = make_resumable_decoder(source)(actual);
-            operation(bytes, end_of_input);
+            storage.emplace_back(bytes);
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);
@@ -225,7 +239,8 @@ TEST_SUITE("cbor_wire/resumable") {
         SUBCASE("wrong child major") {
             const auto bytes     = to_bytes(outer + (IsTextString<T> ? "5840" : "7840"));
             auto       operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::malformed_structure);
@@ -234,7 +249,8 @@ TEST_SUITE("cbor_wire/resumable") {
         SUBCASE("nested indefinite child") {
             const auto bytes     = to_bytes(outer + outer);
             auto       operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::malformed_structure);
@@ -244,7 +260,8 @@ TEST_SUITE("cbor_wire/resumable") {
             const auto bytes     = to_bytes(outer + major + "840");
             auto       bounded   = as_bounded_size<0, 32>(actual);
             auto       operation = make_resumable_decoder(source)(bounded);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::size_limit_exceeded);
@@ -254,7 +271,8 @@ TEST_SUITE("cbor_wire/resumable") {
             resource.refuse      = true;
             const auto bytes     = to_bytes(outer + major + "840");
             auto       operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::out_of_memory);
@@ -264,7 +282,8 @@ TEST_SUITE("cbor_wire/resumable") {
             resource.refuse      = true;
             const auto bytes     = to_bytes(outer + major + "bffffffffffffffff");
             auto       operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::out_of_memory);
@@ -280,7 +299,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto                  source = make_input_source(storage);
             std::deque<std::byte> actual{std::byte{0xaa}};
             auto                  operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == 7U);
@@ -292,7 +312,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto         source = make_input_source(storage);
             std::array   actual{std::byte{0xaa}, std::byte{0xbb}, std::byte{0xcc}};
             auto         operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::unexpected_group_size);
@@ -313,7 +334,8 @@ TEST_SUITE("cbor_wire/resumable") {
                 auto         source = make_input_source(storage);
                 Map          actual{{99, 100}};
                 auto         operation = make_resumable_decoder(source)(actual);
-                operation(input.first(cut));
+                storage.emplace_back(input.first(cut));
+                operation.resume();
                 REQUIRE_FALSE(operation.done());
 
                 Map committed{{99, 100}};
@@ -329,7 +351,11 @@ TEST_SUITE("cbor_wire/resumable") {
                 }
                 CHECK(to_hex(operation.remaining_input()) == to_hex(input.subspan(committed_bytes, cut - committed_bytes)));
 
-                operation(std::span<const std::byte>{}, input.subspan(cut));
+                storage.emplace_back(std::span<const std::byte>{});
+
+                storage.emplace_back(input.subspan(cut));
+
+                operation.resume();
                 REQUIRE(operation.done());
                 REQUIRE(operation.result());
                 CHECK(*operation.result() == item_size);
@@ -350,15 +376,19 @@ TEST_SUITE("cbor_wire/resumable") {
                 output_chunks          storage;
                 auto                   sink      = make_output_source(storage);
                 auto                   operation = make_resumable_encoder(sink)(value);
-                operation(std::span{bytes}.first(cut));
+                storage.emplace_back(std::span{bytes}.first(cut));
+                operation.resume();
                 std::size_t committed_bytes{};
                 for (const auto boundary : {1U, 3U, 6U, 8U, 13U, 14U}) {
                     if (boundary <= cut && boundary <= wire.size())
                         committed_bytes = boundary;
                 }
-                CHECK(to_hex(operation.produced()) == to_hex(std::span{wire}.first(committed_bytes)));
-                if (!operation.done())
-                    operation(std::span{bytes}.subspan(cut));
+                CHECK(to_hex(std::ranges::subrange(sink.begin(), sink.committed_position())) ==
+                      to_hex(std::span{wire}.first(committed_bytes)));
+                if (!operation.done()) {
+                    storage.emplace_back(std::span{bytes}.subspan(cut));
+                    operation.resume();
+                }
                 REQUIRE(operation.done());
                 REQUIRE(operation.result());
                 CHECK(*operation.result() == wire.size());
@@ -378,7 +408,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto                source = make_input_source(storage);
             ordered_integer_map actual{{99, 100}};
             auto                operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual == ordered_integer_map{{99, 100}});
             CHECK(to_hex(operation.remaining_input()) == "1901");
@@ -400,7 +431,8 @@ TEST_SUITE("cbor_wire/resumable") {
             ordered_integer_map actual;
             auto                bounded   = as_bounded_size<Minimum, Maximum>(actual);
             auto                operation = make_resumable_decoder(source)(bounded);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             const auto result = operation.result();
             CHECK((result ? status_code::success : result.error()) == expected_status);
@@ -433,7 +465,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto                                   source = make_input_source(storage);
             std::map<std::uint32_t, std::uint32_t> actual;
             auto operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
-            operation(bytes, end_of_input);
+            storage.emplace_back(bytes);
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == test.status);
@@ -462,9 +495,12 @@ TEST_SUITE("cbor_wire/resumable") {
             auto                       source = make_input_source(storage);
             std::vector<std::uint32_t> actual;
             auto                       operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
-            operation(input.first(cut));
-            if (!operation.done())
-                operation(input.subspan(cut), end_of_input);
+            storage.emplace_back(input.first(cut));
+            operation.resume();
+            if (!operation.done()) {
+                storage.emplace_back(input.subspan(cut));
+                operation.finish();
+            }
 
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
@@ -483,7 +519,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto             indefinite = as_indefinite{actual};
             auto             bounded    = as_bounded_size<Minimum, Maximum>(indefinite);
             auto             operation  = make_resumable_decoder(source)(bounded);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             const auto result = operation.result();
             CHECK((result ? status_code::success : result.error()) == expected_status);
@@ -502,7 +539,8 @@ TEST_SUITE("cbor_wire/resumable") {
         std::vector<int> actual;
         auto             bounded   = as_bounded_size<0, 0>(actual);
         auto             operation = make_resumable_decoder(source)(bounded);
-        operation(empty);
+        storage.emplace_back(empty);
+        operation.resume();
         REQUIRE(operation.result());
         CHECK(*operation.result() == 2U);
         CHECK(actual.empty());
@@ -516,7 +554,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto             source = make_input_source(storage);
             std::vector<int> actual;
             auto             operation = make_resumable_decoder(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual == expected);
             operation.finish();
@@ -544,7 +583,8 @@ TEST_SUITE("cbor_wire/resumable") {
             auto                       source = make_input_source(storage);
             std::vector<std::uint32_t> actual;
             auto                       operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
-            operation(bytes);
+            storage.emplace_back(bytes);
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == expected_status);

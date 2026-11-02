@@ -12,10 +12,33 @@
 #include <list>
 #include <ranges>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 using namespace cbor::tags;
+
+namespace {
+
+// A typed-array trait can describe a value without a default constructor.
+struct non_default_typed_word {
+    std::uint32_t value;
+
+    non_default_typed_word() = delete;
+    explicit constexpr non_default_typed_word(std::uint32_t initial) noexcept : value(initial) {}
+};
+
+static_assert(std::is_trivially_copyable_v<non_default_typed_word>);
+static_assert(!std::is_default_constructible_v<non_default_typed_word>);
+
+} // namespace
+
+namespace cbor::tags::rfc8746 {
+
+template <typed_array_byte_order Order>
+struct typed_array_traits<non_default_typed_word, Order> : typed_array_traits<std::uint32_t, Order> {};
+
+} // namespace cbor::tags::rfc8746
 
 namespace {
 
@@ -81,15 +104,17 @@ template <typename Array, typename EncodeValue> void check_typed_array_encode_sp
         output_chunks          chunks;
         auto                   sink      = make_output_source(chunks);
         auto                   operation = make_resumable_encoder<codec::typed_array>(sink)(value);
-        operation(std::span{bytes}.first(cut));
+        chunks.emplace_back(std::span{bytes}.first(cut));
+        operation.resume();
         if (!operation.done()) {
-            operation(std::span{bytes}.subspan(cut), end_of_input);
+            chunks.emplace_back(std::span{bytes}.subspan(cut));
+            operation.finish();
         }
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == size);
-        CHECK(std::ranges::distance(operation.produced()) == static_cast<std::ptrdiff_t>(size));
+        CHECK(static_cast<std::ptrdiff_t>(operation.committed_bytes()) == static_cast<std::ptrdiff_t>(size));
         CHECK(std::ranges::empty(operation.remaining_output()));
 
         Array actual;
@@ -107,9 +132,11 @@ template <typename Array> void check_typed_array_splits(const Array &expected) {
         auto         source = make_input_source(chunks);
         Array        actual;
         auto         operation = make_resumable_decoder<codec::typed_array>(source)(actual);
-        operation(input.first(cut));
+        chunks.emplace_back(input.first(cut));
+        operation.resume();
         if (!operation.done()) {
-            operation(input.subspan(cut), end_of_input);
+            chunks.emplace_back(input.subspan(cut));
+            operation.finish();
         }
 
         REQUIRE(operation.done());
@@ -148,6 +175,30 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_typed_array") {
+    TEST_CASE("opposite endian typed arrays preserve non default constructible elements at every split") {
+        constexpr auto order =
+            std::endian::native == std::endian::little ? rfc8746::typed_array_byte_order::big : rfc8746::typed_array_byte_order::little;
+        const rfc8746::typed_array<std::uint32_t, order> expected{0, 0x12345678, 0xffffffff};
+        const auto                                       bytes = typed_array_bytes(expected);
+
+        for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+            CAPTURE(cut);
+            std::vector<std::byte>                              input(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(cut));
+            auto                                                decoder = make_resumable_decoder<codec::typed_array>(input);
+            rfc8746::typed_array<non_default_typed_word, order> actual;
+            auto                                                operation = decoder(actual);
+
+            input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
+            const auto state = operation.finish();
+            REQUIRE(state == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+            REQUIRE(actual.values().size() == expected.values().size());
+            for (std::size_t index = 0; index != expected.values().size(); ++index)
+                CHECK(actual.values()[index].value == expected.values()[index]);
+        }
+    }
+
     TEST_CASE("owning typed arrays preserve integer and floating representations at every transport split") {
         check_typed_array_splits(rfc8746::typed_array<std::uint8_t>{0, 1, 127, 255});
         check_typed_array_splits(rfc8746::typed_array<std::int8_t>{-128, -1, 0, 127});
@@ -204,7 +255,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
             auto                   operation = make_operation(sink);
             REQUIRE_FALSE(operation.done());
             for (auto &byte : output) {
-                operation(std::span{&byte, 1});
+                chunks.emplace_back(std::span{&byte, 1});
+                operation.resume();
             }
             REQUIRE(operation.done());
             REQUIRE(operation.result());
@@ -235,7 +287,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         array_type             actual;
         auto                   decoder = make_resumable_decoder<codec::typed_array>(source)(actual);
         for (auto iterator = linked.cbegin(); iterator != linked.cend(); ++iterator) {
-            decoder(input_chunk{iterator, std::next(iterator)});
+            input_storage.emplace_back(input_chunk{iterator, std::next(iterator)});
+            decoder.resume();
         }
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
@@ -249,7 +302,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto                    sink    = make_output_source(output_storage);
         auto                    encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
         for (auto iterator = output.begin(); iterator != output.end(); ++iterator) {
-            encoder(output_chunk{iterator, std::next(iterator)});
+            output_storage.emplace_back(output_chunk{iterator, std::next(iterator)});
+            encoder.resume();
         }
         REQUIRE(encoder.done());
         REQUIRE(encoder.result());
@@ -279,16 +333,19 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         static_assert(!std::ranges::sized_range<decltype(source)>);
         array_type actual;
         auto       operation = make_resumable_decoder<codec::typed_array>(source)(actual);
-        operation(counted_input_chunk{counted_typed_array_iterator{header.cbegin(), &increments},
-                                      counted_typed_array_iterator{header.cend(), &increments}});
+        chunks.emplace_back(counted_input_chunk{counted_typed_array_iterator{header.cbegin(), &increments},
+                                                counted_typed_array_iterator{header.cend(), &increments}});
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(actual.values().empty());
         CHECK(actual.values().capacity() >= expected.values().size());
         CHECK(increments == header.size());
 
         // A complete admitted payload catches both prewalks and repeated decoding.
-        operation(counted_input_chunk{counted_typed_array_iterator{payload.cbegin(), &increments},
-                                      counted_typed_array_iterator{payload.cend(), &increments}});
+        chunks.emplace_back(counted_input_chunk{counted_typed_array_iterator{payload.cbegin(), &increments},
+                                                counted_typed_array_iterator{payload.cend(), &increments}});
+
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
@@ -310,7 +367,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         array_type   actual;
         auto         decoder = make_resumable_decoder<codec::typed_array>(source)(actual);
         for (const auto &byte : reference) {
-            decoder(std::span{&byte, 1});
+            chunks.emplace_back(std::span{&byte, 1});
+            decoder.resume();
         }
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
@@ -321,7 +379,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto                   sink    = make_output_source(output_storage);
         auto                   encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
         for (auto &byte : output) {
-            encoder(std::span{&byte, 1});
+            output_storage.emplace_back(std::span{&byte, 1});
+            encoder.resume();
         }
         REQUIRE(encoder.result());
         CHECK(*encoder.result() == output.size());
@@ -339,7 +398,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         output_chunks          output_storage;
         auto                   sink    = make_output_source(output_storage);
         auto                   encoder = make_resumable_encoder<typed_array_override, codec::typed_array>(sink)(expected);
-        encoder(std::span{output}, end_of_input);
+        output_storage.emplace_back(std::span{output});
+        encoder.finish();
         REQUIRE(encoder.result());
         CHECK(*encoder.result() == reference.size());
 
@@ -347,7 +407,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto                                source = make_input_source(input_storage);
         rfc8746::typed_array<std::uint32_t> actual;
         auto                                decoder = make_resumable_decoder<typed_array_override, codec::typed_array>(source)(actual);
-        decoder(std::span<const std::byte>{output}, end_of_input);
+        input_storage.emplace_back(std::span<const std::byte>{output});
+        decoder.finish();
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
         check_typed_array_values(actual, expected);

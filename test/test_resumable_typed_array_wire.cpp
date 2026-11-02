@@ -43,9 +43,11 @@ void check_bad_typed_array_header(std::initializer_list<std::byte> bytes, status
         array_type   actual{99};
         auto         operation = make_resumable_decoder<codec::typed_array>(source)(actual);
         const auto   input     = std::span{bytes.begin(), bytes.size()};
-        operation(input.first(cut));
+        chunks.emplace_back(input.first(cut));
+        operation.resume();
         if (!operation.done()) {
-            operation(input.subspan(cut), end_of_input);
+            chunks.emplace_back(input.subspan(cut));
+            operation.finish();
         }
         REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
@@ -68,9 +70,11 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             auto         source = make_input_source(chunks);
             float_array  actual;
             auto         decoder = make_resumable_decoder<codec::typed_array>(source)(actual);
-            decoder(std::span{bytes}.first(cut));
+            chunks.emplace_back(std::span{bytes}.first(cut));
+            decoder.resume();
             if (!decoder.done()) {
-                decoder(std::span{bytes}.subspan(cut), end_of_input);
+                chunks.emplace_back(std::span{bytes}.subspan(cut));
+                decoder.finish();
             }
             REQUIRE(decoder.result());
             REQUIRE(actual.values().size() == 2);
@@ -81,9 +85,11 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             output_chunks                       output_storage;
             auto                                sink    = make_output_source(output_storage);
             auto                                encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
-            encoder(std::span{output}.first(cut));
+            output_storage.emplace_back(std::span{output}.first(cut));
+            encoder.resume();
             if (!encoder.done()) {
-                encoder(std::span{output}.subspan(cut), end_of_input);
+                output_storage.emplace_back(std::span{output}.subspan(cut));
+                encoder.finish();
             }
             REQUIRE(encoder.result());
             CHECK(output == bytes);
@@ -107,9 +113,11 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             auto         source = make_input_source(chunks);
             array_type   actual{99};
             auto         decoder = make_resumable_decoder<rejecting_typed_array_tag, codec::typed_array>(source)(actual);
-            decoder(std::span{encoded}.first(cut));
+            chunks.emplace_back(std::span{encoded}.first(cut));
+            decoder.resume();
             if (!decoder.done()) {
-                decoder(std::span{encoded}.subspan(cut), end_of_input);
+                chunks.emplace_back(std::span{encoded}.subspan(cut));
+                decoder.finish();
             }
             REQUIRE(decoder.done());
             REQUIRE_FALSE(decoder.result());
@@ -126,7 +134,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         REQUIRE(encoder.done());
         REQUIRE_FALSE(encoder.result());
         CHECK(encoder.result().error() == status_code::size_limit_exceeded);
-        CHECK(std::ranges::empty(encoder.produced()));
+        CHECK(encoder.committed_bytes() == 0);
         CHECK(sink.committed_position().offset() == 0);
     }
 
@@ -137,7 +145,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             auto         source = make_input_source(chunks);
             array_type   actual{99};
             auto         operation = make_resumable_decoder<codec::typed_array>(source)(actual);
-            operation(std::span{encoded}.first(cut), end_of_input);
+            chunks.emplace_back(std::span{encoded}.first(cut));
+            operation.finish();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);
@@ -164,7 +173,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         auto             source = make_input_source(chunks);
         array_type       actual{99};
         auto             operation = make_resumable_decoder<codec::typed_array>(source)(actual);
-        operation(std::span{header});
+        chunks.emplace_back(std::span{header});
+        operation.resume();
         CHECK_FALSE(operation.done());
         CHECK(actual.values().empty());
         CHECK(actual.values().capacity() >= 1024);
@@ -176,7 +186,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         auto             empty_source = make_input_source(empty_chunks);
         array_type       empty_actual{99};
         auto             empty_operation = make_resumable_decoder<codec::typed_array>(empty_source)(empty_actual);
-        empty_operation(std::span{empty});
+        empty_chunks.emplace_back(std::span{empty});
+        empty_operation.resume();
         REQUIRE(empty_operation.done());
         REQUIRE(empty_operation.result());
         CHECK(*empty_operation.result() == empty.size());
@@ -191,7 +202,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         auto             source = make_input_source(chunks);
         array_type       actual;
         auto             operation = make_resumable_decoder<codec::typed_array>(source)(actual);
-        operation(std::span{header});
+        chunks.emplace_back(std::span{header});
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
         if constexpr (sizeof(std::size_t) < sizeof(std::uint64_t)) {
@@ -212,7 +224,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         array_type   actual;
         {
             auto operation = make_resumable_decoder<codec::typed_array>(source)(actual);
-            operation(std::span<const std::byte>{bytes}, end_of_input);
+            chunks.emplace_back(std::span<const std::byte>{bytes});
+            operation.finish();
             REQUIRE(operation.result());
             CHECK(*operation.result() == encoded.size());
             CHECK(actual.values() == std::vector<std::uint16_t>{0x1234, 0xabcd});
@@ -235,7 +248,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             output_chunks          chunks;
             auto                   sink      = make_output_source(chunks);
             auto                   operation = make_resumable_encoder<codec::typed_array>(sink)(expected);
-            operation(std::span{bytes}, end_of_input);
+            chunks.emplace_back(std::span{bytes});
+            operation.finish();
             REQUIRE(operation.done());
             if (size == encoded.size()) {
                 REQUIRE(operation.result());
@@ -246,9 +260,55 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
                 CHECK(operation.result().error() == status_code::incomplete);
                 const auto committed = size < 3 ? 0 : 3 + ((size - 3) / 2) * 2;
                 CHECK(sink.committed_position().offset() == committed);
-                CHECK(std::ranges::distance(operation.produced()) == static_cast<std::ptrdiff_t>(committed));
-                CHECK(std::ranges::equal(operation.produced(), std::span{encoded}.first(committed)));
+                CHECK(static_cast<std::ptrdiff_t>(operation.committed_bytes()) == static_cast<std::ptrdiff_t>(committed));
+                CHECK(std::ranges::equal(std::ranges::subrange(sink.begin(), sink.committed_position()),
+                                         std::span{encoded}.first(committed)));
             }
         }
+    }
+}
+
+TEST_SUITE("cbor_wire/resumable_typed_array") {
+    TEST_CASE("abandoning a pending typed encode discards its partial element") {
+        const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{0x11223344}};
+        std::vector<std::byte>                    reference;
+        REQUIRE(make_encoder<codec::typed_array>(reference)(expected));
+        const auto                      header_size = reference.size() - sizeof(std::uint32_t);
+        std::vector<std::byte>          first(header_size + 1);
+        std::vector<std::byte>          second(16);
+        std::list<std::span<std::byte>> chunks{std::span{first}};
+        auto                            sink = make_output_source(chunks);
+
+        std::array<std::byte, 16>       replacement_bytes;
+        std::list<std::span<std::byte>> replacement_chunks{std::span{replacement_bytes}};
+        auto                            replacement_sink = make_output_source(replacement_chunks);
+
+        {
+            auto operation = make_resumable_encoder<codec::typed_array>(sink)(expected);
+            REQUIRE_FALSE(operation.done());
+            REQUIRE(operation.committed_bytes() == header_size);
+            REQUIRE(sink.position().offset() == first.size());
+
+            SUBCASE("destruction") {}
+            SUBCASE("move assignment") {
+                operation = make_resumable_encoder<codec::typed_array>(replacement_sink)(42);
+                REQUIRE(operation.done());
+                REQUIRE(operation.result());
+                CHECK(sink.position() == sink.committed_position());
+            }
+        }
+        CHECK(sink.position() == sink.committed_position());
+
+        chunks.emplace_back(second);
+        auto next = make_resumable_encoder(sink)(42);
+        REQUIRE(next.done());
+        REQUIRE(next.result());
+        std::vector<std::byte> scalar;
+        REQUIRE(make_encoder(scalar)(42));
+        reference.resize(header_size);
+        reference.insert(reference.end(), scalar.begin(), scalar.end());
+        auto committed = std::ranges::subrange(sink.begin(), sink.committed_position());
+        CHECK(std::ranges::equal(committed, reference));
+        CHECK(next.committed_bytes() == scalar.size());
     }
 }

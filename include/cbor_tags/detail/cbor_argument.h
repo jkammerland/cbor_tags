@@ -130,6 +130,11 @@ template <typename EmitByte> constexpr void emit_cbor_major_argument(std::uint64
 }
 
 template <typename Appender, typename OutputBuffer, typename Byte>
+// Keep the append cursor and destination pointer local to per-element loops
+// when additional codec instantiations change the compiler's inlining budget.
+#if defined(__GNUC__) || defined(__clang__)
+[[gnu::always_inline]]
+#endif
 constexpr void append_cbor_major_argument(Appender &appender, OutputBuffer &output, std::uint64_t value, Byte major_type) {
     using output_byte = typename std::remove_cvref_t<OutputBuffer>::value_type;
     const auto major  = cbor_byte_to_u8(major_type);

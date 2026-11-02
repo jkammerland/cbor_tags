@@ -244,12 +244,14 @@ template <typename T> struct appender<T, true> {
         }
     }
 
-    template <typename... Ts> constexpr void multi_append(T &container, Ts &&...values) {
+    // Byte operands need no reference identity. Values avoid addressable
+    // temporaries when a scalar writer is emitted as a separate function.
+    template <typename... Ts> constexpr void multi_append(T &container, Ts... values) {
         static_assert(sizeof...(Ts) > 1, "multi_append requires at least 2 arguments, use operator() for single values");
         constexpr bool all_1_byte = ((sizeof(Ts) == 1) && ...);
         static_assert(all_1_byte, "multi_append requires all arguments to be 1 byte types");
         ensure_capacity(container, static_cast<size_type>(sizeof...(Ts)));
-        ((container[head_++] = std::forward<Ts>(values)), ...);
+        ((container[head_++] = values), ...);
     }
 
     constexpr void operator()(T &container, value_type value) {
@@ -329,6 +331,44 @@ template <typename T> struct reader_size_type<T, false, true> {
     using type = std::ranges::range_size_t<const std::remove_cvref_t<T>>;
 };
 
+template <typename T, typename Position>
+concept HasRemainingInputSize = requires(const T &input, const Position &position) {
+    { input.remaining_size(position) } -> std::convertible_to<std::size_t>;
+};
+
+// Only library-owned positions opt into these internal fast paths. User
+// iterators may have unrelated members with the same operation names.
+struct bulk_input_position_tag {};
+
+template <typename Position>
+concept BuiltinBulkInputPosition =
+    requires { typename Position::bulk_input_tag; } && std::same_as<typename Position::bulk_input_tag, bulk_input_position_tag>;
+
+template <typename Position>
+concept HasBulkUnsignedRead = BuiltinBulkInputPosition<Position> && requires(Position &position, std::size_t count) {
+    { position.read_unsigned(count) } -> std::same_as<std::uint64_t>;
+};
+
+template <typename Position>
+concept HasBulkByteRead = BuiltinBulkInputPosition<Position> && requires(Position &position, std::span<std::byte> bytes) {
+    { position.read_bytes(bytes) } -> std::same_as<std::size_t>;
+};
+
+template <typename T>
+concept HasOutputPositionOffset = requires(const T &output) {
+    { output.position().offset() } -> std::integral;
+};
+
+template <typename T>
+concept HasOutputTotalSize = requires(const T &output) {
+    { output.total_size() } -> std::integral;
+};
+
+template <typename T>
+concept OutputByteSegmentRange = std::ranges::forward_range<const T> && requires(std::ranges::range_reference_t<const T> segment) {
+    { segment.bytes() } -> std::same_as<std::span<const std::byte>>;
+};
+
 [[nodiscard]] constexpr auto negative_seek_magnitude(std::ptrdiff_t value) noexcept {
     using magnitude_type = std::make_unsigned_t<std::ptrdiff_t>;
     if (value == std::numeric_limits<std::ptrdiff_t>::min()) {
@@ -389,9 +429,18 @@ template <typename T> struct reader<T, false> {
     constexpr reader(const T &container) : position_(std::ranges::begin(container)) {}
 
     // Does not have random access so need to use iterator
-    constexpr bool empty(const T &container) const noexcept { return position_ == std::ranges::end(container); }
-    constexpr bool empty(const T &container, size_type offset) const noexcept {
-        if constexpr (std::ranges::sized_range<const T>) {
+    constexpr bool empty(const T &container) const {
+        // Logical sources can answer availability without rebinding an iterator.
+        if constexpr (HasRemainingInputSize<T, iterator>)
+            return container.remaining_size(position_) == 0;
+        else
+            return position_ == std::ranges::end(container);
+    }
+    constexpr bool empty(const T &container, size_type offset) const {
+        if constexpr (HasRemainingInputSize<T, iterator>) {
+            // A retained range may start after an already reclaimed prefix.
+            return offset >= container.remaining_size(position_);
+        } else if constexpr (std::ranges::sized_range<const T>) {
             const auto range_size = static_cast<size_type>(std::ranges::size(container));
             return current_offset_ >= range_size || offset >= (range_size - current_offset_);
         }
@@ -405,14 +454,24 @@ template <typename T> struct reader<T, false> {
         }
         return false;
     }
-    constexpr value_type read(const T &) noexcept {
+    constexpr value_type read(const T &) {
         auto result = static_cast<value_type>(*position_);
         ++position_;
         ++current_offset_;
         return result;
     }
 
-    constexpr value_type read(const T &, size_type offset) noexcept {
+    // Built-in segmented sources can traverse a scalar payload without
+    // reconstructing an indexed inner iterator for every byte.
+    constexpr std::uint64_t read_unsigned(const T &, std::size_t count)
+        requires HasBulkUnsignedRead<iterator>
+    {
+        const auto value = position_.read_unsigned(count);
+        current_offset_ += count;
+        return value;
+    }
+
+    constexpr value_type read(const T &, size_type offset) {
         auto it = position_;
         std::advance(it, static_cast<std::ptrdiff_t>(offset));
         return static_cast<value_type>(*it);

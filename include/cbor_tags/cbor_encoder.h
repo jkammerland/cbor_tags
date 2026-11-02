@@ -80,6 +80,11 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
         }
     }
 
+    // Preserve the caller's constant major type through the shared writer.
+    // Otherwise bulk loops can pay a generic helper call for every element.
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr void encode_major_and_size(std::uint64_t value, byte_type majorType) {
         detail::append_cbor_major_argument(appender_, data_, value, majorType);
     }
@@ -298,11 +303,10 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     [[nodiscard]] constexpr auto current_offset() const {
         if constexpr (IsFixedArray<OutputBuffer>) {
             return appender_.head_;
+        } else if constexpr (CborSegmentOutputBuffer<OutputBuffer> && detail::HasOutputPositionOffset<OutputBuffer>) {
+            return std::as_const(data_).position().offset();
         } else if constexpr (CborSegmentOutputBuffer<OutputBuffer>) {
-            if constexpr (std::ranges::forward_range<const OutputBuffer> &&
-                          requires(std::ranges::range_reference_t<const OutputBuffer> segment) {
-                              { segment.bytes() } -> std::same_as<std::span<const std::byte>>;
-                          }) {
+            if constexpr (detail::OutputByteSegmentRange<OutputBuffer>) {
                 // Borrowed segments can represent more bytes than native size_t.
                 // Measure their payload extents before narrowing the call's delta.
                 std::uintmax_t total{};
@@ -314,9 +318,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
                     total += size;
                 }
                 return total;
-            } else if constexpr (requires {
-                                     { std::as_const(data_).total_size() } -> std::integral;
-                                 }) {
+            } else if constexpr (detail::HasOutputTotalSize<OutputBuffer>) {
                 return std::as_const(data_).total_size();
             } else {
                 static_assert(always_false<OutputBuffer>::value,

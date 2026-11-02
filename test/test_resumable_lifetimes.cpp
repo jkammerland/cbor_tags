@@ -7,9 +7,12 @@
 #include <cstddef>
 #include <exception>
 #include <functional>
+#include <iterator>
 #include <list>
 #include <optional>
+#include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -84,6 +87,85 @@ struct hook_lifetime {
     int        *frames_destroyed{};
 };
 
+// Copyable source positions need not have nonthrowing assignment. Arm the
+// assignment failure only after ordinary decoding has reached its retry point.
+class throwing_position_input {
+  public:
+    struct position_type {
+        using value_type        = std::byte;
+        using difference_type   = std::ptrdiff_t;
+        using iterator_category = std::bidirectional_iterator_tag;
+        using iterator_concept  = std::bidirectional_iterator_tag;
+
+        const std::vector<std::byte> *bytes{};
+        const bool                   *throw_assignment{};
+        std::size_t                   absolute{};
+
+        position_type() = default;
+        position_type(const std::vector<std::byte> &storage, const bool &armed, std::size_t offset)
+            : bytes(&storage), throw_assignment(&armed), absolute(offset) {}
+        position_type(const position_type &) = default;
+        position_type &operator=(const position_type &other) {
+            if (other.throw_assignment && *other.throw_assignment)
+                throw std::runtime_error("position assignment is armed");
+            bytes            = other.bytes;
+            throw_assignment = other.throw_assignment;
+            absolute         = other.absolute;
+            return *this;
+        }
+
+        const std::byte &operator*() const { return (*bytes)[absolute]; }
+        position_type   &operator++() {
+            ++absolute;
+            return *this;
+        }
+        position_type operator++(int) {
+            auto previous = *this;
+            ++*this;
+            return previous;
+        }
+        position_type &operator--() {
+            --absolute;
+            return *this;
+        }
+        position_type operator--(int) {
+            auto previous = *this;
+            --*this;
+            return previous;
+        }
+        std::size_t offset() const { return absolute; }
+        friend bool operator==(const position_type &, const position_type &) = default;
+    };
+
+    explicit throwing_position_input(std::vector<std::byte> &storage) : storage_(storage) {}
+
+    position_type begin() const { return {storage_, throw_assignment, 0}; }
+    position_type end() const { return {storage_, throw_assignment, storage_.size()}; }
+    position_type committed_position() const noexcept { return {storage_, throw_assignment, committed_}; }
+    void          commit(position_type position) { committed_ = position.offset(); }
+    auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
+    bool          eof() const { return closed_; }
+    void          close() { closed_ = true; }
+    void          refresh() {}
+
+    void acquire() {
+        if (acquired)
+            throw std::logic_error("source already has an active operation");
+        acquired = true;
+    }
+    void release() noexcept { acquired = false; }
+
+    bool throw_assignment{};
+    bool acquired{};
+
+  private:
+    std::vector<std::byte> &storage_;
+    std::size_t             committed_{};
+    bool                    closed_{};
+};
+
+static_assert(ResumableInputSource<throwing_position_input>);
+
 template <typename Context> resumable<status_code> resumable_decode(Context &context, hook_lifetime &value) {
     struct frame_guard {
         int *destroyed;
@@ -96,6 +178,127 @@ template <typename Context> resumable<status_code> resumable_decode(Context &con
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_lifetimes") {
+
+    TEST_CASE("named factory retains an awaiting operation through move and inline destruction") {
+        const std::string      expected = "factory-owned cursor";
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder(bytes)(expected));
+        input_chunks chunks;
+        auto         decoder = make_resumable_decoder(chunks);
+        std::string  actual;
+        auto         original = std::optional{decoder(actual)};
+        chunks.emplace_back(std::span<const std::byte>{bytes}.first(2));
+        REQUIRE(original->resume() == resume_state::need_input);
+
+        std::optional<operation_result> result;
+        decltype(original)              moved;
+        auto                            consumer = await_result(*original, result, [&] { moved.reset(); });
+        moved.emplace(std::move(*original));
+        original.reset();
+        chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(2));
+        const auto state = moved->resume();
+
+        CHECK(state == resume_state::done);
+        CHECK_FALSE(moved);
+        REQUIRE(consumer.done());
+        CHECK_NOTHROW(consumer.rethrow());
+        REQUIRE(result);
+        REQUIRE(*result);
+        CHECK(**result == bytes.size());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("named factory cancellation completes its waiter and permits a subsequent operation") {
+        input_chunks chunks;
+        auto         decoder = make_resumable_decoder(chunks);
+        {
+            std::string                     pending;
+            auto                            operation = decoder(pending);
+            std::optional<operation_result> result;
+            bool                            resumed{};
+            auto                            consumer = await_result(operation, result, [&] { resumed = true; });
+            operation.cancel();
+            CHECK(resumed);
+            REQUIRE(consumer.done());
+            CHECK_NOTHROW(consumer.rethrow());
+            REQUIRE(result);
+            REQUIRE_FALSE(*result);
+            CHECK(result->error() == status_code::cancelled);
+        }
+
+        const int              expected = 65536;
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder(bytes)(expected));
+        int  actual{};
+        auto operation = decoder(actual);
+        chunks.emplace_back(bytes);
+        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(actual == expected);
+    }
+
+    TEST_CASE("input cancellation keeps committed progress without assigning a retired reader position") {
+        const int              first_expected  = 7;
+        const int              second_expected = 1000;
+        std::vector<std::byte> first_bytes;
+        std::vector<std::byte> bytes;
+        REQUIRE(make_encoder(first_bytes)(first_expected));
+        REQUIRE(make_encoder(bytes)(first_expected, second_expected));
+        std::vector<std::byte>  storage(bytes.begin(), bytes.end() - 1);
+        throwing_position_input source(storage);
+        auto                    decoder = make_resumable_decoder(source);
+
+        {
+            int  first{};
+            int  second{};
+            auto operation = decoder(first, second);
+            REQUIRE_FALSE(operation.done());
+            CHECK(first == first_expected);
+            const auto committed = operation.committed_bytes();
+            REQUIRE(committed == first_bytes.size());
+            REQUIRE(source.committed_position().offset() == committed);
+
+            std::size_t                     notifications{};
+            std::optional<operation_result> result;
+            auto                            consumer = await_result(operation, result, [&] { ++notifications; });
+            source.throw_assignment                  = true;
+
+            // Cancellation destroys the reader instead of resetting its position.
+            CHECK_NOTHROW(operation.cancel());
+            REQUIRE(operation.done());
+            REQUIRE(consumer.done());
+            CHECK_NOTHROW(consumer.rethrow());
+            REQUIRE(result);
+            REQUIRE_FALSE(*result);
+            CHECK(result->error() == status_code::cancelled);
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::cancelled);
+            CHECK(operation.committed_bytes() == committed);
+            CHECK(source.committed_position().offset() == committed);
+            CHECK(notifications == 1);
+
+            // Completion is terminal, but acquisition lasts until destruction.
+            CHECK_NOTHROW(operation.cancel());
+            CHECK(operation.resume() == resume_state::done);
+            CHECK(notifications == 1);
+            CHECK(source.acquired);
+            int rejected{};
+            CHECK_THROWS_AS(decoder(rejected), std::logic_error);
+        }
+
+        CHECK_FALSE(source.acquired);
+        source.throw_assignment = false;
+        storage.push_back(bytes.back());
+
+        // The same factory starts at the retained second integer, not the first.
+        int  second{};
+        auto next = decoder(second);
+        REQUIRE(next.done());
+        REQUIRE(next.result());
+        CHECK(*next.result() == bytes.size() - first_bytes.size());
+        CHECK(second == second_expected);
+        CHECK(source.committed_position().offset() == bytes.size());
+    }
 
     TEST_CASE("ready resumable results do not allocate a coroutine frame") {
         bool        ready{};
@@ -125,9 +328,11 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto                            consumer = await_result(operation, result, [&] { resumed = true; });
 
         REQUIRE_FALSE(consumer.done());
-        operation(std::span<const std::byte>{bytes}.first(1));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(1));
+        operation.resume();
         CHECK_FALSE(resumed);
-        operation(std::span<const std::byte>{bytes}.subspan(1));
+        storage.emplace_back(std::span<const std::byte>{bytes}.subspan(1));
+        operation.resume();
 
         CHECK(resumed);
         REQUIRE(consumer.done());
@@ -162,7 +367,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         std::optional<operation_result> result;
         auto                            consumer = await_result(*operation, result, std::move(on_complete));
         REQUIRE_FALSE(consumer.done());
-        (*operation)(bytes);
+        storage.emplace_back(bytes);
+        operation->resume();
 
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -190,7 +396,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto                            consumer = await_result(*operation, result, [&] { operation.reset(); });
 
         REQUIRE_FALSE(consumer.done());
-        (*operation)(bytes);
+        storage.emplace_back(bytes);
+        operation->resume();
 
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -221,7 +428,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         std::optional<operation_result> result;
         auto                            replacement = await_result(operation, result, [] {});
         REQUIRE_FALSE(replacement.done());
-        operation(bytes);
+        storage.emplace_back(bytes);
+        operation.resume();
 
         REQUIRE(replacement.done());
         CHECK_NOTHROW(replacement.rethrow());
@@ -239,14 +447,16 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto         source = make_input_source(storage);
         std::string  actual;
         auto         original = std::optional{make_resumable_decoder(source)(actual)};
-        original->operator()(std::span<const std::byte>{bytes}.first(3));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(3));
+        original->resume();
         std::optional<operation_result> result;
         auto                            consumer = await_result(*original, result, [] {});
         REQUIRE_FALSE(consumer.done());
 
         auto moved = std::move(*original);
         original.reset();
-        moved(std::span<const std::byte>{bytes}.subspan(3));
+        storage.emplace_back(std::span<const std::byte>{bytes}.subspan(3));
+        moved.resume();
 
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -265,7 +475,8 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         int           frames_destroyed{};
         hook_lifetime actual{{}, &frames_destroyed};
         auto          operation = make_resumable_decoder(source)(actual);
-        operation(std::span<const std::byte>{bytes}.first(2));
+        storage.emplace_back(std::span<const std::byte>{bytes}.first(2));
+        operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(frames_destroyed == 0);
 
@@ -316,13 +527,17 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         auto                       consumer = collect_values(generator, actual, consumed, failure);
         REQUIRE_FALSE(consumer.done());
 
-        SUBCASE("whole batch") { generator(bytes, end_of_input); }
+        SUBCASE("whole batch") {
+            storage.emplace_back(bytes);
+            generator.finish();
+        }
         SUBCASE("one byte at a time") {
             for (std::size_t index = 0; index < bytes.size(); ++index) {
-                generator(std::span<const std::byte>{bytes}.subspan(index, 1));
+                storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
+                generator.resume();
             }
             CHECK_FALSE(consumer.done());
-            generator(end_of_input);
+            generator.finish();
         }
 
         REQUIRE(consumer.done());
