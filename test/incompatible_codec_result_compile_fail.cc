@@ -31,12 +31,32 @@ struct incompatible_codec {
 };
 
 template <typename Decoder> auto decode(Decoder &, incompatible_codec &&) { return expected<void, int>{}; }
+#elif defined(CBOR_TAGS_INCOMPATIBLE_MEMBER_TRANSCODE_ENCODE) || defined(CBOR_TAGS_INCOMPATIBLE_MEMBER_TRANSCODE_DECODE)
+struct incompatible_codec {
+    int value{};
+
+    template <typename Transcoder> auto transcode(Transcoder &) const { return expected<void, int>{}; }
+};
+#elif defined(CBOR_TAGS_INCOMPATIBLE_FREE_TRANSCODE_ENCODE) || defined(CBOR_TAGS_INCOMPATIBLE_FREE_TRANSCODE_DECODE)
+struct incompatible_codec {
+    int value{};
+};
+
+template <typename Transcoder> auto transcode(Transcoder &, const incompatible_codec &) { return expected<void, int>{}; }
+#elif defined(CBOR_TAGS_VOID_AGGREGATE_ENCODE)
+struct incompatible_codec {
+    int value{};
+
+    template <typename Encoder> void encode(Encoder &) const {}
+};
 #else
 #error "expected an incompatible-codec compile-fail mode"
 #endif
 
 int main() {
-#if defined(CBOR_TAGS_INCOMPATIBLE_MEMBER_ENCODE) || defined(CBOR_TAGS_INCOMPATIBLE_FREE_ENCODE)
+#if defined(CBOR_TAGS_INCOMPATIBLE_MEMBER_ENCODE) || defined(CBOR_TAGS_INCOMPATIBLE_FREE_ENCODE) ||                                  \
+    defined(CBOR_TAGS_INCOMPATIBLE_MEMBER_TRANSCODE_ENCODE) || defined(CBOR_TAGS_INCOMPATIBLE_FREE_TRANSCODE_ENCODE) ||              \
+    defined(CBOR_TAGS_VOID_AGGREGATE_ENCODE)
     std::vector<std::byte> buffer;
     auto                   enc    = cbor::tags::make_encoder(buffer);
     auto                   result = enc(incompatible_codec{});

@@ -181,7 +181,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithEncodingOverload<self_t, T> && !HasIncompatibleEncodingCustomization<self_t, T>)
+        requires(IsAggregate<T> && detail::encoding_customization_traits<self_t, T>::aggregate_fallback)
     constexpr void encode(const T &value) {
         if constexpr (HasInlineTag<T>) {
             const auto &&tuple = to_tuple(value);
@@ -211,7 +211,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     template <IsUntaggedTuple T> constexpr void encode(const T &value) { aggregate_encode(value); }
 
     template <typename C>
-        requires(IsClassWithEncodingOverload<self_t, C> && !HasIncompatibleEncodingCustomization<self_t, C>)
+        requires detail::encoding_customization_traits<self_t, C>::compatible
     constexpr void encode(const C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_encode         = HasEncodeMethod<self_t, C>;
@@ -248,7 +248,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
     }
 
     template <typename C>
-        requires HasIncompatibleEncodingCustomization<self_t, C>
+        requires detail::encoding_customization_traits<self_t, C>::incompatible
     constexpr void encode(const C &) {
         static_assert(always_false<C>::value,
                       "custom encode/transcode must return a result with has_value() convertible to bool and error() convertible to "

@@ -407,6 +407,26 @@ add_incompatible_codec_result_compile_fail_test(
   incompatible_free_decode_result_compile_fails
   CBOR_TAGS_INCOMPATIBLE_FREE_DECODE
   "custom decode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_member_transcode_encode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_MEMBER_TRANSCODE_ENCODE
+  "custom encode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_member_transcode_decode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_MEMBER_TRANSCODE_DECODE
+  "custom decode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_free_transcode_encode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_FREE_TRANSCODE_ENCODE
+  "custom encode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  incompatible_free_transcode_decode_result_compile_fails
+  CBOR_TAGS_INCOMPATIBLE_FREE_TRANSCODE_DECODE
+  "custom decode/transcode must return a result")
+add_incompatible_codec_result_compile_fail_test(
+  void_aggregate_encode_result_compile_fails
+  CBOR_TAGS_VOID_AGGREGATE_ENCODE
+  "custom encode/transcode must return a result")
 
 add_dynamic_bounded_size_compile_fail_test(
   dynamic_bounded_size_cddl_compile_fails

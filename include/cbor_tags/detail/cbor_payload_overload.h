@@ -23,7 +23,7 @@ template <typename Self, typename Codec> struct payload_encoder_overload_probe :
     template <IsUntaggedTuple T> core_payload_overload encode(const T &);
     template <IsVariant T> core_payload_overload       encode(const T &);
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithEncodingOverload<Self, T> && !HasIncompatibleEncodingCustomization<Self, T>)
+        requires(IsAggregate<T> && encoding_customization_traits<Self, T>::aggregate_fallback)
     core_payload_overload encode(const T &);
 
     template <typename T> core_payload_overload                                   encode(const std::optional<T> &);
@@ -49,13 +49,13 @@ template <typename Self, typename Codec> struct payload_decoder_overload_probe :
     template <IsRangeOfCborValues T> core_payload_overload decode(T &, major_type, std::byte);
     template <IsVariant T> core_payload_overload           decode(T &, major_type, std::byte);
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<Self, T> && !HasIncompatibleDecodingCustomization<Self, T>)
+        requires(IsAggregate<T> && decoding_customization_traits<Self, T>::aggregate_fallback)
     core_payload_overload decode(T &);
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<Self, T> && !HasIncompatibleDecodingCustomization<Self, T>)
+        requires(IsAggregate<T> && decoding_customization_traits<Self, T>::aggregate_fallback)
     core_payload_overload decode(T &, major_type, std::byte);
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<Self, T> && !HasIncompatibleDecodingCustomization<Self, T>)
+        requires(IsAggregate<T> && decoding_customization_traits<Self, T>::aggregate_fallback)
     core_payload_overload decode(T &, std::uint64_t);
 
     template <typename T> core_payload_overload decode(std::optional<T> &, major_type, std::byte);

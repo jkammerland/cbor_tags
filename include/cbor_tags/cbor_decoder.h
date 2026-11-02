@@ -699,7 +699,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
+        requires(IsAggregate<T> && detail::decoding_customization_traits<self_t, T>::aggregate_fallback)
     constexpr status_code decode(T &value) {
         auto &&tuple = to_tuple(value);
 
@@ -737,7 +737,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
+        requires(IsAggregate<T> && detail::decoding_customization_traits<self_t, T>::aggregate_fallback)
     constexpr status_code decode(T &value, major_type major, byte additionalInfo) {
         if constexpr (IsTag<T>) {
             if (major != major_type::Tag) {
@@ -757,14 +757,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename T>
-        requires(IsAggregate<T> && !IsClassWithDecodingOverload<self_t, T> && !HasIncompatibleDecodingCustomization<self_t, T>)
+        requires(IsAggregate<T> && detail::decoding_customization_traits<self_t, T>::aggregate_fallback)
     constexpr status_code decode(T &value, std::uint64_t tag) {
         auto &&tuple = to_tuple(value);
         return this->decode_tagged_aggregate(value, tag, tuple);
     }
 
     template <typename T>
-        requires IsClassWithTagOverload<T> && IsClassWithDecodingOverload<self_t, T> && (!HasIncompatibleDecodingCustomization<self_t, T>)
+        requires IsClassWithTagOverload<T> && detail::decoding_customization_traits<self_t, T>::compatible
     constexpr status_code decode(T &value, std::uint64_t tag) {
         std::uint64_t class_tag;
         if constexpr (HasTagMember<T>) {
@@ -1155,7 +1155,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C, bool DecodeTag = true>
-        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
+        requires detail::decoding_customization_traits<self_t, C>::compatible
     constexpr status_code decode_class_impl(C &value) {
         constexpr bool has_transcode      = HasTranscodeMethod<self_t, C>;
         constexpr bool has_decode         = HasDecodeMethod<self_t, C>;
@@ -1213,26 +1213,26 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
+        requires detail::decoding_customization_traits<self_t, C>::compatible
     constexpr status_code decode(C &value) {
         return decode_class_impl<C, true>(value);
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
+        requires detail::decoding_customization_traits<self_t, C>::compatible
     constexpr status_code decode_without_tag(C &value) {
         return decode_class_impl<C, false>(value);
     }
 
     template <typename C>
-        requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
+        requires detail::decoding_customization_traits<self_t, C>::compatible
     constexpr status_code decode(C &value, major_type, byte) {
         reader_.seek(-1);
         return this->decode(value);
     }
 
     template <typename C>
-        requires HasIncompatibleDecodingCustomization<self_t, C>
+        requires detail::decoding_customization_traits<self_t, C>::incompatible
     constexpr status_code decode(C &) {
         static_assert(always_false<C>::value,
                       "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
@@ -1241,7 +1241,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C>
-        requires HasIncompatibleDecodingCustomization<self_t, C>
+        requires detail::decoding_customization_traits<self_t, C>::incompatible
     constexpr status_code decode(C &, major_type, byte) {
         static_assert(always_false<C>::value,
                       "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "
@@ -1250,7 +1250,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <typename C>
-        requires HasIncompatibleDecodingCustomization<self_t, C>
+        requires detail::decoding_customization_traits<self_t, C>::incompatible
     constexpr status_code decode(C &, std::uint64_t) {
         static_assert(always_false<C>::value,
                       "custom decode/transcode must return a result with has_value() convertible to bool and error() convertible to "

@@ -767,6 +767,29 @@ template <typename T, typename C>
 concept IsClassWithDecodingOverload = std::is_class_v<C> && (HasTranscodeMethod<T, C> || HasDecodeMethod<T, C> ||
                                                              HasTranscodeFreeFunction<T, C> || HasDecodeFreeFunction<T, C>);
 
+namespace detail {
+
+// Keep customization concept evaluation outside the constraints on encoder and
+// decoder specializations. In particular, their codec type can contain a whole
+// template-template argument pack. The cached predicates are exactly the
+// corresponding public concepts; the composite predicates only name the three
+// mutually exclusive dispatch states used by the overload sets.
+template <typename Codec, typename Value> struct encoding_customization_traits {
+    static constexpr bool has_overload = IsClassWithEncodingOverload<Codec, Value>;
+    static constexpr bool incompatible = HasIncompatibleEncodingCustomization<Codec, Value>;
+    static constexpr bool compatible = has_overload && !incompatible;
+    static constexpr bool aggregate_fallback = !has_overload && !incompatible;
+};
+
+template <typename Codec, typename Value> struct decoding_customization_traits {
+    static constexpr bool has_overload = IsClassWithDecodingOverload<Codec, Value>;
+    static constexpr bool incompatible = HasIncompatibleDecodingCustomization<Codec, Value>;
+    static constexpr bool compatible = has_overload && !incompatible;
+    static constexpr bool aggregate_fallback = !has_overload && !incompatible;
+};
+
+} // namespace detail
+
 template <typename T>
 concept IsAggregate = std::is_aggregate_v<T> && !IsVariant<T> && !IsFixedArray<T> && !IsAnyHeader<T> && !IsIndefiniteBreak<T> &&
                       !IsString<T> && !IsNamedWrapper<T> && !IsAnyBoundedSizeWrapper<T>;
