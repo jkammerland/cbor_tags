@@ -26,7 +26,7 @@ using namespace cbor::tags;
 
 namespace {
 
-using count_options        = Options<Option<expected<std::size_t, status_code>>, default_wrapping>;
+using count_options        = byte_count_options;
 using legacy_count_options = Options<Option<expected<std::uint64_t, status_code>>, default_wrapping>;
 
 struct status_result {
@@ -46,6 +46,12 @@ struct status_options {
     using return_type                 = status_result;
     static constexpr bool wrap_groups = true;
 };
+
+using strict_count_options = Options<return_byte_count, default_wrapping, strict_integer_decoding>;
+static_assert(count_options::wrap_groups);
+static_assert(!detail::strict_integer_decode_option_v<count_options>);
+static_assert(detail::strict_integer_decode_option_v<strict_count_options>);
+static_assert(std::same_as<strict_count_options::return_type, expected<std::size_t, status_code>>);
 
 static_assert(std::same_as<count_options::return_type, expected<std::size_t, status_code>>);
 static_assert(std::same_as<legacy_count_options::return_type, expected<std::uint64_t, status_code>>);

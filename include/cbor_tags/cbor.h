@@ -116,7 +116,8 @@ template <typename T> struct Option {
     using type       = T;
 };
 
-using default_expected = Option<expected<void, status_code>>;
+using default_expected  = Option<expected<void, status_code>>;
+using return_byte_count = Option<expected<std::size_t, status_code>>;
 
 namespace detail {
 
@@ -318,6 +319,7 @@ template <typename... T> struct Options {
 };
 
 using default_options                    = Options<default_expected, default_wrapping>;
+using byte_count_options                 = Options<return_byte_count, default_wrapping>;
 using strict_integer_decoder_options     = Options<default_expected, default_wrapping, strict_integer_decoding>;
 using unchecked_aliasing_decoder_options = Options<default_expected, default_wrapping, assume_no_input_output_aliasing>;
 using encoded_item_view_decoder_options  = Options<default_expected, default_wrapping, return_encoded_item_view>;

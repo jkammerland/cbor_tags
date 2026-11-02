@@ -26,8 +26,9 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 
 - [🎯 Key Features](#-key-features)
 - [🔧 Quick Start](#-quick-start)
-  - [Basic Encoding/Decoding Example](#basic-encodingdecoding-example)
-  - [Tagged Struct Example](#tagged-struct-example)
+  - [Install and link](#install-and-link)
+  - [Tagged record round trip](#tagged-record-round-trip)
+  - [Contracts at a glance](#contracts-at-a-glance)
   - [Advanced Type Support](#advanced-type-support)
   - [Version Handling with Variants](#version-handling-with-variants)
   - [Manual Tag Parsing](#manual-tag-parsing)
@@ -65,75 +66,89 @@ The library design is inspired by [zpp_bits](https://github.com/eyalz800/zpp_bit
 ## 🔧 Quick Start
 Work through the [numbered examples](examples/README.md) for a gradual introduction to values, receiver layouts, containers and codecs.
 
-### Basic Encoding/Decoding Example
-Basic example of encoding and decoding a single cbor items:
-```cpp
-#include "cbor_tags/cbor_decoder.h"
-#include "cbor_tags/cbor_encoder.h"
+### Install and link
 
+With an [installed package](#-installation), use this `CMakeLists.txt` beside
+`main.cpp`:
+
+```cmake
+cmake_minimum_required(VERSION 3.25)
+project(cbor_message LANGUAGES CXX)
+find_package(cbor_tags CONFIG REQUIRED)
+add_executable(cbor_message main.cpp)
+target_compile_features(cbor_message PRIVATE cxx_std_20)
+target_link_libraries(cbor_message PRIVATE cbor::tags)
+```
+
+Configure with `cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/install`,
+then build with `cmake --build build`. The [installation guide](#-installation)
+also covers FetchContent, Conan, and vcpkg.
+
+### Tagged record round trip
+
+A tagged record gives an application message one CBOR item. Save this as
+`main.cpp`:
+
+```cpp
+#include <cbor_tags/cbor_decoder.h>
+#include <cbor_tags/cbor_encoder.h>
 #include <cassert>
 #include <cstddef>
-#include <iostream>
+#include <cstdint>
 #include <string>
-#include <string_view>
 #include <vector>
 
-using namespace cbor::tags;
-using namespace std::string_view_literals;
+namespace ct = cbor::tags;
 
-int main() {
-    // Create a data buffer to hold the encoded data (could be std::deque, std::pmr::vector, std::array, ...)
-    auto data = std::vector<std::byte>{};
-
-    // Encoding (sender side)
-    auto enc  = make_encoder(data);
-    if(!enc(2, 3.14, "Hello, World!"sv)){
-        return 1;
-    }
-
-    // Emulate transfer of data buffer
-    auto transmitted_data = data;
-
-    // Declare variables to hold the decoded data (receiver side)
-    int  a;
-    double b;
-    std::string c;
-
-    // Decoding
-    auto dec = make_decoder(transmitted_data);
-    if(!dec(a, b, c)){
-        return 1;
-    }
-
-    assert(a == 2);
-    assert(b == 3.14);
-    assert(c == "Hello, World!");
-
-    return 0;
-}
-```
-> [!IMPORTANT]
-> These values are not grouped in any way. For that they would have to be enclosed in a array, map or binary string. If it is a special sequence of items, you can define a tag for it and share that definition with the recipient(s).
-
-### Tagged Struct Example
-Here is how you could formulate a struct with a tag from the first example:
-```cpp
-struct Tagged {
+struct message {
     static constexpr std::uint64_t cbor_tag = 321;
-    int            a;
-    double         b;
-    std::string    c;
+    int sequence{};
+    std::string text;
+    bool operator==(const message &) const = default;
 };
 
-Tagged tagged{.a = 2, .b = 3.14, .c = "Hello, World!"};
-enc(tagged);
+int main() {
+    const message sent{42, "ready"};
+    std::vector<std::byte> wire;
+    const auto encoded = ct::make_encoder(wire)(sent);
+    if (!encoded) return 1;
+
+    // Start with a fresh destination for each message.
+    message received;
+    auto decoder = ct::make_decoder(wire);
+    const auto decoded = decoder(received);
+    if (!decoded) return 1;
+
+    // This application expects exactly one message in the supplied buffer.
+    if (decoder.tell() != wire.cend()) return 1;
+    assert(received == sent);
+}
 ```
 
-The default wire shape is `#6.321([int, float64, tstr])`: tag 321 identifies
-the application-defined payload, followed by the reflected struct fields. See
-[custom tag handling](#-custom-tag-handling) for other tag forms, and the
-[decoder contract](doc/decoder_resource_limits.md#decoder-contract) for
-destination, failure, input, and aliasing rules.
+The wire shape is `#6.321([int, tstr])`: tag 321 identifies the application
+payload, followed by the reflected fields. Applications communicating with
+other CBOR implementations agree on that tag and schema.
+
+### Contracts at a glance
+
+| Concern | Ordinary API contract |
+| --- | --- |
+| Destinations | Owning strings and sequences append; maps insert. Start empty for a fresh value. Fixed destinations assign elements; typed-array destination wrappers replace contents. See [destination rules](doc/decoder_resource_limits.md#decoder-contract) and [typed arrays](doc/rfc8746_typed_arrays.md). |
+| Trailing bytes | A call reads its requested items and leaves trailing input unread. Compare `tell()` with the supplied end when the message must consume the buffer. |
+| Numeric conversion | Default integer decoding permits narrowing; [strict integer options](doc/options.md#strict-integer-decode) require representability. Floating-point destinations require the matching wire width. |
+| Validation | Typed decoding is distinct from [structural/text validation](doc/traversal.md). Neither implies an application profile or duplicate-key rejection. |
+| Failure | Check every result. Failure is terminal for that instance and can leave partial output or a decoded prefix; see [status errors](doc/status_errors.md). |
+| Borrowing | Views borrow caller-owned input. Keep their backing bytes alive and stable for the entire borrow; see [borrowed views](doc/experimental_ranges.md). |
+
+Choose the next example by task:
+
+| Task | Guide |
+| --- | --- |
+| Fixed storage or bounded destinations | [Decoder resource limits](doc/decoder_resource_limits.md) |
+| Borrow a view | [Byte-view example](examples/20_experimental_byte_view.cpp) |
+| Process consecutive items | [Basic values](examples/01_basic_values.cpp) and [per-call byte counts](doc/options.md#return-byte-counts) |
+| Resume an incoming stream | [Resumable API proposal](https://github.com/jkammerland/cbor_tags/pull/225) |
+| Add a custom codec | [Codec extensions](doc/codec_extensions.md) |
 
 ### Advanced Type Support
 This can be taken further to any number of members or nesting, e.g a struct with all CBOR major types (and more):

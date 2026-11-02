@@ -1075,3 +1075,24 @@ endforeach()
 if(CBOR_TAGS_TEST_BOOST_ROOT)
   target_include_directories(tests SYSTEM PRIVATE "${CBOR_TAGS_TEST_BOOST_ROOT}")
 endif()
+
+# The calls themselves must diagnose ignored results, independent of expected's attributes.
+add_executable(transcoder_nodiscard_compile transcoder_nodiscard_compile.cc)
+target_link_libraries(transcoder_nodiscard_compile PRIVATE cbor::tags)
+add_test(NAME transcoder_nodiscard_compile COMMAND transcoder_nodiscard_compile)
+
+foreach(DIRECTION ENCODE DECODE)
+  string(TOLOWER "transcoder_nodiscard_${DIRECTION}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL transcoder_nodiscard_compile.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_NODISCARD_${DIRECTION})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  if(MSVC)
+    target_compile_options(${TEST_NAME} PRIVATE /we4834)
+  else()
+    target_compile_options(${TEST_NAME} PRIVATE -Werror=unused-result)
+  endif()
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=nodiscard" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
