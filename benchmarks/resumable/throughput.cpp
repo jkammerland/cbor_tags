@@ -192,7 +192,7 @@ template <typename T> auto counted_destination(const std::vector<T> &, allocatio
     return std::pmr::vector<T>{&resource};
 }
 template <typename T> auto counted_destination(const std::deque<T> &, allocation_counter &resource) {
-    return std::pmr::deque<T>{&resource};
+    return std::pmr::deque<T>{std::pmr::polymorphic_allocator<T>{&resource}};
 }
 inline auto counted_destination(const std::string &, allocation_counter &resource) { return std::pmr::string{&resource}; }
 
