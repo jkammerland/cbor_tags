@@ -114,7 +114,7 @@ inline status_code resumable_exception_status() noexcept {
     } catch (...) { return status_code::error; }
 }
 
-template <typename Context> class resume_operation {
+template <typename Context> class [[nodiscard]] resume_operation {
     struct state {
         resume_control                     control;
         Context                            context;

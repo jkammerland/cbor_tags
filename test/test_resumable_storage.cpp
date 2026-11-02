@@ -54,6 +54,17 @@ struct counted_customization {
 };
 } // namespace
 
+namespace cbor::tags {
+template <> struct resumable_retry_traits<ordinary_item> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = false;
+};
+template <> struct resumable_retry_traits<counted_customization> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = false;
+};
+} // namespace cbor::tags
+
 TEST_SUITE("roundtrip/resumable_storage") {
     TEST_CASE_TEMPLATE("owning mixed byte chunks preserve input retries through tail growth and append", Storage,
                        std::vector<std::deque<std::byte>>, std::list<std::deque<std::byte>>, std::vector<std::list<std::byte>>,

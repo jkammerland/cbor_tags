@@ -145,6 +145,13 @@ status_code operation_status(const expected<std::size_t, status_code> &result) {
 
 } // namespace
 
+namespace cbor::tags {
+template <typename Self> struct resumable_retry_traits<std::optional<bool>, rejecting_optional_bool_codec<Self>> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+} // namespace cbor::tags
+
 TEST_SUITE("cbor_wire/resumable") {
 
     TEST_CASE("integer arrays commit only complete elements across each wire width") {

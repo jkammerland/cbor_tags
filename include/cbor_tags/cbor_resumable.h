@@ -8,8 +8,10 @@ namespace cbor::tags {
 
 namespace detail {
 template <typename Context> struct resumable_factory {
-    typename Context::source_type &source;
-    template <typename... T> auto  operator()(T &&...values) const { return resume_operation<Context>{source, std::forward<T>(values)...}; }
+    typename Context::source_type              &source;
+    template <typename... T> [[nodiscard]] auto operator()(T &&...values) const {
+        return resume_operation<Context>{source, std::forward<T>(values)...};
+    }
 };
 
 // The adapter's cursors refer back to it. Keep it at the factory's address and
@@ -24,7 +26,9 @@ template <typename Context> class storage_resumable_factory {
     storage_resumable_factory(storage_resumable_factory &&)                 = delete;
     storage_resumable_factory &operator=(storage_resumable_factory &&)      = delete;
 
-    template <typename... T> auto operator()(T &&...values) & { return resume_operation<Context>{source_, std::forward<T>(values)...}; }
+    template <typename... T> [[nodiscard]] auto operator()(T &&...values) & {
+        return resume_operation<Context>{source_, std::forward<T>(values)...};
+    }
     template <typename... T> auto operator()(T &&...) && = delete;
 };
 } // namespace detail
@@ -75,12 +79,12 @@ auto make_resumable_encoder_with_options(Storage &storage) {
 namespace cbor::tags {
 
 template <ResumableInputSource Source>
-auto make_resumable_validator(Source &source, std::size_t count = 1, validation_options options = {}) {
+[[nodiscard]] auto make_resumable_validator(Source &source, std::size_t count = 1, validation_options options = {}) {
     return detail::resume_operation<detail::resumable_validation_context<Source>>{
         source, detail::validation_request{.count = count, .until_eof = false, .options = options}};
 }
 template <ResumableInputSource Source>
-auto make_resumable_validator(Source &source, until_end_of_input_t, validation_options options = {}) {
+[[nodiscard]] auto make_resumable_validator(Source &source, until_end_of_input_t, validation_options options = {}) {
     return detail::resume_operation<detail::resumable_validation_context<Source>>{
         source, detail::validation_request{.count = 0, .until_eof = true, .options = options}};
 }

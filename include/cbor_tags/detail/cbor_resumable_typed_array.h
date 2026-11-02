@@ -3,6 +3,7 @@
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_extension_encode.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
+#include "cbor_tags/detail/cbor_resumable_retry.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
 #include "cbor_tags/detail/cbor_typed_array_range.h"
 
@@ -211,3 +212,13 @@ resumable<status_code> resumable_encode_typed_array(Context &context, Range &val
 }
 
 } // namespace cbor::tags::detail
+
+namespace cbor::tags {
+
+template <std::uint64_t Tag, std::size_t ElementSize>
+struct resumable_retry_traits<detail::resumable_typed_array_header<Tag, ElementSize>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+
+} // namespace cbor::tags

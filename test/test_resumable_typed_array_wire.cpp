@@ -58,6 +58,15 @@ void check_bad_typed_array_header(std::initializer_list<std::byte> bytes, status
 
 } // namespace
 
+// This observer always rejects before mutating state, including on retries of
+// the tagged header. It has no successful external effects to roll back.
+namespace cbor::tags {
+template <typename T, typename Self> struct resumable_retry_traits<T, rejecting_typed_array_tag<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+} // namespace cbor::tags
+
 TEST_SUITE("cbor_wire/resumable_typed_array") {
     TEST_CASE("big endian floating payloads preserve independently specified nan bits") {
         using float_array = rfc8746::typed_array<float, rfc8746::typed_array_byte_order::big>;

@@ -17,6 +17,10 @@ There are two codecs because the wire formats do different things:
 - `cbor::tags::codec::shared_ptr` writes CBOR shared-reference tags 28 and 29 so repeated
   pointers decode to the same object.
 
+`codec::shared_ptr` supports ordinary factories. Resumable factories reject it
+because graph scope updates need to survive suspension without being repeated;
+see [resumable codec composition](resumable.md#custom-codecs-and-supported-combinations).
+
 Both codecs use structural concepts rather than matching only the standard
 pointer templates. `IsUniquePointer`, `IsSharedPointer`, and `IsSmartPointer`
 therefore accept compatible user-defined pointer types. For a shared pointer,

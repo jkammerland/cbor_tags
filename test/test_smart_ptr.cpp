@@ -1,3 +1,4 @@
+#include "smart_ptr_scope_ref_test.h"
 #include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
@@ -17,8 +18,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-#include "smart_ptr_scope_ref_test.h"
 
 using namespace cbor::tags;
 using namespace cbor::tags::smart_ptr;

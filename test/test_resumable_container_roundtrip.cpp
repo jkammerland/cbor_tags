@@ -205,6 +205,20 @@ template <template <typename> typename Codec> void check_integer_map_override(st
 
 } // namespace
 
+// These fixture codecs publish their result and completion counters only on success.
+namespace cbor::tags {
+
+template <typename Self> struct resumable_retry_traits<std::uint32_t, direct_integer_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint32_t, header_integer_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+
+} // namespace cbor::tags
+
 TEST_SUITE("roundtrip/resumable") {
 
     TEST_CASE_TEMPLATE("indefinite string payloads reserve before unsized input and traverse once", T, std::string,

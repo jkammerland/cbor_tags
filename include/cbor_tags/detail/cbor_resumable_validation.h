@@ -341,3 +341,14 @@ class resumable_generator_context : public resumable_decode_context<Source, Opti
     }
 };
 } // namespace cbor::tags::detail
+
+namespace cbor::tags {
+
+// The token decoder assigns a fresh scalar/header token on each attempt; the
+// validator commits traversal state only after that token is complete.
+template <> struct resumable_retry_traits<detail::resumable_walk_token> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+
+} // namespace cbor::tags
