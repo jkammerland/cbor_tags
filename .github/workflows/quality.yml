@@ -96,10 +96,7 @@ jobs:
     - name: Build tests and benchmark targets
       shell: bash
       run: |
-        cmake --build build/cmake-3.25 \
-          --target tests test_decode_stack_floor test_unsigned_char test_resumable_compile cborctl \
-          bench_encoder bench_resumable_throughput bench_resumable_latency \
-          --parallel
+        cmake --build build/cmake-3.25 --parallel
 
     - name: Run tests
       shell: bash
