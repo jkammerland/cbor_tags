@@ -197,7 +197,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             debug::println("Caught exception: {}", e.what());
             // Exceptions from application customizations have no library parse classification.
             return unexpected<status_code>(status_code::error);
-        }
+        } catch (...) { return unexpected<status_code>(status_code::error); }
     }
 
     constexpr status_code decode(integer &value, major_type major, byte additionalInfo) {
