@@ -17,13 +17,10 @@ namespace cbor::tags::detail {
 #if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
 // Call only while handling an active exception. Keep exception-object access
 // outside callers that affected Windows Clang versions inline into a coroutine.
-__declspec(noinline)
-inline status_code resumable_encode_exception_status() noexcept {
+__declspec(noinline) inline status_code resumable_encode_exception_status() noexcept {
     try {
         throw;
-    } catch (const encode_status_exception &error) {
-        return error.status;
-    } catch (...) {
+    } catch (const encode_status_exception &error) { return error.status; } catch (...) {
         return resumable_exception_status();
     }
 }
@@ -586,7 +583,12 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         const bool     indefinite = force_indefinite || !std::ranges::sized_range<Range>;
         status_code    status;
         if constexpr (std::ranges::sized_range<Range>) {
-            status = co_await (indefinite ? byte(major | std::byte{0x1f}) : header(std::ranges::size(range), major));
+            // Keep awaited branches separate: GCC 12 can destroy a conditional
+            // coroutine temporary twice after the header suspends.
+            if (indefinite)
+                status = co_await byte(major | std::byte{0x1f});
+            else
+                status = co_await header(std::ranges::size(range), major);
         } else
             status = co_await byte(major | std::byte{0x1f});
         if (status != status_code::success)
