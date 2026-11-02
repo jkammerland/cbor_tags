@@ -647,12 +647,14 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         const bool     indefinite = force_indefinite || !std::ranges::sized_range<Range>;
         status_code    status;
         if constexpr (std::ranges::sized_range<Range>) {
-            // Keep awaited branches separate: GCC 12 can destroy a conditional
-            // coroutine temporary twice after the header suspends.
-            if (indefinite)
-                status = co_await byte(major | std::byte{0x1f});
-            else
-                status = co_await header(std::ranges::size(range), major);
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 12
+            // GCC 12 can destroy a conditional coroutine temporary twice after
+            // suspension. Give the header operation a named owner before awaiting.
+            auto opening = indefinite ? byte(major | std::byte{0x1f}) : header(std::ranges::size(range), major);
+            status       = co_await std::move(opening);
+#else
+            status = co_await (indefinite ? byte(major | std::byte{0x1f}) : header(std::ranges::size(range), major));
+#endif
         } else
             status = co_await byte(major | std::byte{0x1f});
         if (status != status_code::success)
