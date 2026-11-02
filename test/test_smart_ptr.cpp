@@ -1,3 +1,4 @@
+#include "smart_ptr_scope_ref_test.h"
 #include "test_util.h"
 
 #include <cbor_tags/cbor_decoder.h>
@@ -898,6 +899,64 @@ TEST_CASE("unique pointer concept accepts a user-defined pointer type") {
     CHECK_EQ(*decoded, 42U);
 }
 
+TEST_CASE("smart pointer scope callbacks preserve shared state across translation units") {
+    shared_ptr_encode_scope       encode_scope;
+    shared_ptr_decode_scope       decode_scope;
+    auto                          owner = std::make_shared<int>(42);
+    const shared_ptr_encode_key   key{owner.get(), owner.get()};
+    const shared_ptr_decode_entry entry{owner, key.pointer_type, shared_ptr_entry_state::encoding};
+
+    const smart_ptr::detail::encode_scope_ref local_encode{encode_scope};
+    const auto                                remote_encode = smart_ptr_scope_ref_test::make_encode_ref(encode_scope);
+    const smart_ptr::detail::decode_scope_ref local_decode{decode_scope};
+    const auto                                remote_decode = smart_ptr_scope_ref_test::make_decode_ref(decode_scope);
+
+    // Observe mutations through a wrapper instantiated in the other TU.
+    for (bool remote_first : {false, true}) {
+        const auto &encode       = remote_first ? remote_encode : local_encode;
+        const auto &other_encode = remote_first ? local_encode : remote_encode;
+        const auto &decode       = remote_first ? remote_decode : local_decode;
+        const auto &other_decode = remote_first ? local_decode : remote_decode;
+
+        REQUIRE(encode.observe_untracked());
+        const auto first = encode.observe(key);
+        REQUIRE(first);
+        CHECK_EQ(first->kind, shared_ptr_observation_kind::first);
+        CHECK_EQ(first->index, 1U);
+        CHECK_FALSE(other_encode.observe(key));
+        encode.mark_complete(first->index);
+        const auto reference = other_encode.observe(key);
+        REQUIRE(reference);
+        CHECK_EQ(reference->kind, shared_ptr_observation_kind::reference);
+        CHECK_EQ(reference->index, first->index);
+        other_encode.reset();
+        CHECK_EQ(encode_scope.size(), 0U);
+
+        REQUIRE(decode.insert_untracked());
+        const auto index = decode.insert(entry);
+        REQUIRE(index);
+        CHECK_EQ(*index, 1U);
+        const auto pending = other_decode.resolve(*index);
+        REQUIRE(pending);
+        CHECK(pending->pointer == owner);
+        CHECK(pending->pointer_type == key.pointer_type);
+        CHECK_EQ(pending->state, shared_ptr_entry_state::encoding);
+
+        // Resolving must neither complete the stored entry nor alter its ownership.
+        const auto still_pending = decode.resolve(*index);
+        REQUIRE(still_pending);
+        CHECK_EQ(still_pending->state, shared_ptr_entry_state::encoding);
+        CHECK(still_pending->pointer == owner);
+        decode.mark_complete(*index);
+        const auto complete = other_decode.resolve(*index);
+        REQUIRE(complete);
+        CHECK_EQ(complete->state, shared_ptr_entry_state::complete);
+        other_decode.reset();
+        CHECK_EQ(decode_scope.size(), 0U);
+        CHECK_FALSE(decode.resolve(*index));
+    }
+}
+
 TEST_CASE("shared pointer concept accepts a user-defined pointer type") {
     auto                                         owner = std::make_shared<std::uint64_t>(42U);
     smart_ptr_test::shared_handle<std::uint64_t> first{owner};
@@ -947,24 +1006,32 @@ TEST_CASE("shared pointer identity includes the exact pointer type") {
     CHECK_EQ(to_hex(bytes), "d81c07d81c07");
 }
 
-TEST_CASE("scoped shared pointer wrapper copies lvalues and moves rvalues") {
+TEST_CASE("shared pointer copies and moves use the codec reference table") {
     auto pointer = std::make_shared<std::uint64_t>(9U);
-    auto copied  = as_scoped_shared_ptr(pointer);
+    auto copied  = pointer;
     REQUIRE(pointer);
 
-    auto moved = as_scoped_shared_ptr(std::move(pointer));
+    auto moved = std::move(pointer);
     CHECK_FALSE(pointer);
 
-    std::vector<std::byte> bytes;
-    auto                   enc = make_encoder<codec::shared_ptr>(bytes);
+    shared_ptr_encode_scope encode_scope;
+    std::vector<std::byte>  bytes;
+    auto                    enc = make_encoder<codec::shared_ptr>(bytes);
+    enc.set_shared_ptr_scope(encode_scope);
     REQUIRE(enc(copied, moved));
     CHECK_EQ(to_hex(bytes), "d81c09d81d00");
+    CHECK_EQ(encode_scope.size(), 1U);
 
-    scoped_shared_ptr<std::shared_ptr<std::uint64_t>> decoded_first;
-    scoped_shared_ptr<std::shared_ptr<std::uint64_t>> decoded_second;
-    auto                                              dec = make_decoder<codec::shared_ptr>(bytes);
+    shared_ptr_decode_scope        decode_scope;
+    std::shared_ptr<std::uint64_t> decoded_first;
+    std::shared_ptr<std::uint64_t> decoded_second;
+    auto                           dec = make_decoder<codec::shared_ptr>(bytes);
+    dec.set_shared_ptr_scope(decode_scope);
     REQUIRE(dec(decoded_first, decoded_second));
-    CHECK(decoded_first.value() == decoded_second.value());
+    REQUIRE(decoded_first);
+    CHECK_EQ(*decoded_first, 9U);
+    CHECK(decoded_first == decoded_second);
+    CHECK_EQ(decode_scope.size(), 1U);
 }
 
 TEST_CASE("shared_ptr codec uses IANA reference tags") {

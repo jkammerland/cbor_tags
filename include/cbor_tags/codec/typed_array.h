@@ -5,6 +5,7 @@
 #include "cbor_tags/codec.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
 #include "cbor_tags/detail/cbor_extension_encode.h"
+#include "cbor_tags/detail/cbor_resumable_typed_array.h"
 #include "cbor_tags/detail/cbor_typed_array_range.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
@@ -1072,6 +1073,32 @@ template <typename Self> struct typed_array : base<Self> {
     using base<Self>::decode;
     using base<Self>::encode;
 
+    template <typename T, rfc8746::typed_array_byte_order ByteOrder>
+    resumable<status_code> resumable_decode(rfc8746::typed_array<T, ByteOrder> &array) {
+        using value_type = std::remove_cv_t<T>;
+        return tags::detail::resumable_decode_typed_array<rfc8746::typed_array_traits<value_type, ByteOrder>::tag,
+                                                          rfc8746::detail::native_matches_byte_order<ByteOrder>>(
+            static_cast<Self &>(*this), array,
+            [](std::span<const std::byte> bytes) { return rfc8746::detail::from_endian<ByteOrder, value_type>(bytes); });
+    }
+
+    template <typename T, rfc8746::typed_array_byte_order ByteOrder>
+    resumable<status_code> resumable_encode(const rfc8746::typed_array<T, ByteOrder> &array) {
+        return resumable_encode_values<ByteOrder>(array.values());
+    }
+
+    template <typename T, rfc8746::typed_array_byte_order ByteOrder>
+    resumable<status_code> resumable_encode(const rfc8746::typed_array_ref<T, ByteOrder> &array) {
+        // Keep the descriptor in the coroutine while payload transfer is suspended.
+        auto values = array.values();
+        co_return co_await resumable_encode_values<ByteOrder>(values);
+    }
+
+    template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+    resumable<status_code> resumable_encode(const rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
+        return resumable_encode_values<ByteOrder>(array.values());
+    }
+
     template <typename Array, std::size_t Min, std::size_t Max>
         requires rfc8746::TypedArrayEncodeTarget<Array>
     void encode(const bounded_size<Array, Min, Max> &bounded) {
@@ -1418,6 +1445,14 @@ template <typename Self> struct typed_array : base<Self> {
     }
 
   private:
+    template <rfc8746::typed_array_byte_order ByteOrder, typename Range> resumable<status_code> resumable_encode_values(Range &values) {
+        using value_type = std::ranges::range_value_t<Range>;
+        return tags::detail::resumable_encode_typed_array<rfc8746::typed_array_traits<value_type, ByteOrder>::tag>(
+            static_cast<Self &>(*this), values, [](std::span<std::byte> output, std::span<const value_type> input) {
+                rfc8746::detail::write_endian_payload_to<ByteOrder>(output, input);
+            });
+    }
+
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
     [[nodiscard]] static std::uint64_t typed_array_element_count(const rfc8746::typed_array<T, ByteOrder> &array) {
         return static_cast<std::uint64_t>(array.span().size());

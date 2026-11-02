@@ -4,6 +4,7 @@
 #include "cbor_tags/cbor_reflection_config.h"
 #include "cbor_tags/cbor_reflection_count.h"
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -116,6 +117,11 @@ struct append_cursor<T> {
 template <typename T> struct appender<T, false> : append_cursor<T> {
     using value_type = T::value_type;
 
+    template <bool Geometric = false>
+        requires(!Geometric ||
+                 requires(T &container) {
+                     { container.capacity() } -> std::convertible_to<typename T::size_type>;
+                 })
     constexpr void reserve_for_append(T &container, std::uint64_t additional_size) const {
         if constexpr (AppendReservable<T>) {
             using size_type = typename T::size_type;
@@ -133,7 +139,18 @@ template <typename T> struct appender<T, false> : append_cursor<T> {
                 throw std::length_error("CBOR string length exceeds target container max_size");
             }
 
-            container.reserve(static_cast<size_type>(current_size + static_cast<size_type>(additional_size)));
+            auto required_size = static_cast<size_type>(current_size + static_cast<size_type>(additional_size));
+            if constexpr (Geometric) {
+                // Each indefinite child has a known size, but many small children
+                // must retain geometric growth instead of reallocating per child.
+                const auto capacity = std::min<size_type>(container.capacity(), maximum_size);
+                if (required_size <= capacity)
+                    return;
+                const size_type grown_size =
+                    capacity > maximum_size - capacity ? static_cast<size_type>(maximum_size) : static_cast<size_type>(capacity + capacity);
+                required_size = std::max(required_size, grown_size);
+            }
+            container.reserve(required_size);
         }
     }
 

@@ -27,6 +27,8 @@ template <typename R> inline constexpr bool segment_borrowable_byte_range_v = se
 
 } // namespace detail
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_range_encoder : detail::cbor_raw_view_encoder<T> {
     using detail::cbor_raw_view_encoder<T>::encode;
     using detail::cbor_raw_view_encoder<T>::encode_encoded_view;

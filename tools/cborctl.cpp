@@ -301,14 +301,17 @@ void print_usage(std::ostream &out, std::string_view executable) {
         << "  No byte limits by default; limits apply only when set.\n\n"
         << "Annotation options:\n"
         << "  --mode smart|no_annotation\n"
-        << "  --current-indent N --offset N --max-depth N --annotation-column N\n"
-        << "  --indent-width N --comment-indent-width N --max-structure-depth N\n"
-        << "\n"
+        << "  --current-indent N --offset N --annotation-column N\n"
+        << "  --indent-width N --comment-indent-width N\n"
+        << "  --max-bytes-per-line N Maximum payload bytes per annotation line.\n"
+        << "  --max-structure-depth N Maximum annotation nesting depth.\n\n"
         << "Diagnostic options:\n"
         << "  --format-by-rows --no-format-by-rows\n"
         << "  --override-array-by-columns --no-override-array-by-columns\n"
-        << "  --row-offset N --row-current-indent N --check-tstr-utf8\n"
-        << "  --max-depth N --current-depth N\n";
+        << "  --row-offset N --row-current-indent N\n"
+        << "  --check-tstr-utf8      Mark invalid UTF-8 text in diagnostic output.\n"
+        << "  --max-depth N         Maximum diagnostic nesting depth.\n"
+        << "  --current-depth N     Initial diagnostic nesting depth.\n";
 }
 
 struct parsed_arguments {
@@ -358,8 +361,8 @@ void parse_annotation_option(parsed_arguments &parsed, std::string_view option, 
         options.current_indent = parse_size(value, option);
     } else if (option == "--offset") {
         options.offset = parse_size(value, option);
-    } else if (option == "--max-depth") {
-        options.max_depth = parse_size(value, option);
+    } else if (option == "--max-bytes-per-line") {
+        options.max_bytes_per_line = parse_size(value, option);
     } else if (option == "--annotation-column") {
         options.annotation_column = parse_size(value, option);
     } else if (option == "--indent-width") {
@@ -425,9 +428,10 @@ void parse_value_option(parsed_arguments &parsed, std::string_view option, std::
 
 [[nodiscard]] bool option_takes_value(std::string_view option) noexcept {
     return option == "--input" || option == "--mode" || option == "--current-indent" || option == "--offset" || option == "--max-depth" ||
-           option == "--annotation-column" || option == "--indent-width" || option == "--comment-indent-width" ||
-           option == "--max-structure-depth" || option == "--max-source-size" || option == "--max-input-size" ||
-           option == "--max-output-size" || option == "--row-offset" || option == "--row-current-indent" || option == "--current-depth";
+           option == "--max-bytes-per-line" || option == "--annotation-column" || option == "--indent-width" ||
+           option == "--comment-indent-width" || option == "--max-structure-depth" || option == "--max-source-size" ||
+           option == "--max-input-size" || option == "--max-output-size" || option == "--row-offset" || option == "--row-current-indent" ||
+           option == "--current-depth";
 }
 
 [[nodiscard]] parsed_arguments parse_arguments(int argc, char *argv[]) {

@@ -186,7 +186,7 @@ Customizations that directly return `enc(...)` or `dec(...)` should use an
 
 Failures return the usual error. The output or destination may retain a partial
 prefix, and failure remains terminal. Byte-count returns cannot be combined
-with encoded-item-view returns.
+with consumed-byte-view returns.
 
 Count-returning encoders require measurable output: fixed buffers, sized
 containers, or segmented buffers. Unsupported unsized custom outputs are
@@ -197,19 +197,38 @@ can exceed the native `std::size_t` range. If measurement overflows, or the
 current call's count does not fit the selected result type, the call returns
 `status_code::size_limit_exceeded`.
 
-## Return Encoded Item Views
+## Return Consumed Bytes
+
+Select `consumed_bytes_decoder_options`, or add the `return_consumed_bytes`
+option to a custom `Options<...>`, to borrow the bytes consumed by each successful
+decoder call:
 
 ```cpp
-auto dec = make_decoder_with_options<encoded_item_view_decoder_options>(buffer);
-Claims claims{};
-auto encoded = dec(claims); // expected<encoded_item_view, status_code>
+std::vector<std::byte> buffer;
+auto written = make_encoder(buffer)(1U, 24U);
+assert(written);
+
+auto dec = make_decoder_with_options<consumed_bytes_decoder_options>(buffer);
+unsigned first{}, second{};
+auto consumed = dec(first, second);
+// expected<encoded_byte_view_for<decltype(buffer)>, status_code>
+
+assert(consumed && first == 1U && second == 24U);
+assert(std::ranges::equal(*consumed, buffer));
+assert(consumed->span().size() == buffer.size()); // contiguous input only
 ```
 
 On success, the borrowed view covers exactly the bytes consumed by this call.
-Keep the input alive and unchanged. Variadic calls include all arguments;
-header-only calls return the consumed prefix; zero consumption returns an empty
-view. Typed decoding stays single-pass. Direct decoding into a encoded item, array
-or map view instead structurally parses one complete item to find its end.
+Keep the input alive and unchanged. Variadic calls include all arguments, so the
+view may contain multiple items. Header-only calls return just the consumed
+prefix, which may not be a complete item. Zero consumption returns an empty
+view. Typed decoding stays single-pass and does not scan trailing input. Failures
+return the usual error and remain terminal; no consumed-byte view is returned.
+
+The result is a byte range: iterate `*consumed` directly, or use `.span()` for
+contiguous input. Direct decoding into an `encoded_item_view`,
+`encoded_array_view`, or `encoded_map_view` structurally scans one complete
+item to find its end; those views provide a `.bytes()` accessor.
 
 ## Wrapping Groups
 

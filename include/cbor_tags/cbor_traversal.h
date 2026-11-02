@@ -71,6 +71,26 @@ namespace detail {
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
                                        double, bool, std::nullptr_t, simple, indefinite_break>;
 
+// Token interpretation is shared by synchronous and suspended traversal.
+template <typename Decoder> status_code read_walk_token(Decoder &decoder, catch_all_variant &value, bool strict_validation) {
+    const auto [major, additional_info] = decoder.read_initial_byte();
+    if (additional_info >= std::byte{28} && additional_info <= std::byte{30}) {
+        return status_code::invalid_additional_info;
+    }
+    const auto status = decoder.decode(value, major, additional_info);
+    if (status != status_code::success) {
+        return detail::is_retriable_variant_mismatch(status) ? status_code::malformed_structure : status;
+    }
+    // Keep the initial additional-info value: simple{n} alone cannot tell
+    // whether a small simple value used the forbidden two-byte form.
+    if (strict_validation && major == major_type::Simple && additional_info == std::byte{24}) {
+        if (const auto *value_ptr = std::get_if<simple>(&value); value_ptr && value_ptr->value < 32U) {
+            return status_code::malformed_structure;
+        }
+    }
+    return status_code::success;
+}
+
 // Consumers can translate structural errors without intercepting exceptions
 // thrown by their presentation callbacks. This is deliberately not public API.
 enum class walk_failure_reason { none, malformed, unexpected_break, invalid_chunk, depth, invalid_utf8, payload };
@@ -121,22 +141,7 @@ template <typename Decoder, typename Visitor> class item_walker {
 
     status_code read_token(catch_all_variant &value, std::size_t depth) {
         mark_failure(walk_failure_reason::malformed, depth);
-        const auto [major, additional_info] = decoder_.read_initial_byte();
-        if (additional_info >= std::byte{28} && additional_info <= std::byte{30}) {
-            return status_code::invalid_additional_info;
-        }
-        const auto status = decoder_.decode(value, major, additional_info);
-        if (status != status_code::success) {
-            return detail::is_retriable_variant_mismatch(status) ? status_code::malformed_structure : status;
-        }
-        // Keep the initial additional-info value: simple{n} alone cannot tell
-        // whether a small simple value used the forbidden two-byte form.
-        if (options_.strict_validation && major == major_type::Simple && additional_info == std::byte{24}) {
-            if (const auto *value_ptr = std::get_if<simple>(&value); value_ptr && value_ptr->value < 32U) {
-                return status_code::malformed_structure;
-            }
-        }
-        return status_code::success;
+        return read_walk_token(decoder_, value, options_.strict_validation);
     }
 
     template <typename Header> status_code string_payload(const Header &header, std::size_t depth) {

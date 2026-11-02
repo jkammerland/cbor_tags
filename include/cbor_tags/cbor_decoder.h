@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/detail/cbor_decode_elements.h"
 #include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
 #include "cbor_tags/detail/cbor_item_shape.h"
@@ -149,6 +150,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     using subrange           = std::ranges::subrange<iterator_t>;
     using bstr_view_t        = bstr_view<subrange>;
     using tstr_view_t        = tstr_view<subrange>;
+    using encoded_byte_view  = encoded_byte_view_for<InputBuffer>;
     using encoded_item_view  = encoded_item_view_for<InputBuffer>;
     using encoded_array_view = encoded_array_view_for<InputBuffer>;
     using encoded_map_view   = encoded_map_view_for<InputBuffer>;
@@ -161,8 +163,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <typename... T> expected_type operator()(T &&...args) noexcept {
         try {
-            if constexpr (detail::return_encoded_item_view_option_v<Options>) {
-                return decode_with_encoded_item_view(std::forward<T>(args)...);
+            if constexpr (detail::return_consumed_bytes_option_v<Options>) {
+                return decode_with_consumed_bytes(std::forward<T>(args)...);
             } else {
                 // Local snapshots include nested customization calls without
                 // adding a second traversal of non-contiguous input.
@@ -576,41 +578,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // unsized input contains it. Keep the element loop one-pass rather
         // than adding a validation traversal.
         detail::appender<T> appender_;
-        for (auto i = length; i > 0; --i) {
-            if constexpr (IsMap<T>) {
-                using key_type    = typename T::key_type;
-                using mapped_type = typename T::mapped_type;
-                using value_type  = std::pair<key_type, mapped_type>;
-                if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
-                              detail::can_propagate_container_allocator_for<mapped_type, T>()) {
-                    auto key          = detail::make_decode_value_for<key_type>(value);
-                    auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                    auto status       = decode(key);
-                    status            = status == status_code::success ? decode(mapped_value) : status;
-                    if (status != status_code::success) {
-                        return status;
-                    }
-                    value_type result{std::move(key), std::move(mapped_value)};
-                    appender_(value, std::move(result));
-                } else {
-                    value_type result;
-                    auto &[key, mapped_value] = result;
-                    auto status               = decode(key);
-                    status                    = status == status_code::success ? decode(mapped_value) : status;
-                    if (status != status_code::success) {
-                        return status;
-                    }
-                    appender_(value, std::move(result));
-                }
-            } else {
-                using value_type = typename T::value_type;
-                auto result      = detail::make_decode_value_for<value_type>(value);
-                auto status      = decode(result);
-                if (status != status_code::success) {
-                    return status;
-                }
-                appender_(value, std::move(result));
-            }
+        if constexpr (!IsMap<T>) {
+            return detail::decode_array_elements(*this, value, appender_, length);
+        } else {
+            std::optional<detail::decoded_map_pair<T>> entry;
+            bool                                       key_complete{};
+            bool                                       ended{};
+            std::uint64_t                              count{};
+            return detail::decode_map_elements<false>(*this, value, appender_, entry, key_complete, count, ended, 0, length);
         }
 
         return status_code::success;
@@ -1435,6 +1410,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
     }
 
+// Keep the scalar reader chain inline as more container codecs share it;
+// an out-of-line adapter adds a call for every integer in synchronous loops.
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr uint64_t decode_unsigned(byte additionalInfo) {
         if (additionalInfo < static_cast<byte>(24)) {
             return static_cast<uint64_t>(additionalInfo);
@@ -1557,96 +1537,20 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_array(T &value, decode_size_bounds bounds = {}) {
-        detail::appender<T>            appender_;
-        [[maybe_unused]] std::uint64_t size{};
-        while (true) {
-            auto [major, additionalInfo] = read_initial_byte();
-            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                if constexpr (CheckBounds) {
-                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                } else {
-                    return status_code::success;
-                }
-            }
-            if constexpr (CheckBounds) {
-                if (size == bounds.max_size) {
-                    return status_code::size_limit_exceeded;
-                }
-            }
-
-            using value_type = typename T::value_type;
-            auto result      = detail::make_decode_value_for<value_type>(value);
-            auto status      = decode(result, major, additionalInfo);
-            if (status != status_code::success) {
-                return status;
-            }
-            appender_(value, std::move(result));
-            if constexpr (CheckBounds) {
-                ++size;
-            }
-        }
+        detail::appender<T> append;
+        std::uint64_t       count{};
+        bool                ended{};
+        return detail::decode_indefinite_array_elements<CheckBounds>(*this, value, append, count, ended, bounds.min_size, bounds.max_size);
     }
 
     template <bool CheckBounds = false, typename T> constexpr status_code decode_indef_map(T &value, decode_size_bounds bounds = {}) {
-        detail::appender<T>            appender_;
-        [[maybe_unused]] std::uint64_t size{};
-        while (true) {
-            auto [major, additionalInfo] = read_initial_byte();
-            if (major == major_type::Simple && additionalInfo == static_cast<byte>(31)) {
-                if constexpr (CheckBounds) {
-                    return size >= bounds.min_size ? status_code::success : status_code::size_limit_exceeded;
-                } else {
-                    return status_code::success;
-                }
-            }
-            if constexpr (CheckBounds) {
-                if (size == bounds.max_size) {
-                    return status_code::size_limit_exceeded;
-                }
-            }
-
-            using key_type    = typename T::key_type;
-            using mapped_type = typename T::mapped_type;
-            using value_type  = std::pair<key_type, mapped_type>;
-            if constexpr (detail::can_propagate_container_allocator_for<key_type, T>() ||
-                          detail::can_propagate_container_allocator_for<mapped_type, T>()) {
-                auto key          = detail::make_decode_value_for<key_type>(value);
-                auto mapped_value = detail::make_decode_value_for<mapped_type>(value);
-                auto status       = decode(key, major, additionalInfo);
-                if (status == status_code::success) {
-                    auto [mapped_major, mapped_additional_info] = read_initial_byte();
-                    if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                        return status_code::malformed_structure;
-                    }
-                    status = decode(mapped_value, mapped_major, mapped_additional_info);
-                }
-                if (status != status_code::success) {
-                    return status;
-                }
-                value_type result{std::move(key), std::move(mapped_value)};
-                appender_(value, std::move(result));
-                if constexpr (CheckBounds) {
-                    ++size;
-                }
-            } else {
-                value_type result{};
-                auto       status = decode(result.first, major, additionalInfo);
-                if (status == status_code::success) {
-                    auto [mapped_major, mapped_additional_info] = read_initial_byte();
-                    if (mapped_major == major_type::Simple && mapped_additional_info == static_cast<byte>(31)) {
-                        return status_code::malformed_structure;
-                    }
-                    status = decode(result.second, mapped_major, mapped_additional_info);
-                }
-                if (status != status_code::success) {
-                    return status;
-                }
-                appender_(value, std::move(result));
-                if constexpr (CheckBounds) {
-                    ++size;
-                }
-            }
-        }
+        detail::appender<T>                        append;
+        std::optional<detail::decoded_map_pair<T>> entry;
+        bool                                       key_complete{};
+        bool                                       ended{};
+        std::uint64_t                              count{};
+        return detail::decode_map_elements<true, CheckBounds>(*this, value, append, entry, key_complete, count, ended, bounds.min_size,
+                                                              bounds.max_size);
     }
 
     constexpr size_type require_bytes(std::uint64_t length) {
@@ -1667,6 +1571,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return needed;
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr uint64_t read_unsigned(byte additionalInfo) {
         const auto info = std::to_integer<std::uint8_t>(additionalInfo);
         if (!detail::is_valid_cbor_argument_info(info)) {
@@ -1773,6 +1680,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return std::bit_cast<double>(bits);
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::always_inline]]
+#endif
     constexpr auto read_initial_byte() {
         if (reader_.empty(data_)) {
             throw parse_incomplete_exception("Unexpected end of input");
@@ -1812,18 +1722,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status;
     }
 
+    constexpr status_code decode_wrapped_group_header(major_type major, byte additional_info, std::uint64_t size) {
+        if (major != major_type::Array)
+            return status_code::no_match_for_array_on_buffer;
+        return decode_unsigned(additional_info) == size ? status_code::success : status_code::unexpected_group_size;
+    }
+
     template <typename Tuple> constexpr status_code decode_group_from_header(Tuple &&tuple, major_type major, byte additional_info) {
         constexpr auto size = std::tuple_size_v<std::remove_cvref_t<Tuple>>;
         if constexpr (size == 0U) {
             // An empty group cannot account for an already-consumed item header.
             return status_code::unexpected_group_size;
         } else if constexpr (size > 1U && Options::wrap_groups) {
-            if (major != major_type::Array) {
-                return status_code::no_match_for_array_on_buffer;
-            }
-            if (decode_unsigned(additional_info) != size) {
-                return status_code::unexpected_group_size;
-            }
+            const auto status = decode_wrapped_group_header(major, additional_info, size);
+            if (status != status_code::success)
+                return status;
             return std::apply([this](auto &&...args) { return this->applier(args...); }, tuple);
         } else {
             // Single-field and unwrapped groups pass the header to their first
@@ -1842,7 +1755,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return collect_status.result;
     }
 
-    template <typename... T> constexpr expected_type decode_with_encoded_item_view(T &&...args) {
+    template <typename... T> constexpr expected_type decode_with_consumed_bytes(T &&...args) {
         const auto start        = tell();
         const auto start_offset = current_offset();
 
@@ -1852,11 +1765,12 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return unexpected<decltype(collect_status.result)>(collect_status.result);
         }
 
-        const auto        cursor = tell();
-        const auto        size   = current_offset() - start_offset;
-        encoded_item_view encoded_item;
-        assign_encoded_view(encoded_item, start, cursor, size);
-        return expected_type{std::move(encoded_item)};
+        // A variadic call can consume a prefix, several items, or no bytes.
+        // Return that range directly without asserting a complete-item shape.
+        const auto cursor = tell();
+        const auto size   = current_offset() - start_offset;
+        using byte_range  = typename encoded_byte_view::range_type;
+        return expected_type{encoded_byte_view{byte_range{start, cursor, size}}};
     }
 
     constexpr auto tell() const noexcept {
@@ -2181,6 +2095,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 };
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_indefinite_decoder {
     using byte = std::byte;
 
@@ -2239,6 +2155,8 @@ template <typename T> struct cbor_indefinite_decoder {
     }
 };
 
+// Public construction supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_header_decoder {
     constexpr auto get_and_validate_header(major_type expectedMajorType) {
         auto [initialByte, additionalInfo] = detail::underlying<T>(this).read_initial_byte();

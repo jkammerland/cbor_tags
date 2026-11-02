@@ -1,10 +1,24 @@
 // A public extension header should be enough for its codec wrappers and factories.
+#include "smart_ptr_scope_ref_test.h"
+
 #include <cbor_tags/codec/shared_ptr.h>
 #include <cbor_tags/codec/unique_ptr.h>
 #include <cstddef>
 #include <doctest/doctest.h>
 #include <memory>
 #include <vector>
+
+namespace smart_ptr_scope_ref_test {
+
+cbor::tags::smart_ptr::detail::encode_scope_ref make_encode_ref(cbor::tags::smart_ptr::shared_ptr_encode_scope &scope) {
+    return cbor::tags::smart_ptr::detail::encode_scope_ref{scope};
+}
+
+cbor::tags::smart_ptr::detail::decode_scope_ref make_decode_ref(cbor::tags::smart_ptr::shared_ptr_decode_scope &scope) {
+    return cbor::tags::smart_ptr::detail::decode_scope_ref{scope};
+}
+
+} // namespace smart_ptr_scope_ref_test
 
 using namespace cbor::tags;
 using namespace cbor::tags::smart_ptr;

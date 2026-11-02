@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cbor_tags/cbor_concepts_checking.h"
-#include "cbor_tags/detail/cbor_pointer_traits.h"
+#include "cbor_tags/detail/cbor_variant_traits.h"
 #include "cbor_tags/extensions/cddl_traits.h"
 
 #include <concepts>
@@ -76,34 +76,6 @@ template <typename T> consteval bool cddl_contains_fixed_tag() {
     }
 }
 
-template <typename T, std::uint64_t Tag> consteval bool cddl_contains_fixed_tag_value() {
-    using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsOptional<value_type>) {
-        return cddl_contains_fixed_tag_value<typename value_type::value_type, Tag>();
-    } else if constexpr (IsVariant<value_type>) {
-        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_fixed_tag_value<Ts, Tag>() || ...); });
-    } else if constexpr (cddl_direct_fixed_tag_available<value_type>()) {
-        return cddl_direct_fixed_tag<value_type>() == Tag;
-    } else {
-        return false;
-    }
-}
-
-template <typename T> consteval bool cddl_contains_shared_pointer() {
-    using value_type = std::remove_cvref_t<T>;
-    if constexpr (IsOptional<value_type>) {
-        return cddl_contains_shared_pointer<typename value_type::value_type>();
-    } else if constexpr (IsVariant<value_type>) {
-        return with_variant_alternatives<value_type>([]<typename... Ts>() { return (cddl_contains_shared_pointer<Ts>() || ...); });
-    } else {
-        return IsSharedPointer<value_type>;
-    }
-}
-
-template <typename T> consteval bool cddl_contains_shared_pointer_collision_tag() {
-    return cddl_contains_tag_header<T>() || cddl_contains_fixed_tag_value<T, 28U>() || cddl_contains_fixed_tag_value<T, 29U>();
-}
-
 template <typename A, typename B> consteval bool cddl_fixed_tags_overlap() {
     using a_type = std::remove_cvref_t<A>;
     using b_type = std::remove_cvref_t<B>;
@@ -128,26 +100,11 @@ template <typename A, typename B> consteval bool cddl_tag_alternatives_overlap()
            (cddl_contains_tag_header<A>() && cddl_contains_tag_header<B>());
 }
 
-template <cddl_shared_pointer_mode PointerMode, typename A, typename B> consteval bool cddl_scoped_tag_alternatives_overlap() {
-    if constexpr (PointerMode == cddl_shared_pointer_mode::shared_graph) {
-        return cddl_tag_alternatives_overlap<A, B>() ||
-               (cddl_contains_shared_pointer<A>() && cddl_contains_shared_pointer_collision_tag<B>()) ||
-               (cddl_contains_shared_pointer<B>() && cddl_contains_shared_pointer_collision_tag<A>()) ||
-               (cddl_contains_shared_pointer<A>() && cddl_contains_shared_pointer<B>());
-    } else {
-        return cddl_tag_alternatives_overlap<A, B>();
-    }
-}
+template <typename T> consteval bool cddl_variant_has_tag_overlap() { return false; }
 
-template <cddl_shared_pointer_mode PointerMode> consteval bool cddl_scoped_variant_has_tag_overlap() { return false; }
-
-template <cddl_shared_pointer_mode PointerMode, typename T> consteval bool cddl_scoped_variant_has_tag_overlap() { return false; }
-
-template <cddl_shared_pointer_mode PointerMode, typename T, typename U, typename... Rest>
-consteval bool cddl_scoped_variant_has_tag_overlap() {
-    return cddl_scoped_tag_alternatives_overlap<PointerMode, T, U>() ||
-           (cddl_scoped_tag_alternatives_overlap<PointerMode, T, Rest>() || ...) ||
-           cddl_scoped_variant_has_tag_overlap<PointerMode, U, Rest...>();
+template <typename T, typename U, typename... Rest> consteval bool cddl_variant_has_tag_overlap() {
+    return cddl_tag_alternatives_overlap<T, U>() || (cddl_tag_alternatives_overlap<T, Rest>() || ...) ||
+           cddl_variant_has_tag_overlap<U, Rest...>();
 }
 
 } // namespace cbor::tags::detail

@@ -77,10 +77,9 @@ For raw `union` storage with a domain-specific discriminator, prefer an ADL
 `encode`/`decode` overload unless the type can honestly expose the same
 `index`/`get`/`visit`/`assign` operations as a variant.
 
-## Hashing And Migration
+## Hashing
 
-`variant_hasher` has been removed. Replace it with the standard variant hasher
-when every alternative is itself hashable:
+Use the standard variant hasher when every alternative is itself hashable:
 
 ```cpp
 using key = std::variant<int, std::string>;
@@ -141,12 +140,6 @@ std::unordered_map<key, int, key_hash> values;
 
 The overloads intentionally cover only the application's alternatives. Adding
 another alternative to `key` requires adding its hashing policy as well.
-
-This is a source-breaking migration for code that named `variant_hasher`. The
-old helper partially handled byte strings and shallow ranges, but its generic
-interface implied support for arbitrary CBOR-compatible alternatives. Nested
-ranges and maps did not provide that support, and their equality and ordering
-semantics do not admit one universally correct hashing policy.
 
 ## Compile-Time Dispatch
 

@@ -106,7 +106,7 @@ run_cli(
   0
   "01"
   "__skip__"
-  annotate --input hex --mode no_annotation --current-indent 1 --offset 2 --max-depth 1 --annotation-column 16 --indent-width 3 --comment-indent-width 4 --max-structure-depth 8 0102)
+  annotate --input hex --mode no_annotation --current-indent 1 --offset 2 --max-bytes-per-line 1 --annotation-column 16 --indent-width 3 --comment-indent-width 4 --max-structure-depth 8 0102)
 run_cli(
   diagnostic_base64_standard
   0
@@ -207,6 +207,9 @@ run_cli(invalid_subcommand 2 "__skip__" "error: expected subcommand" bogus --inp
 run_cli(invalid_input_value 2 "__skip__" "error: --input expects 'hex' or 'base64'" diagnostic --input bogus 01)
 run_cli(invalid_mode_value 2 "__skip__" "error: --mode expects 'smart' or 'no_annotation'" annotate --input hex --mode bogus 01)
 run_cli(invalid_annotation_column_value 2 "__skip__" "error: --annotation-column expects an unsigned integer" annotate --input hex --annotation-column nope 01)
+# Annotation byte width and diagnostic nesting depth are separate options.
+run_cli(annotate_rejects_old_depth_name 2 "__skip__" "error: unknown option '--max-depth'" annotate --input hex --max-depth 1 01)
+run_cli(diagnostic_rejects_annotation_width 2 "__skip__" "error: unknown option '--max-bytes-per-line'" diagnostic --input hex --max-bytes-per-line 1 01)
 run_cli(annotate_rejects_diagnostic_flag 2 "__skip__" "error: unknown option '--check-tstr-utf8'" annotate --input hex --check-tstr-utf8 01)
 run_cli(odd_hex 1 "__skip__" "error: hex input has odd number of digits" diagnostic --input hex 1)
 run_cli(invalid_hex_char 1 "__skip__" "error: hex input contains non-hex character" diagnostic --input hex 0g)

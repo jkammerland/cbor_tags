@@ -152,7 +152,7 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK_EQ(decoded.signatures.front().signature, std::vector<std::byte>{std::byte{0x14}});
     }
 
-    TEST_CASE("encoded item view options decode non-empty CWT claims maps") {
+    TEST_CASE("consumed bytes options decode non-empty CWT claims maps") {
         claims_set claims;
         claims.issuer     = "idp";
         claims.expiration = std::int64_t{42};
@@ -162,13 +162,13 @@ TEST_SUITE("cbor_wire/cwt") {
         REQUIRE(enc(claims));
 
         claims_set decoded;
-        auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(encoded);
+        auto       dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(encoded);
         auto       result = dec(decoded);
 
         REQUIRE(result);
         CHECK_EQ(decoded.issuer, claims.issuer);
         CHECK_EQ(decoded.expiration, claims.expiration);
-        CHECK_EQ(to_hex(result->bytes()), to_hex(encoded));
+        CHECK_EQ(to_hex(*result), to_hex(encoded));
         CHECK_EQ(dec.tell(), encoded.end());
     }
 
@@ -263,7 +263,7 @@ TEST_SUITE("cbor_wire/cwt") {
         static_assert(!std::ranges::sized_range<decltype(input)>);
         claims_set decoded;
         decoded.issuer = "unchanged";
-        auto dec       = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(input);
+        auto dec       = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(input);
         auto result    = dec(decoded);
 
         REQUIRE_FALSE(result);
@@ -272,16 +272,16 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK(dec.tell() == input.end());
     }
 
-    TEST_CASE("encoded item view options retain complete indefinite CWT claims maps") {
+    TEST_CASE("consumed bytes options retain complete indefinite CWT claims maps") {
         auto       input = to_bytes("bf016369647004182aff");
         claims_set decoded;
-        auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(input);
+        auto       dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(input);
         auto       result = dec(decoded);
 
         REQUIRE(result);
         CHECK_EQ(decoded.issuer, "idp");
         CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
-        CHECK_EQ(to_hex(result->bytes()), to_hex(input));
+        CHECK_EQ(to_hex(*result), to_hex(input));
         CHECK_EQ(dec.tell(), input.end());
     }
 
@@ -609,10 +609,10 @@ TEST_SUITE("cbor_wire/cwt") {
         cose_sign1 value;
         auto       tagged = make_tag_pair(cose_sign1_tag{}, value);
         auto       cwt    = make_tag_pair(cwt_tag{}, tagged);
-        auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(bytes);
+        auto       dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(bytes);
         const auto result = dec(cwt);
         REQUIRE(result);
-        CHECK_EQ(to_hex(result->bytes()), "d83dd29f40a041614162ff");
+        CHECK_EQ(to_hex(*result), "d83dd29f40a041614162ff");
         REQUIRE(value.payload);
         CHECK(*value.payload == std::vector<std::byte>{std::byte{'a'}});
         CHECK(value.signature == std::vector<std::byte>{std::byte{'b'}});
@@ -729,15 +729,15 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK_EQ(decoded.issuer, "unchanged");
     }
 
-    TEST_CASE("encoded item view options retain CWT maps with text labels") {
+    TEST_CASE("consumed bytes options retain CWT maps with text labels") {
         auto       input = to_bytes("a27f637072696476617465ff830102030166697373756572");
         claims_set decoded;
-        auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(input);
+        auto       dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(input);
         auto       result = dec(decoded);
 
         REQUIRE(result);
         CHECK_EQ(decoded.issuer, "issuer");
-        CHECK_EQ(to_hex(result->bytes()), to_hex(input));
+        CHECK_EQ(to_hex(*result), to_hex(input));
         CHECK_EQ(dec.tell(), input.end());
     }
 
@@ -774,16 +774,16 @@ TEST_SUITE("cbor_wire/cwt") {
         }
     }
 
-    TEST_CASE("encoded item view options retain array-valued audience claims") {
+    TEST_CASE("consumed bytes options retain array-valued audience claims") {
         auto       input = to_bytes("a1039f61616162ff");
         claims_set decoded;
-        auto       dec    = make_decoder_with_options<encoded_item_view_decoder_options, codec::cwt>(input);
+        auto       dec    = make_decoder_with_options<consumed_bytes_decoder_options, codec::cwt>(input);
         auto       result = dec(decoded);
 
         REQUIRE(result);
         REQUIRE(decoded.audience);
         CHECK_EQ(*decoded.audience, (audience_claim{std::vector<std::string>{"a", "b"}}));
-        CHECK_EQ(to_hex(result->bytes()), to_hex(input));
+        CHECK_EQ(to_hex(*result), to_hex(input));
         CHECK_EQ(dec.tell(), input.end());
     }
 

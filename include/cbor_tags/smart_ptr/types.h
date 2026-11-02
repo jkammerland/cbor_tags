@@ -166,35 +166,4 @@ class shared_ptr_decode_scope {
 static_assert(SharedPtrEncodeScope<shared_ptr_encode_scope>);
 static_assert(SharedPtrDecodeScope<shared_ptr_decode_scope>);
 
-template <IsSharedPointer Pointer> class scoped_shared_ptr {
-  public:
-    using pointer_type = std::remove_cvref_t<Pointer>;
-    using element_type = typename pointer_type::element_type;
-
-    scoped_shared_ptr()
-        requires std::default_initializable<pointer_type>
-    = default;
-
-    explicit scoped_shared_ptr(pointer_type pointer) : pointer_(std::move(pointer)) {}
-
-    [[nodiscard]] element_type *get() const noexcept(noexcept(pointer_.get())) { return pointer_.get(); }
-    [[nodiscard]] element_type &operator*() const noexcept(noexcept(*pointer_)) { return *pointer_; }
-    explicit operator bool() const noexcept(noexcept(static_cast<bool>(pointer_))) { return static_cast<bool>(pointer_); }
-
-    void reset() noexcept(noexcept(pointer_.reset())) { pointer_.reset(); }
-    void reset(element_type *raw) noexcept(noexcept(pointer_.reset(raw))) { pointer_.reset(raw); }
-
-    [[nodiscard]] pointer_type       &value()       &noexcept { return pointer_; }
-    [[nodiscard]] const pointer_type &value() const & noexcept { return pointer_; }
-    [[nodiscard]] pointer_type      &&value()      &&noexcept { return std::move(pointer_); }
-
-  private:
-    pointer_type pointer_;
-};
-
-template <IsSharedPointer Pointer>
-[[nodiscard]] auto as_scoped_shared_ptr(Pointer pointer) -> scoped_shared_ptr<std::remove_cvref_t<Pointer>> {
-    return scoped_shared_ptr<std::remove_cvref_t<Pointer>>{std::move(pointer)};
-}
-
 } // namespace cbor::tags::smart_ptr

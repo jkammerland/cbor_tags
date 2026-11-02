@@ -2,10 +2,14 @@
 #include <cbor_tags/cbor.h>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/cbor_traversal.h>
 #include <cbor_tags/extensions/cbor_visualization.h>
 #include <cstddef>
 #include <deque>
+#include <list>
+#include <span>
+#include <string>
 
 [[maybe_unused]] constexpr int cbor_tags_tidy_anchor() { return 0; }
 
@@ -21,4 +25,18 @@
     const std::deque<std::byte>                               noncontiguous{};
     ct::decoder<decltype(noncontiguous), ct::default_options> range_dec{noncontiguous};
     (void)ct::walk_item(range_dec, [](const auto &, const auto &) { return ct::status_code::success; }, {.strict_validation = true});
+}
+
+// Instantiate the separate coroutine adapters without changing ordinary codec modes.
+[[maybe_unused]] void cbor_tags_resumable_tidy_anchor() {
+    namespace ct = cbor::tags;
+    std::list<std::span<const std::byte>> input;
+    auto                                  source = ct::make_input_source(input);
+    std::string                           text;
+    auto                                  decode = ct::make_resumable_decoder(source)(text);
+    decode.finish();
+    std::list<std::span<std::byte>> output;
+    auto                            sink   = ct::make_output_source(output);
+    auto                            encode = ct::make_resumable_encoder(sink)(text);
+    encode.cancel();
 }

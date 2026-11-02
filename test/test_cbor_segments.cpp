@@ -657,7 +657,7 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
         byte_segments segments;
         segments.append_owned({std::byte{0x01}});
 
-        auto item = validate_item_segments(std::move(segments));
+        auto item = check_item_segments_structure(std::move(segments));
 
         REQUIRE(item);
         CHECK_EQ(to_hex(item->flatten()), "01");
@@ -667,7 +667,7 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
         byte_segments segments;
         segments.append_owned({std::byte{0x01}, std::byte{0x02}});
 
-        auto item = validate_item_segments(std::move(segments));
+        auto item = check_item_segments_structure(std::move(segments));
 
         REQUIRE_FALSE(item);
         CHECK_EQ(item.error(), status_code::error);
@@ -677,7 +677,7 @@ TEST_CASE("encoded item segment validation requires exactly one complete cbor it
         byte_segments segments;
         segments.append_owned({std::byte{0x58}});
 
-        auto item = validate_item_segments(std::move(segments));
+        auto item = check_item_segments_structure(std::move(segments));
 
         REQUIRE_FALSE(item);
         CHECK_EQ(item.error(), status_code::incomplete);

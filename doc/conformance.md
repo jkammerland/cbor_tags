@@ -15,10 +15,14 @@ boundaries:
 
 - The core encoder and typed decoder map between C++ types and CBOR items. The
   requested destination type determines which wire forms are accepted.
-- Raw item views, segmented-item validation, and lazy tag discovery perform a
-  structural scan so that they can identify complete item boundaries. They use
+- Directly decoded raw item views, `check_item_segments_structure`, and lazy tag
+  discovery perform a structural scan to identify complete item boundaries. They use
   the library's permissive CBOR syntax profile; they are not strict RFC 8949
   validators.
+- `consumed_bytes_decoder_options` returns the bytes consumed by a successful
+  typed decode without adding a structural scan. That range can be a header
+  prefix, several items, or empty. Manually constructed encoded item, array, and
+  map views are unchecked; their constructors do not establish item validity.
 - The visualization extension is a diagnostic parser. It performs checks needed
   to render an item and can be stricter than the core decoder.
 - `walk_item` visits one complete item and checks its structure. Its default
@@ -66,8 +70,10 @@ diagnostic traversal retain the decoder's permissive simple-value behavior.
 
 The core decoder preserves the payload bytes of a CBOR text string and does not
 validate that they form UTF-8. This keeps byte handling separate from application
-text policy. The visualization extension can validate text with
-`DiagnosticOptions::check_tstr_utf8`.
+text policy. With `DiagnosticOptions::check_tstr_utf8`, the visualization
+extension marks invalid text as `non-utf8(N)`, where `N` is the payload byte
+length. This does not reject the item; the corresponding `cborctl diagnostic`
+command can print that marker and exit successfully.
 
 Applications that require RFC-valid text strings can use `validate_item` or
 strict `walk_item` at their admission boundary, or a codec that enforces that

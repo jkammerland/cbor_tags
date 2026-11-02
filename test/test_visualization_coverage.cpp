@@ -155,7 +155,7 @@ TEST_CASE("buffer annotation handles empty input, text chunks, arrays, maps, and
     REQUIRE(enc(wrap_as_array{std::string{"hi"}, std::vector<int>{1, 2}, std::map<int, int>{{3, 4}}, make_tag_pair(static_tag<42>{}, 7)}));
 
     std::string annotation;
-    buffer_annotate(buffer, annotation, {.max_depth = 2, .mode = AnnotationMode::no_annotation});
+    buffer_annotate(buffer, annotation, {.max_bytes_per_line = 2, .mode = AnnotationMode::no_annotation});
     INFO(annotation);
     CHECK(annotation.find("82") != std::string::npos);
     CHECK(annotation.find("68") != std::string::npos);
@@ -290,7 +290,7 @@ TEST_CASE("smart buffer annotation wraps string payloads before the annotation c
     const auto buffer = to_bytes("6c48656c6c6f20776f726c6421");
 
     std::string annotation;
-    buffer_annotate(buffer, annotation, {.max_depth = 3, .annotation_column = 16});
+    buffer_annotate(buffer, annotation, {.max_bytes_per_line = 3, .annotation_column = 16});
 
     INFO(annotation);
     CHECK(annotation.find("6c              # text(12)") != std::string::npos);
