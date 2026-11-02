@@ -1,7 +1,8 @@
 # Status errors
 
-Encoder and decoder call operators return an expected result. Check it before
-reading `.error()`. Use `status_message(code)` for a diagnostic:
+Encoder and decoder call operators are `[[nodiscard]]` and return an expected
+result. Check it before reading `.error()`. Use `status_message(code)` for a
+diagnostic:
 
 ```cpp
 #include <cbor_tags/cbor_decoder.h>

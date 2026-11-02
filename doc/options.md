@@ -156,23 +156,28 @@ when that layout is not practical.
 
 ## Return Byte Counts
 
-Select `expected<std::size_t, status_code>` to return the number of bytes
-written or consumed by each successful call:
+Use `byte_count_options` to return `expected<std::size_t, status_code>` with
+the number of bytes written or consumed by each successful call:
 
 ```cpp
-using count_options =
-    Options<Option<expected<std::size_t, status_code>>, default_wrapping>;
-
 std::vector<std::byte> buffer;
-auto enc = make_encoder_with_options<count_options>(buffer);
+auto enc = make_encoder_with_options<byte_count_options>(buffer);
 auto written = enc(1U, 24U);
 assert(written && *written == 3);
 
 unsigned first{}, second{};
-auto dec = make_decoder_with_options<count_options>(buffer);
+auto dec = make_decoder_with_options<byte_count_options>(buffer);
 auto consumed = dec(first, second);
 assert(consumed && *consumed == 3);
 assert(first == 1U && second == 24U);
+```
+
+`byte_count_options` retains default group wrapping and integer decoding.
+Compose `return_byte_count` with other options when needed:
+
+```cpp
+using strict_counts =
+    Options<return_byte_count, default_wrapping, strict_integer_decoding>;
 ```
 
 Counts include all arguments and their headers and tags. They apply to the

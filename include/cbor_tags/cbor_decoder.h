@@ -159,7 +159,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     explicit decoder(const InputBuffer &data) : data_(data), reader_(data) {}
 
-    template <typename... T> expected_type operator()(T &&...args) noexcept {
+    template <typename... T> [[nodiscard]] expected_type operator()(T &&...args) noexcept {
         try {
             if constexpr (detail::return_encoded_item_view_option_v<Options>) {
                 return decode_with_encoded_item_view(std::forward<T>(args)...);

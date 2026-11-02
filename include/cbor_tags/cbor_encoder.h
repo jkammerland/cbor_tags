@@ -45,7 +45,7 @@ struct encoder : Encoders<encoder<OutputBuffer, Options, Encoders...>>... {
 
     constexpr explicit encoder(OutputBuffer &data) : data_(data) {}
 
-    template <typename... T> expected_type operator()(T &&...args) noexcept {
+    template <typename... T> [[nodiscard]] expected_type operator()(T &&...args) noexcept {
         try {
             // Each public call measures its own complete write, including nested customizations.
             [[maybe_unused]] const auto start_offset = [&] {
