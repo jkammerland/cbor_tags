@@ -19,7 +19,7 @@ struct throwing_record {
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
         const auto result = decoder(value);
         if (!result)
-            return unexpected<status_code>{result.error()};
+            return cbor::tags::unexpected<status_code>{result.error()};
         raise();
         return {};
     }
