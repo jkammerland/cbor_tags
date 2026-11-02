@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_resumable.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <list>
 #include <span>
@@ -41,43 +42,44 @@ int main() {
     std::list<std::span<std::byte>> output_chunks;
     auto sink = ct::make_output_source(output_chunks);
     auto encoding = ct::make_resumable_encoder(sink)(sent);
-    if (encoding(first) != ct::resume_state::need_output ||
-        encoding(second) != ct::resume_state::done) {
-        return 1;
-    }
+    const auto first_output_state = encoding(first);
+    assert(first_output_state == ct::resume_state::need_output);
+
+    const auto final_output_state = encoding(second);
+    assert(final_output_state == ct::resume_state::done);
 
     // Check the selected field order independently through the ordinary array decoder.
     const auto encoded = encoding.result();
-    if (!encoded || *encoded <= first.size() || *encoded > first.size() + second.size()) {
-        return 2;
-    }
+    assert(encoded);
+    assert(*encoded > first.size());
+    assert(*encoded <= first.size() + second.size());
     auto produced = encoding.produced();
     std::string station;
     std::vector<int> samples;
     auto decoder = ct::make_decoder(produced);
-    if (!decoder(ct::wrap_as_array{station, samples}) || station != sent.station ||
-        samples != sent.samples || decoder.tell() != produced.end()) {
-        return 2;
-    }
+    const auto fields = decoder(ct::wrap_as_array{station, samples});
+    assert(fields);
+    assert(station == sent.station);
+    assert(samples == sent.samples);
+    assert(decoder.tell() == produced.end());
 
     // Supply only written bytes; both backing buffers remain alive during decoding.
     std::list<std::span<const std::byte>> input_chunks;
     auto source = ct::make_input_source(input_chunks);
     app::Report received;
     auto decoding = ct::make_resumable_decoder(source)(received);
-    if (decoding(std::span<const std::byte>{first}) != ct::resume_state::need_input) {
-        return 3;
-    }
-    if (decoding(std::span<const std::byte>{second}.first(*encoded - first.size()),
-            ct::end_of_input) != ct::resume_state::done) {
-        return 3;
-    }
+    const auto first_input_state = decoding(std::span<const std::byte>{first});
+    assert(first_input_state == ct::resume_state::need_input);
+
+    const auto final_input_state =
+        decoding(std::span<const std::byte>{second}.first(*encoded - first.size()));
+    assert(final_input_state == ct::resume_state::done);
 
     // The hook resumes inside its fields, then reconstructs the application layout.
     const auto decoded = decoding.result();
-    if (!decoded || *decoded != *encoded || received.station != sent.station ||
-        received.samples != sent.samples) {
-        return 4;
-    }
+    assert(decoded);
+    assert(*decoded == *encoded);
+    assert(received.station == sent.station);
+    assert(received.samples == sent.samples);
     return 0;
 }

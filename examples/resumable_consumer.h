@@ -5,8 +5,10 @@
 
 namespace example {
 
-// Minimal eager consumer: the producer resumes it inline through the CBOR awaiter.
+// Example-only coroutine support, shared by the await and generator examples.
+// The producer resumes this eager consumer inline through the CBOR awaiter.
 // Declare it after its awaited operation so its frame is always destroyed first.
+
 class consumer {
   public:
     struct promise_type {
@@ -41,6 +43,7 @@ class consumer {
     bool done() const noexcept {
         return handle_.done();
     }
+    // co_return supplies this bool; it is not a CBOR operation status.
     bool succeeded() const noexcept {
         return done() && handle_.promise().success && !handle_.promise().failure;
     }

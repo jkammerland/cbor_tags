@@ -3,6 +3,7 @@
 #include "resumable_consumer.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <list>
 #include <span>
@@ -35,9 +36,8 @@ int main() {
     // Encode three top-level readings, without an enclosing CBOR array.
     const std::array sent{7, 24, 1000};
     std::vector<std::byte> buffer;
-    if (!ct::make_encoder(buffer)(sent[0], sent[1], sent[2])) {
-        return 1;
-    }
+    const auto encoded = ct::make_encoder(buffer)(sent[0], sent[1], sent[2]);
+    assert(encoded);
 
     // The consumer outlives no borrowed object: it is declared last and destroyed first.
     const auto bytes = std::span<const std::byte>{buffer};
@@ -50,20 +50,19 @@ int main() {
 
     // One feed can yield an item and immediately start waiting for the next one.
     items(bytes.first(1));
-    if (consumer.done() || items.done() || received != std::vector<int>{sent.front()}) {
-        return 2;
-    }
+    assert(!consumer.done());
+    assert(!items.done());
+    assert(received == std::vector<int>{sent.front()});
 
     // Buffered items drain inline; the consumer still waits for the end of the sequence.
     items(bytes.subspan(1));
-    if (consumer.done() || received != std::vector<int>(sent.begin(), sent.end())) {
-        return 2;
-    }
+    assert(!consumer.done());
+    assert(received == std::vector<int>(sent.begin(), sent.end()));
 
     // Clean EOF produces a successful zero-byte result, not another reading.
     items(ct::end_of_input);
-    if (!consumer.succeeded() || !items.done() || consumed != buffer.size()) {
-        return 3;
-    }
+    assert(consumer.succeeded());
+    assert(items.done());
+    assert(consumed == buffer.size());
     return 0;
 }

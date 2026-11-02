@@ -1,9 +1,11 @@
 #include "cbor_tags/cbor_encoder.h"
 #include "cbor_tags/cbor_resumable.h"
+#include "example_support.h"
 
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <list>
 #include <span>
 #include <string>
@@ -41,12 +43,14 @@ int main() {
     const auto first_state = operation(first_chunk);
     assert(first_state == ct::resume_state::need_input);
     assert(chunks.size() == 1);
+    std::cout << "first input: " << example::to_hex(first_chunk) << '\n';
 
     // subspan(2) supplies every byte after the two already supplied.
     const auto last_chunk = bytes.subspan(2);
     const auto final_state = operation(last_chunk);
     assert(final_state == ct::resume_state::done);
     assert(chunks.size() == 2);
+    std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
     // Typed decoding finishes when all requested values are available, without EOF.
     const auto result = operation.result();

@@ -1,8 +1,11 @@
 #include "cbor_tags/cbor_decoder.h"
 #include "cbor_tags/cbor_resumable.h"
+#include "example_support.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
+#include <iostream>
 #include <list>
 #include <ranges>
 #include <span>
@@ -14,39 +17,46 @@ namespace ct = cbor::tags;
 message = tstr
 */
 int main() {
-    // Keep the value and every supplied output buffer alive through completion.
+    // This text needs 20 encoded bytes. Two bytes deliberately force suspension.
     const std::string sent = "ready for transport";
     std::array<std::byte, 2> first{};
     std::array<std::byte, 64> second{};
+
+    // The sink tracks written and committed positions across borrowed buffers.
     std::list<std::span<std::byte>> chunks;
     auto sink = ct::make_output_source(chunks);
     auto operation = ct::make_resumable_encoder(sink)(sent);
 
-    // Exhausting the first buffer suspends the operation without closing it.
-    if (operation(first) != ct::resume_state::need_output || operation.done()) {
-        return 1;
-    }
+    // Supply writable space, then observe that the encoder needs more.
+    const auto first_state = operation(first);
+    assert(first_state == ct::resume_state::need_output);
+    assert(chunks.size() == 1);
 
-    // Add space without reusing or publishing bytes from the pending operation.
-    if (operation(second) != ct::resume_state::done) {
-        return 1;
-    }
+    const auto final_state = operation(second);
+    assert(final_state == ct::resume_state::done);
+    assert(chunks.size() == 2);
 
-    // produced() includes only committed bytes, excluding unused output capacity.
+    // produced() excludes unused capacity and any uncommitted writes.
     const auto result = operation.result();
+    assert(result);
     auto produced = operation.produced();
-    if (!result || *result <= first.size() ||
-        *result != static_cast<std::size_t>(std::ranges::distance(produced)) ||
-        *result + static_cast<std::size_t>(std::ranges::distance(operation.remaining_output())) !=
-            first.size() + second.size()) {
-        return 2;
-    }
+    const auto written = static_cast<std::size_t>(std::ranges::distance(produced));
+    const auto unused =
+        static_cast<std::size_t>(std::ranges::distance(operation.remaining_output()));
+    assert(*result > first.size());
+    assert(*result == written);
+    assert(written + unused == first.size() + second.size());
 
-    // Decode the committed range while its backing buffers remain alive.
+    // Decode the committed bytes while both backing buffers and the sink are alive.
     std::string received;
     auto decoder = ct::make_decoder(produced);
-    if (!decoder(received) || received != sent || decoder.tell() != produced.end()) {
-        return 3;
-    }
+    const auto decoded = decoder(received);
+    assert(decoded);
+    assert(received == sent);
+    assert(decoder.tell() == produced.end());
+
+    std::cout << "received: " << received << '\n';
+    std::cout << "encoded bytes: " << written << '\n';
+    std::cout << "encoded: " << example::to_hex(produced) << '\n';
     return 0;
 }

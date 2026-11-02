@@ -192,6 +192,7 @@ template <typename T> auto counted_destination(const std::vector<T> &, allocatio
     return std::pmr::vector<T>{&resource};
 }
 template <typename T> auto counted_destination(const std::deque<T> &, allocation_counter &resource) {
+    // An untyped resource pointer selects initializer_list<bool> for deque<bool>.
     return std::pmr::deque<T>{std::pmr::polymorphic_allocator<T>{&resource}};
 }
 inline auto counted_destination(const std::string &, allocation_counter &resource) { return std::pmr::string{&resource}; }
@@ -280,6 +281,8 @@ void run_workload(const throughput_options &options, const std::string &name, co
                     }
                     allocation_counter resource;
                     auto               decoded = counted_destination(value, resource);
+                    require(decoded.empty(), "allocation destination must start empty");
+                    require(decoded.get_allocator().resource() == &resource, "allocation destination must use its counter");
                     if constexpr (reservable_destination<T>) {
                         if (reserve) {
                             decoded.reserve(value.size());
