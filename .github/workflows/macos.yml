@@ -11,6 +11,11 @@ on:
       - '**.md'
       - 'LICENSE'
 
+# Bound compiler processes on hosted runners. A bare --parallel overrides this
+# limit with unlimited jobs when CMake uses Unix Makefiles.
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
 jobs:
   build:
     name: ${{ matrix.config.name }} C++${{ matrix.cxx_standard }}
@@ -79,7 +84,7 @@ jobs:
 
     - name: Build
       shell: bash
-      run: cmake --build build-cxx${{ matrix.cxx_standard }} --config Release --parallel
+      run: cmake --build build-cxx${{ matrix.cxx_standard }} --config Release
 
     - name: Test
       shell: bash
@@ -117,7 +122,7 @@ jobs:
 
     - name: Build
       shell: bash
-      run: cmake --build build-std-expected-cxx23 --config Release --parallel
+      run: cmake --build build-std-expected-cxx23 --config Release
 
     - name: Test
       shell: bash
@@ -200,7 +205,7 @@ jobs:
 
     - name: Build
       shell: bash
-      run: cmake --build build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} --config Release --parallel
+      run: cmake --build build-${{ matrix.backend.id }}-cxx${{ matrix.cxx_standard }} --config Release
 
     - name: Test
       shell: bash

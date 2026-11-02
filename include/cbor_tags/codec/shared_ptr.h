@@ -9,6 +9,9 @@ template <typename Self> struct shared_ptr : base<Self> {
     using base<Self>::decode;
     using base<Self>::encode;
 
+    // Graph scope mutations cannot be restored by the ordinary retry boundary.
+    static_assert(!tags::detail::is_resumable_context<Self>, "codec::shared_ptr does not support resumable operations");
+
     template <smart_ptr::SharedPtrEncodeScope Scope, typename S = Self>
         requires smart_ptr::detail::EncoderSelf<S>
     void set_shared_ptr_scope(Scope &scope) {

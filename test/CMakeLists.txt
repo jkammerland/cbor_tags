@@ -1119,3 +1119,44 @@ add_test(NAME resumable_zero_input_compile_fails COMMAND ${CMAKE_COMMAND}
   "-DPASS_REGEX=Zero-byte container entries require an explicit count bound"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 set_tests_properties(resumable_zero_input_compile_fails PROPERTIES LABELS "compile-fail")
+
+# Retry declarations authorize the selected customization and direction only.
+add_executable(resumable_retry_compile resumable_retry_compile.cc)
+target_link_libraries(resumable_retry_compile PRIVATE cbor::tags)
+add_test(NAME resumable_retry_compile COMMAND resumable_retry_compile)
+
+function(add_resumable_retry_failure CASE DIAGNOSTIC)
+  string(TOLOWER "resumable_retry_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_retry_compile.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE ${ARGN})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  if(CASE STREQUAL "NODISCARD")
+    # clang-cl uses Clang diagnostics even with the MSVC command-line frontend.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+      target_compile_options(${TEST_NAME} PRIVATE /we4834)
+    else()
+      target_compile_options(${TEST_NAME} PRIVATE -Werror=unused-result -Werror=unused-value)
+    endif()
+  endif()
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endfunction()
+
+foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVER_DECODE)
+  add_resumable_retry_failure(${CASE} "ordinary decoding requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
+endforeach()
+add_resumable_retry_failure(MEMBER_ENCODE "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
+add_resumable_retry_failure(OBSERVER_ENCODE "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+add_resumable_retry_failure(NODISCARD "nodiscard" CBOR_RETRY_NODISCARD)
+
+foreach(DIRECTION ENCODE DECODE)
+  foreach(STORAGE SOURCE STORAGE)
+    foreach(OPTIONS OPTIONS DEFAULT)
+      add_resumable_retry_failure(SHARED_${DIRECTION}_${STORAGE}_${OPTIONS}
+        "codec::shared_ptr does not support resumable operations"
+        CBOR_RETRY_SHARED CBOR_RETRY_${DIRECTION} CBOR_RETRY_${STORAGE} CBOR_RETRY_${OPTIONS})
+    endforeach()
+  endforeach()
+endforeach()

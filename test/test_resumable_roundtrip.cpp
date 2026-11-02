@@ -29,6 +29,22 @@ namespace {
 using input_chunks  = std::list<std::span<const std::byte>>;
 using output_chunks = std::list<std::span<std::byte>>;
 
+// Native hooks retain field progress when either string crosses a chunk edge.
+struct string_pair {
+    std::string first;
+    std::string second;
+    bool        operator==(const string_pair &) const = default;
+
+    template <typename Encoder> auto                   encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
+    template <typename Decoder> auto                   decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
+        co_return co_await encoder(wrap_as_array{first, second});
+    }
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
+        co_return co_await decoder(wrap_as_array{first, second});
+    }
+};
+
 struct resumable_message {
     std::string                name;
     std::vector<std::uint32_t> values;
@@ -520,7 +536,70 @@ resumable<status_code> resumable_transcode(Context &context, Value &value) {
 
 } // namespace
 
+// These fixtures publish decoded values only on success. The declarations
+// authorize their complete ordinary retry units, including completion counters.
+namespace cbor::tags {
+
+template <> struct resumable_retry_traits<retry_safe_record> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+template <> struct resumable_retry_traits<retry_safe_encoder_record> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = false;
+};
+template <typename Self> struct resumable_retry_traits<mixin_tagged_value, ordinary_tagged_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint32_t, ordinary_uint32_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint32_t, plain_uint32_codec<Self>> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+template <typename T, typename Self> struct resumable_retry_traits<T, contextual_variant_codec<Self>> {
+    static constexpr bool encode = false;
+    static constexpr bool decode =
+        std::same_as<T, tag_context_value> || std::same_as<T, header_tag_context_value> || std::same_as<T, header_context_value>;
+};
+template <typename Self> struct resumable_retry_traits<static_tag<45005>, rvalue_metadata_tag_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+
+} // namespace cbor::tags
+
 TEST_SUITE("roundtrip/resumable") {
+
+    TEST_CASE("custom string pair hooks preserve values across every transport split") {
+        const string_pair expected{"a", "b"};
+        check_every_decode_split(expected);
+        check_every_encode_split(expected);
+    }
+
+    TEST_CASE("declared transactional decoder publishes once across every transport split") {
+        const retry_safe_record expected{65536, "retry-safe payload", 0, {}};
+        const auto              bytes = ordinary_bytes(expected);
+        for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+            CAPTURE(cut);
+            input_chunks      chunks{std::span<const std::byte>{bytes}.first(cut)};
+            auto              source = make_input_source(chunks);
+            retry_safe_record actual;
+            auto              operation = make_resumable_decoder(source)(actual);
+            if (!operation.done()) {
+                chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
+                operation.finish();
+            }
+            REQUIRE(operation.result());
+            CHECK(actual.number == expected.number);
+            CHECK(actual.text == expected.text);
+            CHECK(actual.completed == std::vector<std::uint32_t>{expected.number});
+            CHECK(*operation.result() == bytes.size());
+        }
+    }
 
     TEST_CASE_TEMPLATE("integer arrays preserve signed and unsigned boundaries across every split", T, std::uint8_t, std::uint16_t,
                        std::uint32_t, std::uint64_t, std::int8_t, std::int16_t, std::int32_t, std::int64_t) {

@@ -5,6 +5,7 @@
 #include "cbor_tags/detail/cbor_resumable_concepts.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
 #include "cbor_tags/detail/cbor_resumable_leaf.h"
+#include "cbor_tags/detail/cbor_resumable_retry.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
 
 #include <algorithm>
@@ -98,6 +99,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     // A complete normal call is the retry boundary, including nested customizations.
     // Its writes stay tentative until the whole call succeeds.
     template <typename T> resumable<status_code> ordinary(T &value) {
+        static_assert(resumable_encode_retry_allowed<ordinary_type, T, Codecs<ordinary_type>...>(),
+                      "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in");
         return attempt([this, &value] {
             const auto result = ordinary_(value);
             return result ? status_code::success : result.error();
@@ -323,6 +326,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             auto        tag = get_major_6_tag_from_class(value);
             status_code status;
             if constexpr (is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
+                static_assert(resumable_encode_retry_allowed<ordinary_type, decltype(tag), Codecs<ordinary_type>...>(),
+                              "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in");
                 status = co_await attempt([this, &tag] {
                     const auto result = ordinary_(std::move(tag));
                     return result ? status_code::success : result.error();

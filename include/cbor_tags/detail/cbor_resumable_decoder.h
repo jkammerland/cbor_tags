@@ -4,6 +4,7 @@
 #include "cbor_tags/detail/cbor_resumable_concepts.h"
 #include "cbor_tags/detail/cbor_resumable_control.h"
 #include "cbor_tags/detail/cbor_resumable_leaf.h"
+#include "cbor_tags/detail/cbor_resumable_retry.h"
 #include "cbor_tags/detail/cbor_resumable_source.h"
 
 #include <algorithm>
@@ -111,6 +112,31 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // A complete normal call is the sole retry boundary, including its nested calls.
     template <typename T> resumable<status_code> ordinary(T &value) {
+        require_retry<T>();
+        return attempt_ordinary(value);
+    }
+
+    template <typename T, payload_decode_context Context> resumable<status_code> ordinary(resume_context_value<T, Context> &value) {
+        require_retry<T, Context>();
+        return attempt_ordinary(value);
+    }
+
+    template <typename T> resumable<status_code> ordinary(resume_tag_wrapper<T> &value) {
+        require_retry<T>();
+        return attempt_ordinary(value);
+    }
+
+    // This internal adapter only checks the group header; it publishes no
+    // destination or codec state before completing that check.
+    resumable<status_code> ordinary(resume_group_header &value) { return attempt_ordinary(value); }
+
+  private:
+    template <typename T, payload_decode_context Context = payload_decode_context::direct> static consteval void require_retry() {
+        static_assert(resumable_decode_retry_allowed<ordinary_type, T, Context, Codecs<ordinary_type>...>(),
+                      "ordinary decoding requires a resumable hook or resumable_retry_traits decode opt-in");
+    }
+
+    template <typename T> resumable<status_code> attempt_ordinary(T &value) {
         const auto result = ordinary_(value);
         if (result) {
             commit();
@@ -124,6 +150,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return retry(value);
     }
 
+  public:
     template <typename... T> resumable<status_code> operator()(T &&...value) {
         return arguments(std::tuple<T...>{std::forward<T>(value)...});
     }
@@ -446,6 +473,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // Lookahead uses the same ordinary decoder without committing the speculative header.
     template <typename T> status_code peek_once(T &value) {
+        require_retry<T>();
         const auto result = ordinary_(value);
         rollback();
         return result ? status_code::success : result.error();

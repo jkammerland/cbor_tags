@@ -236,6 +236,24 @@ template <typename Self> struct bool_codec : codec::base<Self> {
 
 } // namespace
 
+// These fixture codecs publish their result and completion counters only on success.
+namespace cbor::tags {
+
+template <typename Self> struct resumable_retry_traits<float, direct_float_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<float, header_float_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<bool, bool_codec<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+
+} // namespace cbor::tags
+
 TEST_SUITE("roundtrip/resumable") {
 
     TEST_CASE("bounded float and bool leaves retain values at every array and map split") {
