@@ -372,7 +372,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
             input.reserve(input.capacity() + wire.size());
             input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.finish() == resume_state::finished);
+            REQUIRE(operation.close_input() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == wire.size());
         }
@@ -484,7 +484,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             if (cancel) {
                 operation.cancel();
             } else {
-                operation.finish();
+                operation.close_input();
             }
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
@@ -517,7 +517,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE(first.result());
         CHECK(items.value() == 42);
 
-        CHECK(items.finish() == resume_state::finished);
+        CHECK(items.close_input() == resume_state::finished);
         auto &end = items.next();
         REQUIRE(end.done());
         REQUIRE(end.result());

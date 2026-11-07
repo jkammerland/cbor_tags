@@ -103,7 +103,7 @@ template <typename Source> class resumable_validation_context : public resumable
         resumable_scalar_batch<> batch{.remaining = request.count, .indefinite = request.until_eof};
         while (!batch.finished()) {
             while (this->empty()) {
-                if (this->eof())
+                if (this->closed())
                     co_return request.until_eof ? status_code::success : status_code::incomplete;
                 co_await this->wait();
             }
@@ -262,7 +262,7 @@ template <typename Source> class resumable_validation_context : public resumable
             if (window_.empty()) {
                 refresh_window();
                 if (window_.empty() && base::empty()) {
-                    if (this->eof())
+                    if (this->closed())
                         co_return status_code::incomplete;
                     co_await this->wait();
                     continue;
@@ -331,7 +331,7 @@ class resumable_generator_context : public resumable_decode_context<Source, Opti
     using base::base;
     resumable_task<status_code> operator()(T &value, bool &ended) {
         while (this->empty()) {
-            if (this->eof()) {
+            if (this->closed()) {
                 ended = true;
                 co_return status_code::success;
             }

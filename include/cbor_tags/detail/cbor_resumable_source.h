@@ -667,7 +667,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
         }
     }
 
-    bool eof() const { return closed_; }
+    bool closed() const { return closed_; }
     bool owns(const iterator &position) const { return position.source_ == this; }
 
     // Cleanup only restores known progress positions; an unsized end sentinel
@@ -903,7 +903,7 @@ template <detail::ResumableStorage Storage> class input_source {
     void acquire() { chunks_.acquire(); }
     void release() noexcept { chunks_.release(); }
     void close() { chunks_.close(); }
-    bool eof() const { return chunks_.eof(); }
+    bool closed() const { return chunks_.closed(); }
 
     void commit(const iterator &position) {
         assert(chunks_.owns(position) && position.offset() >= committed_.offset());
@@ -947,7 +947,7 @@ template <detail::ResumableOutputStorage Storage> class output_source {
     output_source &operator=(output_source &&)      = delete;
 
     void refresh() { chunks_.refresh(); }
-    bool eof() const { return chunks_.eof(); }
+    bool closed() const { return chunks_.closed(); }
     void close() { chunks_.close(); }
     void acquire() { chunks_.acquire(); }
     void release() noexcept { chunks_.release(); }
@@ -1010,7 +1010,7 @@ template <detail::ResumableOutputStorage Storage> class output_source {
             }
         }
         if constexpr (growable) {
-            if (!bytes.empty() && !eof()) {
+            if (!bytes.empty() && !closed()) {
                 if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
                     throw std::length_error("CBOR output byte offset overflow");
                 using byte_type = std::ranges::range_value_t<Storage>;

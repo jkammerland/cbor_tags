@@ -83,8 +83,8 @@ template <typename T> class [[nodiscard]] resumable_task {
 };
 
 enum class resume_state { need_input, need_output, finished };
-struct until_end_of_input_t {};
-inline constexpr until_end_of_input_t until_end_of_input{};
+struct until_closed_t {};
+inline constexpr until_closed_t until_closed{};
 
 namespace detail {
 template <typename Context>
@@ -205,12 +205,16 @@ template <typename Context> class [[nodiscard]] resume_operation {
         s.context.source().refresh();
         return drive(s);
     }
-    resume_state finish() {
-        auto &s = checked_state();
-        if (s.control.driving)
-            throw std::logic_error("cannot finish a running codec");
-        s.context.source().close();
-        return resume();
+    // No more input or room will come: the codec ends instead of waiting
+    resume_state close_input()
+        requires(Context::waiting_state == resume_state::need_input)
+    {
+        return close_source();
+    }
+    resume_state close_output()
+        requires(Context::waiting_state == resume_state::need_output)
+    {
+        return close_source();
     }
     void cancel() {
         // Nothing to cancel in a moved-from operation, same as a finished one
@@ -276,6 +280,14 @@ template <typename Context> class [[nodiscard]] resume_operation {
         if (!state_)
             throw std::logic_error("resumable operation was moved from");
         return *state_;
+    }
+
+    resume_state close_source() {
+        auto &s = checked_state();
+        if (s.control.driving)
+            throw std::logic_error("cannot close the source of a running codec");
+        s.context.source().close();
+        return resume();
     }
 
     // Ends a pending operation with status. Waking the waiter is up to the caller.

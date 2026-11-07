@@ -20,11 +20,11 @@ int main() {
     const auto encoded = ct::make_encoder(buffer)(stations, true);
     assert(encoded);
 
-    // until_end_of_input selects validation of the entire incoming sequence.
+    // until_closed selects validation of the entire incoming sequence.
     const auto bytes = std::span<const std::byte>{buffer};
     std::vector<std::byte> input;
     auto source = ct::make_input_source(input);
-    auto operation = ct::make_resumable_validator(source, ct::until_end_of_input);
+    auto operation = ct::make_resumable_validator(source, ct::until_closed);
 
     // The producer appends bytes to the bound container before resuming validation.
     input.insert(input.end(), bytes.begin(), bytes.begin() + 3);
@@ -40,8 +40,8 @@ int main() {
     assert(input.size() == buffer.size());
     std::cout << "input bytes: " << input.size() << '\n';
 
-    // finish() announces EOF. Temporary exhaustion does not end the sequence.
-    const auto final_state = operation.finish();
+    // close_input() ends the input. Temporary exhaustion does not end the sequence.
+    const auto final_state = operation.close_input();
     assert(final_state == ct::resume_state::finished);
 
     // Success checks CBOR structure and UTF-8, not the application CDDL schema.

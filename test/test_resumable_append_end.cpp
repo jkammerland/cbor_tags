@@ -112,7 +112,7 @@ TEST_SUITE("resumable/source") {
         REQUIRE(source.write(initial) == 4);
 
         source.close();
-        CHECK(source.eof());
+        CHECK(source.closed());
         CHECK(source.write({}) == 0);
         CHECK(source.write(initial) == 0);
         CHECK(append_end_values(storage) == std::vector<unsigned>{10, 11, 1, 2, 3, 4});

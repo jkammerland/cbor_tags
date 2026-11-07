@@ -103,9 +103,9 @@ or changing the retained prefix. The default adapter does not support
 
 A flat `vector<byte>` or `deque<byte>` can instead receive appended bytes
 directly. Typed decoding finishes once the requested values are complete;
-`finish()` closes input and makes a truncated item return `status_code::incomplete`.
-Closing applies to the source, even when the operation is already done: later
-operations on it see the end of input.
+`close_input()` says no more input will come, so a truncated item returns
+`status_code::incomplete`. Closing applies to the source, even when the
+operation is already finished: later operations on it see the closed input.
 See the [record example](../examples/40_resumable.cpp).
 
 ## Encode to a growable container
@@ -185,9 +185,11 @@ int main() {
 ```
 
 Only `committed_bytes()` may be published; capacity and tentative writes are not
-encoded length. These default chunk descriptors stay append-only even after
-publication; the [ring example](../examples/46_resumable_ring.cpp) shows explicit
-publication and reclamation ownership.
+encoded length. When no more room will come, `close_output()` ends a waiting
+operation with `status_code::incomplete`. These default chunk descriptors stay
+append-only even after publication; the
+[ring example](../examples/46_resumable_ring.cpp) shows explicit publication and
+reclamation ownership.
 
 Growable encoding appends after existing contents. See the
 [bounded encoding example](../examples/41_resumable_encoding.cpp) for a complete
@@ -227,7 +229,7 @@ the last inner range while preserving earlier contents and order:
 
 Mutation and codec driving are serialized. Repeated `resume()` without new
 availability is safe, but the producer should wait for a storage change rather
-than busy-loop; empty input alone never signals EOF.
+than busy-loop; running out of input never closes it, only `close_input()` does.
 
 ## Borrow decoded strings and items
 
@@ -430,18 +432,19 @@ running codec is unsupported.
 
 `make_resumable_generator<T>(source)` retains a current value and operation.
 Call `next()` before driving, copy `value()` before requesting the next item,
-and keep one outstanding request; clean EOF succeeds with zero bytes and sets
-`done()`. See the [generator example](../examples/44_resumable_generator.cpp).
+and keep one outstanding request; closing the input between items succeeds with
+zero bytes and sets `done()`. See the
+[generator example](../examples/44_resumable_generator.cpp).
 
 `make_resumable_validator(source)` checks one item without constructing values;
-a numeric second argument selects a fixed item count, and `until_end_of_input`
-waits for explicit closure. The third argument accepts `validation_options`,
-whose default depth limit is 64; see the
+a numeric second argument selects a fixed item count, and `until_closed`
+validates items until `close_input()`. The third argument accepts
+`validation_options`, whose default depth limit is 64; see the
 [validation example](../examples/42_resumable_validation.cpp).
 
 Validation checks CBOR structure and UTF-8, not an application schema.
 Indefinite text chunks must each contain complete UTF-8 sequences; a declared
-payload that is truncated at EOF remains `incomplete`.
+payload that is cut short by closing the input remains `incomplete`.
 
 ## Compose custom codecs
 
@@ -603,7 +606,8 @@ contract:
   a short write means temporary exhaustion.
 - Both expose nonthrowing `committed_position()` and `release()`; output
   `restore(position)` is also nonthrowing. `acquire()` enforces one operation,
-  `refresh()` runs before driving, and `eof()`/`close()` mark terminal availability.
+  `refresh()` runs before driving, and `close()` and `closed()` mark the end of
+  input or output.
 - A sized input source reports its retained size and supplies
   `remaining_size(position)` for exact availability. A nonzero absolute offset
   is not an index into that retained size; unsized input needs no total extent.

@@ -28,7 +28,7 @@ void check_leaf_failure(const std::vector<std::byte> &bytes, const T &prefix, st
         T                                actual;
         auto                             operation = make_resumable_decoder(source)(actual);
         if (!operation.done())
-            operation.finish();
+            operation.close_input();
         REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == expected_status);

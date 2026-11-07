@@ -32,7 +32,7 @@ concept ResumableSource = ResumableSizeType<Source> && requires(Source &source, 
     typename Source::position_type;
     requires ResumablePosition<typename Source::position_type>;
     { constant.committed_position() } noexcept -> std::same_as<typename Source::position_type>;
-    { constant.eof() } -> std::same_as<bool>;
+    { constant.closed() } -> std::same_as<bool>;
     { source.refresh() } -> std::same_as<void>;
     { source.close() } -> std::same_as<void>;
     { source.acquire() } -> std::same_as<void>;

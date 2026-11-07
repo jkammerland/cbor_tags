@@ -70,7 +70,7 @@ class named_helper_source {
     void          commit(position_type position) { committed_ = position.index; }
     auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
     void          refresh() {}
-    bool          eof() const { return closed_; }
+    bool          closed() const { return closed_; }
     void          close() { closed_ = true; }
     void          acquire() {
         if (active_)
@@ -128,7 +128,7 @@ class custom_empty_window_source {
     void commit() { source_.commit(); }
     void restore(position_type position) noexcept { source_.restore(position); }
     void refresh() { source_.refresh(); }
-    bool eof() const { return source_.eof(); }
+    bool closed() const { return source_.closed(); }
     void close() { source_.close(); }
     void acquire() { source_.acquire(); }
     void release() noexcept { source_.release(); }
@@ -325,7 +325,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
 
             if (!close_before_start) {
                 REQUIRE(operation.state() == ct::resume_state::need_output);
-                REQUIRE(operation.finish() == ct::resume_state::finished);
+                REQUIRE(operation.close_output() == ct::resume_state::finished);
             }
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());

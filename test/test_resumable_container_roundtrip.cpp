@@ -278,7 +278,7 @@ TEST_SUITE("roundtrip/resumable") {
                 decoder.resume();
                 if (!decoder.done()) {
                     input_storage.emplace_back(input.subspan(cut));
-                    decoder.finish();
+                    decoder.close_input();
                 }
                 REQUIRE(decoder.done());
                 REQUIRE(decoder.result());
@@ -328,7 +328,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
-                operation.finish();
+                operation.close_input();
             }
             REQUIRE(operation.done());
             REQUIRE(operation.result());
@@ -388,7 +388,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.finish();
+                operation.close_input();
             }
             REQUIRE(operation.done());
             REQUIRE(operation.result());

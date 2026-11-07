@@ -97,7 +97,7 @@ template <ResumableInputSource Source>
         source, detail::validation_request{.count = count, .until_eof = false, .options = options}};
 }
 template <ResumableInputSource Source>
-[[nodiscard]] auto make_resumable_validator(Source &source, until_end_of_input_t, validation_options options = {}) {
+[[nodiscard]] auto make_resumable_validator(Source &source, until_closed_t, validation_options options = {}) {
     return detail::resume_operation<detail::resumable_validation_context<Source>>{
         source, detail::validation_request{.count = 0, .until_eof = true, .options = options}};
 }
@@ -128,10 +128,10 @@ class resumable_generator {
             throw std::logic_error("call generator.next() before resuming");
         return operation_->resume();
     }
-    resume_state finish() {
+    resume_state close_input() {
         if (!operation_)
-            throw std::logic_error("call generator.next() before finishing");
-        return operation_->finish();
+            throw std::logic_error("call generator.next() before closing its input");
+        return operation_->close_input();
     }
     T       &value() noexcept { return value_; }
     const T &value() const noexcept { return value_; }

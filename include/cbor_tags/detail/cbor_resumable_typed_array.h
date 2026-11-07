@@ -75,7 +75,7 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, Array
     while (values.size() != element_count) {
         const auto available = resumable_source_access::borrow_window(context.source(), reader.position_);
         if (available ? available->empty() : context.empty()) {
-            if (context.eof()) {
+            if (context.closed()) {
                 co_return status_code::incomplete;
             }
             co_await context.wait();
@@ -149,7 +149,7 @@ resumable_task<status_code> resumable_encode_typed_array_boundary(Context &conte
                 continue;
             }
         }
-        if (context.eof()) {
+        if (context.closed()) {
             context.rollback();
             co_return status_code::incomplete;
         }

@@ -61,9 +61,9 @@ standalone and uses standard-library storage.
 | [40_a_resumable.cpp](40_a_resumable.cpp) | Continue a truncated record | A failed one-shot decode is terminal; a resumable decode keeps its progress and finishes once the missing bytes are appended. |
 | [40_resumable.cpp](40_resumable.cpp) | Decode items as input grows | Append bytes to a deque, resume, and inspect the completed values. |
 | [41_resumable_encoding.cpp](41_resumable_encoding.cpp) | Encode into a growable container | Let a deque grow and inspect its committed encoded prefix. |
-| [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until explicit EOF. |
+| [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until the input is closed. |
 | [43_resumable_coroutine.cpp](43_resumable_coroutine.cpp) | Await an operation from a coroutine | A serialized codec resume completes the waiting consumer inline. |
-| [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; distinguish clean EOF from an item. |
+| [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; tell the end of the sequence from another item. |
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
 | [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a public source | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows; a sink hashes a byte string larger than the ring. |
 

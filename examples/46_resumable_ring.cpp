@@ -82,7 +82,7 @@ template <bool Output, std::size_t Capacity> class ring_source {
     iterator committed_position() const noexcept {
         return {this, committed_};
     }
-    bool eof() const {
+    bool closed() const {
         return closed_;
     }
     void close() {

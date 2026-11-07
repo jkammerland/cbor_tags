@@ -746,9 +746,9 @@ TEST_SUITE("resumable/source") {
         source.release();
 
         source.close();
-        CHECK(source.eof());
+        CHECK(source.closed());
         source.close();
-        CHECK(source.eof());
+        CHECK(source.closed());
     }
 
     TEST_CASE_TEMPLATE("input descriptors can relocate without invalidating checkpoints", Storage, std::vector<std::span<const std::byte>>,

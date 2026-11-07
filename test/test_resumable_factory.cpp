@@ -221,7 +221,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
         chunks.emplace_back(std::span<const std::byte>{bytes}.first(bytes.size() - 1));
         REQUIRE(operation.resume() == resume_state::need_input);
         CHECK_THROWS_AS(decoder(actual), std::logic_error);
-        CHECK(operation.finish() == resume_state::finished);
+        CHECK(operation.close_input() == resume_state::finished);
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == status_code::incomplete);
         CHECK(actual == expected.substr(0, expected.size() - 1));

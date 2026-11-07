@@ -12,7 +12,7 @@ namespace ct = cbor::tags;
 
 template <typename Generator>
 example::consumer collect(Generator &items, std::vector<int> &received, std::size_t &consumed) {
-    // next() returns the generator-owned operation for the next value or clean EOF.
+    // next() returns the generator-owned operation for the next value or the end of the sequence.
     auto result = co_await items.next();
     assert(result);
     while (!items.done()) {
@@ -58,8 +58,8 @@ int main() {
     assert(!consumer.done());
     assert(received == std::vector<int>(sent.begin(), sent.end()));
 
-    // Clean EOF produces a successful zero-byte result, not another reading.
-    items.finish();
+    // Closing the input produces a successful zero-byte result, not another reading.
+    items.close_input();
     assert(consumer.succeeded());
     assert(items.done());
     assert(consumed == buffer.size());

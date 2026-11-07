@@ -34,7 +34,7 @@
     auto                                  source = ct::make_input_source(input);
     std::string                           text;
     auto                                  decode = ct::make_resumable_decoder(source)(text);
-    decode.finish();
+    decode.close_input();
     std::list<std::span<std::byte>> output;
     auto                            sink   = ct::make_output_source(output);
     auto                            encode = ct::make_resumable_encoder(sink)(text);

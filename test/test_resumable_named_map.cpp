@@ -72,7 +72,7 @@ template <typename T, typename Equal> void check_named_map_splits(std::span<cons
         storage.emplace_back(wire.subspan(cut));
         operation.resume();
         if (!operation.done())
-            operation.finish();
+            operation.close_input();
 
         REQUIRE(operation.done());
         const auto result = operation.result();
@@ -97,7 +97,7 @@ template <typename T, typename Equal> void check_named_map_splits(std::span<cons
         operation.resume();
     }
     if (!operation.done())
-        operation.finish();
+        operation.close_input();
 
     REQUIRE(operation.done());
     const auto result = operation.result();

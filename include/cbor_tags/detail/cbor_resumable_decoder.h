@@ -116,7 +116,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     ordinary_type &ordinary() noexcept { return ordinary_; }
     auto           wait() noexcept { return control_.wait(); }
     bool           empty() const { return ordinary_.reader_.empty(source_); }
-    bool           eof() const { return source_.eof(); }
+    bool           closed() const { return source_.closed(); }
     void           commit() {
         // The source owns the checkpoint; retain only its scalar progress here.
         source_.commit(ordinary_.reader_.position_);
@@ -162,7 +162,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         if (result.error() != status_code::incomplete)
             return result.error();
         rollback();
-        if (eof())
+        if (closed())
             return status_code::incomplete;
         return retry(value);
     }
@@ -177,7 +177,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         drain_payload(value, length, append);
         if (length == 0)
             return status_code::success;
-        if (eof())
+        if (closed())
             return status_code::incomplete;
         return await_payload(value, length, append);
     }
@@ -214,7 +214,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         while (length != 0) {
             co_await wait();
             drain_payload(value, length, append);
-            if (length != 0 && eof())
+            if (length != 0 && closed())
                 co_return status_code::incomplete;
         }
         co_return status_code::success;
@@ -258,7 +258,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         const auto status = drain_sink(sink, length);
         if (status != status_code::success || length == 0)
             return status;
-        if (eof())
+        if (closed())
             return status_code::incomplete;
         return await_sink_payload(sink, length);
     }
@@ -269,7 +269,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             const auto status = drain_sink(sink, length);
             if (status != status_code::success)
                 co_return status;
-            if (length != 0 && eof())
+            if (length != 0 && closed())
                 co_return status_code::incomplete;
         }
         co_return status_code::success;
@@ -398,7 +398,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if (result.error() != status_code::incomplete)
                 co_return result.error();
             rollback();
-            if (eof())
+            if (closed())
                 co_return status_code::incomplete;
         }
     }
@@ -807,7 +807,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     resumable_task<status_code> available() {
         if (!empty())
             return status_code::success;
-        if (eof())
+        if (closed())
             return status_code::incomplete;
         return await_available();
     }
@@ -817,7 +817,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             co_await wait();
             if (!empty())
                 co_return status_code::success;
-        } while (!eof());
+        } while (!closed());
         co_return status_code::incomplete;
     }
     template <typename T> resumable_task<status_code> optional(T &value) {
@@ -848,7 +848,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     template <typename T> resumable_task<status_code> peek(T &value) {
         const auto status = peek_once(value);
-        if (status != status_code::incomplete || eof())
+        if (status != status_code::incomplete || closed())
             return status;
         return await_peek(value);
     }
@@ -857,7 +857,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         for (;;) {
             co_await wait();
             const auto status = peek_once(value);
-            if (status != status_code::incomplete || eof())
+            if (status != status_code::incomplete || closed())
                 co_return status;
         }
     }
@@ -1132,7 +1132,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         std::uint64_t                      count{};
         while (!ended && (Indefinite || count != maximum)) {
             const auto status = leaf_map_elements<Indefinite>(value, append, entry, key_complete, count, ended, minimum, maximum);
-            if (status != status_code::incomplete || eof())
+            if (status != status_code::incomplete || closed())
                 co_return status;
             co_await wait();
         }
@@ -1185,7 +1185,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 auto remaining = header.size;
                 while (remaining != 0) {
                     status = leaf_elements(value, append, remaining);
-                    if (status != status_code::incomplete || eof())
+                    if (status != status_code::incomplete || closed())
                         co_return status;
                     co_await wait();
                 }
@@ -1195,7 +1195,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 bool          ended{};
                 while (!ended) {
                     status = indefinite_leaf_elements(value, append, count, ended, minimum, maximum);
-                    if (status != status_code::incomplete || eof())
+                    if (status != status_code::incomplete || closed())
                         co_return status;
                     co_await wait();
                 }

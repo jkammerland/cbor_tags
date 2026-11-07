@@ -151,7 +151,7 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(actual == expected);
 
             if (truncated) {
-                operation.finish();
+                operation.close_input();
                 REQUIRE(operation.done());
                 REQUIRE_FALSE(operation.result());
                 CHECK(operation.result().error() == status_code::incomplete);
@@ -230,7 +230,7 @@ TEST_SUITE("cbor_wire/resumable") {
             const auto bytes     = to_bytes(outer + major + "8");
             auto       operation = make_resumable_decoder(source)(actual);
             storage.emplace_back(bytes);
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);
@@ -413,7 +413,7 @@ TEST_SUITE("cbor_wire/resumable") {
             REQUIRE_FALSE(operation.done());
             CHECK(actual == ordered_integer_map{{99, 100}});
             CHECK(to_hex(operation.remaining_input()) == "1901");
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);
@@ -466,7 +466,7 @@ TEST_SUITE("cbor_wire/resumable") {
             std::map<std::uint32_t, std::uint32_t> actual;
             auto operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
             storage.emplace_back(bytes);
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == test.status);
@@ -499,7 +499,7 @@ TEST_SUITE("cbor_wire/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.finish();
+                operation.close_input();
             }
 
             REQUIRE(operation.done());
@@ -558,7 +558,7 @@ TEST_SUITE("cbor_wire/resumable") {
             operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual == expected);
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);

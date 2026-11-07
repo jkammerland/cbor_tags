@@ -144,7 +144,7 @@ class throwing_position_input {
     position_type committed_position() const noexcept { return {storage_, throw_assignment, committed_}; }
     void          commit(position_type position) { committed_ = position.offset(); }
     auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
-    bool          eof() const { return closed_; }
+    bool          closed() const { return closed_; }
     void          close() { closed_ = true; }
     void          refresh() {}
 
@@ -318,7 +318,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         CHECK_FALSE(operation.done());
         CHECK(operation.committed_bytes() == 0);
         CHECK_THROWS_AS(operation.resume(), std::logic_error);
-        CHECK_THROWS_AS(operation.finish(), std::logic_error);
+        CHECK_THROWS_AS(operation.close_input(), std::logic_error);
         CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
         CHECK_THROWS_AS(static_cast<void>(operation.remaining_input()), std::logic_error);
         CHECK_NOTHROW(operation.cancel()); // nothing to cancel, like a finished one
@@ -629,7 +629,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
         SUBCASE("whole batch") {
             storage.emplace_back(bytes);
-            generator.finish();
+            generator.close_input();
         }
         SUBCASE("one byte at a time") {
             for (std::size_t index = 0; index < bytes.size(); ++index) {
@@ -637,7 +637,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
                 generator.resume();
             }
             CHECK_FALSE(consumer.done());
-            generator.finish();
+            generator.close_input();
         }
 
         REQUIRE(consumer.done());

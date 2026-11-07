@@ -108,7 +108,7 @@ template <typename Array, typename EncodeValue> void check_typed_array_encode_sp
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(std::span{bytes}.subspan(cut));
-            operation.finish();
+            operation.close_output();
         }
 
         REQUIRE(operation.done());
@@ -136,7 +136,7 @@ template <typename Array> void check_typed_array_splits(const Array &expected) {
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(input.subspan(cut));
-            operation.finish();
+            operation.close_input();
         }
 
         REQUIRE(operation.done());
@@ -189,7 +189,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
             auto                                                operation = decoder(actual);
 
             input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
-            const auto state = operation.finish();
+            const auto state = operation.close_input();
             REQUIRE(state == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
@@ -399,7 +399,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto                   sink    = make_output_source(output_storage);
         auto                   encoder = make_resumable_encoder<typed_array_override, codec::typed_array>(sink)(expected);
         output_storage.emplace_back(std::span{output});
-        encoder.finish();
+        encoder.close_output();
         REQUIRE(encoder.result());
         CHECK(*encoder.result() == reference.size());
 
@@ -408,7 +408,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         rfc8746::typed_array<std::uint32_t> actual;
         auto                                decoder = make_resumable_decoder<typed_array_override, codec::typed_array>(source)(actual);
         input_storage.emplace_back(std::span<const std::byte>{output});
-        decoder.finish();
+        decoder.close_input();
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
         check_typed_array_values(actual, expected);

@@ -493,7 +493,7 @@ TEST_SUITE("cbor_wire/sinks") {
                 auto                   resumable_decoder = make_resumable_decoder(input);
                 auto                   operation         = resumable_decoder(make_sink());
                 CHECK_FALSE(operation.done());
-                operation.finish();
+                operation.close_input();
                 REQUIRE(operation.done());
                 REQUIRE_FALSE(operation.result());
                 CHECK(operation.result().error() == status_code::incomplete);
