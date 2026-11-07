@@ -327,6 +327,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <IsBinaryString T> constexpr status_code decode(T &t, major_type major, byte additionalInfo) {
         static_assert(!IsView<T> || IsConstView<T>, "if T is a view, it must be const, e.g std::span<const std::byte>");
 
+        // Early return for incompatible view/buffer combination, before waiting on the payload
+        if constexpr (IsConstView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        }
+
         // Early validation
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
@@ -1255,6 +1260,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
 
     template <IsBinaryString T>
     constexpr status_code decode_bounded_bstr(T &wrapped, major_type major, byte additionalInfo, std::size_t min, std::size_t max) {
+        if constexpr (IsConstView<T> && (!IsContiguous<InputBuffer> && IsContiguous<T>)) {
+            return status_code::contiguous_view_on_non_contiguous_data;
+        }
         if (major != major_type::ByteString) {
             return status_code::no_match_for_bstr_on_buffer;
         }
