@@ -49,7 +49,7 @@ int main() {
     const auto last_chunk = bytes.subspan(2);
     input.push_back(last_chunk);
     const auto final_state = operation.resume();
-    assert(final_state == ct::resume_state::done);
+    assert(final_state == ct::resume_state::finished);
     std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
     // Typed decoding finishes when all requested values are available, without EOF.

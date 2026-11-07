@@ -55,7 +55,7 @@ int main() {
 
     // In theory, we should be able to resume and complete the 3 element array decoding.
     const auto state = session.resume();
-    assert(state == ct::resume_state::done);
+    assert(state == ct::resume_state::finished);
     const auto result = session.result();
     assert(result);
     assert(*result == buffer.size());

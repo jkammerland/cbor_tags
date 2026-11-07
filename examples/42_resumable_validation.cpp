@@ -42,7 +42,7 @@ int main() {
 
     // finish() announces EOF. Temporary exhaustion does not end the sequence.
     const auto final_state = operation.finish();
-    assert(final_state == ct::resume_state::done);
+    assert(final_state == ct::resume_state::finished);
 
     // Success checks CBOR structure and UTF-8, not the application CDDL schema.
     const auto result = operation.result();

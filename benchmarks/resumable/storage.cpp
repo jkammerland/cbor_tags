@@ -134,7 +134,7 @@ template <typename Operation> bool completed(Operation &operation, std::size_t s
     const bool valid  = operation.done() && result && *result == size && operation.committed_bytes() == size;
     if (self_test) {
         const auto repeated = operation.resume();
-        require(repeated == ct::resume_state::done && operation.committed_bytes() == size, "terminal resume changed completion");
+        require(repeated == ct::resume_state::finished && operation.committed_bytes() == size, "terminal resume changed completion");
     }
     return valid;
 }

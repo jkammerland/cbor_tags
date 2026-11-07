@@ -190,7 +190,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
 
             input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
             const auto state = operation.finish();
-            REQUIRE(state == resume_state::done);
+            REQUIRE(state == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
             REQUIRE(actual.values().size() == expected.values().size());

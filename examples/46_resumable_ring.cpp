@@ -285,7 +285,7 @@ int main() {
         assert(transport.size() > published_before);
 
         const auto state = encoding.resume();
-        assert(state == ct::resume_state::need_output || state == ct::resume_state::done);
+        assert(state == ct::resume_state::need_output || state == ct::resume_state::finished);
         ++output_resumptions;
     }
     publish(output, transport);
@@ -323,7 +323,7 @@ int main() {
         supplied += admitted;
 
         const auto state = decoding.resume();
-        assert(state == ct::resume_state::need_input || state == ct::resume_state::done);
+        assert(state == ct::resume_state::need_input || state == ct::resume_state::finished);
         ++input_resumptions;
     }
 
