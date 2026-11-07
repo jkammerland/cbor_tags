@@ -220,6 +220,173 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return status_code::success;
     }
 
+    // Sinks get the payload in pieces as it arrives, so nothing waits for the whole string
+    template <typename Sink> resumable<status_code> string_sink(Sink &sink) {
+        using header_type = std::conditional_t<IsTstrSink<Sink>, as_text_any, as_bstr_any>;
+        header_type header{};
+        auto        status = co_await ordinary(header);
+        if (status != status_code::success)
+            co_return status;
+        if (!header.indefinite)
+            co_return co_await sink_payload(sink, header.size);
+
+        // Indefinite strings are definite chunks of the same type up to a break
+        const auto chunk_major = IsTstrSink<Sink> ? std::byte{0x60} : std::byte{0x40};
+        for (;;) {
+            status = co_await available();
+            if (status != status_code::success)
+                co_return status;
+            const auto initial = static_cast<std::byte>(*ordinary_.reader_.position_);
+            if (initial == std::byte{0xff}) {
+                indefinite_break end{};
+                co_return co_await ordinary(end);
+            }
+            if ((initial & std::byte{0xe0}) != chunk_major || (initial & std::byte{0x1f}) == std::byte{31})
+                co_return status_code::malformed_structure;
+
+            header_type chunk{};
+            status = co_await ordinary(chunk);
+            if (status != status_code::success)
+                co_return status;
+            status = co_await sink_payload(sink, chunk.size);
+            if (status != status_code::success)
+                co_return status;
+        }
+    }
+
+    template <typename Sink> resumable<status_code> sink_payload(Sink &sink, std::uint64_t length) {
+        const auto status = drain_sink(sink, length);
+        if (status != status_code::success || length == 0)
+            return status;
+        if (eof())
+            return status_code::incomplete;
+        return await_sink_payload(sink, length);
+    }
+
+    template <typename Sink> resumable<status_code> await_sink_payload(Sink &sink, std::uint64_t length) {
+        while (length != 0) {
+            co_await wait();
+            const auto status = drain_sink(sink, length);
+            if (status != status_code::success)
+                co_return status;
+            if (length != 0 && eof())
+                co_return status_code::incomplete;
+        }
+        co_return status_code::success;
+    }
+
+    // A piece points into the source when it lends windows, else into a local copy.
+    // It's committed once the callback accepts it.
+    template <typename Sink> status_code drain_sink(Sink &sink, std::uint64_t &length) {
+        while (length != 0 && !empty()) {
+            if (const auto window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
+                window && !window->empty()) {
+                const auto count  = static_cast<std::size_t>(std::min<std::uint64_t>(length, window->size()));
+                const auto status = sink.deliver(window->first(count));
+                if (status != status_code::success)
+                    return status;
+                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, count);
+                ordinary_.reader_.current_offset_ += count;
+                length -= count;
+            } else {
+                std::array<std::byte, 256> bytes;
+                const auto                 requested = static_cast<std::size_t>(std::min<std::uint64_t>(length, bytes.size()));
+                std::size_t                count{};
+                if constexpr (HasBulkByteRead<decltype(ordinary_.reader_.position_)>) {
+                    count = ordinary_.reader_.position_.read_bytes(std::span(bytes).first(requested));
+                    ordinary_.reader_.current_offset_ += count;
+                } else {
+                    while (count != requested && !empty())
+                        bytes[count++] = static_cast<std::byte>(ordinary_.reader_.read(source_));
+                }
+                assert(count != 0);
+                const auto status = sink.deliver(std::span<const std::byte>{bytes}.first(count));
+                if (status != status_code::success)
+                    return status;
+                length -= count;
+            }
+            commit();
+        }
+        return status_code::success;
+    }
+
+    // Elements and entries decode like container children, then go to the callback
+    template <typename Sink> resumable<status_code> array_sink(Sink &sink) {
+        using element_type = typename Sink::value_type;
+        static_assert(!consumes_zero_bytes<element_type>(), "as_array_sink elements must consume input, or a large count never ends");
+
+        as_array_any header{};
+        auto         status = co_await ordinary(header);
+        if (status != status_code::success)
+            co_return status;
+        for (std::uint64_t index = 0; header.indefinite || index != header.size; ++index) {
+            if (header.indefinite) {
+                status = co_await available();
+                if (status != status_code::success)
+                    co_return status;
+                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+                    indefinite_break end{};
+                    co_return co_await ordinary(end);
+                }
+            }
+
+            element_type element{};
+            status = header.indefinite ? co_await header_item(element) : co_await item(element);
+            if (status != status_code::success)
+                co_return status;
+            status = sink.deliver(std::move(element));
+            if (status != status_code::success)
+                co_return status;
+        }
+        co_return status_code::success;
+    }
+
+    template <typename Sink> resumable<status_code> map_sink(Sink &sink) {
+        using key_type    = typename Sink::key_type;
+        using mapped_type = typename Sink::mapped_type;
+        static_assert(!consumes_zero_bytes<key_type>() || !consumes_zero_bytes<mapped_type>(),
+                      "as_map_sink entries must consume input, or a large count never ends");
+
+        as_map_any header{};
+        auto       status = co_await ordinary(header);
+        if (status != status_code::success)
+            co_return status;
+        for (std::uint64_t index = 0; header.indefinite || index != header.size; ++index) {
+            if (header.indefinite) {
+                status = co_await available();
+                if (status != status_code::success)
+                    co_return status;
+                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+                    indefinite_break end{};
+                    co_return co_await ordinary(end);
+                }
+            }
+
+            key_type key{};
+            status = header.indefinite ? co_await header_item(key) : co_await item(key);
+            if (status != status_code::success)
+                co_return status;
+
+            // A break between a key and its value is malformed
+            if (header.indefinite) {
+                status = co_await available();
+                if (status != status_code::success)
+                    co_return status;
+                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff})
+                    co_return status_code::malformed_structure;
+            }
+            mapped_type mapped{};
+            status = header.indefinite ? co_await header_item(mapped) : co_await item(mapped);
+            if (status != status_code::success)
+                co_return status;
+
+            status = sink.deliver(std::move(key), std::move(mapped));
+            if (status != status_code::success)
+                co_return status;
+        }
+        co_return status_code::success;
+    }
+
     template <typename T> resumable<status_code> retry(T &value) {
         for (;;) {
             co_await wait();
@@ -291,8 +458,15 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::direct>())
             // Explicit ordinary customizations precede every structural category.
             return ordinary(value); // NOLINT(bugprone-branch-clone)
+        else if constexpr (IsStringSink<U>)
+            return string_sink(value);
+        else if constexpr (IsArraySink<U>)
+            return array_sink(value);
+        else if constexpr (IsMapSink<U>)
+            return map_sink(value);
         else if constexpr (IsAnyBoundedSizeWrapper<U>) {
             using V = std::remove_cvref_t<decltype(value.value())>;
+            static_assert(!IsSink<V>, "sinks take no size bounds, return a status_code from the callback instead");
             if constexpr (IsAnyHeader<V> || IsConstView<V>)
                 return ordinary(value);
             else if constexpr (IsBoundedSizeWrapper<U>)

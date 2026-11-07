@@ -7,6 +7,7 @@
 #include "cbor_tags/cbor_integer.h"
 #include "cbor_tags/cbor_reflection.h"
 #include "cbor_tags/cbor_simple.h"
+#include "cbor_tags/cbor_sinks.h"
 #include "cbor_tags/detail/cbor_decode_elements.h"
 #include "cbor_tags/detail/cbor_decode_error.h"
 #include "cbor_tags/detail/cbor_item.h"
@@ -16,6 +17,7 @@
 #include "cbor_tags/float16_ieee754.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -1134,6 +1136,103 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
+    template <typename F> constexpr status_code decode(bstr_sink<F> &sink, major_type major, byte additionalInfo) {
+        return decode_string_sink<major_type::ByteString>(sink, major, additionalInfo);
+    }
+
+    template <typename T>
+        requires(IsAnyBoundedSizeWrapper<T> && detail::IsSink<typename T::value_type>)
+    constexpr status_code decode(T &, major_type, byte) {
+        static_assert(always_false<T>::value, "sinks take no size bounds, return a status_code from the callback instead");
+        return status_code::error;
+    }
+
+    template <typename F> constexpr status_code decode(tstr_sink<F> &sink, major_type major, byte additionalInfo) {
+        return decode_string_sink<major_type::TextString>(sink, major, additionalInfo);
+    }
+
+    template <typename T, typename F> constexpr status_code decode(array_sink<T, F> &sink, major_type major, byte additionalInfo) {
+        static_assert(!detail::builtin_decode_consumes_zero_bytes<self_t, T>(),
+                      "as_array_sink elements must consume input, or a large count never ends");
+        if (major != major_type::Array) {
+            return status_code::no_match_for_array_on_buffer;
+        }
+
+        const bool indefinite = additionalInfo == static_cast<byte>(31);
+        const auto size       = indefinite ? std::uint64_t{} : decode_unsigned(additionalInfo);
+        for (std::uint64_t index = 0; indefinite || index != size; ++index) {
+            T           element{};
+            status_code status{};
+            if (indefinite) {
+                const auto [element_major, element_info] = read_initial_byte();
+                if (element_major == major_type::Simple && element_info == static_cast<byte>(31)) {
+                    return status_code::success;
+                }
+                status = decode(element, element_major, element_info);
+            } else {
+                status = decode(element);
+            }
+            if (status != status_code::success) {
+                return status;
+            }
+
+            status = sink.deliver(std::move(element));
+            if (status != status_code::success) {
+                return status;
+            }
+        }
+        return status_code::success;
+    }
+
+    template <typename K, typename V, typename F>
+    constexpr status_code decode(map_sink<K, V, F> &sink, major_type major, byte additionalInfo) {
+        static_assert(!detail::builtin_decode_consumes_zero_bytes<self_t, K>() || !detail::builtin_decode_consumes_zero_bytes<self_t, V>(),
+                      "as_map_sink entries must consume input, or a large count never ends");
+        if (major != major_type::Map) {
+            return status_code::no_match_for_map_on_buffer;
+        }
+
+        const bool indefinite = additionalInfo == static_cast<byte>(31);
+        const auto size       = indefinite ? std::uint64_t{} : decode_unsigned(additionalInfo);
+        for (std::uint64_t index = 0; indefinite || index != size; ++index) {
+            K           key{};
+            V           value{};
+            status_code status{};
+            if (indefinite) {
+                const auto [key_major, key_info] = read_initial_byte();
+                if (key_major == major_type::Simple && key_info == static_cast<byte>(31)) {
+                    return status_code::success;
+                }
+                status = decode(key, key_major, key_info);
+                if (status != status_code::success) {
+                    return status;
+                }
+
+                // A break between a key and its value is malformed
+                const auto [value_major, value_info] = read_initial_byte();
+                if (value_major == major_type::Simple && value_info == static_cast<byte>(31)) {
+                    return status_code::malformed_structure;
+                }
+                status = decode(value, value_major, value_info);
+            } else {
+                status = decode(key);
+                if (status != status_code::success) {
+                    return status;
+                }
+                status = decode(value);
+            }
+            if (status != status_code::success) {
+                return status;
+            }
+
+            status = sink.deliver(std::move(key), std::move(value));
+            if (status != status_code::success) {
+                return status;
+            }
+        }
+        return status_code::success;
+    }
+
     template <typename C, bool DecodeTag = true>
         requires(IsClassWithDecodingOverload<self_t, C> && !HasIncompatibleDecodingCustomization<self_t, C>)
     constexpr status_code decode_class_impl(C &value) {
@@ -1541,6 +1640,61 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (CheckBounds) {
                 size += chunk_size;
             }
+        }
+    }
+
+    template <major_type Major, typename Sink> constexpr status_code decode_string_sink(Sink &sink, major_type major, byte additionalInfo) {
+        if (major != Major) {
+            return Major == major_type::TextString ? status_code::no_match_for_tstr_on_buffer : status_code::no_match_for_bstr_on_buffer;
+        }
+        if (additionalInfo != static_cast<byte>(31)) {
+            return decode_sink_payload(sink, decode_unsigned(additionalInfo));
+        }
+
+        // Indefinite strings are definite chunks of the same type up to a break
+        while (true) {
+            const auto [chunk_major, chunk_info] = read_initial_byte();
+            if (chunk_major == major_type::Simple && chunk_info == static_cast<byte>(31)) {
+                return status_code::success;
+            }
+            if (chunk_major != Major || chunk_info == static_cast<byte>(31)) {
+                return status_code::malformed_structure;
+            }
+            const auto status = decode_sink_payload(sink, decode_unsigned(chunk_info));
+            if (status != status_code::success) {
+                return status;
+            }
+        }
+    }
+
+    // Contiguous input hands over the payload in place, anything else in copied pieces
+    template <typename Sink> constexpr status_code decode_sink_payload(Sink &sink, std::uint64_t length) {
+        const auto payload_size = require_bytes(length);
+        if (payload_size == 0) {
+            return status_code::success;
+        }
+        if constexpr (IsContiguous<InputBuffer>) {
+            return sink.deliver(take_bstring_payload(payload_size));
+        } else {
+            std::array<byte, 256> piece{};
+            for (auto remaining = payload_size; remaining != 0;) {
+                const auto count = static_cast<std::size_t>(std::min<size_type>(remaining, piece.size()));
+                for (std::size_t index = 0; index != count; ++index) {
+                    if constexpr (!std::ranges::sized_range<const InputBuffer>) {
+                        if (reader_.empty(data_)) {
+                            return status_code::incomplete;
+                        }
+                    }
+                    piece[index] = static_cast<byte>(reader_.read(data_));
+                }
+
+                const auto status = sink.deliver(std::span<const byte>{piece}.first(count));
+                if (status != status_code::success) {
+                    return status;
+                }
+                remaining -= count;
+            }
+            return status_code::success;
         }
     }
 

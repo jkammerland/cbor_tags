@@ -50,6 +50,7 @@ repeating completed work without copying or replacing the destination.
 | Ordinary customizations | Require a declaration for each applicable customization and direction. |
 | `codec::typed_array` | Owning array decoding and owning/borrowed-range encoding have native hooks. Other wrapper forms require a hook or retry declaration. |
 | `codec::shared_ptr` | Rejected by resumable factories, including encoding. Graph scope updates require a state-preserving resumable implementation. Ordinary factories support this codec. |
+| [Sinks](#stream-decoded-data-to-callbacks) | String pieces reach the callback as they arrive and are committed once accepted. Elements and entries resume like container children. |
 
 Changing transport chunk boundaries must preserve the values of every
 supported combination. Include every input/output split in custom-codec tests;
@@ -280,6 +281,83 @@ soon as the string header arrives.
 
 Each view completes in one step: its whole string or item must be in retained
 storage at once. Bounded storage, such as a ring, must be large enough for it.
+A [sink](#stream-decoded-data-to-callbacks) takes a string in pieces instead.
+
+## Stream decoded data to callbacks
+
+A sink decodes into a callback instead of a destination. String payloads reach
+the callback in pieces as input arrives, and arrays and maps reach it one
+element or entry at a time, so nothing has to hold the whole value:
+
+| Function | Callback arguments |
+| --- | --- |
+| `as_bstr_sink(f)` | `std::span<const std::byte>`, one call per piece |
+| `as_tstr_sink(f)` | `std::string_view`, one call per piece |
+| `as_array_sink<T>(f)` | `T&&`, one call per element |
+| `as_map_sink<K, V>(f)` | `K&&, V&&`, one call per entry |
+
+```cpp
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <span>
+#include <vector>
+
+namespace ct = cbor::tags;
+
+int main() {
+    std::vector<std::byte> wire;
+    const std::vector<std::byte> image(5'000, std::byte{0x2a});
+    const std::vector<std::uint32_t> readings{3, 5, 8};
+    const auto encoded = ct::make_encoder(wire)(image, readings);
+    assert(encoded);
+
+    std::deque<std::span<const std::byte>> input;
+    auto decoder = ct::make_resumable_decoder(input);
+    std::size_t image_size{};
+    std::uint64_t total{};
+    auto operation = decoder(
+        ct::as_bstr_sink([&](std::span<const std::byte> piece) {
+            image_size += piece.size();
+            return image_size <= 1'000'000 ? ct::status_code::success : ct::status_code::size_limit_exceeded;
+        }),
+        ct::as_array_sink<std::uint32_t>([&](std::uint32_t reading) { total += reading; }));
+
+    // Each chunk reaches the image sink before the next one arrives
+    for (std::size_t offset = 0; offset < wire.size(); offset += 1'000) {
+        input.push_back(std::span<const std::byte>{wire}.subspan(offset, std::min<std::size_t>(1'000, wire.size() - offset)));
+        operation.resume();
+    }
+    assert(operation.result());
+    assert(image_size == image.size());
+    assert(total == 16);
+}
+```
+
+The callback returns `void` or `status_code`. Any status other than
+`status_code::success` stops the decode with that status, and an exception
+stops it with `status_code::error`. Sinks take no `as_bounded_size` limits;
+check sizes in the callback as above.
+
+A piece is only valid during the call. Where pieces split depends on the
+input's storage, so they needn't match the chunks of an indefinite-length
+string, and a text piece can end inside a UTF-8 sequence. Empty strings and
+chunks make no call.
+
+A piece points into the source when the source lends
+[windows](#implement-a-reclaiming-source), otherwise into a copy. Either way
+it's committed once the callback accepts it, so bounded storage only has to fit
+the string's head. The [ring example](../examples/46_resumable_ring.cpp) passes
+a byte string many times larger than its ring this way.
+
+The functions return `bstr_sink<F>`, `tstr_sink<F>`, `array_sink<T, F>`, and
+`map_sink<K, V, F>`. A record field can be a sink too, so one field streams
+while the others decode as usual. One-shot decoders accept sinks as well, and
+contiguous input passes a definite byte string as a single piece.
 
 ## Await completion or cancel
 
@@ -531,10 +609,22 @@ contract:
   is not an index into that retained size; unsized input needs no total extent.
 
 Custom sources expose noncontiguous logical traversal even over contiguous
-allocations; optional borrow/consume windows provide contiguous bulk access.
-Temporary codec windows end before suspension. [Decoded views](#borrow-decoded-strings-and-items)
-instead hold source positions and keep reading through the source after their
-operation ends.
+allocations. A source can also lend windows, contiguous runs of its storage
+that the codec copies in bulk and [sinks](#stream-decoded-data-to-callbacks)
+read in place:
+
+- Input: `borrow_window(position) const` returns
+  `std::optional<std::span<const std::byte>>` with the available bytes from
+  `position` to the end of a run, and `consume_window(position, count) const`
+  advances `position` past `count` of them.
+- Output: `borrow_window()` returns `std::optional<std::span<std::byte>>` with
+  writable storage at `position()`, and `consume_window(count)` marks `count`
+  of those bytes written.
+
+Return `std::nullopt` where the source has no window. Windows end before the
+codec suspends. [Decoded views](#borrow-decoded-strings-and-items) instead hold
+source positions and keep reading through the source after their operation
+ends.
 
 Reclaim bytes strictly before commitment only after every decoded view,
 external borrow, or pending I/O using them has ended. Output publication tracks
